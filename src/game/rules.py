@@ -353,7 +353,7 @@ class GameRules:
             street=next_street,
             pot=pot or state.pot,
             stacks=stacks or state.stacks,
-            board=state.board,  # Board will be updated by caller
+            board=state.board,  # Board will be updated by caller (CFR will deal cards)
             hole_cards=state.hole_cards,
             betting_history=betting_history,
             button_position=state.button_position,
@@ -361,6 +361,7 @@ class GameRules:
             is_terminal=False,
             to_call=0,
             last_aggressor=None,
+            _skip_validation=True,  # Skip validation - board will be dealt by CFR
         )
 
     def _advance_to_showdown(
@@ -382,9 +383,26 @@ class GameRules:
         stacks: Tuple[int, int],
     ) -> GameState:
         """Create terminal showdown state and determine winner."""
-        # Evaluate hands
+        # Note: Board might not be complete (all-in before river)
+        # CFR solver will deal remaining cards before evaluating
+        # So we just create a terminal state without validating board size
         if len(state.board) < 5:
-            raise ValueError("Cannot showdown without complete board")
+            # Return state signaling showdown needed but board incomplete
+            # CFR will deal remaining cards
+            return state.__class__(
+                street=Street.RIVER if state.street == Street.RIVER else state.street,
+                pot=pot,
+                stacks=stacks,
+                board=state.board,
+                hole_cards=state.hole_cards,
+                betting_history=betting_history,
+                button_position=state.button_position,
+                current_player=state.current_player,
+                is_terminal=True,  # Mark as terminal
+                to_call=0,
+                last_aggressor=state.last_aggressor,
+                _skip_validation=True,  # Board may be incomplete
+            )
 
         winner = self._determine_winner(state.hole_cards, state.board)
 
