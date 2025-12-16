@@ -113,7 +113,7 @@ class TestLoadConfig:
         config = load_config()
 
         assert config.get("game.starting_stack") == 200
-        assert config.get("storage.backend") == "memory"
+        assert config.get("storage.backend") == "disk"
 
     def test_load_with_overrides(self):
         config = load_config(

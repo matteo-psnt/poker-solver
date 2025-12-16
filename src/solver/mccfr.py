@@ -159,27 +159,46 @@ class MCCFRSolver(BaseSolver):
 
         infoset = self.storage.get_or_create_infoset(infoset_key, legal_actions)
 
-        # Use infoset's stored legal actions for consistency
-        # (states with same InfoSetKey might have slightly different actions due to abstraction)
-        legal_actions = infoset.legal_actions
+        # Validate stored actions against current state
+        # (states with same InfoSetKey might have different stack sizes)
+        valid_actions = []
+        valid_indices = []
+        for i, action in enumerate(infoset.legal_actions):
+            try:
+                # Test if action is valid for current state
+                state.apply_action(action, self.rules)
+                valid_actions.append(action)
+                valid_indices.append(i)
+            except ValueError:
+                # Action invalid for current state (e.g., bet exceeds stack)
+                pass
 
-        # Get current strategy (regret matching)
-        strategy = infoset.get_strategy()
+        # If no stored actions are valid, use current legal actions
+        if not valid_actions:
+            valid_actions = legal_actions
+            valid_indices = list(range(len(legal_actions)))
+
+        # Filter strategy/regrets to only valid actions
+        full_strategy = infoset.get_strategy()
+        strategy = full_strategy[valid_indices]
+
+        # Renormalize strategy
+        strategy_sum = np.sum(strategy)
+        if strategy_sum > 0:
+            strategy = strategy / strategy_sum
+        else:
+            strategy = np.ones(len(valid_actions)) / len(valid_actions)
+
+        # Use valid actions for this traversal
+        legal_actions = valid_actions
 
         if current_player == traversing_player:
             # ON-POLICY: Compute counterfactual values for all actions
             action_utilities = np.zeros(len(legal_actions))
 
             for i, action in enumerate(legal_actions):
-                # Apply action
-                try:
-                    next_state = state.apply_action(action, self.rules)
-                except ValueError as e:
-                    # If state transition fails due to missing cards, this might be a chance node
-                    # For now, skip this action (this shouldn't happen in correct implementation)
-                    print(f"Warning: Failed to apply action {action}: {e}")
-                    action_utilities[i] = 0
-                    continue
+                # Apply action (all actions are pre-validated now)
+                next_state = state.apply_action(action, self.rules)
 
                 # Check if we need to deal cards after this action
                 if self._is_chance_node(next_state):
@@ -194,13 +213,19 @@ class MCCFRSolver(BaseSolver):
             node_utility = np.dot(strategy, action_utilities)
 
             # Update regrets (weighted by opponent reach probability)
+            # Map back to original infoset indices
             opponent = 1 - current_player
             for i in range(len(legal_actions)):
                 regret = action_utilities[i] - node_utility
-                infoset.update_regret(i, regret * reach_probs[opponent])
+                original_idx = valid_indices[i]
+                infoset.update_regret(original_idx, regret * reach_probs[opponent])
 
             # Update average strategy (weighted by player reach probability)
-            infoset.update_strategy(reach_probs[current_player])
+            # Only update valid actions in the strategy sum
+            for i in range(len(legal_actions)):
+                original_idx = valid_indices[i]
+                infoset.strategy_sum[original_idx] += strategy[i] * reach_probs[current_player]
+            infoset.reach_count += 1
 
             return node_utility
 
@@ -213,19 +238,12 @@ class MCCFRSolver(BaseSolver):
             new_reach_probs = reach_probs.copy()
             new_reach_probs[current_player] *= strategy[action_idx]
 
-            # Apply action and continue
-            try:
-                next_state = state.apply_action(action, self.rules)
-            except ValueError as e:
-                # Action from infoset is no longer valid (different stack size)
-                # This can happen when states with same InfoSetKey have different exact stacks
-                # Fall back to first legal action (deterministic fallback)
-                fresh_actions = self.action_abstraction.get_legal_actions(state)
-                if not fresh_actions:
-                    raise ValueError(f"No legal actions at state: {state}")
-                # Use first legal action as deterministic fallback
-                fallback_action = fresh_actions[0]
-                next_state = state.apply_action(fallback_action, self.rules)
+            # Apply action and continue (all actions are pre-validated)
+            next_state = state.apply_action(action, self.rules)
+
+            # Check if we need to deal cards after this action
+            if self._is_chance_node(next_state):
+                next_state = self._sample_chance_outcome(next_state)
 
             return self._cfr_outcome_sampling(next_state, traversing_player, new_reach_probs)
 

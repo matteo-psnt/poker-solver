@@ -218,3 +218,79 @@ class TestMCCFRSolver:
         # Check custom stack size
         assert state.stacks[0] == 99  # 100 - 1 (SB)
         assert state.stacks[1] == 98  # 100 - 2 (BB)
+
+    def test_train_verbose(self, capsys):
+        """Test verbose training output."""
+        action_abs = ActionAbstraction()
+        card_abs = RankBasedBucketing()
+        storage = InMemoryStorage()
+        solver = MCCFRSolver(action_abs, card_abs, storage)
+
+        # Train with verbose=True for 1000+ iterations to trigger print
+        solver.train(num_iterations=1000, verbose=True)
+
+        # Check that output was produced
+        captured = capsys.readouterr()
+        assert "Iteration" in captured.out
+        assert "avg utility" in captured.out
+
+    def test_train_return_statistics(self):
+        """Test that train() returns correct statistics."""
+        action_abs = ActionAbstraction()
+        card_abs = RankBasedBucketing()
+        storage = InMemoryStorage()
+        solver = MCCFRSolver(action_abs, card_abs, storage)
+
+        stats = solver.train(num_iterations=10, verbose=False)
+
+        assert "start_iteration" in stats
+        assert "end_iteration" in stats
+        assert "total_iterations" in stats
+        assert stats["total_iterations"] == 10
+        assert "final_avg_utility" in stats
+
+    def test_get_average_strategy_nonexistent_infoset(self):
+        """Test get_average_strategy with non-existent infoset."""
+        from src.abstraction.infoset import InfoSetKey
+        from src.game.state import Street
+
+        action_abs = ActionAbstraction()
+        card_abs = RankBasedBucketing()
+        storage = InMemoryStorage()
+        solver = MCCFRSolver(action_abs, card_abs, storage)
+
+        # Create fake infoset key
+        fake_key = InfoSetKey(
+            player_position=0,
+            street=Street.PREFLOP,
+            betting_sequence="fake",
+            card_bucket=99,
+            spr_bucket=0,
+        )
+
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="Infoset not found"):
+            solver.get_average_strategy(fake_key)
+
+    def test_get_current_strategy_nonexistent_infoset(self):
+        """Test get_current_strategy with non-existent infoset."""
+        from src.abstraction.infoset import InfoSetKey
+        from src.game.state import Street
+
+        action_abs = ActionAbstraction()
+        card_abs = RankBasedBucketing()
+        storage = InMemoryStorage()
+        solver = MCCFRSolver(action_abs, card_abs, storage)
+
+        # Create fake infoset key
+        fake_key = InfoSetKey(
+            player_position=0,
+            street=Street.PREFLOP,
+            betting_sequence="fake",
+            card_bucket=99,
+            spr_bucket=0,
+        )
+
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="Infoset not found"):
+            solver.get_current_strategy(fake_key)

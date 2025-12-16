@@ -124,9 +124,25 @@ def main():
     if args.seed is not None:
         print(f"  Seed: {args.seed}")
 
+    # Determine run_id (for resume or new training)
+    run_id = None
+    if args.resume:
+        from src.training.checkpoint import CheckpointManager
+        checkpoint_dir = Path(config.get("training.checkpoint_dir", "data/checkpoints"))
+        runs = CheckpointManager.list_runs(checkpoint_dir)
+        if runs:
+            run_id = runs[-1]  # Latest run
+            print(f"\nResuming from run: {run_id}")
+        else:
+            print("\nNo existing runs found to resume from. Starting new training.")
+
     # Build trainer
     print("\nInitializing trainer...")
-    trainer = Trainer(config)
+    trainer = Trainer(config, run_id=run_id)
+
+    if not args.resume or run_id:
+        print(f"  Run ID: {trainer.checkpoint_manager.run_id}")
+        print(f"  Checkpoint directory: {trainer.checkpoint_manager.checkpoint_dir}")
 
     # Run training
     iterations = args.iterations or config.get("training.num_iterations")

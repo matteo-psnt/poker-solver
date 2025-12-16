@@ -221,7 +221,7 @@ def get_default_config() -> Dict[str, Any]:
             "checkpoint_dir": "data/checkpoints",
         },
         "storage": {
-            "backend": "memory",
+            "backend": "disk",
             "cache_size": 100000,
             "flush_frequency": 1000,
         },

@@ -52,7 +52,7 @@ training:
 
 # ===== Storage Configuration =====
 storage:
-  backend: "memory"  # Options: "memory", "disk"
+  backend: "disk"  # Options: "memory", "disk"
   cache_size: 100000  # LRU cache size for disk backend
   flush_frequency: 1000  # Flush dirty infosets every N iterations
 

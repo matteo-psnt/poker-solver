@@ -184,7 +184,20 @@ class DiskBackedStorage(Storage):
         # Try to load from disk
         if key in self.key_to_id:
             legal_actions = self.infoset_actions.get(key, [])
-            return self._load_from_disk(key, legal_actions)
+            infoset = self._load_from_disk(key, legal_actions)
+            if infoset is not None:
+                # Add loaded infoset to cache (without marking as dirty)
+                self.cache[key] = infoset
+                self.cache.move_to_end(key)
+
+                # Evict LRU if cache is full
+                if len(self.cache) > self.cache_size:
+                    oldest_key, oldest_infoset = self.cache.popitem(last=False)
+                    if oldest_key in self.dirty_keys:
+                        self._write_to_disk(oldest_key, oldest_infoset)
+                        self.dirty_keys.discard(oldest_key)
+
+            return infoset
 
         return None
 
@@ -192,12 +205,17 @@ class DiskBackedStorage(Storage):
         """Check if infoset exists."""
         return key in self.cache or key in self.key_to_id
 
+    def mark_dirty(self, key: InfoSetKey):
+        """Mark infoset as modified (needs to be written to disk)."""
+        if key in self.cache:
+            self.dirty_keys.add(key)
+
     def num_infosets(self) -> int:
         """Get total number of stored infosets."""
         return len(self.key_to_id)
 
     def flush(self):
-        """Write dirty infosets to disk."""
+        """Write dirty infosets and metadata to disk."""
         if not self.dirty_keys:
             return
 
@@ -207,6 +225,9 @@ class DiskBackedStorage(Storage):
                 self._write_to_disk(key, self.cache[key])
 
         self.dirty_keys.clear()
+
+        # Also save metadata so storage can be reloaded
+        self._save_metadata(iteration=0)  # Use dummy iteration for flush
 
     def checkpoint(self, iteration: int):
         """Save complete checkpoint."""
@@ -273,8 +294,10 @@ class DiskBackedStorage(Storage):
                     return None
                 strategy_sum = f[str(infoset_id)][:]
 
-            # Create infoset
-            infoset = InfoSet(key, legal_actions)
+            # Create infoset with stored legal_actions (not current ones)
+            # This ensures regrets/strategy_sum sizes match
+            stored_actions = self.infoset_actions.get(key, legal_actions)
+            infoset = InfoSet(key, stored_actions)
             infoset.regrets = regrets
             infoset.strategy_sum = strategy_sum
 
