@@ -1,0 +1,16 @@
+# Quick Test Configuration
+# For rapid testing and development (10K iterations)
+
+training:
+  num_iterations: 10000
+  checkpoint_frequency: 1000
+  log_frequency: 100
+  checkpoint_dir: "data/checkpoints/quick_test"
+  verbose: true
+
+storage:
+  backend: "memory"
+
+system:
+  seed: 42  # Fixed seed for reproducibility
+  log_level: "INFO"

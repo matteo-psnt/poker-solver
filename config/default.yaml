@@ -1,0 +1,62 @@
+# Default Configuration for HUNLHE Solver
+# Heads-Up No-Limit Hold'em Monte Carlo CFR Solver
+
+# ===== Game Configuration =====
+game:
+  starting_stack: 200  # BB units
+  small_blind: 1
+  big_blind: 2
+
+# ===== Action Abstraction =====
+action_abstraction:
+  # Preflop betting sizes (in BB units)
+  preflop:
+    raises: [2.5, 4.0, "all-in"]
+
+  # Postflop betting sizes (pot fractions)
+  postflop:
+    bets: [0.33, 0.75, "all-in"]
+
+# ===== Card Abstraction =====
+card_abstraction:
+  type: "rank_based"  # Options: "rank_based", "equity_bucketing"
+
+  # Number of buckets per street
+  num_buckets:
+    preflop: 6
+    flop: 9
+    turn: 9
+    river: 9
+
+  # For equity bucketing (when type="equity_bucketing")
+  # num_rollouts: 1000
+  # precomputed_file: "data/abstractions/equity_buckets.pkl"
+
+# ===== SPR Bucketing =====
+spr_buckets:
+  # Thresholds for [shallow/medium, medium/deep]
+  thresholds: [4, 13]
+
+# ===== Solver Configuration =====
+solver:
+  type: "mccfr"
+  variant: "outcome_sampling"  # Options: "outcome_sampling", "external_sampling"
+
+# ===== Training Configuration =====
+training:
+  num_iterations: 1000
+  checkpoint_frequency: 100  # Save checkpoint every N iterations
+  log_frequency: 10  # Print progress every N iterations
+  checkpoint_dir: "data/checkpoints"
+  verbose: true
+
+# ===== Storage Configuration =====
+storage:
+  backend: "memory"  # Options: "memory", "disk"
+  cache_size: 100000  # LRU cache size for disk backend
+  flush_frequency: 1000  # Flush dirty infosets every N iterations
+
+# ===== System Configuration =====
+system:
+  seed: null  # Random seed (null = random)
+  log_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR

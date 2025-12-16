@@ -1,0 +1,215 @@
+"""
+Training orchestration for MCCFR solver.
+
+Manages the complete training loop: solver creation, iteration execution,
+checkpointing, metrics tracking, and progress reporting.
+"""
+
+from pathlib import Path
+from typing import Dict, Optional
+
+from tqdm import tqdm
+
+from src.abstraction.action_abstraction import ActionAbstraction
+from src.abstraction.card_abstraction import CardAbstraction, RankBasedBucketing
+from src.solver.base import BaseSolver
+from src.solver.mccfr import MCCFRSolver
+from src.solver.storage import DiskBackedStorage, InMemoryStorage, Storage
+from src.training.checkpoint import CheckpointManager
+from src.training.metrics import MetricsTracker
+from src.utils.config import Config
+
+
+class Trainer:
+    """
+    Orchestrates MCCFR training.
+
+    Manages solver initialization, training loop, checkpointing,
+    metrics tracking, and progress reporting.
+    """
+
+    def __init__(self, config: Config):
+        """
+        Initialize trainer from configuration.
+
+        Args:
+            config: Configuration object
+        """
+        self.config = config
+
+        # Build components
+        self.action_abstraction = self._build_action_abstraction()
+        self.card_abstraction = self._build_card_abstraction()
+        self.storage = self._build_storage()
+
+        # Build solver
+        self.solver = self._build_solver()
+
+        # Initialize checkpoint manager
+        checkpoint_dir = Path(config.get("training.checkpoint_dir", "data/checkpoints"))
+        self.checkpoint_manager = CheckpointManager(
+            checkpoint_dir,
+            config_name=config.get("system.config_name", "default"),
+        )
+
+        # Initialize metrics tracker
+        self.metrics = MetricsTracker(
+            window_size=config.get("training.log_frequency", 100)
+        )
+
+    def _build_action_abstraction(self) -> ActionAbstraction:
+        """Build action abstraction from config."""
+        action_config = self.config.get_section("action_abstraction")
+        return ActionAbstraction(action_config)
+
+    def _build_card_abstraction(self) -> CardAbstraction:
+        """Build card abstraction from config."""
+        card_config = self.config.get_section("card_abstraction")
+        abstraction_type = card_config.get("type", "rank_based")
+
+        if abstraction_type == "rank_based":
+            return RankBasedBucketing()
+        else:
+            # Default to rank-based for now
+            # TODO: Implement equity bucketing
+            return RankBasedBucketing()
+
+    def _build_storage(self) -> Storage:
+        """Build storage backend from config."""
+        storage_config = self.config.get_section("storage")
+        backend = storage_config.get("backend", "memory")
+
+        if backend == "memory":
+            return InMemoryStorage()
+        elif backend == "disk":
+            checkpoint_dir = Path(self.config.get("training.checkpoint_dir"))
+            cache_size = storage_config.get("cache_size", 100000)
+            flush_frequency = storage_config.get("flush_frequency", 1000)
+
+            return DiskBackedStorage(
+                checkpoint_dir=checkpoint_dir,
+                cache_size=cache_size,
+                flush_frequency=flush_frequency,
+            )
+        else:
+            raise ValueError(f"Unknown storage backend: {backend}")
+
+    def _build_solver(self) -> BaseSolver:
+        """Build solver from config."""
+        solver_config = self.config.get_section("solver")
+        game_config = self.config.get_section("game")
+        system_config = self.config.get_section("system")
+
+        # Merge configs for solver
+        merged_config = {**game_config, **system_config}
+
+        solver_type = solver_config.get("type", "mccfr")
+
+        if solver_type == "mccfr":
+            return MCCFRSolver(
+                action_abstraction=self.action_abstraction,
+                card_abstraction=self.card_abstraction,
+                storage=self.storage,
+                config=merged_config,
+            )
+        else:
+            raise ValueError(f"Unknown solver type: {solver_type}")
+
+    def train(
+        self,
+        num_iterations: Optional[int] = None,
+        resume: bool = False,
+    ) -> Dict:
+        """
+        Run training loop.
+
+        Args:
+            num_iterations: Number of iterations (overrides config if provided)
+            resume: Whether to resume from latest checkpoint
+
+        Returns:
+            Training results dictionary
+        """
+        # Get iteration count
+        if num_iterations is None:
+            num_iterations = self.config.get("training.num_iterations", 1000)
+
+        checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)
+        log_freq = self.config.get("training.log_frequency", 10)
+        verbose = self.config.get("training.verbose", True)
+
+        # Resume from checkpoint if requested
+        start_iteration = 0
+        if resume:
+            latest = self.checkpoint_manager.load_latest()
+            if latest:
+                start_iteration = latest.iteration
+                print(f"Resuming from iteration {start_iteration}")
+                # Note: Storage should already be loaded if using disk backend
+
+        # Training loop
+        if verbose:
+            iterator = tqdm(
+                range(start_iteration, num_iterations),
+                desc="Training",
+                unit="iter",
+            )
+        else:
+            iterator = range(start_iteration, num_iterations)
+
+        for i in iterator:
+            # Run one iteration
+            utility = self.solver.train_iteration()
+
+            # Log metrics
+            self.metrics.log_iteration(
+                iteration=i + 1,
+                utility=utility,
+                num_infosets=self.solver.num_infosets(),
+            )
+
+            # Periodic logging
+            if (i + 1) % log_freq == 0 and verbose:
+                summary = self.metrics.get_summary()
+                if isinstance(iterator, tqdm):
+                    iterator.set_postfix({
+                        "util": f"{summary['avg_utility']:+.2f}",
+                        "infosets": f"{summary['avg_infosets']:.0f}",
+                    })
+
+            # Periodic checkpointing
+            if (i + 1) % checkpoint_freq == 0:
+                self.checkpoint_manager.save(self.solver, i + 1)
+
+        # Final checkpoint
+        self.checkpoint_manager.save(self.solver, num_iterations)
+
+        # Print final summary
+        if verbose:
+            self.metrics.print_summary()
+
+        return {
+            "total_iterations": num_iterations,
+            "final_infosets": self.solver.num_infosets(),
+            "avg_utility": self.metrics.get_avg_utility(),
+            "elapsed_time": self.metrics.get_elapsed_time(),
+        }
+
+    def evaluate(self) -> Dict:
+        """
+        Evaluate current solver.
+
+        Returns:
+            Evaluation metrics
+        """
+        # TODO: Implement evaluation (head-to-head, exploitability)
+        return {
+            "num_infosets": self.solver.num_infosets(),
+        }
+
+    def __str__(self) -> str:
+        """String representation."""
+        return (
+            f"Trainer(solver={self.solver}, "
+            f"config={self.config})"
+        )
