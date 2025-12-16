@@ -117,6 +117,7 @@ class GameState:
         is_terminal: Whether this state is terminal (hand over)
         to_call: Amount current player needs to call (0 if can check)
         last_aggressor: Player who last bet/raised (None if no betting yet)
+        _skip_validation: Skip validation (for CFR internal use)
     """
 
     street: Street
@@ -130,9 +131,14 @@ class GameState:
     is_terminal: bool
     to_call: int = 0
     last_aggressor: Optional[int] = None
+    _skip_validation: bool = False
 
     def __post_init__(self):
         """Validate game state consistency."""
+        # Skip validation if requested (for CFR internal states)
+        if self._skip_validation:
+            return
+
         # Validate player indices
         if self.button_position not in (0, 1):
             raise ValueError(f"Invalid button_position: {self.button_position}")
