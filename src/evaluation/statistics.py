@@ -215,9 +215,7 @@ class MatchStatisticsAnalyzer:
         # Convert to bb/hand
         bb_payoffs = [p / big_blind for p in payoffs]
 
-        mean, ci_lower, ci_upper = compute_confidence_interval(
-            bb_payoffs, self.confidence_level
-        )
+        mean, ci_lower, ci_upper = compute_confidence_interval(bb_payoffs, self.confidence_level)
         variance, std_dev = compute_variance(bb_payoffs)
 
         return {
@@ -252,9 +250,7 @@ class MatchStatisticsAnalyzer:
                 "mean_difference": 0.0,
             }
 
-        t_stat, p_value, is_sig = t_test_difference(
-            payoffs1, payoffs2, self.confidence_level
-        )
+        t_stat, p_value, is_sig = t_test_difference(payoffs1, payoffs2, self.confidence_level)
 
         mean_diff = np.mean(payoffs1) - np.mean(payoffs2)
 

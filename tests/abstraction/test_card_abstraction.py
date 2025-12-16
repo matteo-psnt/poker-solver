@@ -1,7 +1,5 @@
 """Tests for card abstraction."""
 
-import pytest
-
 from src.abstraction.card_abstraction import RankBasedBucketing
 from src.game.state import Card, Street
 
@@ -139,12 +137,8 @@ class TestRankBasedBucketing:
         """Same hand different suits should give same bucket."""
         bucketing = RankBasedBucketing()
 
-        bucket1 = bucketing.get_bucket(
-            (Card.new("As"), Card.new("Ks")), tuple(), Street.PREFLOP
-        )
-        bucket2 = bucketing.get_bucket(
-            (Card.new("Ah"), Card.new("Kh")), tuple(), Street.PREFLOP
-        )
+        bucket1 = bucketing.get_bucket((Card.new("As"), Card.new("Ks")), tuple(), Street.PREFLOP)
+        bucket2 = bucketing.get_bucket((Card.new("Ah"), Card.new("Kh")), tuple(), Street.PREFLOP)
 
         # Both are AK suited -> should be same bucket
         assert bucket1 == bucket2

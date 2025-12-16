@@ -5,7 +5,7 @@ This module wraps the treys poker evaluator to provide fast hand strength
 calculations for Texas Hold'em.
 """
 
-from typing import List, Tuple
+from typing import Tuple
 
 from treys import Evaluator as TreysEvaluator
 
@@ -110,7 +110,10 @@ class HandEvaluator:
             return 0
 
     def hand_is_better(
-        self, hole_cards1: Tuple[Card, Card], hole_cards2: Tuple[Card, Card], board: Tuple[Card, ...]
+        self,
+        hole_cards1: Tuple[Card, Card],
+        hole_cards2: Tuple[Card, Card],
+        board: Tuple[Card, ...],
     ) -> bool:
         """
         Check if hand1 beats hand2.

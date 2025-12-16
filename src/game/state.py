@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 
 from treys import Card as TreysCard
 
-from src.game.actions import Action, ActionType
+from src.game.actions import Action
 
 
 class Street(Enum):
@@ -277,9 +277,7 @@ class GameState:
         from src.abstraction.infoset import InfoSetKey
 
         # Get card bucket for player's hand
-        card_bucket = card_abstraction.get_bucket(
-            self.hole_cards[player], self.board, self.street
-        )
+        card_bucket = card_abstraction.get_bucket(self.hole_cards[player], self.board, self.street)
 
         # Compute SPR bucket
         effective_stack = min(self.stacks)

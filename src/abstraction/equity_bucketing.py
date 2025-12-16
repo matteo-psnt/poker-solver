@@ -8,10 +8,10 @@ their equity (win probability) against a random opponent hand.
 import pickle
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
-from treys import Card as TreysCard, Deck
+from treys import Deck
 
 from src.abstraction.card_abstraction import CardAbstraction
 from src.abstraction.clustering import KMeansClustering
@@ -65,10 +65,7 @@ class EquityBucketing(CardAbstraction):
         self.is_fitted = False
 
     def get_bucket(
-        self,
-        hole_cards: Tuple[Card, Card],
-        board: Tuple[Card, ...],
-        street: Street
+        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
     ) -> int:
         """
         Get bucket for a hand.
@@ -143,10 +140,10 @@ class EquityBucketing(CardAbstraction):
 
             if street == Street.PREFLOP:
                 # Deal all 5 board cards
-                remaining_board.extend(deck.cards[board_idx:board_idx + 5])
+                remaining_board.extend(deck.cards[board_idx : board_idx + 5])
             elif street == Street.FLOP:
                 # Deal turn and river
-                remaining_board.extend(deck.cards[board_idx:board_idx + 2])
+                remaining_board.extend(deck.cards[board_idx : board_idx + 2])
             elif street == Street.TURN:
                 # Deal river
                 remaining_board.append(deck.cards[board_idx])
@@ -306,7 +303,5 @@ class EquityBucketing(CardAbstraction):
         return self.num_buckets_per_street[street]
 
     def __str__(self) -> str:
-        buckets_str = ", ".join(
-            [f"{s.name}={self.num_buckets_per_street[s]}" for s in Street]
-        )
+        buckets_str = ", ".join([f"{s.name}={self.num_buckets_per_street[s]}" for s in Street])
         return f"EquityBucketing({buckets_str}, rollouts={self.num_rollouts})"

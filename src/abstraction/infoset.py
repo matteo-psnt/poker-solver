@@ -6,7 +6,7 @@ to a player given their information (hole cards, board, betting history).
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 
@@ -37,13 +37,15 @@ class InfoSetKey:
 
     def __hash__(self) -> int:
         """Hash for dictionary storage."""
-        return hash((
-            self.player_position,
-            self.street,
-            self.betting_sequence,
-            self.card_bucket,
-            self.spr_bucket,
-        ))
+        return hash(
+            (
+                self.player_position,
+                self.street,
+                self.betting_sequence,
+                self.card_bucket,
+                self.spr_bucket,
+            )
+        )
 
     def __eq__(self, other) -> bool:
         """Equality comparison."""

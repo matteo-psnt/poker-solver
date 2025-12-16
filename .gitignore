@@ -58,6 +58,7 @@ logs/
 
 # uv
 .python-version-backup
+.ruff_cache/
 
 # Jupyter
 .ipynb_checkpoints/

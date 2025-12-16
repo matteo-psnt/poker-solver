@@ -7,7 +7,7 @@ timing, convergence indicators, etc.
 
 import time
 from collections import deque
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List
 
 import numpy as np
 
@@ -152,8 +152,10 @@ class MetricsTracker:
 
         print(f"\n{'='*60}")
         print(f"Iteration: {summary['iteration']:,}")
-        print(f"Avg Utility (last {self.window_size}): {summary['avg_utility']:+.2f} "
-              f"(±{summary['utility_std']:.2f})")
+        print(
+            f"Avg Utility (last {self.window_size}): {summary['avg_utility']:+.2f} "
+            f"(±{summary['utility_std']:.2f})"
+        )
         print(f"Avg Infosets: {summary['avg_infosets']:.0f}")
         print(f"Speed: {summary['iter_per_sec']:.1f} iter/s")
         print(f"Elapsed: {_format_time(summary['elapsed_time'])}")
@@ -189,10 +191,7 @@ class MetricsTracker:
 
     def __str__(self) -> str:
         """String representation."""
-        return (
-            f"MetricsTracker(iter={self.iteration}, "
-            f"avg_util={self.get_avg_utility():+.2f})"
-        )
+        return f"MetricsTracker(iter={self.iteration}, " f"avg_util={self.get_avg_utility():+.2f})"
 
 
 def _format_time(seconds: float) -> str:

@@ -1,9 +1,7 @@
 """Tests for action abstraction."""
 
-import pytest
-
 from src.abstraction.action_abstraction import ActionAbstraction
-from src.game.actions import ActionType, bet, call, check, fold
+from src.game.actions import ActionType, bet
 from src.game.state import Card, GameState, Street
 
 

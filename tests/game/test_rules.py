@@ -358,15 +358,11 @@ class TestGameRules:
         hole_cards = ((Card(1), Card(2)), (Card(3), Card(4)))
 
         # Button position 0
-        state0 = rules.create_initial_state(
-            starting_stack=200, hole_cards=hole_cards, button=0
-        )
+        state0 = rules.create_initial_state(starting_stack=200, hole_cards=hole_cards, button=0)
         assert state0.button_position == 0
 
         # Button position 1
-        state1 = rules.create_initial_state(
-            starting_stack=200, hole_cards=hole_cards, button=1
-        )
+        state1 = rules.create_initial_state(starting_stack=200, hole_cards=hole_cards, button=1)
         assert state1.button_position == 1
 
     def test_can_raise(self):
@@ -426,8 +422,6 @@ class TestGameRules:
 
     def test_advance_street_logic(self):
         """Test that betting round advances to next street correctly."""
-        rules = GameRules()
-
         # Start on flop
         hole_cards = ((Card(1), Card(2)), (Card(3), Card(4)))
         state = GameState(

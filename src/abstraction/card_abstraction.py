@@ -6,7 +6,7 @@ into buckets. This is essential for making poker tractable.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Tuple
+from typing import Tuple
 
 from src.game.evaluator import get_evaluator
 from src.game.state import Card, Street
@@ -20,7 +20,9 @@ class CardAbstraction(ABC):
     """
 
     @abstractmethod
-    def get_bucket(self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street) -> int:
+    def get_bucket(
+        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
+    ) -> int:
         """
         Get the bucket for a hand.
 
@@ -79,12 +81,14 @@ class RankBasedBucketing(CardAbstraction):
         # Define preflop buckets
         self.preflop_buckets = {
             Street.PREFLOP: 6,  # 6 preflop categories
-            Street.FLOP: 9,      # Hand rank classes (1-9)
+            Street.FLOP: 9,  # Hand rank classes (1-9)
             Street.TURN: 9,
             Street.RIVER: 9,
         }
 
-    def get_bucket(self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street) -> int:
+    def get_bucket(
+        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
+    ) -> int:
         """Get bucket for hand using simple rank categories."""
         if street.is_preflop():
             return self._get_preflop_bucket(hole_cards)
@@ -103,13 +107,8 @@ class RankBasedBucketing(CardAbstraction):
         4 = Medium (AJ, KQ, suited connectors)
         5 = Weak (everything else)
         """
-        # Convert to treys internal representation
+        # Extract ranks using string representation
         c1, c2 = hole_cards
-        r1 = c1.card_int
-        r2 = c2.card_int
-
-        # Extract ranks (treys uses bit manipulation)
-        # For simplicity, we'll use string representation
         c1_str = repr(c1)  # e.g., "As"
         c2_str = repr(c2)
 
@@ -121,8 +120,21 @@ class RankBasedBucketing(CardAbstraction):
         is_pair = rank1 == rank2
         is_suited = suit1 == suit2
 
-        rank_values = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8,
-                       '9': 9, 'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14}
+        rank_values = {
+            "2": 2,
+            "3": 3,
+            "4": 4,
+            "5": 5,
+            "6": 6,
+            "7": 7,
+            "8": 8,
+            "9": 9,
+            "T": 10,
+            "J": 11,
+            "Q": 12,
+            "K": 13,
+            "A": 14,
+        }
 
         val1 = rank_values.get(rank1, 0)
         val2 = rank_values.get(rank2, 0)

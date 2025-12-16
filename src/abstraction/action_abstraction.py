@@ -5,10 +5,10 @@ This module implements action abstraction that discretizes the continuous
 betting space into a small set of actions (e.g., bet 33%, 75%, all-in).
 """
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 from src.game.actions import Action, ActionType, all_in, bet, raises
-from src.game.state import GameState, Street
+from src.game.state import GameState
 
 
 class ActionAbstraction:
@@ -152,7 +152,11 @@ class ActionAbstraction:
                 else:
                     # Pot-sized raise
                     raise_size = int(pot * pot_frac)
-                    if raise_size > 0 and (to_call + raise_size) <= stack and raise_size not in sizes:
+                    if (
+                        raise_size > 0
+                        and (to_call + raise_size) <= stack
+                        and raise_size not in sizes
+                    ):
                         sizes.append(raise_size)
 
         return sorted(sizes)

@@ -55,9 +55,7 @@ class Trainer:
         self.solver = self._build_solver()
 
         # Initialize metrics tracker
-        self.metrics = MetricsTracker(
-            window_size=config.get("training.log_frequency", 100)
-        )
+        self.metrics = MetricsTracker(window_size=config.get("training.log_frequency", 100))
 
     def _build_action_abstraction(self) -> ActionAbstraction:
         """Build action abstraction from config."""
@@ -175,10 +173,12 @@ class Trainer:
             if (i + 1) % log_freq == 0 and verbose:
                 summary = self.metrics.get_summary()
                 if isinstance(iterator, tqdm):
-                    iterator.set_postfix({
-                        "util": f"{summary['avg_utility']:+.2f}",
-                        "infosets": f"{summary['avg_infosets']:.0f}",
-                    })
+                    iterator.set_postfix(
+                        {
+                            "util": f"{summary['avg_utility']:+.2f}",
+                            "infosets": f"{summary['avg_infosets']:.0f}",
+                        }
+                    )
 
             # Periodic checkpointing
             if (i + 1) % checkpoint_freq == 0:
@@ -212,7 +212,4 @@ class Trainer:
 
     def __str__(self) -> str:
         """String representation."""
-        return (
-            f"Trainer(solver={self.solver}, "
-            f"config={self.config})"
-        )
+        return f"Trainer(solver={self.solver}, " f"config={self.config})"

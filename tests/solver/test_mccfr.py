@@ -181,7 +181,9 @@ class TestMCCFRSolver:
         diff = abs(infosets1 - infosets2)
         avg = (infosets1 + infosets2) / 2
         variance = diff / avg if avg > 0 else 0
-        assert variance < 0.20, f"Variance {variance:.2%} exceeds 20% (infosets: {infosets1} vs {infosets2})"
+        assert (
+            variance < 0.20
+        ), f"Variance {variance:.2%} exceeds 20% (infosets: {infosets1} vs {infosets2})"
 
     def test_checkpoint(self):
         """Test that checkpoint doesn't crash."""
@@ -208,10 +210,7 @@ class TestMCCFRSolver:
         action_abs = ActionAbstraction()
         card_abs = RankBasedBucketing()
         storage = InMemoryStorage()
-        solver = MCCFRSolver(
-            action_abs, card_abs, storage,
-            config={"starting_stack": 100}
-        )
+        solver = MCCFRSolver(action_abs, card_abs, storage, config={"starting_stack": 100})
 
         state = solver._deal_initial_state()
 

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from src.abstraction.infoset import InfoSet, InfoSetKey, create_infoset_key
-from src.game.actions import bet, call, check, fold
+from src.game.actions import bet, call, fold
 from src.game.state import Street
 
 
@@ -97,7 +97,7 @@ class TestInfoSet:
 
         # All zeros -> uniform distribution
         assert len(strategy) == 3
-        assert np.allclose(strategy, [1/3, 1/3, 1/3])
+        assert np.allclose(strategy, [1 / 3, 1 / 3, 1 / 3])
         assert np.isclose(strategy.sum(), 1.0)
 
     def test_regret_matching_positive_regrets(self):
@@ -128,7 +128,7 @@ class TestInfoSet:
         strategy = infoset.get_strategy()
 
         # All negative -> uniform
-        assert np.allclose(strategy, [1/3, 1/3, 1/3])
+        assert np.allclose(strategy, [1 / 3, 1 / 3, 1 / 3])
 
     def test_update_regret(self):
         key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)

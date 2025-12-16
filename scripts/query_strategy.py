@@ -9,7 +9,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 from treys import Card as TreysCard
 
 # Add project root to path
@@ -22,7 +21,7 @@ from src.abstraction.infoset import InfoSetKey
 from src.game.actions import ActionType
 from src.game.state import Card, Street
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import DiskBackedStorage, InMemoryStorage
+from src.solver.storage import DiskBackedStorage
 from src.training.checkpoint import CheckpointManager
 
 
@@ -108,8 +107,8 @@ def show_strategy(
     infoset = solver.storage.get_infoset(infoset_key)
 
     if infoset is None:
-        print(f"  ❌ No strategy found for this situation")
-        print(f"     (Situation never encountered during training)")
+        print("  ❌ No strategy found for this situation")
+        print("     (Situation never encountered during training)")
         return
 
     # Get average strategy (Nash equilibrium approximation)

@@ -1,7 +1,5 @@
 """Tests for head-to-head evaluator."""
 
-import pytest
-
 from src.abstraction.action_abstraction import ActionAbstraction
 from src.abstraction.card_abstraction import RankBasedBucketing
 from src.evaluation.head_to_head import (

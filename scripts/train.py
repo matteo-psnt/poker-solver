@@ -18,14 +18,12 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.training.trainer import Trainer
-from src.utils.config import Config, load_config
+from src.utils.config import Config
 
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Train HUNLHE poker solver using Monte Carlo CFR"
-    )
+    parser = argparse.ArgumentParser(description="Train HUNLHE poker solver using Monte Carlo CFR")
 
     # Configuration
     parser.add_argument(
@@ -128,6 +126,7 @@ def main():
     run_id = None
     if args.resume:
         from src.training.checkpoint import CheckpointManager
+
         checkpoint_dir = Path(config.get("training.checkpoint_dir", "data/checkpoints"))
         runs = CheckpointManager.list_runs(checkpoint_dir)
         if runs:
@@ -174,6 +173,7 @@ def main():
     except Exception as e:
         print(f"\n\nError during training: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

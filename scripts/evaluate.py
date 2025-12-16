@@ -26,15 +26,12 @@ from src.evaluation.statistics import MatchStatisticsAnalyzer
 from src.game.rules import GameRules
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import DiskBackedStorage, InMemoryStorage
-from src.training.checkpoint import CheckpointManager
 from src.utils.config import Config
 
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Evaluate HUNLHE poker solver performance"
-    )
+    parser = argparse.ArgumentParser(description="Evaluate HUNLHE poker solver performance")
 
     # Checkpoint selection
     parser.add_argument(
@@ -175,9 +172,7 @@ def evaluate_checkpoint(
 
     print(f"\nStatistical Analysis ({confidence*100:.0f}% confidence):")
     print(f"  Mean: {analysis['bb_per_hand']:+.3f} bb/hand")
-    print(
-        f"  95% CI: [{analysis['ci_lower']:+.3f}, {analysis['ci_upper']:+.3f}] bb/hand"
-    )
+    print(f"  95% CI: [{analysis['ci_lower']:+.3f}, {analysis['ci_upper']:+.3f}] bb/hand")
     print(f"  Std Dev: {analysis['std_dev']:.3f} bb/hand")
 
 
@@ -237,7 +232,7 @@ def compare_checkpoints(
 
     comparison = analyzer.compare_strategies(payoffs1, payoffs2)
 
-    print(f"\nStatistical Comparison:")
+    print("\nStatistical Comparison:")
     print(f"  Mean Difference: {comparison['mean_difference']/rules.big_blind:+.3f} bb/hand")
     print(f"  t-statistic: {comparison['t_statistic']:.3f}")
     print(f"  p-value: {comparison['p_value']:.4f}")
@@ -262,7 +257,7 @@ def print_match_results(stats: MatchStatistics, title: str, verbose: bool):
     print(f"Showdown Rate: {stats.showdown_pct:.1f}%")
 
     if verbose:
-        print(f"\nDetailed Results:")
+        print("\nDetailed Results:")
         for i, result in enumerate(stats.results[:10]):  # Show first 10
             print(
                 f"  Hand {i+1}: P0={result.player0_payoff:+4d}, "

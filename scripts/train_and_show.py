@@ -24,15 +24,24 @@ from src.game.actions import ActionType
 from src.game.state import Card, Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
-from src.utils.config import Config
 
 
 def parse_card(card_str: str) -> Card:
     """Parse card string like 'Ah' or 'Kd' into Card object."""
     rank_map = {
-        "A": "A", "K": "K", "Q": "Q", "J": "J", "T": "T",
-        "9": "9", "8": "8", "7": "7", "6": "6",
-        "5": "5", "4": "4", "3": "3", "2": "2",
+        "A": "A",
+        "K": "K",
+        "Q": "Q",
+        "J": "J",
+        "T": "T",
+        "9": "9",
+        "8": "8",
+        "7": "7",
+        "6": "6",
+        "5": "5",
+        "4": "4",
+        "3": "3",
+        "2": "2",
     }
     suit_map = {"h": "h", "d": "d", "c": "c", "s": "s"}
 
@@ -103,7 +112,7 @@ def show_strategy_for_situation(
     infoset = solver.storage.get_infoset(infoset_key)
 
     if infoset is None:
-        print(f"  ❌ No strategy found (situation not encountered during training)")
+        print("  ❌ No strategy found (situation not encountered during training)")
         return
 
     print(f"  ✅ Strategy learned (visited {infoset.reach_count} times):")
@@ -210,7 +219,7 @@ def show_strategy_summary(solver: MCCFRSolver):
     print(f"\nTotal situations learned: {total_infosets:,}")
 
     # Sample some infosets to show diversity
-    print(f"\nSample of learned situations:")
+    print("\nSample of learned situations:")
 
     count = 0
     for key, infoset in storage.infosets.items():
