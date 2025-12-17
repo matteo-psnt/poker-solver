@@ -191,12 +191,13 @@ def get_default_config() -> Dict[str, Any]:
             "big_blind": 2,
         },
         "action_abstraction": {
-            "preflop": {
-                "raises": [2.5, 4.0, "all-in"],
-            },
+            "preflop_raises": [2.5, 3.5, 5.0],
             "postflop": {
-                "bets": [0.33, 0.75, "all-in"],
+                "flop": [0.33, 0.66, 1.25],
+                "turn": [0.50, 1.0, 1.5],
+                "river": [0.50, 1.0, 2.0],
             },
+            "all_in_spr_threshold": 2.0,
         },
         "card_abstraction": {
             "type": "rank_based",

@@ -68,6 +68,10 @@ class MCCFRSolver(BaseSolver):
             random.seed(seed)
             np.random.seed(seed)
 
+        # Cache: Reuse deck instance to avoid repeated Random() creation
+        self._deck = Deck()
+        self._deck_cards = self._deck.cards[:]  # Keep original card list
+
     def train_iteration(self) -> float:
         """
         Execute one MCCFR iteration with outcome sampling.
@@ -96,14 +100,15 @@ class MCCFRSolver(BaseSolver):
         Returns:
             Initial GameState with cards dealt
         """
-        # Create and shuffle deck
-        deck = Deck()
-        random.shuffle(deck.cards)
+        # Reuse deck instance and shuffle
+        # Much faster than creating new Deck() which creates new Random()
+        self._deck.cards = self._deck_cards[:]
+        random.shuffle(self._deck.cards)
 
         # Deal hole cards
         hole_cards = (
-            (Card(deck.cards[0]), Card(deck.cards[1])),
-            (Card(deck.cards[2]), Card(deck.cards[3])),
+            (Card(self._deck.cards[0]), Card(self._deck.cards[1])),
+            (Card(self._deck.cards[2]), Card(self._deck.cards[3])),
         )
 
         # Create initial state (after blinds)
@@ -303,8 +308,8 @@ class MCCFRSolver(BaseSolver):
         Returns:
             New state with cards dealt
         """
-        # Create deck and remove known cards
-        deck = Deck()
+        # Reuse deck instance
+        self._deck.cards = self._deck_cards[:]
         known_cards = set()
 
         # Remove hole cards
@@ -317,8 +322,8 @@ class MCCFRSolver(BaseSolver):
             known_cards.add(card.card_int)
 
         # Filter deck
-        deck.cards = [c for c in deck.cards if c not in known_cards]
-        random.shuffle(deck.cards)
+        self._deck.cards = [c for c in self._deck.cards if c not in known_cards]
+        random.shuffle(self._deck.cards)
 
         # Deal cards based on what's missing
         new_board = list(state.board)
@@ -326,13 +331,13 @@ class MCCFRSolver(BaseSolver):
 
         if state.street == Street.FLOP and current_board_size == 0:
             # Deal flop (3 cards)
-            new_board.extend([Card(c) for c in deck.cards[:3]])
+            new_board.extend([Card(c) for c in self._deck.cards[:3]])
         elif state.street == Street.TURN and current_board_size == 3:
             # Deal turn (1 card)
-            new_board.append(Card(deck.cards[0]))
+            new_board.append(Card(self._deck.cards[0]))
         elif state.street == Street.RIVER and current_board_size == 4:
             # Deal river (1 card)
-            new_board.append(Card(deck.cards[0]))
+            new_board.append(Card(self._deck.cards[0]))
         else:
             # No cards to deal or already complete
             return state
@@ -364,8 +369,8 @@ class MCCFRSolver(BaseSolver):
         Returns:
             State with complete 5-card board
         """
-        # Create deck and remove known cards
-        deck = Deck()
+        # Reuse deck instance
+        self._deck.cards = self._deck_cards[:]
         known_cards = set()
 
         for player_cards in state.hole_cards:
@@ -375,14 +380,14 @@ class MCCFRSolver(BaseSolver):
         for card in state.board:
             known_cards.add(card.card_int)
 
-        deck.cards = [c for c in deck.cards if c not in known_cards]
-        random.shuffle(deck.cards)
+        self._deck.cards = [c for c in self._deck.cards if c not in known_cards]
+        random.shuffle(self._deck.cards)
 
         # Deal remaining cards to complete board
         new_board = list(state.board)
         cards_needed = 5 - len(state.board)
 
-        new_board.extend([Card(c) for c in deck.cards[:cards_needed]])
+        new_board.extend([Card(c) for c in self._deck.cards[:cards_needed]])
 
         # Return state with complete board
         return GameState(

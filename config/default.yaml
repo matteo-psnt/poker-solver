@@ -8,14 +8,25 @@ game:
   big_blind: 2
 
 # ===== Action Abstraction =====
+# Research-grade abstraction for 200BB deep-stack HUNLHE
+# Based on standard CFR research (Johanson et al., Brown & Sandholm, DeepStack)
 action_abstraction:
   # Preflop betting sizes (in BB units)
+  # No all-in preflop at 200BB (almost never correct)
   preflop:
-    raises: [2.5, 4.0, "all-in"]
+    raises: [2.5, 3.5, 5.0]  # Range construction sizes
 
-  # Postflop betting sizes (pot fractions)
+  # Postflop betting sizes (pot fractions, street-dependent)
   postflop:
-    bets: [0.33, 0.75, "all-in"]
+    flop:
+      bets: [0.33, 0.66, 1.25]  # Range bet, standard, overbet
+    turn:
+      bets: [0.50, 1.0, 1.5]  # Medium, pot, large overbet
+    river:
+      bets: [0.50, 1.0, 2.0]  # Thin value, pot, large overbet
+
+  # All-in handling: Only allowed when SPR < 2
+  all_in_spr_threshold: 2.0  # Disable all-in above this SPR
 
 # ===== Card Abstraction =====
 card_abstraction:

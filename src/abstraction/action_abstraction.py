@@ -31,32 +31,67 @@ class ActionAbstraction:
         Args:
             config: Dictionary with abstraction parameters
                    {
-                       'preflop_raises': [2.5, 4.0, 'all-in'],  # BB units
-                       'postflop_bets': [0.33, 0.75, 'all-in'],  # Pot fractions
+                       'preflop_raises': [2.5, 3.5, 5.0],  # BB units
+                       'postflop': {  # Street-dependent
+                           'flop': [0.33, 0.66, 1.25],
+                           'turn': [0.50, 1.0, 1.5],
+                           'river': [0.50, 1.0, 2.0],
+                       },
+                       'all_in_spr_threshold': 2.0,  # Only allow all-in if SPR < threshold
                    }
                    If None, uses default abstraction.
         """
         if config is None:
             config = self._default_config()
 
-        self.preflop_raises = config.get("preflop_raises", [2.5, 4.0, "all-in"])
-        self.postflop_bets = config.get("postflop_bets", [0.33, 0.75, "all-in"])
+        self.preflop_raises = config.get("preflop_raises", [2.5, 3.5, 5.0])
 
-        # Convert 'all-in' string to special marker
-        self.preflop_raises = [r if r != "all-in" else float("inf") for r in self.preflop_raises]
-        self.postflop_bets = [b if b != "all-in" else float("inf") for b in self.postflop_bets]
+        # Street-dependent postflop bets
+        postflop_config = config.get("postflop", {})
+        if isinstance(postflop_config, dict) and (
+            "flop" in postflop_config or "turn" in postflop_config or "river" in postflop_config
+        ):
+            # New format: street-dependent
+            # Handle both {"flop": [0.33, ...]} and {"flop": {"bets": [0.33, ...]}}
+            self.postflop_bets = {}
+            for street in ["flop", "turn", "river"]:
+                street_config = postflop_config.get(street, [0.33, 0.66, 1.25])
+                if isinstance(street_config, dict):
+                    # Format: {"flop": {"bets": [...]}}
+                    self.postflop_bets[street] = street_config.get("bets", [0.33, 0.66, 1.25])
+                else:
+                    # Format: {"flop": [...]}
+                    self.postflop_bets[street] = street_config
+        else:
+            # Legacy format: same bets for all streets
+            legacy_bets = config.get("postflop_bets", [0.33, 0.75])
+            self.postflop_bets = {
+                "flop": legacy_bets,
+                "turn": legacy_bets,
+                "river": legacy_bets,
+            }
+
+        # All-in threshold (SPR)
+        self.all_in_spr_threshold = config.get("all_in_spr_threshold", 2.0)
 
     @staticmethod
     def _default_config() -> Dict:
-        """Get default action abstraction."""
+        """Get default research-grade action abstraction."""
         return {
-            "preflop_raises": [2.5, 4.0, "all-in"],  # Raise to 2.5bb, 4bb, or all-in
-            "postflop_bets": [0.33, 0.75, "all-in"],  # Bet 33%, 75% pot, or all-in
+            "preflop_raises": [2.5, 3.5, 5.0],  # Standard raise sizes
+            "postflop": {
+                "flop": [0.33, 0.66, 1.25],  # Range, standard, overbet
+                "turn": [0.50, 1.0, 1.5],  # Medium, pot, large
+                "river": [0.50, 1.0, 2.0],  # Thin, pot, large overbet
+            },
+            "all_in_spr_threshold": 2.0,  # Only allow all-in when SPR < 2
         }
 
     def get_bet_sizes(self, state: GameState) -> List[int]:
         """
         Get legal bet sizes for current state.
+
+        Uses street-dependent sizing and SPR-conditional all-in.
 
         Args:
             state: Current game state
@@ -71,31 +106,32 @@ class ActionAbstraction:
         pot = state.pot
         stack = state.stacks[state.current_player]
 
+        # Calculate SPR (Stack-to-Pot Ratio)
+        spr = stack / pot if pot > 0 else float("inf")
+
         sizes = []
 
         if state.street.is_preflop():
             # Preflop: use BB-denominated sizes
             big_blind = 2  # TODO: Get from game rules
             for raise_bb in self.preflop_raises:
-                if raise_bb == float("inf"):
-                    # All-in
-                    if stack not in sizes:
-                        sizes.append(stack)
-                else:
-                    bet_size = int(raise_bb * big_blind)
-                    if bet_size <= stack and bet_size not in sizes:
-                        sizes.append(bet_size)
+                bet_size = int(raise_bb * big_blind)
+                if bet_size <= stack and bet_size not in sizes:
+                    sizes.append(bet_size)
         else:
-            # Postflop: use pot-fraction sizes
-            for pot_frac in self.postflop_bets:
-                if pot_frac == float("inf"):
-                    # All-in
-                    if stack not in sizes:
-                        sizes.append(stack)
-                else:
-                    bet_size = int(pot * pot_frac)
-                    if bet_size <= stack and bet_size > 0 and bet_size not in sizes:
-                        sizes.append(bet_size)
+            # Postflop: use street-dependent pot-fraction sizes
+            street_name = state.street.name.lower()
+            pot_fractions = self.postflop_bets.get(street_name, [0.33, 0.66, 1.25])
+
+            for pot_frac in pot_fractions:
+                bet_size = int(pot * pot_frac)
+                if bet_size <= stack and bet_size > 0 and bet_size not in sizes:
+                    sizes.append(bet_size)
+
+        # Add all-in only if SPR < threshold
+        if spr < self.all_in_spr_threshold:
+            if stack not in sizes and stack > 0:
+                sizes.append(stack)
 
         # Filter out bets that are too small (< 1 chip)
         sizes = [s for s in sizes if s > 0]
@@ -105,6 +141,8 @@ class ActionAbstraction:
     def get_raise_sizes(self, state: GameState) -> List[int]:
         """
         Get legal raise sizes for current state.
+
+        Uses street-dependent sizing and SPR-conditional all-in.
 
         Args:
             state: Current game state
@@ -124,40 +162,36 @@ class ActionAbstraction:
             # Cannot raise, only call or fold
             return []
 
+        # Calculate SPR (Stack-to-Pot Ratio)
+        spr = stack / pot if pot > 0 else float("inf")
+
         sizes = []
 
         if state.street.is_preflop():
             # Preflop: raise in BB units
             big_blind = 2  # TODO: Get from game rules
             for raise_bb in self.preflop_raises:
-                if raise_bb == float("inf"):
-                    # All-in raise
-                    raise_amount = stack - to_call
-                    if raise_amount > 0 and raise_amount not in sizes:
-                        sizes.append(raise_amount)
-                else:
-                    # Standard raise size
-                    total_bet = int(raise_bb * big_blind)
-                    raise_amount = total_bet - to_call
-                    if raise_amount > 0 and total_bet <= stack and raise_amount not in sizes:
-                        sizes.append(raise_amount)
+                # Standard raise size
+                total_bet = int(raise_bb * big_blind)
+                raise_amount = total_bet - to_call
+                if raise_amount > 0 and total_bet <= stack and raise_amount not in sizes:
+                    sizes.append(raise_amount)
         else:
-            # Postflop: raise as pot fractions
-            for pot_frac in self.postflop_bets:
-                if pot_frac == float("inf"):
-                    # All-in raise
-                    raise_amount = stack - to_call
-                    if raise_amount > 0 and raise_amount not in sizes:
-                        sizes.append(raise_amount)
-                else:
-                    # Pot-sized raise
-                    raise_size = int(pot * pot_frac)
-                    if (
-                        raise_size > 0
-                        and (to_call + raise_size) <= stack
-                        and raise_size not in sizes
-                    ):
-                        sizes.append(raise_size)
+            # Postflop: street-dependent raise as pot fractions
+            street_name = state.street.name.lower()
+            pot_fractions = self.postflop_bets.get(street_name, [0.50, 1.0, 1.5])
+
+            for pot_frac in pot_fractions:
+                # Pot-sized raise
+                raise_size = int(pot * pot_frac)
+                if raise_size > 0 and (to_call + raise_size) <= stack and raise_size not in sizes:
+                    sizes.append(raise_size)
+
+        # Add all-in raise only if SPR < threshold
+        if spr < self.all_in_spr_threshold:
+            raise_amount = stack - to_call
+            if raise_amount > 0 and raise_amount not in sizes:
+                sizes.append(raise_amount)
 
         return sorted(sizes)
 
@@ -271,10 +305,13 @@ class ActionAbstraction:
 
     def __str__(self) -> str:
         """String representation of abstraction."""
-        preflop_str = ", ".join(
-            ["all-in" if r == float("inf") else f"{r}bb" for r in self.preflop_raises]
-        )
-        postflop_str = ", ".join(
-            ["all-in" if b == float("inf") else f"{int(b * 100)}%" for b in self.postflop_bets]
-        )
-        return f"ActionAbstraction(preflop=[{preflop_str}], postflop=[{postflop_str}])"
+        preflop_str = ", ".join([f"{r}bb" for r in self.preflop_raises])
+
+        # Show street-dependent postflop
+        postflop_parts = []
+        for street, bets in self.postflop_bets.items():
+            bet_str = ", ".join([f"{int(b * 100)}%" for b in bets])
+            postflop_parts.append(f"{street}=[{bet_str}]")
+        postflop_str = ", ".join(postflop_parts)
+
+        return f"ActionAbstraction(preflop=[{preflop_str}], postflop={{{postflop_str}}}, all_in_spr<{self.all_in_spr_threshold})"
