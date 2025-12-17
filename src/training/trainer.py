@@ -5,6 +5,7 @@ Manages the complete training loop: solver creation, iteration execution,
 checkpointing, metrics tracking, and progress reporting.
 """
 
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -12,6 +13,7 @@ from tqdm import tqdm
 
 from src.abstraction.action_abstraction import ActionAbstraction
 from src.abstraction.card_abstraction import CardAbstraction, RankBasedBucketing
+from src.abstraction.equity_bucketing import EquityBucketing
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import DiskBackedStorage, InMemoryStorage, Storage
@@ -44,6 +46,7 @@ class Trainer:
             checkpoint_base_dir,
             config_name=config.get("system.config_name", "default"),
             run_id=run_id,
+            config=config.to_dict(),  # Pass full config for metadata
         )
 
         # Build components (storage needs the run-specific checkpoint_dir)
@@ -69,10 +72,20 @@ class Trainer:
 
         if abstraction_type == "rank_based":
             return RankBasedBucketing()
+        elif abstraction_type == "equity_bucketing":
+            # Load precomputed equity bucketing from file
+            bucketing_path = card_config.get("bucketing_path")
+            if not bucketing_path:
+                raise ValueError("equity_bucketing type requires 'bucketing_path' in config")
+
+            bucketing_path = Path(bucketing_path)
+            if not bucketing_path.exists():
+                raise FileNotFoundError(f"Equity bucketing file not found: {bucketing_path}")
+
+            bucketing = EquityBucketing.load(bucketing_path)
+            return bucketing
         else:
-            # Default to rank-based for now
-            # TODO: Implement equity bucketing
-            return RankBasedBucketing()
+            raise ValueError(f"Unknown card abstraction type: {abstraction_type}")
 
     def _build_storage(self) -> Storage:
         """Build storage backend from config."""
@@ -142,11 +155,14 @@ class Trainer:
         # Resume from checkpoint if requested
         start_iteration = 0
         if resume:
-            latest = self.checkpoint_manager.load_latest()
-            if latest:
-                start_iteration = latest.iteration
+            latest_checkpoint = self.checkpoint_manager.get_latest_checkpoint()
+            if latest_checkpoint:
+                start_iteration = latest_checkpoint["iteration"]
                 print(f"Resuming from iteration {start_iteration}")
                 # Note: Storage should already be loaded if using disk backend
+
+        # Track training time
+        training_start_time = time.time()
 
         # Training loop
         if verbose:
@@ -158,45 +174,96 @@ class Trainer:
         else:
             iterator = range(start_iteration, num_iterations)
 
-        for i in iterator:
-            # Run one iteration
-            utility = self.solver.train_iteration()
+        try:
+            for i in iterator:
+                # Run one iteration
+                utility = self.solver.train_iteration()
 
-            # Log metrics
-            self.metrics.log_iteration(
-                iteration=i + 1,
-                utility=utility,
+                # Log metrics
+                self.metrics.log_iteration(
+                    iteration=i + 1,
+                    utility=utility,
+                    num_infosets=self.solver.num_infosets(),
+                )
+
+                # Periodic logging
+                if (i + 1) % log_freq == 0 and verbose:
+                    summary = self.metrics.get_summary()
+                    if isinstance(iterator, tqdm):
+                        iterator.set_postfix(
+                            {
+                                "util": f"{summary['avg_utility']:+.2f}",
+                                "infosets": f"{summary['avg_infosets']:.0f}",
+                            }
+                        )
+
+                # Periodic checkpointing
+                if (i + 1) % checkpoint_freq == 0:
+                    elapsed_time = time.time() - training_start_time
+
+                    # Get metrics for this checkpoint
+                    summary = self.metrics.get_summary()
+                    checkpoint_metrics = {
+                        "avg_utility_p0": summary.get("avg_utility", 0.0),
+                        "avg_utility_p1": -summary.get("avg_utility", 0.0),
+                        "avg_infosets": summary.get("avg_infosets", 0),
+                    }
+
+                    # Save checkpoint with metrics
+                    self.checkpoint_manager.save(
+                        self.solver,
+                        i + 1,
+                        metrics=checkpoint_metrics,
+                    )
+
+                    # Update run statistics
+                    self.checkpoint_manager.update_stats(
+                        total_iterations=i + 1,
+                        total_runtime_seconds=elapsed_time,
+                        num_infosets=self.solver.num_infosets(),
+                    )
+
+            # Final checkpoint
+            elapsed_time = time.time() - training_start_time
+            summary = self.metrics.get_summary()
+            final_metrics = {
+                "avg_utility_p0": summary.get("avg_utility", 0.0),
+                "avg_utility_p1": -summary.get("avg_utility", 0.0),
+                "avg_infosets": summary.get("avg_infosets", 0),
+            }
+
+            self.checkpoint_manager.save(
+                self.solver,
+                num_iterations,
+                metrics=final_metrics,
+                tags=["final"],
+            )
+
+            # Update final stats
+            self.checkpoint_manager.update_stats(
+                total_iterations=num_iterations,
+                total_runtime_seconds=elapsed_time,
                 num_infosets=self.solver.num_infosets(),
             )
 
-            # Periodic logging
-            if (i + 1) % log_freq == 0 and verbose:
-                summary = self.metrics.get_summary()
-                if isinstance(iterator, tqdm):
-                    iterator.set_postfix(
-                        {
-                            "util": f"{summary['avg_utility']:+.2f}",
-                            "infosets": f"{summary['avg_infosets']:.0f}",
-                        }
-                    )
+            # Mark run as completed
+            self.checkpoint_manager.mark_completed()
 
-            # Periodic checkpointing
-            if (i + 1) % checkpoint_freq == 0:
-                self.checkpoint_manager.save(self.solver, i + 1)
+            # Print final summary
+            if verbose:
+                self.metrics.print_summary()
 
-        # Final checkpoint
-        self.checkpoint_manager.save(self.solver, num_iterations)
+            return {
+                "total_iterations": num_iterations,
+                "final_infosets": self.solver.num_infosets(),
+                "avg_utility": self.metrics.get_avg_utility(),
+                "elapsed_time": elapsed_time,
+            }
 
-        # Print final summary
-        if verbose:
-            self.metrics.print_summary()
-
-        return {
-            "total_iterations": num_iterations,
-            "final_infosets": self.solver.num_infosets(),
-            "avg_utility": self.metrics.get_avg_utility(),
-            "elapsed_time": self.metrics.get_elapsed_time(),
-        }
+        except Exception:
+            # Mark run as failed on exception
+            self.checkpoint_manager.mark_failed()
+            raise
 
     def evaluate(self) -> Dict:
         """

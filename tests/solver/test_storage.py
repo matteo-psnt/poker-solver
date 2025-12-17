@@ -20,7 +20,14 @@ class TestInMemoryStorage:
 
     def test_get_or_create_infoset(self):
         storage = InMemoryStorage()
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(
+            player_position=0,
+            street=Street.FLOP,
+            betting_sequence="b0.75",
+            preflop_hand=None,
+            postflop_bucket=25,
+            spr_bucket=1,
+        )
         actions = [fold(), call(), bet(50)]
 
         infoset = storage.get_or_create_infoset(key, actions)
@@ -32,7 +39,14 @@ class TestInMemoryStorage:
 
     def test_get_or_create_same_key_returns_same_infoset(self):
         storage = InMemoryStorage()
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(
+            player_position=0,
+            street=Street.FLOP,
+            betting_sequence="b0.75",
+            preflop_hand=None,
+            postflop_bucket=25,
+            spr_bucket=1,
+        )
         actions = [fold(), call()]
 
         infoset1 = storage.get_or_create_infoset(key, actions)
@@ -43,7 +57,14 @@ class TestInMemoryStorage:
 
     def test_get_infoset_exists(self):
         storage = InMemoryStorage()
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(
+            player_position=0,
+            street=Street.FLOP,
+            betting_sequence="b0.75",
+            preflop_hand=None,
+            postflop_bucket=25,
+            spr_bucket=1,
+        )
         actions = [fold(), call()]
 
         storage.get_or_create_infoset(key, actions)
@@ -54,7 +75,14 @@ class TestInMemoryStorage:
 
     def test_get_infoset_not_exists(self):
         storage = InMemoryStorage()
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(
+            player_position=0,
+            street=Street.FLOP,
+            betting_sequence="b0.75",
+            preflop_hand=None,
+            postflop_bucket=25,
+            spr_bucket=1,
+        )
 
         infoset = storage.get_infoset(key)
 
@@ -62,8 +90,22 @@ class TestInMemoryStorage:
 
     def test_has_infoset(self):
         storage = InMemoryStorage()
-        key1 = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
-        key2 = InfoSetKey(1, Street.FLOP, "b0.75", 25, 1)
+        key1 = InfoSetKey(
+            player_position=0,
+            street=Street.FLOP,
+            betting_sequence="b0.75",
+            preflop_hand=None,
+            postflop_bucket=25,
+            spr_bucket=1,
+        )
+        key2 = InfoSetKey(
+            player_position=1,
+            street=Street.FLOP,
+            betting_sequence="b0.75",
+            preflop_hand=None,
+            postflop_bucket=25,
+            spr_bucket=1,
+        )
 
         storage.get_or_create_infoset(key1, [fold(), call()])
 
@@ -73,7 +115,14 @@ class TestInMemoryStorage:
     def test_infoset_state_persists(self):
         """Test that infoset modifications persist."""
         storage = InMemoryStorage()
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(
+            player_position=0,
+            street=Street.FLOP,
+            betting_sequence="b0.75",
+            preflop_hand=None,
+            postflop_bucket=25,
+            spr_bucket=1,
+        )
         actions = [fold(), call()]
 
         infoset = storage.get_or_create_infoset(key, actions)
@@ -87,7 +136,14 @@ class TestInMemoryStorage:
 
     def test_clear(self):
         storage = InMemoryStorage()
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(
+            player_position=0,
+            street=Street.FLOP,
+            betting_sequence="b0.75",
+            preflop_hand=None,
+            postflop_bucket=25,
+            spr_bucket=1,
+        )
 
         storage.get_or_create_infoset(key, [fold(), call()])
         assert storage.num_infosets() == 1
@@ -113,7 +169,14 @@ class TestDiskBackedStorage:
     def test_get_or_create_infoset(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = DiskBackedStorage(Path(tmpdir), cache_size=10)
-            key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+            key = InfoSetKey(
+                player_position=0,
+                street=Street.FLOP,
+                betting_sequence="b0.75",
+                preflop_hand=None,
+                postflop_bucket=25,
+                spr_bucket=1,
+            )
             actions = [fold(), call(), bet(50)]
 
             infoset = storage.get_or_create_infoset(key, actions)
@@ -128,9 +191,30 @@ class TestDiskBackedStorage:
             storage = DiskBackedStorage(Path(tmpdir), cache_size=2)
 
             # Create 3 infosets
-            key1 = InfoSetKey(0, Street.FLOP, "b0.75", 1, 1)
-            key2 = InfoSetKey(0, Street.FLOP, "b0.75", 2, 1)
-            key3 = InfoSetKey(0, Street.FLOP, "b0.75", 3, 1)
+            key1 = InfoSetKey(
+                player_position=0,
+                street=Street.FLOP,
+                betting_sequence="b0.75",
+                preflop_hand=None,
+                postflop_bucket=1,
+                spr_bucket=1,
+            )
+            key2 = InfoSetKey(
+                player_position=0,
+                street=Street.FLOP,
+                betting_sequence="b0.75",
+                preflop_hand=None,
+                postflop_bucket=2,
+                spr_bucket=1,
+            )
+            key3 = InfoSetKey(
+                player_position=0,
+                street=Street.FLOP,
+                betting_sequence="b0.75",
+                preflop_hand=None,
+                postflop_bucket=3,
+                spr_bucket=1,
+            )
 
             storage.get_or_create_infoset(key1, [fold(), call()])
             storage.get_or_create_infoset(key2, [fold(), call()])
@@ -144,7 +228,14 @@ class TestDiskBackedStorage:
         """Test that flush writes modified infosets."""
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = DiskBackedStorage(Path(tmpdir), cache_size=10)
-            key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+            key = InfoSetKey(
+                player_position=0,
+                street=Street.FLOP,
+                betting_sequence="b0.75",
+                preflop_hand=None,
+                postflop_bucket=25,
+                spr_bucket=1,
+            )
 
             infoset = storage.get_or_create_infoset(key, [fold(), call()])
             infoset.update_regret(0, 100.0)
@@ -160,7 +251,14 @@ class TestDiskBackedStorage:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create storage and add infosets
             storage1 = DiskBackedStorage(Path(tmpdir), cache_size=10)
-            key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+            key = InfoSetKey(
+                player_position=0,
+                street=Street.FLOP,
+                betting_sequence="b0.75",
+                preflop_hand=None,
+                postflop_bucket=25,
+                spr_bucket=1,
+            )
 
             infoset = storage1.get_or_create_infoset(key, [fold(), call()])
             infoset.update_regret(0, 50.0)
@@ -183,8 +281,22 @@ class TestDiskBackedStorage:
     def test_has_infoset(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = DiskBackedStorage(Path(tmpdir), cache_size=10)
-            key1 = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
-            key2 = InfoSetKey(1, Street.FLOP, "b0.75", 25, 1)
+            key1 = InfoSetKey(
+                player_position=0,
+                street=Street.FLOP,
+                betting_sequence="b0.75",
+                preflop_hand=None,
+                postflop_bucket=25,
+                spr_bucket=1,
+            )
+            key2 = InfoSetKey(
+                player_position=1,
+                street=Street.FLOP,
+                betting_sequence="b0.75",
+                preflop_hand=None,
+                postflop_bucket=25,
+                spr_bucket=1,
+            )
 
             storage.get_or_create_infoset(key1, [fold(), call()])
 
@@ -198,7 +310,14 @@ class TestDiskBackedStorage:
 
             # Access infosets to trigger periodic flush
             for i in range(10):
-                key = InfoSetKey(0, Street.FLOP, f"seq{i}", i, 1)
+                key = InfoSetKey(
+                    player_position=0,
+                    street=Street.FLOP,
+                    betting_sequence=f"seq{i}",
+                    preflop_hand=None,
+                    postflop_bucket=i,
+                    spr_bucket=1,
+                )
                 storage.get_or_create_infoset(key, [fold(), call()])
 
             # Should have flushed at least once

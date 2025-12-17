@@ -8,6 +8,7 @@ This is the final component that ties together:
 - BoardClusterer (board texture clustering)
 """
 
+import logging
 import pickle
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -16,9 +17,24 @@ import numpy as np
 from sklearn.cluster import KMeans
 
 from src.abstraction.board_clustering import BoardClusterer
+from src.abstraction.constants import (
+    DEFAULT_EQUITY_SAMPLES,
+    DEFAULT_FLOP_BOARD_CLUSTERS,
+    DEFAULT_FLOP_BUCKETS,
+    DEFAULT_RIVER_BOARD_CLUSTERS,
+    DEFAULT_RIVER_BUCKETS,
+    DEFAULT_TURN_BOARD_CLUSTERS,
+    DEFAULT_TURN_BUCKETS,
+    KMEANS_MAX_ITER,
+    KMEANS_RANDOM_STATE,
+    NUM_PREFLOP_HANDS,
+)
 from src.abstraction.equity_calculator import EquityCalculator
 from src.abstraction.preflop_hands import PreflopHandMapper
 from src.game.state import Card, Street
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 class EquityBucketing:
@@ -58,22 +74,23 @@ class EquityBucketing:
         """
         if num_buckets is None:
             num_buckets = {
-                Street.FLOP: 50,
-                Street.TURN: 100,
-                Street.RIVER: 200,
+                Street.FLOP: DEFAULT_FLOP_BUCKETS,
+                Street.TURN: DEFAULT_TURN_BUCKETS,
+                Street.RIVER: DEFAULT_RIVER_BUCKETS,
             }
-
         self.num_buckets = num_buckets
-        self.equity_calculator = equity_calculator or EquityCalculator(num_samples=1000)
+        self.equity_calculator = equity_calculator or EquityCalculator(
+            num_samples=DEFAULT_EQUITY_SAMPLES
+        )
 
         # Create board clusterer with appropriate cluster counts
         if board_clusterer is None:
             if num_board_clusters is None:
                 # Use default board cluster counts
                 num_board_clusters = {
-                    Street.FLOP: 200,
-                    Street.TURN: 500,
-                    Street.RIVER: 1000,
+                    Street.FLOP: DEFAULT_FLOP_BOARD_CLUSTERS,
+                    Street.TURN: DEFAULT_TURN_BOARD_CLUSTERS,
+                    Street.RIVER: DEFAULT_RIVER_BOARD_CLUSTERS,
                 }
             self.board_clusterer = BoardClusterer(num_clusters=num_board_clusters)
         else:
@@ -112,7 +129,7 @@ class EquityBucketing:
             if street not in sample_boards:
                 continue
 
-            print(f"\nFitting {street.name}...")
+            logger.info(f"Fitting {street.name}...")
 
             # 1. Fit board clusterer
             boards = sample_boards[street]
@@ -132,8 +149,8 @@ class EquityBucketing:
 
             self.bucket_assignments[street] = bucket_assignments
 
-            print(
-                f"  {street.name}: {len(boards)} boards → "
+            logger.info(
+                f"{street.name}: {len(boards)} boards → "
                 f"{num_board_clusters} clusters → "
                 f"{self.num_buckets[street]} buckets"
             )
@@ -199,8 +216,13 @@ class EquityBucketing:
         # Get all 169 hand strings in order
         all_hands = PreflopHandMapper.get_all_hands()
 
+        # Track statistics for validation
+        empty_clusters = 0
+        conflict_defaults = 0
+        total_calculations = 0
+
         # For each preflop hand
-        for hand_idx in range(169):
+        for hand_idx in range(NUM_PREFLOP_HANDS):
             hand_string = all_hands[hand_idx]
 
             # Get a concrete example of this hand
@@ -213,13 +235,20 @@ class EquityBucketing:
                 if len(boards) == 0:
                     # No boards in this cluster - use default equity
                     equity_matrix[hand_idx, cluster_id] = 0.5
+                    empty_clusters += 1
+                    logger.warning(
+                        f"{street.name}: Empty cluster {cluster_id} for hand {hand_string}. "
+                        f"Using default equity 0.5. This may indicate insufficient board samples."
+                    )
                     continue
 
                 # Compute average equity across representative boards
                 equities = []
+                conflicts = 0
                 for board in boards:
                     # Skip if hole cards conflict with board
                     if self._cards_conflict(hole_cards, board):
+                        conflicts += 1
                         continue
 
                     equity = self.equity_calculator.calculate_equity(hole_cards, board, street)
@@ -228,8 +257,35 @@ class EquityBucketing:
                 if len(equities) == 0:
                     # All boards conflicted - use default
                     equity_matrix[hand_idx, cluster_id] = 0.5
+                    conflict_defaults += 1
+                    logger.warning(
+                        f"{street.name}: All {len(boards)} boards in cluster {cluster_id} "
+                        f"conflicted with hand {hand_string} ({conflicts} conflicts). "
+                        f"Using default equity 0.5. This should be rare."
+                    )
                 else:
                     equity_matrix[hand_idx, cluster_id] = np.mean(equities)
+                    if conflicts > 0:
+                        logger.debug(
+                            f"{street.name}: Hand {hand_string}, cluster {cluster_id}: "
+                            f"Skipped {conflicts}/{len(boards)} boards due to conflicts"
+                        )
+
+                total_calculations += 1
+
+        # Log summary statistics
+        total_cells = NUM_PREFLOP_HANDS * num_clusters
+        logger.info(
+            f"{street.name} equity matrix computed: "
+            f"{total_cells} cells, {empty_clusters} empty clusters ({100*empty_clusters/total_cells:.2f}%), "
+            f"{conflict_defaults} conflict defaults ({100*conflict_defaults/total_cells:.2f}%)"
+        )
+
+        if empty_clusters > 0 or conflict_defaults > 0:
+            logger.warning(
+                f"{street.name}: {empty_clusters + conflict_defaults} cells used default equity 0.5. "
+                f"Consider increasing board samples or cluster representatives."
+            )
 
         return equity_matrix
 
@@ -257,7 +313,12 @@ class EquityBucketing:
 
         # Run K-means
         n_clusters = self.num_buckets[street]
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        kmeans = KMeans(
+            n_clusters=n_clusters,
+            random_state=KMEANS_RANDOM_STATE,
+            max_iter=KMEANS_MAX_ITER,
+            n_init=10,
+        )
         labels = kmeans.fit_predict(features)
 
         # Reshape back to [169, num_board_clusters]
@@ -330,7 +391,16 @@ class EquityBucketing:
         hole_cards: Tuple[Card, Card],
         board: Tuple[Card, ...],
     ) -> bool:
-        """Check if hole cards conflict with board cards."""
+        """
+        Check if hole cards conflict with board cards.
+
+        Args:
+            hole_cards: Two hole cards
+            board: Board cards
+
+        Returns:
+            True if any cards are duplicated
+        """
         all_cards = set(hole_cards) | set(board)
         return len(all_cards) < len(hole_cards) + len(board)
 
@@ -356,7 +426,7 @@ class EquityBucketing:
         with open(filepath, "wb") as f:
             pickle.dump(data, f)
 
-        print(f"Saved bucketing to {filepath}")
+        logger.info(f"Saved bucketing to {filepath}")
 
     @classmethod
     def load(cls, filepath: Path) -> "EquityBucketing":
@@ -380,7 +450,7 @@ class EquityBucketing:
         bucketing.clusterers = data["clusterers"]
         bucketing.fitted = data["fitted"]
 
-        print(f"Loaded bucketing from {filepath}")
+        logger.info(f"Loaded bucketing from {filepath}")
         return bucketing
 
     def get_num_buckets(self, street: Street) -> int:

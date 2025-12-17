@@ -6,6 +6,7 @@ for efficient MCCFR training at scale.
 """
 
 import json
+import logging
 import pickle
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -16,6 +17,9 @@ import h5py
 
 from src.abstraction.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 class Storage(ABC):
@@ -230,7 +234,7 @@ class DiskBackedStorage(Storage):
 
     def checkpoint(self, iteration: int):
         """Save complete checkpoint."""
-        print(f"Checkpointing at iteration {iteration}...")
+        logger.info(f"Checkpointing at iteration {iteration}...")
 
         # Flush all dirty data
         self.flush()
@@ -238,7 +242,7 @@ class DiskBackedStorage(Storage):
         # Save metadata
         self._save_metadata(iteration)
 
-        print(f"Checkpoint saved: {self.num_infosets()} infosets")
+        logger.info(f"Checkpoint saved: {self.num_infosets()} infosets")
 
     def _add_to_cache(self, key: InfoSetKey, infoset: InfoSet):
         """Add infoset to cache, evicting LRU if full."""
@@ -327,7 +331,7 @@ class DiskBackedStorage(Storage):
             return infoset
 
         except Exception as e:
-            print(f"Warning: Failed to load infoset {infoset_id}: {e}")
+            logger.warning(f"Failed to load infoset {infoset_id}: {e}")
             return None
 
     def _write_to_disk(self, key: InfoSetKey, infoset: InfoSet):
@@ -374,19 +378,17 @@ class DiskBackedStorage(Storage):
             f.create_dataset(dataset_name, data=infoset.cumulative_utility)
 
     def _save_metadata(self, iteration: int):
-        """Save metadata (key mappings, iteration, etc.)."""
-        metadata = {
-            "iteration": iteration,
-            "num_infosets": self.num_infosets(),
-            "next_id": self.next_id,
-        }
+        """
+        Save storage metadata (key mappings only).
 
-        # Save metadata
-        metadata_file = self.checkpoint_dir / "metadata.json"
-        with open(metadata_file, "w") as f:
-            json.dump(metadata, f, indent=2)
+        Note:
+            Run-level metadata (iteration, stats, etc.) is now handled
+            by CheckpointManager. This only saves internal storage state.
 
-        # Save key mappings
+        Args:
+            iteration: Current iteration (unused, kept for compatibility)
+        """
+        # Save key mappings (the only state we need to persist)
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
         with open(key_mapping_file, "wb") as f:
             pickle.dump(
@@ -394,24 +396,29 @@ class DiskBackedStorage(Storage):
                     "key_to_id": self.key_to_id,
                     "id_to_key": self.id_to_key,
                     "infoset_actions": self.infoset_actions,
+                    "next_id": self.next_id,
                 },
                 f,
             )
 
+        logger.debug(
+            f"Saved storage metadata: {self.num_infosets()} infosets, next_id={self.next_id}"
+        )
+
     def _load_metadata(self):
-        """Load metadata from disk if exists."""
-        metadata_file = self.checkpoint_dir / "metadata.json"
+        """
+        Load storage metadata from disk if exists.
+
+        Supports both old format (metadata.json + key_mapping.pkl)
+        and new format (key_mapping.pkl only).
+        """
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
 
-        if not metadata_file.exists() or not key_mapping_file.exists():
+        if not key_mapping_file.exists():
+            logger.debug("No existing checkpoint found")
             return
 
         try:
-            # Load metadata
-            with open(metadata_file, "r") as f:
-                metadata = json.load(f)
-                self.next_id = metadata.get("next_id", 0)
-
             # Load key mappings
             with open(key_mapping_file, "rb") as f:
                 data = pickle.load(f)
@@ -419,10 +426,24 @@ class DiskBackedStorage(Storage):
                 self.id_to_key = data["id_to_key"]
                 self.infoset_actions = data["infoset_actions"]
 
-            print(f"Loaded checkpoint: {self.num_infosets()} infosets")
+                # next_id might be in key_mapping.pkl (new format) or metadata.json (old format)
+                if "next_id" in data:
+                    self.next_id = data["next_id"]
+                else:
+                    # Try to load from old metadata.json
+                    metadata_file = self.checkpoint_dir / "metadata.json"
+                    if metadata_file.exists():
+                        with open(metadata_file, "r") as f:
+                            metadata = json.load(f)
+                            self.next_id = metadata.get("next_id", len(self.key_to_id))
+                    else:
+                        # Fall back to inferring from key_to_id
+                        self.next_id = len(self.key_to_id)
+
+            logger.info(f"Loaded storage: {self.num_infosets()} infosets, next_id={self.next_id}")
 
         except Exception as e:
-            print(f"Warning: Failed to load metadata: {e}")
+            logger.warning(f"Failed to load storage metadata: {e}")
 
     def __str__(self) -> str:
         return (

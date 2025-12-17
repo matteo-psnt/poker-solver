@@ -10,6 +10,14 @@ from typing import List, Tuple
 import numpy as np
 from sklearn.cluster import KMeans
 
+from src.abstraction.card_utils import get_rank_value, get_suit
+from src.abstraction.constants import (
+    DEFAULT_FLOP_BOARD_CLUSTERS,
+    DEFAULT_RIVER_BOARD_CLUSTERS,
+    DEFAULT_TURN_BOARD_CLUSTERS,
+    KMEANS_MAX_ITER,
+    KMEANS_RANDOM_STATE,
+)
 from src.game.state import Card, Street
 
 
@@ -34,9 +42,9 @@ class BoardClusterer:
         """
         if num_clusters is None:
             num_clusters = {
-                Street.FLOP: 200,
-                Street.TURN: 500,
-                Street.RIVER: 1000,
+                Street.FLOP: DEFAULT_FLOP_BOARD_CLUSTERS,
+                Street.TURN: DEFAULT_TURN_BOARD_CLUSTERS,
+                Street.RIVER: DEFAULT_RIVER_BOARD_CLUSTERS,
             }
 
         self.num_clusters = num_clusters
@@ -96,7 +104,7 @@ class BoardClusterer:
         # Count cards per suit
         suit_counts = {}
         for card in board:
-            suit = self._get_suit(card)
+            suit = get_suit(card)
             suit_counts[suit] = suit_counts.get(suit, 0) + 1
 
         num_suits = len(suit_counts)
@@ -128,7 +136,7 @@ class BoardClusterer:
         # Count cards per rank
         rank_counts = {}
         for card in board:
-            rank = self._get_rank_value(card)
+            rank = get_rank_value(card)
             rank_counts[rank] = rank_counts.get(rank, 0) + 1
 
         num_ranks = len(rank_counts)
@@ -160,7 +168,7 @@ class BoardClusterer:
         Returns:
             List of features
         """
-        ranks = [self._get_rank_value(card) for card in board]
+        ranks = [get_rank_value(card) for card in board]
         ranks_sorted = sorted(ranks)
 
         # Spread
@@ -199,7 +207,7 @@ class BoardClusterer:
         Returns:
             List of features
         """
-        ranks = [self._get_rank_value(card) for card in board]
+        ranks = [get_rank_value(card) for card in board]
 
         max_rank = max(ranks)
         avg_rank = np.mean(ranks)
@@ -245,42 +253,6 @@ class BoardClusterer:
 
         return False
 
-    def _get_suit(self, card: Card) -> str:
-        """Extract suit from card."""
-        card_str = repr(card)
-        if len(card_str) == 2:
-            return card_str[1]
-        else:
-            return card_str[2]
-
-    def _get_rank_value(self, card: Card) -> int:
-        """
-        Extract rank value from card.
-
-        Returns:
-            Rank value (2-14, where 14 = Ace)
-        """
-        card_str = repr(card)
-        rank_char = card_str[0]
-
-        rank_map = {
-            "2": 2,
-            "3": 3,
-            "4": 4,
-            "5": 5,
-            "6": 6,
-            "7": 7,
-            "8": 8,
-            "9": 9,
-            "T": 10,
-            "J": 11,
-            "Q": 12,
-            "K": 13,
-            "A": 14,
-        }
-
-        return rank_map[rank_char]
-
     def fit(self, boards: List[Tuple[Card, ...]], street: Street):
         """
         Fit clusterer on sample boards for a given street.
@@ -294,7 +266,12 @@ class BoardClusterer:
 
         # Fit K-means
         n_clusters = self.num_clusters[street]
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        kmeans = KMeans(
+            n_clusters=n_clusters,
+            random_state=KMEANS_RANDOM_STATE,
+            max_iter=KMEANS_MAX_ITER,
+            n_init=10,
+        )
         kmeans.fit(features)
 
         self.clusterers[street] = kmeans
