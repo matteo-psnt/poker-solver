@@ -415,6 +415,8 @@ class EquityBucketing:
         """
         Check if hole cards conflict with board cards.
 
+        Optimized version using card_int comparison.
+
         Args:
             hole_cards: Two hole cards
             board: Board cards
@@ -422,8 +424,9 @@ class EquityBucketing:
         Returns:
             True if any cards are duplicated
         """
-        all_cards = set(hole_cards) | set(board)
-        return len(all_cards) < len(hole_cards) + len(board)
+        hole_ints = {c.card_int for c in hole_cards}
+        board_ints = {c.card_int for c in board}
+        return bool(hole_ints & board_ints)
 
     def save(self, filepath: Path):
         """

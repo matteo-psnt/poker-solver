@@ -10,17 +10,26 @@ class TestActionAbstraction:
 
     def test_default_config(self):
         abstraction = ActionAbstraction()
-        assert abstraction.preflop_raises == [2.5, 4.0, float("inf")]
-        assert abstraction.postflop_bets == [0.33, 0.75, float("inf")]
+        assert abstraction.preflop_raises == [2.5, 3.5, 5.0]
+        assert abstraction.postflop_bets == {
+            "flop": [0.33, 0.66, 1.25],
+            "turn": [0.50, 1.0, 1.5],
+            "river": [0.50, 1.0, 2.0],
+        }
 
     def test_custom_config(self):
         config = {
             "preflop_raises": [3.0, 5.0],
-            "postflop_bets": [0.5, 1.0],
+            "postflop_bets": [0.5, 1.0],  # Legacy format
         }
         abstraction = ActionAbstraction(config)
         assert abstraction.preflop_raises == [3.0, 5.0]
-        assert abstraction.postflop_bets == [0.5, 1.0]
+        # Legacy format applies same bets to all streets
+        assert abstraction.postflop_bets == {
+            "flop": [0.5, 1.0],
+            "turn": [0.5, 1.0],
+            "river": [0.5, 1.0],
+        }
 
     def test_get_bet_sizes_preflop(self):
         abstraction = ActionAbstraction()
@@ -41,10 +50,10 @@ class TestActionAbstraction:
         )
 
         sizes = abstraction.get_bet_sizes(state)
-        # Preflop: 2.5bb = 5 chips, 4bb = 8 chips, all-in = 197
+        # Preflop: 2.5bb = 5 chips, 3.5bb = 7 chips, 5bb = 10 chips
         assert 5 in sizes
-        assert 8 in sizes
-        assert 197 in sizes
+        assert 7 in sizes
+        assert 10 in sizes
 
     def test_get_bet_sizes_postflop(self):
         abstraction = ActionAbstraction()
@@ -65,10 +74,10 @@ class TestActionAbstraction:
         )
 
         sizes = abstraction.get_bet_sizes(state)
-        # Postflop: 33% pot = 33, 75% pot = 75, all-in = 200
+        # Postflop (flop): 33% pot = 33, 66% pot = 66, 125% pot = 125
         assert 33 in sizes
-        assert 75 in sizes
-        assert 200 in sizes
+        assert 66 in sizes
+        assert 125 in sizes
 
     def test_get_bet_sizes_facing_bet(self):
         """Cannot bet when facing a bet."""
