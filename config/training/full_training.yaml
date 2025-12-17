@@ -1,0 +1,18 @@
+# Full Training Configuration
+# Production-scale training (10M iterations with disk-backed storage)
+
+training:
+  num_iterations: 10000000
+  checkpoint_frequency: 10000
+  log_frequency: 1000
+  checkpoint_dir: "data/checkpoints/full_training"
+  verbose: true
+
+storage:
+  backend: "disk"
+  cache_size: 100000
+  flush_frequency: 1000
+
+system:
+  seed: null  # Random for diversity
+  log_level: "INFO"

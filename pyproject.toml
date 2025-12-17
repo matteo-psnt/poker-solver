@@ -1,7 +1,7 @@
 [project]
 name = "poker-solver"
 version = "0.1.0"
-description = "Research-grade Heads-Up No-Limit Hold'em solver using Monte Carlo CFR"
+description = "Heads-Up No-Limit Hold'em solver using Monte Carlo CFR"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
