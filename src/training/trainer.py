@@ -12,7 +12,7 @@ from typing import Dict, Optional
 from tqdm import tqdm
 
 from src.abstraction.action_abstraction import ActionAbstraction
-from src.abstraction.card_abstraction import CardAbstraction, RankBasedBucketing
+from src.abstraction.card_abstraction import CardAbstraction
 from src.abstraction.equity_bucketing import EquityBucketing
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
@@ -68,24 +68,28 @@ class Trainer:
     def _build_card_abstraction(self) -> CardAbstraction:
         """Build card abstraction from config."""
         card_config = self.config.get_section("card_abstraction")
-        abstraction_type = card_config.get("type", "rank_based")
+        abstraction_type = card_config.get("type", "equity_bucketing")
 
-        if abstraction_type == "rank_based":
-            return RankBasedBucketing()
-        elif abstraction_type == "equity_bucketing":
+        if abstraction_type == "equity_bucketing":
             # Load precomputed equity bucketing from file
             bucketing_path = card_config.get("bucketing_path")
             if not bucketing_path:
-                raise ValueError("equity_bucketing type requires 'bucketing_path' in config")
+                raise ValueError("equity_bucketing requires 'bucketing_path' in config")
 
             bucketing_path = Path(bucketing_path)
             if not bucketing_path.exists():
-                raise FileNotFoundError(f"Equity bucketing file not found: {bucketing_path}")
+                raise FileNotFoundError(
+                    f"Equity bucketing file not found: {bucketing_path}\n"
+                    "Please run 'Precompute Equity Buckets' from the CLI first."
+                )
 
             bucketing = EquityBucketing.load(bucketing_path)
             return bucketing
         else:
-            raise ValueError(f"Unknown card abstraction type: {abstraction_type}")
+            raise ValueError(
+                f"Unknown card abstraction type: {abstraction_type}\n"
+                "Only 'equity_bucketing' is supported."
+            )
 
     def _build_storage(self) -> Storage:
         """Build storage backend from config."""
