@@ -293,12 +293,36 @@ class DiskBackedStorage(Storage):
                     return None
                 strategy_sum = f[str(infoset_id)][:]
 
+            # Load reach_count and cumulative_utility (if they exist)
+            reach_count = 0
+            cumulative_utility = 0.0
+
+            reach_file = self.checkpoint_dir / "reach_counts.h5"
+            if reach_file.exists():
+                try:
+                    with h5py.File(reach_file, "r") as f:
+                        if str(infoset_id) in f:
+                            reach_count = int(f[str(infoset_id)][()])
+                except Exception:
+                    pass
+
+            utility_file = self.checkpoint_dir / "utilities.h5"
+            if utility_file.exists():
+                try:
+                    with h5py.File(utility_file, "r") as f:
+                        if str(infoset_id) in f:
+                            cumulative_utility = float(f[str(infoset_id)][()])
+                except Exception:
+                    pass
+
             # Create infoset with stored legal_actions (not current ones)
             # This ensures regrets/strategy_sum sizes match
             stored_actions = self.infoset_actions.get(key, legal_actions)
             infoset = InfoSet(key, stored_actions)
             infoset.regrets = regrets
             infoset.strategy_sum = strategy_sum
+            infoset.reach_count = reach_count
+            infoset.cumulative_utility = cumulative_utility
 
             return infoset
 
@@ -332,6 +356,22 @@ class DiskBackedStorage(Storage):
             f.create_dataset(
                 dataset_name, data=infoset.strategy_sum, compression="gzip", compression_opts=1
             )
+
+        # Write reach count
+        reach_file = self.checkpoint_dir / "reach_counts.h5"
+        with h5py.File(reach_file, "a") as f:
+            dataset_name = str(infoset_id)
+            if dataset_name in f:
+                del f[dataset_name]
+            f.create_dataset(dataset_name, data=infoset.reach_count)
+
+        # Write cumulative utility
+        utility_file = self.checkpoint_dir / "utilities.h5"
+        with h5py.File(utility_file, "a") as f:
+            dataset_name = str(infoset_id)
+            if dataset_name in f:
+                del f[dataset_name]
+            f.create_dataset(dataset_name, data=infoset.cumulative_utility)
 
     def _save_metadata(self, iteration: int):
         """Save metadata (key mappings, iteration, etc.)."""
