@@ -30,18 +30,11 @@ action_abstraction:
 
 # ===== Card Abstraction =====
 card_abstraction:
-  type: "rank_based"  # Options: "rank_based", "equity_bucketing"
+  type: "equity_bucketing"
 
-  # Number of buckets per street
-  num_buckets:
-    preflop: 6
-    flop: 9
-    turn: 9
-    river: 9
-
-  # For equity bucketing (when type="equity_bucketing")
-  # num_rollouts: 1000
-  # precomputed_file: "data/abstractions/equity_buckets.pkl"
+  # Path to precomputed equity bucketing file
+  # Must be generated using "Precompute Equity Buckets" in CLI
+  bucketing_path: "data/abstractions/equity_buckets.pkl"
 
 # ===== SPR Bucketing =====
 spr_buckets:

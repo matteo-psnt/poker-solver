@@ -50,8 +50,6 @@ dmypy.json
 
 # Project-specific
 data/checkpoints/
-data/abstractions/*.pkl
-data/abstractions/*.h5
 data/results/
 *.log
 logs/
