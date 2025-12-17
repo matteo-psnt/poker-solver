@@ -150,7 +150,7 @@ class MetricsTracker:
         """Print formatted metrics summary."""
         summary = self.get_summary()
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Iteration: {summary['iteration']:,}")
         print(
             f"Avg Utility (last {self.window_size}): {summary['avg_utility']:+.2f} "
@@ -159,7 +159,7 @@ class MetricsTracker:
         print(f"Avg Infosets: {summary['avg_infosets']:.0f}")
         print(f"Speed: {summary['iter_per_sec']:.1f} iter/s")
         print(f"Elapsed: {_format_time(summary['elapsed_time'])}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
     def get_progress_string(self, target_iterations: int) -> str:
         """
@@ -184,14 +184,14 @@ class MetricsTracker:
         bar = "█" * filled + "░" * (bar_width - filled)
 
         return (
-            f"[{bar}] {progress*100:.1f}% "
+            f"[{bar}] {progress * 100:.1f}% "
             f"({self.iteration:,}/{target_iterations:,}) "
             f"ETA: {_format_time(eta)}"
         )
 
     def __str__(self) -> str:
         """String representation."""
-        return f"MetricsTracker(iter={self.iteration}, " f"avg_util={self.get_avg_utility():+.2f})"
+        return f"MetricsTracker(iter={self.iteration}, avg_util={self.get_avg_utility():+.2f})"
 
 
 def _format_time(seconds: float) -> str:

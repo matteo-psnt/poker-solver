@@ -1,0 +1,28 @@
+{
+  "name": "equity_buckets_test",
+  "created_at": "2025-12-17T00:08:49.896172",
+  "abstraction_type": "equity_bucketing",
+  "num_buckets": {
+    "FLOP": 10,
+    "TURN": 20,
+    "RIVER": 30
+  },
+  "num_board_clusters": {
+    "FLOP": 20,
+    "TURN": 30,
+    "RIVER": 40
+  },
+  "num_equity_samples": 100,
+  "num_samples_per_cluster": 3,
+  "num_boards_sampled": {
+    "FLOP": 500,
+    "TURN": 300,
+    "RIVER": 200
+  },
+  "computation_time_seconds": 52.05379796028137,
+  "num_workers": 12,
+  "seed": 42,
+  "empty_clusters": null,
+  "conflict_defaults": null,
+  "file_size_kb": 86.1865234375
+}

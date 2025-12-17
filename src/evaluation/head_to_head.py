@@ -71,9 +71,9 @@ class MatchStatistics:
         return (
             f"MatchStatistics(\n"
             f"  Hands: {self.num_hands}\n"
-            f"  Player 0: {self.player0_wins} wins ({self.player0_wins/self.num_hands*100:.1f}%), "
+            f"  Player 0: {self.player0_wins} wins ({self.player0_wins / self.num_hands * 100:.1f}%), "
             f"{self.player0_bb_per_hand:+.2f} bb/hand\n"
-            f"  Player 1: {self.player1_wins} wins ({self.player1_wins/self.num_hands*100:.1f}%), "
+            f"  Player 1: {self.player1_wins} wins ({self.player1_wins / self.num_hands * 100:.1f}%), "
             f"{self.player1_bb_per_hand:+.2f} bb/hand\n"
             f"  Showdown: {self.showdown_pct:.1f}%\n"
             f")"
