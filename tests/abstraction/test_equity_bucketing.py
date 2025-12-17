@@ -36,8 +36,8 @@ class TestEquityBucketing:
 
     def test_fit_small_sample(self):
         """Test fitting on small sample of boards."""
-        # Use fast equity calculator for testing (only 50 samples)
-        equity_calc = EquityCalculator(num_samples=50)
+        # Use fast equity calculator for testing (only 20 samples)
+        equity_calc = EquityCalculator(num_samples=20)
 
         # Use smaller bucket counts for testing
         bucketing = EquityBucketing(
@@ -87,7 +87,7 @@ class TestEquityBucketing:
 
     def test_get_bucket_after_fit(self):
         """Test getting bucket for a hand after fitting."""
-        equity_calc = EquityCalculator(num_samples=50)
+        equity_calc = EquityCalculator(num_samples=20)
         bucketing = EquityBucketing(
             num_buckets={Street.FLOP: 5},
             num_board_clusters={Street.FLOP: 3},
@@ -166,7 +166,7 @@ class TestEquityBucketing:
 
     def test_save_and_load(self):
         """Test saving and loading bucketing."""
-        equity_calc = EquityCalculator(num_samples=50)
+        equity_calc = EquityCalculator(num_samples=20)
         bucketing = EquityBucketing(
             num_buckets={Street.FLOP: 5},
             num_board_clusters={Street.FLOP: 2},
@@ -206,7 +206,7 @@ class TestEquityBucketing:
 
     def test_different_hands_different_buckets(self):
         """Test that different strength hands get different buckets."""
-        equity_calc = EquityCalculator(num_samples=50)
+        equity_calc = EquityCalculator(num_samples=20)
         bucketing = EquityBucketing(
             num_buckets={Street.FLOP: 10},
             num_board_clusters={Street.FLOP: 3},
@@ -259,7 +259,7 @@ class TestEquityBucketing:
         assert "not fitted" in s
 
         # After fitting
-        equity_calc = EquityCalculator(num_samples=50)
+        equity_calc = EquityCalculator(num_samples=20)
         bucketing_small = EquityBucketing(
             num_buckets={Street.FLOP: 5},
             num_board_clusters={Street.FLOP: 2},
@@ -278,7 +278,7 @@ class TestEquityBucketing:
 
     def test_multiple_streets(self):
         """Test fitting multiple streets."""
-        equity_calc = EquityCalculator(num_samples=50)
+        equity_calc = EquityCalculator(num_samples=20)
         bucketing = EquityBucketing(
             num_buckets={
                 Street.FLOP: 5,

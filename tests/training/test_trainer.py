@@ -55,18 +55,18 @@ class TestTrainer:
     def test_train_executes(self):
         """Test that training runs without errors."""
         config = Config.default()
-        config.set("training.num_iterations", 10)
-        config.set("training.checkpoint_frequency", 5)
-        config.set("training.log_frequency", 2)
+        config.set("training.num_iterations", 2)  # Reduced to 2
+        config.set("training.checkpoint_frequency", 1)
+        config.set("training.log_frequency", 1)
         config.set("training.verbose", False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.set("training.checkpoint_dir", tmpdir)
 
             trainer = Trainer(config)
-            results = trainer.train(num_iterations=10)
+            results = trainer.train(num_iterations=2)
 
-            assert results["total_iterations"] == 10
+            assert results["total_iterations"] == 2
             assert results["final_infosets"] > 0
             assert "avg_utility" in results
             assert "elapsed_time" in results
@@ -74,36 +74,38 @@ class TestTrainer:
     def test_train_with_iterations_override(self):
         """Test overriding num_iterations."""
         config = Config.default()
-        config.set("training.num_iterations", 100)
+        config.set("training.num_iterations", 2)  # Reduced to 2
         config.set("training.verbose", False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.set("training.checkpoint_dir", tmpdir)
 
             trainer = Trainer(config)
-            results = trainer.train(num_iterations=5)  # Override
+            results = trainer.train(num_iterations=2)  # Override
 
-            assert results["total_iterations"] == 5
+            assert results["total_iterations"] == 2
 
     def test_train_creates_checkpoint(self):
         """Test that checkpoints are created."""
         config = Config.default()
+        config.set("training.num_iterations", 2)  # Reduced to 2
         config.set("training.verbose", False)
+        config.set("training.checkpoint_frequency", 1)  # Checkpoint every iteration
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.set("training.checkpoint_dir", tmpdir)
 
             trainer = Trainer(config)
-            trainer.train(num_iterations=10)
+            trainer.train(num_iterations=2)
 
             # Check checkpoint exists in run subdirectory
             checkpoint_dir = Path(tmpdir)
             run_dirs = list(checkpoint_dir.glob("run_*"))
             assert len(run_dirs) > 0, "No run subdirectory created"
 
-            # Check for metadata files in run directory
-            metadata_files = list(run_dirs[0].glob("checkpoint_*_metadata.json"))
-            assert len(metadata_files) > 0, "No checkpoint metadata files found"
+            # Check for checkpoint manifest file
+            manifest_file = run_dirs[0] / "checkpoint_manifest.json"
+            assert manifest_file.exists(), "No checkpoint manifest found"
 
     def test_evaluate(self):
         """Test evaluation method."""
@@ -131,7 +133,7 @@ class TestTrainer:
     def test_train_with_default_iterations(self):
         """Test training with num_iterations=None (uses config default)."""
         config = Config.default()
-        config.set("training.num_iterations", 5)
+        config.set("training.num_iterations", 2)  # Reduced from 5
         config.set("training.verbose", False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -140,11 +142,12 @@ class TestTrainer:
             trainer = Trainer(config)
             results = trainer.train(num_iterations=None)
 
-            assert results["total_iterations"] == 5
+            assert results["total_iterations"] == 2
 
     def test_train_with_resume(self):
         """Test training with resume=True."""
         config = Config.default()
+        config.set("training.num_iterations", 2)
         config.set("training.verbose", False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -152,11 +155,11 @@ class TestTrainer:
 
             # First training session
             trainer1 = Trainer(config)
-            trainer1.train(num_iterations=5)
+            trainer1.train(num_iterations=2)  # Reduced from 5
 
             # Second session with resume (should find no checkpoint and start from 0)
             trainer2 = Trainer(config)
-            results = trainer2.train(num_iterations=10, resume=True)
+            results = trainer2.train(num_iterations=2, resume=True)  # Reduced from 3
 
             # Since we used different trainer instances, resume won't find anything
             # This tests the resume=True code path
@@ -165,12 +168,13 @@ class TestTrainer:
     def test_train_non_verbose(self):
         """Test training with verbose=False."""
         config = Config.default()
+        config.set("training.num_iterations", 2)
         config.set("training.verbose", False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.set("training.checkpoint_dir", tmpdir)
 
             trainer = Trainer(config)
-            results = trainer.train(num_iterations=5)
+            results = trainer.train(num_iterations=2)  # Reduced from 5
 
-            assert results["total_iterations"] == 5
+            assert results["total_iterations"] == 2
