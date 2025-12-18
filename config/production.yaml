@@ -46,7 +46,7 @@ spr_buckets:
 # ===== Solver Configuration =====
 solver:
   type: "mccfr"
-  variant: "outcome_sampling"
+  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
   # CFR+ provides ~100x faster convergence than vanilla CFR
   cfr_plus: true
   # Linear CFR provides additional 2-3x speedup
