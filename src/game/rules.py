@@ -5,7 +5,6 @@ This module implements the betting rules, pot calculations, and state transition
 that govern how the game progresses.
 """
 
-import random
 from typing import List, Optional, Tuple
 
 from src.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
@@ -178,7 +177,6 @@ class GameRules:
         to_call = state.to_call
         last_aggressor = state.last_aggressor
         street = state.street
-        is_terminal = False
 
         # Handle different action types
         if action.type == ActionType.FOLD:

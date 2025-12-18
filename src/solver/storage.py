@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import h5py
-import numpy as np
 
 from src.abstraction.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action
@@ -320,7 +319,9 @@ class DiskBackedStorage(Storage):
             dataset_name = str(infoset_id)
             if dataset_name in f:
                 del f[dataset_name]
-            f.create_dataset(dataset_name, data=infoset.regrets, compression="gzip", compression_opts=1)
+            f.create_dataset(
+                dataset_name, data=infoset.regrets, compression="gzip", compression_opts=1
+            )
 
         # Write strategy sum
         strategy_file = self.checkpoint_dir / "strategies.h5"
@@ -328,7 +329,9 @@ class DiskBackedStorage(Storage):
             dataset_name = str(infoset_id)
             if dataset_name in f:
                 del f[dataset_name]
-            f.create_dataset(dataset_name, data=infoset.strategy_sum, compression="gzip", compression_opts=1)
+            f.create_dataset(
+                dataset_name, data=infoset.strategy_sum, compression="gzip", compression_opts=1
+            )
 
     def _save_metadata(self, iteration: int):
         """Save metadata (key mappings, iteration, etc.)."""
@@ -346,11 +349,14 @@ class DiskBackedStorage(Storage):
         # Save key mappings
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
         with open(key_mapping_file, "wb") as f:
-            pickle.dump({
-                "key_to_id": self.key_to_id,
-                "id_to_key": self.id_to_key,
-                "infoset_actions": self.infoset_actions,
-            }, f)
+            pickle.dump(
+                {
+                    "key_to_id": self.key_to_id,
+                    "id_to_key": self.id_to_key,
+                    "infoset_actions": self.infoset_actions,
+                },
+                f,
+            )
 
     def _load_metadata(self):
         """Load metadata from disk if exists."""

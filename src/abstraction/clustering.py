@@ -6,7 +6,7 @@ equity distributions.
 """
 
 import random
-from typing import List, Tuple
+from typing import Tuple
 
 import numpy as np
 
@@ -33,7 +33,7 @@ class KMeansClustering:
         self.cluster_centers = None
         self.labels = None
 
-    def fit(self, data: np.ndarray, seed: int = 42) -> 'KMeansClustering':
+    def fit(self, data: np.ndarray, seed: int = 42) -> "KMeansClustering":
         """
         Fit k-means to data.
 
@@ -50,9 +50,7 @@ class KMeansClustering:
         n_samples = data.shape[0]
 
         if n_samples < self.n_clusters:
-            raise ValueError(
-                f"Cannot cluster {n_samples} samples into {self.n_clusters} clusters"
-            )
+            raise ValueError(f"Cannot cluster {n_samples} samples into {self.n_clusters} clusters")
 
         # Initialize centers randomly (k-means++)
         self.cluster_centers = self._kmeans_plusplus_init(data)
@@ -129,13 +127,12 @@ class KMeansClustering:
         # Choose remaining centers
         for _ in range(1, self.n_clusters):
             # Compute distances to nearest center
-            distances = np.array([
-                min(np.linalg.norm(point - center) for center in centers)
-                for point in data
-            ])
+            distances = np.array(
+                [min(np.linalg.norm(point - center) for center in centers) for point in data]
+            )
 
             # Square distances for k-means++ weighting
-            squared_distances = distances ** 2
+            squared_distances = distances**2
             probabilities = squared_distances / squared_distances.sum()
 
             # Sample next center with probability proportional to squared distance
@@ -156,8 +153,7 @@ class KMeansClustering:
         """
         # Compute distances to all centers
         distances = np.linalg.norm(
-            data[:, np.newaxis, :] - self.cluster_centers[np.newaxis, :, :],
-            axis=2
+            data[:, np.newaxis, :] - self.cluster_centers[np.newaxis, :, :], axis=2
         )
 
         # Assign to nearest center
@@ -209,7 +205,7 @@ class KMeansClustering:
             cluster_points = data[self.labels == k]
             if len(cluster_points) > 0:
                 distances = np.linalg.norm(cluster_points - self.cluster_centers[k], axis=1)
-                inertia += np.sum(distances ** 2)
+                inertia += np.sum(distances**2)
 
         return inertia
 
@@ -219,9 +215,7 @@ class KMeansClustering:
 
 
 def find_optimal_k(
-    data: np.ndarray,
-    k_range: Tuple[int, int] = (5, 50),
-    method: str = "elbow"
+    data: np.ndarray, k_range: Tuple[int, int] = (5, 50), method: str = "elbow"
 ) -> int:
     """
     Find optimal number of clusters using elbow method.

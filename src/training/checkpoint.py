@@ -67,7 +67,9 @@ class CheckpointManager:
     checkpoint metadata.
     """
 
-    def __init__(self, checkpoint_dir: Path, config_name: Optional[str] = None, run_id: Optional[str] = None):
+    def __init__(
+        self, checkpoint_dir: Path, config_name: Optional[str] = None, run_id: Optional[str] = None
+    ):
         """
         Initialize checkpoint manager.
 
@@ -221,7 +223,9 @@ class CheckpointManager:
         return sorted(runs)
 
     @classmethod
-    def from_run_id(cls, base_checkpoint_dir: Path, run_id: str, config_name: Optional[str] = None) -> "CheckpointManager":
+    def from_run_id(
+        cls, base_checkpoint_dir: Path, run_id: str, config_name: Optional[str] = None
+    ) -> "CheckpointManager":
         """
         Create CheckpointManager for an existing run.
 

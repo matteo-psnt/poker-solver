@@ -126,11 +126,14 @@ class TestLoadConfig:
 
     def test_load_from_file_with_overrides(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump({
-                "game": {"starting_stack": 150, "small_blind": 1, "big_blind": 2},
-                "training": {"num_iterations": 100, "checkpoint_frequency": 10},
-                "storage": {"backend": "memory"}
-            }, f)
+            yaml.dump(
+                {
+                    "game": {"starting_stack": 150, "small_blind": 1, "big_blind": 2},
+                    "training": {"num_iterations": 100, "checkpoint_frequency": 10},
+                    "storage": {"backend": "memory"},
+                },
+                f,
+            )
             config_path = Path(f.name)
 
         try:

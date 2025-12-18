@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from src.abstraction.infoset import InfoSetKey
 from src.game.actions import bet, call, fold

@@ -6,7 +6,7 @@ losses, and chip distributions.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 from treys import Deck

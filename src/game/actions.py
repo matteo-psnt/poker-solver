@@ -7,7 +7,6 @@ and provides data structures for representing player actions.
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional
 
 
 class ActionType(Enum):

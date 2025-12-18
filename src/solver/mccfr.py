@@ -5,14 +5,14 @@ Implements MCCFR with outcome sampling for scalable poker solving.
 """
 
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 from treys import Deck
 
 from src.abstraction.action_abstraction import ActionAbstraction
 from src.abstraction.card_abstraction import CardAbstraction
-from src.game.actions import Action, ActionType
+from src.game.actions import ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
 from src.solver.base import BaseSolver

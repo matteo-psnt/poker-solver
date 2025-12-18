@@ -4,9 +4,8 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import pytest
 
-from src.abstraction.infoset import InfoSet, InfoSetKey
+from src.abstraction.infoset import InfoSetKey
 from src.game.actions import Action, ActionType
 from src.game.state import Street
 from src.solver.storage import DiskBackedStorage
@@ -70,7 +69,10 @@ class TestDiskBackedStorage:
             # Load infoset
             infoset2 = storage2.get_infoset(key)
 
-            assert infoset2 is not None, f"Failed to load infoset. Storage has {storage2.num_infosets()} infosets, key in mapping: {key in storage2.key_to_id}"
+            assert infoset2 is not None, (
+                f"Failed to load infoset. Storage has {storage2.num_infosets()} infosets, "
+                f"key in mapping: {key in storage2.key_to_id}"
+            )
             assert np.allclose(infoset2.regrets, [1.0, 2.0, 3.0])
             assert np.allclose(infoset2.strategy_sum, [0.5, 0.3, 0.2])
 

@@ -3,8 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from src.abstraction.action_abstraction import ActionAbstraction
 from src.abstraction.card_abstraction import RankBasedBucketing
 from src.solver.mccfr import MCCFRSolver
@@ -97,9 +95,7 @@ class TestCheckpointManager:
 
     def test_create_manager_with_run_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            manager = CheckpointManager(
-                Path(tmpdir), config_name="test", run_id="run_test123"
-            )
+            manager = CheckpointManager(Path(tmpdir), config_name="test", run_id="run_test123")
 
             assert manager.run_id == "run_test123"
             assert "run_test123" in str(manager.checkpoint_dir)
@@ -277,10 +273,10 @@ class TestCheckpointManager:
 
     def test_list_runs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create multiple runs
-            manager1 = CheckpointManager(Path(tmpdir), run_id="run_001")
-            manager2 = CheckpointManager(Path(tmpdir), run_id="run_002")
-            manager3 = CheckpointManager(Path(tmpdir), run_id="run_003")
+            # Create multiple runs (creating managers creates the directories)
+            _manager1 = CheckpointManager(Path(tmpdir), run_id="run_001")
+            _manager2 = CheckpointManager(Path(tmpdir), run_id="run_002")
+            _manager3 = CheckpointManager(Path(tmpdir), run_id="run_003")
 
             # List runs
             runs = CheckpointManager.list_runs(Path(tmpdir))

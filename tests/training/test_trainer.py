@@ -3,8 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from src.abstraction.action_abstraction import ActionAbstraction
 from src.abstraction.card_abstraction import RankBasedBucketing
 from src.solver.mccfr import MCCFRSolver
