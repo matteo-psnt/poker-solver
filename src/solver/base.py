@@ -129,6 +129,5 @@ class BaseSolver(ABC):
 
     def __str__(self) -> str:
         return (
-            f"{self.__class__.__name__}(iteration={self.iteration}, "
-            f"infosets={self.num_infosets()})"
+            f"{self.__class__.__name__}(iteration={self.iteration}, infosets={self.num_infosets()})"
         )

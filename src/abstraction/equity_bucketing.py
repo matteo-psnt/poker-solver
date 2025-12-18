@@ -15,6 +15,7 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 from sklearn.cluster import KMeans
+from tqdm import tqdm
 
 from src.abstraction.board_clustering import BoardClusterer
 from src.abstraction.constants import (
@@ -110,6 +111,7 @@ class EquityBucketing:
         self,
         sample_boards: Dict[Street, list],
         num_samples_per_cluster: int = 10,
+        num_workers: Optional[int] = None,
     ):
         """
         Fit bucketing system on sample boards.
@@ -124,6 +126,8 @@ class EquityBucketing:
                           e.g., {Street.FLOP: [(As, Ks, Qs), ...]}
             num_samples_per_cluster: How many boards to sample per cluster
                                     for equity calculation
+            num_workers: Number of parallel workers (None = sequential,
+                        >1 = parallel using multiprocessing)
         """
         for street in [Street.FLOP, Street.TURN, Street.RIVER]:
             if street not in sample_boards:
@@ -142,7 +146,20 @@ class EquityBucketing:
             )
 
             # 3. Compute equity matrix: [169 hands × num_board_clusters]
-            equity_matrix = self._compute_equity_matrix(cluster_representatives, street)
+            if num_workers and num_workers > 1:
+                # Use parallel computation
+                from src.abstraction.parallel_equity import compute_equity_matrix_parallel
+
+                equity_matrix = compute_equity_matrix_parallel(
+                    cluster_representatives=cluster_representatives,
+                    street=street,
+                    num_equity_samples=self.equity_calculator.num_samples,
+                    seed=42,  # Use fixed seed for reproducibility
+                    num_workers=num_workers,
+                )
+            else:
+                # Use sequential computation
+                equity_matrix = self._compute_equity_matrix(cluster_representatives, street)
 
             # 4. Run K-means clustering on (hand, board_cluster) pairs
             bucket_assignments = self._cluster_equities(equity_matrix, street)
@@ -221,8 +238,12 @@ class EquityBucketing:
         conflict_defaults = 0
         total_calculations = 0
 
-        # For each preflop hand
-        for hand_idx in range(NUM_PREFLOP_HANDS):
+        # For each preflop hand (with progress bar)
+        for hand_idx in tqdm(
+            range(NUM_PREFLOP_HANDS),
+            desc=f"{street.name} equity matrix",
+            unit="hand",
+        ):
             hand_string = all_hands[hand_idx]
 
             # Get a concrete example of this hand
@@ -277,8 +298,8 @@ class EquityBucketing:
         total_cells = NUM_PREFLOP_HANDS * num_clusters
         logger.info(
             f"{street.name} equity matrix computed: "
-            f"{total_cells} cells, {empty_clusters} empty clusters ({100*empty_clusters/total_cells:.2f}%), "
-            f"{conflict_defaults} conflict defaults ({100*conflict_defaults/total_cells:.2f}%)"
+            f"{total_cells} cells, {empty_clusters} empty clusters ({100 * empty_clusters / total_cells:.2f}%), "
+            f"{conflict_defaults} conflict defaults ({100 * conflict_defaults / total_cells:.2f}%)"
         )
 
         if empty_clusters > 0 or conflict_defaults > 0:

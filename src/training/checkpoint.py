@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import yaml
+
 from src.solver.base import BaseSolver
 from src.training.metadata import CheckpointManifest, RunMetadata
 
@@ -89,6 +91,13 @@ class CheckpointManager:
             )
             self.run_metadata.save(self.checkpoint_dir / "run_metadata.json")
             logger.info(f"Created run metadata for {self.run_id}")
+
+        # Save config as YAML file for easy inspection
+        if self._config is not None:
+            config_file = self.checkpoint_dir / "config.yaml"
+            with open(config_file, "w") as f:
+                yaml.dump(self._config, f, default_flow_style=False, sort_keys=False)
+            logger.info(f"Saved config to {config_file}")
 
         # Create manifest
         if self.manifest is None:

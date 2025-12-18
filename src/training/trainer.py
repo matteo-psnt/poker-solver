@@ -279,4 +279,4 @@ class Trainer:
 
     def __str__(self) -> str:
         """String representation."""
-        return f"Trainer(solver={self.solver}, " f"config={self.config})"
+        return f"Trainer(solver={self.solver}, config={self.config})"

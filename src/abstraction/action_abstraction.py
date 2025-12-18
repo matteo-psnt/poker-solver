@@ -275,6 +275,6 @@ class ActionAbstraction:
             ["all-in" if r == float("inf") else f"{r}bb" for r in self.preflop_raises]
         )
         postflop_str = ", ".join(
-            ["all-in" if b == float("inf") else f"{int(b*100)}%" for b in self.postflop_bets]
+            ["all-in" if b == float("inf") else f"{int(b * 100)}%" for b in self.postflop_bets]
         )
         return f"ActionAbstraction(preflop=[{preflop_str}], postflop=[{postflop_str}])"
