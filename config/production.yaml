@@ -1,0 +1,74 @@
+# Production Training Configuration for HUNLHE Solver
+# Optimized for creating viable GTO strategies with CFR+
+#
+# Expected training time with CFR+:
+# - 100M iterations: ~8 hours (single core) or ~1-2 hours (8 cores parallel)
+# - 1B iterations: ~3.6 days (single core) or ~12-18 hours (8 cores parallel)
+#
+# Convergence targets (with CFR+):
+# - 10M iterations: ~50-100 mbb/g exploitability (weak amateur)
+# - 100M iterations: ~10-20 mbb/g exploitability (decent player)
+# - 1B iterations: ~1-5 mbb/g exploitability (good player)
+
+# ===== Game Configuration =====
+game:
+  starting_stack: 200  # BB units (standard deep stack)
+  small_blind: 1
+  big_blind: 2
+
+# ===== Action Abstraction =====
+action_abstraction:
+  # Production-grade betting sizes based on solver research
+  preflop:
+    raises: [2.5, 3.5, 5.0]  # Min-raise, standard, larger sizing
+  postflop:
+    flop:
+      bets: [0.33, 0.66, 1.25]  # Range bet, standard bet, overbet
+    turn:
+      bets: [0.50, 1.0, 1.5]    # Half pot, pot, large overbet
+    river:
+      bets: [0.50, 1.0, 2.0]    # Thin value, pot, polarized overbet
+  all_in_spr_threshold: 2.0
+
+# ===== Card Abstraction =====
+card_abstraction:
+  type: "equity_bucketing"
+  # Using production abstraction with proper granularity:
+  # - Flop: 50 buckets (200 board clusters)
+  # - Turn: 100 buckets (500 board clusters)
+  # - River: 200 buckets (1000 board clusters)
+  bucketing_path: "data/abstractions/equity_buckets_20251217_042337/bucketing.pkl"
+
+# ===== SPR Bucketing =====
+spr_buckets:
+  thresholds: [4, 13]  # [shallow/medium, medium/deep]
+
+# ===== Solver Configuration =====
+solver:
+  type: "mccfr"
+  variant: "outcome_sampling"
+  # CFR+ provides ~100x faster convergence than vanilla CFR
+  cfr_plus: true
+  # Linear CFR provides additional 2-3x speedup
+  linear_cfr: true
+
+# ===== Training Configuration =====
+training:
+  # Start with 1M iterations, increase if exploitability is too high
+  num_iterations: 1000000  # 1M iterations
+  checkpoint_frequency: 1000  # Checkpoint every 1K iterations
+  log_frequency: 1000  # Log every 1K iterations
+  checkpoint_dir: "data/checkpoints/production"
+  verbose: true
+
+# ===== Storage Configuration =====
+storage:
+  backend: "disk"
+  cache_size: 500000  # Larger cache for production (500K infosets)
+  flush_frequency: 1000  # Flush every 1K iterations
+
+# ===== System Configuration =====
+system:
+  seed: null  # Random seed for diversity
+  log_level: "INFO"
+  config_name: "production"
