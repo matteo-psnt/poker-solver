@@ -28,29 +28,31 @@ class Trainer:
     metrics tracking, and progress reporting.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, run_id: Optional[str] = None):
         """
         Initialize trainer from configuration.
 
         Args:
             config: Configuration object
+            run_id: Optional run ID (for resuming or explicit naming)
         """
         self.config = config
 
-        # Build components
+        # Initialize checkpoint manager FIRST to get run-specific directory
+        checkpoint_base_dir = Path(config.get("training.checkpoint_dir", "data/checkpoints"))
+        self.checkpoint_manager = CheckpointManager(
+            checkpoint_base_dir,
+            config_name=config.get("system.config_name", "default"),
+            run_id=run_id,
+        )
+
+        # Build components (storage needs the run-specific checkpoint_dir)
         self.action_abstraction = self._build_action_abstraction()
         self.card_abstraction = self._build_card_abstraction()
         self.storage = self._build_storage()
 
         # Build solver
         self.solver = self._build_solver()
-
-        # Initialize checkpoint manager
-        checkpoint_dir = Path(config.get("training.checkpoint_dir", "data/checkpoints"))
-        self.checkpoint_manager = CheckpointManager(
-            checkpoint_dir,
-            config_name=config.get("system.config_name", "default"),
-        )
 
         # Initialize metrics tracker
         self.metrics = MetricsTracker(
@@ -82,7 +84,8 @@ class Trainer:
         if backend == "memory":
             return InMemoryStorage()
         elif backend == "disk":
-            checkpoint_dir = Path(self.config.get("training.checkpoint_dir"))
+            # Use the run-specific checkpoint directory from CheckpointManager
+            checkpoint_dir = self.checkpoint_manager.checkpoint_dir
             cache_size = storage_config.get("cache_size", 100000)
             flush_frequency = storage_config.get("flush_frequency", 1000)
 

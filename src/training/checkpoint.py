@@ -67,18 +67,27 @@ class CheckpointManager:
     checkpoint metadata.
     """
 
-    def __init__(self, checkpoint_dir: Path, config_name: Optional[str] = None):
+    def __init__(self, checkpoint_dir: Path, config_name: Optional[str] = None, run_id: Optional[str] = None):
         """
         Initialize checkpoint manager.
 
         Args:
-            checkpoint_dir: Directory to store checkpoints
+            checkpoint_dir: Base directory to store checkpoints
             config_name: Optional name for this training run
+            run_id: Optional unique identifier for this run (auto-generated if not provided)
         """
-        self.checkpoint_dir = Path(checkpoint_dir)
+        self.base_checkpoint_dir = Path(checkpoint_dir)
         self.config_name = config_name or "default"
 
-        # Create checkpoint directory
+        # Generate unique run ID if not provided
+        if run_id is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.run_id = f"run_{timestamp}"
+        else:
+            self.run_id = run_id
+
+        # Create run-specific subdirectory
+        self.checkpoint_dir = self.base_checkpoint_dir / self.run_id
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     def save(self, solver: BaseSolver, iteration: int) -> Path:
@@ -97,7 +106,7 @@ class CheckpointManager:
             iteration=iteration,
             timestamp=datetime.now().isoformat(),
             num_infosets=solver.num_infosets(),
-            config_name=self.config_name,
+            config_name=f"{self.config_name}_{self.run_id}",
             checkpoint_dir=self.checkpoint_dir,
         )
 
@@ -189,7 +198,44 @@ class CheckpointManager:
         for checkpoint in checkpoints[:-keep_last_n]:
             self.delete_checkpoint(checkpoint.iteration)
 
+    @classmethod
+    def list_runs(cls, base_checkpoint_dir: Path) -> list[str]:
+        """
+        List all training runs in the checkpoint directory.
+
+        Args:
+            base_checkpoint_dir: Base checkpoint directory
+
+        Returns:
+            List of run IDs
+        """
+        base_path = Path(base_checkpoint_dir)
+        if not base_path.exists():
+            return []
+
+        runs = []
+        for run_dir in base_path.iterdir():
+            if run_dir.is_dir() and run_dir.name.startswith("run_"):
+                runs.append(run_dir.name)
+
+        return sorted(runs)
+
+    @classmethod
+    def from_run_id(cls, base_checkpoint_dir: Path, run_id: str, config_name: Optional[str] = None) -> "CheckpointManager":
+        """
+        Create CheckpointManager for an existing run.
+
+        Args:
+            base_checkpoint_dir: Base checkpoint directory
+            run_id: Existing run ID to load
+            config_name: Optional config name
+
+        Returns:
+            CheckpointManager for the specified run
+        """
+        return cls(base_checkpoint_dir, config_name=config_name, run_id=run_id)
+
     def __str__(self) -> str:
         """String representation."""
         num_checkpoints = len(self.list_checkpoints())
-        return f"CheckpointManager(dir={self.checkpoint_dir}, checkpoints={num_checkpoints})"
+        return f"CheckpointManager(run={self.run_id}, dir={self.checkpoint_dir}, checkpoints={num_checkpoints})"
