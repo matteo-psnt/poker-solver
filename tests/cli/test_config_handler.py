@@ -21,7 +21,8 @@ training:
   checkpoint_frequency: 100
 
 card_abstraction:
-  type: rank_based
+  type: equity_bucketing
+  bucketing_path: data/abstractions/equity_buckets.pkl
 """
     )
 

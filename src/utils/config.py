@@ -200,13 +200,8 @@ def get_default_config() -> Dict[str, Any]:
             "all_in_spr_threshold": 2.0,
         },
         "card_abstraction": {
-            "type": "rank_based",
-            "num_buckets": {
-                "preflop": 6,
-                "flop": 9,
-                "turn": 9,
-                "river": 9,
-            },
+            "type": "equity_bucketing",
+            "bucketing_path": "data/abstractions/equity_buckets.pkl",
         },
         "spr_buckets": {
             "thresholds": [4, 13],

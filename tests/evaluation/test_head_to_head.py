@@ -1,7 +1,6 @@
 """Tests for head-to-head evaluator."""
 
 from src.abstraction.action_abstraction import ActionAbstraction
-from src.abstraction.card_abstraction import RankBasedBucketing
 from src.evaluation.head_to_head import (
     HeadToHeadEvaluator,
     MatchResult,
@@ -10,6 +9,7 @@ from src.evaluation.head_to_head import (
 from src.game.rules import GameRules
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
+from tests.test_helpers import DummyCardAbstraction
 
 
 class TestMatchResult:
@@ -76,7 +76,7 @@ class TestHeadToHeadEvaluator:
     def test_create_evaluator(self):
         rules = GameRules()
         action_abs = ActionAbstraction()
-        card_abs = RankBasedBucketing()
+        card_abs = DummyCardAbstraction()
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
@@ -92,7 +92,7 @@ class TestHeadToHeadEvaluator:
         """Test playing a match between two solvers."""
         rules = GameRules()
         action_abs = ActionAbstraction()
-        card_abs = RankBasedBucketing()
+        card_abs = DummyCardAbstraction()
 
         # Create two solvers
         storage1 = InMemoryStorage()
@@ -131,7 +131,7 @@ class TestHeadToHeadEvaluator:
         """Test that button alternates correctly."""
         rules = GameRules()
         action_abs = ActionAbstraction()
-        card_abs = RankBasedBucketing()
+        card_abs = DummyCardAbstraction()
 
         storage1 = InMemoryStorage()
         storage2 = InMemoryStorage()
@@ -165,7 +165,7 @@ class TestHeadToHeadEvaluator:
         """Test self-play (same solver vs itself)."""
         rules = GameRules()
         action_abs = ActionAbstraction()
-        card_abs = RankBasedBucketing()
+        card_abs = DummyCardAbstraction()
 
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
@@ -200,7 +200,7 @@ class TestHeadToHeadEvaluator:
         """Test that payoffs have opposite signs (zero-sum game)."""
         rules = GameRules()
         action_abs = ActionAbstraction()
-        card_abs = RankBasedBucketing()
+        card_abs = DummyCardAbstraction()
 
         storage1 = InMemoryStorage()
         storage2 = InMemoryStorage()
