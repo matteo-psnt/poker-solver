@@ -6,6 +6,7 @@ Maps hole card pairs to canonical 169-hand notation (e.g., AKs, 72o, TT).
 
 from typing import Tuple
 
+from src.abstraction.card_utils import cards_have_same_suit, get_rank_char
 from src.game.state import Card
 
 
@@ -45,15 +46,11 @@ class PreflopHandMapper:
         c1, c2 = hole_cards
 
         # Extract ranks
-        r1 = self._get_rank(c1)
-        r2 = self._get_rank(c2)
-
-        # Extract suits
-        s1 = self._get_suit(c1)
-        s2 = self._get_suit(c2)
+        r1 = get_rank_char(c1)
+        r2 = get_rank_char(c2)
 
         # Check if suited
-        suited = s1 == s2
+        suited = cards_have_same_suit(c1, c2)
 
         # For pairs, return like "AA", "KK", etc.
         if r1 == r2:
@@ -107,47 +104,6 @@ class PreflopHandMapper:
             return 13 + position
         else:
             return 13 + 78 + position
-
-    def _get_rank(self, card: Card) -> str:
-        """
-        Extract rank character from card.
-
-        Args:
-            card: Card object
-
-        Returns:
-            Rank character ('A', 'K', ..., '2')
-        """
-        # Convert card to string (e.g., "A♠")
-        card_str = repr(card)
-
-        # Extract rank (first character)
-        rank_char = card_str[0]
-
-        # Handle 'T' for 10
-        if rank_char == "1":  # "10" -> "T"
-            return "T"
-
-        return rank_char
-
-    def _get_suit(self, card: Card) -> str:
-        """
-        Extract suit from card.
-
-        Args:
-            card: Card object
-
-        Returns:
-            Suit symbol ('♠', '♥', '♦', '♣')
-        """
-        card_str = repr(card)
-
-        # Suit is last character(s)
-        # Handle both "A♠" and "10♠"
-        if len(card_str) == 2:
-            return card_str[1]
-        else:
-            return card_str[2]
 
     @staticmethod
     def get_all_hands() -> list[str]:

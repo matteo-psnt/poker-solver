@@ -28,12 +28,13 @@ class TestDiskBackedStorage:
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = DiskBackedStorage(Path(tmpdir), cache_size=2)
 
-            # Create infoset
+            # Create infoset (preflop uses hand string)
             key = InfoSetKey(
                 player_position=0,
                 street=Street.PREFLOP,
                 betting_sequence="",
-                card_bucket=5,
+                preflop_hand="AKs",
+                postflop_bucket=None,
                 spr_bucket=1,
             )
 
@@ -83,13 +84,15 @@ class TestDiskBackedStorage:
             storage = DiskBackedStorage(Path(tmpdir), cache_size=2)
 
             # Create 3 infosets (more than cache size)
+            hands = ["AA", "KK", "QQ"]
             keys = []
             for i in range(3):
                 key = InfoSetKey(
                     player_position=0,
                     street=Street.PREFLOP,
                     betting_sequence=f"seq{i}",
-                    card_bucket=i,
+                    preflop_hand=hands[i],
+                    postflop_bucket=None,
                     spr_bucket=0,
                 )
                 keys.append(key)
@@ -112,12 +115,14 @@ class TestDiskBackedStorage:
             storage = DiskBackedStorage(Path(tmpdir))
 
             # Create multiple infosets
+            hands = ["AA", "KK", "QQ", "JJ", "TT", "99", "88", "77", "66", "55"]
             for i in range(10):
                 key = InfoSetKey(
                     player_position=i % 2,
                     street=Street.PREFLOP,
                     betting_sequence=f"s{i}",
-                    card_bucket=i,
+                    preflop_hand=hands[i],
+                    postflop_bucket=None,
                     spr_bucket=0,
                 )
 
@@ -142,12 +147,13 @@ class TestDiskBackedStorage:
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = DiskBackedStorage(Path(tmpdir))
 
-            # Create infoset
+            # Create infoset (preflop uses hand string)
             key = InfoSetKey(
                 player_position=0,
                 street=Street.PREFLOP,
                 betting_sequence="",
-                card_bucket=5,
+                preflop_hand="AKs",
+                postflop_bucket=None,
                 spr_bucket=1,
             )
 
@@ -180,13 +186,14 @@ class TestDiskBackedStorage:
 
             assert storage.num_infosets() == 0
 
-            # Add infosets
+            # Add infosets (using postflop for buckets)
             for i in range(5):
                 key = InfoSetKey(
                     player_position=0,
-                    street=Street.PREFLOP,
+                    street=Street.FLOP,
                     betting_sequence=str(i),
-                    card_bucket=i,
+                    preflop_hand=None,
+                    postflop_bucket=i,
                     spr_bucket=0,
                 )
                 actions = [Action(ActionType.FOLD, 0)]
@@ -201,9 +208,10 @@ class TestDiskBackedStorage:
 
             key = InfoSetKey(
                 player_position=0,
-                street=Street.PREFLOP,
+                street=Street.FLOP,
                 betting_sequence="nonexistent",
-                card_bucket=99,
+                preflop_hand=None,
+                postflop_bucket=99,
                 spr_bucket=0,
             )
 
@@ -215,12 +223,13 @@ class TestDiskBackedStorage:
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = DiskBackedStorage(Path(tmpdir))
 
-            # Create infoset
+            # Create infoset (postflop uses bucket)
             key = InfoSetKey(
                 player_position=0,
-                street=Street.PREFLOP,
+                street=Street.FLOP,
                 betting_sequence="",
-                card_bucket=5,
+                preflop_hand=None,
+                postflop_bucket=5,
                 spr_bucket=1,
             )
 

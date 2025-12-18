@@ -258,12 +258,13 @@ class TestMCCFRSolver:
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
-        # Create fake infoset key
+        # Create fake infoset key (preflop uses hand string)
         fake_key = InfoSetKey(
             player_position=0,
             street=Street.PREFLOP,
             betting_sequence="fake",
-            card_bucket=99,
+            preflop_hand="AA",
+            postflop_bucket=None,
             spr_bucket=0,
         )
 
@@ -281,12 +282,13 @@ class TestMCCFRSolver:
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
-        # Create fake infoset key
+        # Create fake infoset key (preflop uses hand string)
         fake_key = InfoSetKey(
             player_position=0,
             street=Street.PREFLOP,
             betting_sequence="fake",
-            card_bucket=99,
+            preflop_hand="AA",
+            postflop_bucket=None,
             spr_bucket=0,
         )
 
