@@ -75,6 +75,18 @@ class Card:
         """
         return cls(TreysCard.new(card_str))
 
+    @classmethod
+    def get_full_deck(cls) -> List["Card"]:
+        """
+        Get a full 52-card deck.
+
+        Returns:
+            List of all 52 cards
+        """
+        ranks = "23456789TJQKA"
+        suits = "shdc"
+        return [cls.new(f"{rank}{suit}") for rank in ranks for suit in suits]
+
     def __str__(self) -> str:
         """String representation (e.g., '[ A ♠ ]')."""
         return TreysCard.int_to_pretty_str(self.card_int)

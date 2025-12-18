@@ -226,6 +226,7 @@ class MCCFRSolver(BaseSolver):
                 original_idx = valid_indices[i]
                 infoset.strategy_sum[original_idx] += strategy[i] * reach_probs[current_player]
             infoset.reach_count += 1
+            infoset.cumulative_utility += node_utility
 
             return node_utility
 

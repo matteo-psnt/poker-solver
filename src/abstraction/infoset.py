@@ -6,7 +6,7 @@ to a player given their information (hole cards, board, betting history).
 """
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -23,8 +23,14 @@ class InfoSetKey:
     - Player's position (button vs non-button)
     - Current street
     - Betting sequence (normalized action history)
-    - Card bucket (abstracted hand strength)
+    - Hand representation (hybrid preflop/postflop)
     - SPR bucket (stack-to-pot ratio category)
+
+    **Hybrid Hand Representation:**
+    - Preflop: Uses hand string (e.g., "AKs", "72o", "TT")
+              → 169 unique hands, no bucketing
+    - Postflop: Uses bucket ID (e.g., 0-49 on flop)
+               → Equity-based bucketing
 
     Being frozen makes it hashable and suitable as a dictionary key.
     """
@@ -32,8 +38,25 @@ class InfoSetKey:
     player_position: int  # 0 or 1
     street: Street
     betting_sequence: str  # Normalized betting history (e.g., "f", "c", "b0.75-c")
-    card_bucket: int  # Abstracted hand strength bucket
+
+    # Hybrid hand representation
+    preflop_hand: Optional[str]  # "AKs", "72o", etc. (None if postflop)
+    postflop_bucket: Optional[int]  # 0-49/99/199 (None if preflop)
+
     spr_bucket: int  # Stack-to-pot ratio bucket (0=shallow, 1=medium, 2=deep)
+
+    def __post_init__(self):
+        """Validate that exactly one of preflop_hand or postflop_bucket is set."""
+        if self.street == Street.PREFLOP:
+            if self.preflop_hand is None:
+                raise ValueError("preflop_hand must be set for PREFLOP street")
+            if self.postflop_bucket is not None:
+                raise ValueError("postflop_bucket must be None for PREFLOP street")
+        else:
+            if self.postflop_bucket is None:
+                raise ValueError(f"postflop_bucket must be set for {self.street.name} street")
+            if self.preflop_hand is not None:
+                raise ValueError(f"preflop_hand must be None for {self.street.name} street")
 
     def __hash__(self) -> int:
         """Hash for dictionary storage."""
@@ -42,7 +65,8 @@ class InfoSetKey:
                 self.player_position,
                 self.street,
                 self.betting_sequence,
-                self.card_bucket,
+                self.preflop_hand,
+                self.postflop_bucket,
                 self.spr_bucket,
             )
         )
@@ -55,22 +79,32 @@ class InfoSetKey:
             self.player_position == other.player_position
             and self.street == other.street
             and self.betting_sequence == other.betting_sequence
-            and self.card_bucket == other.card_bucket
+            and self.preflop_hand == other.preflop_hand
+            and self.postflop_bucket == other.postflop_bucket
             and self.spr_bucket == other.spr_bucket
         )
 
+    def get_hand_repr(self) -> str:
+        """Get human-readable hand representation."""
+        if self.street == Street.PREFLOP:
+            return self.preflop_hand
+        else:
+            return f"B{self.postflop_bucket}"
+
     def __str__(self) -> str:
         """Human-readable string representation."""
+        hand_repr = self.get_hand_repr()
         return (
             f"InfoSet(P{self.player_position}|{self.street.name}|"
-            f"seq={self.betting_sequence}|bucket={self.card_bucket}|spr={self.spr_bucket})"
+            f"seq={self.betting_sequence}|hand={hand_repr}|spr={self.spr_bucket})"
         )
 
     def __repr__(self) -> str:
         return (
             f"InfoSetKey(player_position={self.player_position}, "
             f"street={self.street}, betting_sequence='{self.betting_sequence}', "
-            f"card_bucket={self.card_bucket}, spr_bucket={self.spr_bucket})"
+            f"preflop_hand={self.preflop_hand!r}, postflop_bucket={self.postflop_bucket}, "
+            f"spr_bucket={self.spr_bucket})"
         )
 
 
@@ -101,8 +135,9 @@ class InfoSet:
         self.regrets = np.zeros(self.num_actions, dtype=np.float32)
         self.strategy_sum = np.zeros(self.num_actions, dtype=np.float32)
 
-        # Iteration counter for this infoset
-        self.reach_count = 0
+        # Statistics tracking
+        self.reach_count = 0  # Number of times this infoset was reached
+        self.cumulative_utility = 0.0  # Sum of node utilities (for average)
 
     def get_strategy(self) -> np.ndarray:
         """
@@ -149,6 +184,18 @@ class InfoSet:
 
         return avg_strategy
 
+    def get_average_utility(self) -> float:
+        """
+        Compute average utility (expected value) at this infoset.
+
+        Returns:
+            Average utility over all iterations (0 if never reached)
+        """
+        if self.reach_count > 0:
+            return self.cumulative_utility / self.reach_count
+        else:
+            return 0.0
+
     def update_regret(self, action_idx: int, regret: float):
         """
         Update cumulative regret for an action.
@@ -162,16 +209,18 @@ class InfoSet:
 
         self.regrets[action_idx] += regret
 
-    def update_strategy(self, reach_prob: float):
+    def update_strategy(self, reach_prob: float, node_utility: float = 0.0):
         """
         Update cumulative strategy (weighted by reach probability).
 
         Args:
             reach_prob: Probability of reaching this infoset
+            node_utility: Expected utility at this node (optional)
         """
         strategy = self.get_strategy()
         self.strategy_sum += strategy * reach_prob
         self.reach_count += 1
+        self.cumulative_utility += node_utility
 
     def reset_regrets(self):
         """Reset all regrets to zero (for some CFR variants)."""
@@ -206,7 +255,8 @@ class InfoSet:
             f"  Current Strategy: [{strategy_str}]\n"
             f"  Average Strategy: [{avg_str}]\n"
             f"  Regrets: {self.regrets}\n"
-            f"  Reach Count: {self.reach_count}"
+            f"  Reach Count: {self.reach_count}\n"
+            f"  Average Utility: {self.get_average_utility():+.4f}"
         )
 
     def __repr__(self) -> str:
@@ -217,26 +267,36 @@ def create_infoset_key(
     player: int,
     street: Street,
     betting_sequence: str,
-    card_bucket: int,
     spr_bucket: int,
+    preflop_hand: Optional[str] = None,
+    postflop_bucket: Optional[int] = None,
 ) -> InfoSetKey:
     """
-    Convenience function to create an InfoSetKey.
+    Convenience function to create an InfoSetKey with hybrid representation.
 
     Args:
         player: Player position (0 or 1)
         street: Current street
         betting_sequence: Normalized betting history
-        card_bucket: Card abstraction bucket
         spr_bucket: SPR bucket (0=shallow, 1=medium, 2=deep)
+        preflop_hand: Hand string for preflop (e.g., "AKs")
+        postflop_bucket: Bucket ID for postflop (e.g., 0-49)
 
     Returns:
         InfoSetKey instance
+
+    Examples:
+        # Preflop
+        create_infoset_key(0, Street.PREFLOP, "r2.5", 2, preflop_hand="AKs")
+
+        # Postflop
+        create_infoset_key(0, Street.FLOP, "c-b0.75", 1, postflop_bucket=15)
     """
     return InfoSetKey(
         player_position=player,
         street=street,
         betting_sequence=betting_sequence,
-        card_bucket=card_bucket,
+        preflop_hand=preflop_hand,
+        postflop_bucket=postflop_bucket,
         spr_bucket=spr_bucket,
     )

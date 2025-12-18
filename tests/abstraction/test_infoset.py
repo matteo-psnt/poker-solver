@@ -11,24 +11,65 @@ from src.game.state import Street
 class TestInfoSetKey:
     """Tests for InfoSetKey."""
 
-    def test_create_infoset_key(self):
+    def test_create_infoset_key_preflop(self):
+        """Test creating preflop InfoSetKey with hand string."""
+        key = InfoSetKey(
+            player_position=0,
+            street=Street.PREFLOP,
+            betting_sequence="r2.5",
+            preflop_hand="AKs",
+            postflop_bucket=None,
+            spr_bucket=2,
+        )
+        assert key.player_position == 0
+        assert key.street == Street.PREFLOP
+        assert key.betting_sequence == "r2.5"
+        assert key.preflop_hand == "AKs"
+        assert key.postflop_bucket is None
+        assert key.spr_bucket == 2
+
+    def test_create_infoset_key_postflop(self):
+        """Test creating postflop InfoSetKey with bucket."""
         key = InfoSetKey(
             player_position=0,
             street=Street.FLOP,
             betting_sequence="b0.75-c",
-            card_bucket=25,
+            preflop_hand=None,
+            postflop_bucket=25,
             spr_bucket=1,
         )
         assert key.player_position == 0
         assert key.street == Street.FLOP
         assert key.betting_sequence == "b0.75-c"
-        assert key.card_bucket == 25
+        assert key.preflop_hand is None
+        assert key.postflop_bucket == 25
         assert key.spr_bucket == 1
 
+    def test_infoset_key_validation_preflop(self):
+        """Test validation for preflop keys."""
+        # Missing preflop_hand
+        with pytest.raises(ValueError, match="preflop_hand must be set"):
+            InfoSetKey(0, Street.PREFLOP, "r2.5", None, None, 2)
+
+        # Has postflop_bucket on preflop
+        with pytest.raises(ValueError, match="postflop_bucket must be None"):
+            InfoSetKey(0, Street.PREFLOP, "r2.5", "AKs", 15, 2)
+
+    def test_infoset_key_validation_postflop(self):
+        """Test validation for postflop keys."""
+        # Missing postflop_bucket
+        with pytest.raises(ValueError, match="postflop_bucket must be set"):
+            InfoSetKey(0, Street.FLOP, "b0.75", None, None, 1)
+
+        # Has preflop_hand on postflop
+        with pytest.raises(ValueError, match="preflop_hand must be None"):
+            InfoSetKey(0, Street.FLOP, "b0.75", "AKs", 25, 1)
+
     def test_infoset_key_hashable(self):
-        key1 = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
-        key2 = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
-        key3 = InfoSetKey(1, Street.FLOP, "b0.75", 25, 1)  # Different player
+        """Test that identical keys hash the same."""
+        key1 = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        key2 = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        key3 = InfoSetKey(1, Street.FLOP, "b0.75", None, 25, 1)  # Different player
 
         # Same keys should hash the same
         assert hash(key1) == hash(key2)
@@ -37,17 +78,18 @@ class TestInfoSetKey:
         assert hash(key1) != hash(key3)
 
     def test_infoset_key_equality(self):
-        key1 = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
-        key2 = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
-        key3 = InfoSetKey(1, Street.FLOP, "b0.75", 25, 1)
+        """Test key equality."""
+        key1 = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        key2 = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        key3 = InfoSetKey(1, Street.FLOP, "b0.75", None, 25, 1)
 
         assert key1 == key2
         assert key1 != key3
 
     def test_infoset_key_as_dict_key(self):
         """InfoSetKeys should work as dictionary keys."""
-        key1 = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
-        key2 = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key1 = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        key2 = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
 
         data = {key1: "value1"}
         # Should retrieve using equivalent key
@@ -55,28 +97,54 @@ class TestInfoSetKey:
 
     def test_infoset_key_immutable(self):
         """InfoSetKeys should be immutable (frozen)."""
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         with pytest.raises(AttributeError):
-            key.card_bucket = 30
+            key.postflop_bucket = 30
 
-    def test_create_infoset_key_helper(self):
+    def test_create_infoset_key_helper_preflop(self):
+        """Test helper function for preflop."""
+        key = create_infoset_key(
+            player=0,
+            street=Street.PREFLOP,
+            betting_sequence="r2.5",
+            spr_bucket=2,
+            preflop_hand="AKs",
+        )
+        assert isinstance(key, InfoSetKey)
+        assert key.player_position == 0
+        assert key.street == Street.PREFLOP
+        assert key.preflop_hand == "AKs"
+
+    def test_create_infoset_key_helper_postflop(self):
+        """Test helper function for postflop."""
         key = create_infoset_key(
             player=0,
             street=Street.TURN,
             betting_sequence="x-b0.50",
-            card_bucket=40,
             spr_bucket=2,
+            postflop_bucket=40,
         )
         assert isinstance(key, InfoSetKey)
         assert key.player_position == 0
         assert key.street == Street.TURN
+        assert key.postflop_bucket == 40
+
+    def test_get_hand_repr(self):
+        """Test get_hand_repr method."""
+        # Preflop
+        key_preflop = InfoSetKey(0, Street.PREFLOP, "r2.5", "AKs", None, 2)
+        assert key_preflop.get_hand_repr() == "AKs"
+
+        # Postflop
+        key_postflop = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        assert key_postflop.get_hand_repr() == "B25"
 
 
 class TestInfoSet:
     """Tests for InfoSet class."""
 
     def test_create_infoset(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
 
         infoset = InfoSet(key, actions)
@@ -89,7 +157,7 @@ class TestInfoSet:
 
     def test_initial_strategy_uniform(self):
         """Initial strategy should be uniform."""
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
@@ -102,7 +170,7 @@ class TestInfoSet:
 
     def test_regret_matching_positive_regrets(self):
         """Regret matching should prefer actions with higher regret."""
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
@@ -118,7 +186,7 @@ class TestInfoSet:
 
     def test_regret_matching_negative_regrets(self):
         """Negative regrets should be floored at 0."""
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
@@ -131,7 +199,7 @@ class TestInfoSet:
         assert np.allclose(strategy, [1 / 3, 1 / 3, 1 / 3])
 
     def test_update_regret(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
@@ -145,7 +213,7 @@ class TestInfoSet:
 
     def test_update_regret_cumulative(self):
         """Regrets should accumulate."""
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call()]
         infoset = InfoSet(key, actions)
 
@@ -156,7 +224,7 @@ class TestInfoSet:
         assert infoset.regrets[0] == 12.0  # 10 + 5 - 3
 
     def test_update_strategy(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
@@ -173,7 +241,7 @@ class TestInfoSet:
 
     def test_average_strategy(self):
         """Average strategy should track cumulative play."""
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
@@ -192,7 +260,7 @@ class TestInfoSet:
         assert np.isclose(avg.sum(), 1.0)
 
     def test_reset_regrets(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call()]
         infoset = InfoSet(key, actions)
 
@@ -202,7 +270,7 @@ class TestInfoSet:
         assert np.allclose(infoset.regrets, [0.0, 0.0])
 
     def test_reset_strategy_sum(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call()]
         infoset = InfoSet(key, actions)
 
@@ -212,7 +280,7 @@ class TestInfoSet:
         assert np.allclose(infoset.strategy_sum, [0.0, 0.0])
 
     def test_prune_small_values(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
@@ -229,7 +297,7 @@ class TestInfoSet:
         assert infoset.strategy_sum[2] == 0.0
 
     def test_update_regret_invalid_index(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call()]
         infoset = InfoSet(key, actions)
 
@@ -237,7 +305,7 @@ class TestInfoSet:
             infoset.update_regret(5, 10.0)
 
     def test_str_representation(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", 25, 1)
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call()]
         infoset = InfoSet(key, actions)
 

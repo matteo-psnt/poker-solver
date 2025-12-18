@@ -1,74 +1,281 @@
 """
-Equity-based card abstraction using Monte Carlo sampling.
+Equity-based K-means bucketing for postflop card abstraction.
 
-This module implements equity bucketing, which clusters hands based on
-their equity (win probability) against a random opponent hand.
+Clusters (hand, board) pairs into buckets based on equity values.
+This is the final component that ties together:
+- PreflopHandMapper (169 hands)
+- EquityCalculator (Monte Carlo equity)
+- BoardClusterer (board texture clustering)
 """
 
 import pickle
-import random
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from treys import Deck
+from sklearn.cluster import KMeans
 
-from src.abstraction.card_abstraction import CardAbstraction
-from src.abstraction.clustering import KMeansClustering
-from src.game.evaluator import get_evaluator
+from src.abstraction.board_clustering import BoardClusterer
+from src.abstraction.equity_calculator import EquityCalculator
+from src.abstraction.preflop_hands import PreflopHandMapper
 from src.game.state import Card, Street
 
 
-class EquityBucketing(CardAbstraction):
+class EquityBucketing:
     """
-    Equity-based card abstraction using Monte Carlo rollouts.
+    Equity-based card abstraction using K-means clustering.
 
-    For each hand, we:
-    1. Compute equity via Monte Carlo simulation (1000+ rollouts)
-    2. Cluster hands with similar equities using k-means
-    3. Assign bucket based on nearest cluster center
+    For each street:
+    - Precompute equity for all 169 hands × board clusters
+    - Cluster (hand, board) pairs into buckets based on equity
+    - Bucket counts: 50 (flop), 100 (turn), 200 (river)
 
-    This is precomputed offline and saved to disk.
+    Storage requirements:
+    - Flop: 169 × 200 × 1 byte = 34 KB
+    - Turn: 169 × 500 × 1 byte = 85 KB
+    - River: 169 × 1000 × 1 byte = 169 KB
+    Total: ~288 KB (very compact!)
     """
 
     def __init__(
         self,
-        num_buckets_per_street: Optional[Dict[Street, int]] = None,
-        num_rollouts: int = 1000,
+        num_buckets: Optional[Dict[Street, int]] = None,
+        num_board_clusters: Optional[Dict[Street, int]] = None,
+        equity_calculator: Optional[EquityCalculator] = None,
+        board_clusterer: Optional[BoardClusterer] = None,
     ):
         """
         Initialize equity bucketing.
 
         Args:
-            num_buckets_per_street: Number of buckets for each street
-                                   {Street.PREFLOP: 8, Street.FLOP: 50, ...}
-            num_rollouts: Number of Monte Carlo rollouts for equity calculation
+            num_buckets: Dict mapping Street → num_buckets
+                        Default: {FLOP: 50, TURN: 100, RIVER: 200}
+            num_board_clusters: Dict mapping Street → num_board_clusters
+                               Default: {FLOP: 200, TURN: 500, RIVER: 1000}
+                               For small tests, use smaller values (e.g., 5-10)
+            equity_calculator: EquityCalculator instance (created if None)
+            board_clusterer: BoardClusterer instance (created if None)
         """
-        self.num_rollouts = num_rollouts
-        self.evaluator = get_evaluator()
-
-        if num_buckets_per_street is None:
-            # Default configuration
-            self.num_buckets_per_street = {
-                Street.PREFLOP: 8,
+        if num_buckets is None:
+            num_buckets = {
                 Street.FLOP: 50,
-                Street.TURN: 50,
-                Street.RIVER: 50,
+                Street.TURN: 100,
+                Street.RIVER: 200,
             }
+
+        self.num_buckets = num_buckets
+        self.equity_calculator = equity_calculator or EquityCalculator(num_samples=1000)
+
+        # Create board clusterer with appropriate cluster counts
+        if board_clusterer is None:
+            if num_board_clusters is None:
+                # Use default board cluster counts
+                num_board_clusters = {
+                    Street.FLOP: 200,
+                    Street.TURN: 500,
+                    Street.RIVER: 1000,
+                }
+            self.board_clusterer = BoardClusterer(num_clusters=num_board_clusters)
         else:
-            self.num_buckets_per_street = num_buckets_per_street
+            self.board_clusterer = board_clusterer
+        self.hand_mapper = PreflopHandMapper()
 
-        # Cluster centers (set via precomputation)
-        self.bucket_centers: Dict[Street, np.ndarray] = {}
+        # Bucket assignments: bucket_assignments[street][hand_idx][board_cluster] = bucket_id
+        self.bucket_assignments: Dict[Street, np.ndarray] = {}
 
-        # Whether bucketing has been precomputed
-        self.is_fitted = False
+        # K-means models: clusterers[street] = KMeans model
+        self.clusterers: Dict[Street, KMeans] = {}
+
+        # Track if fitted
+        self.fitted = False
+
+    def fit(
+        self,
+        sample_boards: Dict[Street, list],
+        num_samples_per_cluster: int = 10,
+    ):
+        """
+        Fit bucketing system on sample boards.
+
+        This is the training/precomputation step that:
+        1. Fits board clusterer on sample boards
+        2. Computes equity for all (hand, board_cluster) pairs
+        3. Runs K-means to assign buckets
+
+        Args:
+            sample_boards: Dict mapping Street → list of board tuples
+                          e.g., {Street.FLOP: [(As, Ks, Qs), ...]}
+            num_samples_per_cluster: How many boards to sample per cluster
+                                    for equity calculation
+        """
+        for street in [Street.FLOP, Street.TURN, Street.RIVER]:
+            if street not in sample_boards:
+                continue
+
+            print(f"\nFitting {street.name}...")
+
+            # 1. Fit board clusterer
+            boards = sample_boards[street]
+            self.board_clusterer.fit(boards, street)
+            num_board_clusters = self.board_clusterer.num_clusters[street]
+
+            # 2. Sample representative boards for each cluster
+            cluster_representatives = self._sample_cluster_representatives(
+                boards, street, num_samples_per_cluster
+            )
+
+            # 3. Compute equity matrix: [169 hands × num_board_clusters]
+            equity_matrix = self._compute_equity_matrix(cluster_representatives, street)
+
+            # 4. Run K-means clustering on (hand, board_cluster) pairs
+            bucket_assignments = self._cluster_equities(equity_matrix, street)
+
+            self.bucket_assignments[street] = bucket_assignments
+
+            print(
+                f"  {street.name}: {len(boards)} boards → "
+                f"{num_board_clusters} clusters → "
+                f"{self.num_buckets[street]} buckets"
+            )
+
+        self.fitted = True
+
+    def _sample_cluster_representatives(
+        self,
+        boards: list,
+        street: Street,
+        num_samples_per_cluster: int,
+    ) -> Dict[int, list]:
+        """
+        Sample representative boards for each cluster.
+
+        Returns:
+            Dict mapping cluster_id → list of board tuples
+        """
+        num_clusters = self.board_clusterer.num_clusters[street]
+        cluster_boards = {i: [] for i in range(num_clusters)}
+
+        # Assign each board to cluster
+        for board in boards:
+            cluster_id = self.board_clusterer.get_cluster(board)
+            cluster_boards[cluster_id].append(board)
+
+        # Sample from each cluster
+        representatives = {}
+        for cluster_id in range(num_clusters):
+            boards_in_cluster = cluster_boards[cluster_id]
+
+            if len(boards_in_cluster) == 0:
+                # Cluster has no boards - skip it
+                representatives[cluster_id] = []
+            elif len(boards_in_cluster) <= num_samples_per_cluster:
+                # Use all boards
+                representatives[cluster_id] = boards_in_cluster
+            else:
+                # Sample without replacement
+                indices = np.random.choice(
+                    len(boards_in_cluster),
+                    size=num_samples_per_cluster,
+                    replace=False,
+                )
+                representatives[cluster_id] = [boards_in_cluster[i] for i in indices]
+
+        return representatives
+
+    def _compute_equity_matrix(
+        self,
+        cluster_representatives: Dict[int, list],
+        street: Street,
+    ) -> np.ndarray:
+        """
+        Compute equity for all (hand, board_cluster) pairs.
+
+        Returns:
+            equity_matrix: shape [169 hands, num_board_clusters]
+        """
+        num_clusters = self.board_clusterer.num_clusters[street]
+        equity_matrix = np.zeros((169, num_clusters))
+
+        # Get all 169 hand strings in order
+        all_hands = PreflopHandMapper.get_all_hands()
+
+        # For each preflop hand
+        for hand_idx in range(169):
+            hand_string = all_hands[hand_idx]
+
+            # Get a concrete example of this hand
+            hole_cards = self._get_example_hand(hand_string)
+
+            # For each board cluster
+            for cluster_id in range(num_clusters):
+                boards = cluster_representatives[cluster_id]
+
+                if len(boards) == 0:
+                    # No boards in this cluster - use default equity
+                    equity_matrix[hand_idx, cluster_id] = 0.5
+                    continue
+
+                # Compute average equity across representative boards
+                equities = []
+                for board in boards:
+                    # Skip if hole cards conflict with board
+                    if self._cards_conflict(hole_cards, board):
+                        continue
+
+                    equity = self.equity_calculator.calculate_equity(hole_cards, board, street)
+                    equities.append(equity)
+
+                if len(equities) == 0:
+                    # All boards conflicted - use default
+                    equity_matrix[hand_idx, cluster_id] = 0.5
+                else:
+                    equity_matrix[hand_idx, cluster_id] = np.mean(equities)
+
+        return equity_matrix
+
+    def _cluster_equities(
+        self,
+        equity_matrix: np.ndarray,
+        street: Street,
+    ) -> np.ndarray:
+        """
+        Cluster (hand, board_cluster) pairs into buckets using K-means.
+
+        Args:
+            equity_matrix: shape [169 hands, num_board_clusters]
+
+        Returns:
+            bucket_assignments: shape [169, num_board_clusters]
+                               Values are bucket IDs (0 to num_buckets-1)
+        """
+        # Flatten into (hand, board_cluster) pairs
+        num_hands, num_board_clusters = equity_matrix.shape
+
+        # Feature matrix: each row is [equity] for a (hand, board_cluster) pair
+        # Shape: [169 × num_board_clusters, 1]
+        features = equity_matrix.reshape(-1, 1)
+
+        # Run K-means
+        n_clusters = self.num_buckets[street]
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        labels = kmeans.fit_predict(features)
+
+        # Reshape back to [169, num_board_clusters]
+        bucket_assignments = labels.reshape(num_hands, num_board_clusters)
+
+        # Store clusterer
+        self.clusterers[street] = kmeans
+
+        return bucket_assignments.astype(np.uint8)  # Save memory
 
     def get_bucket(
-        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
+        self,
+        hole_cards: Tuple[Card, Card],
+        board: Tuple[Card, ...],
+        street: Street,
     ) -> int:
         """
-        Get bucket for a hand.
+        Get bucket ID for a (hole_cards, board) pair.
 
         Args:
             hole_cards: Player's hole cards
@@ -77,231 +284,111 @@ class EquityBucketing(CardAbstraction):
 
         Returns:
             Bucket ID (0 to num_buckets-1)
+
+        Raises:
+            ValueError: If not fitted for this street
         """
-        if not self.is_fitted:
-            raise ValueError("Bucketing not precomputed. Call precompute_buckets() first.")
+        if street not in self.bucket_assignments:
+            raise ValueError(f"Bucketing not fitted for {street}")
 
-        if street not in self.bucket_centers:
-            raise ValueError(f"No bucket centers for street {street}")
+        # Get hand index
+        hand_idx = self.hand_mapper.get_hand_index(hole_cards)
 
-        # Compute equity
-        equity = self.compute_equity(hole_cards, board, street)
+        # Get board cluster
+        board_cluster = self.board_clusterer.get_cluster(board)
 
-        # Find nearest cluster center
-        centers = self.bucket_centers[street]
-        distances = np.abs(centers - equity)
-        bucket = int(np.argmin(distances))
+        # Lookup bucket
+        bucket = self.bucket_assignments[street][hand_idx, board_cluster]
 
-        return bucket
+        return int(bucket)
 
-    def compute_equity(
+    def _get_example_hand(self, hand_string: str) -> Tuple[Card, Card]:
+        """
+        Get a concrete example of a hand string.
+
+        e.g., "AKs" → (As, Ks)
+              "72o" → (7h, 2d)
+              "TT" → (Th, Td)
+        """
+        if len(hand_string) == 2:
+            # Pair
+            rank = hand_string[0]
+            return (Card.new(f"{rank}h"), Card.new(f"{rank}d"))
+        else:
+            # Suited or offsuit
+            high_rank = hand_string[0]
+            low_rank = hand_string[1]
+            suited = hand_string[2] == "s"
+
+            if suited:
+                return (Card.new(f"{high_rank}s"), Card.new(f"{low_rank}s"))
+            else:
+                return (Card.new(f"{high_rank}h"), Card.new(f"{low_rank}d"))
+
+    def _cards_conflict(
         self,
         hole_cards: Tuple[Card, Card],
         board: Tuple[Card, ...],
-        street: Street,
-        num_rollouts: Optional[int] = None,
-    ) -> float:
-        """
-        Compute hand equity via Monte Carlo simulation.
-
-        Args:
-            hole_cards: Player's hole cards
-            board: Community cards
-            street: Current street
-            num_rollouts: Number of simulations (default: self.num_rollouts)
-
-        Returns:
-            Equity (win probability) between 0 and 1
-        """
-        if num_rollouts is None:
-            num_rollouts = self.num_rollouts
-
-        # Convert cards to treys format
-        hero_cards = [c.card_int for c in hole_cards]
-        board_cards = [c.card_int for c in board]
-
-        # Create deck and remove known cards
-        deck = Deck()
-        deck.cards = [c for c in deck.cards if c not in hero_cards and c not in board_cards]
-
-        wins = 0
-        ties = 0
-
-        for _ in range(num_rollouts):
-            # Shuffle deck
-            random.shuffle(deck.cards)
-
-            # Deal opponent cards
-            villain_cards = deck.cards[:2]
-
-            # Deal remaining board cards
-            remaining_board = board_cards.copy()
-            board_idx = 2
-
-            if street == Street.PREFLOP:
-                # Deal all 5 board cards
-                remaining_board.extend(deck.cards[board_idx : board_idx + 5])
-            elif street == Street.FLOP:
-                # Deal turn and river
-                remaining_board.extend(deck.cards[board_idx : board_idx + 2])
-            elif street == Street.TURN:
-                # Deal river
-                remaining_board.append(deck.cards[board_idx])
-            # else RIVER: board is complete
-
-            # Evaluate hands
-            hero_rank = self.evaluator.evaluator.evaluate(remaining_board, hero_cards)
-            villain_rank = self.evaluator.evaluator.evaluate(remaining_board, villain_cards)
-
-            # Lower rank = better hand
-            if hero_rank < villain_rank:
-                wins += 1
-            elif hero_rank == villain_rank:
-                ties += 1
-
-        # Equity = (wins + 0.5 * ties) / total
-        equity = (wins + 0.5 * ties) / num_rollouts
-
-        return equity
-
-    def precompute_buckets(
-        self,
-        num_samples_per_street: Optional[Dict[Street, int]] = None,
-        seed: int = 42,
-    ):
-        """
-        Precompute bucket centers via k-means clustering.
-
-        This samples random hands, computes equities, and clusters them.
-
-        Args:
-            num_samples_per_street: Number of hands to sample per street
-                                   {Street.PREFLOP: 10000, ...}
-            seed: Random seed for reproducibility
-        """
-        random.seed(seed)
-        np.random.seed(seed)
-
-        if num_samples_per_street is None:
-            # Default: sample 10K hands per street
-            num_samples_per_street = {
-                Street.PREFLOP: 10000,
-                Street.FLOP: 5000,
-                Street.TURN: 3000,
-                Street.RIVER: 2000,
-            }
-
-        print("Precomputing equity buckets...")
-
-        for street in [Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER]:
-            num_buckets = self.num_buckets_per_street[street]
-            num_samples = num_samples_per_street[street]
-
-            print(f"\n{street.name}: Sampling {num_samples} hands into {num_buckets} buckets...")
-
-            # Sample random hands and compute equities
-            equities = []
-            for i in range(num_samples):
-                if (i + 1) % 1000 == 0:
-                    print(f"  Processed {i + 1}/{num_samples} hands...")
-
-                # Sample random hand and board
-                hole_cards, board = self._sample_random_hand(street)
-
-                # Compute equity
-                equity = self.compute_equity(hole_cards, board, street)
-                equities.append(equity)
-
-            equities = np.array(equities).reshape(-1, 1)  # Shape: [n_samples, 1]
-
-            # Cluster equities
-            print(f"  Clustering {num_samples} hands into {num_buckets} buckets...")
-            kmeans = KMeansClustering(n_clusters=num_buckets)
-            kmeans.fit(equities, seed=seed)
-
-            # Store cluster centers
-            self.bucket_centers[street] = kmeans.cluster_centers.flatten()
-
-            print(f"  {street.name} bucketing complete!")
-            print(f"  Bucket centers: {self.bucket_centers[street]}")
-
-        self.is_fitted = True
-        print("\nAll buckets precomputed successfully!")
-
-    def _sample_random_hand(self, street: Street) -> Tuple[Tuple[Card, Card], Tuple[Card, ...]]:
-        """
-        Sample a random hand and board for a given street.
-
-        Args:
-            street: Street to sample for
-
-        Returns:
-            (hole_cards, board)
-        """
-        deck = Deck()
-        random.shuffle(deck.cards)
-
-        # Deal hole cards
-        hole_cards = (Card(deck.cards[0]), Card(deck.cards[1]))
-
-        # Deal board based on street
-        if street == Street.PREFLOP:
-            board = tuple()
-        elif street == Street.FLOP:
-            board = tuple(Card(c) for c in deck.cards[2:5])
-        elif street == Street.TURN:
-            board = tuple(Card(c) for c in deck.cards[2:6])
-        elif street == Street.RIVER:
-            board = tuple(Card(c) for c in deck.cards[2:7])
-        else:
-            raise ValueError(f"Unknown street: {street}")
-
-        return hole_cards, board
+    ) -> bool:
+        """Check if hole cards conflict with board cards."""
+        all_cards = set(hole_cards) | set(board)
+        return len(all_cards) < len(hole_cards) + len(board)
 
     def save(self, filepath: Path):
         """
-        Save precomputed buckets to disk.
+        Save bucketing to disk.
 
-        Args:
-            filepath: Path to save file (.pkl)
+        Saves:
+        - Bucket assignments
+        - K-means models
+        - Configuration
+        - Board clusterer state
         """
-        if not self.is_fitted:
-            raise ValueError("Cannot save unfitted bucketing")
-
         data = {
-            "num_buckets_per_street": self.num_buckets_per_street,
-            "num_rollouts": self.num_rollouts,
-            "bucket_centers": self.bucket_centers,
+            "num_buckets": self.num_buckets,
+            "bucket_assignments": self.bucket_assignments,
+            "clusterers": self.clusterers,
+            "board_clusterer": self.board_clusterer,
+            "fitted": self.fitted,
         }
 
         filepath.parent.mkdir(parents=True, exist_ok=True)
-
         with open(filepath, "wb") as f:
             pickle.dump(data, f)
 
-        print(f"Saved equity bucketing to {filepath}")
+        print(f"Saved bucketing to {filepath}")
 
-    def load(self, filepath: Path):
+    @classmethod
+    def load(cls, filepath: Path) -> "EquityBucketing":
         """
-        Load precomputed buckets from disk.
+        Load bucketing from disk.
 
         Args:
-            filepath: Path to load from (.pkl)
+            filepath: Path to saved bucketing file
+
+        Returns:
+            EquityBucketing instance
         """
         with open(filepath, "rb") as f:
             data = pickle.load(f)
 
-        self.num_buckets_per_street = data["num_buckets_per_street"]
-        self.num_rollouts = data["num_rollouts"]
-        self.bucket_centers = data["bucket_centers"]
-        self.is_fitted = True
+        bucketing = cls(
+            num_buckets=data["num_buckets"],
+            board_clusterer=data["board_clusterer"],
+        )
+        bucketing.bucket_assignments = data["bucket_assignments"]
+        bucketing.clusterers = data["clusterers"]
+        bucketing.fitted = data["fitted"]
 
-        print(f"Loaded equity bucketing from {filepath}")
+        print(f"Loaded bucketing from {filepath}")
+        return bucketing
 
-    def num_buckets(self, street: Street) -> int:
+    def get_num_buckets(self, street: Street) -> int:
         """Get number of buckets for a street."""
-        return self.num_buckets_per_street[street]
+        return self.num_buckets[street]
 
     def __str__(self) -> str:
-        buckets_str = ", ".join([f"{s.name}={self.num_buckets_per_street[s]}" for s in Street])
-        return f"EquityBucketing({buckets_str}, rollouts={self.num_rollouts})"
+        """String representation."""
+        buckets_str = ", ".join([f"{s.name}: {n}" for s, n in self.num_buckets.items()])
+        fitted_str = "fitted" if self.fitted else "not fitted"
+        return f"EquityBucketing({buckets_str}) - {fitted_str}"
