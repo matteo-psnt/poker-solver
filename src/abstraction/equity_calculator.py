@@ -35,6 +35,9 @@ class EquityCalculator:
             random.seed(seed)
             np.random.seed(seed)
 
+        # Cache the full deck for performance (huge speedup!)
+        self.full_deck = Card.get_full_deck()
+
     def calculate_equity(
         self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
     ) -> float:
@@ -137,6 +140,8 @@ class EquityCalculator:
         """
         Sample opponent hand and complete board to river.
 
+        Optimized to minimize list comprehensions and sampling operations.
+
         Args:
             hole_cards: Player's hole cards
             board: Current board
@@ -145,22 +150,26 @@ class EquityCalculator:
         Returns:
             (opponent_hand, completed_board)
         """
-        # Create deck excluding player's cards and board
-        used_cards = set(hole_cards) | set(board)
-        deck = [c for c in Card.get_full_deck() if c not in used_cards]
+        # Create set of used card_ints for fast lookup
+        used_card_ints = {c.card_int for c in hole_cards}
+        used_card_ints.update(c.card_int for c in board)
 
-        # Sample opponent hand (2 cards)
-        opp_cards = random.sample(deck, 2)
-        opp_hand = tuple(opp_cards)
+        # Filter deck once using card_int (faster than Card equality)
+        available = [c for c in self.full_deck if c.card_int not in used_card_ints]
 
-        # Remove opponent cards from deck
-        deck = [c for c in deck if c not in opp_cards]
+        # Calculate total cards needed (opponent + remaining board)
+        cards_needed_board = 5 - len(board)
+        total_cards_needed = 2 + cards_needed_board  # 2 for opponent + N for board
 
-        # Deal remaining board cards
-        cards_needed = 5 - len(board)
-        if cards_needed > 0:
-            new_cards = random.sample(deck, cards_needed)
-            full_board = board + tuple(new_cards)
+        # Sample all cards at once (more efficient than multiple samples)
+        sampled_cards = random.sample(available, total_cards_needed)
+
+        # Split into opponent hand and board cards
+        opp_hand = tuple(sampled_cards[:2])
+
+        if cards_needed_board > 0:
+            new_board_cards = tuple(sampled_cards[2:])
+            full_board = board + new_board_cards
         else:
             full_board = board
 

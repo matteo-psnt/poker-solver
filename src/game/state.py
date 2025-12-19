@@ -46,12 +46,20 @@ class Street(Enum):
             return None
 
 
+# Module-level caches for performance
+_CARD_CACHE = {}  # Cache for Card.new()
+_FULL_DECK_CACHE = None  # Cache for full deck
+
+
 class Card:
     """
     Card representation using the treys library.
 
     This wraps treys.Card to provide a cleaner interface while maintaining
     compatibility with the fast hand evaluation.
+
+    Note: Card objects are cached for performance. Creating the same card
+    multiple times returns the same object.
     """
 
     def __init__(self, card_int: int):
@@ -62,11 +70,15 @@ class Card:
             card_int: Integer representation from treys (use Card.new() to create)
         """
         self.card_int = card_int
+        self._hash = None  # Cache hash value for performance
 
     @classmethod
     def new(cls, card_str: str) -> "Card":
         """
         Create a card from string representation (e.g., 'As', 'Kh', '2d').
+
+        Cards are cached - calling this multiple times with the same string
+        returns the same Card object for performance.
 
         Args:
             card_str: Two-character string (rank + suit)
@@ -74,21 +86,32 @@ class Card:
                      Suits: 's', 'h', 'd', 'c'
 
         Returns:
-            Card instance
+            Card instance (cached)
         """
-        return cls(TreysCard.new(card_str))
+        if card_str not in _CARD_CACHE:
+            _CARD_CACHE[card_str] = cls(TreysCard.new(card_str))
+        return _CARD_CACHE[card_str]
 
     @classmethod
     def get_full_deck(cls) -> List["Card"]:
         """
         Get a full 52-card deck.
 
+        The deck is cached for performance. Returns a copy to prevent
+        accidental mutation of the cached deck.
+
         Returns:
             List of all 52 cards
         """
-        ranks = "23456789TJQKA"
-        suits = "shdc"
-        return [cls.new(f"{rank}{suit}") for rank in ranks for suit in suits]
+        global _FULL_DECK_CACHE
+
+        if _FULL_DECK_CACHE is None:
+            ranks = "23456789TJQKA"
+            suits = "shdc"
+            _FULL_DECK_CACHE = [cls.new(f"{rank}{suit}") for rank in ranks for suit in suits]
+
+        # Return a copy to prevent mutation
+        return _FULL_DECK_CACHE.copy()
 
     def __str__(self) -> str:
         """String representation (e.g., '[ A ♠ ]')."""
@@ -98,13 +121,30 @@ class Card:
         """Compact representation (e.g., 'As')."""
         return TreysCard.int_to_str(self.card_int)
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: object) -> bool:
+        """
+        Equality comparison based on card integer.
+
+        Optimized with fast type() check for common case.
+        """
+        # Fast path: direct type check (most common case)
+        if type(other) is Card:
+            return self.card_int == other.card_int
+
+        # Slow path: handle subclasses
         if not isinstance(other, Card):
             return False
         return self.card_int == other.card_int
 
     def __hash__(self) -> int:
-        return hash(self.card_int)
+        """
+        Hash based on card integer for use in sets/dicts.
+
+        Hash is cached for performance (called millions of times).
+        """
+        if self._hash is None:
+            self._hash = hash(self.card_int)
+        return self._hash
 
     def __lt__(self, other: "Card") -> bool:
         """Compare cards for sorting (by rank)."""
