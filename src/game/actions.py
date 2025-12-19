@@ -8,6 +8,10 @@ and provides data structures for representing player actions.
 from dataclasses import dataclass
 from enum import Enum, auto
 
+# Module-level cache for action normalization (performance optimization)
+# Maps (ActionType, amount, pot) -> normalized string
+_NORMALIZE_CACHE: dict = {}
+
 
 class ActionType(Enum):
     """Types of actions available in HUNLHE."""
@@ -77,23 +81,36 @@ class Action:
         Returns:
             Normalized action string (e.g., "f", "c", "b0.75", "r2.5")
         """
+        # Fast path for common non-amount actions (no computation needed)
         if self.type == ActionType.FOLD:
             return "f"
         elif self.type == ActionType.CHECK:
             return "x"
         elif self.type == ActionType.CALL:
             return "c"
-        elif self.type == ActionType.BET:
-            pot_frac = self.amount / pot if pot > 0 else 0
-            return f"b{pot_frac:.2f}"
-        elif self.type == ActionType.RAISE:
-            # Normalize as pot-sized unit (e.g., raise to 2.5x pot)
-            pot_frac = self.amount / pot if pot > 0 else 0
-            return f"r{pot_frac:.2f}"
         elif self.type == ActionType.ALL_IN:
             return "a"
+
+        # For amount-based actions, use module-level cache
+        # Key is (action_type, amount, pot) tuple
+        cache_key = (self.type, self.amount, pot)
+
+        global _NORMALIZE_CACHE
+        if cache_key in _NORMALIZE_CACHE:
+            return _NORMALIZE_CACHE[cache_key]
+
+        # Compute normalized form
+        if self.type == ActionType.BET:
+            pot_frac = self.amount / pot if pot > 0 else 0
+            result = f"b{pot_frac:.2f}"
+        elif self.type == ActionType.RAISE:
+            pot_frac = self.amount / pot if pot > 0 else 0
+            result = f"r{pot_frac:.2f}"
         else:
             raise ValueError(f"Unknown action type: {self.type}")
+
+        _NORMALIZE_CACHE[cache_key] = result
+        return result
 
     def __str__(self) -> str:
         """Human-readable string representation."""
