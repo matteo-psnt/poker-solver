@@ -46,6 +46,9 @@ def _compute_hand_equity_row(args):
     # Get example hand
     hole_cards = _get_example_hand(hand_string)
 
+    # Pre-compute hole card set for faster conflict detection
+    hole_card_ints = {c.card_int for c in hole_cards}
+
     # Compute equity for each cluster
     num_clusters = len(cluster_representatives)
     equity_row = np.zeros(num_clusters)
@@ -66,8 +69,9 @@ def _compute_hand_equity_row(args):
         conflicts = 0
 
         for board in boards:
-            # Skip if hole cards conflict with board
-            if _cards_conflict(hole_cards, board):
+            # Skip if hole cards conflict with board (optimized check)
+            board_ints = {c.card_int for c in board}
+            if hole_card_ints & board_ints:  # Set intersection
                 conflicts += 1
                 continue
 
@@ -106,9 +110,14 @@ def _cards_conflict(
     hole_cards: Tuple[Card, Card],
     board: Tuple[Card, ...],
 ) -> bool:
-    """Check if hole cards conflict with board cards."""
-    all_cards = set(hole_cards) | set(board)
-    return len(all_cards) < len(hole_cards) + len(board)
+    """
+    Check if hole cards conflict with board cards.
+
+    Optimized to use card_int comparison for speed.
+    """
+    hole_ints = {c.card_int for c in hole_cards}
+    board_ints = {c.card_int for c in board}
+    return bool(hole_ints & board_ints)  # Returns True if any overlap
 
 
 def compute_equity_matrix_parallel(

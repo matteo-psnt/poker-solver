@@ -142,7 +142,7 @@ class Card:
 
         Hash is cached for performance (called millions of times).
         """
-        if self._hash is None:
+        if not hasattr(self, "_hash") or self._hash is None:
             self._hash = hash(self.card_int)
         return self._hash
 

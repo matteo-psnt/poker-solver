@@ -133,9 +133,9 @@ class TestDiskBackedStorage:
             # Checkpoint
             storage.checkpoint(iteration=100)
 
-            # Verify metadata saved
-            metadata_file = Path(tmpdir) / "metadata.json"
-            assert metadata_file.exists()
+            # Verify key mapping saved (metadata.json is handled by CheckpointManager now)
+            key_mapping_file = Path(tmpdir) / "key_mapping.pkl"
+            assert key_mapping_file.exists()
 
             # Reload in new storage
             storage2 = DiskBackedStorage(Path(tmpdir))
