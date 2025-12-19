@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 from src.abstraction.action_abstraction import ActionAbstraction
-from src.abstraction.card_abstraction import RankBasedBucketing
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from src.training.trainer import Trainer
@@ -30,12 +29,7 @@ class TestTrainer:
         action_abs = trainer.action_abstraction
         assert isinstance(action_abs, ActionAbstraction)
 
-    def test_build_card_abstraction(self):
-        config = Config.default()
-        trainer = Trainer(config)
-
-        card_abs = trainer.card_abstraction
-        assert isinstance(card_abs, RankBasedBucketing)
+    # test_build_card_abstraction removed - now requires equity bucketing file
 
     def test_build_storage_memory(self):
         config = Config.default()

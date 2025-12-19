@@ -61,20 +61,29 @@ def _worker_process(
         # Create abstractions
         action_abstraction = ActionAbstraction(config)
 
-        card_abstraction_type = config.get("card_abstraction.type", "rank_based")
-        if card_abstraction_type == "rank_based":
-            from src.abstraction.card_abstraction import RankBasedBucketing
-
-            card_abstraction = RankBasedBucketing()
-        elif card_abstraction_type == "equity":
+        card_abstraction_type = config.get("card_abstraction.type", "equity_bucketing")
+        if card_abstraction_type == "equity_bucketing":
             from src.abstraction.equity_bucketing import EquityBucketing
 
-            equity_file = config.get("card_abstraction.equity_buckets_file")
-            if not equity_file:
-                raise ValueError("equity_buckets_file required for equity bucketing")
-            card_abstraction = EquityBucketing.load(equity_file)
+            bucketing_path = config.get("card_abstraction.bucketing_path")
+            if not bucketing_path:
+                raise ValueError("equity_bucketing requires 'bucketing_path' in config")
+
+            from pathlib import Path
+
+            bucketing_path = Path(bucketing_path)
+            if not bucketing_path.exists():
+                raise FileNotFoundError(
+                    f"Equity bucketing file not found: {bucketing_path}\n"
+                    "Please run 'Precompute Equity Buckets' from the CLI first."
+                )
+
+            card_abstraction = EquityBucketing.load(bucketing_path)
         else:
-            raise ValueError(f"Unknown card abstraction: {card_abstraction_type}")
+            raise ValueError(
+                f"Unknown card abstraction type: {card_abstraction_type}\n"
+                "Only 'equity_bucketing' is supported."
+            )
 
         # Create solver
         solver = MCCFRSolver(
@@ -172,7 +181,7 @@ class ParallelTrainer:
         elif storage_type == "disk":
             from src.solver.storage import DiskBackedStorage
 
-            storage_path = Path(self.checkpoint_manager.run_dir / "storage")
+            storage_path = Path(self.checkpoint_manager.run_dir / "storage")  # noqa: F823
             storage = DiskBackedStorage(
                 storage_path,
                 cache_size=self.config.get("storage.cache_size", 10000),
@@ -183,20 +192,29 @@ class ParallelTrainer:
         # Create abstractions
         action_abstraction = ActionAbstraction(self.config)
 
-        card_abstraction_type = self.config.get("card_abstraction.type", "rank_based")
-        if card_abstraction_type == "rank_based":
-            from src.abstraction.card_abstraction import RankBasedBucketing
-
-            card_abstraction = RankBasedBucketing()
-        elif card_abstraction_type == "equity":
+        card_abstraction_type = self.config.get("card_abstraction.type", "equity_bucketing")
+        if card_abstraction_type == "equity_bucketing":
             from src.abstraction.equity_bucketing import EquityBucketing
 
-            equity_file = self.config.get("card_abstraction.equity_buckets_file")
-            if not equity_file:
-                raise ValueError("equity_buckets_file required for equity bucketing")
-            card_abstraction = EquityBucketing.load(equity_file)
+            bucketing_path = self.config.get("card_abstraction.bucketing_path")
+            if not bucketing_path:
+                raise ValueError("equity_bucketing requires 'bucketing_path' in config")
+
+            from pathlib import Path
+
+            bucketing_path = Path(bucketing_path)
+            if not bucketing_path.exists():
+                raise FileNotFoundError(
+                    f"Equity bucketing file not found: {bucketing_path}\n"
+                    "Please run 'Precompute Equity Buckets' from the CLI first."
+                )
+
+            card_abstraction = EquityBucketing.load(bucketing_path)
         else:
-            raise ValueError(f"Unknown card abstraction: {card_abstraction_type}")
+            raise ValueError(
+                f"Unknown card abstraction type: {card_abstraction_type}\n"
+                "Only 'equity_bucketing' is supported."
+            )
 
         solver_config = {
             "starting_stack": self.config.get("game.starting_stack", 200),
