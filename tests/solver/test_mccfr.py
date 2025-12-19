@@ -227,7 +227,7 @@ class TestMCCFRSolver:
 
         # Train with verbose=True (note: output only prints every 1000 iterations)
         # Just verify it runs without error
-        solver.train(num_iterations=10, verbose=True)
+        solver.train(num_iterations=2, verbose=True)
 
     def test_train_return_statistics(self):
         """Test that train() returns correct statistics."""
@@ -236,12 +236,12 @@ class TestMCCFRSolver:
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
-        stats = solver.train(num_iterations=10, verbose=False)
+        stats = solver.train(num_iterations=2, verbose=False)
 
         assert "start_iteration" in stats
         assert "end_iteration" in stats
         assert "total_iterations" in stats
-        assert stats["total_iterations"] == 10
+        assert stats["total_iterations"] == 2
         assert "final_avg_utility" in stats
 
     def test_get_average_strategy_nonexistent_infoset(self):

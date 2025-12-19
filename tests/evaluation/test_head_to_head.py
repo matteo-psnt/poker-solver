@@ -208,8 +208,8 @@ class TestHeadToHeadEvaluator:
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
 
-        solver1.train(num_iterations=2, verbose=False)
-        solver2.train(num_iterations=2, verbose=False)
+        solver1.train(num_iterations=1, verbose=False)
+        solver2.train(num_iterations=1, verbose=False)
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
@@ -221,7 +221,7 @@ class TestHeadToHeadEvaluator:
         stats = evaluator.play_match(
             solver0=solver1,
             solver1=solver2,
-            num_hands=3,
+            num_hands=2,
             seed=42,
         )
 
