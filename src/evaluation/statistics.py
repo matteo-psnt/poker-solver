@@ -5,7 +5,7 @@ Provides confidence intervals, significance tests, and variance calculations
 for match results.
 """
 
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import numpy as np
 from scipy import stats
@@ -39,7 +39,7 @@ def compute_confidence_interval(
     lower = mean - margin_of_error
     upper = mean + margin_of_error
 
-    return mean, lower, upper
+    return float(mean), float(lower), float(upper)
 
 
 def compute_win_rate_confidence_interval(
@@ -76,8 +76,8 @@ def compute_win_rate_confidence_interval(
 
 
 def t_test_difference(
-    values1: List[float],
-    values2: List[float],
+    values1: Sequence[float],
+    values2: Sequence[float],
     confidence_level: float = 0.95,
 ) -> Tuple[float, float, bool]:
     """

@@ -2,19 +2,22 @@
 
 import multiprocessing as mp
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Union
 
 import questionary
 
 from src.training.trainer import Trainer
 from src.utils.config import Config
 
+if TYPE_CHECKING:
+    from src.training.parallel_trainer import ParallelTrainer
+
 
 def handle_train(
     config: Config,
     custom_style,
     checkpoint_dir: Path,
-) -> Optional[Trainer]:
+) -> Union[Trainer, ParallelTrainer, None]:
     """
     Handle training a new solver.
 
@@ -73,13 +76,16 @@ def handle_train(
     if use_parallel:
         from src.training.parallel_trainer import ParallelTrainer
 
-        trainer = ParallelTrainer(config, num_workers=num_workers)
+        trainer: Union[Trainer, "ParallelTrainer"] = ParallelTrainer(
+            config, num_workers=num_workers
+        )
     else:
         trainer = Trainer(config)
 
     # Start training
     print(f"\nStarting training for {config.get('training.num_iterations')} iterations...")
-    print(f"Checkpoints: {trainer.checkpoint_manager.checkpoint_dir}")
+    if hasattr(trainer, "checkpoint_manager"):
+        print(f"Checkpoints: {trainer.checkpoint_manager.checkpoint_dir}")
     print(f"Checkpoint frequency: every {config.get('training.checkpoint_frequency')} iterations")
     if use_parallel:
         print(f"Parallel workers: {num_workers}")

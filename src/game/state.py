@@ -70,7 +70,7 @@ class Card:
             card_int: Integer representation from treys (use Card.new() to create)
         """
         self.card_int = card_int
-        self._hash = None  # Cache hash value for performance
+        self._hash: Optional[int] = None  # Cache hash value for performance
 
     @classmethod
     def new(cls, card_str: str) -> "Card":

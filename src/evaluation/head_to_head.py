@@ -269,14 +269,14 @@ class HeadToHeadEvaluator:
         if infoset is None:
             # No strategy for this infoset, use random legal action
             legal_actions = self.action_abstraction.get_legal_actions(state)
-            return np.random.choice(legal_actions)
+            return legal_actions[np.random.choice(len(legal_actions))]
 
         # Get average strategy (Nash equilibrium approximation)
         strategy = infoset.get_average_strategy()
         legal_actions = infoset.legal_actions
 
         # Sample action according to strategy
-        action_idx = np.random.choice(len(legal_actions), p=strategy)
+        action_idx = int(np.random.choice(len(legal_actions), p=strategy))
         return legal_actions[action_idx]
 
     def _deal_initial_state(self, button: int) -> GameState:

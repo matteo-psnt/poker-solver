@@ -119,7 +119,7 @@ class MetricsTracker:
         if avg_time == 0:
             return 0.0
 
-        return 1.0 / avg_time
+        return float(1.0 / avg_time)
 
     def get_elapsed_time(self) -> float:
         """

@@ -17,9 +17,9 @@ class TestEquityBucketing:
         """Test creating bucketing system."""
         bucketing = EquityBucketing()
         assert bucketing is not None
-        assert bucketing.num_buckets[Street.FLOP] == 50
-        assert bucketing.num_buckets[Street.TURN] == 100
-        assert bucketing.num_buckets[Street.RIVER] == 200
+        assert bucketing.num_buckets(Street.FLOP) == 50
+        assert bucketing.num_buckets(Street.TURN) == 100
+        assert bucketing.num_buckets(Street.RIVER) == 200
         assert not bucketing.fitted
 
     def test_create_bucketing_custom_buckets(self):
@@ -30,9 +30,9 @@ class TestEquityBucketing:
             Street.RIVER: 30,
         }
         bucketing = EquityBucketing(num_buckets=custom)
-        assert bucketing.num_buckets[Street.FLOP] == 10
-        assert bucketing.num_buckets[Street.TURN] == 20
-        assert bucketing.num_buckets[Street.RIVER] == 30
+        assert bucketing.num_buckets(Street.FLOP) == 10
+        assert bucketing.num_buckets(Street.TURN) == 20
+        assert bucketing.num_buckets(Street.RIVER) == 30
 
     def test_fit_small_sample(self):
         """Test fitting on small sample of boards."""
@@ -191,7 +191,7 @@ class TestEquityBucketing:
             loaded = EquityBucketing.load(filepath)
 
             # Should have same configuration
-            assert loaded.num_buckets == bucketing.num_buckets
+            assert loaded._num_buckets_dict == bucketing._num_buckets_dict
             assert loaded.fitted
             assert Street.FLOP in loaded.bucket_assignments
 

@@ -5,7 +5,7 @@ Groups similar board textures together to reduce the state space from millions
 of boards to a manageable number of clusters (~200-1000 per street).
 """
 
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 from sklearn.cluster import KMeans
@@ -48,7 +48,7 @@ class BoardClusterer:
             }
 
         self.num_clusters = num_clusters
-        self.clusterers = {}  # Street → fitted KMeans model
+        self.clusterers: Dict[Street, KMeans] = {}  # Street → fitted KMeans model
         self.fitted = False
 
     def extract_features(self, board: Tuple[Card, ...]) -> np.ndarray:
@@ -102,7 +102,7 @@ class BoardClusterer:
             List of features
         """
         # Count cards per suit
-        suit_counts = {}
+        suit_counts: Dict[str, int] = {}
         for card in board:
             suit = get_suit(card)
             suit_counts[suit] = suit_counts.get(suit, 0) + 1
@@ -134,7 +134,7 @@ class BoardClusterer:
             List of features
         """
         # Count cards per rank
-        rank_counts = {}
+        rank_counts: Dict[int, int] = {}
         for card in board:
             rank = get_rank_value(card)
             rank_counts[rank] = rank_counts.get(rank, 0) + 1
@@ -210,7 +210,7 @@ class BoardClusterer:
         ranks = [get_rank_value(card) for card in board]
 
         max_rank = max(ranks)
-        avg_rank = np.mean(ranks)
+        avg_rank = float(np.mean(ranks))
         broadway_count = sum(1 for r in ranks if r >= 10)  # T, J, Q, K, A
 
         features = [
@@ -219,7 +219,7 @@ class BoardClusterer:
             broadway_count / len(board),  # Normalized
         ]
 
-        return features
+        return [float(f) for f in features]
 
     def _has_straight_possibility(self, ranks_sorted: List[int]) -> bool:
         """

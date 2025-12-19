@@ -169,7 +169,7 @@ class EquityCalculator:
         sampled_cards = random.sample(available, total_cards_needed)
 
         # Split into opponent hand and board cards
-        opp_hand = tuple(sampled_cards[:2])
+        opp_hand: Tuple[Card, Card] = (sampled_cards[0], sampled_cards[1])
 
         if cards_needed_board > 0:
             new_board_cards = tuple(sampled_cards[2:])
@@ -246,7 +246,7 @@ class EquityCalculator:
                 if any(c in opp_hand or c in full_board for c in hand):
                     continue
 
-                result = self._evaluate_showdown(hand, opp_hand, full_board)
+                result = self._evaluate_showdown(hand, (opp_hand[0], opp_hand[1]), full_board)
                 if result < 0:  # Win (compare_hands returns -1 for hand1 win)
                     wins[i] += 1
                 elif result == 0:

@@ -35,6 +35,10 @@ class GameRules:
         self.big_blind = big_blind
         self.evaluator = get_evaluator()
 
+    def _stacks_to_tuple(self, stacks: List[int]) -> Tuple[int, int]:
+        """Convert stacks list to fixed-size tuple for type safety."""
+        return (stacks[0], stacks[1])
+
     def create_initial_state(
         self,
         starting_stack: int,
@@ -71,7 +75,7 @@ class GameRules:
         return GameState(
             street=Street.PREFLOP,
             pot=pot,
-            stacks=tuple(stacks),
+            stacks=self._stacks_to_tuple(stacks),
             board=tuple(),
             hole_cards=hole_cards,
             betting_history=tuple(),
@@ -171,7 +175,7 @@ class GameRules:
         # Copy mutable state
         pot = state.pot
         stacks = list(state.stacks)
-        betting_history = list(state.betting_history)
+        betting_history: List[Action] = list(state.betting_history)
         betting_history.append(action)
 
         to_call = state.to_call
@@ -196,7 +200,7 @@ class GameRules:
                 return state.__class__(
                     street=street,
                     pot=pot,
-                    stacks=tuple(stacks),
+                    stacks=self._stacks_to_tuple(stacks),
                     board=state.board,
                     hole_cards=state.hole_cards,
                     betting_history=tuple(betting_history),
@@ -217,11 +221,13 @@ class GameRules:
             # Check if anyone is all-in
             if stacks[current_player] == 0:
                 # Current player all-in, go to showdown
-                return self._advance_to_showdown(state, tuple(betting_history), pot, tuple(stacks))
+                return self._advance_to_showdown(
+                    state, tuple(betting_history), pot, self._stacks_to_tuple(stacks)
+                )
             else:
                 # Move to next street
                 return self._advance_street(
-                    state, tuple(betting_history), pot=pot, stacks=tuple(stacks)
+                    state, tuple(betting_history), pot=pot, stacks=self._stacks_to_tuple(stacks)
                 )
 
         elif action.type in (ActionType.BET, ActionType.RAISE):
@@ -243,7 +249,7 @@ class GameRules:
             return state.__class__(
                 street=street,
                 pot=pot,
-                stacks=tuple(stacks),
+                stacks=self._stacks_to_tuple(stacks),
                 board=state.board,
                 hole_cards=state.hole_cards,
                 betting_history=tuple(betting_history),
@@ -268,14 +274,14 @@ class GameRules:
                     if new_to_call == 0:
                         # All-in call, go to showdown
                         return self._advance_to_showdown(
-                            state, tuple(betting_history), pot, tuple(stacks)
+                            state, tuple(betting_history), pot, self._stacks_to_tuple(stacks)
                         )
                     else:
                         # All-in raise
                         return state.__class__(
                             street=street,
                             pot=pot,
-                            stacks=tuple(stacks),
+                            stacks=self._stacks_to_tuple(stacks),
                             board=state.board,
                             hole_cards=state.hole_cards,
                             betting_history=tuple(betting_history),
@@ -288,14 +294,14 @@ class GameRules:
                 else:
                     # All-in for less than call, treat as call
                     return self._advance_to_showdown(
-                        state, tuple(betting_history), pot, tuple(stacks)
+                        state, tuple(betting_history), pot, self._stacks_to_tuple(stacks)
                     )
             else:
                 # All-in bet
                 return state.__class__(
                     street=street,
                     pot=pot,
-                    stacks=tuple(stacks),
+                    stacks=self._stacks_to_tuple(stacks),
                     board=state.board,
                     hole_cards=state.hole_cards,
                     betting_history=tuple(betting_history),
@@ -312,7 +318,7 @@ class GameRules:
     def _street_complete(self, state: GameState, betting_history: List[Action]) -> bool:
         """Check if betting is complete on current street."""
         # Count actions on this street
-        actions_this_street = []
+        actions_this_street: List[Action] = []
         for action in reversed(betting_history):
             actions_this_street.insert(0, action)
             # Stop at street transition (would need to track street changes)

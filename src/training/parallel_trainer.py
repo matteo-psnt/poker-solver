@@ -8,7 +8,7 @@ with periodic synchronization of regret/strategy updates.
 import multiprocessing as mp
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 from tqdm import tqdm
@@ -59,7 +59,7 @@ def _worker_process(
         }
 
         # Create abstractions
-        action_abstraction = ActionAbstraction(config)
+        action_abstraction = ActionAbstraction(config.to_dict())
 
         card_abstraction_type = config.get("card_abstraction.type", "equity_bucketing")
         if card_abstraction_type == "equity_bucketing":
@@ -161,7 +161,7 @@ class ParallelTrainer:
         runs_base_dir = Path(config.get("training.run_dir", "data/runs"))
         self.training_run = TrainingRun(
             base_dir=runs_base_dir,
-            experiment_id=run_id,
+            experiment_name=run_id,
             config_name=config.get("system.config_name", "default"),
             config=config.to_dict(),
         )
@@ -329,7 +329,7 @@ class ParallelTrainer:
         # Progress bar for batches
         num_batches = (num_iterations + batch_size - 1) // batch_size
         if verbose:
-            batch_iterator = tqdm(
+            batch_iterator: Union[range, tqdm] = tqdm(
                 range(num_batches),
                 desc="Training batches",
                 unit="batch",
@@ -348,7 +348,7 @@ class ParallelTrainer:
                 extra_iters = current_batch_size % self.num_workers
 
                 # Start worker processes
-                result_queue = mp.Queue()
+                result_queue: mp.Queue = mp.Queue()
                 processes = []
 
                 for worker_id in range(self.num_workers):
@@ -435,7 +435,7 @@ class ParallelTrainer:
                     self.training_run.update_stats(
                         total_iterations=completed_iterations,
                         total_runtime_seconds=elapsed_time,
-                        num_infosets=summary.get("avg_infosets", 0),
+                        num_infosets=int(summary.get("avg_infosets", 0)),
                     )
 
         except KeyboardInterrupt:
