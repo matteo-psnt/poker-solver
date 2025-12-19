@@ -52,11 +52,11 @@ class AbstractionManager:
         Initialize abstraction manager.
 
         Args:
-            base_dir: Base directory for abstractions
-                     (default: data/abstractions)
+            base_dir: Base directory for equity buckets
+                     (default: data/equity_buckets)
         """
         if base_dir is None:
-            base_dir = Path("data/abstractions")
+            base_dir = Path("data/equity_buckets")
 
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -175,10 +175,10 @@ class AbstractionManager:
 
     def get_abstraction(self, name_or_alias: str) -> Optional[Path]:
         """
-        Get abstraction by name or alias.
+        Get equity buckets by name or alias.
 
         Args:
-            name_or_alias: Abstraction name or alias
+            name_or_alias: Equity bucket set name or alias
 
         Returns:
             Path to abstraction.pkl file, or None if not found
@@ -267,14 +267,14 @@ class AbstractionManager:
         return False
 
     def print_summary(self):
-        """Print summary of all abstractions."""
+        """Print summary of all equity bucket sets."""
         abstractions = self.list_abstractions()
 
         if not abstractions:
-            print("No abstractions found.")
+            print("No equity buckets found.")
             return
 
-        print(f"\nAvailable Abstractions ({len(abstractions)}):")
+        print(f"\nAvailable Equity Buckets ({len(abstractions)}):")
         print("=" * 80)
 
         for name, path, metadata in abstractions:
@@ -304,10 +304,10 @@ class AbstractionManager:
         prompt_user: bool = True,
     ) -> Path:
         """
-        Find an abstraction by config name, optionally computing if not found.
+        Find equity buckets by config name, optionally computing if not found.
 
         Args:
-            config_name: Name of the abstraction config (e.g., "production")
+            config_name: Name of the equity bucket config (e.g., "production")
             auto_compute: If True, automatically compute if not found
             prompt_user: If True, prompt user before computing
 
@@ -315,9 +315,9 @@ class AbstractionManager:
             Path to the abstraction.pkl file
 
         Raises:
-            FileNotFoundError: If abstraction not found and auto_compute=False
+            FileNotFoundError: If equity buckets not found and auto_compute=False
         """
-        # Load the abstraction config
+        # Load the equity bucket config
         config_dict = load_abstraction_config(config_name)
 
         # Create metadata from config to compute hash
@@ -393,10 +393,10 @@ class AbstractionManager:
 
 def load_abstraction_config(name: str) -> Dict:
     """
-    Load abstraction configuration from YAML file.
+    Load equity bucket configuration from YAML file.
 
     Args:
-        name: Name of the abstraction config (e.g., "production")
+        name: Name of the equity bucket config (e.g., "production")
 
     Returns:
         Dictionary with configuration
@@ -405,11 +405,11 @@ def load_abstraction_config(name: str) -> Dict:
         FileNotFoundError: If config file not found
     """
     # Look for config file
-    config_file = Path(f"config/abstractions/{name}.yaml")
+    config_file = Path(f"config/equity_buckets/{name}.yaml")
 
     if not config_file.exists():
         raise FileNotFoundError(
-            f"Abstraction config '{name}' not found.\n"
+            f"Equity bucket config '{name}' not found.\n"
             f"Expected: {config_file}\n"
             f"Available configs: {list_abstraction_configs()}"
         )
@@ -430,12 +430,12 @@ def load_abstraction_config(name: str) -> Dict:
 
 def list_abstraction_configs() -> List[str]:
     """
-    List all available abstraction configuration files.
+    List all available equity bucket configuration files.
 
     Returns:
         List of config names
     """
-    config_dir = Path("config/abstractions")
+    config_dir = Path("config/equity_buckets")
     if not config_dir.exists():
         return []
 

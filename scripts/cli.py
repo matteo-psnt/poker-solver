@@ -48,7 +48,7 @@ class SolverCLI:
         self.base_dir = Path(__file__).parent.parent
         self.config_dir = self.base_dir / "config"
         self.checkpoint_dir = self.base_dir / "data" / "checkpoints"
-        self.abstractions_dir = self.base_dir / "data" / "abstractions"
+        self.equity_buckets_dir = self.base_dir / "data" / "equity_buckets"
         self.current_trainer: Optional[Trainer] = None
 
         # Setup Ctrl+C handler
@@ -96,7 +96,7 @@ class SolverCLI:
                     "Train Solver",
                     "Evaluate Solver",
                     "Precompute Equity Buckets",
-                    "List Abstractions",
+                    "List Equity Buckets",
                     "View Past Runs",
                     "Resume Training",
                     "View Preflop Chart",
@@ -116,8 +116,8 @@ class SolverCLI:
                     self.evaluate_solver()
                 elif "Precompute" in action:
                     self.precompute_equity_buckets()
-                elif "List Abstractions" in action:
-                    from src.abstraction.abstraction_metadata import AbstractionManager
+                elif "List Equity Buckets" in action:
+                    from src.abstraction.manager import AbstractionManager
 
                     manager = AbstractionManager()
                     manager.print_summary()

@@ -33,15 +33,15 @@ action_abstraction:
 # ===== Card Abstraction =====
 card_abstraction:
   type: "equity_bucketing"
-  # Reference abstraction config by name from config/abstractions/
-  # Using production abstraction with proper granularity:
+  # Reference equity bucket config by name from config/equity_buckets/
+  # Using production equity buckets with proper granularity:
   # - Flop: 50 buckets (200 board clusters)
   # - Turn: 100 buckets (500 board clusters)
   # - River: 200 buckets (1000 board clusters)
   config: production
 
   # Alternative: Direct file path (backward compatibility)
-  # bucketing_path: "data/abstractions/buckets-F50T100R200-C200C500C1000-s1000-2a0e3c/abstraction.pkl"
+  # bucketing_path: "data/equity_buckets/buckets-F50T100R200-C200C500C1000-s1000-2a0e3c/abstraction.pkl"
 
 # ===== SPR Bucketing =====
 spr_buckets:

@@ -37,5 +37,5 @@
 - If output data changes (e.g., `data/runs/`), call it out and avoid committing large artifacts.
 
 ## Configuration & Data Tips
-- Training configs live in `config/training/` and abstractions in `config/abstractions/`.
+- Training configs live in `config/training/` and abstractions in `config/equity_buckets/`.
 - For reproducibility, document the config and CLI flags used for any reported results.

@@ -78,7 +78,7 @@ class Trainer:
 
             if abstraction_config:
                 # NEW: Load by config name with auto-prompt
-                from src.abstraction.abstraction_metadata import AbstractionManager
+                from src.abstraction.manager import AbstractionManager
 
                 manager = AbstractionManager()
                 bucketing_path = manager.find_or_compute(
@@ -94,7 +94,7 @@ class Trainer:
             if not bucketing_path:
                 raise ValueError(
                     "equity_bucketing requires either 'config' or 'bucketing_path'.\n"
-                    "Recommended: Use 'config: production' to reference an abstraction config."
+                    "Recommended: Use 'config: production' to reference an equity bucket config."
                 )
 
             bucketing_path = Path(bucketing_path)

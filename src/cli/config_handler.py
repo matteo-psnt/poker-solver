@@ -87,7 +87,7 @@ def edit_config(config: Config, custom_style) -> Config:
     config.set("training.checkpoint_frequency", int(checkpoint_freq))
 
     if abstraction_type == "equity_bucketing":
-        default_path = "data/abstractions/equity_buckets.pkl"
+        default_path = "data/equity_buckets/equity_buckets.pkl"
         bucketing_path = questionary.text(
             "Equity bucketing file path:",
             default=config.get("card_abstraction.bucketing_path", default_path),
