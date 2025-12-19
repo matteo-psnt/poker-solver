@@ -48,7 +48,13 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "timeout: test timeout in seconds",
+]
 addopts = "-v"
+timeout = 5
+timeout_func_only = true
 
 [dependency-groups]
 # Development, testing, and code quality tools
@@ -61,4 +67,5 @@ dev = [
     "types-pyyaml>=6.0.12.20250915",
     "types-tqdm>=4.67.0.20250809",
     "questionary>=2.1.1",  # Interactive CLI prompts
+    "pytest-timeout>=2.4.0",
 ]

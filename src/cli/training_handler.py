@@ -17,7 +17,7 @@ def handle_train(
     config: Config,
     custom_style,
     checkpoint_dir: Path,
-) -> Union[Trainer, ParallelTrainer, None]:
+) -> Union[Trainer, "ParallelTrainer", None]:
     """
     Handle training a new solver.
 

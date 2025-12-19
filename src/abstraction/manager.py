@@ -1,340 +1,47 @@
 """
-Metadata management for card abstractions with config-hash based naming.
+High-level management of card abstractions.
 
-Provides registry-based abstraction management with automatic deduplication
-based on configuration hashing.
+Provides abstraction storage, retrieval, and automatic computation
+with registry integration.
 """
 
-import hashlib
 import json
 import shutil
-from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import yaml
 
+from src.abstraction.metadata import (
+    AbstractionMetadata,
+    compute_config_hash,
+    generate_abstraction_name,
+)
+from src.abstraction.registry import AbstractionRegistry
 
-def compute_config_hash(metadata: "AbstractionMetadata") -> str:
+
+def _find_abstraction_file(directory: Path) -> Optional[Path]:
     """
-    Compute a short hash of the abstraction configuration.
-
-    This hash is used to detect duplicate configurations and generate
-    unique directory names.
+    Helper to find abstraction file with fallback to old naming.
 
     Args:
-        metadata: Abstraction metadata
+        directory: Abstraction directory
 
     Returns:
-        6-character hex hash of the configuration
+        Path to abstraction file or None
     """
-    # Extract configuration parameters that define uniqueness
-    config = {
-        "abstraction_type": metadata.abstraction_type,
-        "num_buckets": metadata.num_buckets,
-        "num_board_clusters": metadata.num_board_clusters,
-        "num_equity_samples": metadata.num_equity_samples,
-        "num_samples_per_cluster": metadata.num_samples_per_cluster,
-        "seed": metadata.seed,
-    }
-
-    # Create deterministic JSON string
-    config_str = json.dumps(config, sort_keys=True)
-
-    # Compute hash
-    hash_obj = hashlib.sha256(config_str.encode())
-    return hash_obj.hexdigest()[:6]
-
-
-def generate_abstraction_name(metadata: "AbstractionMetadata") -> str:
-    """
-    Generate standardized name from configuration.
-
-    Format: buckets-F{flop}T{turn}R{river}-C{flop}C{turn}C{river}-s{samples}-{hash}
-
-    Example: buckets-F50T100R200-C200C500C1000-s1000-a3f4b2
-
-    Args:
-        metadata: Abstraction metadata
-
-    Returns:
-        Generated name string
-    """
-    # Bucket counts
-    f_buckets = metadata.num_buckets.get("FLOP", 0)
-    t_buckets = metadata.num_buckets.get("TURN", 0)
-    r_buckets = metadata.num_buckets.get("RIVER", 0)
-
-    # Cluster counts
-    f_clusters = metadata.num_board_clusters.get("FLOP", 0)
-    t_clusters = metadata.num_board_clusters.get("TURN", 0)
-    r_clusters = metadata.num_board_clusters.get("RIVER", 0)
-
-    # Samples
-    samples = metadata.num_equity_samples
-
-    # Hash
-    config_hash = compute_config_hash(metadata)
-
-    return f"buckets-F{f_buckets}T{t_buckets}R{r_buckets}-C{f_clusters}C{t_clusters}C{r_clusters}-s{samples}-{config_hash}"
-
-
-@dataclass
-class AbstractionMetadata:
-    """Metadata for a card abstraction."""
-
-    # Identification
-    name: str
-    created_at: str
-    abstraction_type: str  # "equity_bucketing"
-
-    # Configuration
-    num_buckets: Dict[str, int]  # Street name -> num buckets
-    num_board_clusters: Dict[str, int]  # Street name -> num clusters
-    num_equity_samples: int
-    num_samples_per_cluster: int
-
-    # Board sampling
-    num_boards_sampled: Dict[str, int]  # Street name -> num boards
-
-    # Computation info
-    computation_time_seconds: float
-    num_workers: int
-    seed: int
-
-    # Quality metrics (optional)
-    empty_clusters: Optional[Dict[str, int]] = None
-    conflict_defaults: Optional[Dict[str, int]] = None
-
-    # File info
-    file_size_kb: Optional[float] = None
-
-    # Aliases (optional user-defined names)
-    aliases: List[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "AbstractionMetadata":
-        """Create from dictionary."""
-        # Handle missing aliases field for backward compatibility
-        if "aliases" not in data:
-            data["aliases"] = []
-        return cls(**data)
-
-    def get_config_hash(self) -> str:
-        """Get the configuration hash for this abstraction."""
-        return compute_config_hash(self)
-
-    def generate_name(self) -> str:
-        """Generate standardized name from configuration."""
-        return generate_abstraction_name(self)
-
-    def __str__(self) -> str:
-        """Human-readable representation."""
-        lines = [
-            f"Abstraction: {self.name}",
-            f"Type: {self.abstraction_type}",
-            f"Created: {self.created_at}",
-            f"Buckets: FLOP={self.num_buckets.get('FLOP', 'N/A')}, "
-            f"TURN={self.num_buckets.get('TURN', 'N/A')}, "
-            f"RIVER={self.num_buckets.get('RIVER', 'N/A')}",
-            f"Board Clusters: FLOP={self.num_board_clusters.get('FLOP', 'N/A')}, "
-            f"TURN={self.num_board_clusters.get('TURN', 'N/A')}, "
-            f"RIVER={self.num_board_clusters.get('RIVER', 'N/A')}",
-            f"MC Samples: {self.num_equity_samples}",
-            f"Computation Time: {self.computation_time_seconds / 60:.1f} minutes",
-            f"Workers: {self.num_workers}",
-        ]
-
-        if self.file_size_kb:
-            lines.append(f"File Size: {self.file_size_kb:.1f} KB")
-
-        if self.aliases:
-            lines.append(f"Aliases: {', '.join(self.aliases)}")
-
-        return "\n".join(lines)
-
-
-@dataclass
-class RegistryEntry:
-    """Entry in the abstraction registry."""
-
-    name: str
-    config_hash: str
-    path: str
-    created_at: str
-    aliases: List[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "RegistryEntry":
-        """Create from dictionary."""
-        return cls(**data)
-
-
-class AbstractionRegistry:
-    """Registry for tracking abstractions by config hash and aliases."""
-
-    def __init__(self, registry_file: Path):
-        """
-        Initialize registry.
-
-        Args:
-            registry_file: Path to registry JSON file
-        """
-        self.registry_file = Path(registry_file)
-        self.entries: Dict[str, RegistryEntry] = {}
-        self._alias_map: Dict[str, str] = {}  # alias -> name
-
-        # Load existing registry if it exists
-        if self.registry_file.exists():
-            self.load()
-
-    def load(self):
-        """Load registry from disk."""
-        try:
-            with open(self.registry_file, "r") as f:
-                data = json.load(f)
-
-            self.entries = {}
-            self._alias_map = {}
-
-            for name, entry_data in data.get("entries", {}).items():
-                entry = RegistryEntry.from_dict(entry_data)
-                self.entries[name] = entry
-
-                # Build alias map
-                for alias in entry.aliases:
-                    self._alias_map[alias] = name
-
-        except Exception as e:
-            print(f"Warning: Failed to load registry: {e}")
-            self.entries = {}
-            self._alias_map = {}
-
-    def save(self):
-        """Save registry to disk."""
-        self.registry_file.parent.mkdir(parents=True, exist_ok=True)
-
-        data = {
-            "entries": {name: entry.to_dict() for name, entry in self.entries.items()},
-            "last_updated": datetime.now().isoformat(),
-        }
-
-        with open(self.registry_file, "w") as f:
-            json.dump(data, f, indent=2)
-
-    def register(
-        self,
-        name: str,
-        config_hash: str,
-        path: Path,
-        aliases: Optional[List[str]] = None,
-    ):
-        """
-        Register a new abstraction.
-
-        Args:
-            name: Abstraction name
-            config_hash: Configuration hash
-            path: Path to abstraction directory
-            aliases: Optional aliases
-        """
-        aliases = aliases or []
-
-        entry = RegistryEntry(
-            name=name,
-            config_hash=config_hash,
-            path=str(path),
-            created_at=datetime.now().isoformat(),
-            aliases=aliases,
-        )
-
-        self.entries[name] = entry
-
-        # Update alias map
-        for alias in aliases:
-            self._alias_map[alias] = name
-
-        self.save()
-
-    def get(self, name_or_alias: str) -> Optional[RegistryEntry]:
-        """
-        Get registry entry by name or alias.
-
-        Args:
-            name_or_alias: Abstraction name or alias
-
-        Returns:
-            Registry entry or None
-        """
-        # Try direct name lookup
-        if name_or_alias in self.entries:
-            return self.entries[name_or_alias]
-
-        # Try alias lookup
-        if name_or_alias in self._alias_map:
-            actual_name = self._alias_map[name_or_alias]
-            return self.entries.get(actual_name)
-
-        return None
-
-    def find_by_config_hash(self, config_hash: str) -> Optional[RegistryEntry]:
-        """
-        Find abstraction by config hash.
-
-        Args:
-            config_hash: Configuration hash to search for
-
-        Returns:
-            Registry entry or None
-        """
-        for entry in self.entries.values():
-            if entry.config_hash == config_hash:
-                return entry
-        return None
-
-    def add_alias(self, name: str, alias: str):
-        """
-        Add an alias to an existing abstraction.
-
-        Args:
-            name: Abstraction name
-            alias: Alias to add
-        """
-        if name not in self.entries:
-            raise ValueError(f"Abstraction {name} not found in registry")
-
-        entry = self.entries[name]
-        if alias not in entry.aliases:
-            entry.aliases.append(alias)
-            self._alias_map[alias] = name
-            self.save()
-
-    def remove_alias(self, alias: str):
-        """
-        Remove an alias.
-
-        Args:
-            alias: Alias to remove
-        """
-        if alias in self._alias_map:
-            name = self._alias_map[alias]
-            entry = self.entries[name]
-            entry.aliases.remove(alias)
-            del self._alias_map[alias]
-            self.save()
-
-    def list_all(self) -> List[RegistryEntry]:
-        """List all registered abstractions."""
-        return list(self.entries.values())
+    # Try new filename first
+    abstraction_file = directory / "abstraction.pkl"
+    if abstraction_file.exists():
+        return abstraction_file
+
+    # Fallback to legacy filename
+    old_file = directory / "bucketing.pkl"
+    if old_file.exists():
+        return old_file
+
+    return None
 
 
 class AbstractionManager:
@@ -404,9 +111,6 @@ class AbstractionManager:
         # Copy bucketing file (renamed to abstraction.pkl)
         dest_file = abstraction_dir / "abstraction.pkl"
         shutil.copy(bucketing_file, dest_file)
-
-        # Add file size to metadata
-        metadata.file_size_kb = dest_file.stat().st_size / 1024
 
         # Add aliases to metadata
         metadata.aliases = aliases
@@ -482,8 +186,8 @@ class AbstractionManager:
         # Try registry lookup first (faster)
         entry = self.registry.get(name_or_alias)
         if entry:
-            abstraction_file = Path(entry.path) / "abstraction.pkl"
-            if abstraction_file.exists():
+            abstraction_file = _find_abstraction_file(Path(entry.path))
+            if abstraction_file:
                 return abstraction_file
 
         # Fallback: scan directories
@@ -491,15 +195,9 @@ class AbstractionManager:
 
         for abs_name, abs_path, metadata in abstractions:
             if abs_name == name_or_alias or name_or_alias in metadata.aliases:
-                # Check both new and old filenames
-                abstraction_file = abs_path / "abstraction.pkl"
-                if abstraction_file.exists():
+                abstraction_file = _find_abstraction_file(abs_path)
+                if abstraction_file:
                     return abstraction_file
-
-                # Backward compatibility: check for old filename
-                old_file = abs_path / "bucketing.pkl"
-                if old_file.exists():
-                    return old_file
 
         return None
 
@@ -591,19 +289,13 @@ class AbstractionManager:
                 f"T={metadata.num_buckets.get('TURN', 'N/A')}, "
                 f"R={metadata.num_buckets.get('RIVER', 'N/A')}"
             )
-            print(
-                f"  Computation: {metadata.computation_time_seconds / 60:.1f} min "
-                f"({metadata.num_workers} workers)"
-            )
 
-            if metadata.file_size_kb:
-                print(f"  Size: {metadata.file_size_kb:.1f} KB")
-
-            # Check both filenames
-            abstraction_file = path / "abstraction.pkl"
-            if not abstraction_file.exists():
-                abstraction_file = path / "bucketing.pkl"
-            print(f"  File: {abstraction_file}")
+            # Find abstraction file
+            abstraction_file = _find_abstraction_file(path)
+            if abstraction_file:
+                file_size_kb = abstraction_file.stat().st_size / 1024
+                print(f"  Size: {file_size_kb:.1f} KB")
+                print(f"  File: {abstraction_file}")
 
     def find_or_compute(
         self,
@@ -642,9 +334,6 @@ class AbstractionManager:
             num_board_clusters=config_dict["num_board_clusters"],
             num_equity_samples=config_dict["num_equity_samples"],
             num_samples_per_cluster=config_dict["num_samples_per_cluster"],
-            num_boards_sampled=config_dict.get("num_samples_per_street", {}),
-            computation_time_seconds=0.0,
-            num_workers=config_dict.get("num_workers", 1),
             seed=config_dict.get("seed", 42),
         )
 
@@ -654,14 +343,9 @@ class AbstractionManager:
 
         if existing:
             # Found! Return the path
-            abstraction_file = Path(existing.path) / "abstraction.pkl"
-            if abstraction_file.exists():
+            abstraction_file = _find_abstraction_file(Path(existing.path))
+            if abstraction_file:
                 return abstraction_file
-
-            # Fallback to old filename
-            old_file = Path(existing.path) / "bucketing.pkl"
-            if old_file.exists():
-                return old_file
 
         # Not found - check if we should compute
         if not auto_compute and not prompt_user:
@@ -693,8 +377,8 @@ class AbstractionManager:
         # Find it again (should exist now)
         existing = self.registry.find_by_config_hash(config_hash)
         if existing:
-            abstraction_file = Path(existing.path) / "abstraction.pkl"
-            if abstraction_file.exists():
+            abstraction_file = _find_abstraction_file(Path(existing.path))
+            if abstraction_file:
                 return abstraction_file
 
         # Fallback: try to find by aliases

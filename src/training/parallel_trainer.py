@@ -59,7 +59,8 @@ def _worker_process(
         }
 
         # Create abstractions
-        action_abstraction = ActionAbstraction(config.to_dict())
+        big_blind = config.get("game.big_blind", 2)
+        action_abstraction = ActionAbstraction(config.to_dict(), big_blind=big_blind)
 
         card_abstraction_type = config.get("card_abstraction.type", "equity_bucketing")
         if card_abstraction_type == "equity_bucketing":
@@ -190,7 +191,8 @@ class ParallelTrainer:
             raise ValueError(f"Unknown storage type: {storage_type}")
 
         # Create abstractions
-        action_abstraction = ActionAbstraction(self.config)
+        big_blind = self.config.get("game.big_blind", 2)
+        action_abstraction = ActionAbstraction(self.config, big_blind=big_blind)
 
         card_abstraction_type = self.config.get("card_abstraction.type", "equity_bucketing")
         if card_abstraction_type == "equity_bucketing":

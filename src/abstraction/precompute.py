@@ -311,12 +311,6 @@ def precompute_equity_bucketing(
             },
             num_equity_samples=config.num_equity_samples,
             num_samples_per_cluster=config.num_samples_per_cluster,
-            num_boards_sampled={
-                street.name: config.num_samples_per_street[street]
-                for street in config.num_samples_per_street
-            },
-            computation_time_seconds=total_time,
-            num_workers=config.num_workers,
             seed=config.seed,
         )
 

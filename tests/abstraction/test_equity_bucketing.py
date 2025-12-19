@@ -244,9 +244,9 @@ class TestEquityBucketing:
     def test_get_num_buckets(self):
         """Test getting number of buckets."""
         bucketing = EquityBucketing()
-        assert bucketing.get_num_buckets(Street.FLOP) == 50
-        assert bucketing.get_num_buckets(Street.TURN) == 100
-        assert bucketing.get_num_buckets(Street.RIVER) == 200
+        assert bucketing.num_buckets(Street.FLOP) == 50
+        assert bucketing.num_buckets(Street.TURN) == 100
+        assert bucketing.num_buckets(Street.RIVER) == 200
 
     def test_str_representation(self):
         """Test string representation."""
