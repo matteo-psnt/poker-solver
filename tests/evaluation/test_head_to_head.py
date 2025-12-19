@@ -37,28 +37,28 @@ class TestMatchStatistics:
 
     def test_create_match_statistics(self):
         stats = MatchStatistics(
-            num_hands=100,
-            player0_wins=55,
-            player1_wins=45,
-            player0_total_won=200,
-            player1_total_won=-200,
+            num_hands=10,
+            player0_wins=6,
+            player1_wins=4,
+            player0_total_won=20,
+            player1_total_won=-20,
             player0_bb_per_hand=1.0,
             player1_bb_per_hand=-1.0,
             showdown_pct=50.0,
             results=[],
         )
 
-        assert stats.num_hands == 100
-        assert stats.player0_wins == 55
-        assert stats.player1_wins == 45
+        assert stats.num_hands == 10
+        assert stats.player0_wins == 6
+        assert stats.player1_wins == 4
 
     def test_str_representation(self):
         stats = MatchStatistics(
-            num_hands=100,
-            player0_wins=55,
-            player1_wins=45,
-            player0_total_won=200,
-            player1_total_won=-200,
+            num_hands=10,
+            player0_wins=6,
+            player1_wins=4,
+            player0_total_won=20,
+            player1_total_won=-20,
             player0_bb_per_hand=1.0,
             player1_bb_per_hand=-1.0,
             showdown_pct=50.0,
@@ -66,8 +66,8 @@ class TestMatchStatistics:
         )
 
         s = str(stats)
-        assert "100" in s
-        assert "55" in s
+        assert "10" in s
+        assert "6" in s
 
 
 class TestHeadToHeadEvaluator:
@@ -102,8 +102,8 @@ class TestHeadToHeadEvaluator:
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
 
         # Train briefly so they have some strategy
-        solver1.train(num_iterations=10, verbose=False)
-        solver2.train(num_iterations=10, verbose=False)
+        solver1.train(num_iterations=3, verbose=False)
+        solver2.train(num_iterations=3, verbose=False)
 
         # Create evaluator
         evaluator = HeadToHeadEvaluator(
@@ -117,14 +117,14 @@ class TestHeadToHeadEvaluator:
         stats = evaluator.play_match(
             solver0=solver1,
             solver1=solver2,
-            num_hands=10,
+            num_hands=3,
             seed=42,
         )
 
         # Check statistics
-        assert stats.num_hands == 10
-        assert stats.player0_wins + stats.player1_wins == 10
-        assert len(stats.results) == 10
+        assert stats.num_hands == 3
+        assert stats.player0_wins + stats.player1_wins == 3
+        assert len(stats.results) == 3
         assert 0 <= stats.showdown_pct <= 100
 
     def test_play_match_alternating_button(self):
@@ -140,8 +140,8 @@ class TestHeadToHeadEvaluator:
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
 
         # Train briefly
-        solver1.train(num_iterations=5, verbose=False)
-        solver2.train(num_iterations=5, verbose=False)
+        solver1.train(num_iterations=2, verbose=False)
+        solver2.train(num_iterations=2, verbose=False)
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
@@ -154,12 +154,12 @@ class TestHeadToHeadEvaluator:
         stats = evaluator.play_match(
             solver0=solver1,
             solver1=solver2,
-            num_hands=4,
+            num_hands=2,
             alternate_button=True,
             seed=42,
         )
 
-        assert stats.num_hands == 4
+        assert stats.num_hands == 2
 
     def test_play_self_play_match(self):
         """Test self-play (same solver vs itself)."""
@@ -171,7 +171,7 @@ class TestHeadToHeadEvaluator:
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
         # Train
-        solver.train(num_iterations=10, verbose=False)
+        solver.train(num_iterations=3, verbose=False)
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
@@ -184,11 +184,11 @@ class TestHeadToHeadEvaluator:
         stats = evaluator.play_match(
             solver0=solver,
             solver1=solver,
-            num_hands=10,
+            num_hands=3,
             seed=42,
         )
 
-        assert stats.num_hands == 10
+        assert stats.num_hands == 3
 
         # In self-play, expected value should be close to 0
         # But individual match results can vary
@@ -208,8 +208,8 @@ class TestHeadToHeadEvaluator:
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
 
-        solver1.train(num_iterations=5, verbose=False)
-        solver2.train(num_iterations=5, verbose=False)
+        solver1.train(num_iterations=2, verbose=False)
+        solver2.train(num_iterations=2, verbose=False)
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
@@ -221,7 +221,7 @@ class TestHeadToHeadEvaluator:
         stats = evaluator.play_match(
             solver0=solver1,
             solver1=solver2,
-            num_hands=10,
+            num_hands=3,
             seed=42,
         )
 

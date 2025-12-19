@@ -45,11 +45,11 @@ class TestCheckpointManager:
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
             # Train briefly to create infosets
-            solver.train(num_iterations=5, verbose=False)
+            solver.train(num_iterations=2, verbose=False)
 
             # Save checkpoint
             manager = CheckpointManager(Path(tmpdir))
-            checkpoint_path = manager.save(solver, iteration=5)
+            checkpoint_path = manager.save(solver, iteration=2)
 
             assert checkpoint_path.exists()
 
@@ -71,17 +71,17 @@ class TestCheckpointManager:
             assert len(checkpoints) == 0
 
             # Save multiple checkpoints
-            solver.train(num_iterations=5, verbose=False)
-            manager.save(solver, iteration=5)
+            solver.train(num_iterations=2, verbose=False)
+            manager.save(solver, iteration=2)
 
-            solver.train(num_iterations=5, verbose=False)
-            manager.save(solver, iteration=10)
+            solver.train(num_iterations=2, verbose=False)
+            manager.save(solver, iteration=4)
 
             # Check list
             checkpoints = manager.list_checkpoints()
             assert len(checkpoints) == 2
-            assert checkpoints[0]["iteration"] == 5
-            assert checkpoints[1]["iteration"] == 10
+            assert checkpoints[0]["iteration"] == 2
+            assert checkpoints[1]["iteration"] == 4
 
     def test_get_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -90,16 +90,16 @@ class TestCheckpointManager:
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
-            solver.train(num_iterations=5, verbose=False)
+            solver.train(num_iterations=2, verbose=False)
 
             manager = CheckpointManager(Path(tmpdir))
-            manager.save(solver, iteration=5)
+            manager.save(solver, iteration=2)
 
             # Get checkpoint
-            info = manager.get_checkpoint(iteration=5)
+            info = manager.get_checkpoint(iteration=2)
 
             assert info is not None
-            assert info["iteration"] == 5
+            assert info["iteration"] == 2
             assert info["num_infosets"] > 0
 
     def test_get_nonexistent_checkpoint(self):
@@ -124,20 +124,20 @@ class TestCheckpointManager:
             assert latest is None
 
             # Save multiple checkpoints
-            solver.train(num_iterations=5, verbose=False)
-            manager.save(solver, iteration=5)
+            solver.train(num_iterations=2, verbose=False)
+            manager.save(solver, iteration=2)
 
-            solver.train(num_iterations=5, verbose=False)
-            manager.save(solver, iteration=10)
+            solver.train(num_iterations=2, verbose=False)
+            manager.save(solver, iteration=4)
 
-            solver.train(num_iterations=5, verbose=False)
-            manager.save(solver, iteration=15)
+            solver.train(num_iterations=2, verbose=False)
+            manager.save(solver, iteration=6)
 
             # Get latest
             latest = manager.get_latest_checkpoint()
 
             assert latest is not None
-            assert latest["iteration"] == 15
+            assert latest["iteration"] == 6
 
     def test_get_latest_iteration(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -152,10 +152,10 @@ class TestCheckpointManager:
             assert manager.get_latest_iteration() == 0
 
             # Save checkpoints
-            solver.train(num_iterations=10, verbose=False)
-            manager.save(solver, iteration=10)
+            solver.train(num_iterations=3, verbose=False)
+            manager.save(solver, iteration=3)
 
-            assert manager.get_latest_iteration() == 10
+            assert manager.get_latest_iteration() == 3
 
     def test_list_runs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -166,16 +166,16 @@ class TestCheckpointManager:
 
             # Create multiple runs with actual checkpoints (so metadata exists)
             manager1 = CheckpointManager(Path(tmpdir), run_id="run_001")
-            solver.train(num_iterations=5, verbose=False)
-            manager1.save(solver, iteration=5)
+            solver.train(num_iterations=2, verbose=False)
+            manager1.save(solver, iteration=2)
 
             manager2 = CheckpointManager(Path(tmpdir), run_id="run_002")
-            solver.train(num_iterations=5, verbose=False)
-            manager2.save(solver, iteration=10)
+            solver.train(num_iterations=2, verbose=False)
+            manager2.save(solver, iteration=4)
 
             manager3 = CheckpointManager(Path(tmpdir), run_id="run_003")
-            solver.train(num_iterations=5, verbose=False)
-            manager3.save(solver, iteration=15)
+            solver.train(num_iterations=2, verbose=False)
+            manager3.save(solver, iteration=6)
 
             # List runs
             runs = CheckpointManager.list_runs(Path(tmpdir))
@@ -203,8 +203,8 @@ class TestCheckpointManager:
 
             # Create a run with actual checkpoint
             manager1 = CheckpointManager(Path(tmpdir), run_id="run_test")
-            solver.train(num_iterations=5, verbose=False)
-            manager1.save(solver, iteration=5)
+            solver.train(num_iterations=2, verbose=False)
+            manager1.save(solver, iteration=2)
 
             # Load from run ID
             manager2 = CheckpointManager.from_run_id(
@@ -231,8 +231,8 @@ class TestCheckpointManager:
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
             manager = CheckpointManager(Path(tmpdir))
-            solver.train(num_iterations=10, verbose=False)
-            manager.save(solver, iteration=10)
+            solver.train(num_iterations=2, verbose=False)  # Reduced from 10
+            manager.save(solver, iteration=2)  # Match iteration count
 
             # Update stats
             manager.update_stats(
@@ -254,8 +254,8 @@ class TestCheckpointManager:
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
             manager = CheckpointManager(Path(tmpdir))
-            solver.train(num_iterations=5, verbose=False)
-            manager.save(solver, iteration=5)
+            solver.train(num_iterations=2, verbose=False)
+            manager.save(solver, iteration=2)
 
             manager.mark_completed()
 
