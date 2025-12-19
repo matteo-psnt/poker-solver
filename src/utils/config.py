@@ -277,3 +277,55 @@ def load_config(config_path: Optional[Path] = None, **overrides) -> Config:
 
     config.validate()
     return config
+
+
+def list_training_configs() -> list[str]:
+    """
+    List all available training configurations.
+
+    Returns:
+        List of config names (without .yaml extension)
+
+    Example:
+        >>> configs = list_training_configs()
+        >>> print(configs)
+        ['default', 'production', 'fast_test', 'quick_test']
+    """
+    config_dir = Path(__file__).parent.parent.parent / "config" / "training"
+    if not config_dir.exists():
+        return []
+
+    config_files = sorted(config_dir.glob("*.yaml"))
+    return [f.stem for f in config_files]
+
+
+def load_training_config(name: str) -> Config:
+    """
+    Load a training configuration by name from config/training/.
+
+    Args:
+        name: Config name (without .yaml extension)
+
+    Returns:
+        Config instance
+
+    Raises:
+        FileNotFoundError: If config file not found
+
+    Example:
+        >>> config = load_training_config("production")
+        >>> config.get("training.num_iterations")
+        100000000
+    """
+    config_dir = Path(__file__).parent.parent.parent / "config" / "training"
+    config_path = config_dir / f"{name}.yaml"
+
+    if not config_path.exists():
+        available = list_training_configs()
+        raise FileNotFoundError(
+            f"Training config '{name}' not found.\n"
+            f"Available configs: {', '.join(available)}\n"
+            f"Place config files in config/training/"
+        )
+
+    return Config.from_file(config_path)

@@ -17,8 +17,8 @@ from src.abstraction.equity_bucketing import EquityBucketing
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import DiskBackedStorage, InMemoryStorage, Storage
-from src.training.checkpoint import CheckpointManager
 from src.training.metrics import MetricsTracker
+from src.training.training_run import TrainingRun
 from src.utils.config import Config
 
 
@@ -40,16 +40,16 @@ class Trainer:
         """
         self.config = config
 
-        # Initialize checkpoint manager FIRST to get run-specific directory
-        checkpoint_base_dir = Path(config.get("training.checkpoint_dir", "data/checkpoints"))
-        self.checkpoint_manager = CheckpointManager(
-            checkpoint_base_dir,
-            config_name=config.get("system.config_name", "default"),
+        # Initialize training run FIRST to get run-specific directory
+        runs_base_dir = Path(config.get("training.runs_dir", "data/runs"))
+        self.training_run = TrainingRun(
+            base_dir=runs_base_dir,
             run_id=run_id,
+            config_name=config.get("system.config_name", "default"),
             config=config.to_dict(),  # Pass full config for metadata
         )
 
-        # Build components (storage needs the run-specific checkpoint_dir)
+        # Build components (storage needs the run-specific directory)
         self.action_abstraction = self._build_action_abstraction()
         self.card_abstraction = self._build_card_abstraction()
         self.storage = self._build_storage()
@@ -71,10 +71,29 @@ class Trainer:
         abstraction_type = card_config.get("type", "equity_bucketing")
 
         if abstraction_type == "equity_bucketing":
-            # Load precomputed equity bucketing from file
+            # Check if using new config-based system
+            abstraction_config = card_config.get("config")
+
+            if abstraction_config:
+                # NEW: Load by config name with auto-prompt
+                from src.abstraction.abstraction_metadata import AbstractionManager
+
+                manager = AbstractionManager()
+                bucketing_path = manager.find_or_compute(
+                    config_name=abstraction_config,
+                    auto_compute=False,
+                    prompt_user=True,  # Prompt user if not found
+                )
+                bucketing = EquityBucketing.load(bucketing_path)
+                return bucketing
+
+            # OLD: Direct file path (backward compatibility)
             bucketing_path = card_config.get("bucketing_path")
             if not bucketing_path:
-                raise ValueError("equity_bucketing requires 'bucketing_path' in config")
+                raise ValueError(
+                    "equity_bucketing requires either 'config' or 'bucketing_path'.\n"
+                    "Recommended: Use 'config: production' to reference an abstraction config."
+                )
 
             bucketing_path = Path(bucketing_path)
             if not bucketing_path.exists():
@@ -99,13 +118,13 @@ class Trainer:
         if backend == "memory":
             return InMemoryStorage()
         elif backend == "disk":
-            # Use the run-specific checkpoint directory from CheckpointManager
-            checkpoint_dir = self.checkpoint_manager.checkpoint_dir
+            # Use the run-specific directory from TrainingRun
+            run_dir = self.training_run.run_dir
             cache_size = storage_config.get("cache_size", 100000)
             flush_frequency = storage_config.get("flush_frequency", 1000)
 
             return DiskBackedStorage(
-                checkpoint_dir=checkpoint_dir,
+                checkpoint_dir=run_dir,
                 cache_size=cache_size,
                 flush_frequency=flush_frequency,
             )
@@ -156,12 +175,12 @@ class Trainer:
         log_freq = self.config.get("training.log_frequency", 10)
         verbose = self.config.get("training.verbose", True)
 
-        # Resume from checkpoint if requested
+        # Resume from snapshot if requested
         start_iteration = 0
         if resume:
-            latest_checkpoint = self.checkpoint_manager.get_latest_checkpoint()
-            if latest_checkpoint:
-                start_iteration = latest_checkpoint["iteration"]
+            latest_snapshot = self.training_run.get_latest_snapshot()
+            if latest_snapshot:
+                start_iteration = latest_snapshot["iteration"]
                 print(f"Resuming from iteration {start_iteration}")
                 # Note: Storage should already be loaded if using disk backend
 
@@ -201,33 +220,33 @@ class Trainer:
                             }
                         )
 
-                # Periodic checkpointing
+                # Periodic snapshotting
                 if (i + 1) % checkpoint_freq == 0:
                     elapsed_time = time.time() - training_start_time
 
-                    # Get metrics for this checkpoint
+                    # Get metrics for this snapshot
                     summary = self.metrics.get_summary()
-                    checkpoint_metrics = {
+                    snapshot_metrics = {
                         "avg_utility_p0": summary.get("avg_utility", 0.0),
                         "avg_utility_p1": -summary.get("avg_utility", 0.0),
                         "avg_infosets": summary.get("avg_infosets", 0),
                     }
 
-                    # Save checkpoint with metrics
-                    self.checkpoint_manager.save(
+                    # Save snapshot with metrics
+                    self.training_run.save_snapshot(
                         self.solver,
                         i + 1,
-                        metrics=checkpoint_metrics,
+                        metrics=snapshot_metrics,
                     )
 
                     # Update run statistics
-                    self.checkpoint_manager.update_stats(
+                    self.training_run.update_stats(
                         total_iterations=i + 1,
                         total_runtime_seconds=elapsed_time,
                         num_infosets=self.solver.num_infosets(),
                     )
 
-            # Final checkpoint
+            # Final snapshot
             elapsed_time = time.time() - training_start_time
             summary = self.metrics.get_summary()
             final_metrics = {
@@ -236,7 +255,7 @@ class Trainer:
                 "avg_infosets": summary.get("avg_infosets", 0),
             }
 
-            self.checkpoint_manager.save(
+            self.training_run.save_snapshot(
                 self.solver,
                 num_iterations,
                 metrics=final_metrics,
@@ -244,14 +263,14 @@ class Trainer:
             )
 
             # Update final stats
-            self.checkpoint_manager.update_stats(
+            self.training_run.update_stats(
                 total_iterations=num_iterations,
                 total_runtime_seconds=elapsed_time,
                 num_infosets=self.solver.num_infosets(),
             )
 
-            # Mark run as completed
-            self.checkpoint_manager.mark_completed()
+            # Mark experiment as completed
+            self.training_run.mark_completed()
 
             # Print final summary
             if verbose:
@@ -265,8 +284,8 @@ class Trainer:
             }
 
         except Exception:
-            # Mark run as failed on exception
-            self.checkpoint_manager.mark_failed()
+            # Mark experiment as failed on exception
+            self.training_run.mark_failed()
             raise
 
     def evaluate(self) -> Dict:

@@ -1,0 +1,27 @@
+# Production abstraction configuration
+# High-quality abstraction for serious training runs
+
+name: production
+aliases:
+  - default
+
+num_buckets:
+  FLOP: 50
+  TURN: 100
+  RIVER: 200
+
+num_board_clusters:
+  FLOP: 200
+  TURN: 500
+  RIVER: 1000
+
+num_equity_samples: 1000
+num_samples_per_cluster: 5
+
+num_samples_per_street:
+  FLOP: 5000
+  TURN: 3000
+  RIVER: 2000
+
+num_workers: 12
+seed: 42

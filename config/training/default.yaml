@@ -32,10 +32,13 @@ action_abstraction:
 card_abstraction:
   type: "equity_bucketing"
 
-  # Path to precomputed equity bucketing file
-  # Must be generated using "Precompute Equity Buckets" in CLI
+  # Reference abstraction config by name
+  # This will load config/abstractions/production.yaml and find/compute the abstraction
   # Using production abstraction: 50/100/200 buckets per street
-  bucketing_path: "data/abstractions/equity_buckets_20251217_042337/bucketing.pkl"
+  config: production
+
+  # Alternative: Direct file path (backward compatibility)
+  # bucketing_path: "data/abstractions/buckets-F50T100R200-C200C500C1000-s1000-2a0e3c/abstraction.pkl"
 
 # ===== SPR Bucketing =====
 spr_buckets:

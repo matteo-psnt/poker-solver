@@ -1,9 +1,9 @@
-# equity_buckets_test
+# buckets-F10T20R30-C20C30C40-s100-5c0c84
 
 ## Configuration
 
 ```
-Abstraction: equity_buckets_test
+Abstraction: buckets-F10T20R30-C20C30C40-s100-5c0c84
 Type: equity_bucketing
 Created: 2025-12-17T00:08:49.896172
 Buckets: FLOP=10, TURN=20, RIVER=30
@@ -19,5 +19,5 @@ File Size: 86.2 KB
 ```python
 from src.abstraction.equity_bucketing import EquityBucketing
 
-bucketing = EquityBucketing.load('data/abstractions/equity_buckets_test_20251217_000849/bucketing.pkl')
+bucketing = EquityBucketing.load('data/abstractions/buckets-F10T20R30-C20C30C40-s100-5c0c84_20251217_000849/abstraction.pkl')
 ```

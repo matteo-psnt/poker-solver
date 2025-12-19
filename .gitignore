@@ -49,8 +49,6 @@ dmypy.json
 .pytype/
 
 # Project-specific
-data/checkpoints/
-data/results/
 *.log
 logs/
 

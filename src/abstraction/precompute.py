@@ -7,7 +7,7 @@ Supports parallelization, checkpointing, and resumable computation.
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -42,6 +42,46 @@ class PrecomputeConfig:
     # Optional
     seed: int = 42
     num_workers: int = 1  # Number of parallel workers (1 = sequential, >1 = parallel)
+    aliases: List[str] = field(default_factory=list)  # User-defined aliases for this abstraction
+    config_name: Optional[str] = None  # Name of the config (e.g., "production", "test")
+
+    @classmethod
+    def from_dict(cls, config_dict: dict) -> "PrecomputeConfig":
+        """
+        Create PrecomputeConfig from dictionary (e.g., loaded from YAML).
+
+        Args:
+            config_dict: Configuration dictionary
+
+        Returns:
+            PrecomputeConfig instance
+        """
+
+        # Convert string keys to Street enums
+        def convert_street_dict(d: dict) -> Dict[Street, int]:
+            result = {}
+            for key, value in d.items():
+                if isinstance(key, str):
+                    # Convert string to Street enum
+                    result[Street[key]] = value
+                else:
+                    result[key] = value
+            return result
+
+        return cls(
+            num_samples_per_street=convert_street_dict(config_dict["num_samples_per_street"]),
+            num_buckets=convert_street_dict(config_dict["num_buckets"]),
+            num_board_clusters=convert_street_dict(config_dict["num_board_clusters"]),
+            num_equity_samples=config_dict["num_equity_samples"],
+            num_samples_per_cluster=config_dict["num_samples_per_cluster"],
+            output_file=Path(
+                config_dict.get("output_file", "data/abstractions/equity_buckets.pkl")
+            ),
+            seed=config_dict.get("seed", 42),
+            num_workers=config_dict.get("num_workers", 1),
+            aliases=config_dict.get("aliases", []),
+            config_name=config_dict.get("config_name"),
+        )
 
     @classmethod
     def default(cls) -> "PrecomputeConfig":
@@ -65,6 +105,8 @@ class PrecomputeConfig:
             num_equity_samples=1000,
             num_samples_per_cluster=5,
             output_file=Path("data/abstractions/equity_buckets.pkl"),
+            config_name="production",
+            aliases=["default"],  # Additional alias
         )
 
     @classmethod
@@ -89,6 +131,8 @@ class PrecomputeConfig:
             num_equity_samples=100,
             num_samples_per_cluster=3,
             output_file=Path("data/abstractions/equity_buckets_test.pkl"),
+            config_name="fast_test",
+            aliases=["test"],  # Additional alias
         )
 
 
@@ -257,7 +301,7 @@ def precompute_equity_bucketing(
 
         # Create metadata
         metadata = AbstractionMetadata(
-            name=config.output_file.stem,
+            name="",  # Will be auto-generated from config
             created_at=datetime.now().isoformat(),
             abstraction_type="equity_bucketing",
             num_buckets={street.name: config.num_buckets[street] for street in config.num_buckets},
@@ -276,12 +320,33 @@ def precompute_equity_bucketing(
             seed=config.seed,
         )
 
-        # Save with metadata
+        # Save with metadata (auto-generate name from config)
         manager = AbstractionManager()
-        abstraction_dir = manager.save_abstraction(config.output_file, metadata)
+
+        # Build aliases: config name + explicit aliases from config
+        aliases = []
+
+        # Add config name as automatic alias (if provided and not "default")
+        if config.config_name and config.config_name != "default":
+            aliases.append(config.config_name)
+
+        # Add explicit aliases from config
+        aliases.extend(config.aliases)
+
+        abstraction_dir = manager.save_abstraction(
+            config.output_file,
+            metadata,
+            aliases=aliases,
+            auto_name=True,  # Generate name from config
+        )
 
         logger.info(f"  Saved abstraction with metadata to: {abstraction_dir}")
-        logger.info("  Use AbstractionManager.list_abstractions() to view all")
+        logger.info(f"  Name: {metadata.name}")
+        if aliases:
+            logger.info(f"  Aliases: {', '.join(aliases)}")
+        else:
+            logger.info("  No aliases set (use config_name or aliases field to add)")
+        logger.info("  Use AbstractionManager().list_abstractions() to view all")
 
     return bucketing
 
