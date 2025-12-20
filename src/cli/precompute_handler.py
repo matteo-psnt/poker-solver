@@ -6,13 +6,13 @@ from pathlib import Path
 import questionary
 import yaml
 
-from src.abstraction.manager import EquityBucketManager
-from src.abstraction.metadata import EquityBucketMetadata, compute_config_hash
-from src.abstraction.precompute import (
+from src.abstraction.equity.manager import EquityBucketManager
+from src.abstraction.equity.precompute import (
     PrecomputeConfig,
     precompute_equity_bucketing,
     print_summary,
 )
+from src.abstraction.utils.metadata import EquityBucketMetadata, compute_config_hash
 from src.game.state import Street
 
 

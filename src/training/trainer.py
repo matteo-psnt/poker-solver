@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from src.training import builders
 from src.training.metrics import MetricsTracker
-from src.training.training_run import TrainingRun
+from src.training.run.training_run import TrainingRun
 from src.utils.config import Config
 
 

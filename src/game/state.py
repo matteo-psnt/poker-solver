@@ -329,8 +329,8 @@ class GameState:
             InfoSetKey (will be implemented in abstraction module)
         """
         # Imports here to avoid circular dependencies
-        from src.abstraction.infoset import InfoSetKey
-        from src.abstraction.preflop_hands import PreflopHandMapper
+        from src.abstraction.preflop.preflop_hands import PreflopHandMapper
+        from src.abstraction.utils.infoset import InfoSetKey
 
         # Compute SPR bucket
         effective_stack = min(self.stacks)
@@ -384,7 +384,7 @@ class GameState:
         Returns:
             Bucket index (0, 1, or 2)
         """
-        from src.abstraction.constants import SPR_DEEP_THRESHOLD, SPR_SHALLOW_THRESHOLD
+        from src.abstraction.utils.constants import SPR_DEEP_THRESHOLD, SPR_SHALLOW_THRESHOLD
 
         if spr < SPR_SHALLOW_THRESHOLD:
             return 0  # Shallow

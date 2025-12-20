@@ -17,9 +17,11 @@ import numpy as np
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
-from src.abstraction.board_clustering import BoardClusterer
-from src.abstraction.card_abstraction import CardAbstraction
-from src.abstraction.constants import (
+from src.abstraction.core.card_abstraction import CardAbstraction
+from src.abstraction.equity.board_clustering import BoardClusterer
+from src.abstraction.equity.equity_calculator import EquityCalculator
+from src.abstraction.preflop.preflop_hands import PreflopHandMapper
+from src.abstraction.utils.constants import (
     DEFAULT_EQUITY_SAMPLES,
     DEFAULT_FLOP_BOARD_CLUSTERS,
     DEFAULT_FLOP_BUCKETS,
@@ -31,8 +33,6 @@ from src.abstraction.constants import (
     KMEANS_RANDOM_STATE,
     NUM_PREFLOP_HANDS,
 )
-from src.abstraction.equity_calculator import EquityCalculator
-from src.abstraction.preflop_hands import PreflopHandMapper
 from src.game.state import Card, Street
 
 # Setup logger
@@ -153,7 +153,7 @@ class EquityBucketing(CardAbstraction):
             # 3. Compute equity matrix: [169 hands × num_board_clusters]
             if num_workers and num_workers > 1:
                 # Use parallel computation
-                from src.abstraction.parallel_equity import compute_equity_matrix_parallel
+                from src.abstraction.equity.parallel_equity import compute_equity_matrix_parallel
 
                 equity_matrix = compute_equity_matrix_parallel(
                     cluster_representatives=cluster_representatives,

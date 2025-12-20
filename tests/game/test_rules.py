@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.abstraction.action_abstraction import ActionAbstraction
+from src.abstraction.core.action_abstraction import ActionAbstraction
 from src.game.actions import ActionType, all_in, bet, call, check, fold, raises
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street

@@ -99,7 +99,7 @@ def edit_config(config: Config, custom_style) -> Config:
         config.set("card_abstraction.config", config_name)
 
         # Check if the config exists
-        from src.abstraction.manager import EquityBucketManager
+        from src.abstraction.equity.manager import EquityBucketManager
 
         manager = EquityBucketManager()
         abstraction_path = manager.get_abstraction(config_name)

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from src.solver.base import BaseSolver
-from src.training.metadata import (
+from src.training.run.metadata import (
     CheckpointEntry,
     ProvenanceInfo,
     RunMetadata,
