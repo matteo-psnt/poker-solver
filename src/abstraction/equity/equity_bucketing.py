@@ -10,6 +10,7 @@ This is the final component that ties together:
 
 import logging
 import pickle
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -37,6 +38,13 @@ from src.game.state import Card, Street
 
 # Setup logger
 logger = logging.getLogger(__name__)
+
+
+# Backward compatibility for old pickle files
+# Map old module paths to new ones
+sys.modules["src.abstraction.board_clustering"] = sys.modules[
+    "src.abstraction.equity.board_clustering"
+]
 
 
 class EquityBucketing(CardAbstraction):
