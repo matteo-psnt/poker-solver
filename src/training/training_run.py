@@ -1,5 +1,5 @@
 """
-Training run management with rich metadata and experiment tracking.
+Training run management with rich metadata and run tracking.
 
 Provides a TrainingRun class that represents a single training session,
 with snapshot tracking, metrics, and metadata collection.
@@ -26,16 +26,16 @@ logger = logging.getLogger(__name__)
 
 
 class SnapshotManifest:
-    """Manifest tracking all solver snapshots in an experiment."""
+    """Manifest tracking all solver snapshots in a run."""
 
-    def __init__(self, experiment_id: str):
+    def __init__(self, run_id: str):
         """
         Initialize snapshot manifest.
 
         Args:
-            experiment_id: Unique experiment identifier
+            run_id: Unique run identifier
         """
-        self.run_id = experiment_id
+        self.run_id = run_id
         self.snapshots: List[CheckpointEntry] = []
         self.latest_iteration: int = 0
         self.best_snapshot: Optional[Dict[str, Any]] = None
@@ -82,7 +82,7 @@ class SnapshotManifest:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            "experiment_id": self.run_id,
+            "run_id": self.run_id,
             "snapshots": [s.to_dict() for s in self.snapshots],
             "latest_iteration": self.latest_iteration,
             "best_snapshot": self.best_snapshot,
@@ -91,7 +91,7 @@ class SnapshotManifest:
     @classmethod
     def from_dict(cls, data: dict) -> "SnapshotManifest":
         """Create from dictionary."""
-        manifest = cls(experiment_id=data["experiment_id"])
+        manifest = cls(run_id=data.get("run_id"))
         manifest.snapshots = [CheckpointEntry.from_dict(s) for s in data.get("snapshots", [])]
         manifest.latest_iteration = data.get("latest_iteration", 0)
         manifest.best_snapshot = data.get("best_snapshot")
@@ -110,9 +110,9 @@ class SnapshotManifest:
         return cls.from_dict(data)
 
 
-class ExperimentMetadata(RunMetadata):
+class ExtendedRunMetadata(RunMetadata):
     """
-    Extended metadata for experiments with additional tracking features.
+    Extended metadata for training runs with additional tracking features.
     """
 
     def __init__(
@@ -120,7 +120,7 @@ class ExperimentMetadata(RunMetadata):
         run_id: str,
         config_name: str,
         started_at: str,
-        experiment_name: Optional[str] = None,
+        run_name: Optional[str] = None,
         group: Optional[str] = None,
         tags: Optional[List[str]] = None,
         description: Optional[str] = None,
@@ -129,23 +129,23 @@ class ExperimentMetadata(RunMetadata):
         **kwargs,
     ):
         """
-        Initialize experiment metadata.
+        Initialize extended run metadata.
 
         Args:
             run_id: Unique run identifier
             config_name: Configuration name
             started_at: Start timestamp
-            experiment_name: Human-readable experiment name
-            group: Experiment group (e.g., "baselines", "ablations")
+            run_name: Human-readable run name
+            group: Run group (e.g., "baselines", "ablations")
             tags: List of tags for filtering
-            description: Experiment description
+            description: Run description
             abstraction_name: Name of abstraction used
             abstraction_path: Path to abstraction file
             **kwargs: Additional fields for RunMetadata
         """
         super().__init__(run_id=run_id, config_name=config_name, started_at=started_at, **kwargs)
 
-        self.experiment_name = experiment_name or run_id
+        self.run_name = run_name or run_id
         self.group = group
         self.tags = tags or []
         self.description = description
@@ -157,7 +157,7 @@ class ExperimentMetadata(RunMetadata):
         base_dict = super().to_dict()
         base_dict.update(
             {
-                "experiment_name": self.experiment_name,
+                "run_name": self.run_name,
                 "group": self.group,
                 "tags": self.tags,
                 "description": self.description,
@@ -172,10 +172,10 @@ class ExperimentMetadata(RunMetadata):
         return base_dict
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ExperimentMetadata":
+    def from_dict(cls, data: dict) -> "ExtendedRunMetadata":
         """Create from dictionary."""
-        # Extract experiment-specific fields
-        experiment_name = data.pop("experiment_name", None)
+        # Extract run-specific fields
+        run_name = data.pop("run_name", None)
         group = data.pop("group", None)
         tags = data.pop("tags", [])
         description = data.pop("description", None)
@@ -193,11 +193,11 @@ class ExperimentMetadata(RunMetadata):
         stats_data = data.pop("statistics", None)
 
         # Create instance
-        experiment = cls(
+        run_metadata = cls(
             run_id=data["run_id"],
             config_name=data["config_name"],
             started_at=data["started_at"],
-            experiment_name=experiment_name,
+            run_name=run_name,
             group=group,
             tags=tags,
             description=description,
@@ -210,20 +210,20 @@ class ExperimentMetadata(RunMetadata):
 
         # Restore complex objects
         if system_data:
-            experiment.system = SystemInfo(**system_data)
+            run_metadata.system = SystemInfo(**system_data)
         if provenance_data:
-            experiment.provenance = ProvenanceInfo(**provenance_data)
+            run_metadata.provenance = ProvenanceInfo(**provenance_data)
         if stats_data:
-            experiment.statistics = TrainingStats(**stats_data)
+            run_metadata.statistics = TrainingStats(**stats_data)
 
-        return experiment
+        return run_metadata
 
     @classmethod
     def create(  # type: ignore[override]  # Parent class has different signature pattern
         cls,
         run_id: str,
         config_name: str,
-        experiment_name: Optional[str] = None,
+        run_name: Optional[str] = None,
         group: Optional[str] = None,
         tags: Optional[List[str]] = None,
         description: Optional[str] = None,
@@ -231,17 +231,17 @@ class ExperimentMetadata(RunMetadata):
         abstraction_path: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         command: Optional[str] = None,
-    ) -> "ExperimentMetadata":
+    ) -> "ExtendedRunMetadata":
         """
-        Create new experiment metadata.
+        Create new extended run metadata.
 
         Args:
             run_id: Unique run identifier
             config_name: Configuration name
-            experiment_name: Human-readable experiment name
-            group: Experiment group
+            run_name: Human-readable run name
+            group: Run group
             tags: List of tags
-            description: Experiment description
+            description: Run description
             abstraction_name: Name of abstraction used
             abstraction_path: Path to abstraction file
             config: Full configuration dictionary
@@ -251,7 +251,7 @@ class ExperimentMetadata(RunMetadata):
             run_id=run_id,
             config_name=config_name,
             started_at=datetime.now().isoformat(),
-            experiment_name=experiment_name,
+            run_name=run_name,
             group=group,
             tags=tags,
             description=description,
@@ -265,18 +265,18 @@ class ExperimentMetadata(RunMetadata):
         )
 
 
-class ExperimentRegistry:
-    """Registry for tracking all experiments."""
+class RunsRegistry:
+    """Registry for tracking all training runs."""
 
     def __init__(self, registry_file: Path):
         """
-        Initialize experiment registry.
+        Initialize runs registry.
 
         Args:
             registry_file: Path to registry JSON file
         """
         self.registry_file = Path(registry_file)
-        self.experiments: List[Dict[str, Any]] = []
+        self.runs: List[Dict[str, Any]] = []
         self.groups: Dict[str, List[str]] = {}
 
         if self.registry_file.exists():
@@ -288,12 +288,12 @@ class ExperimentRegistry:
             with open(self.registry_file, "r") as f:
                 data = json.load(f)
 
-            self.experiments = data.get("experiments", [])
+            self.runs = data.get("runs", [])
             self.groups = data.get("groups", {})
 
         except Exception as e:
-            logger.warning(f"Failed to load experiment registry: {e}")
-            self.experiments = []
+            logger.warning(f"Failed to load runs registry: {e}")
+            self.runs = []
             self.groups = {}
 
     def save(self):
@@ -301,7 +301,7 @@ class ExperimentRegistry:
         self.registry_file.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
-            "experiments": self.experiments,
+            "runs": self.runs,
             "groups": self.groups,
             "last_updated": datetime.now().isoformat(),
         }
@@ -311,8 +311,8 @@ class ExperimentRegistry:
 
     def register(
         self,
-        experiment_id: str,
-        experiment_name: str,
+        run_id: str,
+        run_name: str,
         group: Optional[str] = None,
         tags: Optional[List[str]] = None,
         status: str = "running",
@@ -320,10 +320,10 @@ class ExperimentRegistry:
         started_at: Optional[str] = None,
         metrics: Optional[Dict[str, Any]] = None,
     ):
-        """Register a new experiment."""
+        """Register a new training run."""
         entry = {
-            "id": experiment_id,
-            "name": experiment_name,
+            "id": run_id,
+            "name": run_name,
             "group": group,
             "tags": tags or [],
             "status": status,
@@ -332,40 +332,40 @@ class ExperimentRegistry:
             "metrics": metrics or {},
         }
 
-        # Add to experiments list
-        self.experiments.append(entry)
+        # Add to runs list
+        self.runs.append(entry)
 
         # Add to group
         if group:
             if group not in self.groups:
                 self.groups[group] = []
-            self.groups[group].append(experiment_id)
+            self.groups[group].append(run_id)
 
         self.save()
 
-    def update_status(self, experiment_id: str, status: str):
-        """Update experiment status."""
-        for exp in self.experiments:
-            if exp["id"] == experiment_id:
-                exp["status"] = status
+    def update_status(self, run_id: str, status: str):
+        """Update run status."""
+        for run in self.runs:
+            if run["id"] == run_id:
+                run["status"] = status
                 self.save()
                 break
 
-    def update_metrics(self, experiment_id: str, metrics: Dict[str, Any]):
-        """Update experiment metrics."""
-        for exp in self.experiments:
-            if exp["id"] == experiment_id:
-                exp["metrics"].update(metrics)
+    def update_metrics(self, run_id: str, metrics: Dict[str, Any]):
+        """Update run metrics."""
+        for run in self.runs:
+            if run["id"] == run_id:
+                run["metrics"].update(metrics)
                 self.save()
                 break
 
     def list_by_group(self, group: str) -> List[Dict[str, Any]]:
-        """List experiments in a group."""
-        return [exp for exp in self.experiments if exp.get("group") == group]
+        """List runs in a group."""
+        return [run for run in self.runs if run.get("group") == group]
 
     def list_by_tag(self, tag: str) -> List[Dict[str, Any]]:
-        """List experiments with a tag."""
-        return [exp for exp in self.experiments if tag in exp.get("tags", [])]
+        """List runs with a tag."""
+        return [run for run in self.runs if tag in run.get("tags", [])]
 
 
 class TrainingRun:
@@ -379,8 +379,8 @@ class TrainingRun:
     - System information
 
     Uses:
-    - experiment.json: Run-level metadata (replaces run_metadata.json)
-    - snapshots.json: List of all snapshots with metrics (replaces checkpoint_manifest.json)
+    - runs.json: Run-level metadata
+    - snapshots.json: List of all snapshots with metrics
     - config.yaml: Full configuration
     - solver data files (HDF5, pickle, etc.)
     """
@@ -388,7 +388,7 @@ class TrainingRun:
     def __init__(
         self,
         base_dir: Path,
-        experiment_name: Optional[str] = None,
+        run_name: Optional[str] = None,
         run_id: Optional[str] = None,
         group: Optional[str] = None,
         tags: Optional[List[str]] = None,
@@ -403,9 +403,9 @@ class TrainingRun:
 
         Args:
             base_dir: Base directory to store runs (data/runs)
-            experiment_name: Human-readable experiment name (optional)
+            run_name: Human-readable run name (optional)
             run_id: Optional unique identifier (auto-generated if not provided)
-            group: Experiment group (e.g., "baselines", "ablations")
+            group: Run group (e.g., "baselines", "ablations")
             tags: List of tags for filtering (e.g., ["cfr+", "baseline"])
             description: Run description
             abstraction_name: Name of abstraction used
@@ -419,8 +419,8 @@ class TrainingRun:
         # Generate unique run ID if not provided
         if run_id is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            if experiment_name:
-                self.run_id = f"{experiment_name}-{timestamp}"
+            if run_name:
+                self.run_id = f"{run_name}-{timestamp}"
             else:
                 self.run_id = f"run-{timestamp}"
         else:
@@ -430,14 +430,14 @@ class TrainingRun:
         self.run_dir = self.base_dir / self.run_id
 
         # Metadata
-        self.experiment_metadata: Optional[ExperimentMetadata] = None
+        self.run_metadata: Optional[ExtendedRunMetadata] = None
         self.snapshot_manifest: Optional[SnapshotManifest] = None
 
         # Track if we've initialized
         self.initialized = False
 
         # Store parameters for later
-        self._experiment_name = experiment_name or self.run_id
+        self._run_name = run_name or self.run_id
         self._group = group
         self._tags = tags or []
         self._description = description
@@ -446,11 +446,11 @@ class TrainingRun:
         self._config = config
 
         # Initialize registry
-        self.registry = ExperimentRegistry(self.base_dir / ".experiments.json")
+        self.registry = RunsRegistry(self.base_dir / ".runs.json")
 
-        # Try to load existing experiment if directory exists
+        # Try to load existing run if directory exists
         if self.run_dir.exists():
-            self._load_existing_experiment()
+            self._load_existing_run()
 
     def _ensure_initialized(self):
         """Ensure run directory and metadata are initialized."""
@@ -462,11 +462,11 @@ class TrainingRun:
         logger.info(f"Created run directory: {self.run_dir}")
 
         # Create run metadata
-        if self.experiment_metadata is None:
-            self.experiment_metadata = ExperimentMetadata.create(
+        if self.run_metadata is None:
+            self.run_metadata = ExtendedRunMetadata.create(
                 run_id=self.run_id,
                 config_name=self.config_name,
-                experiment_name=self._experiment_name,
+                run_name=self._run_name,
                 group=self._group,
                 tags=self._tags,
                 description=self._description,
@@ -474,7 +474,7 @@ class TrainingRun:
                 abstraction_path=self._abstraction_path,
                 config=self._config,
             )
-            self.experiment_metadata.save(self.run_dir / "experiment.json")
+            self.run_metadata.save(self.run_dir / ".run.json")
             logger.info(f"Created run metadata for {self.run_id}")
 
         # Save config as YAML file for easy inspection
@@ -486,32 +486,33 @@ class TrainingRun:
 
         # Create snapshot manifest
         if self.snapshot_manifest is None:
-            self.snapshot_manifest = SnapshotManifest(experiment_id=self.run_id)
+            self.snapshot_manifest = SnapshotManifest(run_id=self.run_id)
             self.snapshot_manifest.save(self.run_dir / "snapshots.json")
             logger.info(f"Created snapshot manifest for {self.run_id}")
 
-        # Register in experiment registry
+        # Register in runs registry
         self.registry.register(
-            experiment_id=self.run_id,
-            experiment_name=self._experiment_name,
+            run_id=self.run_id,
+            run_name=self._run_name,
             group=self._group,
             tags=self._tags,
             status="running",
             abstraction_name=self._abstraction_name,
-            started_at=self.experiment_metadata.started_at,
+            started_at=self.run_metadata.started_at,
         )
 
         self.initialized = True
 
-    def _load_existing_experiment(self):
-        """Load existing experiment metadata and manifest."""
-        experiment_metadata_path = self.run_dir / "experiment.json"
+    def _load_existing_run(self):
+        """Load existing run metadata and manifest."""
+        # Try new filename first, fallback to old
+        run_metadata_path = self.run_dir / ".run.json"
         snapshot_manifest_path = self.run_dir / "snapshots.json"
 
         try:
-            if experiment_metadata_path.exists():
-                self.experiment_metadata = ExperimentMetadata.load(experiment_metadata_path)
-                logger.info(f"Loaded experiment metadata for {self.run_id}")
+            if run_metadata_path.exists():
+                self.run_metadata = ExtendedRunMetadata.load(run_metadata_path)
+                logger.info(f"Loaded run metadata for {self.run_id}")
 
             if snapshot_manifest_path.exists():
                 self.snapshot_manifest = SnapshotManifest.load(snapshot_manifest_path)
@@ -522,7 +523,7 @@ class TrainingRun:
             self.initialized = True
 
         except Exception as e:
-            logger.warning(f"Failed to load existing experiment metadata: {e}")
+            logger.warning(f"Failed to load existing run metadata: {e}")
             self.initialized = False
 
     def save_snapshot(
@@ -542,7 +543,7 @@ class TrainingRun:
             tags: Optional tags (e.g., ["milestone", "best"])
 
         Returns:
-            Path to experiment directory
+            Path to run directory
         """
         # Ensure initialized
         self._ensure_initialized()
@@ -582,10 +583,10 @@ class TrainingRun:
         avg_traversal_depth: float = 0.0,
     ):
         """Update training statistics."""
-        if not self.initialized or self.experiment_metadata is None:
+        if not self.initialized or self.run_metadata is None:
             return
 
-        self.experiment_metadata.update_stats(
+        self.run_metadata.update_stats(
             total_iterations=total_iterations,
             total_runtime_seconds=total_runtime_seconds,
             num_infosets=num_infosets,
@@ -594,23 +595,23 @@ class TrainingRun:
         )
 
         # Save updated metadata
-        self.experiment_metadata.save(self.run_dir / "experiment.json")
+        self.run_metadata.save(self.run_dir / ".run.json")
 
     def mark_completed(self):
-        """Mark experiment as completed."""
-        if self.experiment_metadata is not None:
-            self.experiment_metadata.mark_completed()
-            self.experiment_metadata.save(self.run_dir / "experiment.json")
+        """Mark run as completed."""
+        if self.run_metadata is not None:
+            self.run_metadata.mark_completed()
+            self.run_metadata.save(self.run_dir / ".run.json")
             self.registry.update_status(self.run_id, "completed")
-            logger.info(f"Experiment {self.run_id} marked as completed")
+            logger.info(f"Run {self.run_id} marked as completed")
 
     def mark_failed(self):
-        """Mark experiment as failed."""
-        if self.experiment_metadata is not None:
-            self.experiment_metadata.mark_failed()
-            self.experiment_metadata.save(self.run_dir / "experiment.json")
+        """Mark run as failed."""
+        if self.run_metadata is not None:
+            self.run_metadata.mark_failed()
+            self.run_metadata.save(self.run_dir / ".run.json")
             self.registry.update_status(self.run_id, "failed")
-            logger.info(f"Experiment {self.run_id} marked as failed")
+            logger.info(f"Run {self.run_id} marked as failed")
 
     def get_snapshot(self, iteration: int) -> Optional[Dict[str, Any]]:
         """Get snapshot metadata by iteration."""
@@ -654,7 +655,7 @@ class TrainingRun:
         for run_dir in base_path.iterdir():
             if run_dir.is_dir() and not run_dir.name.startswith("."):
                 # Check if it has metadata
-                if (run_dir / "experiment.json").exists():
+                if (run_dir / ".run.json").exists():
                     runs.append(run_dir.name)
 
         return sorted(runs)
@@ -695,6 +696,6 @@ class TrainingRun:
         num_snapshots = len(self.snapshot_manifest.snapshots) if self.snapshot_manifest else 0
         status = "initialized" if self.initialized else "not initialized"
         return (
-            f"TrainingRun(id={self.run_id}, name={self._experiment_name}, "
+            f"TrainingRun(id={self.run_id}, name={self._run_name}, "
             f"dir={self.run_dir}, snapshots={num_snapshots}, status={status})"
         )

@@ -67,6 +67,6 @@ storage:
 
 # ===== System Configuration =====
 system:
-  config_name: "default"  # Name of the config file (for experiment tracking)
+  config_name: "default"  # Name of the config file
   seed: null  # Random seed (null = random)
   log_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR

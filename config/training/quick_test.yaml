@@ -1,6 +1,19 @@
 # Quick Test Configuration
 # For rapid testing and development (10K iterations)
 
+action_abstraction:
+  preflop:
+    raises: [2.5, 3.5, 5.0]
+
+  postflop:
+    flop:
+      bets: [0.33, 0.66, 1.25]
+    turn:
+      bets: [0.50, 1.0, 1.5]
+    river:
+      bets: [0.50, 1.0, 2.0]
+  all_in_spr_threshold: 2.0
+
 training:
   num_iterations: 10000
   checkpoint_frequency: 1000
@@ -8,7 +21,7 @@ training:
   verbose: true
 
 solver:
-  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
+  sampling_method: "outcome"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
   cfr_plus: true
   linear_cfr: false
 
@@ -18,7 +31,9 @@ card_abstraction:
   config: fast_test
 
 storage:
-  backend: "memory"
+  backend: "disk"
+  cache_size: 100000  # LRU cache size for disk backend
+  flush_frequency: 1000  # Flush dirty infosets every N iterations
 
 system:
   seed: 42  # Fixed seed for reproducibility

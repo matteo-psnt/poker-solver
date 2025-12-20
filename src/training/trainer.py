@@ -11,12 +11,7 @@ from typing import Dict, Optional, Union
 
 from tqdm import tqdm
 
-from src.abstraction.action_abstraction import ActionAbstraction
-from src.abstraction.card_abstraction import CardAbstraction
-from src.abstraction.equity_bucketing import EquityBucketing
-from src.solver.base import BaseSolver
-from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import DiskBackedStorage, InMemoryStorage, Storage
+from src.training import builders
 from src.training.metrics import MetricsTracker
 from src.training.training_run import TrainingRun
 from src.utils.config import Config
@@ -49,109 +44,18 @@ class Trainer:
             config=config.to_dict(),  # Pass full config for metadata
         )
 
-        # Build components (storage needs the run-specific directory)
-        self.action_abstraction = self._build_action_abstraction()
-        self.card_abstraction = self._build_card_abstraction()
-        self.storage = self._build_storage()
-
-        # Build solver
-        self.solver = self._build_solver()
+        # Build components using shared builders
+        self.action_abstraction = builders.build_action_abstraction(config)
+        self.card_abstraction = builders.build_card_abstraction(
+            config, prompt_user=True, auto_compute=False
+        )
+        self.storage = builders.build_storage(config, run_dir=self.training_run.run_dir)
+        self.solver = builders.build_solver(
+            config, self.action_abstraction, self.card_abstraction, self.storage
+        )
 
         # Initialize metrics tracker
         self.metrics = MetricsTracker(window_size=config.get("training.log_frequency", 100))
-
-    def _build_action_abstraction(self) -> ActionAbstraction:
-        """Build action abstraction from config."""
-        action_config = self.config.get_section("action_abstraction")
-        game_config = self.config.get_section("game")
-        big_blind = game_config.get("big_blind", 2)
-        return ActionAbstraction(action_config, big_blind=big_blind)
-
-    def _build_card_abstraction(self) -> CardAbstraction:
-        """Build card abstraction from config."""
-        card_config = self.config.get_section("card_abstraction")
-        abstraction_type = card_config.get("type", "equity_bucketing")
-
-        if abstraction_type == "equity_bucketing":
-            # Check if using new config-based system
-            abstraction_config = card_config.get("config")
-
-            if abstraction_config:
-                from src.abstraction.manager import EquityBucketManager
-
-                manager = EquityBucketManager()
-                bucketing_path = manager.find_or_compute(
-                    config_name=abstraction_config,
-                    auto_compute=False,
-                    prompt_user=True,  # Prompt user if not found
-                )
-                bucketing = EquityBucketing.load(bucketing_path)
-                return bucketing
-
-            # OLD: Direct file path (backward compatibility)
-            bucketing_path = card_config.get("bucketing_path")
-            if not bucketing_path:
-                raise ValueError(
-                    "equity_bucketing requires either 'config' or 'bucketing_path'.\n"
-                    "Recommended: Use 'config: production' to reference an equity bucket config."
-                )
-
-            bucketing_path = Path(bucketing_path)
-            if not bucketing_path.exists():
-                raise FileNotFoundError(
-                    f"Equity bucketing file not found: {bucketing_path}\n"
-                    "Please run 'Precompute Equity Buckets' from the CLI first."
-                )
-
-            bucketing = EquityBucketing.load(bucketing_path)
-            return bucketing
-        else:
-            raise ValueError(
-                f"Unknown card abstraction type: {abstraction_type}\n"
-                "Only 'equity_bucketing' is supported."
-            )
-
-    def _build_storage(self) -> Storage:
-        """Build storage backend from config."""
-        storage_config = self.config.get_section("storage")
-        backend = storage_config.get("backend", "memory")
-
-        if backend == "memory":
-            return InMemoryStorage()
-        elif backend == "disk":
-            # Use the run-specific directory from TrainingRun
-            run_dir = self.training_run.run_dir
-            cache_size = storage_config.get("cache_size", 100000)
-            flush_frequency = storage_config.get("flush_frequency", 1000)
-
-            return DiskBackedStorage(
-                checkpoint_dir=run_dir,
-                cache_size=cache_size,
-                flush_frequency=flush_frequency,
-            )
-        else:
-            raise ValueError(f"Unknown storage backend: {backend}")
-
-    def _build_solver(self) -> BaseSolver:
-        """Build solver from config."""
-        solver_config = self.config.get_section("solver")
-        game_config = self.config.get_section("game")
-        system_config = self.config.get_section("system")
-
-        # Merge configs for solver
-        merged_config = {**game_config, **system_config}
-
-        solver_type = solver_config.get("type", "mccfr")
-
-        if solver_type == "mccfr":
-            return MCCFRSolver(
-                action_abstraction=self.action_abstraction,
-                card_abstraction=self.card_abstraction,
-                storage=self.storage,
-                config=merged_config,
-            )
-        else:
-            raise ValueError(f"Unknown solver type: {solver_type}")
 
     def train(
         self,
@@ -270,7 +174,7 @@ class Trainer:
                 num_infosets=self.solver.num_infosets(),
             )
 
-            # Mark experiment as completed
+            # Mark run as completed
             self.training_run.mark_completed()
 
             # Print final summary
@@ -318,7 +222,7 @@ class Trainer:
             raise
 
         except Exception:
-            # Mark experiment as failed on exception
+            # Mark run as failed on exception
             self.training_run.mark_failed()
             raise
 

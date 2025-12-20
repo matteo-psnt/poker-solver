@@ -3,21 +3,23 @@ Parallel training for MCCFR solver.
 
 Uses multiprocessing to run multiple MCCFR iterations in parallel,
 with periodic synchronization of regret/strategy updates.
+
+Performance optimizations:
+- Abstractions are serialized once and passed to workers (avoids rebuilding)
+- Each worker runs with independent in-memory storage
+- Results are merged after each batch using averaging (regrets) and summing (strategies)
 """
 
 import multiprocessing as mp
 import time
-from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import numpy as np
 from tqdm import tqdm
 
-from src.abstraction.action_abstraction import ActionAbstraction
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
-from src.training.metrics import MetricsTracker
-from src.training.training_run import TrainingRun
+from src.training.trainer import Trainer
 from src.utils.config import Config
 
 
@@ -25,6 +27,8 @@ def _worker_process(
     worker_id: int,
     num_iterations: int,
     config_dict: Dict,
+    serialized_action_abstraction: bytes,
+    serialized_card_abstraction: bytes,
     seed: int,
     result_queue: mp.Queue,
 ) -> None:
@@ -32,14 +36,17 @@ def _worker_process(
     Worker process that runs MCCFR iterations independently.
 
     Each worker:
-    1. Creates its own solver with independent storage
-    2. Runs N iterations with unique random seed
-    3. Returns accumulated regrets/strategies for merging
+    1. Deserializes pre-built abstractions (much faster than rebuilding)
+    2. Creates its own solver with independent storage
+    3. Runs N iterations with unique random seed
+    4. Returns accumulated regrets/strategies for merging
 
     Args:
         worker_id: Unique worker identifier
         num_iterations: Number of iterations for this worker
         config_dict: Configuration dictionary
+        serialized_action_abstraction: Pickled ActionAbstraction
+        serialized_card_abstraction: Pickled CardAbstraction
         seed: Random seed for this worker
         result_queue: Queue to return results
     """
@@ -47,46 +54,21 @@ def _worker_process(
         # Recreate config
         config = Config.from_dict(config_dict)
 
-        # Create independent storage for this worker
+        # Deserialize pre-built abstractions (much faster than rebuilding from disk)
+        import pickle
+
+        action_abstraction = pickle.loads(serialized_action_abstraction)
+        card_abstraction = pickle.loads(serialized_card_abstraction)
+
+        # Workers always use in-memory storage
         storage = InMemoryStorage()
 
-        # Create solver with unique seed
-        solver_config = {
-            "starting_stack": config.get("game.starting_stack", 200),
-            "small_blind": config.get("game.small_blind", 1),
-            "big_blind": config.get("game.big_blind", 2),
-            "seed": seed,  # Unique seed per worker
-        }
+        # Create solver config with unique seed
+        solver_config = config.get_section("game").copy()
+        solver_config.update(config.get_section("system"))
+        solver_config["seed"] = seed  # Unique seed per worker
 
-        # Create abstractions
-        big_blind = config.get("game.big_blind", 2)
-        action_abstraction = ActionAbstraction(config.to_dict(), big_blind=big_blind)
-
-        card_abstraction_type = config.get("card_abstraction.type", "equity_bucketing")
-        if card_abstraction_type == "equity_bucketing":
-            from src.abstraction.equity_bucketing import EquityBucketing
-
-            bucketing_path = config.get("card_abstraction.bucketing_path")
-            if not bucketing_path:
-                raise ValueError("equity_bucketing requires 'bucketing_path' in config")
-
-            from pathlib import Path
-
-            bucketing_path = Path(bucketing_path)
-            if not bucketing_path.exists():
-                raise FileNotFoundError(
-                    f"Equity bucketing file not found: {bucketing_path}\n"
-                    "Please run 'Precompute Equity Buckets' from the CLI first."
-                )
-
-            card_abstraction = EquityBucketing.load(bucketing_path)
-        else:
-            raise ValueError(
-                f"Unknown card abstraction type: {card_abstraction_type}\n"
-                "Only 'equity_bucketing' is supported."
-            )
-
-        # Create solver
+        # Build solver
         solver = MCCFRSolver(
             action_abstraction=action_abstraction,
             card_abstraction=card_abstraction,
@@ -128,9 +110,11 @@ def _worker_process(
         )
 
 
-class ParallelTrainer:
+class ParallelTrainer(Trainer):
     """
     Parallel MCCFR trainer using multiprocessing.
+
+    Inherits from Trainer and overrides train() to use parallel execution.
 
     Strategy:
     1. Split iterations into batches
@@ -155,79 +139,11 @@ class ParallelTrainer:
             num_workers: Number of parallel workers (default: CPU count)
             run_id: Optional run ID for checkpointing
         """
-        self.config = config
+        # Call parent Trainer.__init__ to setup everything
+        super().__init__(config, run_id)
+
+        # Add parallel-specific attribute
         self.num_workers = num_workers or mp.cpu_count()
-
-        # Initialize experiment manager
-        runs_base_dir = Path(config.get("training.runs_dir", "data/runs"))
-        self.training_run = TrainingRun(
-            base_dir=runs_base_dir,
-            experiment_name=run_id,
-            config_name=config.get("system.config_name", "default"),
-            config=config.to_dict(),
-        )
-
-        # Create master storage and solver (for checkpointing)
-        self._setup_master_solver()
-
-        # Metrics tracker
-        self.metrics = MetricsTracker()
-
-    def _setup_master_solver(self):
-        """Setup master solver for checkpointing."""
-        storage_type = self.config.get("storage.type", "memory")
-
-        if storage_type == "memory":
-            storage = InMemoryStorage()
-        elif storage_type == "disk":
-            from src.solver.storage import DiskBackedStorage
-
-            storage_path = Path(self.training_run.run_dir / "storage")
-            storage = DiskBackedStorage(
-                storage_path,
-                cache_size=self.config.get("storage.cache_size", 10000),
-            )
-        else:
-            raise ValueError(f"Unknown storage type: {storage_type}")
-
-        # Create abstractions
-        big_blind = self.config.get("game.big_blind", 2)
-        action_abstraction = ActionAbstraction(self.config, big_blind=big_blind)
-
-        card_abstraction_type = self.config.get("card_abstraction.type", "equity_bucketing")
-        if card_abstraction_type == "equity_bucketing":
-            from src.abstraction.equity_bucketing import EquityBucketing
-
-            bucketing_path = self.config.get("card_abstraction.bucketing_path")
-            if not bucketing_path:
-                raise ValueError("equity_bucketing requires 'bucketing_path' in config")
-
-            bucketing_path = Path(bucketing_path)
-            if not bucketing_path.exists():
-                raise FileNotFoundError(
-                    f"Equity bucketing file not found: {bucketing_path}\n"
-                    "Please run 'Precompute Equity Buckets' from the CLI first."
-                )
-
-            card_abstraction = EquityBucketing.load(bucketing_path)
-        else:
-            raise ValueError(
-                f"Unknown card abstraction type: {card_abstraction_type}\n"
-                "Only 'equity_bucketing' is supported."
-            )
-
-        solver_config = {
-            "starting_stack": self.config.get("game.starting_stack", 200),
-            "small_blind": self.config.get("game.small_blind", 1),
-            "big_blind": self.config.get("game.big_blind", 2),
-        }
-
-        self.solver = MCCFRSolver(
-            action_abstraction=action_abstraction,
-            card_abstraction=card_abstraction,
-            storage=storage,
-            config=solver_config,
-        )
 
     def _merge_worker_results(self, worker_results: List[Dict]):
         """
@@ -299,10 +215,10 @@ class ParallelTrainer:
         batch_size: Optional[int] = None,
     ) -> Dict:
         """
-        Run parallel training.
+        Run parallel training loop (overrides Trainer.train).
 
         Args:
-            num_iterations: Total iterations to run
+            num_iterations: Total iterations to run (overrides config)
             batch_size: Iterations per batch (default: num_workers * 10)
 
         Returns:
@@ -327,6 +243,16 @@ class ParallelTrainer:
 
         training_start_time = time.time()
         completed_iterations = 0
+
+        # Serialize abstractions once (avoids rebuilding in each worker)
+        import pickle
+
+        serialized_action_abstraction = pickle.dumps(self.solver.action_abstraction)
+        serialized_card_abstraction = pickle.dumps(self.solver.card_abstraction)
+        if verbose:
+            print(
+                f"   Serialized abstractions: {len(serialized_action_abstraction) + len(serialized_card_abstraction):,} bytes"
+            )
 
         # Progress bar for batches
         num_batches = (num_iterations + batch_size - 1) // batch_size
@@ -369,6 +295,8 @@ class ParallelTrainer:
                             worker_id,
                             worker_iters,
                             self.config.to_dict(),
+                            serialized_action_abstraction,
+                            serialized_card_abstraction,
                             worker_seed,
                             result_queue,
                         ),
