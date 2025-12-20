@@ -19,7 +19,7 @@ class AbstractionMetadata:
     # Identification
     name: str
     created_at: str
-    abstraction_type: str  # "equity_bucketing" or "rank_based"
+    abstraction_type: str  # "equity_bucketing"
 
     # Configuration
     num_buckets: Dict[str, int]  # Street name -> num buckets

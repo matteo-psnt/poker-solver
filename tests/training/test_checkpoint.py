@@ -4,10 +4,10 @@ import tempfile
 from pathlib import Path
 
 from src.abstraction.action_abstraction import ActionAbstraction
-from src.abstraction.card_abstraction import RankBasedBucketing
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from src.training.checkpoint import CheckpointManager
+from tests.test_helpers import DummyCardAbstraction
 
 
 class TestCheckpointManager:
@@ -40,7 +40,7 @@ class TestCheckpointManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create solver
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
@@ -60,7 +60,7 @@ class TestCheckpointManager:
     def test_list_checkpoints(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
@@ -86,7 +86,7 @@ class TestCheckpointManager:
     def test_get_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
@@ -113,7 +113,7 @@ class TestCheckpointManager:
     def test_get_latest_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
@@ -142,7 +142,7 @@ class TestCheckpointManager:
     def test_get_latest_iteration(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
@@ -160,7 +160,7 @@ class TestCheckpointManager:
     def test_list_runs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
@@ -197,7 +197,7 @@ class TestCheckpointManager:
     def test_from_run_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
@@ -226,7 +226,7 @@ class TestCheckpointManager:
     def test_update_stats(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
@@ -249,7 +249,7 @@ class TestCheckpointManager:
     def test_mark_completed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             action_abs = ActionAbstraction()
-            card_abs = RankBasedBucketing()
+            card_abs = DummyCardAbstraction()
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 

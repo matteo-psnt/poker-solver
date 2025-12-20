@@ -71,12 +71,8 @@ def edit_config(config: Config, custom_style) -> Config:
         style=custom_style,
     ).ask()
 
-    abstraction_type = questionary.select(
-        "Card abstraction type:",
-        choices=["rank_based", "equity_bucketing"],
-        default=config.get("card_abstraction.type", "rank_based"),
-        style=custom_style,
-    ).ask()
+    # Card abstraction is now always equity_bucketing
+    abstraction_type = "equity_bucketing"
 
     checkpoint_freq = questionary.text(
         "Checkpoint frequency:",
