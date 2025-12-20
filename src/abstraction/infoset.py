@@ -196,29 +196,76 @@ class InfoSet:
         else:
             return 0.0
 
-    def update_regret(self, action_idx: int, regret: float):
+    def update_regret(
+        self,
+        action_idx: int,
+        regret: float,
+        cfr_plus: bool = False,
+        linear_cfr: bool = False,
+        iteration: int = 1,
+    ):
         """
         Update cumulative regret for an action.
+
+        Supports multiple CFR variants:
+        - Vanilla CFR: regrets can be negative
+        - CFR+: regrets are floored at 0 (much faster convergence)
+        - Linear CFR: regrets weighted by iteration number
 
         Args:
             action_idx: Index of action in legal_actions
             regret: Regret value to add (can be negative)
+            cfr_plus: If True, floor regrets at 0 (CFR+)
+            linear_cfr: If True, weight by iteration (Linear CFR)
+            iteration: Current iteration (for linear weighting)
         """
         if action_idx < 0 or action_idx >= self.num_actions:
             raise ValueError(f"Invalid action index: {action_idx}")
 
-        self.regrets[action_idx] += regret
+        # Apply weighting for Linear CFR
+        weighted_regret = regret
+        if linear_cfr:
+            # Linear weighting: multiply by iteration number
+            # Can also use (iteration + 1) ** 0.5 for square-root weighting
+            weighted_regret = regret * iteration
 
-    def update_strategy(self, reach_prob: float, node_utility: float = 0.0):
+        # Update regret
+        if cfr_plus:
+            # CFR+: Floor cumulative regrets at 0
+            self.regrets[action_idx] = max(0, self.regrets[action_idx] + weighted_regret)
+        else:
+            # Vanilla CFR: Allow negative regrets
+            self.regrets[action_idx] += weighted_regret
+
+    def update_strategy(
+        self,
+        reach_prob: float,
+        node_utility: float = 0.0,
+        linear_cfr: bool = False,
+        iteration: int = 1,
+    ):
         """
         Update cumulative strategy (weighted by reach probability).
+
+        Supports multiple CFR variants:
+        - Vanilla/CFR+: Uniform weighting
+        - Linear CFR: Weight by iteration number
 
         Args:
             reach_prob: Probability of reaching this infoset
             node_utility: Expected utility at this node (optional)
+            linear_cfr: If True, weight by iteration (Linear CFR)
+            iteration: Current iteration (for linear weighting)
         """
         strategy = self.get_strategy()
-        self.strategy_sum += strategy * reach_prob
+
+        # Apply weighting for Linear CFR
+        weight = reach_prob
+        if linear_cfr:
+            # Linear weighting: multiply by iteration number
+            weight = reach_prob * iteration
+
+        self.strategy_sum += strategy * weight
         self.reach_count += 1
         self.cumulative_utility += node_utility
 

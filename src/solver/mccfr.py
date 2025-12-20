@@ -49,10 +49,16 @@ class MCCFRSolver(BaseSolver):
                 'starting_stack': int (default 200),
                 'small_blind': int (default 1),
                 'big_blind': int (default 2),
-                'seed': int (optional)
+                'seed': int (optional),
+                'cfr_plus': bool (default True),
+                'linear_cfr': bool (default False)
             }
         """
         super().__init__(action_abstraction, card_abstraction, storage, config)
+
+        # CFR variant configuration
+        self.cfr_plus = self.config.get("cfr_plus", True)  # Enable CFR+ by default
+        self.linear_cfr = self.config.get("linear_cfr", False)
 
         # Game configuration
         self.starting_stack = self.config.get("starting_stack", 200)
@@ -223,13 +229,22 @@ class MCCFRSolver(BaseSolver):
             for i in range(len(legal_actions)):
                 regret = action_utilities[i] - node_utility
                 original_idx = valid_indices[i]
-                infoset.update_regret(original_idx, regret * reach_probs[opponent])
+                infoset.update_regret(
+                    original_idx,
+                    regret * reach_probs[opponent],
+                    cfr_plus=self.cfr_plus,
+                    linear_cfr=self.linear_cfr,
+                    iteration=self.iteration,
+                )
 
             # Update average strategy (weighted by player reach probability)
             # Only update valid actions in the strategy sum
             for i in range(len(legal_actions)):
                 original_idx = valid_indices[i]
-                infoset.strategy_sum[original_idx] += strategy[i] * reach_probs[current_player]
+                weight = strategy[i] * reach_probs[current_player]
+                if self.linear_cfr:
+                    weight *= self.iteration
+                infoset.strategy_sum[original_idx] += weight
             infoset.reach_count += 1
             infoset.cumulative_utility += node_utility
 
