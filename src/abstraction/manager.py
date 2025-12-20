@@ -14,11 +14,11 @@ from typing import Dict, List, Optional
 import yaml
 
 from src.abstraction.metadata import (
-    AbstractionMetadata,
+    EquityBucketMetadata,
     compute_config_hash,
     generate_abstraction_name,
 )
-from src.abstraction.registry import AbstractionRegistry
+from src.abstraction.registry import EquityBucketRegistry
 
 
 def _find_abstraction_file(directory: Path) -> Optional[Path]:
@@ -44,8 +44,8 @@ def _find_abstraction_file(directory: Path) -> Optional[Path]:
     return None
 
 
-class AbstractionManager:
-    """Manages card abstraction storage and retrieval with registry."""
+class EquityBucketManager:
+    """Manages equity bucket storage and retrieval with registry."""
 
     def __init__(self, base_dir: Path = None):
         """
@@ -62,12 +62,12 @@ class AbstractionManager:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize registry
-        self.registry = AbstractionRegistry(self.base_dir / ".registry.json")
+        self.registry = EquityBucketRegistry(self.base_dir / ".registry.json")
 
     def save_abstraction(
         self,
         bucketing_file: Path,
-        metadata: AbstractionMetadata,
+        metadata: EquityBucketMetadata,
         aliases: Optional[List[str]] = None,
         auto_name: bool = True,
     ) -> Path:
@@ -162,7 +162,7 @@ class AbstractionManager:
             try:
                 with open(metadata_file, "r") as f:
                     metadata_dict = json.load(f)
-                metadata = AbstractionMetadata.from_dict(metadata_dict)
+                metadata = EquityBucketMetadata.from_dict(metadata_dict)
                 abstractions.append((metadata.name, item, metadata))
             except Exception as e:
                 print(f"Warning: Failed to load metadata from {item}: {e}")
@@ -223,7 +223,7 @@ class AbstractionManager:
             with open(metadata_file, "r") as f:
                 metadata_dict = json.load(f)
 
-            metadata = AbstractionMetadata.from_dict(metadata_dict)
+            metadata = EquityBucketMetadata.from_dict(metadata_dict)
             if new_alias not in metadata.aliases:
                 metadata.aliases.append(new_alias)
 
@@ -326,7 +326,7 @@ class AbstractionManager:
         precompute_config = PrecomputeConfig.from_dict(config_dict)
 
         # Create metadata for hash computation
-        metadata = AbstractionMetadata(
+        metadata = EquityBucketMetadata(
             name="",  # Will be generated
             created_at=datetime.now().isoformat(),
             abstraction_type="equity_bucketing",

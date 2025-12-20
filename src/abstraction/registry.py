@@ -10,11 +10,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.abstraction.metadata import RegistryEntry
+from src.abstraction.metadata import BucketEntry
 
 
-class AbstractionRegistry:
-    """Registry for tracking abstractions by config hash and aliases."""
+class EquityBucketRegistry:
+    """Registry for tracking equity buckets by config hash and aliases."""
 
     def __init__(self, registry_file: Path):
         """
@@ -24,7 +24,7 @@ class AbstractionRegistry:
             registry_file: Path to registry JSON file
         """
         self.registry_file = Path(registry_file)
-        self.entries: Dict[str, RegistryEntry] = {}
+        self.entries: Dict[str, BucketEntry] = {}
         self._alias_map: Dict[str, str] = {}  # alias -> name
 
         # Load existing registry if it exists
@@ -41,7 +41,7 @@ class AbstractionRegistry:
             self._alias_map = {}
 
             for name, entry_data in data.get("entries", {}).items():
-                entry = RegistryEntry.from_dict(entry_data)
+                entry = BucketEntry.from_dict(entry_data)
                 self.entries[name] = entry
 
                 # Build alias map
@@ -83,7 +83,7 @@ class AbstractionRegistry:
         """
         aliases = aliases or []
 
-        entry = RegistryEntry(
+        entry = BucketEntry(
             name=name,
             config_hash=config_hash,
             path=str(path),
@@ -99,7 +99,7 @@ class AbstractionRegistry:
 
         self.save()
 
-    def get(self, name_or_alias: str) -> Optional[RegistryEntry]:
+    def get(self, name_or_alias: str) -> Optional[BucketEntry]:
         """
         Get registry entry by name or alias.
 
@@ -120,7 +120,7 @@ class AbstractionRegistry:
 
         return None
 
-    def find_by_config_hash(self, config_hash: str) -> Optional[RegistryEntry]:
+    def find_by_config_hash(self, config_hash: str) -> Optional[BucketEntry]:
         """
         Find abstraction by config hash.
 
@@ -166,6 +166,6 @@ class AbstractionRegistry:
             del self._alias_map[alias]
             self.save()
 
-    def list_all(self) -> List[RegistryEntry]:
+    def list_all(self) -> List[BucketEntry]:
         """List all registered abstractions."""
         return list(self.entries.values())

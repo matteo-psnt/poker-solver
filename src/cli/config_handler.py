@@ -87,17 +87,25 @@ def edit_config(config: Config, custom_style) -> Config:
     config.set("training.checkpoint_frequency", int(checkpoint_freq))
 
     if abstraction_type == "equity_bucketing":
-        default_path = "data/equity_buckets/equity_buckets.pkl"
-        bucketing_path = questionary.text(
-            "Equity bucketing file path:",
-            default=config.get("card_abstraction.bucketing_path", default_path),
+        # Use config-based approach
+        default_config = config.get("card_abstraction.config", "production")
+
+        config_name = questionary.text(
+            "Equity bucketing config name:",
+            default=default_config,
             style=custom_style,
         ).ask()
 
-        config.set("card_abstraction.bucketing_path", bucketing_path)
+        config.set("card_abstraction.config", config_name)
 
-        if not Path(bucketing_path).exists():
-            print(f"\n[!] Warning: Equity bucketing file not found: {bucketing_path}")
+        # Check if the config exists
+        from src.abstraction.manager import EquityBucketManager
+
+        manager = EquityBucketManager()
+        abstraction_path = manager.get_abstraction(config_name)
+
+        if not abstraction_path:
+            print(f"\n[!] Warning: Equity bucketing config not found: {config_name}")
             precompute = questionary.confirm(
                 "Would you like to precompute equity buckets now?",
                 default=True,

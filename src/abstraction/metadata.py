@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
 
-def compute_config_hash(metadata: "AbstractionMetadata") -> str:
+def compute_config_hash(metadata: "EquityBucketMetadata") -> str:
     """
     Compute a short hash of the abstraction configuration.
 
@@ -42,7 +42,7 @@ def compute_config_hash(metadata: "AbstractionMetadata") -> str:
     return hash_obj.hexdigest()[:6]
 
 
-def generate_abstraction_name(metadata: "AbstractionMetadata") -> str:
+def generate_abstraction_name(metadata: "EquityBucketMetadata") -> str:
     """
     Generate standardized name from configuration.
 
@@ -76,8 +76,8 @@ def generate_abstraction_name(metadata: "AbstractionMetadata") -> str:
 
 
 @dataclass
-class AbstractionMetadata:
-    """Metadata for a card abstraction."""
+class EquityBucketMetadata:
+    """Metadata for equity bucket configuration."""
 
     # Identification
     name: str
@@ -103,7 +103,7 @@ class AbstractionMetadata:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AbstractionMetadata":
+    def from_dict(cls, data: dict) -> "EquityBucketMetadata":
         """
         Create from dictionary with backward compatibility.
 
@@ -156,8 +156,8 @@ class AbstractionMetadata:
 
 
 @dataclass
-class RegistryEntry:
-    """Entry in the abstraction registry."""
+class BucketEntry:
+    """Entry in the equity bucket registry."""
 
     name: str
     config_hash: str
@@ -170,6 +170,6 @@ class RegistryEntry:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "RegistryEntry":
+    def from_dict(cls, data: dict) -> "BucketEntry":
         """Create from dictionary."""
         return cls(**data)

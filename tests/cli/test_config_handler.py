@@ -26,7 +26,7 @@ training:
 
 card_abstraction:
   type: equity_bucketing
-  bucketing_path: data/abstractions/equity_buckets.pkl
+  config: production
 """
     )
 
