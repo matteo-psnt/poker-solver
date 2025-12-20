@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 # Module-level cache for action normalization (performance optimization)
-# Maps (ActionType, amount, pot) -> normalized string
+# Maps (ActionType.value, amount, pot) -> normalized string
+# Limited size to prevent unbounded growth
 _NORMALIZE_CACHE: dict = {}
+_NORMALIZE_CACHE_MAX_SIZE = 10000
 
 
 class ActionType(Enum):
@@ -92,12 +94,17 @@ class Action:
             return "a"
 
         # For amount-based actions, use module-level cache
-        # Key is (action_type, amount, pot) tuple
-        cache_key = (self.type, self.amount, pot)
+        # Key is (action_type_value, amount, pot) tuple
+        # Use type.value instead of type enum for faster hashing
+        cache_key = (self.type.value, self.amount, pot)
 
         global _NORMALIZE_CACHE
         if cache_key in _NORMALIZE_CACHE:
             return _NORMALIZE_CACHE[cache_key]
+
+        # Clear cache if it gets too large (prevent unbounded growth)
+        if len(_NORMALIZE_CACHE) >= _NORMALIZE_CACHE_MAX_SIZE:
+            _NORMALIZE_CACHE.clear()
 
         # Compute normalized form
         if self.type == ActionType.BET:

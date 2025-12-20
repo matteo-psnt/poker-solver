@@ -68,8 +68,6 @@ class TestEquityPerformance:
 
     def test_parallel_equity_faster_than_sequential(self):
         """Test that parallel computation is actually faster."""
-        PrecomputeConfig.fast_test()
-
         # Generate small sample for testing
         boards = generate_boards_optimized(
             street=Street.FLOP, num_samples=50, seed=42, show_progress=False
@@ -216,10 +214,11 @@ class TestEquityBucketingWorkflow:
             },
             num_equity_samples=20,
             num_samples_per_cluster=2,
-            output_file=tmp_path / "test_bucketing.pkl",
             seed=42,
             num_workers=2,  # Use parallel
         )
+
+        output_file = tmp_path / "test_bucketing.pkl"
 
         # Generate boards
         sample_boards = {}
@@ -277,10 +276,10 @@ class TestEquityBucketingWorkflow:
         assert 0 <= bucket < config.num_buckets[Street.FLOP]
 
         # Save and load
-        bucketing.save(config.output_file)
-        assert config.output_file.exists()
+        bucketing.save(output_file)
+        assert output_file.exists()
 
-        loaded = EquityBucketing.load(config.output_file)
+        loaded = EquityBucketing.load(output_file)
         assert loaded.fitted
 
         # Verify loaded bucketing gives same results
