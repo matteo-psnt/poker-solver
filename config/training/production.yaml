@@ -62,7 +62,6 @@ training:
   num_iterations: 1000000  # 1M iterations
   checkpoint_frequency: 1000  # Checkpoint every 1K iterations
   log_frequency: 1000  # Log every 1K iterations
-  checkpoint_dir: "data/checkpoints/production"
   verbose: true
 
 # ===== Storage Configuration =====

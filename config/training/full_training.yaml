@@ -5,7 +5,6 @@ training:
   num_iterations: 10000000
   checkpoint_frequency: 10000
   log_frequency: 1000
-  checkpoint_dir: "data/checkpoints/full_training"
   verbose: true
 
 solver:
