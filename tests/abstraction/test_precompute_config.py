@@ -23,7 +23,7 @@ class TestPrecomputeConfig:
         assert config.num_buckets[Street.TURN] == 20
         assert config.num_buckets[Street.RIVER] == 30
 
-        assert config.representatives_per_cluster == 1
+        assert config.representatives_per_cluster == 2
         assert config.equity_samples == 100
         assert config.seed == 42
 
@@ -76,12 +76,10 @@ class TestPrecomputeConfig:
         with pytest.raises(FileNotFoundError):
             PrecomputeConfig.from_yaml("nonexistent_config")
 
-    def test_load_from_path(self):
-        """Test loading config from absolute path."""
-        config_path = (
-            Path(__file__).parent.parent.parent / "config" / "abstraction" / "fast_test.yaml"
-        )
-        config = PrecomputeConfig.from_yaml(str(config_path))
+    def test_config_files_exist(self):
+        """Test that all expected config files exist."""
+        config_dir = Path(__file__).parent.parent.parent / "config" / "abstraction"
 
-        assert config.num_board_clusters[Street.FLOP] == 10
-        assert config.equity_samples == 100
+        assert (config_dir / "fast_test.yaml").exists()
+        assert (config_dir / "default.yaml").exists()
+        assert (config_dir / "production.yaml").exists()

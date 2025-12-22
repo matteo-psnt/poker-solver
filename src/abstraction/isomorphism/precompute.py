@@ -127,6 +127,16 @@ class PrecomputeConfig:
             kmeans_n_init=data.get("kmeans_n_init", 10),
         )
 
+    @classmethod
+    def default(cls) -> "PrecomputeConfig":
+        """Load the default configuration."""
+        return cls.from_yaml("default")
+
+    @classmethod
+    def fast_test(cls) -> "PrecomputeConfig":
+        """Load the fast_test configuration for quick testing."""
+        return cls.from_yaml("fast_test")
+
 
 @dataclass
 class ComboEquity:
