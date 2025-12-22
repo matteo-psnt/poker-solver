@@ -6,13 +6,12 @@ Provides centralized, reusable functions for building solver components
 and ParallelTrainer to eliminate code duplication.
 """
 
+import json
 from pathlib import Path
 from typing import Optional
 
 from src.abstraction.core.action_abstraction import ActionAbstraction
 from src.abstraction.core.card_abstraction import CardAbstraction
-from src.abstraction.equity.equity_bucketing import EquityBucketing
-from src.abstraction.equity.manager import EquityBucketManager
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import DiskBackedStorage, InMemoryStorage, Storage
@@ -41,9 +40,7 @@ def build_card_abstraction(
     """
     Build card abstraction from config.
 
-    Supports two modes:
-    1. Config-based (recommended): Uses EquityBucketManager to find/load abstraction
-    2. Direct path (legacy): Loads from explicit file path
+    Uses combo-level abstraction with suit isomorphism for correct postflop bucketing.
 
     Args:
         config: Configuration object
@@ -51,47 +48,78 @@ def build_card_abstraction(
         auto_compute: Whether to auto-compute if abstraction not found
 
     Returns:
-        CardAbstraction instance (typically EquityBucketing)
+        CardAbstraction instance (ComboAbstraction)
 
     Raises:
         ValueError: If config is invalid
-        FileNotFoundError: If bucketing file doesn't exist
+        FileNotFoundError: If abstraction file doesn't exist
     """
     card_config = config.get_section("card_abstraction")
-    abstraction_type = card_config.get("type", "equity_bucketing")
 
-    if abstraction_type == "equity_bucketing":
-        # Check for direct file path FIRST (higher priority, for testing/override)
-        bucketing_path = card_config.get("bucketing_path")
-        if bucketing_path:
-            bucketing_path = Path(bucketing_path)
-            if not bucketing_path.exists():
-                raise FileNotFoundError(
-                    f"Equity bucketing file not found: {bucketing_path}\n"
-                    "Please run 'Precompute Equity Buckets' from the CLI first."
-                )
-            return EquityBucketing.load(bucketing_path)
+    # Get the abstraction path/config
+    abstraction_path = card_config.get("abstraction_path")
+    abstraction_config = card_config.get("config")
 
-        # NEW: Config-based system (uses EquityBucketManager)
-        abstraction_config = card_config.get("config")
-        if abstraction_config:
-            manager = EquityBucketManager()
-            manager_path = manager.find_or_compute(
-                config_name=abstraction_config,
-                auto_compute=auto_compute,
-                prompt_user=prompt_user,
+    if abstraction_path:
+        # Direct path provided
+        abstraction_path = Path(abstraction_path)
+        if not abstraction_path.exists():
+            raise FileNotFoundError(
+                f"Combo abstraction file not found: {abstraction_path}\n"
+                "Please run 'Precompute Combo Abstraction' from the CLI first."
             )
-            return EquityBucketing.load(manager_path)
+        from src.abstraction.isomorphism.precompute import ComboPrecomputer
 
-        # Neither config nor path provided
-        raise ValueError(
-            "equity_bucketing requires either 'config' or 'bucketing_path'.\n"
-            "Recommended: Use 'config: production' to reference an equity bucket config."
-        )
+        return ComboPrecomputer.load(abstraction_path)
+
+    elif abstraction_config:
+        # Config name provided - look for matching abstraction
+        base_path = Path("data/combo_abstraction")
+
+        if not base_path.exists():
+            raise FileNotFoundError(
+                f"No combo abstractions found (directory doesn't exist: {base_path}).\n"
+                f"Please run 'Precompute Combo Abstraction' from the CLI with config '{abstraction_config}'.yaml first."
+            )
+
+        # Find abstraction matching this config name
+        matching = []
+        if base_path.exists():
+            for path in base_path.iterdir():
+                if not path.is_dir():
+                    continue
+
+                metadata_file = path / "metadata.json"
+                if not metadata_file.exists():
+                    continue
+
+                try:
+                    with open(metadata_file) as f:
+                        metadata = json.load(f)
+
+                    # Check if config_name matches
+                    saved_config_name = metadata.get("config", {}).get("config_name")
+                    if saved_config_name == abstraction_config:
+                        matching.append(path)
+                except Exception:
+                    continue
+
+        if not matching:
+            raise FileNotFoundError(
+                f"No combo abstraction found for config '{abstraction_config}'.\n"
+                f"Please run 'Precompute Combo Abstraction' from the CLI first with {abstraction_config}.yaml."
+            )
+
+        # Use most recent if multiple matches
+        most_recent = max(matching, key=lambda p: p.stat().st_mtime)
+        from src.abstraction.isomorphism.precompute import ComboPrecomputer
+
+        return ComboPrecomputer.load(most_recent)
+
     else:
         raise ValueError(
-            f"Unknown card abstraction type: {abstraction_type}\n"
-            "Only 'equity_bucketing' is supported."
+            "card_abstraction requires either 'config' or 'abstraction_path'.\n"
+            "Example: config: default"
         )
 
 

@@ -13,8 +13,7 @@ solver:
   linear_cfr: false
 
 card_abstraction:
-  type: "equity_bucketing"
-  # Reference abstraction config by name
+  # Combo-level abstraction (production settings for full training)
   config: production
 
 storage:
