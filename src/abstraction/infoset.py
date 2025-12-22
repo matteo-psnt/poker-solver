@@ -12,6 +12,7 @@ import numpy as np
 
 from src.game.actions import Action
 from src.game.state import Street
+from src.utils.numba_ops import average_strategy, regret_matching
 
 
 @dataclass(frozen=True)
@@ -151,18 +152,8 @@ class InfoSet:
         Returns:
             Probability distribution over actions (sums to 1)
         """
-        # Positive regrets only
-        positive_regrets = np.maximum(self.regrets, 0)
-        sum_positive = np.sum(positive_regrets)
-
-        if sum_positive > 0:
-            # Normalize to probability distribution
-            strategy = positive_regrets / sum_positive
-        else:
-            # Uniform strategy if all regrets non-positive
-            strategy = np.ones(self.num_actions) / self.num_actions
-
-        return strategy
+        # Use Numba-optimized regret matching (or fallback)
+        return regret_matching(self.regrets)
 
     def get_average_strategy(self) -> np.ndarray:
         """
@@ -173,16 +164,8 @@ class InfoSet:
         Returns:
             Probability distribution over actions (sums to 1)
         """
-        sum_strategy = np.sum(self.strategy_sum)
-
-        if sum_strategy > 0:
-            # Normalize to probability distribution
-            avg_strategy = self.strategy_sum / sum_strategy
-        else:
-            # Uniform if never updated (shouldn't happen in practice)
-            avg_strategy = np.ones(self.num_actions) / self.num_actions
-
-        return avg_strategy
+        # Use Numba-optimized average strategy computation (or fallback)
+        return average_strategy(self.strategy_sum)
 
     def get_average_utility(self) -> float:
         """
