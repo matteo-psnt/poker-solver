@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.abstraction.utils.infoset import InfoSetKey
+from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import bet, call, fold
 from src.game.state import Street
 from src.solver.storage import DiskBackedStorage, InMemoryStorage

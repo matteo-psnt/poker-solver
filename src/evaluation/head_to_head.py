@@ -11,8 +11,8 @@ from typing import List, Optional
 import numpy as np
 from treys import Deck
 
-from src.abstraction.core.action_abstraction import ActionAbstraction
-from src.abstraction.core.card_abstraction import CardAbstraction
+from src.actions.betting_actions import BettingActions
+from src.bucketing.base import BucketingStrategy
 from src.game.actions import Action, ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
@@ -93,8 +93,8 @@ class HeadToHeadEvaluator:
     def __init__(
         self,
         rules: GameRules,
-        action_abstraction: ActionAbstraction,
-        card_abstraction: CardAbstraction,
+        action_abstraction: BettingActions,
+        card_abstraction: BucketingStrategy,
         starting_stack: int = 200,
     ):
         """

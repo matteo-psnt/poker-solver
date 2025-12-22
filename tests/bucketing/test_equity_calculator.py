@@ -1,6 +1,6 @@
 """Tests for equity calculator."""
 
-from src.abstraction.utils import EquityCalculator
+from src.bucketing.utils import EquityCalculator
 from src.game.state import Card, Street
 
 

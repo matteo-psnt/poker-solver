@@ -6,11 +6,11 @@ Maps hole card pairs to canonical 169-hand notation (e.g., AKs, 72o, TT).
 
 from typing import Tuple
 
-from src.abstraction.utils.card_utils import cards_have_same_suit, get_rank_char
+from src.bucketing.utils.card_utils import cards_have_same_suit, get_rank_char
 from src.game.state import Card
 
 
-class PreflopHandMapper:
+class PreflopHandClasses:
     """
     Maps hole cards to canonical preflop hand representation.
 
@@ -119,24 +119,24 @@ class PreflopHandMapper:
         hands = []
 
         # Pairs
-        for rank in PreflopHandMapper.RANKS:
+        for rank in PreflopHandClasses.RANKS:
             hands.append(f"{rank}{rank}")
 
         # Suited
-        for i, high in enumerate(PreflopHandMapper.RANKS):
-            for low in PreflopHandMapper.RANKS[i + 1 :]:
+        for i, high in enumerate(PreflopHandClasses.RANKS):
+            for low in PreflopHandClasses.RANKS[i + 1 :]:
                 hands.append(f"{high}{low}s")
 
         # Offsuit
-        for i, high in enumerate(PreflopHandMapper.RANKS):
-            for low in PreflopHandMapper.RANKS[i + 1 :]:
+        for i, high in enumerate(PreflopHandClasses.RANKS):
+            for low in PreflopHandClasses.RANKS[i + 1 :]:
                 hands.append(f"{high}{low}o")
 
         return hands
 
     def __str__(self) -> str:
         """String representation."""
-        return "PreflopHandMapper(169 hands)"
+        return "PreflopHandClasses(169 hands)"
 
 
 def get_preflop_hand_string(hole_cards: Tuple[Card, Card]) -> str:
@@ -149,5 +149,5 @@ def get_preflop_hand_string(hole_cards: Tuple[Card, Card]) -> str:
     Returns:
         Canonical hand string
     """
-    mapper = PreflopHandMapper()
+    mapper = PreflopHandClasses()
     return mapper.get_hand_string(hole_cards)

@@ -1,9 +1,9 @@
 """Test helpers for poker solver tests."""
 
-from src.abstraction.core.card_abstraction import CardAbstraction
+from src.bucketing.base import BucketingStrategy
 
 
-class DummyCardAbstraction(CardAbstraction):
+class DummyCardAbstraction(BucketingStrategy):
     """
     Minimal card abstraction for testing.
 

@@ -24,23 +24,23 @@ import numpy as np
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
-from src.abstraction.isomorphism.board_clustering import BoardClusterer
-from src.abstraction.isomorphism.canonical_boards import (
+from src.bucketing.postflop.board_clustering import BoardClusterer
+from src.bucketing.postflop.board_enumeration import (
     CanonicalBoardEnumerator,
 )
-from src.abstraction.isomorphism.combo_abstraction import (
-    CanonicalCombo,
-    ComboAbstraction,
-    get_all_canonical_combos,
+from src.bucketing.postflop.hand_bucketing import (
+    CanonicalHand,
+    PostflopBucketer,
+    get_all_canonical_hands,
     get_representative_hand,
 )
-from src.abstraction.isomorphism.suit_canonicalization import (
+from src.bucketing.postflop.suit_isomorphism import (
     CanonicalCard,
     canonicalize_board,
     get_canonical_board_id,
     get_canonical_hand_id,
 )
-from src.abstraction.utils import EquityCalculator
+from src.bucketing.utils import EquityCalculator
 from src.game.state import Card, Street
 
 logger = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ class PrecomputeConfig:
 class ComboEquity:
     """Equity information for a canonical combo."""
 
-    combo: CanonicalCombo
+    combo: CanonicalHand
     equity: float
 
     # For debugging/verification
@@ -211,7 +211,7 @@ def _worker_compute_board_equities(args) -> List[Tuple[int, int, float]]:
     results = []
 
     # Get all canonical combos for this board
-    for i, combo in enumerate(get_all_canonical_combos(board_info.representative)):
+    for i, combo in enumerate(get_all_canonical_hands(board_info.representative)):
         board_id, hand_id, equity = compute_equity_for_combo(
             canonical_board=combo.board,
             canonical_hand=combo.hand,
@@ -229,7 +229,7 @@ def _worker_compute_cluster_equities(args) -> List[Tuple[int, int, int, float]]:
     board_info, cluster_id, equity_samples, seed = args
     results = []
 
-    for i, combo in enumerate(get_all_canonical_combos(board_info.representative)):
+    for i, combo in enumerate(get_all_canonical_hands(board_info.representative)):
         board_id, hand_id, equity = compute_equity_for_combo(
             canonical_board=combo.board,
             canonical_hand=combo.hand,
@@ -242,7 +242,7 @@ def _worker_compute_cluster_equities(args) -> List[Tuple[int, int, int, float]]:
     return results
 
 
-class ComboPrecomputer:
+class PostflopPrecomputer:
     """
     Precomputes combo-level abstraction data using board clustering.
 
@@ -270,7 +270,7 @@ class ComboPrecomputer:
         }
 
         # Final abstraction object
-        self.abstraction = ComboAbstraction()
+        self.abstraction = PostflopBucketer()
 
         # Attach board clusterer to abstraction for runtime use
         self.abstraction._board_clusterer = self.board_clusterer
@@ -334,7 +334,7 @@ class ComboPrecomputer:
         for cluster in clusters:
             for rep_board in cluster.representative_boards:
                 # Create a minimal board info for the worker
-                from src.abstraction.isomorphism.canonical_boards import CanonicalBoardInfo
+                from src.bucketing.postflop.board_enumeration import CanonicalBoardInfo
 
                 canonical_rep, _ = canonicalize_board(rep_board)
                 board_info = CanonicalBoardInfo(
@@ -457,7 +457,7 @@ class ComboPrecomputer:
     def precompute_all(
         self,
         streets: Optional[List[Street]] = None,
-    ) -> ComboAbstraction:
+    ) -> PostflopBucketer:
         """
         Precompute abstraction for all streets.
 
@@ -465,7 +465,7 @@ class ComboPrecomputer:
             streets: Which streets to precompute (default: all postflop)
 
         Returns:
-            Fitted ComboAbstraction object
+            Fitted PostflopBucketer object
         """
         if streets is None:
             streets = [Street.FLOP, Street.TURN, Street.RIVER]
@@ -480,7 +480,7 @@ class ComboPrecomputer:
         Save precomputed abstraction to disk.
 
         Creates:
-        - combo_abstraction.pkl: The ComboAbstraction object (includes board_clusterer)
+        - combo_abstraction.pkl: The PostflopBucketer object (includes board_clusterer)
         - metadata.json: Configuration and statistics
         """
         path = Path(path)
@@ -521,7 +521,7 @@ class ComboPrecomputer:
         logger.info(f"Saved abstraction to {path}")
 
     @classmethod
-    def load(cls, path: Path) -> ComboAbstraction:
+    def load(cls, path: Path) -> PostflopBucketer:
         """
         Load precomputed abstraction from disk.
 
@@ -529,7 +529,7 @@ class ComboPrecomputer:
             path: Directory containing saved abstraction
 
         Returns:
-            Loaded ComboAbstraction object
+            Loaded PostflopBucketer object
         """
         path = Path(path)
 
@@ -561,7 +561,7 @@ def estimate_precompute_time(
         sample_boards = list(enumerator.iterate())[:sample_size]
 
         for board_info in sample_boards:
-            for combo in get_all_canonical_combos(board_info.representative):
+            for combo in get_all_canonical_hands(board_info.representative):
                 # Just enumerate, don't compute equity for estimate
                 pass
 

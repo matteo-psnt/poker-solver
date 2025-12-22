@@ -9,9 +9,9 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from src.abstraction.core.action_abstraction import ActionAbstraction
-from src.abstraction.core.card_abstraction import CardAbstraction
-from src.abstraction.utils.infoset import InfoSetKey
+from src.actions.betting_actions import BettingActions
+from src.bucketing.base import BucketingStrategy
+from src.bucketing.utils.infoset import InfoSetKey
 from src.solver.storage import Storage
 
 
@@ -24,8 +24,8 @@ class BaseSolver(ABC):
 
     def __init__(
         self,
-        action_abstraction: ActionAbstraction,
-        card_abstraction: CardAbstraction,
+        action_abstraction: BettingActions,
+        card_abstraction: BucketingStrategy,
         storage: Storage,
         config: Optional[Dict] = None,
     ):

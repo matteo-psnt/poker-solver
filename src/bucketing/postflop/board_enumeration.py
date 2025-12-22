@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Dict, Iterator, Optional, Set, Tuple
 
-from src.abstraction.isomorphism.suit_canonicalization import (
+from src.bucketing.postflop.suit_isomorphism import (
     RANKS,
     CanonicalCard,
     canonicalize_board,

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.abstraction.isomorphism import PrecomputeConfig
+from src.bucketing.postflop import PrecomputeConfig
 from src.game.state import Street
 
 

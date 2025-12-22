@@ -125,7 +125,7 @@ Cluster 2: Two-tone, unconnected (moderate texture)
 
 ### 4. `combo_abstraction.py` - Main Abstraction Class
 
-The `ComboAbstraction` class provides the runtime interface:
+The `PostflopBucketer` class provides the runtime interface:
 
 ```python
 # Get bucket for a hand+board combination
@@ -193,10 +193,10 @@ uv run python -m scripts.cli
 # Select "Precompute Combo Abstraction"
 
 # Or directly
-from src.abstraction.isomorphism.precompute import ComboPrecomputer, PrecomputeConfig
+from src.bucketing.postflop.precompute import PostflopPrecomputer, PrecomputeConfig
 
 config = PrecomputeConfig.from_yaml("default")
-precomputer = ComboPrecomputer(config)
+precomputer = PostflopPrecomputer(config)
 precomputer.precompute_all()
 precomputer.save(Path("data/combo_abstraction/my_abstraction"))
 ```
@@ -204,11 +204,11 @@ precomputer.save(Path("data/combo_abstraction/my_abstraction"))
 ### Load and Use
 
 ```python
-from src.abstraction.isomorphism.precompute import ComboPrecomputer
+from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.game.state import Card, Street
 
 # Load precomputed abstraction
-abstraction = ComboPrecomputer.load(Path("data/combo_abstraction/my_abstraction"))
+abstraction = PostflopPrecomputer.load(Path("data/combo_abstraction/my_abstraction"))
 
 # Get bucket for a game state
 bucket = abstraction.get_bucket(
@@ -258,7 +258,7 @@ config/abstraction/
 
 data/combo_abstraction/
 ├── buckets-F50T100R200-C50C100C200-s1000-{hash}/
-│   ├── combo_abstraction.pkl  # Pickled ComboAbstraction
+│   ├── combo_abstraction.pkl  # Pickled PostflopBucketer
 │   └── metadata.json          # Config and statistics
 └── ...
 ```

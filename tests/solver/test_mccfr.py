@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.abstraction.core.action_abstraction import ActionAbstraction
+from src.actions.betting_actions import BettingActions
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from tests.test_helpers import DummyCardAbstraction
@@ -12,7 +12,7 @@ class TestMCCFRSolver:
     """Tests for MCCFRSolver."""
 
     def test_create_solver(self):
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
 
@@ -22,7 +22,7 @@ class TestMCCFRSolver:
         assert solver.num_infosets() == 0
 
     def test_deal_initial_state(self):
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
@@ -39,7 +39,7 @@ class TestMCCFRSolver:
 
     def test_train_iteration_executes(self):
         """Test that one iteration completes without error."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
@@ -53,7 +53,7 @@ class TestMCCFRSolver:
 
     def test_multiple_iterations(self):
         """Test multiple training iterations."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
@@ -66,7 +66,7 @@ class TestMCCFRSolver:
 
     def test_infosets_accumulate(self):
         """Test that infosets accumulate over iterations."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
@@ -84,7 +84,7 @@ class TestMCCFRSolver:
 
     def test_strategies_update(self):
         """Test that strategies are updated during training."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
@@ -103,7 +103,7 @@ class TestMCCFRSolver:
 
     def test_is_chance_node(self):
         """Test chance node detection."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
@@ -117,7 +117,7 @@ class TestMCCFRSolver:
 
     def test_sample_chance_outcome_deals_cards(self):
         """Test that chance node sampling deals cards."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
@@ -162,7 +162,7 @@ class TestMCCFRSolver:
         - Card dealing randomness
         - Action abstraction consistency
         """
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
 
         # Run with seed 42
@@ -187,7 +187,7 @@ class TestMCCFRSolver:
 
     def test_checkpoint(self):
         """Test that checkpoint doesn't crash."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
@@ -196,7 +196,7 @@ class TestMCCFRSolver:
         solver.checkpoint()  # Should not crash
 
     def test_str_representation(self):
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
@@ -207,7 +207,7 @@ class TestMCCFRSolver:
 
     def test_custom_stack_size(self):
         """Test solver with custom stack size."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"starting_stack": 100})
@@ -220,7 +220,7 @@ class TestMCCFRSolver:
 
     def test_train_verbose(self):
         """Test verbose training runs without error."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
@@ -231,7 +231,7 @@ class TestMCCFRSolver:
 
     def test_train_return_statistics(self):
         """Test that train() returns correct statistics."""
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
@@ -246,10 +246,10 @@ class TestMCCFRSolver:
 
     def test_get_average_strategy_nonexistent_infoset(self):
         """Test get_average_strategy with non-existent infoset."""
-        from src.abstraction.utils.infoset import InfoSetKey
+        from src.bucketing.utils.infoset import InfoSetKey
         from src.game.state import Street
 
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)
@@ -270,10 +270,10 @@ class TestMCCFRSolver:
 
     def test_get_current_strategy_nonexistent_infoset(self):
         """Test get_current_strategy with non-existent infoset."""
-        from src.abstraction.utils.infoset import InfoSetKey
+        from src.bucketing.utils.infoset import InfoSetKey
         from src.game.state import Street
 
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage)

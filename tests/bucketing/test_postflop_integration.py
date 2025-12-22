@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from src.abstraction.isomorphism.combo_abstraction import ComboAbstraction
-from src.abstraction.isomorphism.precompute import ComboPrecomputer, PrecomputeConfig
+from src.bucketing.postflop.hand_bucketing import PostflopBucketer
+from src.bucketing.postflop.precompute import PostflopPrecomputer, PrecomputeConfig
 from src.game.rules import Street
 from src.game.state import Card
 
@@ -45,7 +45,7 @@ class TestClusteringIntegration:
     @pytest.fixture
     def precomputed_abstraction(self, test_config):
         """Precompute abstraction with clustering."""
-        precomputer = ComboPrecomputer(test_config)
+        precomputer = PostflopPrecomputer(test_config)
 
         # Precompute one street for testing
         precomputer.precompute_street(Street.FLOP)
@@ -124,7 +124,7 @@ class TestClusteringIntegration:
             save_dir = Path(tmpdir)
 
             # Precompute
-            precomputer = ComboPrecomputer(test_config)
+            precomputer = PostflopPrecomputer(test_config)
             precomputer.precompute_street(Street.FLOP)
 
             # Save
@@ -144,7 +144,7 @@ class TestClusteringIntegration:
             save_dir = Path(tmpdir)
 
             # Precompute and save
-            precomputer = ComboPrecomputer(test_config)
+            precomputer = PostflopPrecomputer(test_config)
             precomputer.precompute_street(Street.FLOP)
             precomputer.save(save_dir)
 
@@ -188,7 +188,7 @@ class TestClusteringIntegration:
     def test_computational_savings(self, test_config):
         """Verify clustering reduces computation vs full enumeration."""
         # Count equity computations needed
-        from src.abstraction.isomorphism.canonical_boards import CanonicalBoardEnumerator
+        from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
 
         enumerator = CanonicalBoardEnumerator(Street.FLOP)
         enumerator.enumerate()
@@ -207,7 +207,7 @@ class TestClusteringIntegration:
 
     def test_error_on_missing_clusterer(self):
         """Test error when board_clusterer not initialized."""
-        abstraction = ComboAbstraction()
+        abstraction = PostflopBucketer()
         # Don't precompute, so _board_clusterer is None
 
         hole_cards = (Card.new("Ah"), Card.new("Kd"))
@@ -231,7 +231,7 @@ class TestClusterPrediction:
             seed=42,
         )
 
-        precomputer = ComboPrecomputer(config)
+        precomputer = PostflopPrecomputer(config)
         precomputer.precompute_street(Street.FLOP)
 
         return precomputer.abstraction
@@ -294,7 +294,7 @@ class TestClusterPrediction:
 
     def test_canonical_boards_predict_to_fitted_clusters(self, clustered_abstraction):
         """Test that canonical boards predict to clusters we fitted on."""
-        from src.abstraction.isomorphism.canonical_boards import CanonicalBoardEnumerator
+        from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
 
         enumerator = CanonicalBoardEnumerator(Street.FLOP)
         enumerator.enumerate()

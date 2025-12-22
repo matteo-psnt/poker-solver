@@ -11,7 +11,7 @@ from src.game.actions import Action, ActionType, all_in, bet, raises
 from src.game.state import GameState
 
 
-class ActionAbstraction:
+class BettingActions:
     """
     Defines legal betting actions per street using abstraction.
 
@@ -314,4 +314,4 @@ class ActionAbstraction:
             postflop_parts.append(f"{street}=[{bet_str}]")
         postflop_str = ", ".join(postflop_parts)
 
-        return f"ActionAbstraction(preflop=[{preflop_str}], postflop={{{postflop_str}}}, all_in_spr<{self.all_in_spr_threshold})"
+        return f"BettingActions(preflop=[{preflop_str}], postflop={{{postflop_str}}}, all_in_spr<{self.all_in_spr_threshold})"

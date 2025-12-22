@@ -6,8 +6,8 @@ from typing import Optional
 
 import questionary
 
-from src.abstraction.core.action_abstraction import ActionAbstraction
-from src.abstraction.utils.infoset import InfoSetKey
+from src.actions.betting_actions import BettingActions
+from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import ActionType
 from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
@@ -62,13 +62,13 @@ def handle_view_preflop_chart(
 
     # For viewing charts, we don't need the full solver - just the storage
     # But MCCFRSolver requires action/card abstraction, so provide minimal instances
-    action_abs = ActionAbstraction()
+    action_abs = BettingActions()
 
     # Card abstraction not actually used for viewing stored strategies
     # Create a dummy implementation since MCCFRSolver requires it
-    from src.abstraction.core.card_abstraction import CardAbstraction
+    from src.bucketing.base import BucketingStrategy
 
-    class DummyCardAbstraction(CardAbstraction):
+    class DummyCardAbstraction(BucketingStrategy):
         """Placeholder abstraction for viewing charts (not used)."""
 
         def get_bucket(self, hole_cards, board, street):

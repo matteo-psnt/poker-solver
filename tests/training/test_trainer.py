@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.abstraction.core.action_abstraction import ActionAbstraction
+from src.actions.betting_actions import BettingActions
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from src.training.trainer import Trainer
@@ -43,7 +43,7 @@ class TestTrainer:
         trainer = Trainer(config_with_dummy_abstraction)
 
         action_abs = trainer.action_abstraction
-        assert isinstance(action_abs, ActionAbstraction)
+        assert isinstance(action_abs, BettingActions)
 
     def test_build_storage_memory(self, config_with_dummy_abstraction):
         config_with_dummy_abstraction.set("storage.backend", "memory")

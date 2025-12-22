@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from src.abstraction.utils.infoset import InfoSet, InfoSetKey, create_infoset_key
+from src.bucketing.utils.infoset import InfoSet, InfoSetKey, create_infoset_key
 from src.game.actions import bet, call, fold
 from src.game.state import Street
 

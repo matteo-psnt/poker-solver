@@ -14,7 +14,7 @@ from typing import Tuple
 from src.game.state import Card, Street
 
 
-class CardAbstraction(ABC):
+class BucketingStrategy(ABC):
     """
     Abstract interface for card bucketing strategies.
 
