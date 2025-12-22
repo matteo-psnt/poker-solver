@@ -10,6 +10,7 @@ training:
   verbose: true
 
 solver:
+  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
   cfr_plus: true
   linear_cfr: false
 

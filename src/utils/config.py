@@ -208,7 +208,7 @@ def get_default_config() -> Dict[str, Any]:
         },
         "solver": {
             "type": "mccfr",
-            "variant": "outcome_sampling",
+            "sampling_method": "external",
         },
         "training": {
             "num_iterations": 1000,

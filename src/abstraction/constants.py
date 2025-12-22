@@ -38,9 +38,6 @@ TEST_RIVER_BOARD_CLUSTERS = 10
 # Default number of Monte Carlo samples for equity calculation
 DEFAULT_EQUITY_SAMPLES = 1000
 
-# Number of samples for testing (faster but less accurate)
-TEST_EQUITY_SAMPLES = 100
-
 # =============================================================================
 # SPR (Stack-to-Pot Ratio) Constants
 # =============================================================================

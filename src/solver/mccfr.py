@@ -1,7 +1,7 @@
 """
 Monte Carlo Counterfactual Regret Minimization (MCCFR) solver.
 
-Implements MCCFR with outcome sampling for scalable poker solving.
+Implements MCCFR with external sampling (default) or outcome sampling for scalable poker solving.
 """
 
 import random
@@ -21,14 +21,19 @@ from src.solver.storage import Storage
 
 class MCCFRSolver(BaseSolver):
     """
-    Monte Carlo CFR with outcome sampling.
+    Monte Carlo CFR with external sampling or outcome sampling.
 
-    Key differences from vanilla CFR:
-    - Samples single action per player (not all actions)
-    - Samples chance outcomes (don't iterate all possibilities)
-    - Only traverses sampled path (much faster)
+    External sampling (default):
+    - Explores all actions for traversing player
+    - Samples single action for opponent
+    - Samples chance outcomes
 
-    This allows scaling to large games like HUNLHE.
+    Outcome sampling:
+    - Samples single action for all players
+    - Samples chance outcomes
+    - Faster but higher variance
+
+    Both methods scale to large games like HUNLHE.
     """
 
     def __init__(
@@ -51,7 +56,8 @@ class MCCFRSolver(BaseSolver):
                 'big_blind': int (default 2),
                 'seed': int (optional),
                 'cfr_plus': bool (default True),
-                'linear_cfr': bool (default False)
+                'linear_cfr': bool (default False),
+                'sampling_method': str (default 'external', options: 'external', 'outcome')
             }
         """
         super().__init__(action_abstraction, card_abstraction, storage, config)
@@ -59,6 +65,14 @@ class MCCFRSolver(BaseSolver):
         # CFR variant configuration
         self.cfr_plus = self.config.get("cfr_plus", True)  # Enable CFR+ by default
         self.linear_cfr = self.config.get("linear_cfr", False)
+        self.sampling_method = self.config.get(
+            "sampling_method", "external"
+        )  # 'external' or 'outcome'
+
+        if self.sampling_method not in ["external", "outcome"]:
+            raise ValueError(
+                f"Invalid sampling_method: {self.sampling_method}. Must be 'external' or 'outcome'."
+            )
 
         # Game configuration
         self.starting_stack = self.config.get("starting_stack", 200)
@@ -80,7 +94,7 @@ class MCCFRSolver(BaseSolver):
 
     def train_iteration(self) -> float:
         """
-        Execute one MCCFR iteration with outcome sampling.
+        Execute one MCCFR iteration using configured sampling method.
 
         Returns:
             Utility for player 0
@@ -91,7 +105,10 @@ class MCCFRSolver(BaseSolver):
         # Run CFR for both players
         utilities = []
         for player in [0, 1]:
-            util = self._cfr_outcome_sampling(state, player, [1.0, 1.0])
+            if self.sampling_method == "external":
+                util = self._cfr_external_sampling(state, player, [1.0, 1.0])
+            else:  # outcome sampling
+                util = self._cfr_outcome_sampling(state, player, [1.0, 1.0])
             utilities.append(util)
 
         self.iteration += 1
@@ -126,14 +143,17 @@ class MCCFRSolver(BaseSolver):
 
         return state
 
-    def _cfr_outcome_sampling(
+    def _cfr_external_sampling(
         self,
         state: GameState,
         traversing_player: int,
         reach_probs: List[float],
     ) -> float:
         """
-        Recursive MCCFR traversal with outcome sampling.
+        Recursive MCCFR traversal with external sampling.
+
+        External sampling explores all actions for the traversing player
+        and samples a single action for the opponent.
 
         Args:
             state: Current game state
@@ -155,7 +175,7 @@ class MCCFRSolver(BaseSolver):
         # Chance node - sample card
         if self._is_chance_node(state):
             next_state = self._sample_chance_outcome(state)
-            return self._cfr_outcome_sampling(next_state, traversing_player, reach_probs)
+            return self._cfr_external_sampling(next_state, traversing_player, reach_probs)
 
         # Decision node
         current_player = state.current_player
@@ -216,7 +236,7 @@ class MCCFRSolver(BaseSolver):
                     next_state = self._sample_chance_outcome(next_state)
 
                 # Recursively compute utility
-                action_utilities[i] = self._cfr_outcome_sampling(
+                action_utilities[i] = self._cfr_external_sampling(
                     next_state, traversing_player, reach_probs
                 )
 
@@ -266,7 +286,138 @@ class MCCFRSolver(BaseSolver):
             if self._is_chance_node(next_state):
                 next_state = self._sample_chance_outcome(next_state)
 
-            return self._cfr_outcome_sampling(next_state, traversing_player, new_reach_probs)
+            return self._cfr_external_sampling(next_state, traversing_player, new_reach_probs)
+
+    def _cfr_outcome_sampling(
+        self,
+        state: GameState,
+        traversing_player: int,
+        reach_probs: List[float],
+    ) -> float:
+        """
+        Recursive MCCFR traversal with outcome sampling.
+
+        Outcome sampling samples a single action for ALL players (including traversing player).
+        This is faster but has higher variance than external sampling.
+
+        Args:
+            state: Current game state
+            traversing_player: Player we're computing regrets for (0 or 1)
+            reach_probs: Reach probabilities [p0, p1]
+
+        Returns:
+            Expected utility for traversing_player
+        """
+        # Terminal node - return payoff
+        if state.is_terminal:
+            # If terminal but board incomplete (all-in before river), deal remaining cards
+            if len(state.board) < 5:
+                complete_state = self._deal_remaining_cards(state)
+                return complete_state.get_payoff(traversing_player, self.rules)
+            return state.get_payoff(traversing_player, self.rules)
+
+        # Chance node - sample card
+        if self._is_chance_node(state):
+            next_state = self._sample_chance_outcome(state)
+            return self._cfr_outcome_sampling(next_state, traversing_player, reach_probs)
+
+        # Decision node
+        current_player = state.current_player
+
+        # Get infoset
+        infoset_key = state.get_infoset_key(current_player, self.card_abstraction)
+        legal_actions = self.action_abstraction.get_legal_actions(state)
+
+        if not legal_actions:
+            raise ValueError(f"No legal actions at state: {state}")
+
+        infoset = self.storage.get_or_create_infoset(infoset_key, legal_actions)
+
+        # Validate stored actions against current state
+        valid_actions = []
+        valid_indices = []
+        for i, action in enumerate(infoset.legal_actions):
+            try:
+                state.apply_action(action, self.rules)
+                valid_actions.append(action)
+                valid_indices.append(i)
+            except ValueError:
+                pass
+
+        # If no stored actions are valid, use current legal actions
+        if not valid_actions:
+            valid_actions = legal_actions
+            valid_indices = list(range(len(legal_actions)))
+
+        # Filter strategy/regrets to only valid actions
+        full_strategy = infoset.get_strategy()
+        strategy = full_strategy[valid_indices]
+
+        # Renormalize strategy
+        strategy_sum = np.sum(strategy)
+        if strategy_sum > 0:
+            strategy = strategy / strategy_sum
+        else:
+            strategy = np.ones(len(valid_actions)) / len(valid_actions)
+
+        legal_actions = valid_actions
+
+        # Sample action for current player (regardless of traversing player)
+        action_idx = np.random.choice(len(legal_actions), p=strategy)
+        action = legal_actions[action_idx]
+
+        # Apply action
+        next_state = state.apply_action(action, self.rules)
+
+        # Check if we need to deal cards after this action
+        if self._is_chance_node(next_state):
+            next_state = self._sample_chance_outcome(next_state)
+
+        # Recursively compute utility for sampled action
+        sampled_utility = self._cfr_outcome_sampling(next_state, traversing_player, reach_probs)
+
+        # Update regrets only for traversing player
+        if current_player == traversing_player:
+            # For outcome sampling, we need to update regrets using importance sampling
+            # Regret for sampled action: utility - baseline
+            # We use the sampled utility as the baseline (simplified outcome sampling)
+            opponent = 1 - current_player
+
+            # Compute counterfactual value for sampled action
+            # Weight by opponent reach and sampling probability
+            w = reach_probs[opponent] / strategy[action_idx] if strategy[action_idx] > 0 else 0
+
+            # For each action, compute regret
+            for i in range(len(legal_actions)):
+                original_idx = valid_indices[i]
+                if i == action_idx:
+                    # Sampled action: regret = (utility - baseline) * weight
+                    # Using 0 baseline for simplicity (pure outcome sampling)
+                    regret = sampled_utility * w
+                else:
+                    # Unsampled actions: regret = -baseline * weight
+                    regret = -sampled_utility * w
+
+                infoset.update_regret(
+                    original_idx,
+                    regret,
+                    cfr_plus=self.cfr_plus,
+                    linear_cfr=self.linear_cfr,
+                    iteration=self.iteration,
+                )
+
+            # Update average strategy (weighted by player reach probability)
+            for i in range(len(legal_actions)):
+                original_idx = valid_indices[i]
+                weight = strategy[i] * reach_probs[current_player]
+                if self.linear_cfr:
+                    weight *= self.iteration
+                infoset.strategy_sum[original_idx] += weight
+
+            infoset.reach_count += 1
+            infoset.cumulative_utility += sampled_utility
+
+        return sampled_utility
 
     def _is_chance_node(self, state: GameState) -> bool:
         """
@@ -422,5 +573,5 @@ class MCCFRSolver(BaseSolver):
     def __str__(self) -> str:
         return (
             f"MCCFRSolver(iteration={self.iteration}, infosets={self.num_infosets()}, "
-            f"stack={self.starting_stack})"
+            f"sampling={self.sampling_method}, stack={self.starting_stack})"
         )
