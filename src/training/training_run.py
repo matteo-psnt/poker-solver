@@ -219,7 +219,7 @@ class ExperimentMetadata(RunMetadata):
         return experiment
 
     @classmethod
-    def create(  # type: ignore[override]
+    def create(  # type: ignore[override]  # Parent class has different signature pattern
         cls,
         run_id: str,
         config_name: str,

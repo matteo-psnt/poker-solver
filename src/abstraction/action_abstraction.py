@@ -24,7 +24,7 @@ class ActionAbstraction:
         Postflop: fold, call, check, bet 33% pot, bet 75% pot, all-in
     """
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, big_blind: int = 2):
         """
         Initialize action abstraction from configuration.
 
@@ -40,10 +40,12 @@ class ActionAbstraction:
                        'all_in_spr_threshold': 2.0,  # Only allow all-in if SPR < threshold
                    }
                    If None, uses default abstraction.
+            big_blind: Big blind size for preflop raise calculations
         """
         if config is None:
             config = self._default_config()
 
+        self.big_blind = big_blind
         self.preflop_raises = config.get("preflop_raises", [2.5, 3.5, 5.0])
 
         # Street-dependent postflop bets
@@ -113,9 +115,8 @@ class ActionAbstraction:
 
         if state.street.is_preflop():
             # Preflop: use BB-denominated sizes
-            big_blind = 2  # TODO: Get from game rules
             for raise_bb in self.preflop_raises:
-                bet_size = int(raise_bb * big_blind)
+                bet_size = int(raise_bb * self.big_blind)
                 if bet_size <= stack and bet_size not in sizes:
                     sizes.append(bet_size)
         else:
@@ -169,10 +170,9 @@ class ActionAbstraction:
 
         if state.street.is_preflop():
             # Preflop: raise in BB units
-            big_blind = 2  # TODO: Get from game rules
             for raise_bb in self.preflop_raises:
                 # Standard raise size
-                total_bet = int(raise_bb * big_blind)
+                total_bet = int(raise_bb * self.big_blind)
                 raise_amount = total_bet - to_call
                 if raise_amount > 0 and total_bet <= stack and raise_amount not in sizes:
                     sizes.append(raise_amount)

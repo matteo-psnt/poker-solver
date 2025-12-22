@@ -267,14 +267,14 @@ class TestEquityBucketingWorkflow:
 
             # All bucket IDs should be valid
             assert np.all(assignments >= 0)
-            assert np.all(assignments < config.num_buckets(street))
+            assert np.all(assignments < config.num_buckets[street])
 
         # Test get_bucket works
         hole_cards = (Card.new("As"), Card.new("Ah"))
         board_flop = (Card.new("Kd"), Card.new("Qc"), Card.new("Js"))
         bucket = bucketing.get_bucket(hole_cards, board_flop, Street.FLOP)
 
-        assert 0 <= bucket < config.num_buckets(Street.FLOP)
+        assert 0 <= bucket < config.num_buckets[Street.FLOP]
 
         # Save and load
         bucketing.save(config.output_file)

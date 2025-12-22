@@ -63,7 +63,9 @@ class Trainer:
     def _build_action_abstraction(self) -> ActionAbstraction:
         """Build action abstraction from config."""
         action_config = self.config.get_section("action_abstraction")
-        return ActionAbstraction(action_config)
+        game_config = self.config.get_section("game")
+        big_blind = game_config.get("big_blind", 2)
+        return ActionAbstraction(action_config, big_blind=big_blind)
 
     def _build_card_abstraction(self) -> CardAbstraction:
         """Build card abstraction from config."""
@@ -288,16 +290,39 @@ class Trainer:
             self.training_run.mark_failed()
             raise
 
-    def evaluate(self) -> Dict:
+    def evaluate(
+        self,
+        num_samples: int = 10000,
+        num_rollouts_per_infoset: int = 100,
+    ) -> Dict:
         """
-        Evaluate current solver.
+        Evaluate current solver using exploitability estimation.
+
+        Args:
+            num_samples: Number of game samples for exploitability estimation
+            num_rollouts_per_infoset: Number of rollouts per infoset for BR approximation
 
         Returns:
-            Evaluation metrics
+            Evaluation metrics including exploitability estimates
         """
-        # TODO: Implement evaluation (head-to-head, exploitability)
+        from src.evaluation.exploitability import compute_exploitability
+        from src.solver.mccfr import MCCFRSolver
+
+        # Cast to MCCFRSolver for type checking
+        if not isinstance(self.solver, MCCFRSolver):
+            raise TypeError("Exploitability computation requires MCCFRSolver")
+
+        results = compute_exploitability(
+            self.solver,
+            num_samples=num_samples,
+            num_rollouts_per_infoset=num_rollouts_per_infoset,
+        )
+
         return {
             "num_infosets": self.solver.num_infosets(),
+            "exploitability_mbb": results["exploitability_mbb"],
+            "std_error_mbb": results["std_error_mbb"],
+            "confidence_95_mbb": results["confidence_95_mbb"],
         }
 
     def __str__(self) -> str:
