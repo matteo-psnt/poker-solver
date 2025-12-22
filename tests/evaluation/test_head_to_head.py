@@ -7,6 +7,7 @@ from src.evaluation.head_to_head import (
     MatchStatistics,
 )
 from src.game.rules import GameRules
+from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from tests.test_helpers import DummyCardAbstraction
@@ -16,8 +17,6 @@ class TestMatchResult:
     """Tests for MatchResult dataclass."""
 
     def test_create_match_result(self):
-        from src.game.state import Street
-
         result = MatchResult(
             player0_payoff=10,
             player1_payoff=-10,

@@ -2,22 +2,19 @@
 
 import multiprocessing as mp
 from pathlib import Path
-from typing import TYPE_CHECKING, Union
+from typing import Optional
 
 import questionary
 
-from src.training.trainer import Trainer
+from src.training.trainer import TrainingSession
 from src.utils.config import Config
-
-if TYPE_CHECKING:
-    from src.training.parallel_trainer import ParallelTrainer
 
 
 def handle_train(
     config: Config,
     custom_style,
     checkpoint_dir: Path,
-) -> Union[Trainer, "ParallelTrainer", None]:
+) -> Optional[TrainingSession]:
     """
     Handle training a new solver.
 
@@ -27,7 +24,7 @@ def handle_train(
         checkpoint_dir: Directory for checkpoints
 
     Returns:
-        Trainer instance or None if cancelled
+        TrainingSession instance or None if cancelled
     """
     # Check combo abstraction requirement
     abstraction_path = config.get("card_abstraction.abstraction_path")
@@ -88,25 +85,17 @@ def handle_train(
 
     # Create trainer
     print("\nInitializing trainer...")
-    if use_parallel:
-        from src.training.parallel_trainer import ParallelTrainer
-
-        trainer: Union[Trainer, "ParallelTrainer"] = ParallelTrainer(
-            config, num_workers=num_workers
-        )
-    else:
-        trainer = Trainer(config)
+    trainer = TrainingSession(config)
 
     # Start training
     print(f"\nStarting training for {config.get('training.num_iterations')} iterations...")
-    if hasattr(trainer, "run_manager"):
-        print(f"Run directory: {trainer.run_manager.run_dir}")
+    print(f"Run directory: {trainer.run_dir}")
     print(f"Checkpoint frequency: every {config.get('training.checkpoint_frequency')} iterations")
     if use_parallel:
         print(f"Parallel workers: {num_workers}")
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
 
-    results = trainer.train()
+    results = trainer.train(use_parallel=use_parallel, num_workers=num_workers)
 
     print("\n[OK] Training completed!")
     print(f"   Total iterations: {results.get('iterations', results.get('total_iterations'))}")
@@ -119,20 +108,20 @@ def handle_train(
     return trainer
 
 
-def handle_resume(config: Config, run_id: str, latest_iter: int) -> Trainer:
+def handle_resume(config: Config, run_id: str, latest_iter: int) -> TrainingSession:
     """
     Resume training from checkpoint.
 
     Args:
-        config: Training configuration
-        run_id: Run ID to resume
+        config: Configuration
+        run_id: Run identifier
         latest_iter: Latest iteration number
 
     Returns:
-        Trainer instance
+        TrainingSession instance
     """
     print("\nResuming trainer...")
-    trainer = Trainer(config, run_id=run_id)
+    trainer = TrainingSession(config, run_id=run_id)
 
     print(f"\nResuming training from iteration {latest_iter}...")
     print(

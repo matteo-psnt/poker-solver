@@ -9,11 +9,13 @@ Tests the full pipeline:
 5. Runtime bucket lookup via cluster prediction
 """
 
+import json
 import tempfile
 from pathlib import Path
 
 import pytest
 
+from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.bucketing.postflop.hand_bucketing import PostflopBucketer
 from src.bucketing.postflop.precompute import PostflopPrecomputer, PrecomputeConfig
 from src.game.rules import Street
@@ -148,9 +150,6 @@ class TestClusteringIntegration:
             precomputer.precompute_street(Street.FLOP)
             precomputer.save(save_dir)
 
-            # Load metadata
-            import json
-
             metadata_path = save_dir / "metadata.json"
             with open(metadata_path) as f:
                 metadata = json.load(f)
@@ -188,8 +187,6 @@ class TestClusteringIntegration:
     def test_computational_savings(self, test_config):
         """Verify clustering reduces computation vs full enumeration."""
         # Count equity computations needed
-        from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
-
         enumerator = CanonicalBoardEnumerator(Street.FLOP)
         enumerator.enumerate()
 
@@ -294,8 +291,6 @@ class TestClusterPrediction:
 
     def test_canonical_boards_predict_to_fitted_clusters(self, clustered_abstraction):
         """Test that canonical boards predict to clusters we fitted on."""
-        from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
-
         enumerator = CanonicalBoardEnumerator(Street.FLOP)
         enumerator.enumerate()
 

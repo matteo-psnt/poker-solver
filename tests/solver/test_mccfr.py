@@ -3,6 +3,8 @@
 import pytest
 
 from src.actions.betting_actions import BettingActions
+from src.bucketing.utils.infoset import InfoSetKey
+from src.game.state import Card, GameState, Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from tests.test_helpers import DummyCardAbstraction
@@ -123,8 +125,6 @@ class TestMCCFRSolver:
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         # Create state needing flop
-        from src.game.state import Card, GameState, Street
-
         state = GameState(
             street=Street.FLOP,  # Flop street but no cards yet
             pot=10,
@@ -246,9 +246,6 @@ class TestMCCFRSolver:
 
     def test_get_average_strategy_nonexistent_infoset(self):
         """Test get_average_strategy with non-existent infoset."""
-        from src.bucketing.utils.infoset import InfoSetKey
-        from src.game.state import Street
-
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()
@@ -270,9 +267,6 @@ class TestMCCFRSolver:
 
     def test_get_current_strategy_nonexistent_infoset(self):
         """Test get_current_strategy with non-existent infoset."""
-        from src.bucketing.utils.infoset import InfoSetKey
-        from src.game.state import Street
-
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
         storage = InMemoryStorage()

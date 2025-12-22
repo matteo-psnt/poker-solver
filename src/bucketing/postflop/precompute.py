@@ -15,12 +15,14 @@ import json
 import logging
 import multiprocessing as mp
 import pickle
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+import yaml
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
@@ -86,10 +88,6 @@ class PrecomputeConfig:
         Returns:
             PrecomputeConfig instance
         """
-        from pathlib import Path
-
-        import yaml
-
         config_path = (
             Path(__file__).parent.parent.parent.parent
             / "config"
@@ -546,8 +544,6 @@ def estimate_precompute_time(
 
     Returns estimated hours per street.
     """
-    import time
-
     estimates = {}
 
     for street in [Street.FLOP, Street.TURN, Street.RIVER]:

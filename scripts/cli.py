@@ -7,6 +7,7 @@ Provides a TUI for training, evaluation, precomputation, and run management.
 
 import signal
 import sys
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -26,8 +27,8 @@ from src.cli.combo_handler import (
 )
 from src.cli.config_handler import select_config
 from src.cli.training_handler import handle_resume, handle_train
-from src.training.run.training_run import TrainingRun
-from src.training.trainer import Trainer
+from src.training.run_tracker import RunTracker
+from src.training.trainer import TrainingSession
 from src.utils.config import Config
 
 # Custom style
@@ -55,7 +56,7 @@ class SolverCLI:
         self.config_dir = self.base_dir / "config"
         self.runs_dir = self.base_dir / "data" / "runs"
         self.equity_buckets_dir = self.base_dir / "data" / "equity_buckets"
-        self.current_trainer: Optional[Trainer] = None
+        self.current_trainer: Optional[TrainingSession] = None
 
         # Setup Ctrl+C handler
         signal.signal(signal.SIGINT, self._handle_interrupt)
@@ -136,8 +137,6 @@ class SolverCLI:
                 continue
             except Exception as e:
                 print(f"\n[ERROR] {e}")
-                import traceback
-
                 traceback.print_exc()
                 input("\nPress Enter to continue...")
 
@@ -164,7 +163,7 @@ class SolverCLI:
         print("=" * 60)
 
         # List available runs
-        runs = TrainingRun.list_runs(self.runs_dir)
+        runs = RunTracker.list_runs(self.runs_dir)
 
         if not runs:
             print("\n[ERROR] No trained runs found in data/runs/")
@@ -192,7 +191,7 @@ class SolverCLI:
         print("\nPast Training Runs")
         print("=" * 60)
 
-        runs = TrainingRun.list_runs(self.runs_dir)
+        runs = RunTracker.list_runs(self.runs_dir)
 
         if not runs:
             print("\n[ERROR] No training runs found")
@@ -210,40 +209,27 @@ class SolverCLI:
             return
 
         # Load and display run info
-        training_run = TrainingRun.from_run_id(
-            self.runs_dir,
-            selected,
-        )
+        run_dir = self.runs_dir / selected
+        tracker = RunTracker.load(run_dir)
+        meta = tracker.metadata
 
-        if training_run.run_metadata:
-            meta = training_run.run_metadata
-            print(f"\nRun: {selected}")
-            print("-" * 60)
-            print(f"Status: {meta.status}")
-            print(f"Started: {meta.started_at}")
-            if meta.completed_at:
-                print(f"Completed: {meta.completed_at}")
+        print(f"\nRun: {selected}")
+        print("-" * 60)
+        print(f"Status: {meta.get('status', 'unknown')}")
+        print(f"Started: {meta.get('started_at', 'N/A')}")
+        if meta.get("completed_at"):
+            print(f"Completed: {meta['completed_at']}")
 
-            if meta.statistics:
-                stats = meta.statistics
-                print("\nStatistics:")
-                print(f"  Iterations: {stats.total_iterations}")
-                print(
-                    f"  Runtime: {stats.total_runtime_seconds:.2f}s ({stats.total_runtime_seconds / 60:.1f}m)"
-                )
-                print(f"  Speed: {stats.iterations_per_second:.2f} it/s")
-                print(f"  Infosets: {stats.num_infosets:,}")
+        print("\nStatistics:")
+        print(f"  Iterations: {meta.get('iterations', 0)}")
+        runtime = meta.get("runtime_seconds", 0)
+        print(f"  Runtime: {runtime:.2f}s ({runtime / 60:.1f}m)")
+        if runtime > 0 and meta.get("iterations", 0) > 0:
+            print(f"  Speed: {meta['iterations'] / runtime:.2f} it/s")
+        print(f"  Infosets: {meta.get('num_infosets', 0):,}")
 
-        # Show checkpoints
-        if training_run.manifest:
-            snapshots = training_run.manifest.snapshots
-            print(f"\nSnapshots: {len(snapshots)}")
-            for snapshot in snapshots[:5]:  # Show first 5
-                print(
-                    f"  {snapshot.iteration:6d}: {snapshot.num_infosets:8,} infosets {snapshot.tags}"
-                )
-            if len(snapshots) > 5:
-                print(f"  ... and {len(snapshots) - 5} more")
+        # Show config
+        print(f"\nConfig: {meta.get('config_name', 'unknown')}")
 
         input("\nPress Enter to continue...")
 
@@ -252,7 +238,7 @@ class SolverCLI:
         print("\nResume Training")
         print("=" * 60)
 
-        runs = TrainingRun.list_runs(self.runs_dir)
+        runs = RunTracker.list_runs(self.runs_dir)
 
         if not runs:
             print("No training runs found.")
@@ -268,20 +254,22 @@ class SolverCLI:
         if selected == "Cancel" or selected is None:
             return
 
-        training_run = TrainingRun.from_run_id(self.runs_dir, selected)
+        run_dir = self.runs_dir / selected
+        tracker = RunTracker.load(run_dir)
+        meta = tracker.metadata
 
-        if not training_run.run_metadata or not training_run.run_metadata.config:
+        if not meta.get("config"):
             print("\n[ERROR] No config found for this run")
             input("Press Enter to continue...")
             return
 
-        config_dict = training_run.run_metadata.config
+        config_dict = meta["config"]
         config = Config.from_dict(config_dict)
 
-        latest = training_run.get_latest_snapshot()
-        if latest:
-            print(f"\nLatest checkpoint: iteration {latest['iteration']}")
-            print(f"Infosets: {latest['num_infosets']:,}")
+        latest_iter = meta.get("iterations", 0)
+        if latest_iter > 0:
+            print(f"\nLatest checkpoint: iteration {latest_iter}")
+            print(f"Infosets: {meta.get('num_infosets', 0):,}")
 
         add_iters = questionary.text(
             "Additional iterations to run:",
@@ -292,11 +280,11 @@ class SolverCLI:
         if add_iters is None:
             return
 
-        total_iters = latest["iteration"] + int(add_iters)
+        total_iters = latest_iter + int(add_iters)
         config.set("training.num_iterations", total_iters)
 
         try:
-            self.current_trainer = handle_resume(config, selected, latest["iteration"])
+            self.current_trainer = handle_resume(config, selected, latest_iter)
         finally:
             self.current_trainer = None
 
@@ -342,8 +330,6 @@ class SolverCLI:
                 continue
             except Exception as e:
                 print(f"\n[ERROR] {e}")
-                import traceback
-
                 traceback.print_exc()
                 input("\nPress Enter to continue...")
 

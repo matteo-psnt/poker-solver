@@ -7,11 +7,13 @@ from typing import Optional
 import questionary
 
 from src.actions.betting_actions import BettingActions
+from src.bucketing.base import BucketingStrategy
 from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import ActionType
 from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import DiskBackedStorage
+from src.training.run_tracker import RunTracker
 
 
 def handle_view_preflop_chart(
@@ -27,9 +29,8 @@ def handle_view_preflop_chart(
         base_dir: Base project directory
         custom_style: Questionary style
     """
-    from src.training.run.training_run import TrainingRun
 
-    runs = TrainingRun.list_runs(runs_dir)
+    runs = RunTracker.list_runs(runs_dir)
 
     if not runs:
         print("\n[ERROR] No trained runs found in data/runs/")
@@ -66,8 +67,6 @@ def handle_view_preflop_chart(
 
     # Card abstraction not actually used for viewing stored strategies
     # Create a dummy implementation since MCCFRSolver requires it
-    from src.bucketing.base import BucketingStrategy
-
     class DummyCardAbstraction(BucketingStrategy):
         """Placeholder abstraction for viewing charts (not used)."""
 
