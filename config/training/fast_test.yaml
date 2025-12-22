@@ -16,7 +16,8 @@ solver:
 
 card_abstraction:
   type: "equity_bucketing"
-  bucketing_path: "data/abstractions/equity_buckets_20251217_042337/bucketing.pkl"
+  # Reference abstraction config by name
+  config: fast_test
 
 storage:
   backend: "disk"

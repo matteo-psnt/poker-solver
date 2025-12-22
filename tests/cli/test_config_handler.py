@@ -9,11 +9,15 @@ from src.cli.config_handler import select_config
 
 @pytest.fixture
 def temp_config_dir(tmp_path):
-    """Create temporary config directory."""
+    """Create temporary config directory with training subdirectory."""
     config_dir = tmp_path / "config"
     config_dir.mkdir()
 
-    test_config = config_dir / "test.yaml"
+    # Create training subdirectory
+    training_dir = config_dir / "training"
+    training_dir.mkdir()
+
+    test_config = training_dir / "test.yaml"
     test_config.write_text(
         """
 training:

@@ -16,8 +16,8 @@ from tqdm import tqdm
 from src.abstraction.action_abstraction import ActionAbstraction
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
-from src.training.checkpoint import CheckpointManager
 from src.training.metrics import MetricsTracker
+from src.training.training_run import TrainingRun
 from src.utils.config import Config
 
 
@@ -157,12 +157,12 @@ class ParallelTrainer:
         self.config = config
         self.num_workers = num_workers or mp.cpu_count()
 
-        # Initialize checkpoint manager
-        checkpoint_base_dir = Path(config.get("training.checkpoint_dir", "data/checkpoints"))
-        self.checkpoint_manager = CheckpointManager(
-            checkpoint_base_dir,
+        # Initialize experiment manager
+        runs_base_dir = Path(config.get("training.run_dir", "data/runs"))
+        self.training_run = TrainingRun(
+            base_dir=runs_base_dir,
+            experiment_id=run_id,
             config_name=config.get("system.config_name", "default"),
-            run_id=run_id,
             config=config.to_dict(),
         )
 
@@ -181,7 +181,7 @@ class ParallelTrainer:
         elif storage_type == "disk":
             from src.solver.storage import DiskBackedStorage
 
-            storage_path = Path(self.checkpoint_manager.run_dir / "storage")  # noqa: F823
+            storage_path = Path(self.training_run.run_dir / "storage")
             storage = DiskBackedStorage(
                 storage_path,
                 cache_size=self.config.get("storage.cache_size", 10000),
@@ -199,8 +199,6 @@ class ParallelTrainer:
             bucketing_path = self.config.get("card_abstraction.bucketing_path")
             if not bucketing_path:
                 raise ValueError("equity_bucketing requires 'bucketing_path' in config")
-
-            from pathlib import Path
 
             bucketing_path = Path(bucketing_path)
             if not bucketing_path.exists():
@@ -422,22 +420,22 @@ class ParallelTrainer:
                     elapsed_time = time.time() - training_start_time
                     summary = self.metrics.get_summary()
 
-                    checkpoint_metrics = {
+                    snapshot_metrics = {
                         "avg_utility_p0": summary.get("avg_utility", 0.0),
                         "avg_utility_p1": -summary.get("avg_utility", 0.0),
                         "avg_infosets": summary.get("avg_infosets", 0),
                     }
 
-                    self.checkpoint_manager.save(
+                    self.training_run.save_snapshot(
                         self.solver,
                         completed_iterations,
-                        metrics=checkpoint_metrics,
+                        metrics=snapshot_metrics,
                     )
 
-                    self.checkpoint_manager.update_stats(
-                        completed_iterations,
-                        elapsed_time,
-                        summary.get("avg_infosets", 0),
+                    self.training_run.update_stats(
+                        total_iterations=completed_iterations,
+                        total_runtime_seconds=elapsed_time,
+                        num_infosets=summary.get("avg_infosets", 0),
                     )
 
         except KeyboardInterrupt:
@@ -445,27 +443,27 @@ class ParallelTrainer:
                 print("\n⚠️  Training interrupted by user")
 
         finally:
-            # Final checkpoint
+            # Final snapshot
             elapsed_time = time.time() - training_start_time
             summary = self.metrics.get_summary()
 
-            checkpoint_metrics = {
+            snapshot_metrics = {
                 "avg_utility_p0": summary.get("avg_utility", 0.0),
                 "avg_utility_p1": -summary.get("avg_utility", 0.0),
                 "avg_infosets": summary.get("avg_infosets", 0),
             }
 
-            self.checkpoint_manager.save(
+            self.training_run.save_snapshot(
                 self.solver,
                 completed_iterations,
-                metrics=checkpoint_metrics,
+                metrics=snapshot_metrics,
             )
 
             # Final stats update
-            self.checkpoint_manager.update_stats(
-                completed_iterations,
-                elapsed_time,
-                self.solver.num_infosets(),
+            self.training_run.update_stats(
+                total_iterations=completed_iterations,
+                total_runtime_seconds=elapsed_time,
+                num_infosets=self.solver.num_infosets(),
             )
 
             if verbose:
@@ -482,5 +480,5 @@ class ParallelTrainer:
             "elapsed_time": elapsed_time,
             "num_infosets": self.solver.num_infosets(),
             "metrics": self.metrics.get_summary(),
-            "run_id": self.checkpoint_manager.run_id,
+            "run_id": self.training_run.run_id,
         }

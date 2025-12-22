@@ -1097,7 +1097,7 @@ cache.move_to_end(key)  # Mark as recently used (fast!)
 ### Configuration Structure
 
 ```yaml
-# config/default.yaml
+# config/training/default.yaml
 
 # Game settings (poker rules)
 game:
@@ -1192,19 +1192,19 @@ class Config:
 
 ### Configuration Variants
 
-**Production Config** (`config/production.yaml`):
+**Production Config** (`config/training/production.yaml`):
 - 100M iterations
 - CFR+ enabled
 - Production abstraction (50/100/200 buckets)
 - Disk storage with large cache
 
-**Fast Test Config** (`config/fast_test.yaml`):
+**Fast Test Config** (`config/training/fast_test.yaml`):
 - 10K iterations
 - CFR+ enabled
 - Small abstraction (9/9/9 buckets for testing)
 - In-memory storage
 
-**Full Training Config** (`config/full_training.yaml`):
+**Full Training Config** (`config/training/full_training.yaml`):
 - 1B iterations
 - Linear CFR enabled
 - Production abstraction

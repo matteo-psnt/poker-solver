@@ -112,15 +112,22 @@ poker-solver/
 │
 ├── tests/                      # Test suite (249 tests, 81% coverage)
 ├── config/                     # Configuration files
-│   └── default.yaml           # Default configuration
+│   ├── training/              # Training configurations
+│   │   ├── default.yaml       # Default training config
+│   │   ├── production.yaml    # Production training
+│   │   └── fast_test.yaml     # Quick test config
+│   └── abstractions/          # Card abstraction configs
+│       ├── production.yaml    # Production abstraction
+│       └── fast_test.yaml     # Fast test abstraction
 │
 └── data/                       # Generated data
-    └── checkpoints/           # Saved strategies by run
+    ├── runs/                  # Training run outputs
         └── run_20251216_134249/
             ├── regrets.h5     # Cumulative regrets (HDF5)
             ├── strategies.h5  # Strategy sums (HDF5)
             ├── key_mapping.pkl # InfoSet ID mappings
             └── metadata.json  # Checkpoint metadata
+    └── abstractions/          # Precomputed card abstractions
 ```
 
 ---
@@ -461,7 +468,7 @@ def train_iteration(self):
 
 ## Configuration
 
-### Default Config (`config/default.yaml`)
+### Default Config (`config/training/default.yaml`)
 
 ```yaml
 game:

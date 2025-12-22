@@ -13,16 +13,18 @@ def select_config(config_dir: Path, custom_style) -> Optional[Config]:
     Select and optionally edit a config file.
 
     Args:
-        config_dir: Directory containing config files
+        config_dir: Base config directory (e.g., "config/")
         custom_style: Questionary style
 
     Returns:
         Loaded Config object or None if cancelled
     """
-    config_files = sorted(config_dir.glob("*.yaml"))
+    # Look for training configs in config/training/ subdirectory
+    training_config_dir = config_dir / "training"
+    config_files = sorted(training_config_dir.glob("*.yaml"))
 
     if not config_files:
-        print("[ERROR] No config files found in config/")
+        print(f"[ERROR] No config files found in {training_config_dir}/")
         return None
 
     choices = [f.stem for f in config_files] + ["Cancel"]
@@ -36,7 +38,7 @@ def select_config(config_dir: Path, custom_style) -> Optional[Config]:
     if selected == "Cancel" or selected is None:
         return None
 
-    config_path = config_dir / f"{selected}.yaml"
+    config_path = training_config_dir / f"{selected}.yaml"
     config = Config.from_file(config_path)
 
     edit = questionary.confirm(

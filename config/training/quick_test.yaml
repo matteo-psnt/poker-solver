@@ -13,6 +13,11 @@ solver:
   cfr_plus: true
   linear_cfr: false
 
+card_abstraction:
+  type: "equity_bucketing"
+  # Reference abstraction config by name
+  config: fast_test
+
 storage:
   backend: "memory"
 
