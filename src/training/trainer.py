@@ -7,7 +7,7 @@ checkpointing, metrics tracking, and progress reporting.
 
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 from tqdm import tqdm
 
@@ -189,7 +189,7 @@ class Trainer:
 
         # Training loop
         if verbose:
-            iterator = tqdm(
+            iterator: Union[range, tqdm] = tqdm(
                 range(start_iteration, num_iterations),
                 desc="Training",
                 unit="iter",

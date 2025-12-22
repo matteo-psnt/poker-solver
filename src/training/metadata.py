@@ -30,6 +30,7 @@ class SystemInfo:
     @classmethod
     def collect(cls) -> "SystemInfo":
         """Collect current system information."""
+        import os
         import socket
 
         return cls(
@@ -37,7 +38,7 @@ class SystemInfo:
             platform=platform.system(),
             platform_version=platform.version(),
             hostname=socket.gethostname(),
-            cpu_count=platform.os.cpu_count() or 1,
+            cpu_count=os.cpu_count() or 1,
         )
 
     def to_dict(self) -> dict:

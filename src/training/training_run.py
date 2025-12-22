@@ -219,7 +219,7 @@ class ExperimentMetadata(RunMetadata):
         return experiment
 
     @classmethod
-    def create(
+    def create(  # type: ignore[override]
         cls,
         run_id: str,
         config_name: str,

@@ -9,7 +9,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from tqdm import tqdm
@@ -167,7 +167,7 @@ def generate_boards_optimized(
     }[street]
 
     # Use tqdm if requested
-    iterator = range(num_samples)
+    iterator: Union[range, tqdm] = range(num_samples)
     if show_progress:
         iterator = tqdm(iterator, desc=f"Sampling {street.name} boards", unit="board")
 

@@ -11,13 +11,14 @@ This is the final component that ties together:
 import logging
 import pickle
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
 from src.abstraction.board_clustering import BoardClusterer
+from src.abstraction.card_abstraction import CardAbstraction
 from src.abstraction.constants import (
     DEFAULT_EQUITY_SAMPLES,
     DEFAULT_FLOP_BOARD_CLUSTERS,
@@ -38,7 +39,7 @@ from src.game.state import Card, Street
 logger = logging.getLogger(__name__)
 
 
-class EquityBucketing:
+class EquityBucketing(CardAbstraction):
     """
     Equity-based card abstraction using K-means clustering.
 
@@ -79,7 +80,7 @@ class EquityBucketing:
                 Street.TURN: DEFAULT_TURN_BUCKETS,
                 Street.RIVER: DEFAULT_RIVER_BUCKETS,
             }
-        self.num_buckets = num_buckets
+        self._num_buckets_dict = num_buckets
         self.equity_calculator = equity_calculator or EquityCalculator(
             num_samples=DEFAULT_EQUITY_SAMPLES
         )
@@ -106,6 +107,10 @@ class EquityBucketing:
 
         # Track if fitted
         self.fitted = False
+
+    def num_buckets(self, street: Street) -> int:
+        """Get number of buckets for a street."""
+        return self._num_buckets_dict[street]
 
     def fit(
         self,
@@ -169,7 +174,7 @@ class EquityBucketing:
             logger.info(
                 f"{street.name}: {len(boards)} boards → "
                 f"{num_board_clusters} clusters → "
-                f"{self.num_buckets[street]} buckets"
+                f"{self._num_buckets_dict[street]} buckets"
             )
 
         self.fitted = True
@@ -179,7 +184,7 @@ class EquityBucketing:
         boards: list,
         street: Street,
         num_samples_per_cluster: int,
-    ) -> Dict[int, list]:
+    ) -> Dict[int, List[Tuple[Card, ...]]]:
         """
         Sample representative boards for each cluster.
 
@@ -187,7 +192,7 @@ class EquityBucketing:
             Dict mapping cluster_id → list of board tuples
         """
         num_clusters = self.board_clusterer.num_clusters[street]
-        cluster_boards = {i: [] for i in range(num_clusters)}
+        cluster_boards: Dict[int, List[Tuple[Card, ...]]] = {i: [] for i in range(num_clusters)}
 
         # Assign each board to cluster
         for board in boards:
@@ -195,7 +200,7 @@ class EquityBucketing:
             cluster_boards[cluster_id].append(board)
 
         # Sample from each cluster
-        representatives = {}
+        representatives: Dict[int, List[Tuple[Card, ...]]] = {}
         for cluster_id in range(num_clusters):
             boards_in_cluster = cluster_boards[cluster_id]
 
@@ -333,7 +338,7 @@ class EquityBucketing:
         features = equity_matrix.reshape(-1, 1)
 
         # Run K-means
-        n_clusters = self.num_buckets[street]
+        n_clusters = self._num_buckets_dict[street]
         kmeans = KMeans(
             n_clusters=n_clusters,
             random_state=KMEANS_RANDOM_STATE,
@@ -439,7 +444,7 @@ class EquityBucketing:
         - Board clusterer state
         """
         data = {
-            "num_buckets": self.num_buckets,
+            "num_buckets": self._num_buckets_dict,
             "bucket_assignments": self.bucket_assignments,
             "clusterers": self.clusterers,
             "board_clusterer": self.board_clusterer,
@@ -477,12 +482,8 @@ class EquityBucketing:
         logger.info(f"Loaded bucketing from {filepath}")
         return bucketing
 
-    def get_num_buckets(self, street: Street) -> int:
-        """Get number of buckets for a street."""
-        return self.num_buckets[street]
-
     def __str__(self) -> str:
         """String representation."""
-        buckets_str = ", ".join([f"{s.name}: {n}" for s, n in self.num_buckets.items()])
+        buckets_str = ", ".join([f"{s.name}: {n}" for s, n in self._num_buckets_dict.items()])
         fitted_str = "fitted" if self.fitted else "not fitted"
         return f"EquityBucketing({buckets_str}) - {fitted_str}"

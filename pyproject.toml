@@ -15,21 +15,13 @@ dependencies = [
     "tqdm>=4.65.0",
     "scipy>=1.15.3",
     "scikit-learn==1.7.2",
-    "questionary>=2.1.1",
-    "ruff>=0.14.9",
-    "pytest>=9.0.2",
     "numba>=0.63.1",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "ruff>=0.1.0",
-]
+# Visualization and performance profiling
 optimization = [
     "matplotlib>=3.7.0",
-    "numba>=0.57.0",
 ]
 
 [build-system]
@@ -59,6 +51,14 @@ python_functions = ["test_*"]
 addopts = "-v"
 
 [dependency-groups]
+# Development, testing, and code quality tools
 dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.14.9",
+    "mypy>=1.19.1",
     "pre-commit>=4.5.1",
+    "types-pyyaml>=6.0.12.20250915",
+    "types-tqdm>=4.67.0.20250809",
+    "questionary>=2.1.1",  # Interactive CLI prompts
 ]
