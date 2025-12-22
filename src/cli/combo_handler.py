@@ -64,37 +64,58 @@ def _get_config_choice() -> tuple:
         return None, None
 
 
+# Time estimation constants (empirically calibrated)
+# Derived from multiple benchmark runs with varying configs
+# Unit: seconds per work item (cluster × representative)
+# Baseline: 12 workers, 1000 equity samples
+#
+# Benchmark data used for calibration:
+#   fast_test (10/20/30 clusters, 1 rep, 100 samples, 12 workers):
+#     FLOP: 10 items, ~30s total → 3.0s/item @ 100 samples
+#     TURN: 20 items, ~68s total → 3.4s/item @ 100 samples
+#     RIVER: 30 items, ~147s total → 4.9s/item @ 100 samples
+#
+#   default_plus (50/100/200 clusters, 3 reps, 2000 samples, 12 workers):
+#     FLOP: 150 items, 7.5min → 3.0s/item @ 2000 samples
+#     TURN: 300 items, 17min → 3.4s/item @ 2000 samples
+#     RIVER: 600 items, 49min → 4.9s/item @ 2000 samples
+#
+# Pattern: time scales linearly with equity_samples, inversely with workers
+# Street differences: RIVER ~60% slower than FLOP due to more opponent cards
+TIME_PER_ITEM_BASELINE = {
+    Street.FLOP: 1.5,  # seconds per item at 1000 samples, 12 workers
+    Street.TURN: 1.7,
+    Street.RIVER: 2.45,
+}
+TIME_BASELINE_WORKERS = 12
+TIME_BASELINE_SAMPLES = 1000
+
+
 def _estimate_time(config: PrecomputeConfig) -> None:
     """Show time estimate for precomputation."""
     print("\nEstimating precomputation time...")
 
-    # Based on empirical measurements:
-    # - Clustering is the bottleneck, not equity calculation
-    # - ~1.7s per cluster with 12 workers and 1000 equity samples
-    # - Time scales linearly with equity_samples
-    # - Time scales inversely with num_workers (parallelization)
-
-    base_seconds_per_cluster = 1.75  # Measured with 12 workers, 1000 samples
-    baseline_workers = 12
-    baseline_samples = 1000
-
-    # Get actual workers for this run
     workers = config.num_workers or mp.cpu_count()
 
-    # Scale with equity samples and workers
-    sample_factor = config.equity_samples / baseline_samples
-    worker_factor = baseline_workers / workers
-    seconds_per_cluster = base_seconds_per_cluster * sample_factor * worker_factor
+    # Scale factors relative to baseline
+    sample_factor = config.equity_samples / TIME_BASELINE_SAMPLES
+    worker_factor = TIME_BASELINE_WORKERS / workers
 
     estimates = {}
     total_seconds = 0.0
 
     for street in [Street.FLOP, Street.TURN, Street.RIVER]:
         num_clusters = config.num_board_clusters[street]
-        street_seconds = num_clusters * seconds_per_cluster
+        reps = config.representatives_per_cluster
+        num_items = num_clusters * reps
+
+        seconds_per_item = TIME_PER_ITEM_BASELINE[street] * sample_factor * worker_factor
+        street_seconds = num_items * seconds_per_item
 
         estimates[street] = {
             "clusters": num_clusters,
+            "reps": reps,
+            "items": num_items,
             "est_minutes": street_seconds / 60,
         }
         total_seconds += street_seconds
@@ -110,7 +131,9 @@ def _estimate_time(config: PrecomputeConfig) -> None:
         else:
             time_str = f"{minutes / 60:.1f}h"
 
-        print(f"  {street.name:6s}: {est['clusters']:3d} clusters → ~{time_str}")
+        print(
+            f"  {street.name:6s}: {est['items']:3d} items ({est['clusters']} clusters × {est['reps']} reps) → ~{time_str}"
+        )
 
     print("-" * 50)
     total_minutes = total_seconds / 60
