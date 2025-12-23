@@ -216,6 +216,8 @@ class TrainingSession:
                 continue
 
             # Get or create infoset in master storage
+            # legal_actions is guaranteed to be set if regrets_list is non-empty
+            assert legal_actions is not None
             infoset = self.solver.storage.get_or_create_infoset(key, legal_actions)
 
             # Sum regrets (CFR theory: regrets accumulate additively across all samples)

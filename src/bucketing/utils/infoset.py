@@ -88,7 +88,7 @@ class InfoSetKey:
     def get_hand_repr(self) -> str:
         """Get human-readable hand representation."""
         if self.street == Street.PREFLOP:
-            return self.preflop_hand
+            return self.preflop_hand or ""
         else:
             return f"B{self.postflop_bucket}"
 

@@ -178,8 +178,8 @@ def canonicalize_board(
     present_suits = list(dict.fromkeys(suit for _, suit in sorted_cards))
 
     # Try all possible suit relabelings and find the lexicographically smallest
-    best_canonical = None
-    best_mapping = None
+    best_canonical: Optional[Tuple[CanonicalCard, ...]] = None
+    best_mapping: Optional[Dict[str, int]] = None
 
     # Only need to try permutations of length equal to number of distinct suits
     for perm in permutations(range(len(present_suits))):
@@ -196,7 +196,8 @@ def canonicalize_board(
             best_canonical = canonical
             best_mapping = suit_to_label
 
-    # Build SuitMapping from best mapping
+    # Build SuitMapping from best mapping (guaranteed to be set after loop)
+    assert best_mapping is not None and best_canonical is not None
     final_mapping = SuitMapping(best_mapping, len(best_mapping))
 
     return best_canonical, final_mapping
