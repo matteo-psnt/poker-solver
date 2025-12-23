@@ -29,12 +29,27 @@ def handle_train(
     Returns:
         Trainer instance or None if cancelled
     """
-    # Check equity bucketing requirement
-    if config.get("card_abstraction.type") == "equity_bucketing":
-        bucketing_path = config.get("card_abstraction.bucketing_path")
-        if bucketing_path and not Path(bucketing_path).exists():
-            print(f"\n[ERROR] Equity bucketing file required but not found: {bucketing_path}")
-            print("   Please precompute equity buckets first (option 3 from main menu)")
+    # Check combo abstraction requirement
+    abstraction_path = config.get("card_abstraction.abstraction_path")
+    abstraction_config = config.get("card_abstraction.config")
+
+    if abstraction_path:
+        if not Path(abstraction_path).exists():
+            print(f"\n[ERROR] Combo abstraction file not found: {abstraction_path}")
+            print("   Please precompute combo abstraction first (from main menu)")
+            return None
+    elif abstraction_config:
+        # Check if any abstraction exists
+        base_path = Path("data/combo_abstraction")
+        abstraction_found = False
+        if base_path.exists():
+            for path in base_path.iterdir():
+                if path.is_dir() and (path / "combo_abstraction.pkl").exists():
+                    abstraction_found = True
+                    break
+        if not abstraction_found:
+            print("\n[ERROR] No combo abstraction found.")
+            print("   Please precompute combo abstraction first (from main menu)")
             return None
 
     # Ask about parallel training

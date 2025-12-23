@@ -73,9 +73,6 @@ def edit_config(config: Config, custom_style) -> Config:
         style=custom_style,
     ).ask()
 
-    # Card abstraction is now always equity_bucketing
-    abstraction_type = "equity_bucketing"
-
     checkpoint_freq = questionary.text(
         "Checkpoint frequency:",
         default=str(config.get("training.checkpoint_frequency", 100)),
@@ -83,38 +80,42 @@ def edit_config(config: Config, custom_style) -> Config:
     ).ask()
 
     config.set("training.num_iterations", int(iterations))
-    config.set("card_abstraction.type", abstraction_type)
     config.set("training.checkpoint_frequency", int(checkpoint_freq))
 
-    if abstraction_type == "equity_bucketing":
-        # Use config-based approach
-        default_config = config.get("card_abstraction.config", "production")
+    # Use combo abstraction config-based approach
+    default_config = config.get("card_abstraction.config", "default")
 
-        config_name = questionary.text(
-            "Equity bucketing config name:",
-            default=default_config,
+    config_name = questionary.text(
+        "Combo abstraction config name:",
+        default=default_config,
+        style=custom_style,
+    ).ask()
+
+    config.set("card_abstraction.config", config_name)
+
+    # Check if abstraction exists
+    from pathlib import Path
+
+    base_path = Path("data/combo_abstraction")
+
+    abstraction_found = False
+    if base_path.exists():
+        for path in base_path.iterdir():
+            if path.is_dir() and (path / "combo_abstraction.pkl").exists():
+                abstraction_found = True
+                break
+
+    if not abstraction_found:
+        print("\n[!] Warning: No combo abstraction found.")
+        precompute = questionary.confirm(
+            "Would you like to precompute combo abstraction now?",
+            default=True,
             style=custom_style,
         ).ask()
 
-        config.set("card_abstraction.config", config_name)
+        if precompute:
+            from src.cli.combo_handler import handle_combo_precompute
 
-        # Check if the config exists
-        from src.abstraction.equity.manager import EquityBucketManager
-
-        manager = EquityBucketManager()
-        abstraction_path = manager.get_abstraction(config_name)
-
-        if not abstraction_path:
-            print(f"\n[!] Warning: Equity bucketing config not found: {config_name}")
-            precompute = questionary.confirm(
-                "Would you like to precompute equity buckets now?",
-                default=True,
-                style=custom_style,
-            ).ask()
-
-            if precompute:
-                from src.cli.precompute_handler import handle_precompute
-
-                handle_precompute(custom_style)
+            handle_combo_precompute()
 
     return config

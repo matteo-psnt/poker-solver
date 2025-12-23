@@ -7,24 +7,23 @@ from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from src.training.trainer import Trainer
 from src.utils.config import Config
-from tests.test_helpers import create_minimal_bucketing
-
-
-@pytest.fixture(scope="session")
-def shared_bucketing_file(tmp_path_factory):
-    """Create a single bucketing file for all tests in this session."""
-    bucketing_path = tmp_path_factory.mktemp("data") / "test_bucketing.pkl"
-    create_minimal_bucketing(save_path=bucketing_path)
-    return bucketing_path
+from tests.test_helpers import DummyCardAbstraction
 
 
 @pytest.fixture
-def config_with_bucketing(tmp_path, shared_bucketing_file):
-    """Create a config with a shared bucketing file."""
+def config_with_dummy_abstraction(tmp_path, monkeypatch):
+    """Create a config with dummy card abstraction."""
     config = Config.default()
     # Use tmp_path for runs_dir to prevent creating runs in data/runs
     config.set("training.runs_dir", str(tmp_path / "runs"))
-    config.set("card_abstraction.bucketing_path", str(shared_bucketing_file))
+
+    # Mock the builder to return DummyCardAbstraction
+    from src.training import builders
+
+    def mock_build_card_abstraction(config, prompt_user=False, auto_compute=False):
+        return DummyCardAbstraction()
+
+    monkeypatch.setattr(builders, "build_card_abstraction", mock_build_card_abstraction)
 
     return config
 
@@ -32,45 +31,49 @@ def config_with_bucketing(tmp_path, shared_bucketing_file):
 class TestTrainer:
     """Tests for Trainer class."""
 
-    def test_create_trainer(self, config_with_bucketing):
-        trainer = Trainer(config_with_bucketing)
+    def test_create_trainer(self, config_with_dummy_abstraction):
+        trainer = Trainer(config_with_dummy_abstraction)
 
         assert trainer.config is not None
         assert trainer.solver is not None
         assert trainer.action_abstraction is not None
         assert trainer.card_abstraction is not None
 
-    def test_build_action_abstraction(self, config_with_bucketing):
-        trainer = Trainer(config_with_bucketing)
+    def test_build_action_abstraction(self, config_with_dummy_abstraction):
+        trainer = Trainer(config_with_dummy_abstraction)
 
         action_abs = trainer.action_abstraction
         assert isinstance(action_abs, ActionAbstraction)
 
-    # test_build_card_abstraction removed - now requires equity bucketing file
+    def test_build_storage_memory(self, config_with_dummy_abstraction):
+        config_with_dummy_abstraction.set("storage.backend", "memory")
 
-    def test_build_storage_memory(self, config_with_bucketing):
-        config_with_bucketing.set("storage.backend", "memory")
-
-        trainer = Trainer(config_with_bucketing)
+        trainer = Trainer(config_with_dummy_abstraction)
         assert isinstance(trainer.storage, InMemoryStorage)
 
-    def test_build_solver(self, config_with_bucketing):
-        trainer = Trainer(config_with_bucketing)
+    def test_build_solver(self, config_with_dummy_abstraction):
+        trainer = Trainer(config_with_dummy_abstraction)
 
         solver = trainer.solver
         assert isinstance(solver, MCCFRSolver)
         assert solver.iteration == 0
 
     @pytest.mark.timeout(5)
-    def test_train_executes(self, tmp_path, shared_bucketing_file):
+    def test_train_executes(self, tmp_path, monkeypatch):
         """Test that training runs without errors."""
+        # Mock the builder
+        from src.training import builders
+
+        monkeypatch.setattr(
+            builders, "build_card_abstraction", lambda *args, **kwargs: DummyCardAbstraction()
+        )
+
         config = Config.default()
         config.set("training.num_iterations", 1)
         config.set("training.checkpoint_frequency", 1000)
         config.set("training.log_frequency", 1)
         config.set("training.verbose", False)
         config.set("training.runs_dir", str(tmp_path / "runs"))
-        config.set("card_abstraction.bucketing_path", str(shared_bucketing_file))
         config.set("storage.backend", "memory")
 
         trainer = Trainer(config)
@@ -82,13 +85,19 @@ class TestTrainer:
         assert "elapsed_time" in results
 
     @pytest.mark.timeout(5)
-    def test_train_with_iterations_override(self, tmp_path, shared_bucketing_file):
+    def test_train_with_iterations_override(self, tmp_path, monkeypatch):
         """Test overriding num_iterations."""
+        # Mock the builder
+        from src.training import builders
+
+        monkeypatch.setattr(
+            builders, "build_card_abstraction", lambda *args, **kwargs: DummyCardAbstraction()
+        )
+
         config = Config.default()
         config.set("training.num_iterations", 1)
         config.set("training.verbose", False)
         config.set("training.runs_dir", str(tmp_path / "runs"))
-        config.set("card_abstraction.bucketing_path", str(shared_bucketing_file))
         config.set("storage.backend", "memory")
         config.set("training.checkpoint_frequency", 1000)
 
@@ -99,14 +108,20 @@ class TestTrainer:
 
     @pytest.mark.slow
     @pytest.mark.timeout(20)
-    def test_train_creates_checkpoint(self, tmp_path, shared_bucketing_file):
+    def test_train_creates_checkpoint(self, tmp_path, monkeypatch):
         """Test that checkpoints are created."""
+        # Mock the builder
+        from src.training import builders
+
+        monkeypatch.setattr(
+            builders, "build_card_abstraction", lambda *args, **kwargs: DummyCardAbstraction()
+        )
+
         config = Config.default()
         config.set("training.num_iterations", 1)
         config.set("training.verbose", False)
         config.set("training.checkpoint_frequency", 1)  # Checkpoint every iteration
         config.set("training.runs_dir", str(tmp_path / "runs"))
-        config.set("card_abstraction.bucketing_path", str(shared_bucketing_file))
 
         trainer = Trainer(config)
         trainer.train(num_iterations=1)
@@ -126,12 +141,8 @@ class TestTrainer:
             f"No manifest found in {run_dirs[0]}. Contents: {list(run_dirs[0].iterdir())}"
         )
 
-    def test_str_representation(self, tmp_path, shared_bucketing_file):
-        config = Config.default()
-        config.set("training.runs_dir", str(tmp_path / "runs"))
-        config.set("card_abstraction.bucketing_path", str(shared_bucketing_file))
-
-        trainer = Trainer(config)
+    def test_str_representation(self, config_with_dummy_abstraction):
+        trainer = Trainer(config_with_dummy_abstraction)
         s = str(trainer)
 
         assert "Trainer" in s

@@ -17,9 +17,15 @@ from questionary import Style
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.cli.chart_handler import handle_view_preflop_chart
+from src.cli.combo_handler import (
+    handle_combo_analyze_bucketing,
+    handle_combo_coverage,
+    handle_combo_info,
+    handle_combo_precompute,
+    handle_combo_test_lookup,
+    handle_combo_validate,
+)
 from src.cli.config_handler import select_config
-from src.cli.equity_verification_handler import handle_verify_equity_buckets
-from src.cli.precompute_handler import handle_precompute
 from src.cli.training_handler import handle_resume, handle_train
 from src.training.run.training_run import TrainingRun
 from src.training.trainer import Trainer
@@ -96,9 +102,7 @@ class SolverCLI:
                 choices=[
                     "Train Solver",
                     "Evaluate Solver",
-                    "Precompute Equity Buckets",
-                    "Verify Equity Buckets",
-                    "List Equity Buckets",
+                    "Combo Abstraction Tools",
                     "View Past Runs",
                     "Resume Training",
                     "View Preflop Chart",
@@ -111,21 +115,17 @@ class SolverCLI:
                 print("\nGoodbye!")
                 break
 
+            # Skip separator lines
+            if action.startswith("---"):
+                continue
+
             try:
                 if "Train" in action and "Resume" not in action:
                     self.train_solver()
                 elif "Evaluate" in action:
                     self.evaluate_solver()
-                elif "Precompute" in action:
-                    self.precompute_equity_buckets()
-                elif "Verify Equity" in action:
-                    handle_verify_equity_buckets(custom_style)
-                elif "List Equity Buckets" in action:
-                    from src.abstraction.equity.manager import EquityBucketManager
-
-                    manager = EquityBucketManager()
-                    manager.print_summary()
-                    input("\nPress Enter to continue...")
+                elif "Combo Abstraction" in action:
+                    self.combo_abstraction_menu()
                 elif "View Past" in action:
                     self.view_runs()
                 elif "Resume" in action:
@@ -187,10 +187,6 @@ class SolverCLI:
         print("   This will compare against baseline strategies")
 
         input("\nPress Enter to continue...")
-
-    def precompute_equity_buckets(self):
-        """Precompute equity buckets."""
-        handle_precompute(custom_style)
 
     def view_runs(self):
         """View past training runs."""
@@ -306,6 +302,55 @@ class SolverCLI:
             self.current_trainer = None
 
         input("\nPress Enter to continue...")
+
+    def combo_abstraction_menu(self):
+        """Show combo abstraction tools submenu."""
+        while True:
+            action = questionary.select(
+                "\nCombo Abstraction Tools:",
+                choices=[
+                    "Precompute Abstraction",
+                    "View Abstraction Info",
+                    "Test Bucket Lookup",
+                    "Analyze Bucketing Patterns",
+                    "Analyze Coverage (Fallback Rate)",
+                    "Validate Abstraction",
+                    "Back",
+                ],
+                style=custom_style,
+            ).ask()
+
+            if action is None or action == "Back":
+                return
+
+            try:
+                if "Precompute" in action:
+                    handle_combo_precompute()
+                    input("\nPress Enter to continue...")
+                elif "View" in action:
+                    handle_combo_info()
+                    input("\nPress Enter to continue...")
+                elif "Test" in action:
+                    handle_combo_test_lookup()
+                    input("\nPress Enter to continue...")
+                elif "Analyze Bucketing" in action:
+                    handle_combo_analyze_bucketing()
+                    input("\nPress Enter to continue...")
+                elif "Analyze Coverage" in action:
+                    handle_combo_coverage()
+                    input("\nPress Enter to continue...")
+                elif "Validate" in action:
+                    handle_combo_validate()
+                    input("\nPress Enter to continue...")
+            except KeyboardInterrupt:
+                print("\n\n[!] Operation cancelled by user")
+                continue
+            except Exception as e:
+                print(f"\n[ERROR] {e}")
+                import traceback
+
+                traceback.print_exc()
+                input("\nPress Enter to continue...")
 
     def view_preflop_chart(self):
         """View preflop strategy chart from trained solver."""

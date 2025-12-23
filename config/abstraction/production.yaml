@@ -1,0 +1,29 @@
+# Production Configuration
+# High-quality abstraction for serious training
+# Estimated precomputation time: ~1-2 hours
+
+# Board clustering (public-state abstraction)
+board_clusters:
+  flop: 100   # 100 clusters × 2 reps × ~450 hands = ~90k equity computations
+  turn: 200   # 200 clusters × 2 reps × ~450 hands = ~180k equity computations
+  river: 400  # 400 clusters × 2 reps × ~450 hands = ~360k equity computations
+
+# Representatives per cluster (for equity computation)
+representatives_per_cluster: 2
+
+# Equity buckets per street
+buckets:
+  flop: 100
+  turn: 300
+  river: 600
+
+# Equity calculation settings
+equity_samples: 2000  # Monte Carlo samples per (board, hand) pair
+
+# Clustering algorithm settings
+kmeans_max_iter: 500
+kmeans_n_init: 20
+
+# System settings
+num_workers: null  # null = use all CPU cores
+seed: 42
