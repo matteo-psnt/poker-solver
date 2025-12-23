@@ -1,7 +1,7 @@
 """
-Checkpoint management for training runs.
+Run management for training runs.
 
-Handles saving and loading solver checkpoints using unified metadata system.
+Handles saving and loading solver state using unified metadata system.
 """
 
 import logging
@@ -17,9 +17,9 @@ from src.training.metadata import CheckpointManifest, RunMetadata
 logger = logging.getLogger(__name__)
 
 
-class CheckpointManager:
+class RunManager:
     """
-    Manages solver checkpoints with unified metadata.
+    Manages training runs with unified metadata.
 
     Uses:
     - run_metadata.json: Run-level metadata (config, system, provenance)
@@ -29,16 +29,16 @@ class CheckpointManager:
 
     def __init__(
         self,
-        checkpoint_dir: Path,
+        runs_dir: Path,
         config_name: Optional[str] = None,
         run_id: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
     ):
         """
-        Initialize checkpoint manager.
+        Initialize run manager.
 
         Args:
-            checkpoint_dir: Base directory to store checkpoints
+            runs_dir: Base directory to store training runs
             config_name: Optional name for this training run
             run_id: Optional unique identifier (auto-generated if not provided)
             config: Optional full configuration dictionary
@@ -46,7 +46,7 @@ class CheckpointManager:
         Note:
             Directory is NOT created until first save (lazy creation).
         """
-        self.base_checkpoint_dir = Path(checkpoint_dir)
+        self.base_runs_dir = Path(runs_dir)
         self.config_name = config_name or "default"
 
         # Generate unique run ID if not provided
@@ -57,7 +57,7 @@ class CheckpointManager:
             self.run_id = run_id
 
         # Run-specific directory (not created yet!)
-        self.checkpoint_dir = self.base_checkpoint_dir / self.run_id
+        self.run_dir = self.base_runs_dir / self.run_id
 
         # Metadata
         self.run_metadata: Optional[RunMetadata] = None
@@ -70,7 +70,7 @@ class CheckpointManager:
         self._config = config
 
         # Try to load existing run if directory exists
-        if self.checkpoint_dir.exists():
+        if self.run_dir.exists():
             self._load_existing_run()
 
     def _ensure_initialized(self):
@@ -79,8 +79,8 @@ class CheckpointManager:
             return
 
         # Create directory
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created checkpoint directory: {self.checkpoint_dir}")
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created run directory: {self.run_dir}")
 
         # Create run metadata
         if self.run_metadata is None:
@@ -89,12 +89,12 @@ class CheckpointManager:
                 config_name=self.config_name,
                 config=self._config,
             )
-            self.run_metadata.save(self.checkpoint_dir / "run_metadata.json")
+            self.run_metadata.save(self.run_dir / "run_metadata.json")
             logger.info(f"Created run metadata for {self.run_id}")
 
         # Save config as YAML file for easy inspection
         if self._config is not None:
-            config_file = self.checkpoint_dir / "config.yaml"
+            config_file = self.run_dir / "config.yaml"
             with open(config_file, "w") as f:
                 yaml.dump(self._config, f, default_flow_style=False, sort_keys=False)
             logger.info(f"Saved config to {config_file}")
@@ -102,15 +102,15 @@ class CheckpointManager:
         # Create manifest
         if self.manifest is None:
             self.manifest = CheckpointManifest(run_id=self.run_id)
-            self.manifest.save(self.checkpoint_dir / "checkpoint_manifest.json")
+            self.manifest.save(self.run_dir / "checkpoint_manifest.json")
             logger.info(f"Created checkpoint manifest for {self.run_id}")
 
         self.initialized = True
 
     def _load_existing_run(self):
         """Load existing run metadata and manifest."""
-        run_metadata_path = self.checkpoint_dir / "run_metadata.json"
-        manifest_path = self.checkpoint_dir / "checkpoint_manifest.json"
+        run_metadata_path = self.run_dir / "run_metadata.json"
+        manifest_path = self.run_dir / "checkpoint_manifest.json"
 
         try:
             if run_metadata_path.exists():
@@ -161,17 +161,17 @@ class CheckpointManager:
         )
 
         # Save manifest
-        self.manifest.save(self.checkpoint_dir / "checkpoint_manifest.json")
+        self.manifest.save(self.run_dir / "checkpoint_manifest.json")
 
         # Trigger solver's storage checkpoint
         solver.storage.checkpoint(iteration)
 
         logger.info(
             f"Checkpoint saved: iteration={iteration}, num_infosets={num_infosets}, "
-            f"dir={self.checkpoint_dir}"
+            f"dir={self.run_dir}"
         )
 
-        return self.checkpoint_dir
+        return self.run_dir
 
     def update_stats(
         self,
@@ -203,20 +203,20 @@ class CheckpointManager:
         )
 
         # Save updated metadata
-        self.run_metadata.save(self.checkpoint_dir / "run_metadata.json")
+        self.run_metadata.save(self.run_dir / "run_metadata.json")
 
     def mark_completed(self):
         """Mark training run as completed."""
         if self.run_metadata is not None:
             self.run_metadata.mark_completed()
-            self.run_metadata.save(self.checkpoint_dir / "run_metadata.json")
+            self.run_metadata.save(self.run_dir / "run_metadata.json")
             logger.info(f"Run {self.run_id} marked as completed")
 
     def mark_failed(self):
         """Mark training run as failed."""
         if self.run_metadata is not None:
             self.run_metadata.mark_failed()
-            self.run_metadata.save(self.checkpoint_dir / "run_metadata.json")
+            self.run_metadata.save(self.run_dir / "run_metadata.json")
             logger.info(f"Run {self.run_id} marked as failed")
 
     def get_checkpoint(self, iteration: int) -> Optional[Dict[str, Any]]:
@@ -274,25 +274,28 @@ class CheckpointManager:
         return latest.iteration if latest else 0
 
     @classmethod
-    def list_runs(cls, base_checkpoint_dir: Path) -> List[str]:
+    def list_runs(cls, base_runs_dir: Path) -> List[str]:
         """
-        List all training runs in checkpoint directory.
+        List all training runs in runs directory.
 
         Args:
-            base_checkpoint_dir: Base checkpoint directory
+            base_runs_dir: Base runs directory
 
         Returns:
             List of run IDs
         """
-        base_path = Path(base_checkpoint_dir)
+        base_path = Path(base_runs_dir)
         if not base_path.exists():
             return []
 
         runs = []
         for run_dir in base_path.iterdir():
             if run_dir.is_dir() and run_dir.name.startswith("run_"):
-                # Check if it has metadata (not empty)
-                if (run_dir / "run_metadata.json").exists():
+                # Check if it has metadata (new format or old format)
+                has_new_format = (run_dir / "run_metadata.json").exists()
+                has_old_format = (run_dir / "experiment.json").exists()
+
+                if has_new_format or has_old_format:
                     runs.append(run_dir.name)
 
         return sorted(runs)
@@ -300,32 +303,32 @@ class CheckpointManager:
     @classmethod
     def from_run_id(
         cls,
-        base_checkpoint_dir: Path,
+        base_runs_dir: Path,
         run_id: str,
         config_name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
-    ) -> "CheckpointManager":
+    ) -> "RunManager":
         """
-        Create CheckpointManager for an existing run.
+        Create RunManager for an existing run.
 
         Args:
-            base_checkpoint_dir: Base checkpoint directory
+            base_runs_dir: Base runs directory
             run_id: Existing run ID to load
             config_name: Optional config name
             config: Optional config dict
 
         Returns:
-            CheckpointManager for the specified run
+            RunManager for the specified run
 
         Raises:
             ValueError: If run doesn't exist
         """
-        checkpoint_dir = base_checkpoint_dir / run_id
-        if not checkpoint_dir.exists():
-            raise ValueError(f"Run {run_id} does not exist in {base_checkpoint_dir}")
+        run_dir = base_runs_dir / run_id
+        if not run_dir.exists():
+            raise ValueError(f"Run {run_id} does not exist in {base_runs_dir}")
 
         return cls(
-            checkpoint_dir=base_checkpoint_dir,
+            runs_dir=base_runs_dir,
             config_name=config_name,
             run_id=run_id,
             config=config,
@@ -336,6 +339,6 @@ class CheckpointManager:
         num_checkpoints = len(self.manifest.checkpoints) if self.manifest else 0
         status = "initialized" if self.initialized else "not initialized"
         return (
-            f"CheckpointManager(run={self.run_id}, dir={self.checkpoint_dir}, "
+            f"RunManager(run={self.run_id}, dir={self.run_dir}, "
             f"checkpoints={num_checkpoints}, status={status})"
         )

@@ -15,7 +15,7 @@ from src.solver.storage import DiskBackedStorage
 
 
 def handle_view_preflop_chart(
-    checkpoint_dir: Path,
+    runs_dir: Path,
     base_dir: Path,
     custom_style,
 ):
@@ -23,16 +23,16 @@ def handle_view_preflop_chart(
     Handle viewing preflop strategy chart.
 
     Args:
-        checkpoint_dir: Directory containing checkpoints
+        runs_dir: Directory containing training runs
         base_dir: Base project directory
         custom_style: Questionary style
     """
-    from src.training.checkpoint import CheckpointManager
+    from src.training.checkpoint import RunManager
 
-    runs = CheckpointManager.list_runs(checkpoint_dir)
+    runs = RunManager.list_runs(runs_dir)
 
     if not runs:
-        print("\n[ERROR] No trained runs found in data/checkpoints/")
+        print("\n[ERROR] No trained runs found in data/runs/")
         input("Press Enter to continue...")
         return
 
@@ -46,9 +46,9 @@ def handle_view_preflop_chart(
         return
 
     print(f"\nLoading solver from {selected_run}...")
-    run_checkpoint_dir = checkpoint_dir / selected_run
+    run_dir = runs_dir / selected_run
     storage = DiskBackedStorage(
-        checkpoint_dir=run_checkpoint_dir,
+        checkpoint_dir=run_dir,
         cache_size=100000,
         flush_frequency=1000,
     )

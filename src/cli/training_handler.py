@@ -84,8 +84,8 @@ def handle_train(
 
     # Start training
     print(f"\nStarting training for {config.get('training.num_iterations')} iterations...")
-    if hasattr(trainer, "checkpoint_manager"):
-        print(f"Checkpoints: {trainer.checkpoint_manager.checkpoint_dir}")
+    if hasattr(trainer, "run_manager"):
+        print(f"Run directory: {trainer.run_manager.run_dir}")
     print(f"Checkpoint frequency: every {config.get('training.checkpoint_frequency')} iterations")
     if use_parallel:
         print(f"Parallel workers: {num_workers}")

@@ -77,10 +77,9 @@ class Trainer:
             abstraction_config = card_config.get("config")
 
             if abstraction_config:
-                # NEW: Load by config name with auto-prompt
-                from src.abstraction.manager import AbstractionManager
+                from src.abstraction.manager import EquityBucketManager
 
-                manager = AbstractionManager()
+                manager = EquityBucketManager()
                 bucketing_path = manager.find_or_compute(
                     config_name=abstraction_config,
                     auto_compute=False,

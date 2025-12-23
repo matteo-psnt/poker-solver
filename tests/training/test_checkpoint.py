@@ -6,16 +6,16 @@ from pathlib import Path
 from src.abstraction.action_abstraction import ActionAbstraction
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
-from src.training.checkpoint import CheckpointManager
+from src.training.checkpoint import RunManager
 from tests.test_helpers import DummyCardAbstraction
 
 
-class TestCheckpointManager:
-    """Tests for CheckpointManager."""
+class TestRunManager:
+    """Tests for RunManager."""
 
     def test_create_manager(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
 
             assert manager.base_checkpoint_dir == Path(tmpdir)
             assert manager.config_name == "default"
@@ -25,13 +25,13 @@ class TestCheckpointManager:
 
     def test_create_manager_with_config_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            manager = CheckpointManager(Path(tmpdir), config_name="test_config")
+            manager = RunManager(Path(tmpdir), config_name="test_config")
 
             assert manager.config_name == "test_config"
 
     def test_create_manager_with_run_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            manager = CheckpointManager(Path(tmpdir), config_name="test", run_id="run_test123")
+            manager = RunManager(Path(tmpdir), config_name="test", run_id="run_test123")
 
             assert manager.run_id == "run_test123"
             assert "run_test123" in str(manager.checkpoint_dir)
@@ -48,7 +48,7 @@ class TestCheckpointManager:
             solver.train(num_iterations=2, verbose=False)
 
             # Save checkpoint
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
             checkpoint_path = manager.save(solver, iteration=2)
 
             assert checkpoint_path.exists()
@@ -64,7 +64,7 @@ class TestCheckpointManager:
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
 
             # Initially no checkpoints
             checkpoints = manager.list_checkpoints()
@@ -92,7 +92,7 @@ class TestCheckpointManager:
 
             solver.train(num_iterations=2, verbose=False)
 
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
             manager.save(solver, iteration=2)
 
             # Get checkpoint
@@ -104,7 +104,7 @@ class TestCheckpointManager:
 
     def test_get_nonexistent_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
 
             info = manager.get_checkpoint(iteration=999)
 
@@ -117,7 +117,7 @@ class TestCheckpointManager:
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
 
             # No checkpoints initially
             latest = manager.get_latest_checkpoint()
@@ -146,7 +146,7 @@ class TestCheckpointManager:
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
 
             # No checkpoints initially
             assert manager.get_latest_iteration() == 0
@@ -165,20 +165,20 @@ class TestCheckpointManager:
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
             # Create multiple runs with actual checkpoints (so metadata exists)
-            manager1 = CheckpointManager(Path(tmpdir), run_id="run_001")
+            manager1 = RunManager(Path(tmpdir), run_id="run_001")
             solver.train(num_iterations=2, verbose=False)
             manager1.save(solver, iteration=2)
 
-            manager2 = CheckpointManager(Path(tmpdir), run_id="run_002")
+            manager2 = RunManager(Path(tmpdir), run_id="run_002")
             solver.train(num_iterations=2, verbose=False)
             manager2.save(solver, iteration=4)
 
-            manager3 = CheckpointManager(Path(tmpdir), run_id="run_003")
+            manager3 = RunManager(Path(tmpdir), run_id="run_003")
             solver.train(num_iterations=2, verbose=False)
             manager3.save(solver, iteration=6)
 
             # List runs
-            runs = CheckpointManager.list_runs(Path(tmpdir))
+            runs = RunManager.list_runs(Path(tmpdir))
 
             assert len(runs) == 3
             assert "run_001" in runs
@@ -187,11 +187,11 @@ class TestCheckpointManager:
 
     def test_list_runs_empty_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            runs = CheckpointManager.list_runs(Path(tmpdir))
+            runs = RunManager.list_runs(Path(tmpdir))
             assert len(runs) == 0
 
     def test_list_runs_nonexistent_directory(self):
-        runs = CheckpointManager.list_runs(Path("/nonexistent/directory"))
+        runs = RunManager.list_runs(Path("/nonexistent/directory"))
         assert len(runs) == 0
 
     def test_from_run_id(self):
@@ -202,12 +202,12 @@ class TestCheckpointManager:
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
             # Create a run with actual checkpoint
-            manager1 = CheckpointManager(Path(tmpdir), run_id="run_test")
+            manager1 = RunManager(Path(tmpdir), run_id="run_test")
             solver.train(num_iterations=2, verbose=False)
             manager1.save(solver, iteration=2)
 
             # Load from run ID
-            manager2 = CheckpointManager.from_run_id(
+            manager2 = RunManager.from_run_id(
                 Path(tmpdir), run_id="run_test", config_name="test_config"
             )
 
@@ -216,11 +216,11 @@ class TestCheckpointManager:
 
     def test_str_representation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            manager = CheckpointManager(Path(tmpdir), run_id="run_test")
+            manager = RunManager(Path(tmpdir), run_id="run_test")
 
             s = str(manager)
 
-            assert "CheckpointManager" in s
+            assert "RunManager" in s
             assert "run_test" in s
 
     def test_update_stats(self):
@@ -230,7 +230,7 @@ class TestCheckpointManager:
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
             solver.train(num_iterations=2, verbose=False)  # Reduced from 10
             manager.save(solver, iteration=2)  # Match iteration count
 
@@ -253,7 +253,7 @@ class TestCheckpointManager:
             storage = InMemoryStorage()
             solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
-            manager = CheckpointManager(Path(tmpdir))
+            manager = RunManager(Path(tmpdir))
             solver.train(num_iterations=2, verbose=False)
             manager.save(solver, iteration=2)
 

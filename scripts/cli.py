@@ -20,7 +20,7 @@ from src.cli.chart_handler import handle_view_preflop_chart
 from src.cli.config_handler import select_config
 from src.cli.precompute_handler import handle_precompute
 from src.cli.training_handler import handle_resume, handle_train
-from src.training.checkpoint import CheckpointManager
+from src.training.checkpoint import RunManager
 from src.training.trainer import Trainer
 from src.utils.config import Config
 
@@ -47,7 +47,7 @@ class SolverCLI:
         """Initialize CLI."""
         self.base_dir = Path(__file__).parent.parent
         self.config_dir = self.base_dir / "config"
-        self.checkpoint_dir = self.base_dir / "data" / "checkpoints"
+        self.runs_dir = self.base_dir / "data" / "runs"
         self.equity_buckets_dir = self.base_dir / "data" / "equity_buckets"
         self.current_trainer: Optional[Trainer] = None
 
@@ -66,12 +66,12 @@ class SolverCLI:
                 current_iter = summary.get("total_iterations", 0)
 
                 if current_iter > 0:
-                    self.current_trainer.checkpoint_manager.save(
+                    self.current_trainer.run_manager.save(
                         self.current_trainer.solver,
                         current_iter,
                         tags=["interrupted"],
                     )
-                    self.current_trainer.checkpoint_manager.update_stats(
+                    self.current_trainer.run_manager.update_stats(
                         total_iterations=current_iter,
                         total_runtime_seconds=self.current_trainer.metrics.get_elapsed_time(),
                         num_infosets=self.current_trainer.solver.num_infosets(),
@@ -117,9 +117,9 @@ class SolverCLI:
                 elif "Precompute" in action:
                     self.precompute_equity_buckets()
                 elif "List Equity Buckets" in action:
-                    from src.abstraction.manager import AbstractionManager
+                    from src.abstraction.manager import EquityBucketManager
 
-                    manager = AbstractionManager()
+                    manager = EquityBucketManager()
                     manager.print_summary()
                     input("\nPress Enter to continue...")
                 elif "View Past" in action:
@@ -148,7 +148,7 @@ class SolverCLI:
             return
 
         try:
-            trainer = handle_train(config, custom_style, self.checkpoint_dir)
+            trainer = handle_train(config, custom_style, self.runs_dir)
             self.current_trainer = trainer
         finally:
             self.current_trainer = None
@@ -161,10 +161,10 @@ class SolverCLI:
         print("=" * 60)
 
         # List available runs
-        runs = CheckpointManager.list_runs(self.checkpoint_dir)
+        runs = RunManager.list_runs(self.runs_dir)
 
         if not runs:
-            print("\n[ERROR] No trained runs found in data/checkpoints/")
+            print("\n[ERROR] No trained runs found in data/runs/")
             input("Press Enter to continue...")
             return
 
@@ -193,7 +193,7 @@ class SolverCLI:
         print("\nPast Training Runs")
         print("=" * 60)
 
-        runs = CheckpointManager.list_runs(self.checkpoint_dir)
+        runs = RunManager.list_runs(self.runs_dir)
 
         if not runs:
             print("\n[ERROR] No training runs found")
@@ -211,8 +211,8 @@ class SolverCLI:
             return
 
         # Load and display run info
-        manager = CheckpointManager.from_run_id(
-            self.checkpoint_dir,
+        manager = RunManager.from_run_id(
+            self.runs_dir,
             selected,
         )
 
@@ -251,15 +251,15 @@ class SolverCLI:
         print("\nResume Training")
         print("=" * 60)
 
-        runs = CheckpointManager.list_runs(self.checkpoint_dir)
+        runs = RunManager.list_runs(self.runs_dir)
 
         if not runs:
-            print("\n[ERROR] No training runs found to resume")
+            print("No training runs found.")
             input("Press Enter to continue...")
             return
 
         selected = questionary.select(
-            "Select run to resume:",
+            "Select run to view:",
             choices=runs + ["Cancel"],
             style=custom_style,
         ).ask()
@@ -267,7 +267,7 @@ class SolverCLI:
         if selected == "Cancel" or selected is None:
             return
 
-        manager = CheckpointManager.from_run_id(self.checkpoint_dir, selected)
+        manager = RunManager.from_run_id(self.runs_dir, selected)
 
         if not manager.run_metadata or not manager.run_metadata.config:
             print("\n[ERROR] No config found for this run")
@@ -306,7 +306,7 @@ class SolverCLI:
         print("\nView Preflop Chart")
         print("=" * 60)
 
-        handle_view_preflop_chart(self.checkpoint_dir, self.base_dir, custom_style)
+        handle_view_preflop_chart(self.runs_dir, self.base_dir, custom_style)
 
 
 def main():

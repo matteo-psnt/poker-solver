@@ -36,9 +36,6 @@ class PrecomputeConfig:
     num_equity_samples: int
     num_samples_per_cluster: int
 
-    # Output
-    output_file: Path
-
     # Optional
     seed: int = 42
     num_workers: int = 1  # Number of parallel workers (1 = sequential, >1 = parallel)
@@ -74,65 +71,10 @@ class PrecomputeConfig:
             num_board_clusters=convert_street_dict(config_dict["num_board_clusters"]),
             num_equity_samples=config_dict["num_equity_samples"],
             num_samples_per_cluster=config_dict["num_samples_per_cluster"],
-            output_file=Path(
-                config_dict.get("output_file", "data/abstractions/equity_buckets.pkl")
-            ),
             seed=config_dict.get("seed", 42),
             num_workers=config_dict.get("num_workers", 1),
             aliases=config_dict.get("aliases", []),
             config_name=config_dict.get("config_name"),
-        )
-
-    @classmethod
-    def default(cls) -> "PrecomputeConfig":
-        """Get default production configuration."""
-        return cls(
-            num_samples_per_street={
-                Street.FLOP: 5000,
-                Street.TURN: 3000,
-                Street.RIVER: 2000,
-            },
-            num_buckets={
-                Street.FLOP: 50,
-                Street.TURN: 100,
-                Street.RIVER: 200,
-            },
-            num_board_clusters={
-                Street.FLOP: 200,
-                Street.TURN: 500,
-                Street.RIVER: 1000,
-            },
-            num_equity_samples=1000,
-            num_samples_per_cluster=5,
-            output_file=Path("data/abstractions/equity_buckets.pkl"),
-            config_name="production",
-            aliases=["default"],  # Additional alias
-        )
-
-    @classmethod
-    def fast_test(cls) -> "PrecomputeConfig":
-        """Get fast configuration for testing (~2-5 minutes)."""
-        return cls(
-            num_samples_per_street={
-                Street.FLOP: 500,
-                Street.TURN: 300,
-                Street.RIVER: 200,
-            },
-            num_buckets={
-                Street.FLOP: 10,
-                Street.TURN: 20,
-                Street.RIVER: 30,
-            },
-            num_board_clusters={
-                Street.FLOP: 20,
-                Street.TURN: 30,
-                Street.RIVER: 40,
-            },
-            num_equity_samples=100,
-            num_samples_per_cluster=3,
-            output_file=Path("data/abstractions/equity_buckets_test.pkl"),
-            config_name="fast_test",
-            aliases=["test"],  # Additional alias
         )
 
 
@@ -278,13 +220,20 @@ def precompute_equity_bucketing(
 
     logger.info(f"Fitting completed in {fit_time:.1f}s ({fit_time / 60:.1f} minutes)")
 
-    # Step 4: Save to disk
-    logger.info("Step 4: Saving to disk")
-    config.output_file.parent.mkdir(parents=True, exist_ok=True)
-    bucketing.save(config.output_file)
+    # Step 4: Save to temporary file
+    logger.info("Step 4: Saving to temporary file")
 
-    file_size = config.output_file.stat().st_size
-    logger.info(f"  File: {config.output_file}")
+    # Create temp file in system temp directory
+    import tempfile
+
+    temp_dir = Path(tempfile.gettempdir()) / "poker-solver-precompute"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_file = temp_dir / f"abstraction-{config.config_name or 'temp'}.pkl"
+
+    bucketing.save(temp_file)
+
+    file_size = temp_file.stat().st_size
+    logger.info(f"  Temp file: {temp_file}")
     logger.info(f"  Size: {file_size:,} bytes ({file_size / 1024:.1f} KB)")
 
     # Summary
@@ -295,13 +244,13 @@ def precompute_equity_bucketing(
     if save_with_metadata:
         from datetime import datetime
 
-        from src.abstraction.manager import AbstractionManager
-        from src.abstraction.metadata import AbstractionMetadata
+        from src.abstraction.manager import EquityBucketManager
+        from src.abstraction.metadata import EquityBucketMetadata
 
         logger.info("Step 5: Saving with metadata")
 
         # Create metadata
-        metadata = AbstractionMetadata(
+        metadata = EquityBucketMetadata(
             name="",  # Will be auto-generated from config
             created_at=datetime.now().isoformat(),
             abstraction_type="equity_bucketing",
@@ -316,7 +265,7 @@ def precompute_equity_bucketing(
         )
 
         # Save with metadata (auto-generate name from config)
-        manager = AbstractionManager()
+        manager = EquityBucketManager()
 
         # Build aliases: config name + explicit aliases from config
         aliases = []
@@ -329,7 +278,7 @@ def precompute_equity_bucketing(
         aliases.extend(config.aliases)
 
         abstraction_dir = manager.save_abstraction(
-            config.output_file,
+            temp_file,
             metadata,
             aliases=aliases,
             auto_name=True,  # Generate name from config
@@ -341,7 +290,14 @@ def precompute_equity_bucketing(
             logger.info(f"  Aliases: {', '.join(aliases)}")
         else:
             logger.info("  No aliases set (use config_name or aliases field to add)")
-        logger.info("  Use AbstractionManager().list_abstractions() to view all")
+        logger.info("  Use EquityBucketManager().list_abstractions() to view all")
+
+        # Clean up temp file
+        try:
+            temp_file.unlink()
+            logger.info(f"  Cleaned up temp file: {temp_file}")
+        except Exception as e:
+            logger.warning(f"  Could not clean up temp file: {e}")
 
     return bucketing
 
@@ -428,9 +384,4 @@ def print_summary(config: PrecomputeConfig) -> None:
     print()
     print("Estimated Time:")
     print(f"  ~{estimated_seconds / 60:.0f} minutes ({estimated_seconds / 3600:.1f} hours)")
-
-    print()
-    print("Output:")
-    print(f"  File: {config.output_file}")
-    print("  Expected size: ~300 KB")
     print()
