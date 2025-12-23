@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import logging
 import multiprocessing as mp
 import random
 import subprocess
@@ -758,38 +757,16 @@ def handle_combo_coverage() -> None:
 
     overall_stats = {}
 
-    # Suppress fallback warnings during analysis
-    logger = logging.getLogger("src.bucketing.postflop.hand_bucketing")
-    original_level = logger.level
-
-    # Custom handler to count fallbacks
-    fallback_clusters = []
-
-    class FallbackHandler(logging.Handler):
-        def emit(self, record):
-            if "not found in cluster" in record.getMessage():
-                msg = record.getMessage()
-                parts = msg.split("cluster ")
-                if len(parts) > 1:
-                    cluster_id = int(parts[1].split()[0])
-                    fallback_clusters.append(cluster_id)
-
-    handler = FallbackHandler()
-    logger.addHandler(handler)
-    logger.setLevel(logging.WARNING)
-
     for street in streets:
         print(f"\nAnalyzing {street.name}...")
         print("-" * 60)
 
         num_board_cards = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}[street]
 
-        total_lookups = 0
-        fallback_count = 0
-        cluster_fallbacks: defaultdict[int, int] = defaultdict(int)
-        cluster_lookups: defaultdict[int, int] = defaultdict(int)
+        # Reset stats before this street
+        abstraction.reset_stats()
 
-        fallback_clusters.clear()
+        successful_lookups = 0
 
         # Sample random combinations
         for _ in range(num_samples):
@@ -801,58 +778,32 @@ def handle_combo_coverage() -> None:
                 hole_cards = tuple([Card.new(c) for c in hole_str])
                 board_cards = tuple([Card.new(c) for c in board_str])
 
-                cluster_id = abstraction._board_clusterer.predict(board_cards, street)
-                cluster_lookups[cluster_id] += 1
-
-                initial_fallback_count = len(fallback_clusters)
                 hole_cards_pair: tuple[Card, Card] = (hole_cards[0], hole_cards[1])
                 _bucket = abstraction.get_bucket(hole_cards_pair, board_cards, street)
 
-                total_lookups += 1
-
-                if len(fallback_clusters) > initial_fallback_count:
-                    fallback_count += 1
-                    cluster_fallbacks[cluster_id] += 1
+                successful_lookups += 1
 
             except Exception as e:
-                # Skip invalid combinations but print first error for debugging
-                if total_lookups == 0:
+                # Skip invalid combinations (e.g., duplicate cards)
+                if successful_lookups == 0:
                     print(f"  [DEBUG] First error: {e}")
                 pass
 
-        # Calculate statistics
-        fallback_rate = (fallback_count / total_lookups * 100) if total_lookups > 0 else 0
+        # Get stats from abstraction object
+        stats = abstraction.get_fallback_stats()
+        total_lookups = stats["total_lookups"]
+        fallback_count = stats["fallback_count"]
+        fallback_rate = stats["fallback_rate"] * 100
 
         print(f"  Total lookups: {total_lookups:,}")
         print(f"  Direct hits:   {total_lookups - fallback_count:,} ({100 - fallback_rate:.1f}%)")
         print(f"  Fallback used: {fallback_count:,} ({fallback_rate:.1f}%)")
-
-        # Show worst clusters
-        if cluster_fallbacks:
-            print("\n  Top 10 clusters with most fallbacks:")
-            cluster_fallback_rates = {}
-            for cluster_id, fallbacks in cluster_fallbacks.items():
-                total = cluster_lookups[cluster_id]
-                rate = (fallbacks / total * 100) if total > 0 else 0
-                cluster_fallback_rates[cluster_id] = (fallbacks, total, rate)
-
-            sorted_clusters = sorted(
-                cluster_fallback_rates.items(), key=lambda x: x[1][2], reverse=True
-            )[:10]
-
-            for cluster_id, (fallbacks, total, rate) in sorted_clusters:
-                bar = "█" * min(int(rate / 2), 50)
-                print(f"    Cluster {cluster_id:3d}: {bar} {rate:5.1f}% ({fallbacks}/{total})")
 
         overall_stats[street] = {
             "total_lookups": total_lookups,
             "fallback_count": fallback_count,
             "fallback_rate": fallback_rate,
         }
-
-    # Restore logger
-    logger.removeHandler(handler)
-    logger.setLevel(original_level)
 
     # Overall summary
     print("\n" + "=" * 60)

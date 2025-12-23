@@ -1,5 +1,6 @@
 {
   "config": {
+    "config_name": "fast_test",
     "num_board_clusters": {
       "FLOP": 10,
       "TURN": 20,
@@ -12,8 +13,7 @@
       "RIVER": 30
     },
     "equity_samples": 100,
-    "seed": 42,
-    "config_name": "fast_test"
+    "seed": 42
   },
   "statistics": {
     "FLOP": {
