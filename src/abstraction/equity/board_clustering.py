@@ -10,8 +10,8 @@ from typing import Dict, List, Tuple
 import numpy as np
 from sklearn.cluster import KMeans
 
-from src.abstraction.card_utils import get_rank_value, get_suit
-from src.abstraction.constants import (
+from src.abstraction.utils.card_utils import get_rank_value, get_suit
+from src.abstraction.utils.constants import (
     DEFAULT_FLOP_BOARD_CLUSTERS,
     DEFAULT_RIVER_BOARD_CLUSTERS,
     DEFAULT_TURN_BOARD_CLUSTERS,

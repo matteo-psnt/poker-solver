@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.abstraction.action_abstraction import ActionAbstraction
+from src.abstraction.core.action_abstraction import ActionAbstraction
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from tests.test_helpers import DummyCardAbstraction
@@ -246,7 +246,7 @@ class TestMCCFRSolver:
 
     def test_get_average_strategy_nonexistent_infoset(self):
         """Test get_average_strategy with non-existent infoset."""
-        from src.abstraction.infoset import InfoSetKey
+        from src.abstraction.utils.infoset import InfoSetKey
         from src.game.state import Street
 
         action_abs = ActionAbstraction()
@@ -270,7 +270,7 @@ class TestMCCFRSolver:
 
     def test_get_current_strategy_nonexistent_infoset(self):
         """Test get_current_strategy with non-existent infoset."""
-        from src.abstraction.infoset import InfoSetKey
+        from src.abstraction.utils.infoset import InfoSetKey
         from src.game.state import Street
 
         action_abs = ActionAbstraction()

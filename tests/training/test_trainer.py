@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.abstraction.action_abstraction import ActionAbstraction
+from src.abstraction.core.action_abstraction import ActionAbstraction
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from src.training.trainer import Trainer

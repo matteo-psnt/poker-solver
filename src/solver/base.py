@@ -9,9 +9,9 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from src.abstraction.action_abstraction import ActionAbstraction
-from src.abstraction.card_abstraction import CardAbstraction
-from src.abstraction.infoset import InfoSetKey
+from src.abstraction.core.action_abstraction import ActionAbstraction
+from src.abstraction.core.card_abstraction import CardAbstraction
+from src.abstraction.utils.infoset import InfoSetKey
 from src.solver.storage import Storage
 
 

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
-from src.abstraction.equity_bucketing import EquityBucketing
-from src.abstraction.equity_calculator import EquityCalculator
+from src.abstraction.equity.equity_bucketing import EquityBucketing
+from src.abstraction.equity.equity_calculator import EquityCalculator
 from src.game.state import Card, Street
 
 

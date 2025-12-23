@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from src.abstraction.board_clustering import BoardClusterer
+from src.abstraction.equity.board_clustering import BoardClusterer
 from src.game.state import Card, Street
 
 

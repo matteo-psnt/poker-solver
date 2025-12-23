@@ -20,7 +20,7 @@ from src.cli.chart_handler import handle_view_preflop_chart
 from src.cli.config_handler import select_config
 from src.cli.precompute_handler import handle_precompute
 from src.cli.training_handler import handle_resume, handle_train
-from src.training.checkpoint import RunManager
+from src.training.run.training_run import TrainingRun
 from src.training.trainer import Trainer
 from src.utils.config import Config
 
@@ -66,12 +66,12 @@ class SolverCLI:
                 current_iter = summary.get("total_iterations", 0)
 
                 if current_iter > 0:
-                    self.current_trainer.run_manager.save(
+                    self.current_trainer.training_run.save_snapshot(
                         self.current_trainer.solver,
                         current_iter,
                         tags=["interrupted"],
                     )
-                    self.current_trainer.run_manager.update_stats(
+                    self.current_trainer.training_run.update_stats(
                         total_iterations=current_iter,
                         total_runtime_seconds=self.current_trainer.metrics.get_elapsed_time(),
                         num_infosets=self.current_trainer.solver.num_infosets(),
@@ -117,7 +117,7 @@ class SolverCLI:
                 elif "Precompute" in action:
                     self.precompute_equity_buckets()
                 elif "List Equity Buckets" in action:
-                    from src.abstraction.manager import EquityBucketManager
+                    from src.abstraction.equity.manager import EquityBucketManager
 
                     manager = EquityBucketManager()
                     manager.print_summary()
@@ -161,7 +161,7 @@ class SolverCLI:
         print("=" * 60)
 
         # List available runs
-        runs = RunManager.list_runs(self.runs_dir)
+        runs = TrainingRun.list_runs(self.runs_dir)
 
         if not runs:
             print("\n[ERROR] No trained runs found in data/runs/")
@@ -193,7 +193,7 @@ class SolverCLI:
         print("\nPast Training Runs")
         print("=" * 60)
 
-        runs = RunManager.list_runs(self.runs_dir)
+        runs = TrainingRun.list_runs(self.runs_dir)
 
         if not runs:
             print("\n[ERROR] No training runs found")
@@ -211,13 +211,13 @@ class SolverCLI:
             return
 
         # Load and display run info
-        manager = RunManager.from_run_id(
+        training_run = TrainingRun.from_run_id(
             self.runs_dir,
             selected,
         )
 
-        if manager.run_metadata:
-            meta = manager.run_metadata
+        if training_run.run_metadata:
+            meta = training_run.run_metadata
             print(f"\nRun: {selected}")
             print("-" * 60)
             print(f"Status: {meta.status}")
@@ -236,13 +236,15 @@ class SolverCLI:
                 print(f"  Infosets: {stats.num_infosets:,}")
 
         # Show checkpoints
-        if manager.manifest:
-            checkpoints = manager.manifest.checkpoints
-            print(f"\nCheckpoints: {len(checkpoints)}")
-            for cp in checkpoints[:5]:  # Show first 5
-                print(f"  {cp.iteration:6d}: {cp.num_infosets:8,} infosets {cp.tags}")
-            if len(checkpoints) > 5:
-                print(f"  ... and {len(checkpoints) - 5} more")
+        if training_run.manifest:
+            snapshots = training_run.manifest.snapshots
+            print(f"\nSnapshots: {len(snapshots)}")
+            for snapshot in snapshots[:5]:  # Show first 5
+                print(
+                    f"  {snapshot.iteration:6d}: {snapshot.num_infosets:8,} infosets {snapshot.tags}"
+                )
+            if len(snapshots) > 5:
+                print(f"  ... and {len(snapshots) - 5} more")
 
         input("\nPress Enter to continue...")
 
@@ -251,7 +253,7 @@ class SolverCLI:
         print("\nResume Training")
         print("=" * 60)
 
-        runs = RunManager.list_runs(self.runs_dir)
+        runs = TrainingRun.list_runs(self.runs_dir)
 
         if not runs:
             print("No training runs found.")
@@ -267,17 +269,17 @@ class SolverCLI:
         if selected == "Cancel" or selected is None:
             return
 
-        manager = RunManager.from_run_id(self.runs_dir, selected)
+        training_run = TrainingRun.from_run_id(self.runs_dir, selected)
 
-        if not manager.run_metadata or not manager.run_metadata.config:
+        if not training_run.run_metadata or not training_run.run_metadata.config:
             print("\n[ERROR] No config found for this run")
             input("Press Enter to continue...")
             return
 
-        config_dict = manager.run_metadata.config
+        config_dict = training_run.run_metadata.config
         config = Config.from_dict(config_dict)
 
-        latest = manager.get_latest_checkpoint()
+        latest = training_run.get_latest_snapshot()
         if latest:
             print(f"\nLatest checkpoint: iteration {latest['iteration']}")
             print(f"Infosets: {latest['num_infosets']:,}")

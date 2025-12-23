@@ -1,6 +1,6 @@
 """Tests for preflop hand mapping."""
 
-from src.abstraction.preflop_hands import PreflopHandMapper
+from src.abstraction.preflop.preflop_hands import PreflopHandMapper
 from src.game.state import Card
 
 

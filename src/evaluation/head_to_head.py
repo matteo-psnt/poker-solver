@@ -11,8 +11,8 @@ from typing import List, Optional
 import numpy as np
 from treys import Deck
 
-from src.abstraction.action_abstraction import ActionAbstraction
-from src.abstraction.card_abstraction import CardAbstraction
+from src.abstraction.core.action_abstraction import ActionAbstraction
+from src.abstraction.core.card_abstraction import CardAbstraction
 from src.game.actions import Action, ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street

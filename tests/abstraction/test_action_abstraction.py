@@ -1,6 +1,6 @@
 """Tests for action abstraction."""
 
-from src.abstraction.action_abstraction import ActionAbstraction
+from src.abstraction.core.action_abstraction import ActionAbstraction
 from src.game.actions import ActionType, bet
 from src.game.state import Card, GameState, Street
 

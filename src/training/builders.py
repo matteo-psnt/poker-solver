@@ -9,10 +9,10 @@ and ParallelTrainer to eliminate code duplication.
 from pathlib import Path
 from typing import Optional
 
-from src.abstraction.action_abstraction import ActionAbstraction
-from src.abstraction.card_abstraction import CardAbstraction
-from src.abstraction.equity_bucketing import EquityBucketing
-from src.abstraction.manager import EquityBucketManager
+from src.abstraction.core.action_abstraction import ActionAbstraction
+from src.abstraction.core.card_abstraction import CardAbstraction
+from src.abstraction.equity.equity_bucketing import EquityBucketing
+from src.abstraction.equity.manager import EquityBucketManager
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import DiskBackedStorage, InMemoryStorage, Storage

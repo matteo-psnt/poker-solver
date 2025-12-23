@@ -5,14 +5,14 @@ import time
 import numpy as np
 import pytest
 
-from src.abstraction.equity_bucketing import EquityBucketing
-from src.abstraction.equity_calculator import EquityCalculator
-from src.abstraction.parallel_equity import (
+from src.abstraction.equity.equity_bucketing import EquityBucketing
+from src.abstraction.equity.equity_calculator import EquityCalculator
+from src.abstraction.equity.parallel_equity import (
     _cards_conflict,
     _get_example_hand,
     compute_equity_matrix_parallel,
 )
-from src.abstraction.precompute import PrecomputeConfig, generate_boards_optimized
+from src.abstraction.equity.precompute import PrecomputeConfig, generate_boards_optimized
 from src.game.state import Card, Street
 
 

@@ -14,8 +14,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 from tqdm import tqdm
 
-from src.abstraction.equity_bucketing import EquityBucketing
-from src.abstraction.equity_calculator import EquityCalculator
+from src.abstraction.equity.equity_bucketing import EquityBucketing
+from src.abstraction.equity.equity_calculator import EquityCalculator
 from src.game.state import Card, Street
 
 logger = logging.getLogger(__name__)
@@ -244,8 +244,8 @@ def precompute_equity_bucketing(
     if save_with_metadata:
         from datetime import datetime
 
-        from src.abstraction.manager import EquityBucketManager
-        from src.abstraction.metadata import EquityBucketMetadata
+        from src.abstraction.equity.manager import EquityBucketManager
+        from src.abstraction.utils.metadata import EquityBucketMetadata
 
         logger.info("Step 5: Saving with metadata")
 

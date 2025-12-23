@@ -11,8 +11,8 @@ from typing import Dict, List, Tuple
 import numpy as np
 from tqdm import tqdm
 
-from src.abstraction.equity_calculator import EquityCalculator
-from src.abstraction.preflop_hands import PreflopHandMapper
+from src.abstraction.equity.equity_calculator import EquityCalculator
+from src.abstraction.preflop.preflop_hands import PreflopHandMapper
 from src.game.state import Card, Street
 
 logger = logging.getLogger(__name__)

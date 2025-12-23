@@ -4,9 +4,9 @@ from pathlib import Path
 
 import numpy as np
 
-from src.abstraction.board_clustering import BoardClusterer
-from src.abstraction.card_abstraction import CardAbstraction
-from src.abstraction.equity_bucketing import EquityBucketing
+from src.abstraction.core.card_abstraction import CardAbstraction
+from src.abstraction.equity.board_clustering import BoardClusterer
+from src.abstraction.equity.equity_bucketing import EquityBucketing
 from src.game.state import Street
 
 
