@@ -110,7 +110,7 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
         ValueError: If storage backend is unknown or run_dir missing for disk
     """
     storage_config = config.get_section("storage")
-    backend = storage_config.get("backend", "memory")
+    backend = storage_config.get("backend")
 
     if backend == "memory":
         return InMemoryStorage()

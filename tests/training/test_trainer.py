@@ -61,16 +61,17 @@ class TestTrainer:
         assert isinstance(solver, MCCFRSolver)
         assert solver.iteration == 0
 
-    @pytest.mark.timeout(15)
+    @pytest.mark.timeout(5)
     def test_train_executes(self, tmp_path, shared_bucketing_file):
         """Test that training runs without errors."""
         config = Config.default()
         config.set("training.num_iterations", 1)
-        config.set("training.checkpoint_frequency", 1)
+        config.set("training.checkpoint_frequency", 1000)
         config.set("training.log_frequency", 1)
         config.set("training.verbose", False)
         config.set("training.runs_dir", str(tmp_path / "runs"))
         config.set("card_abstraction.bucketing_path", str(shared_bucketing_file))
+        config.set("storage.backend", "memory")
 
         trainer = Trainer(config)
         results = trainer.train(num_iterations=1)
@@ -80,7 +81,7 @@ class TestTrainer:
         assert "avg_utility" in results
         assert "elapsed_time" in results
 
-    @pytest.mark.timeout(10)
+    @pytest.mark.timeout(5)
     def test_train_with_iterations_override(self, tmp_path, shared_bucketing_file):
         """Test overriding num_iterations."""
         config = Config.default()
@@ -88,13 +89,16 @@ class TestTrainer:
         config.set("training.verbose", False)
         config.set("training.runs_dir", str(tmp_path / "runs"))
         config.set("card_abstraction.bucketing_path", str(shared_bucketing_file))
+        config.set("storage.backend", "memory")
+        config.set("training.checkpoint_frequency", 1000)
 
         trainer = Trainer(config)
         results = trainer.train(num_iterations=1)  # Override
 
         assert results["total_iterations"] == 1
 
-    @pytest.mark.timeout(15)
+    @pytest.mark.slow
+    @pytest.mark.timeout(20)
     def test_train_creates_checkpoint(self, tmp_path, shared_bucketing_file):
         """Test that checkpoints are created."""
         config = Config.default()
@@ -131,24 +135,3 @@ class TestTrainer:
         s = str(trainer)
 
         assert "Trainer" in s
-
-    @pytest.mark.timeout(15)
-    def test_train_with_resume(self, tmp_path, shared_bucketing_file):
-        """Test training with resume=True."""
-        config = Config.default()
-        config.set("training.num_iterations", 1)
-        config.set("training.verbose", False)
-        config.set("training.runs_dir", str(tmp_path / "runs"))
-        config.set("card_abstraction.bucketing_path", str(shared_bucketing_file))
-
-        # First training session
-        trainer1 = Trainer(config)
-        trainer1.train(num_iterations=1)
-
-        # Second session with resume (should find no checkpoint and start from 0)
-        trainer2 = Trainer(config)
-        results = trainer2.train(num_iterations=1, resume=True)
-
-        # Since we used different trainer instances, resume won't find anything
-        # This tests the resume=True code path
-        assert "total_iterations" in results

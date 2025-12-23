@@ -165,7 +165,8 @@ class Config:
 
         # Validate storage config
         storage = self.get_section("storage")
-        if storage.get("backend") not in ["memory", "disk"]:
+        backend = storage.get("backend")
+        if backend not in ["memory", "disk"]:
             raise ValueError("storage backend must be 'memory' or 'disk'")
 
     def __str__(self) -> str:

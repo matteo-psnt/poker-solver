@@ -46,8 +46,8 @@ class MatchStatistics:
 
     Attributes:
         num_hands: Number of hands played
-        player0_wins: Number of hands player 0 won
-        player1_wins: Number of hands player 1 won
+        player0_wins: Number of hands player 0 won (ties count as 0.5)
+        player1_wins: Number of hands player 1 won (ties count as 0.5)
         player0_total_won: Total chips won by player 0
         player1_total_won: Total chips won by player 1
         player0_bb_per_hand: Big blinds per hand for player 0
@@ -57,8 +57,8 @@ class MatchStatistics:
     """
 
     num_hands: int
-    player0_wins: int
-    player1_wins: int
+    player0_wins: float
+    player1_wins: float
     player0_total_won: int
     player1_total_won: int
     player0_bb_per_hand: float
@@ -136,8 +136,8 @@ class HeadToHeadEvaluator:
             np.random.seed(seed)
 
         results = []
-        player0_wins = 0
-        player1_wins = 0
+        player0_wins = 0.0
+        player1_wins = 0.0
         player0_total_won = 0
         player1_total_won = 0
         showdown_count = 0
@@ -155,9 +155,13 @@ class HeadToHeadEvaluator:
 
             # Update statistics
             if result.player0_payoff > 0:
-                player0_wins += 1
+                player0_wins += 1.0
             elif result.player1_payoff > 0:
-                player1_wins += 1
+                player1_wins += 1.0
+            else:
+                # Split pot; count tie as half win for each player.
+                player0_wins += 0.5
+                player1_wins += 0.5
 
             player0_total_won += result.player0_payoff
             player1_total_won += result.player1_payoff
@@ -274,6 +278,9 @@ class HeadToHeadEvaluator:
         # Get average strategy (Nash equilibrium approximation)
         strategy = infoset.get_average_strategy()
         legal_actions = infoset.legal_actions
+
+        # Normalize strategy to ensure it sums to exactly 1.0 (fix floating point errors)
+        strategy = strategy / strategy.sum()
 
         # Sample action according to strategy
         action_idx = int(np.random.choice(len(legal_actions), p=strategy))
