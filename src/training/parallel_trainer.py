@@ -159,7 +159,7 @@ class ParallelTrainer:
         self.num_workers = num_workers or mp.cpu_count()
 
         # Initialize experiment manager
-        runs_base_dir = Path(config.get("training.run_dir", "data/runs"))
+        runs_base_dir = Path(config.get("training.runs_dir", "data/runs"))
         self.training_run = TrainingRun(
             base_dir=runs_base_dir,
             experiment_name=run_id,

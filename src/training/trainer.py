@@ -284,6 +284,39 @@ class Trainer:
                 "elapsed_time": elapsed_time,
             }
 
+        except KeyboardInterrupt:
+            # User interrupted - save progress before exiting
+            if verbose:
+                print("\n⚠️  Training interrupted by user")
+
+            elapsed_time = time.time() - training_start_time
+            summary = self.metrics.get_summary()
+            interrupt_metrics = {
+                "avg_utility_p0": summary.get("avg_utility", 0.0),
+                "avg_utility_p1": -summary.get("avg_utility", 0.0),
+                "avg_infosets": summary.get("avg_infosets", 0),
+            }
+
+            # Save final snapshot with current progress
+            current_iter = i + 1 if "i" in locals() else start_iteration
+            self.training_run.save_snapshot(
+                self.solver,
+                current_iter,
+                metrics=interrupt_metrics,
+                tags=["interrupted"],
+            )
+
+            self.training_run.update_stats(
+                total_iterations=current_iter,
+                total_runtime_seconds=elapsed_time,
+                num_infosets=self.solver.num_infosets(),
+            )
+
+            if verbose:
+                print(f"✅ Progress saved at iteration {current_iter}")
+
+            raise
+
         except Exception:
             # Mark experiment as failed on exception
             self.training_run.mark_failed()

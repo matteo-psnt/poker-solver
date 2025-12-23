@@ -214,7 +214,6 @@ def get_default_config() -> Dict[str, Any]:
             "num_iterations": 1000,
             "checkpoint_frequency": 100,
             "log_frequency": 10,
-            "checkpoint_dir": "data/checkpoints",
         },
         "storage": {
             "backend": "disk",
