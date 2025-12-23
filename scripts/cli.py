@@ -23,7 +23,6 @@ from src.cli.combo_handler import (
     handle_combo_info,
     handle_combo_precompute,
     handle_combo_test_lookup,
-    handle_combo_validate,
 )
 from src.cli.config_handler import select_config
 from src.cli.training_handler import handle_resume, handle_train
@@ -314,7 +313,6 @@ class SolverCLI:
                     "Test Bucket Lookup",
                     "Analyze Bucketing Patterns",
                     "Analyze Coverage (Fallback Rate)",
-                    "Validate Abstraction",
                     "Back",
                 ],
                 style=custom_style,
@@ -338,9 +336,6 @@ class SolverCLI:
                     input("\nPress Enter to continue...")
                 elif "Analyze Coverage" in action:
                     handle_combo_coverage()
-                    input("\nPress Enter to continue...")
-                elif "Validate" in action:
-                    handle_combo_validate()
                     input("\nPress Enter to continue...")
             except KeyboardInterrupt:
                 print("\n\n[!] Operation cancelled by user")

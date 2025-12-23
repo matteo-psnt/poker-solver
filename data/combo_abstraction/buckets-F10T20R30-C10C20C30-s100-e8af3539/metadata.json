@@ -1,0 +1,34 @@
+{
+  "config": {
+    "num_board_clusters": {
+      "FLOP": 10,
+      "TURN": 20,
+      "RIVER": 30
+    },
+    "representatives_per_cluster": 2,
+    "num_buckets": {
+      "FLOP": 10,
+      "TURN": 20,
+      "RIVER": 30
+    },
+    "equity_samples": 100,
+    "seed": 42
+  },
+  "statistics": {
+    "FLOP": {
+      "num_clusters": 10,
+      "num_combos": 7626,
+      "num_buckets": 10
+    },
+    "TURN": {
+      "num_clusters": 20,
+      "num_combos": 22645,
+      "num_buckets": 20
+    },
+    "RIVER": {
+      "num_clusters": 30,
+      "num_combos": 33573,
+      "num_buckets": 30
+    }
+  }
+}
