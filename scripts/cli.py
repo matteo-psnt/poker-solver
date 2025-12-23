@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.cli.chart_handler import handle_view_preflop_chart
 from src.cli.config_handler import select_config
+from src.cli.equity_verification_handler import handle_verify_equity_buckets
 from src.cli.precompute_handler import handle_precompute
 from src.cli.training_handler import handle_resume, handle_train
 from src.training.run.training_run import TrainingRun
@@ -96,6 +97,7 @@ class SolverCLI:
                     "Train Solver",
                     "Evaluate Solver",
                     "Precompute Equity Buckets",
+                    "Verify Equity Buckets",
                     "List Equity Buckets",
                     "View Past Runs",
                     "Resume Training",
@@ -116,6 +118,8 @@ class SolverCLI:
                     self.evaluate_solver()
                 elif "Precompute" in action:
                     self.precompute_equity_buckets()
+                elif "Verify Equity" in action:
+                    handle_verify_equity_buckets(custom_style)
                 elif "List Equity Buckets" in action:
                     from src.abstraction.equity.manager import EquityBucketManager
 
