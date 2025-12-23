@@ -231,7 +231,7 @@ class EquityBucketing:
 # Generate production abstraction (takes ~30-60 minutes)
 uv run python scripts/cli.py
 # Select: "Precompute Equity Buckets" → Production config
-# Output: data/abstractions/equity_buckets_YYYYMMDD_HHMMSS/
+# Output: data/equity_buckets/equity_buckets_YYYYMMDD_HHMMSS/
 ```
 
 **Storage Requirements**:
@@ -1120,7 +1120,7 @@ action_abstraction:
 # Card abstraction (hand bucketing)
 card_abstraction:
   type: "equity_bucketing"
-  bucketing_path: "data/abstractions/equity_buckets_20251217_042337/bucketing.pkl"
+  bucketing_path: "data/equity_buckets/equity_buckets_20251217_042337/bucketing.pkl"
 
 # Solver configuration (CFR variant)
 solver:

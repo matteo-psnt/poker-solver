@@ -24,15 +24,15 @@ action_abstraction:
 card_abstraction:
   type: "equity_bucketing"
 
-  # NEW: Reference abstraction config by name
+  # NEW: Reference equity bucket config by name
   # This will:
-  # 1. Load config/abstractions/production.yaml
+  # 1. Load config/equity_buckets/production.yaml
   # 2. Check if already precomputed (by config hash)
   # 3. If not found, prompt user to compute
   config: production
 
   # OLD: Direct file path (still supported for backward compatibility)
-  # bucketing_path: "data/abstractions/buckets-F50T100R200-C200C500C1000-s1000-2a0e3c/abstraction.pkl"
+  # bucketing_path: "data/equity_buckets/buckets-F50T100R200-C200C500C1000-s1000-2a0e3c/abstraction.pkl"
 
 # ===== SPR Bucketing =====
 spr_buckets:
@@ -65,7 +65,7 @@ system:
   log_level: "INFO"
   config_name: "baseline"  # Name for this training config
 
-# Available abstraction configs in config/abstractions/:
+# Available equity bucket configs in config/equity_buckets/:
 # - production: High-quality (50/100/200 buckets)
 # - fast_test: Quick test (10/20/30 buckets)
-# - Or create your own YAML in config/abstractions/
+# - Or create your own YAML in config/equity_buckets/

@@ -201,7 +201,7 @@ def get_default_config() -> Dict[str, Any]:
         },
         "card_abstraction": {
             "type": "equity_bucketing",
-            "bucketing_path": "data/abstractions/equity_buckets.pkl",
+            "bucketing_path": "data/equity_buckets/equity_buckets.pkl",
         },
         "spr_buckets": {
             "thresholds": [4, 13],

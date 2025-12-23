@@ -295,7 +295,8 @@ def precompute_equity_bucketing(
     if save_with_metadata:
         from datetime import datetime
 
-        from src.abstraction.abstraction_metadata import AbstractionManager, AbstractionMetadata
+        from src.abstraction.manager import AbstractionManager
+        from src.abstraction.metadata import AbstractionMetadata
 
         logger.info("Step 5: Saving with metadata")
 
