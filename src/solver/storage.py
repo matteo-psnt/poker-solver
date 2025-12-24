@@ -11,7 +11,7 @@ import pickle
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import h5py
 
@@ -393,8 +393,8 @@ class DiskBackedStorage(Storage):
                     # Try to load from old metadata.json
                     metadata_file = self.checkpoint_dir / "metadata.json"
                     if metadata_file.exists():
-                        with open(metadata_file, "r") as f:
-                            metadata = json.load(f)
+                        with open(metadata_file, "r", encoding="utf-8") as f:  # type: ignore[assignment]
+                            metadata: Any = json.load(f)
                             self.next_id = metadata.get("next_id", len(self.key_to_id))
                     else:
                         # Fall back to inferring from key_to_id

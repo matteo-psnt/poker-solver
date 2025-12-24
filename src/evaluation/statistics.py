@@ -99,7 +99,7 @@ def t_test_difference(
 
     # Check if significant at given confidence level
     alpha = 1 - confidence_level
-    is_significant = p_value < alpha
+    is_significant = bool(p_value < alpha)
 
     return float(t_stat), float(p_value), is_significant
 
