@@ -203,12 +203,14 @@ class TrainingSession:
                     if legal_actions is None:
                         legal_actions = data["legal_actions"]
 
-            if not regrets_list or not strategies_list:
+            if not regrets_list:
                 continue
 
             # Verify all arrays are same shape (should be for same infoset)
             shapes = [r.shape for r in regrets_list]
             if len(set(shapes)) > 1:
+                print(f"Action set size mismatch for infoset {key}: {shapes}")
+
                 # Different workers saw different action sets - skip this infoset
                 # This can happen due to race conditions in independent rollouts
                 continue
@@ -216,13 +218,13 @@ class TrainingSession:
             # Get or create infoset in master storage
             infoset = self.solver.storage.get_or_create_infoset(key, legal_actions)
 
-            # Average regrets (CFR theory: regrets are averaged across parallel iterations)
+            # Sum regrets (CFR theory: regrets accumulate additively across all samples)
             if len(regrets_list) == 1:
-                avg_regrets = regrets_list[0]
+                sum_regrets = regrets_list[0]
             else:
-                avg_regrets = np.mean(regrets_list, axis=0)
+                sum_regrets = np.sum(regrets_list, axis=0)
 
-            infoset.regrets = avg_regrets.astype(np.float32)
+            infoset.regrets += sum_regrets.astype(np.float32)
 
             # Sum strategies (CFR theory: strategies are accumulated)
             if len(strategies_list) == 1:
@@ -230,7 +232,7 @@ class TrainingSession:
             else:
                 sum_strategies = np.sum(strategies_list, axis=0)
 
-            infoset.strategy_sum = sum_strategies.astype(np.float32)
+            infoset.strategy_sum += sum_strategies.astype(np.float32)
 
     def _train_parallel(
         self,
@@ -432,7 +434,7 @@ class TrainingSession:
         """
         # Get iteration count
         if num_iterations is None:
-            num_iterations = self.config.get("training.num_iterations", 1000)
+            num_iterations = int(self.config.get("training.num_iterations", 1000))
 
         # Resume from snapshot if requested
         if resume:
@@ -541,7 +543,7 @@ class TrainingSession:
                 print("\n⚠️  Training interrupted by user")
 
             elapsed_time = time.time() - training_start_time
-            current_iter = i + 1 if "i" in locals() else start_iteration
+            current_iter = i + 1 if "i" in locals() else start_iteration  # type: ignore
 
             # Save progress
             self.run_tracker.update(
