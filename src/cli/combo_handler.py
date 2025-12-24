@@ -2,9 +2,11 @@
 
 import hashlib
 import json
+import logging
 import multiprocessing as mp
 import random
 import subprocess
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import questionary
@@ -15,6 +17,29 @@ from src.bucketing.postflop import (
     PrecomputeConfig,
 )
 from src.game.state import Card, Street
+
+
+def _get_config_name_from_metadata(metadata: dict) -> str:
+    """
+    Extract config name from metadata JSON, handling both old and new formats.
+
+    Old format: metadata["config_name"]
+    New format: metadata["config"]["config_name"]
+
+    Args:
+        metadata: Loaded metadata dictionary
+
+    Returns:
+        Config name or "unknown" if not found
+    """
+    # Try new format first (nested under "config")
+    if "config" in metadata and isinstance(metadata["config"], dict):
+        config_name = metadata["config"].get("config_name")
+        if config_name:
+            return config_name
+
+    # Fall back to old format (top-level)
+    return metadata.get("config_name", "unknown")
 
 
 def _list_available_configs() -> list:
@@ -314,7 +339,7 @@ def handle_combo_info() -> None:
         print("   " + "-" * 57)
 
         # Config name
-        config_name = metadata.get("config_name", "unknown")
+        config_name = _get_config_name_from_metadata(metadata)
         print(f"   Config: {config_name}")
 
         # Config details
@@ -365,7 +390,7 @@ def _show_detailed_info(abstractions: list) -> None:
     # Build choices
     choices = []
     for path, metadata in abstractions:
-        config_name = metadata.get("config_name", "unknown")
+        config_name = _get_config_name_from_metadata(metadata)
         choices.append(f"{path.name} ({config_name})")
 
     choices.append("Back")
@@ -380,7 +405,7 @@ def _show_detailed_info(abstractions: list) -> None:
 
     # Find selected
     for path, metadata in abstractions:
-        config_name = metadata.get("config_name", "unknown")
+        config_name = _get_config_name_from_metadata(metadata)
         if f"{path.name} ({config_name})" == choice:
             print("\n" + "=" * 60)
             print(f"DETAILED INFO: {path.name}")
@@ -404,8 +429,6 @@ def _show_detailed_info(abstractions: list) -> None:
                         all_buckets.extend(cluster_buckets.values())
 
                     if all_buckets:
-                        from collections import Counter
-
                         bucket_counts = Counter(all_buckets)
                         num_unique = len(bucket_counts)
 
@@ -463,7 +486,7 @@ def _select_abstraction() -> tuple:
     # Build choices
     choices = []
     for path, metadata in abstractions:
-        config_name = metadata.get("config_name", "unknown")
+        config_name = _get_config_name_from_metadata(metadata)
         choices.append(f"{path.name} ({config_name})")
 
     choices.append("Cancel")
@@ -478,7 +501,7 @@ def _select_abstraction() -> tuple:
 
     # Find selected abstraction
     for path, metadata in abstractions:
-        config_name = metadata.get("config_name", "unknown")
+        config_name = _get_config_name_from_metadata(metadata)
         if f"{path.name} ({config_name})" == choice:
             return path, metadata
 
@@ -679,9 +702,6 @@ def handle_combo_coverage() -> None:
     """
     Analyze abstraction coverage - how often lookups need fallback.
     """
-    import logging
-    from collections import defaultdict
-
     print()
     print("=" * 60)
     print("  ANALYZE ABSTRACTION COVERAGE")
@@ -929,8 +949,6 @@ def handle_combo_analyze_bucketing() -> None:
 
 def _analyze_premium_vs_weak(abstraction, street: Street) -> None:
     """Analyze bucketing for premium vs weak hands."""
-    from collections import defaultdict
-
     print("\nTesting predefined hand scenarios...")
     print("-" * 60)
 
@@ -1002,9 +1020,6 @@ def _analyze_premium_vs_weak(abstraction, street: Street) -> None:
 
 def _analyze_random_sample(abstraction, street: Street) -> None:
     """Analyze bucketing for random hand/board combinations."""
-    import random
-    from collections import Counter
-
     print("\nGenerating 50 random hand/board combinations...")
     print("-" * 60)
 

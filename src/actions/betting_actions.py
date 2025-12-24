@@ -7,7 +7,7 @@ betting space into a small set of actions (e.g., bet 33%, 75%, all-in).
 
 from typing import Dict, List, Optional
 
-from src.game.actions import Action, ActionType, all_in, bet, raises
+from src.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
 from src.game.state import GameState
 
 
@@ -205,8 +205,6 @@ class BettingActions:
         Returns:
             List of legal actions according to abstraction
         """
-        from src.game.actions import call, check, fold
-
         if state.is_terminal:
             return []
 

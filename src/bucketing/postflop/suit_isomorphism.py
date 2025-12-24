@@ -20,6 +20,7 @@ Example:
 """
 
 from dataclasses import dataclass
+from itertools import permutations
 from typing import Dict, Optional, Tuple
 
 from treys import Card as TreysCard
@@ -177,8 +178,6 @@ def canonicalize_board(
     present_suits = list(dict.fromkeys(suit for _, suit in sorted_cards))
 
     # Try all possible suit relabelings and find the lexicographically smallest
-    from itertools import permutations
-
     best_canonical = None
     best_mapping = None
 

@@ -2,8 +2,8 @@
 Shared builder functions for training components.
 
 Provides centralized, reusable functions for building solver components
-(abstractions, storage, solver) from configuration. Used by both Trainer
-and ParallelTrainer to eliminate code duplication.
+(abstractions, storage, solver) from configuration. Used by TrainingSession
+to eliminate code duplication.
 """
 
 import json

@@ -94,8 +94,6 @@ def edit_config(config: Config, custom_style) -> Config:
     config.set("card_abstraction.config", config_name)
 
     # Check if abstraction exists
-    from pathlib import Path
-
     base_path = Path("data/combo_abstraction")
 
     abstraction_found = False
