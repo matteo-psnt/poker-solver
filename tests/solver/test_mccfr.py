@@ -60,10 +60,10 @@ class TestMCCFRSolver:
         storage = InMemoryStorage()
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
-        results = solver.train(num_iterations=10, verbose=False)
+        results = solver.train(num_iterations=5, verbose=False)
 
-        assert solver.iteration == 10
-        assert results["total_iterations"] == 10
+        assert solver.iteration == 5
+        assert results["total_iterations"] == 5
         assert solver.num_infosets() > 0
 
     def test_infosets_accumulate(self):

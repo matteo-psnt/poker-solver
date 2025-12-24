@@ -53,6 +53,7 @@ class RunTracker:
                 "run_id": self.run_id,
                 "config_name": config_name,
                 "started_at": datetime.now().isoformat(),
+                "resumed_at": None,
                 "completed_at": None,
                 "status": "running",
                 "iterations": 0,
@@ -83,6 +84,12 @@ class RunTracker:
         self.metadata["iterations"] = iterations
         self.metadata["runtime_seconds"] = runtime_seconds
         self.metadata["num_infosets"] = num_infosets
+        self._save()
+
+    def mark_resumed(self):
+        """Mark run as resumed (called when loading from checkpoint)."""
+        self.metadata["resumed_at"] = datetime.now().isoformat()
+        self.metadata["status"] = "running"
         self._save()
 
     def mark_completed(self):

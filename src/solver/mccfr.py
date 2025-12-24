@@ -96,25 +96,33 @@ class MCCFRSolver(BaseSolver):
         """
         Execute one MCCFR iteration using configured sampling method.
 
+        Uses player alternation optimization: each iteration only traverses
+        from one player's perspective, alternating between iterations.
+        This halves traversal cost while preserving convergence.
+
         Returns:
             Utility for player 0
         """
         # Deal random cards and create initial state
         state = self._deal_initial_state()
 
-        # Run CFR for both players
-        utilities = []
-        for player in [0, 1]:
-            if self.sampling_method == "external":
-                util = self._cfr_external_sampling(state, player, [1.0, 1.0])
-            else:  # outcome sampling
-                util = self._cfr_outcome_sampling(state, player, [1.0, 1.0])
-            utilities.append(util)
+        # Alternate traversing player per iteration
+        # This halves computational cost while preserving CFR convergence
+        traversing_player = self.iteration % 2
+
+        if self.sampling_method == "external":
+            util = self._cfr_external_sampling(state, traversing_player, [1.0, 1.0])
+        else:  # outcome sampling
+            util = self._cfr_outcome_sampling(state, traversing_player, [1.0, 1.0])
 
         self.iteration += 1
 
-        # Return player 0's utility
-        return utilities[0]
+        # Return utility from player 0's perspective
+        # If we traversed from player 1's perspective, negate the utility
+        if traversing_player == 1:
+            util = -util
+
+        return util
 
     def _deal_initial_state(self) -> GameState:
         """
@@ -268,6 +276,9 @@ class MCCFRSolver(BaseSolver):
             infoset.reach_count += 1
             infoset.cumulative_utility += node_utility
 
+            # Mark infoset as dirty since we modified regrets and strategy_sum
+            self.storage.mark_dirty(infoset_key)
+
             return node_utility
 
         else:
@@ -416,6 +427,9 @@ class MCCFRSolver(BaseSolver):
 
             infoset.reach_count += 1
             infoset.cumulative_utility += sampled_utility
+
+            # Mark infoset as dirty since we modified regrets and strategy_sum
+            self.storage.mark_dirty(infoset_key)
 
         return sampled_utility
 

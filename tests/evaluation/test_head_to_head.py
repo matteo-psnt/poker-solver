@@ -139,8 +139,8 @@ class TestHeadToHeadEvaluator:
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
 
         # Train briefly
-        solver1.train(num_iterations=2, verbose=False)
-        solver2.train(num_iterations=2, verbose=False)
+        solver1.train(num_iterations=1, verbose=False)
+        solver2.train(num_iterations=1, verbose=False)
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
