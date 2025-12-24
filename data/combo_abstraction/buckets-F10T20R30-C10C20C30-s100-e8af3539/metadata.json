@@ -12,7 +12,8 @@
       "RIVER": 30
     },
     "equity_samples": 100,
-    "seed": 42
+    "seed": 42,
+    "config_name": "fast_test"
   },
   "statistics": {
     "FLOP": {

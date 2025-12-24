@@ -72,6 +72,9 @@ class PrecomputeConfig:
     kmeans_max_iter: int = 300
     kmeans_n_init: int = 10
 
+    # Config name (for matching during training)
+    config_name: Optional[str] = None
+
     @classmethod
     def from_yaml(cls, config_name: str) -> "PrecomputeConfig":
         """Load configuration from YAML file.
@@ -125,6 +128,7 @@ class PrecomputeConfig:
             seed=data.get("seed", 42),
             kmeans_max_iter=data.get("kmeans_max_iter", 300),
             kmeans_n_init=data.get("kmeans_n_init", 10),
+            config_name=config_name,
         )
 
     @classmethod
@@ -489,6 +493,7 @@ class ComboPrecomputer:
         # Save metadata
         metadata = {
             "config": {
+                "config_name": self.config.config_name,
                 "num_board_clusters": {
                     s.name: n for s, n in self.config.num_board_clusters.items()
                 },

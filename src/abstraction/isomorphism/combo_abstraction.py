@@ -100,6 +100,23 @@ class ComboAbstraction(CardAbstraction):
         self._preflop_buckets: Optional[Dict[int, int]] = None
         self._num_preflop_buckets: int = 169  # One bucket per hand class by default
 
+        # Fallback statistics (for monitoring abstraction coverage)
+        self._fallback_count: int = 0
+        self._total_lookups: int = 0
+
+    def __getstate__(self):
+        """Pickle support."""
+        return self.__dict__
+
+    def __setstate__(self, state):
+        """Unpickle support - handles objects saved before new attributes were added."""
+        self.__dict__.update(state)
+        # Initialize new attributes if they don't exist (backward compatibility)
+        if not hasattr(self, "_fallback_count"):
+            self._fallback_count = 0
+        if not hasattr(self, "_total_lookups"):
+            self._total_lookups = 0
+
     def canonicalize(
         self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...]
     ) -> CanonicalCombo:
@@ -167,10 +184,14 @@ class ComboAbstraction(CardAbstraction):
         street_buckets = self._buckets.get(street, {})
         cluster_buckets = street_buckets.get(cluster_id, {})
 
+        # Track lookup statistics
+        self._total_lookups += 1
+
         if combo.hand_id not in cluster_buckets:
             # Fallback: Use nearest hand from this cluster
             # This happens when a hand wasn't seen with the representative boards
             # during precomputation, but should still get a reasonable bucket
+            self._fallback_count += 1
 
             if not cluster_buckets:
                 raise KeyError(
@@ -183,8 +204,8 @@ class ComboAbstraction(CardAbstraction):
             available_buckets = list(cluster_buckets.values())
             median_bucket = sorted(available_buckets)[len(available_buckets) // 2]
 
-            # Log warning for debugging
-            logger.warning(
+            # Log at DEBUG level only (not WARNING) to avoid spam during training
+            logger.debug(
                 f"Hand {combo.hand_id} not found in cluster {cluster_id} for {street.name}. "
                 f"Using cluster median bucket: {median_bucket}"
             )
@@ -192,6 +213,21 @@ class ComboAbstraction(CardAbstraction):
             return median_bucket
 
         return cluster_buckets[combo.hand_id]
+
+    def get_fallback_stats(self) -> dict:
+        """Get fallback statistics for monitoring abstraction coverage."""
+        if self._total_lookups == 0:
+            return {"total_lookups": 0, "fallback_count": 0, "fallback_rate": 0.0}
+        return {
+            "total_lookups": self._total_lookups,
+            "fallback_count": self._fallback_count,
+            "fallback_rate": self._fallback_count / self._total_lookups,
+        }
+
+    def reset_stats(self):
+        """Reset lookup statistics."""
+        self._fallback_count = 0
+        self._total_lookups = 0
 
     def num_buckets(self, street: Street) -> int:
         """Get number of buckets for a street."""
