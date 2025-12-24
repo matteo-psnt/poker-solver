@@ -145,12 +145,12 @@ class ComboAbstraction(CardAbstraction):
         """
         # Handle preflop separately (uses 169 hand classes)
         if street == Street.PREFLOP:
-            from src.abstraction.preflop.hands import PreflopHandMapper
+            from src.abstraction.preflop.preflop_hands import PreflopHandMapper
 
             mapper = PreflopHandMapper()
-            hand_class = mapper.get_hand_class(hole_cards[0], hole_cards[1])
+            hand_index = mapper.get_hand_index(hole_cards)
             # For now, each hand class is its own bucket
-            return hand_class
+            return hand_index
 
         # Canonicalize (hand, board) pair
         combo = self.canonicalize(hole_cards, board)

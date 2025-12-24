@@ -76,7 +76,21 @@ class TestBoardClusteringIntegration:
 
     def test_precomputer_initialization(self):
         """Test that precomputer initializes correctly."""
-        config = PrecomputeConfig.fast_test()
+        config = PrecomputeConfig(
+            num_buckets={
+                Street.FLOP: 5,
+                Street.TURN: 5,
+                Street.RIVER: 5,
+            },
+            num_board_clusters={
+                Street.FLOP: 5,
+                Street.TURN: 5,
+                Street.RIVER: 5,
+            },
+            representatives_per_cluster=1,
+            equity_samples=10,
+            num_workers=1,
+        )
         precomputer = ComboPrecomputer(config)
 
         assert precomputer.config == config
@@ -91,6 +105,12 @@ class TestBoardClusteringIntegration:
                 Street.TURN: 5,
                 Street.RIVER: 5,
             },
+            num_board_clusters={
+                Street.FLOP: 5,
+                Street.TURN: 5,
+                Street.RIVER: 5,
+            },
+            representatives_per_cluster=1,
             equity_samples=10,  # Very few samples for speed
             num_workers=1,
             seed=42,
@@ -112,6 +132,12 @@ class TestBoardClusteringIntegration:
                 Street.TURN: 3,
                 Street.RIVER: 3,
             },
+            num_board_clusters={
+                Street.FLOP: 3,
+                Street.TURN: 3,
+                Street.RIVER: 3,
+            },
+            representatives_per_cluster=1,
             equity_samples=10,
             num_workers=1,
             seed=42,
@@ -138,8 +164,8 @@ class TestBoardClusteringIntegration:
             canonical_boards, representative_boards, Street.FLOP, representatives_per_cluster=1
         )
 
-        # Predict cluster for a board
-        test_board = canonical_boards[0]
+        # Predict cluster for a board (use representative, not canonical)
+        test_board = representative_boards[0]
         cluster_id = clusterer.predict(test_board, Street.FLOP)
 
         assert isinstance(cluster_id, int)
