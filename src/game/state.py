@@ -13,8 +13,12 @@ from treys import Card as TreysCard
 
 from src.game.actions import Action
 
-# Import SPR constants only when needed to avoid circular import at module level
-# They are imported inside methods that use them
+# SPR (Stack-to-Pot Ratio) thresholds for bucketing
+# Shallow: SPR < 4 (push/fold decisions)
+# Medium: 4 <= SPR < 13 (standard play)
+# Deep: SPR >= 13 (complex postflop play)
+SPR_SHALLOW_THRESHOLD = 4.0
+SPR_DEEP_THRESHOLD = 13.0
 
 
 class Street(Enum):
@@ -384,8 +388,6 @@ class GameState:
         Returns:
             Bucket index (0, 1, or 2)
         """
-        from src.abstraction.utils.constants import SPR_DEEP_THRESHOLD, SPR_SHALLOW_THRESHOLD
-
         if spr < SPR_SHALLOW_THRESHOLD:
             return 0  # Shallow
         elif spr < SPR_DEEP_THRESHOLD:
