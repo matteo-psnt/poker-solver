@@ -251,3 +251,161 @@ class TestDiskBackedStorage:
 
             s = str(storage)
             assert "DiskBackedStorage" in s
+
+    def test_dirty_tracking_after_flush(self):
+        """
+        Test that modifications after flush are properly tracked.
+
+        This tests the critical bug where:
+        1. Create infoset -> gets added to cache and marked dirty
+        2. flush() -> writes to disk and clears dirty_keys
+        3. Modify cached infoset -> must mark dirty again!
+        4. Evict from cache -> should write if marked dirty
+        5. Reload -> should see latest modifications
+
+        Without proper dirty tracking, step 3's modifications would be lost.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Use small cache to force eviction
+            storage = DiskBackedStorage(Path(tmpdir), cache_size=2)
+
+            # Create first infoset
+            key1 = InfoSetKey(
+                player_position=0,
+                street=Street.PREFLOP,
+                betting_sequence="",
+                preflop_hand="AKs",
+                postflop_bucket=None,
+                spr_bucket=1,
+            )
+            actions = [Action(ActionType.FOLD, 0), Action(ActionType.CALL, 0)]
+            infoset1 = storage.get_or_create_infoset(key1, actions)
+            infoset1.regrets = np.array([1.0, 2.0], dtype=np.float32)
+            infoset1.strategy_sum = np.array([0.5, 0.5], dtype=np.float32)
+
+            # Flush to disk (clears dirty_keys)
+            storage.flush()
+
+            # Verify dirty_keys is cleared
+            assert len(storage.dirty_keys) == 0
+
+            # NOW: Modify the infoset that's still in cache
+            # This simulates what the solver does - it keeps modifying cached infosets
+            infoset1.regrets = np.array([10.0, 20.0], dtype=np.float32)
+            infoset1.strategy_sum = np.array([0.7, 0.3], dtype=np.float32)
+
+            # CRITICAL: Mark it dirty again (this is what the solver must do)
+            storage.mark_dirty(key1)
+
+            # Verify it's marked dirty
+            assert key1 in storage.dirty_keys
+
+            # Create more infosets to force eviction of infoset1
+            key2 = InfoSetKey(
+                player_position=0,
+                street=Street.PREFLOP,
+                betting_sequence="r",
+                preflop_hand="KK",
+                postflop_bucket=None,
+                spr_bucket=1,
+            )
+            storage.get_or_create_infoset(key2, actions)
+
+            key3 = InfoSetKey(
+                player_position=0,
+                street=Street.PREFLOP,
+                betting_sequence="rr",
+                preflop_hand="QQ",
+                postflop_bucket=None,
+                spr_bucket=1,
+            )
+            storage.get_or_create_infoset(key3, actions)
+
+            # key1 should have been evicted from cache
+            assert key1 not in storage.cache
+
+            # But because it was marked dirty, it should have been written
+            # Reload from disk to verify
+            infoset1_reloaded = storage.get_infoset(key1)
+
+            assert infoset1_reloaded is not None
+            assert np.allclose(infoset1_reloaded.regrets, [10.0, 20.0]), (
+                f"Expected regrets [10.0, 20.0], got {infoset1_reloaded.regrets}. "
+                "This means modifications after flush were lost!"
+            )
+            assert np.allclose(infoset1_reloaded.strategy_sum, [0.7, 0.3]), (
+                f"Expected strategy_sum [0.7, 0.3], got {infoset1_reloaded.strategy_sum}. "
+                "This means modifications after flush were lost!"
+            )
+
+    def test_dirty_tracking_without_mark_dirty(self):
+        """
+        Test demonstrating the bug when mark_dirty is NOT called.
+
+        This test shows what happens when modifications after flush are not
+        properly tracked - the changes get lost on eviction.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Use small cache to force eviction
+            storage = DiskBackedStorage(Path(tmpdir), cache_size=2)
+
+            # Create first infoset
+            key1 = InfoSetKey(
+                player_position=0,
+                street=Street.PREFLOP,
+                betting_sequence="",
+                preflop_hand="AKs",
+                postflop_bucket=None,
+                spr_bucket=1,
+            )
+            actions = [Action(ActionType.FOLD, 0), Action(ActionType.CALL, 0)]
+            infoset1 = storage.get_or_create_infoset(key1, actions)
+            infoset1.regrets = np.array([1.0, 2.0], dtype=np.float32)
+            infoset1.strategy_sum = np.array([0.5, 0.5], dtype=np.float32)
+
+            # Flush to disk (clears dirty_keys)
+            storage.flush()
+
+            # Modify the infoset that's still in cache
+            infoset1.regrets = np.array([10.0, 20.0], dtype=np.float32)
+            infoset1.strategy_sum = np.array([0.7, 0.3], dtype=np.float32)
+
+            # BUG SIMULATION: DO NOT mark it dirty
+            # (This is what would happen before our fix)
+            # storage.mark_dirty(key1)  # <-- COMMENTED OUT
+
+            # Create more infosets to force eviction
+            key2 = InfoSetKey(
+                player_position=0,
+                street=Street.PREFLOP,
+                betting_sequence="r",
+                preflop_hand="KK",
+                postflop_bucket=None,
+                spr_bucket=1,
+            )
+            storage.get_or_create_infoset(key2, actions)
+
+            key3 = InfoSetKey(
+                player_position=0,
+                street=Street.PREFLOP,
+                betting_sequence="rr",
+                preflop_hand="QQ",
+                postflop_bucket=None,
+                spr_bucket=1,
+            )
+            storage.get_or_create_infoset(key3, actions)
+
+            # key1 should have been evicted from cache
+            assert key1 not in storage.cache
+
+            # Because it was NOT marked dirty, modifications were lost
+            infoset1_reloaded = storage.get_infoset(key1)
+
+            assert infoset1_reloaded is not None
+            # Should have OLD values from before modification
+            assert np.allclose(infoset1_reloaded.regrets, [1.0, 2.0]), (
+                "Without mark_dirty, should still have old values"
+            )
+            assert np.allclose(infoset1_reloaded.strategy_sum, [0.5, 0.5]), (
+                "Without mark_dirty, should still have old values"
+            )

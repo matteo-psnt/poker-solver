@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 import h5py
+import numpy as np
 
 from src.bucketing.utils.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action
@@ -43,6 +44,11 @@ class Storage(ABC):
     @abstractmethod
     def num_infosets(self) -> int:
         """Get total number of stored infosets."""
+        pass
+
+    @abstractmethod
+    def mark_dirty(self, key: InfoSetKey):
+        """Mark infoset as modified (needs to be persisted)."""
         pass
 
     @abstractmethod
@@ -88,6 +94,10 @@ class InMemoryStorage(Storage):
         """Get total number of stored infosets."""
         return len(self.infosets)
 
+    def mark_dirty(self, key: InfoSetKey):
+        """No-op for in-memory storage (always in sync)."""
+        pass
+
     def flush(self):
         """No-op for in-memory storage."""
         pass
@@ -114,9 +124,27 @@ class DiskBackedStorage(Storage):
     - Lazy writing (dirty tracking)
 
     Designed to handle 100K-1M+ infosets across 10M+ iterations.
+
+    IMPORTANT CONTRACT:
+    ==================
+    After mutating an infoset's regrets or strategy_sum, you MUST call:
+
+        storage.mark_dirty(infoset_key)
+
+    Failure to mark dirty will cause updates to be lost when the infoset
+    is evicted from cache. This is a critical correctness requirement.
+
+    The solver (mccfr.py) is responsible for calling mark_dirty after
+    all mutations. Do not mutate infosets outside the solver.
     """
 
-    def __init__(self, checkpoint_dir: Path, cache_size: int = 100000, flush_frequency: int = 1000):
+    def __init__(
+        self,
+        checkpoint_dir: Path,
+        cache_size: int = 100000,
+        flush_frequency: int = 1000,
+        enable_dirty_checks: bool = False,
+    ):
         """
         Initialize disk-backed storage.
 
@@ -124,12 +152,14 @@ class DiskBackedStorage(Storage):
             checkpoint_dir: Directory for checkpoint files
             cache_size: Maximum infosets to keep in LRU cache
             flush_frequency: Flush dirty infosets every N accesses
+            enable_dirty_checks: Enable debug checks for missing mark_dirty calls
         """
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         self.cache_size = cache_size
         self.flush_frequency = flush_frequency
+        self.enable_dirty_checks = enable_dirty_checks
 
         # LRU cache (OrderedDict maintains insertion order)
         self.cache: OrderedDict[InfoSetKey, InfoSet] = OrderedDict()
@@ -148,11 +178,19 @@ class DiskBackedStorage(Storage):
         # Access counter for periodic flushing
         self.access_count = 0
 
+        # Debug mode: snapshot infoset state to detect unmarked mutations
+        if self.enable_dirty_checks:
+            self.infoset_snapshots: Dict[InfoSetKey, tuple] = {}
+
         # Load existing data if present
         self._load_metadata()
 
     def get_or_create_infoset(self, key: InfoSetKey, legal_actions: List[Action]) -> InfoSet:
-        """Get existing infoset or create new one."""
+        """
+        Get existing infoset or create new one.
+
+        IMPORTANT: After mutating the returned infoset, you MUST call mark_dirty(key).
+        """
         self.access_count += 1
 
         # Periodic flush
@@ -163,7 +201,13 @@ class DiskBackedStorage(Storage):
         if key in self.cache:
             # Move to end (most recently used)
             self.cache.move_to_end(key)
-            return self.cache[key]
+            infoset = self.cache[key]
+
+            # Debug mode: snapshot state before returning (to detect unmarked mutations)
+            if self.enable_dirty_checks and key not in self.dirty_keys:
+                self._snapshot_infoset(key, infoset)
+
+            return infoset
 
         # Try to load from disk
         infoset = self._load_from_disk(key, legal_actions)
@@ -175,6 +219,10 @@ class DiskBackedStorage(Storage):
 
         # Add to cache
         self._add_to_cache(key, infoset)
+
+        # Debug mode: snapshot new infoset state
+        if self.enable_dirty_checks:
+            self._snapshot_infoset(key, infoset)
 
         return infoset
 
@@ -196,9 +244,23 @@ class DiskBackedStorage(Storage):
                 # Evict LRU if cache is full
                 if len(self.cache) > self.cache_size:
                     oldest_key, oldest_infoset = self.cache.popitem(last=False)
+
+                    # Debug mode: check for unmarked mutations before eviction
+                    if self.enable_dirty_checks:
+                        if self._check_unmarked_mutation(oldest_key, oldest_infoset):
+                            logger.warning(
+                                f"DIRTY TRACKING BUG: Infoset {oldest_key} was mutated "
+                                "but mark_dirty() was not called. Updates will be lost! "
+                                "This is a critical correctness bug."
+                            )
+
                     if oldest_key in self.dirty_keys:
                         self._write_to_disk(oldest_key, oldest_infoset)
                         self.dirty_keys.discard(oldest_key)
+
+                    # Clear snapshot after eviction
+                    if self.enable_dirty_checks and oldest_key in self.infoset_snapshots:
+                        del self.infoset_snapshots[oldest_key]
 
             return infoset
 
@@ -212,6 +274,38 @@ class DiskBackedStorage(Storage):
         """Mark infoset as modified (needs to be written to disk)."""
         if key in self.cache:
             self.dirty_keys.add(key)
+
+            # Debug mode: clear snapshot since we've acknowledged the mutation
+            if self.enable_dirty_checks and key in self.infoset_snapshots:
+                del self.infoset_snapshots[key]
+
+    def _snapshot_infoset(self, key: InfoSetKey, infoset: InfoSet):
+        """
+        Take snapshot of infoset state for debug checks.
+
+        Stores a copy of regrets and strategy_sum to detect unmarked mutations.
+        """
+        self.infoset_snapshots[key] = (
+            infoset.regrets.copy(),
+            infoset.strategy_sum.copy(),
+        )
+
+    def _check_unmarked_mutation(self, key: InfoSetKey, infoset: InfoSet) -> bool:
+        """
+        Check if infoset was mutated without calling mark_dirty.
+
+        Returns True if unmarked mutation detected, False otherwise.
+        """
+        if key not in self.infoset_snapshots:
+            return False
+
+        snapshot_regrets, snapshot_strategies = self.infoset_snapshots[key]
+
+        # Check if arrays were modified
+        regrets_changed = not np.array_equal(infoset.regrets, snapshot_regrets)
+        strategies_changed = not np.array_equal(infoset.strategy_sum, snapshot_strategies)
+
+        return regrets_changed or strategies_changed
 
     def num_infosets(self) -> int:
         """Get total number of stored infosets."""
@@ -258,10 +352,23 @@ class DiskBackedStorage(Storage):
             # Remove oldest item
             oldest_key, oldest_infoset = self.cache.popitem(last=False)
 
+            # Debug mode: check for unmarked mutations before eviction
+            if self.enable_dirty_checks:
+                if self._check_unmarked_mutation(oldest_key, oldest_infoset):
+                    logger.warning(
+                        f"DIRTY TRACKING BUG: Infoset {oldest_key} was mutated "
+                        "but mark_dirty() was not called. Updates will be lost! "
+                        "This is a critical correctness bug."
+                    )
+
             # Write to disk if dirty
             if oldest_key in self.dirty_keys:
                 self._write_to_disk(oldest_key, oldest_infoset)
                 self.dirty_keys.discard(oldest_key)
+
+            # Clear snapshot after eviction
+            if self.enable_dirty_checks and oldest_key in self.infoset_snapshots:
+                del self.infoset_snapshots[oldest_key]
 
     def _assign_id(self, key: InfoSetKey, legal_actions: List[Action]):
         """Assign integer ID to new infoset."""
