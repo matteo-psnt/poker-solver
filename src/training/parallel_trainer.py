@@ -45,8 +45,8 @@ def _worker_process(
         worker_id: Unique worker identifier
         num_iterations: Number of iterations for this worker
         config_dict: Configuration dictionary
-        serialized_action_abstraction: Pickled ActionAbstraction
-        serialized_card_abstraction: Pickled CardAbstraction
+        serialized_action_abstraction: Pickled BettingActions
+        serialized_card_abstraction: Pickled BucketingStrategy
         seed: Random seed for this worker
         result_queue: Queue to return results
     """
@@ -180,7 +180,7 @@ class ParallelTrainer(Trainer):
                     if legal_actions is None:
                         legal_actions = data["legal_actions"]
 
-            if not regrets_list:
+            if not regrets_list or not strategies_list:
                 continue
 
             # Verify all arrays are same shape (should be for same infoset)

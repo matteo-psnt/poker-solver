@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.abstraction.core.action_abstraction import ActionAbstraction
+from src.actions.betting_actions import BettingActions
 from src.game.actions import ActionType, all_in, bet, call, check, fold, raises
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
@@ -117,7 +117,7 @@ class TestGameRules:
     def test_get_legal_actions_with_abstraction(self):
         """Test legal actions with action abstraction."""
         rules = GameRules()
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
 
         state = rules.create_initial_state(
             starting_stack=200,
@@ -386,7 +386,7 @@ class TestGameRules:
         )
 
         # Can raise with action abstraction
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         actions = rules.get_legal_actions(state, action_abstraction=action_abs)
 
         # Should have raise options
@@ -413,7 +413,7 @@ class TestGameRules:
             last_aggressor=None,
         )
 
-        action_abs = ActionAbstraction()
+        action_abs = BettingActions()
         actions = rules.get_legal_actions(state, action_abstraction=action_abs)
 
         # Should have bet options

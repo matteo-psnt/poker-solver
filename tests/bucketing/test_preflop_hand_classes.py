@@ -1,20 +1,20 @@
 """Tests for preflop hand mapping."""
 
-from src.abstraction.preflop.preflop_hands import PreflopHandMapper
+from src.bucketing.preflop.hand_classes import PreflopHandClasses
 from src.game.state import Card
 
 
 class TestPreflopHandMapper:
-    """Tests for PreflopHandMapper."""
+    """Tests for PreflopHandClasses."""
 
     def test_create_mapper(self):
         """Test creating mapper."""
-        mapper = PreflopHandMapper()
+        mapper = PreflopHandClasses()
         assert mapper is not None
 
     def test_get_hand_string_pairs(self):
         """Test mapping pairs."""
-        mapper = PreflopHandMapper()
+        mapper = PreflopHandClasses()
 
         # Aces
         assert mapper.get_hand_string((Card.new("As"), Card.new("Ah"))) == "AA"
@@ -28,7 +28,7 @@ class TestPreflopHandMapper:
 
     def test_get_hand_string_suited(self):
         """Test mapping suited hands."""
-        mapper = PreflopHandMapper()
+        mapper = PreflopHandClasses()
 
         # High cards
         assert mapper.get_hand_string((Card.new("As"), Card.new("Ks"))) == "AKs"
@@ -43,7 +43,7 @@ class TestPreflopHandMapper:
 
     def test_get_hand_string_offsuit(self):
         """Test mapping offsuit hands."""
-        mapper = PreflopHandMapper()
+        mapper = PreflopHandClasses()
 
         # High cards
         assert mapper.get_hand_string((Card.new("As"), Card.new("Kh"))) == "AKo"
@@ -57,7 +57,7 @@ class TestPreflopHandMapper:
 
     def test_get_hand_index_pairs(self):
         """Test getting index for pairs."""
-        mapper = PreflopHandMapper()
+        mapper = PreflopHandClasses()
 
         # Aces should be 0
         assert mapper.get_hand_index((Card.new("As"), Card.new("Ah"))) == 0
@@ -70,7 +70,7 @@ class TestPreflopHandMapper:
 
     def test_get_hand_index_suited(self):
         """Test getting index for suited hands."""
-        mapper = PreflopHandMapper()
+        mapper = PreflopHandClasses()
 
         # AKs should be first suited (index 13)
         assert mapper.get_hand_index((Card.new("As"), Card.new("Ks"))) == 13
@@ -80,7 +80,7 @@ class TestPreflopHandMapper:
 
     def test_get_hand_index_offsuit(self):
         """Test getting index for offsuit hands."""
-        mapper = PreflopHandMapper()
+        mapper = PreflopHandClasses()
 
         # AKo should be first offsuit (index 91 = 13 pairs + 78 suited)
         assert mapper.get_hand_index((Card.new("As"), Card.new("Kh"))) == 91
@@ -90,7 +90,7 @@ class TestPreflopHandMapper:
 
     def test_get_all_hands(self):
         """Test getting all 169 hands."""
-        hands = PreflopHandMapper.get_all_hands()
+        hands = PreflopHandClasses.get_all_hands()
 
         # Should have exactly 169 hands
         assert len(hands) == 169
@@ -112,8 +112,8 @@ class TestPreflopHandMapper:
 
     def test_all_hands_can_be_indexed(self):
         """Test that all hands map to unique indices."""
-        hands = PreflopHandMapper.get_all_hands()
-        mapper = PreflopHandMapper()
+        hands = PreflopHandClasses.get_all_hands()
+        mapper = PreflopHandClasses()
 
         # Create sample cards for each hand
         indices = set()
@@ -147,6 +147,6 @@ class TestPreflopHandMapper:
 
     def test_str_representation(self):
         """Test string representation."""
-        mapper = PreflopHandMapper()
+        mapper = PreflopHandClasses()
         s = str(mapper)
         assert "169" in s

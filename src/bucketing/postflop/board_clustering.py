@@ -17,7 +17,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from treys import Card as TreysCard
 
-from src.abstraction.isomorphism.suit_canonicalization import CanonicalCard
+from src.bucketing.postflop.suit_isomorphism import CanonicalCard
 from src.game.state import Card, Street
 
 
@@ -198,7 +198,7 @@ class BoardClusterer:
         self._kmeans[street] = kmeans
 
         # Build cluster info
-        from src.abstraction.isomorphism.suit_canonicalization import get_canonical_board_id
+        from src.bucketing.postflop.suit_isomorphism import get_canonical_board_id
 
         self._board_to_cluster[street] = {}
         self._clusters[street] = {}

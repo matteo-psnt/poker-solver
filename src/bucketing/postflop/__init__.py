@@ -1,5 +1,5 @@
 """
-Suit isomorphism module for canonical hand/board representation.
+Postflop bucketing with suit isomorphism.
 
 This module provides the foundation for combo-level abstraction under suit isomorphism,
 which is required for theoretically sound postflop bucketing in poker solvers.
@@ -11,20 +11,20 @@ Key concepts:
 - This eliminates duplicate states and ensures deterministic bucket mapping
 """
 
-from src.abstraction.isomorphism.canonical_boards import (
+from src.bucketing.postflop.board_enumeration import (
     CanonicalBoardEnumerator,
     CanonicalBoardInfo,
 )
-from src.abstraction.isomorphism.combo_abstraction import (
-    CanonicalCombo,
-    ComboAbstraction,
-    get_all_canonical_combos,
+from src.bucketing.postflop.hand_bucketing import (
+    CanonicalHand,
+    PostflopBucketer,
+    get_all_canonical_hands,
 )
-from src.abstraction.isomorphism.precompute import (
-    ComboPrecomputer,
+from src.bucketing.postflop.precompute import (
+    PostflopPrecomputer,
     PrecomputeConfig,
 )
-from src.abstraction.isomorphism.suit_canonicalization import (
+from src.bucketing.postflop.suit_isomorphism import (
     CanonicalCard,
     SuitMapping,
     canonicalize_board,
@@ -40,11 +40,11 @@ __all__ = [
     "canonicalize_hand",
     "get_canonical_hand_id",
     "get_canonical_board_id",
-    "CanonicalCombo",
-    "ComboAbstraction",
-    "get_all_canonical_combos",
+    "CanonicalHand",
+    "PostflopBucketer",
+    "get_all_canonical_hands",
     "CanonicalBoardEnumerator",
     "CanonicalBoardInfo",
     "PrecomputeConfig",
-    "ComboPrecomputer",
+    "PostflopPrecomputer",
 ]

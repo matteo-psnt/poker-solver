@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.abstraction.isomorphism import ComboPrecomputer, PrecomputeConfig
-from src.abstraction.isomorphism.board_clustering import BoardClusterer
-from src.abstraction.isomorphism.canonical_boards import CanonicalBoardEnumerator
+from src.bucketing.postflop import PostflopPrecomputer, PrecomputeConfig
+from src.bucketing.postflop.board_clustering import BoardClusterer
+from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.game.state import Street
 
 
@@ -91,7 +91,7 @@ class TestBoardClusteringIntegration:
             equity_samples=10,
             num_workers=1,
         )
-        precomputer = ComboPrecomputer(config)
+        precomputer = PostflopPrecomputer(config)
 
         assert precomputer.config == config
         assert precomputer.abstraction is not None
@@ -116,7 +116,7 @@ class TestBoardClusteringIntegration:
             seed=42,
         )
 
-        precomputer = ComboPrecomputer(config)
+        precomputer = PostflopPrecomputer(config)
 
         # Note: Full precomputation is too slow for unit tests
         # Just verify the precomputer is correctly initialized
@@ -143,7 +143,7 @@ class TestBoardClusteringIntegration:
             seed=42,
         )
 
-        precomputer = ComboPrecomputer(config)
+        precomputer = PostflopPrecomputer(config)
 
         # Note: Full precomputation is too slow for unit tests
         # Just verify save/load mechanics work

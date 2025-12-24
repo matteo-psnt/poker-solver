@@ -16,8 +16,8 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
-from src.abstraction.core.card_abstraction import CardAbstraction
-from src.abstraction.isomorphism.suit_canonicalization import (
+from src.bucketing.base import BucketingStrategy
+from src.bucketing.postflop.suit_isomorphism import (
     RANKS,
     SUITS,
     CanonicalCard,
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class CanonicalCombo:
+class CanonicalHand:
     """
     A canonical (hand, board) pair.
 
@@ -64,10 +64,10 @@ class CanonicalCombo:
     def __repr__(self) -> str:
         hand_str = f"({self.hand[0]}, {self.hand[1]})"
         board_str = " ".join(str(c) for c in self.board)
-        return f"CanonicalCombo(hand={hand_str}, board=[{board_str}])"
+        return f"CanonicalHand(hand={hand_str}, board=[{board_str}])"
 
 
-class ComboAbstraction(CardAbstraction):
+class PostflopBucketer(BucketingStrategy):
     """
     Combo-level abstraction for postflop bucket lookup.
 
@@ -117,9 +117,7 @@ class ComboAbstraction(CardAbstraction):
         if not hasattr(self, "_total_lookups"):
             self._total_lookups = 0
 
-    def canonicalize(
-        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...]
-    ) -> CanonicalCombo:
+    def canonicalize(self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...]) -> CanonicalHand:
         """
         Canonicalize a (hand, board) pair.
 
@@ -128,7 +126,7 @@ class ComboAbstraction(CardAbstraction):
             board: Current board
 
         Returns:
-            CanonicalCombo representing the canonical form
+            CanonicalHand representing the canonical form
         """
         # First canonicalize the board to establish suit mapping
         canonical_board, suit_mapping = canonicalize_board(board)
@@ -136,7 +134,7 @@ class ComboAbstraction(CardAbstraction):
         # Then canonicalize hand relative to board's suit mapping
         canonical_hand = canonicalize_hand(hole_cards, suit_mapping)
 
-        return CanonicalCombo(hand=canonical_hand, board=canonical_board)
+        return CanonicalHand(hand=canonical_hand, board=canonical_board)
 
     def get_bucket(
         self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
@@ -162,9 +160,9 @@ class ComboAbstraction(CardAbstraction):
         """
         # Handle preflop separately (uses 169 hand classes)
         if street == Street.PREFLOP:
-            from src.abstraction.preflop.preflop_hands import PreflopHandMapper
+            from src.bucketing.preflop.hand_classes import PreflopHandClasses
 
-            mapper = PreflopHandMapper()
+            mapper = PreflopHandClasses()
             hand_index = mapper.get_hand_index(hole_cards)
             # For now, each hand class is its own bucket
             return hand_index
@@ -235,7 +233,7 @@ class ComboAbstraction(CardAbstraction):
             return self._num_preflop_buckets
         return self._num_buckets.get(street, 0)
 
-    def set_bucket(self, canonical_combo: CanonicalCombo, street: Street, bucket_id: int):
+    def set_bucket(self, canonical_combo: CanonicalHand, street: Street, bucket_id: int):
         """
         Set bucket for a canonical combo.
 
@@ -263,7 +261,7 @@ class ComboAbstraction(CardAbstraction):
             n = self.num_buckets(street)
             if n > 0:
                 buckets_str.append(f"{street.name}={n}")
-        return f"ComboAbstraction({', '.join(buckets_str)})"
+        return f"PostflopBucketer({', '.join(buckets_str)})"
 
 
 def generate_all_cards() -> List[Card]:
@@ -292,9 +290,9 @@ def generate_all_combos() -> List[Tuple[Card, Card]]:
     return combos
 
 
-def get_all_canonical_combos(
+def get_all_canonical_hands(
     board: Tuple[Card, ...], exclude_board_cards: bool = True
-) -> Iterator[CanonicalCombo]:
+) -> Iterator[CanonicalHand]:
     """
     Generate all canonical combos for a given board.
 
@@ -303,7 +301,7 @@ def get_all_canonical_combos(
         exclude_board_cards: If True, exclude hands that share cards with board
 
     Yields:
-        CanonicalCombo objects
+        CanonicalHand objects
     """
     # Canonicalize board first
     canonical_board, suit_mapping = canonicalize_board(board)
@@ -333,16 +331,16 @@ def get_all_canonical_combos(
 
             seen_canonical.add(canonical_key)
 
-            yield CanonicalCombo(hand=canonical_hand, board=canonical_board)
+            yield CanonicalHand(hand=canonical_hand, board=canonical_board)
 
 
-def count_canonical_combos_for_board(board: Tuple[Card, ...]) -> int:
+def count_canonical_hands_for_board(board: Tuple[Card, ...]) -> int:
     """
     Count unique canonical combos for a board.
 
     Useful for estimating storage requirements.
     """
-    return sum(1 for _ in get_all_canonical_combos(board))
+    return sum(1 for _ in get_all_canonical_hands(board))
 
 
 def get_representative_hand(

@@ -327,14 +327,14 @@ class GameState:
 
         Args:
             player: Player index (0 or 1)
-            card_abstraction: CardAbstraction instance for bucketing
+            card_abstraction: BucketingStrategy instance for bucketing
 
         Returns:
             InfoSetKey (will be implemented in abstraction module)
         """
         # Imports here to avoid circular dependencies
-        from src.abstraction.preflop.preflop_hands import PreflopHandMapper
-        from src.abstraction.utils.infoset import InfoSetKey
+        from src.bucketing.preflop.hand_classes import PreflopHandClasses
+        from src.bucketing.utils.infoset import InfoSetKey
 
         # Compute SPR bucket
         effective_stack = min(self.stacks)
@@ -347,7 +347,7 @@ class GameState:
         # Hybrid representation: preflop uses hand strings, postflop uses buckets
         if self.street == Street.PREFLOP:
             # Get canonical hand string (e.g., "AKs", "72o", "TT")
-            hand_mapper = PreflopHandMapper()
+            hand_mapper = PreflopHandClasses()
             preflop_hand = hand_mapper.get_hand_string(self.hole_cards[player])
 
             return InfoSetKey(

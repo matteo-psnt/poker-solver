@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Set
 
 import h5py
 
-from src.abstraction.utils.infoset import InfoSet, InfoSetKey
+from src.bucketing.utils.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action
 
 # Setup logger

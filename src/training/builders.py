@@ -10,15 +10,15 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from src.abstraction.core.action_abstraction import ActionAbstraction
-from src.abstraction.core.card_abstraction import CardAbstraction
+from src.actions.betting_actions import BettingActions
+from src.bucketing.base import BucketingStrategy
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import DiskBackedStorage, InMemoryStorage, Storage
 from src.utils.config import Config
 
 
-def build_action_abstraction(config: Config) -> ActionAbstraction:
+def build_action_abstraction(config: Config) -> BettingActions:
     """
     Build action abstraction from config.
 
@@ -26,17 +26,17 @@ def build_action_abstraction(config: Config) -> ActionAbstraction:
         config: Configuration object
 
     Returns:
-        ActionAbstraction instance
+        BettingActions instance
     """
     action_config = config.get_section("action_abstraction")
     game_config = config.get_section("game")
     big_blind = game_config.get("big_blind", 2)
-    return ActionAbstraction(action_config, big_blind=big_blind)
+    return BettingActions(action_config, big_blind=big_blind)
 
 
 def build_card_abstraction(
     config: Config, prompt_user: bool = False, auto_compute: bool = False
-) -> CardAbstraction:
+) -> BucketingStrategy:
     """
     Build card abstraction from config.
 
@@ -48,7 +48,7 @@ def build_card_abstraction(
         auto_compute: Whether to auto-compute if abstraction not found
 
     Returns:
-        CardAbstraction instance (ComboAbstraction)
+        BucketingStrategy instance (PostflopBucketer)
 
     Raises:
         ValueError: If config is invalid
@@ -68,9 +68,9 @@ def build_card_abstraction(
                 f"Combo abstraction file not found: {abstraction_path}\n"
                 "Please run 'Precompute Combo Abstraction' from the CLI first."
             )
-        from src.abstraction.isomorphism.precompute import ComboPrecomputer
+        from src.bucketing.postflop.precompute import PostflopPrecomputer
 
-        return ComboPrecomputer.load(abstraction_path)
+        return PostflopPrecomputer.load(abstraction_path)
 
     elif abstraction_config:
         # Config name provided - look for matching abstraction
@@ -112,9 +112,9 @@ def build_card_abstraction(
 
         # Use most recent if multiple matches
         most_recent = max(matching, key=lambda p: p.stat().st_mtime)
-        from src.abstraction.isomorphism.precompute import ComboPrecomputer
+        from src.bucketing.postflop.precompute import PostflopPrecomputer
 
-        return ComboPrecomputer.load(most_recent)
+        return PostflopPrecomputer.load(most_recent)
 
     else:
         raise ValueError(
@@ -160,8 +160,8 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
 
 def build_solver(
     config: Config,
-    action_abstraction: ActionAbstraction,
-    card_abstraction: CardAbstraction,
+    action_abstraction: BettingActions,
+    card_abstraction: BucketingStrategy,
     storage: Storage,
 ) -> BaseSolver:
     """

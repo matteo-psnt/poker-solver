@@ -1,6 +1,6 @@
 """Tests for suit isomorphism canonicalization."""
 
-from src.abstraction.isomorphism.suit_canonicalization import (
+from src.bucketing.postflop.suit_isomorphism import (
     SuitMapping,
     canonicalize_board,
     canonicalize_hand,

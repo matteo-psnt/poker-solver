@@ -2,14 +2,14 @@
 
 import pytest
 
-from src.abstraction.isomorphism import (
+from src.bucketing.postflop import (
     CanonicalBoardEnumerator,
-    ComboPrecomputer,
+    PostflopPrecomputer,
     PrecomputeConfig,
     canonicalize_board,
-    get_all_canonical_combos,
+    get_all_canonical_hands,
 )
-from src.abstraction.isomorphism.precompute import (
+from src.bucketing.postflop.precompute import (
     compute_equity_for_combo,
 )
 from src.game.state import Card, Street
@@ -53,7 +53,7 @@ class TestCanonicalComboGeneration:
     def test_paired_board_has_many_combos(self):
         """Test that a paired board has expected combos."""
         board = (Card.new("2s"), Card.new("2h"), Card.new("2d"))
-        combos = list(get_all_canonical_combos(board))
+        combos = list(get_all_canonical_hands(board))
 
         # With 3 deuces on board, 49 cards remain
         # C(49, 2) = 1176 raw combos
@@ -64,7 +64,7 @@ class TestCanonicalComboGeneration:
     def test_no_duplicate_canonical_combos(self):
         """Test that all generated combos are unique."""
         board = (Card.new("As"), Card.new("Kh"), Card.new("Qd"))
-        combos = list(get_all_canonical_combos(board))
+        combos = list(get_all_canonical_hands(board))
 
         # Convert to keys for uniqueness check
         keys = [(c.board_id, c.hand_id) for c in combos]
@@ -76,7 +76,7 @@ class TestCanonicalComboGeneration:
         board = (Card.new("As"), Card.new("Ks"), Card.new("Qs"))
         _board_set = set(board)
 
-        for combo in get_all_canonical_combos(board):
+        for combo in get_all_canonical_hands(board):
             # The representative hand should not overlap with board
             # (This is checked internally but let's verify the canonical form)
             assert combo.board == canonicalize_board(board)[0]
@@ -88,7 +88,7 @@ class TestEquityComputation:
     def test_compute_equity_returns_valid_range(self):
         """Test that equity is between 0 and 1."""
         board = (Card.new("As"), Card.new("Kh"), Card.new("2c"))
-        combos = list(get_all_canonical_combos(board))
+        combos = list(get_all_canonical_hands(board))
 
         # Test first combo
         combo = combos[0]
@@ -108,7 +108,7 @@ class TestEquityComputation:
         board = (Card.new("2s"), Card.new("7h"), Card.new("Qc"))
 
         # Find combo for AA
-        combos = list(get_all_canonical_combos(board))
+        combos = list(get_all_canonical_hands(board))
 
         # Compute equity for several combos to find a high one
         high_equity_found = False
@@ -153,7 +153,7 @@ class TestComboPrecomputer:
     def test_precomputer_creation(self):
         """Test that precomputer can be created."""
         config = PrecomputeConfig.fast_test()
-        precomputer = ComboPrecomputer(config)
+        precomputer = PostflopPrecomputer(config)
 
         assert precomputer.abstraction is not None
         assert precomputer.config == config
@@ -162,7 +162,7 @@ class TestComboPrecomputer:
     def test_full_precomputation(self):
         """Test full precomputation (skipped by default)."""
         config = PrecomputeConfig.fast_test()
-        precomputer = ComboPrecomputer(config)
+        precomputer = PostflopPrecomputer(config)
 
         abstraction = precomputer.precompute_all(streets=[Street.FLOP])
 

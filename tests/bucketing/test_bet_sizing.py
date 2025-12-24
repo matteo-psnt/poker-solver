@@ -1,15 +1,15 @@
 """Tests for action abstraction."""
 
-from src.abstraction.core.action_abstraction import ActionAbstraction
+from src.actions.betting_actions import BettingActions
 from src.game.actions import ActionType, bet
 from src.game.state import Card, GameState, Street
 
 
 class TestActionAbstraction:
-    """Tests for ActionAbstraction class."""
+    """Tests for BettingActions class."""
 
     def test_default_config(self):
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         assert abstraction.preflop_raises == [2.5, 3.5, 5.0]
         assert abstraction.postflop_bets == {
             "flop": [0.33, 0.66, 1.25],
@@ -22,7 +22,7 @@ class TestActionAbstraction:
             "preflop_raises": [3.0, 5.0],
             "postflop_bets": [0.5, 1.0],  # Legacy format
         }
-        abstraction = ActionAbstraction(config)
+        abstraction = BettingActions(config)
         assert abstraction.preflop_raises == [3.0, 5.0]
         # Legacy format applies same bets to all streets
         assert abstraction.postflop_bets == {
@@ -32,7 +32,7 @@ class TestActionAbstraction:
         }
 
     def test_get_bet_sizes_preflop(self):
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         state = GameState(
             street=Street.PREFLOP,
             pot=3,
@@ -56,7 +56,7 @@ class TestActionAbstraction:
         assert 10 in sizes
 
     def test_get_bet_sizes_postflop(self):
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -81,7 +81,7 @@ class TestActionAbstraction:
 
     def test_get_bet_sizes_facing_bet(self):
         """Cannot bet when facing a bet."""
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         state = GameState(
             street=Street.FLOP,
             pot=150,
@@ -102,7 +102,7 @@ class TestActionAbstraction:
         assert sizes == []
 
     def test_get_raise_sizes_postflop(self):
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         state = GameState(
             street=Street.FLOP,
             pot=150,
@@ -128,7 +128,7 @@ class TestActionAbstraction:
         assert 100 in sizes
 
     def test_get_legal_actions_can_check(self):
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -153,7 +153,7 @@ class TestActionAbstraction:
         assert not any(a.type == ActionType.FOLD for a in actions)  # Can check for free
 
     def test_get_legal_actions_facing_bet(self):
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         state = GameState(
             street=Street.FLOP,
             pot=150,
@@ -179,7 +179,7 @@ class TestActionAbstraction:
         assert any(a.is_aggressive() for a in actions)
 
     def test_discretize_bet_action(self):
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -207,8 +207,8 @@ class TestActionAbstraction:
         assert discretized in legal_actions
 
     def test_str_representation(self):
-        abstraction = ActionAbstraction()
+        abstraction = BettingActions()
         s = str(abstraction)
-        assert "ActionAbstraction" in s
+        assert "BettingActions" in s
         assert "preflop" in s.lower()
         assert "postflop" in s.lower()

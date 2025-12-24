@@ -10,8 +10,8 @@ from pathlib import Path
 import questionary
 from questionary import Choice
 
-from src.abstraction.isomorphism import (
-    ComboPrecomputer,
+from src.bucketing.postflop import (
+    PostflopPrecomputer,
     PrecomputeConfig,
 )
 from src.game.state import Card, Street
@@ -253,7 +253,7 @@ def handle_combo_precompute() -> None:
     print("This may take a while. Progress will be shown.\n")
 
     try:
-        precomputer = ComboPrecomputer(config)
+        precomputer = PostflopPrecomputer(config)
         abstraction = precomputer.precompute_all(streets=streets)
 
         # Save results
@@ -388,7 +388,7 @@ def _show_detailed_info(abstractions: list) -> None:
 
             # Load abstraction for bucket distribution
             try:
-                abstraction = ComboPrecomputer.load(path)
+                abstraction = PostflopPrecomputer.load(path)
 
                 # Show bucket distribution per street
                 for street in [Street.FLOP, Street.TURN, Street.RIVER]:
@@ -502,7 +502,7 @@ def handle_combo_test_lookup() -> None:
     print(f"\nLoading abstraction from {abstraction_path.name}...")
 
     try:
-        abstraction = ComboPrecomputer.load(abstraction_path)
+        abstraction = PostflopPrecomputer.load(abstraction_path)
         print("✓ Loaded successfully")
     except Exception as e:
         print(f"✗ Failed to load: {e}")
@@ -695,7 +695,7 @@ def handle_combo_coverage() -> None:
     print(f"\nLoading abstraction from {abstraction_path.name}...")
 
     try:
-        abstraction = ComboPrecomputer.load(abstraction_path)
+        abstraction = PostflopPrecomputer.load(abstraction_path)
         print("✓ Loaded successfully\n")
     except Exception as e:
         print(f"✗ Failed to load: {e}")
@@ -739,7 +739,7 @@ def handle_combo_coverage() -> None:
     overall_stats = {}
 
     # Suppress fallback warnings during analysis
-    logger = logging.getLogger("src.abstraction.isomorphism.combo_abstraction")
+    logger = logging.getLogger("src.bucketing.postflop.hand_bucketing")
     original_level = logger.level
 
     # Custom handler to count fallbacks
@@ -884,7 +884,7 @@ def handle_combo_analyze_bucketing() -> None:
     print(f"\nLoading abstraction from {abstraction_path.name}...")
 
     try:
-        abstraction = ComboPrecomputer.load(abstraction_path)
+        abstraction = PostflopPrecomputer.load(abstraction_path)
         print("✓ Loaded successfully\n")
     except Exception as e:
         print(f"✗ Failed to load: {e}")
