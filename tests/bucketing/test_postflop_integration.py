@@ -142,6 +142,7 @@ class TestClusteringIntegration:
             assert precomputer.abstraction._board_clusterer is not None
             assert Street.FLOP in precomputer.abstraction._buckets
 
+    @pytest.mark.timeout(10)
     def test_metadata_includes_clustering_info(self, test_config):
         """Test that saved metadata includes clustering statistics."""
         with tempfile.TemporaryDirectory() as tmpdir:
