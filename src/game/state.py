@@ -190,6 +190,7 @@ class GameState:
     is_terminal: bool
     to_call: int = 0
     last_aggressor: Optional[int] = None
+    street_start_pot: int = 0  # Pot at start of current betting round (for normalization)
     _skip_validation: bool = False
 
     def __post_init__(self):
@@ -403,60 +404,48 @@ class GameState:
         not the current pot size. This ensures equivalent betting sequences produce
         the same normalized string regardless of when we observe them.
 
-        We replay the betting history backwards from the current pot to reconstruct
-        the pot size at each action.
+        We reconstruct forward from street_start_pot through the betting history,
+        tracking both pot and to_call to correctly handle all action types.
         """
         if not self.betting_history:
             return ""
 
-        # Reconstruct pot sizes at each action by walking backwards
-        # Start with current pot and work backwards, removing each action's contribution
-        # We need to track to_call to handle CALL actions correctly
+        # Reconstruct pot sizes by walking forward from street_start_pot
+        # This correctly handles RAISE actions which add (to_call + raise_amount)
         pot_at_action: List[int] = []
-        current_pot = self.pot
-        current_to_call = 0  # Track to_call as we go backwards
+        current_pot = self.street_start_pot
+        current_to_call = 0  # Track to_call as we go forward
 
-        # Walk backwards through betting history
-        for i in range(len(self.betting_history) - 1, -1, -1):
-            action = self.betting_history[i]
-
+        # Walk forward through betting history
+        for action in self.betting_history:
             # Record the pot BEFORE this action
+            pot_at_action.append(current_pot)
+
+            # Update pot and to_call based on action type
             if action.type == ActionType.BET:
-                # BET: adds amount to pot, sets to_call to amount
-                pot_before = current_pot - action.amount
-                pot_at_action.insert(0, pot_before)
-                current_pot = pot_before
-                current_to_call = 0  # Before bet, to_call was 0
+                # BET: adds amount to pot, sets to_call
+                current_pot += action.amount
+                current_to_call = action.amount
             elif action.type == ActionType.RAISE:
-                # RAISE: adds amount to pot, increases to_call
-                pot_before = current_pot - action.amount
-                pot_at_action.insert(0, pot_before)
-                current_pot = pot_before
-                # Before this raise, to_call was what the raise was responding to
-                # This is complex to track backwards, so we use the amount
-                current_to_call = 0  # Simplified: reset
+                # RAISE: calls previous bet + raises by amount
+                # Total chips added: to_call + action.amount
+                bet_amount = current_to_call + action.amount
+                current_pot += bet_amount
+                current_to_call = action.amount  # New amount to call is the raise size
             elif action.type == ActionType.CALL:
-                # CALL: adds current_to_call to pot (matching the bet/raise)
-                # We need to figure out what to_call was at this point
-                # Look ahead (backwards in time) to find the last BET/RAISE
-                call_amount = current_to_call
-                if call_amount == 0:
-                    # Find the previous BET or RAISE to know the call amount
-                    for j in range(i - 1, -1, -1):
-                        if self.betting_history[j].type in (ActionType.BET, ActionType.RAISE):
-                            call_amount = self.betting_history[j].amount
-                            break
-                pot_before = current_pot - call_amount
-                pot_at_action.insert(0, pot_before)
-                current_pot = pot_before
-                current_to_call = call_amount  # Before call, there was a bet to match
+                # CALL: adds to_call to pot
+                current_pot += current_to_call
+                current_to_call = 0  # Betting is now even
             elif action.type == ActionType.ALL_IN:
-                pot_before = current_pot - action.amount
-                pot_at_action.insert(0, pot_before)
-                current_pot = pot_before
-            else:
-                # FOLD, CHECK don't change pot
-                pot_at_action.insert(0, current_pot)
+                # ALL_IN: adds amount to pot
+                current_pot += action.amount
+                # to_call depends on whether this was a call or raise all-in
+                # For normalization purposes, we track the excess over previous to_call
+                if action.amount > current_to_call:
+                    current_to_call = action.amount - current_to_call
+                else:
+                    current_to_call = 0
+            # FOLD and CHECK don't change pot or to_call
 
         # Now normalize each action with its contemporaneous pot size
         normalized = []

@@ -394,8 +394,8 @@ class MCCFRSolver(BaseSolver):
             opponent = 1 - current_player
 
             # Compute baseline: expected value under current strategy
-            # Since we only sampled one action, we use that as an estimate of the baseline
-            # This is a common variance reduction technique in outcome sampling
+            # Weighted baseline: baseline = u * σ(a) for faster practical convergence
+            # This updates both sampled and unsampled actions, providing smoother learning
             baseline = sampled_utility * strategy[action_idx]
 
             # For each action, compute regret using the unbiased estimator
