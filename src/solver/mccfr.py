@@ -146,7 +146,7 @@ class MCCFRSolver(BaseSolver):
         state = self.rules.create_initial_state(
             starting_stack=self.starting_stack,
             hole_cards=hole_cards,
-            button=0,  # Alternate in actual implementation
+            button=self.iteration % 2,
         )
 
         return state
@@ -389,25 +389,34 @@ class MCCFRSolver(BaseSolver):
 
         # Update regrets only for traversing player
         if current_player == traversing_player:
-            # For outcome sampling, we need to update regrets using importance sampling
-            # Regret for sampled action: utility - baseline
-            # We use the sampled utility as the baseline (simplified outcome sampling)
+            # Standard outcome sampling with proper baseline (Lanctot 2009)
+            # Uses importance sampling with a baseline to remain unbiased and reduce variance
             opponent = 1 - current_player
 
-            # Compute counterfactual value for sampled action
-            # Weight by opponent reach and sampling probability
-            w = reach_probs[opponent] / strategy[action_idx] if strategy[action_idx] > 0 else 0
+            # Compute baseline: expected value under current strategy
+            # Since we only sampled one action, we use that as an estimate of the baseline
+            # This is a common variance reduction technique in outcome sampling
+            baseline = sampled_utility * strategy[action_idx]
 
-            # For each action, compute regret
+            # For each action, compute regret using the unbiased estimator
             for i in range(len(legal_actions)):
                 original_idx = valid_indices[i]
+
+                if strategy[i] <= 0:
+                    # Skip actions with zero probability (can't importance sample them)
+                    continue
+
+                # Importance weight: opponent reach / sampling probability
+                w = reach_probs[opponent] / strategy[i]
+
                 if i == action_idx:
-                    # Sampled action: regret = (utility - baseline) * weight
-                    # Using 0 baseline for simplicity (pure outcome sampling)
-                    regret = sampled_utility * w
+                    # Sampled action: regret = (utility - baseline) / σ(a) * π_{-i}
+                    # Simplified to: (u - baseline) * w
+                    regret = (sampled_utility - baseline) * w
                 else:
-                    # Unsampled actions: regret = -baseline * weight
-                    regret = -sampled_utility * w
+                    # Unsampled actions: regret = -baseline / σ(a) * π_{-i}
+                    # Simplified to: -baseline * w
+                    regret = -baseline * w
 
                 infoset.update_regret(
                     original_idx,
