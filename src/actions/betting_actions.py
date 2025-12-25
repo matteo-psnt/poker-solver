@@ -91,6 +91,11 @@ class BettingActions:
             "all_in_spr_threshold", defaults["all_in_spr_threshold"]
         )
 
+        # Max raises per street (caps action tree depth)
+        self.max_raises_per_street = config.get(
+            "max_raises_per_street", defaults["max_raises_per_street"]
+        )
+
     @staticmethod
     def _default_config() -> Dict:
         """Get default research-grade action abstraction."""
@@ -102,6 +107,7 @@ class BettingActions:
                 "river": [0.50, 1.0, 2.0],  # Thin, pot, large overbet
             },
             "all_in_spr_threshold": 2.0,  # Only allow all-in when SPR < 2
+            "max_raises_per_street": 4,  # Cap raises per street (prevents infinite action trees)
         }
 
     def get_bet_sizes(self, state: GameState) -> List[int]:
@@ -122,6 +128,12 @@ class BettingActions:
 
         pot = state.pot
         stack = state.stacks[state.current_player]
+
+        # Check raise cap (BET counts as first raise)
+        raises_this_street = self._count_raises_on_current_street(state)
+        if raises_this_street >= self.max_raises_per_street:
+            # Hit raise cap, can only check
+            return []
 
         # Calculate SPR (Stack-to-Pot Ratio)
         spr = stack / pot if pot > 0 else float("inf")
@@ -154,6 +166,43 @@ class BettingActions:
 
         return sorted(sizes)
 
+    def _count_raises_on_current_street(self, state: GameState) -> int:
+        """
+        Count the number of BET/RAISE actions on the current street.
+
+        This is used to cap raises per street and prevent infinite action trees.
+
+        Args:
+            state: Current game state
+
+        Returns:
+            Number of bets/raises on current street
+        """
+        raises_count = 0
+        betting_history = list(state.betting_history)
+
+        # Walk backwards through history to find current street actions
+        for i in range(len(betting_history) - 1, -1, -1):
+            action = betting_history[i]
+
+            # Stop if we hit a CALL (previous street ended)
+            if action.type == ActionType.CALL:
+                break
+
+            # Stop if we hit check-check pattern (previous street ended)
+            if (
+                i >= 1
+                and action.type == ActionType.CHECK
+                and betting_history[i - 1].type == ActionType.CHECK
+            ):
+                break
+
+            # Count BET and RAISE actions
+            if action.type in (ActionType.BET, ActionType.RAISE):
+                raises_count += 1
+
+        return raises_count
+
     def get_raise_sizes(self, state: GameState) -> List[int]:
         """
         Get legal raise sizes for current state.
@@ -176,6 +225,12 @@ class BettingActions:
 
         if stack <= to_call:
             # Cannot raise, only call or fold
+            return []
+
+        # Check raise cap (prevent infinite action trees)
+        raises_this_street = self._count_raises_on_current_street(state)
+        if raises_this_street >= self.max_raises_per_street:
+            # Hit raise cap, can only call or fold
             return []
 
         # Calculate SPR (Stack-to-Pot Ratio)

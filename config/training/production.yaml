@@ -30,6 +30,9 @@ action_abstraction:
       bets: [0.50, 1.0, 2.0]    # Thin value, pot, polarized overbet
   all_in_spr_threshold: 2.0
 
+  # Max raises per street (prevents infinite action trees)
+  max_raises_per_street: 5  # Standard poker cap (reduces infosets by 99.5%)
+
 # ===== Card Abstraction =====
 card_abstraction:
   # Combo-level abstraction with suit isomorphism (production settings)

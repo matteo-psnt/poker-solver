@@ -28,6 +28,9 @@ action_abstraction:
   # All-in handling: Only allowed when SPR < 2
   all_in_spr_threshold: 2.0  # Disable all-in above this SPR
 
+  # Max raises per street (prevents infinite action trees)
+  max_raises_per_street: 4  # Standard poker cap (dramatically reduces infoset count)
+
 # ===== Card Abstraction =====
 card_abstraction:
   # Combo-level abstraction with suit isomorphism
