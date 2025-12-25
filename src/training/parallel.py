@@ -242,6 +242,10 @@ def _persistent_worker_loop(
         solver_config.update(config.get_section("system"))
         solver_config["seed"] = base_seed  # Base seed per worker
 
+        # Workers must use vanilla CFR (no regret flooring) for mathematically correct merging
+        # CFR+ flooring will be applied at master after merge
+        solver_config["cfr_plus"] = False
+
         # Build solver once
         print(f"[Worker {worker_id}] Creating solver...", file=sys.stderr, flush=True)
         solver = MCCFRSolver(
@@ -547,6 +551,10 @@ class WorkerManager:
         Returns:
             Dict with utilities (incremental merge mode) or List of worker results (legacy mode)
         """
+        # Extract CFR+ setting from config for merge operation
+        # Default to False if not specified
+        cfr_plus_enabled = self.config_dict.get("system", {}).get("cfr_plus", False)
+
         # Submit jobs to all workers
         iteration_offset = start_iteration
         for worker_id, num_iterations in enumerate(iterations_per_worker):
@@ -619,7 +627,7 @@ class WorkerManager:
                 # Incremental merge: merge this worker's results immediately
                 if storage is not None:
                     merge_start = time.time()
-                    merge_worker_results(storage, [result])
+                    merge_worker_results(storage, [result], cfr_plus=cfr_plus_enabled)
                     merge_time = time.time() - merge_start
                     if verbose:
                         print(
@@ -784,7 +792,7 @@ def _fast_action_sum(worker_infosets, action_index, num_actions):
     return sum_regrets, sum_strategies
 
 
-def merge_worker_results(solver_storage, worker_results: List[Dict]):
+def merge_worker_results(solver_storage, worker_results: List[Dict], cfr_plus: bool = False):
     """
     Merge worker results into master storage.
 
@@ -793,10 +801,12 @@ def merge_worker_results(solver_storage, worker_results: List[Dict]):
     - Sum strategy counts (CFR theory: strategies accumulate additively)
     - Sum reach counts (total visits across all workers)
     - Sum cumulative utilities (for proper averaging later)
+    - Apply CFR+ flooring if enabled (after merge, not during worker updates)
 
     Args:
         solver_storage: Master storage to merge into
         worker_results: List of result dicts from workers
+        cfr_plus: If True, apply CFR+ regret flooring after merging
     """
     merge_start_time = time.time()
     print(f"[Master] Starting merge of {len(worker_results)} worker results...", flush=True)
@@ -894,6 +904,11 @@ def merge_worker_results(solver_storage, worker_results: List[Dict]):
         # Update master infoset with summed values
         infoset.regrets += sum_regrets
         infoset.strategy_sum += sum_strategies
+
+        # Apply CFR+ flooring after merge (mathematically correct)
+        # Workers use vanilla CFR (no flooring) so regrets sum correctly
+        if cfr_plus:
+            infoset.regrets = np.maximum(0, infoset.regrets)
 
         # Sum reach counts (total visits across all workers)
         infoset.reach_count += sum(data["reach_count"] for data in worker_infosets)
