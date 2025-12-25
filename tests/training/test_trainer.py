@@ -451,3 +451,81 @@ class TestCheckpointEnabledConfig:
 
         # Verify loaded correctly
         assert trainer2.solver.num_infosets() == initial_infosets
+
+
+class TestProfileMode:
+    """Tests for profile mode functionality."""
+
+    @pytest.mark.timeout(30)
+    def test_profile_mode_disabled_by_default(self, config_with_dummy_abstraction):
+        """Test that profile mode is disabled by default."""
+        config = config_with_dummy_abstraction
+        assert not config.get("training.profile_mode", False)
+
+    @pytest.mark.timeout(30)
+    def test_profile_mode_enabled_creates_profile_file(
+        self, config_with_dummy_abstraction, tmp_path
+    ):
+        """Test that profile mode creates profile file when enabled."""
+        config = config_with_dummy_abstraction
+        config.set("training.profile_mode", True)
+        config.set("training.profile_output", str(tmp_path / "profiles"))
+        config.set("training.num_iterations", 3)
+        config.set("training.verbose", False)
+
+        trainer = TrainingSession(config, run_id="test_profile")
+
+        # Run training with profiling
+        trainer.train(num_iterations=3, use_parallel=False)
+
+        # Verify profile file was created
+        profile_dir = tmp_path / "profiles"
+        assert profile_dir.exists()
+
+        profile_files = list(profile_dir.glob("profile_*.prof"))
+        assert len(profile_files) == 1
+        assert profile_files[0].exists()
+        assert profile_files[0].stat().st_size > 0
+
+    @pytest.mark.timeout(30)
+    def test_profile_mode_disabled_no_profile_file(self, config_with_dummy_abstraction, tmp_path):
+        """Test that no profile file is created when profiling is disabled."""
+        config = config_with_dummy_abstraction
+        config.set("training.profile_mode", False)
+        config.set("training.profile_output", str(tmp_path / "profiles"))
+        config.set("training.num_iterations", 3)
+        config.set("training.verbose", False)
+
+        trainer = TrainingSession(config, run_id="test_no_profile")
+
+        # Run training without profiling
+        trainer.train(num_iterations=3, use_parallel=False)
+
+        # Verify no profile files created
+        profile_dir = tmp_path / "profiles"
+        if profile_dir.exists():
+            profile_files = list(profile_dir.glob("profile_*.prof"))
+            assert len(profile_files) == 0
+
+    @pytest.mark.timeout(60)
+    def test_profile_mode_with_parallel_training(self, config_with_dummy_abstraction, tmp_path):
+        """Test that profiling works with parallel training."""
+        config = config_with_dummy_abstraction
+        config.set("training.profile_mode", True)
+        config.set("training.profile_output", str(tmp_path / "profiles"))
+        config.set("training.num_iterations", 4)
+        config.set("training.verbose", False)
+
+        trainer = TrainingSession(config, run_id="test_profile_parallel")
+
+        # Run parallel training with profiling
+        trainer.train(num_iterations=4, use_parallel=True, num_workers=2)
+
+        # Verify profile file was created
+        profile_dir = tmp_path / "profiles"
+        assert profile_dir.exists()
+
+        profile_files = list(profile_dir.glob("profile_*.prof"))
+        assert len(profile_files) == 1
+        assert profile_files[0].exists()
+        assert profile_files[0].stat().st_size > 0

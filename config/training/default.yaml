@@ -56,6 +56,10 @@ training:
   log_frequency: 1000  # Print progress every 1K iterations
   verbose: true
 
+  # Profile mode for performance analysis
+  profile_mode: true  # Enable detailed profiling (use for debugging/optimization)
+  profile_output: "data/profiles"  # Where to save profile results
+
 # ===== Storage Configuration =====
 storage:
   checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended)

@@ -19,6 +19,8 @@ training:
   checkpoint_frequency: 2000
   log_frequency: 100
   verbose: true
+  profile_mode: false
+  profile_output: "data/profiles"
 
 solver:
   sampling_method: "outcome"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
