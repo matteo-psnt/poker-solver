@@ -7,20 +7,21 @@ checkpointing, metrics tracking, and progress reporting.
 Supports both sequential and parallel (multiprocessing) training modes.
 """
 
+import concurrent.futures
 import json
 import multiprocessing as mp
 import pickle
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 from tqdm import tqdm
 
 from src.training import components
 from src.training.metrics import MetricsTracker
-from src.training.parallel import WorkerManager, merge_worker_results
+from src.training.parallel import WorkerManager
 from src.training.run_tracker import RunTracker
 from src.utils.config import Config
 
@@ -77,6 +78,12 @@ class TrainingSession:
 
             # Initialize metrics tracker
             self.metrics = MetricsTracker(window_size=config.get("training.log_frequency", 100))
+
+            # Initialize async checkpointing (single background thread)
+            self._checkpoint_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="checkpoint"
+            )
+            self._pending_checkpoint: Optional[concurrent.futures.Future[float]] = None
         except Exception:
             # Don't create run metadata if initialization fails
             self.run_tracker.mark_failed(cleanup_if_empty=True)
@@ -186,6 +193,82 @@ class TrainingSession:
             return None
             raise
 
+    def _async_checkpoint(self, iteration: int, training_start_time: float):
+        """
+        Non-blocking checkpoint save.
+
+        Ensures previous checkpoint completes before starting new one.
+        Submits new checkpoint to background thread.
+
+        Args:
+            iteration: Current iteration number
+            training_start_time: Training start time for calculating elapsed time
+        """
+        # Wait for previous checkpoint to finish (if any)
+        if self._pending_checkpoint is not None:
+            try:
+                # Non-blocking check
+                self._pending_checkpoint.result(timeout=0.1)
+                if self.config.get("training.verbose", True):
+                    print("[Master] Previous checkpoint completed", flush=True)
+            except concurrent.futures.TimeoutError:
+                # Still running, will wait before next checkpoint
+                pass
+
+        # Submit new checkpoint in background
+        self._pending_checkpoint = self._checkpoint_executor.submit(
+            self._checkpoint_with_timing, iteration, training_start_time
+        )
+        if self.config.get("training.verbose", True):
+            print("[Master] Checkpoint started in background (non-blocking)...", flush=True)
+
+    def _checkpoint_with_timing(self, iteration: int, training_start_time: float):
+        """
+        Execute checkpoint with timing (runs in background thread).
+
+        Args:
+            iteration: Current iteration number
+            training_start_time: Training start time for calculating elapsed time
+
+        Returns:
+            Elapsed time for checkpoint operation
+        """
+        start = time.time()
+        elapsed_time = time.time() - training_start_time
+        self.run_tracker.update(
+            iterations=iteration,
+            runtime_seconds=elapsed_time,
+            num_infosets=self.solver.num_infosets(),
+        )
+        self.storage.checkpoint(iteration)
+        checkpoint_time = time.time() - start
+        if self.config.get("training.verbose", True):
+            print(f"[Background] Checkpoint saved in {checkpoint_time:.2f}s", flush=True)
+        return checkpoint_time
+
+    def _wait_for_checkpoint(self):
+        """Wait for pending checkpoint to complete (called at shutdown)."""
+        if self._pending_checkpoint is not None:
+            if self.config.get("training.verbose", True):
+                print("[Master] Waiting for background checkpoint to complete...", flush=True)
+            try:
+                elapsed = self._pending_checkpoint.result()  # Block until done
+                if self.config.get("training.verbose", True):
+                    print(f"[Master] Background checkpoint completed ({elapsed:.2f}s)", flush=True)
+            except Exception as e:
+                print(f"[Master] Warning: Background checkpoint failed: {e}", flush=True)
+            finally:
+                self._pending_checkpoint = None
+
+    def _shutdown_checkpoint_executor(self):
+        """Shutdown the checkpoint executor (called at end of training)."""
+        if hasattr(self, "_checkpoint_executor"):
+            self._checkpoint_executor.shutdown(wait=True)
+
+    def __del__(self):
+        """Cleanup on deletion."""
+        self._shutdown_checkpoint_executor()
+
     def _train_parallel(
         self,
         num_iterations: int,
@@ -201,13 +284,15 @@ class TrainingSession:
         Args:
             num_iterations: Total iterations to run
             num_workers: Number of parallel workers
-            batch_size: Iterations per batch (default: num_workers * 10)
+            batch_size: Iterations per batch (default: num_workers * 200)
 
         Returns:
             Training results dictionary
         """
         if batch_size is None:
-            batch_size = 200 * num_workers
+            # Larger batch size reduces merge frequency (5x less overhead)
+            # Trade-off: higher memory usage, less frequent progress updates
+            batch_size = 100 * num_workers
 
         checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)
         verbose = self.config.get("training.verbose", True)
@@ -277,44 +362,103 @@ class TrainingSession:
                     ]
 
                     # Submit batch to persistent workers (no process spawning!)
+                    # Results are merged incrementally as they arrive (overlap merge with worker computation)
                     worker_results = worker_manager.submit_batch(
-                        iterations_per_worker=iterations_per_worker, batch_id=batch_idx
+                        iterations_per_worker=iterations_per_worker,
+                        batch_id=batch_idx,
+                        start_iteration=completed_iterations,
+                        timeout_seconds=self.config.get(
+                            "training.parallel_result_timeout_seconds", None
+                        ),
+                        verbose=verbose,
+                        storage=self.solver.storage,  # Enable incremental merge
                     )
 
-                    # Collect utilities from all workers
-                    batch_utilities = []
-                    for result in worker_results:
-                        batch_utilities.extend(result["utilities"])
+                    # Extract utilities (already merged incrementally during collection)
+                    batch_utilities = worker_results["utilities"]
 
-                    # Merge worker results into master storage
-                    merge_worker_results(self.solver.storage, worker_results)
+                    print(
+                        "[Master] All worker results merged, updating metrics...",
+                        flush=True,
+                    )
 
                     # Update solver iteration count
                     self.solver.iteration = completed_iterations + len(batch_utilities)
 
                     # Log metrics using master solver state after merge
                     # This ensures num_infosets reflects the actual merged solver, not worker-local counts
+                    print(
+                        "[Master] Counting infosets in master storage...",
+                        flush=True,
+                    )
                     master_num_infosets = self.solver.num_infosets()
+                    print(
+                        f"[Master] Master has {master_num_infosets} infosets",
+                        flush=True,
+                    )
+
+                    # Get infosets dict for sampling (only materialized when needed)
+                    infosets_dict = (
+                        self.solver.storage.infosets
+                        if hasattr(self.solver.storage, "infosets")
+                        else {}
+                    )
 
                     # Create infoset sampler for solver-quality metrics
-                    def sample_infosets(n: int):
-                        """Sample n random infosets from solver storage."""
-                        if hasattr(self.solver.storage, "infosets"):
-                            all_infosets = list(self.solver.storage.infosets.values())
-                            if len(all_infosets) <= n:
-                                return all_infosets
-                            indices = np.random.choice(len(all_infosets), size=n, replace=False)
-                            return [all_infosets[i] for i in indices]
-                        return []
+                    # Lazy-loads keys array only when actually needed for sampling
+                    from typing import Optional, cast
 
+                    infoset_keys_cache: List[Optional[np.ndarray]] = [None]  # closure capture
+
+                    def sample_infosets(n: int):
+                        """Sample n random infosets from solver storage (lazy key caching)."""
+                        if not infosets_dict:
+                            return []
+
+                        # Only create keys array on first sample (not every batch)
+                        if infoset_keys_cache[0] is None:
+                            cache_start = time.time()
+                            infoset_keys_cache[0] = np.array(list(infosets_dict.keys()))
+                            cache_time = time.time() - cache_start
+                            if verbose and cache_time > 0.5:
+                                print(
+                                    # Cast for mypy: cache is now a numpy array
+                                    f"[Master] Cached {len(cast(np.ndarray, infoset_keys_cache[0]))} keys in {cache_time:.2f}s",
+                                    flush=True,
+                                )
+
+                        keys = infoset_keys_cache[0]
+                        assert keys is not None
+                        infoset_keys_array = cast(np.ndarray, keys)
+                        if len(infoset_keys_array) <= n:
+                            return list(infosets_dict.values())
+
+                        # Sample from cached keys array (fast)
+                        sampled_indices = np.random.choice(
+                            len(infoset_keys_array), size=n, replace=False
+                        )
+                        return [infosets_dict[infoset_keys_array[i]] for i in sampled_indices]
+
+                    # Log metrics for each iteration in the batch
+                    # Only compute expensive quality metrics every log_freq iterations
+                    metrics_start = time.time()
+                    log_freq = self.config.get("training.log_frequency", 100)
                     for util in batch_utilities:
                         completed_iterations += 1
+
+                        # Only sample infosets for quality metrics at log intervals
+                        # This avoids expensive sampling/computation 200x per batch
+                        should_sample = (completed_iterations % log_freq) == 0
+
                         self.metrics.log_iteration(
                             iteration=completed_iterations,
                             utility=util,
                             num_infosets=master_num_infosets,
-                            infoset_sampler=sample_infosets,
+                            infoset_sampler=sample_infosets if should_sample else None,
                         )
+                    metrics_time = time.time() - metrics_start
+                    if verbose and metrics_time > 1.0:
+                        print(f"[Master] Metrics logging took {metrics_time:.2f}s", flush=True)
 
                     # Update progress bar with solver-quality metrics
                     if verbose and isinstance(batch_iterator, tqdm):
@@ -323,22 +467,26 @@ class TrainingSession:
                             f"iter={completed_iterations} | {compact_summary}"
                         )
 
-                    # Checkpoint if needed
+                    # Checkpoint if needed (async, non-blocking)
                     if completed_iterations % checkpoint_freq < batch_size:
-                        elapsed_time = time.time() - training_start_time
-                        self.run_tracker.update(
-                            iterations=completed_iterations,
-                            runtime_seconds=elapsed_time,
-                            num_infosets=self.solver.num_infosets(),
+                        self._async_checkpoint(completed_iterations, training_start_time)
+
+                    # Ready to submit next batch
+                    if verbose:
+                        print(
+                            f"[Master] Batch {batch_idx} complete, preparing next batch...",
+                            flush=True,
                         )
-                        self.storage.checkpoint(completed_iterations)
 
             except KeyboardInterrupt:
                 if verbose:
                     print("\n⚠️  Training interrupted by user")
 
             finally:
-                # Final checkpoint
+                # Wait for any pending background checkpoint
+                self._wait_for_checkpoint()
+
+                # Final checkpoint (synchronous)
                 elapsed_time = time.time() - training_start_time
                 self.run_tracker.update(
                     iterations=completed_iterations,
@@ -381,7 +529,7 @@ class TrainingSession:
                 Use TrainingSession.resume() classmethod instead for proper checkpoint restoration.
             use_parallel: Whether to use parallel training (default: True)
             num_workers: Number of parallel workers (default: CPU count)
-            batch_size: Iterations per batch for parallel mode (default: num_workers * 10)
+            batch_size: Iterations per batch for parallel mode (default: num_workers * 200)
 
         Returns:
             Training results dictionary
@@ -463,21 +611,14 @@ class TrainingSession:
                         compact_summary = self.metrics.get_compact_summary()
                         iterator.set_postfix_str(compact_summary)
 
-                # Periodic snapshotting
+                # Periodic checkpointing (async, non-blocking)
                 if (i + 1) % checkpoint_freq == 0:
-                    elapsed_time = time.time() - training_start_time
+                    self._async_checkpoint(i + 1, training_start_time)
 
-                    # Update progress
-                    self.run_tracker.update(
-                        iterations=i + 1,
-                        runtime_seconds=elapsed_time,
-                        num_infosets=self.solver.num_infosets(),
-                    )
+            # Wait for any pending background checkpoint
+            self._wait_for_checkpoint()
 
-                    # Trigger storage checkpoint
-                    self.storage.checkpoint(i + 1)
-
-            # Final checkpoint
+            # Final checkpoint (synchronous)
             elapsed_time = time.time() - training_start_time
 
             # Update final stats
@@ -509,10 +650,13 @@ class TrainingSession:
             if verbose:
                 print("\n⚠️  Training interrupted by user")
 
+            # Wait for any pending background checkpoint
+            self._wait_for_checkpoint()
+
             elapsed_time = time.time() - training_start_time
             current_iter = i + 1 if "i" in locals() else start_iteration  # type: ignore
 
-            # Save progress
+            # Save progress (synchronous)
             self.run_tracker.update(
                 iterations=current_iter,
                 runtime_seconds=elapsed_time,
@@ -526,6 +670,9 @@ class TrainingSession:
             raise
 
         except Exception:
+            # Wait for any pending background checkpoint
+            self._wait_for_checkpoint()
+
             # Mark run as failed on exception
             self.run_tracker.mark_failed()
             raise

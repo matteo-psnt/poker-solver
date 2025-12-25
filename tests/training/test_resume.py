@@ -39,8 +39,8 @@ def test_config(temp_run_dir):
             "big_blind": 2,
         },
         "action_abstraction": {
-            "raise_sizes": {
-                "preflop": [1.0],
+            "preflop_raises": [2.0],  # 2bb open
+            "postflop": {
                 "flop": [1.0],
                 "turn": [1.0],
                 "river": [1.0],

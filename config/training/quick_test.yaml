@@ -16,7 +16,7 @@ action_abstraction:
 
 training:
   num_iterations: 10000
-  checkpoint_frequency: 1000
+  checkpoint_frequency: 2000
   log_frequency: 100
   verbose: true
 
@@ -30,9 +30,7 @@ card_abstraction:
   config: fast_test
 
 storage:
-  backend: "disk"
-  cache_size: 100000  # LRU cache size for disk backend
-  flush_frequency: 1000  # Flush dirty infosets every N iterations
+  checkpoint_enabled: true  # Save periodic checkpoints to disk
 
 system:
   seed: 42  # Fixed seed for reproducibility

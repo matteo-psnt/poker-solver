@@ -14,7 +14,7 @@ from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import DiskBackedStorage, InMemoryStorage, Storage
+from src.solver.storage import InMemoryStorage, Storage
 from src.utils.config import Config
 
 
@@ -129,33 +129,21 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
 
     Args:
         config: Configuration object
-        run_dir: Optional run directory (required for disk storage)
+        run_dir: Optional run directory (required if checkpointing is enabled)
 
     Returns:
-        Storage instance (InMemoryStorage or DiskBackedStorage)
+        InMemoryStorage instance (with optional disk checkpointing)
 
     Raises:
-        ValueError: If storage backend is unknown or run_dir missing for disk
+        ValueError: If checkpointing is enabled but run_dir is not provided
     """
     storage_config = config.get_section("storage")
-    backend = storage_config.get("backend")
+    checkpoint_enabled = storage_config.get("checkpoint_enabled", True)
 
-    if backend == "memory":
-        return InMemoryStorage()
-    elif backend == "disk":
-        if run_dir is None:
-            raise ValueError("run_dir is required for disk storage backend")
+    if checkpoint_enabled and run_dir is None:
+        raise ValueError("run_dir is required when checkpoint_enabled is true")
 
-        cache_size = storage_config.get("cache_size", 100000)
-        flush_frequency = storage_config.get("flush_frequency", 1000)
-
-        return DiskBackedStorage(
-            checkpoint_dir=run_dir,
-            cache_size=cache_size,
-            flush_frequency=flush_frequency,
-        )
-    else:
-        raise ValueError(f"Unknown storage backend: {backend}")
+    return InMemoryStorage(checkpoint_dir=run_dir if checkpoint_enabled else None)
 
 
 def build_solver(

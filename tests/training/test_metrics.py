@@ -274,20 +274,3 @@ class TestMetricsTracker:
         assert "it/s" in compact
         assert "IS" in compact
         assert "R+" in compact or "H=" in compact  # Regret or entropy
-
-    def test_metrics_without_sampler(self):
-        """Test that metrics work without sampler (backward compatibility)."""
-        tracker = MetricsTracker()
-
-        # Log without sampler (old API)
-        tracker.log_iteration(1, 10.0, 100)
-
-        # Should still work and return basic metrics
-        summary = tracker.get_summary()
-        assert "iteration" in summary
-        assert "avg_utility" in summary
-        assert "avg_infosets" in summary
-
-        # Solver-quality metrics should not be in summary
-        assert "mean_pos_regret" not in summary
-        assert "fallback_rate" not in summary

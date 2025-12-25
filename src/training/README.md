@@ -34,7 +34,8 @@ TrainingSession(config: Config, run_id: Optional[str] = None)
 
 train(num_iterations: int, use_parallel: bool = True, num_workers: int = None, batch_size: int = None)
     # Main training loop
-    # use_parallel=True: spawns worker processes
+    # use_parallel=True: uses persistent worker pool (multiprocessing)
+    #                  workers reset local storage per batch to avoid double counting
     # use_parallel=False: sequential execution
 
 resume(from_checkpoint: Optional[int] = None)
@@ -77,9 +78,8 @@ build_card_abstraction(config: Config, ...) -> BucketingStrategy
     # Raises FileNotFoundError if abstraction not found
 
 build_storage(config: Config, run_dir: Path) -> Storage
-    # Creates storage backend (memory or disk)
-    # Memory: InMemoryStorage - fast, no persistence
-    # Disk: DiskBackedStorage - LRU cache + HDF5
+    # Creates in-memory storage with optional disk checkpointing
+    # Optionally saves periodic checkpoints to disk for persistence
 
 build_solver(config: Config, ...) -> BaseSolver
     # Creates MCCFR solver with all components
@@ -151,23 +151,19 @@ Main Process                          Worker Processes (N workers)
 ├── Serialize abstractions            │
 │   (action_abstraction + card_abs)   │
 │                                     │
-├── Spawn worker processes ────────→  │ Worker 0: run K iterations
-│                                     │   ├── Deserialize abstractions
-│                                     │   ├── Create solver (in-memory storage)
-│                                     │   ├── Run train_iteration() K times
-│                                     │   └── Return infoset data + utilities
+├── Start persistent worker pool ──→  │ Worker 0..N-1: initialize solver once
+│                                     │   └── wait for jobs
 │                                     │
-│                                     │ Worker 1: run K iterations
-│                                     │   └── (same as Worker 0)
-│                                     │
-├── Collect results ←─────────────────┤ Worker N-1: run K iterations
-│                                     │
-├── Merge worker results              │
-│   └── Average regrets/strategies    │
-│                                     │
-├── Update main solver storage        │
-├── Log metrics                       │
-└── Checkpoint (if needed)            │
+└── For each batch:                   │
+    ├── Submit jobs with iteration ─→ │ Worker: reset local storage + set iteration offset
+    │   offsets + K iterations        │   ├── Run train_iteration() K times
+    │                                 │   └── Return infoset data + utilities
+    │
+    ├── Collect results ←─────────────┤
+    ├── Merge worker results (sum)    │
+    ├── Update master storage         │
+    ├── Log metrics                   │
+    └── Checkpoint (if needed)        │
 ```
 
 **Parallel Training Code Path:**
@@ -176,22 +172,20 @@ TrainingSession.train(use_parallel=True, num_workers=N, batch_size=B)
 └── _train_parallel()
     ├── Serialize abstractions (once)
     │   └── pickle.dumps(action_abstraction, card_abstraction)
+    ├── Start WorkerManager (persistent pool)
     │
     └── for each batch:
-        ├── Spawn N worker processes
-        │   └── _worker_process():
-        │       ├── Deserialize abstractions
-        │       ├── Create solver with in-memory storage
+        ├── Submit jobs with iteration offsets
+        │   └── worker loop:
+        │       ├── Reset local storage (per job)
+        │       ├── Set solver.iteration = offset
         │       ├── Run train_iteration() K times
         │       └── Queue results {utilities, infoset_data}
         │
         ├── Collect results from queue
         │
-        ├── Merge worker results
-        │   └── _merge_worker_results():
-        │       ├── Average regrets across workers
-        │       ├── Average strategy_sums across workers
-        │       └── Update main storage
+        ├── Merge worker results (sum + action alignment)
+        │   └── mark_dirty for disk-backed storage
         │
         ├── Log merged metrics
         └── Checkpoint (if iteration % freq == 0)
@@ -212,40 +206,48 @@ TrainingSession.train(use_parallel=True, num_workers=N, batch_size=B)
 - Main storage only updated after merge
 
 **Why Batch Processing?**
-- Amortizes process spawn/join overhead
+- Amortizes merge/checkpoint overhead
 - Allows periodic checkpointing
 - Better progress reporting
-- Typical: batch_size = num_workers * 10
+- Default: batch_size = num_workers * 200
+
+**Why Reset Worker Storage Each Batch?**
+- Avoids double-counting when using persistent workers
+- Keeps worker memory bounded
+- Makes each batch an independent MCCFR sample
 
 **Merge Strategy:**
 ```python
 def _merge_worker_results(worker_results):
     for infoset_key in all_infosets:
         # Collect from all workers that visited this infoset
-        all_regrets = [w[key].regrets for w in workers if key in w]
-        all_strategies = [w[key].strategy_sum for w in workers if key in w]
+        worker_data = [w[key] for w in workers if key in w]
 
-        # Handle action set mismatches (due to sampling variance)
-        if regrets have different shapes:
-            # Pad smaller arrays to match largest action set
-            # Fill missing actions with zeros
-            all_regrets = pad_to_max_size(all_regrets)
-            all_strategies = pad_to_max_size(all_strategies)
+        # Build unified action list (master + any new worker actions)
+        actions = union_actions(master_actions, [w.legal_actions for w in worker_data])
+        action_index = {action: i for i, action in enumerate(actions)}
 
-        # Sum regrets and strategies (CFR theory: additive accumulation)
-        merged_regrets = np.sum(all_regrets, axis=0)
-        merged_strategy = np.sum(all_strategies, axis=0)
+        # Sum regrets and strategies aligned by action identity
+        merged_regrets = np.zeros(len(actions))
+        merged_strategy = np.zeros(len(actions))
+        for data in worker_data:
+            for i, action in enumerate(data.legal_actions):
+                idx = action_index[action]
+                merged_regrets[idx] += data.regrets[i]
+                merged_strategy[idx] += data.strategy_sum[i]
 
         # Accumulate into main storage
-        storage.infoset[key].regrets += merged_regrets
-        storage.infoset[key].strategy_sum += merged_strategy
+        infoset = storage.get_or_create_infoset(key, actions)
+        infoset.regrets += merged_regrets
+        infoset.strategy_sum += merged_strategy
+        storage.mark_dirty(key)  # Required for disk-backed storage
 ```
 
 **Performance Characteristics:**
 - **Speedup:** ~0.7-0.9x per worker (overhead from serialization, merging)
 - **Memory:** N × solver memory (each worker has full solver)
 - **Best Use:** Long runs (>100 iterations), multi-core machines
-- **Overhead:** Process spawn ~0.5s, serialization ~0.1s, merge ~0.2s per batch
+- **Overhead:** One-time worker pool startup + per-batch IPC/merge costs
 
 ---
 
@@ -259,35 +261,35 @@ def _merge_worker_results(worker_results):
 infosets: Dict[str, InfoSet] = {}
 
 # Fast lookups, no I/O
-# Used for: testing, parallel workers, short runs
-# Limitation: RAM-bound, no persistence
+# Used for: all training
 ```
 
-**DiskBackedStorage:**
+**Checkpointing:**
 ```python
-# LRU cache + HDF5 backing
-cache: OrderedDict[str, InfoSet] = OrderedDict()  # In-memory LRU
-file: h5py.File                                   # Persistent storage
+# Periodic saves to HDF5 files
+# All operations stay in RAM (fast)
+# Checkpoint saves current state to disk
 
 # Write strategy:
-# - New infosets go to cache
-# - Cache eviction → flush to HDF5
-# - Periodic flush every N iterations
+# - All operations in-memory (fast dictionary access)
+# - Periodic checkpoint: save all infosets to HDF5
+# - Controlled by checkpoint_frequency in training config
 
-# Read strategy:
-# - Check cache first
-# - Cache miss → load from HDF5 → add to cache
+# Read strategy (on resume):
+# - Load all infosets from HDF5 into memory
+# - Continue training in-memory
 
-# Used for: long training runs, large games
-# Trade-off: I/O overhead for persistence
+# Used for: production training with periodic persistence
+# Trade-off: Brief I/O pause during checkpoint saves
 ```
 
 **Configuration:**
 ```yaml
 storage:
-  backend: "disk"           # "memory" or "disk"
-  cache_size: 100000        # Number of infosets in LRU cache
-  flush_frequency: 1000     # Flush to disk every N iterations
+  checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended)
+
+training:
+  checkpoint_frequency: 2000  # Save checkpoint every N iterations
 ```
 
 ---
@@ -462,6 +464,7 @@ training:
   log_frequency: 100
   verbose: true
   runs_dir: "data/runs"
+  parallel_result_timeout_seconds: null  # null = wait indefinitely for workers
 
 action_abstraction:
   preflop_raises: [2.5, 3.0, 4.0, "allin"]
@@ -552,8 +555,8 @@ trainer.train(num_iterations=10000)  # Continue for 10k more iterations
    - Mitigated by: Precomputation, efficient data structures
 2. Storage I/O (disk backend)
    - Mitigated by: LRU cache, batched flushes
-3. Process spawn overhead (parallel)
-   - Mitigated by: Batch processing, abstraction serialization
+3. Worker pool startup + merge overhead (parallel)
+   - Mitigated by: Persistent pool, larger batches
 
 ---
 
@@ -647,7 +650,7 @@ def handle_resume_training():
 - Progress tracking during batch processing
 
 **Why Batch Processing in Parallel?**
-- Amortizes overhead (spawn, join, merge)
+- Amortizes per-batch IPC/merge overhead
 - Enables periodic checkpointing
 - Better progress reporting
 - Balances latency vs throughput
@@ -663,8 +666,8 @@ def handle_resume_training():
 - Workers may discover different legal actions due to sampling variance
 - Action abstraction edge cases can cause inconsistent action sets
 - Silently skipping infosets biases learning (some states never update)
-- Padding with zeros maintains correctness (zero regret for unseen actions)
-- Uses the most complete action set discovered across workers
+- Aligning by action identity keeps regret updates consistent
+- Missing actions contribute zero regret/strategy (equivalent to padding)
 
 ---
 
@@ -714,32 +717,22 @@ results = trainer.train(num_iterations=1000, use_parallel=True, num_workers=8, b
 config = Config.default()
 config.set("storage.backend", "memory")
 config.set("training.checkpoint_frequency", 500)
-tra✅ **FIXED:** Parallel training now correctly sums regrets (not averages)
-2. ✅ **FIXED:** Action set mismatches are handled by padding (not skipping)
-3. Is batch processing the right abstraction for parallel training?
-4. Should workers use shared storage instead of merging?
-5. Is the checkpoint frequency optimal (every 1000 iterations)?
-6
+config.set("training.num_iterations", 5000)
+```
+
 ## Questions for Review
 
-**Is this approach sound?**
-1. Is the parallel training merge strategy correct (averaging regrets)?
-2. Is batch processing the right abstraction for parallel training?
-3. Should workers use shared storage instead of merging?
-4. Is the checkpoint frequency optimal (every 1000 iterations)?
-5. Are there better ways to serialize/deserialize abstractions?
+**Parallel correctness:**
+1. Is per-batch reset + summation merge the right abstraction for MCCFR parallelism?
+2. Should we support shared storage (shared memory) instead of merging?
 
 **Performance concerns:**
-1. Is the overhead of process spawning acceptable?
-2. Should we use threads instead of processes?
-3. Is LRU cache the best strategy for disk storage?
-4. Should we compress checkpoints?
+1. Is the batch size heuristic (num_workers * 200) optimal for real runs?
+2. Should we compress checkpoints to reduce I/O?
 
 **Extensibility:**
-1. How hard would it be to add distributed training?
-2. Can this support heterogeneous worker capabilities?
-3. Is the config system flexible enough for experiments?
-4. Should we support dynamic abstraction refinement?
+1. How hard would it be to add distributed training (Ray/MPI)?
+2. Should we support dynamic abstraction refinement during training?
 
 ---
 
