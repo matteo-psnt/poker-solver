@@ -9,9 +9,11 @@ import multiprocessing as mp
 import pickle
 import queue
 import random
+import struct
 import time
 import traceback
 from enum import Enum
+from multiprocessing import shared_memory
 from typing import Any, Dict, List, Union
 
 import numpy as np
@@ -22,6 +24,158 @@ class JobType(Enum):
 
     RUN_ITERATIONS = "run_iterations"
     SHUTDOWN = "shutdown"
+
+
+def _serialize_infosets_to_shm(infoset_data: Dict, shm_name: str):
+    """
+    Serialize infosets to shared memory buffer for zero-copy transfer.
+
+    Format:
+    - 4 bytes: num_infosets (uint32)
+    - For each infoset:
+      - 4 bytes: key_length (uint32)
+      - key_length bytes: pickled key
+      - 4 bytes: num_actions (uint32)
+      - num_actions * 4 bytes: regrets (float32)
+      - num_actions * 4 bytes: strategies (float32)
+      - 4 bytes: reach_count (uint32)
+      - 8 bytes: cumulative_utility (float64)
+
+    Args:
+        infoset_data: Dictionary mapping InfoSetKey -> data dict
+        shm_name: Name for the shared memory segment
+
+    Returns:
+        tuple: (SharedMemory object, total size in bytes)
+    """
+    # Calculate total size needed
+    total_size = 4  # num_infosets
+    key_bytes_list = []
+    for key, data in infoset_data.items():
+        key_bytes = pickle.dumps(key)
+        key_bytes_list.append((key, key_bytes))
+        total_size += 4 + len(key_bytes)  # key_length + key
+        total_size += 4  # num_actions
+        total_size += len(data["regrets"]) * 4  # regrets (float32)
+        total_size += len(data["strategy_sum"]) * 4  # strategies (float32)
+        total_size += 4  # reach_count (uint32)
+        total_size += 8  # cumulative_utility (float64)
+
+    # Create shared memory
+    shm = shared_memory.SharedMemory(create=True, size=total_size, name=shm_name)
+
+    try:
+        # Write data
+        buf = shm.buf
+        offset = 0
+
+        # Write num_infosets
+        struct.pack_into("I", buf, offset, len(infoset_data))
+        offset += 4
+
+        # Write each infoset
+        for key, key_bytes in key_bytes_list:
+            data = infoset_data[key]
+
+            # Write key
+            struct.pack_into("I", buf, offset, len(key_bytes))
+            offset += 4
+            buf[offset : offset + len(key_bytes)] = key_bytes
+            offset += len(key_bytes)
+
+            # Write regrets/strategies
+            num_actions = len(data["regrets"])
+            struct.pack_into("I", buf, offset, num_actions)
+            offset += 4
+
+            regrets_bytes = np.array(data["regrets"], dtype=np.float32).tobytes()
+            buf[offset : offset + len(regrets_bytes)] = regrets_bytes
+            offset += len(regrets_bytes)
+
+            strategies_bytes = np.array(data["strategy_sum"], dtype=np.float32).tobytes()
+            buf[offset : offset + len(strategies_bytes)] = strategies_bytes
+            offset += len(strategies_bytes)
+
+            # Write metadata
+            struct.pack_into("I", buf, offset, data["reach_count"])
+            offset += 4
+            struct.pack_into("d", buf, offset, data["cumulative_utility"])
+            offset += 8
+
+        return shm, total_size
+
+    except Exception:
+        # Cleanup on error
+        shm.close()
+        shm.unlink()
+        raise
+
+
+def _deserialize_infosets_from_shm(shm_name: str, shm_size: int) -> Dict:
+    """
+    Deserialize infosets from shared memory buffer.
+
+    Args:
+        shm_name: Name of the shared memory segment
+        shm_size: Expected size of the shared memory (for validation)
+
+    Returns:
+        Dict mapping InfoSetKey -> data dict with regrets, strategy_sum, etc.
+    """
+    shm = None
+    try:
+        shm = shared_memory.SharedMemory(name=shm_name)
+        buf = shm.buf
+        offset = 0
+
+        # Read num_infosets
+        num_infosets = struct.unpack_from("I", buf, offset)[0]
+        offset += 4
+
+        infoset_data = {}
+
+        # Read each infoset
+        for _ in range(num_infosets):
+            # Read key
+            key_length = struct.unpack_from("I", buf, offset)[0]
+            offset += 4
+            key_bytes = bytes(buf[offset : offset + key_length])
+            key = pickle.loads(key_bytes)
+            offset += key_length
+
+            # Read arrays
+            num_actions = struct.unpack_from("I", buf, offset)[0]
+            offset += 4
+
+            regrets = np.frombuffer(buf, dtype=np.float32, count=num_actions, offset=offset).copy()
+            offset += num_actions * 4
+
+            strategies = np.frombuffer(
+                buf, dtype=np.float32, count=num_actions, offset=offset
+            ).copy()
+            offset += num_actions * 4
+
+            # Read metadata
+            reach_count = struct.unpack_from("I", buf, offset)[0]
+            offset += 4
+            cumulative_utility = struct.unpack_from("d", buf, offset)[0]
+            offset += 8
+
+            infoset_data[key] = {
+                "regrets": regrets,
+                "strategy_sum": strategies,
+                "reach_count": reach_count,
+                "cumulative_utility": cumulative_utility,
+                # Note: legal_actions not included in shm transfer (reconstructed from storage)
+            }
+
+        return infoset_data
+
+    finally:
+        # Always cleanup shared memory
+        if shm is not None:
+            shm.close()
+            shm.unlink()
 
 
 def _persistent_worker_loop(
@@ -174,67 +328,87 @@ def _persistent_worker_loop(
                     flush=True,
                 )
                 infoset_data = {}
+                legal_actions_map = {}  # Store separately (not in shared memory)
                 for key, infoset in storage.infosets.items():
                     infoset_data[key] = {
                         "regrets": infoset.regrets.copy(),
                         "strategy_sum": infoset.strategy_sum.copy(),
-                        "legal_actions": infoset.legal_actions,
                         "reach_count": infoset.reach_count,
                         "cumulative_utility": infoset.cumulative_utility,
                     }
+                    legal_actions_map[key] = infoset.legal_actions
 
-                # Return results
+                # Return results using shared memory for large arrays
                 print(
-                    f"[Worker {worker_id}] Sending results to master (result size: ~{len(infoset_data)} infosets)...",
+                    f"[Worker {worker_id}] Serializing {len(infoset_data)} infosets to shared memory...",
                     file=sys.stderr,
                     flush=True,
                 )
 
-                # Use a separate thread to put results with timeout detection
-                # This prevents deadlock if the queue buffer fills up
-                import threading
+                # Serialize to shared memory
+                shm_name = f"worker_{worker_id}_batch_{batch_id}"
+                shm = None
+                try:
+                    shm, shm_size = _serialize_infosets_to_shm(infoset_data, shm_name)
 
-                result_sent = threading.Event()
-                put_error = []
-
-                def _put_result():
-                    try:
-                        result_queue.put(
-                            {
-                                "worker_id": worker_id,
-                                "batch_id": batch_id,
-                                "utilities": utilities,
-                                "infoset_data": infoset_data,
-                                "num_infosets": len(infoset_data),
-                            }
-                        )
-                        result_sent.set()
-                    except Exception as e:
-                        put_error.append(e)
-                        result_sent.set()
-
-                put_thread = threading.Thread(target=_put_result, daemon=True)
-                put_thread.start()
-
-                # Wait with timeout
-                if not result_sent.wait(timeout=120):
                     print(
-                        f"[Worker {worker_id}] WARNING: result_queue.put() blocked for >120s! "
-                        f"Queue may be full. Consider reducing batch size.",
+                        f"[Worker {worker_id}] Sending results to master (shm: {shm_size} bytes, ~{len(infoset_data)} infosets)...",
                         file=sys.stderr,
                         flush=True,
                     )
-                    # Wait indefinitely now
-                    result_sent.wait()
 
-                if put_error:
-                    raise put_error[0]
+                    # Use a separate thread to put results with timeout detection
+                    # This prevents deadlock if the queue buffer fills up
+                    import threading
 
-                print(
-                    f"[Worker {worker_id}] Results sent successfully",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                    result_sent = threading.Event()
+                    put_error = []
+
+                    def _put_result():
+                        try:
+                            result_queue.put(
+                                {
+                                    "worker_id": worker_id,
+                                    "batch_id": batch_id,
+                                    "utilities": utilities,
+                                    "shm_name": shm_name,
+                                    "shm_size": shm_size,
+                                    "legal_actions_map": legal_actions_map,
+                                    "num_infosets": len(infoset_data),
+                                }
+                            )
+                            result_sent.set()
+                        except Exception as e:
+                            put_error.append(e)
+                            result_sent.set()
+
+                    put_thread = threading.Thread(target=_put_result, daemon=True)
+                    put_thread.start()
+
+                    # Wait with timeout
+                    if not result_sent.wait(timeout=120):
+                        print(
+                            f"[Worker {worker_id}] WARNING: result_queue.put() blocked for >120s! "
+                            f"Queue may be full. Consider reducing batch size.",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        # Wait indefinitely now
+                        result_sent.wait()
+
+                    if put_error:
+                        raise put_error[0]
+
+                    print(
+                        f"[Worker {worker_id}] Results sent successfully",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+                finally:
+                    # Worker closes shared memory (master will unlink)
+                    if shm is not None:
+                        shm.close()
 
     except Exception as e:
         # Report error and exit
@@ -390,6 +564,29 @@ class WorkerManager:
                     raise RuntimeError(
                         f"Worker {result['worker_id']} error: {result['error']}\n{traceback_text}"
                     )
+
+                # Deserialize from shared memory if using shm transfer
+                if "shm_name" in result:
+                    print(
+                        f"[Master] Deserializing from shared memory: {result['shm_name']} ({result['shm_size']} bytes)...",
+                        flush=True,
+                    )
+                    try:
+                        infoset_data = _deserialize_infosets_from_shm(
+                            result["shm_name"], result["shm_size"]
+                        )
+                        # Merge legal_actions back into infoset_data
+                        legal_actions_map = result.get("legal_actions_map", {})
+                        for key, data in infoset_data.items():
+                            data["legal_actions"] = legal_actions_map.get(key, [])
+                        # Inject infoset_data into result for merge function
+                        result["infoset_data"] = infoset_data
+                    except Exception as e:
+                        print(
+                            f"[Master] ERROR deserializing shared memory: {e}",
+                            flush=True,
+                        )
+                        raise
 
                 # Incremental merge: merge this worker's results immediately
                 if storage is not None:
