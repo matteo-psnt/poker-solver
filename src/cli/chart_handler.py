@@ -12,7 +12,7 @@ from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import ActionType
 from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import DiskBackedStorage
+from src.solver.storage import InMemoryStorage
 from src.training.run_tracker import RunTracker
 
 
@@ -48,11 +48,7 @@ def handle_view_preflop_chart(
 
     print(f"\nLoading solver from {selected_run}...")
     run_dir = runs_dir / selected_run
-    storage = DiskBackedStorage(
-        checkpoint_dir=run_dir,
-        cache_size=100000,
-        flush_frequency=1000,
-    )
+    storage = InMemoryStorage(checkpoint_dir=run_dir)
 
     print(f"  Loaded {storage.num_infosets():,} infosets")
 

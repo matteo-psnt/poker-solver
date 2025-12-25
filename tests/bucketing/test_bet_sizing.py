@@ -17,20 +17,6 @@ class TestActionAbstraction:
             "river": [0.50, 1.0, 2.0],
         }
 
-    def test_custom_config(self):
-        config = {
-            "preflop_raises": [3.0, 5.0],
-            "postflop_bets": [0.5, 1.0],  # Legacy format
-        }
-        abstraction = BettingActions(config)
-        assert abstraction.preflop_raises == [3.0, 5.0]
-        # Legacy format applies same bets to all streets
-        assert abstraction.postflop_bets == {
-            "flop": [0.5, 1.0],
-            "turn": [0.5, 1.0],
-            "river": [0.5, 1.0],
-        }
-
     def test_get_bet_sizes_preflop(self):
         abstraction = BettingActions()
         state = GameState(

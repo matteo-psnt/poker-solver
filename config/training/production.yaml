@@ -53,15 +53,13 @@ solver:
 training:
   # Start with 1M iterations, increase if exploitability is too high
   num_iterations: 1000000  # 1M iterations
-  checkpoint_frequency: 1000  # Checkpoint every 1K iterations
+  checkpoint_frequency: 2000  # Checkpoint every 2K iterations
   log_frequency: 1000  # Log every 1K iterations
   verbose: true
 
 # ===== Storage Configuration =====
 storage:
-  backend: "disk"
-  cache_size: 500000  # Larger cache for production (500K infosets)
-  flush_frequency: 1000  # Flush every 1K iterations
+  checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended)
 
 # ===== System Configuration =====
 system:

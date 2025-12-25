@@ -46,10 +46,11 @@ class TestTrainer:
         assert isinstance(action_abs, BettingActions)
 
     def test_build_storage_memory(self, config_with_dummy_abstraction):
-        config_with_dummy_abstraction.set("storage.backend", "memory")
+        config_with_dummy_abstraction.set("storage.checkpoint_enabled", False)
 
         trainer = TrainingSession(config_with_dummy_abstraction)
         assert isinstance(trainer.storage, InMemoryStorage)
+        assert trainer.storage.checkpoint_dir is None
 
     def test_build_solver(self, config_with_dummy_abstraction):
         trainer = TrainingSession(config_with_dummy_abstraction)
@@ -75,7 +76,7 @@ class TestTrainer:
 
         config = Config.default()
         config.set("training.runs_dir", str(tmp_path / "runs"))
-        config.set("storage.backend", "memory")
+        config.set("storage.checkpoint_enabled", False)
 
         # Attempt to create trainer (should fail)
         with pytest.raises(ValueError, match="Abstraction not found"):
@@ -105,7 +106,7 @@ class TestTrainer:
         config = config_with_dummy_abstraction
         config.set("training.num_iterations", 6)
         config.set("training.verbose", False)
-        config.set("storage.backend", "memory")
+        config.set("storage.checkpoint_enabled", False)
 
         # Create trainer and run parallel training
         trainer = TrainingSession(config)
@@ -166,7 +167,7 @@ class TestTrainer:
         config = config_with_dummy_abstraction
         config.set("training.num_iterations", 4)
         config.set("training.verbose", False)
-        config.set("storage.backend", "memory")
+        config.set("storage.checkpoint_enabled", False)
 
         # Run sequential training
         trainer_seq = TrainingSession(config, run_id="test_sequential")
@@ -213,7 +214,7 @@ class TestTrainer:
         config = config_with_dummy_abstraction
         config.set("training.num_iterations", 4)
         config.set("training.verbose", False)
-        config.set("storage.backend", "memory")
+        config.set("storage.checkpoint_enabled", False)
 
         # Create trainer
         trainer = TrainingSession(config, run_id="test_perf")
@@ -259,7 +260,7 @@ class TestTrainer:
         # due to sampling variance, stack-dependent legality, etc.
 
         # Use in-memory storage for easier validation
-        config_with_dummy_abstraction.set("storage.backend", "memory")
+        config_with_dummy_abstraction.set("storage.checkpoint_enabled", False)
         trainer = TrainingSession(config_with_dummy_abstraction)
 
         # Run parallel training with multiple workers to increase chance of mismatches
@@ -293,3 +294,160 @@ class TestTrainer:
                 f"Legal actions length mismatch for {infoset_key}: "
                 f"{len(infoset.legal_actions)} != {infoset.num_actions}"
             )
+
+
+class TestAsyncCheckpointing:
+    """Tests for async (non-blocking) checkpointing."""
+
+    @pytest.mark.timeout(30)
+    def test_async_checkpoint_executor_initialized(self, config_with_dummy_abstraction):
+        """Test that async checkpoint executor is initialized."""
+        config_with_dummy_abstraction.set("storage.checkpoint_enabled", True)
+
+        trainer = TrainingSession(config_with_dummy_abstraction)
+
+        # Verify async checkpoint infrastructure exists
+        assert hasattr(trainer, "_checkpoint_executor")
+        assert hasattr(trainer, "_pending_checkpoint")
+        assert trainer._checkpoint_executor is not None
+        assert trainer._pending_checkpoint is None
+
+    @pytest.mark.timeout(60)
+    def test_async_checkpoint_nonblocking(self, config_with_dummy_abstraction):
+        """Test that checkpoints don't block training."""
+        config = config_with_dummy_abstraction
+        config.set("training.checkpoint_frequency", 2)  # Checkpoint every 2 iterations
+        config.set("training.num_iterations", 4)  # Short run
+        config.set("training.verbose", False)
+        config.set("storage.checkpoint_enabled", True)
+
+        trainer = TrainingSession(config, run_id="test_async_checkpoint")
+
+        # Run training with checkpointing enabled
+        results = trainer.train(num_iterations=4, use_parallel=False)
+
+        # Verify training completed
+        assert results["total_iterations"] == 4
+
+        # Checkpoint should have completed in background
+        # (This is verified by the fact that training completes without errors)
+
+    @pytest.mark.timeout(60)
+    def test_async_checkpoint_completes_on_shutdown(self, config_with_dummy_abstraction):
+        """Test that pending checkpoints complete when training ends."""
+        config = config_with_dummy_abstraction
+        config.set("training.checkpoint_frequency", 2)
+        config.set("training.num_iterations", 4)
+        config.set("training.verbose", False)
+        config.set("storage.checkpoint_enabled", True)
+
+        trainer = TrainingSession(config, run_id="test_checkpoint_shutdown")
+
+        # Run training
+        trainer.train(num_iterations=4, use_parallel=False)
+
+        # After training, pending checkpoint should be None (completed)
+        assert trainer._pending_checkpoint is None
+
+        # Verify checkpoint files exist
+        assert (trainer.run_dir / "key_mapping.pkl").exists()
+
+    @pytest.mark.timeout(60)
+    def test_async_checkpoint_parallel_training(self, config_with_dummy_abstraction):
+        """Test async checkpointing with parallel training."""
+        config = config_with_dummy_abstraction
+        config.set("training.checkpoint_frequency", 2)
+        config.set("training.num_iterations", 4)
+        config.set("training.verbose", False)
+        config.set("storage.checkpoint_enabled", True)
+
+        trainer = TrainingSession(config, run_id="test_async_parallel")
+
+        # Run parallel training with checkpointing
+        results = trainer.train(num_iterations=4, use_parallel=True, num_workers=2)
+
+        # Verify training completed
+        assert results["total_iterations"] == 4
+
+        # Verify checkpoint was saved
+        assert (trainer.run_dir / "key_mapping.pkl").exists()
+        assert (trainer.run_dir / "regrets.h5").exists()
+        assert (trainer.run_dir / "strategies.h5").exists()
+
+    @pytest.mark.timeout(30)
+    def test_checkpoint_executor_cleanup(self, config_with_dummy_abstraction):
+        """Test that checkpoint executor is properly cleaned up."""
+        config_with_dummy_abstraction.set("storage.checkpoint_enabled", True)
+
+        trainer = TrainingSession(config_with_dummy_abstraction)
+
+        # Delete trainer (triggers __del__)
+        del trainer
+
+        # Executor should be shutdown (can't check directly, but shouldn't hang)
+        # If this test completes without hanging, cleanup worked
+
+
+class TestCheckpointEnabledConfig:
+    """Tests for checkpoint_enabled configuration."""
+
+    def test_checkpoint_enabled_true_creates_dir(self, config_with_dummy_abstraction):
+        """Test that checkpoint_enabled=true sets up checkpointing."""
+        config_with_dummy_abstraction.set("storage.checkpoint_enabled", True)
+
+        trainer = TrainingSession(config_with_dummy_abstraction)
+
+        # Verify checkpoint directory is set
+        assert trainer.storage.checkpoint_dir is not None
+        assert trainer.storage.checkpoint_dir == trainer.run_dir
+
+    def test_checkpoint_enabled_false_no_checkpointing(self, config_with_dummy_abstraction):
+        """Test that checkpoint_enabled=false disables checkpointing."""
+        config_with_dummy_abstraction.set("storage.checkpoint_enabled", False)
+
+        trainer = TrainingSession(config_with_dummy_abstraction)
+
+        # Verify no checkpoint directory
+        assert trainer.storage.checkpoint_dir is None
+
+    @pytest.mark.timeout(30)
+    def test_checkpoint_enabled_false_no_files_created(self, config_with_dummy_abstraction):
+        """Test that no checkpoint files are created when disabled."""
+        config = config_with_dummy_abstraction
+        config.set("storage.checkpoint_enabled", False)
+        config.set("training.num_iterations", 4)
+        config.set("training.verbose", False)
+
+        trainer = TrainingSession(config, run_id="test_no_checkpoint")
+
+        # Run training
+        trainer.train(num_iterations=4, use_parallel=False)
+
+        # Verify NO checkpoint files created
+        assert not (trainer.run_dir / "key_mapping.pkl").exists()
+        assert not (trainer.run_dir / "regrets.h5").exists()
+        assert not (trainer.run_dir / "strategies.h5").exists()
+
+    @pytest.mark.timeout(60)
+    def test_checkpoint_enabled_resume(self, config_with_dummy_abstraction, tmp_path):
+        """Test resuming from checkpoint with new config format."""
+        config = config_with_dummy_abstraction
+        config.set("storage.checkpoint_enabled", True)
+        config.set("training.num_iterations", 4)
+        config.set("training.verbose", False)
+        config.set("training.runs_dir", str(tmp_path / "runs"))
+
+        # First training session
+        trainer1 = TrainingSession(config, run_id="test_resume")
+        results1 = trainer1.train(num_iterations=4, use_parallel=False)
+
+        # Verify checkpoint exists
+        assert (trainer1.run_dir / "key_mapping.pkl").exists()
+
+        initial_infosets = results1["final_infosets"]
+
+        # Resume training
+        trainer2 = TrainingSession.resume(trainer1.run_dir)
+
+        # Verify loaded correctly
+        assert trainer2.solver.num_infosets() == initial_infosets

@@ -5,7 +5,7 @@ import pytest
 from src.actions.betting_actions import BettingActions
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import DiskBackedStorage, InMemoryStorage
+from src.solver.storage import InMemoryStorage
 from src.training import components
 from src.utils.config import Config
 from tests.test_helpers import DummyCardAbstraction
@@ -67,55 +67,35 @@ class TestBuildCardAbstraction:
 class TestBuildStorage:
     """Tests for build_storage."""
 
-    def test_build_memory_storage(self, tmp_path):
-        """Test building in-memory storage."""
+    def test_build_storage_with_checkpointing(self, tmp_path):
+        """Test building storage with checkpointing enabled."""
         config = Config.default()
-        config.set("storage.backend", "memory")
+        config.set("storage.checkpoint_enabled", True)
 
         storage = components.build_storage(config, run_dir=tmp_path)
 
         assert isinstance(storage, InMemoryStorage)
         assert storage.num_infosets() == 0
+        assert storage.checkpoint_dir == tmp_path
 
-    def test_build_disk_storage(self, tmp_path):
-        """Test building disk-backed storage."""
+    def test_build_storage_without_checkpointing(self):
+        """Test building storage without checkpointing."""
         config = Config.default()
-        config.set("storage.backend", "disk")
+        config.set("storage.checkpoint_enabled", False)
 
-        storage = components.build_storage(config, run_dir=tmp_path)
+        storage = components.build_storage(config, run_dir=None)
 
-        assert isinstance(storage, DiskBackedStorage)
+        assert isinstance(storage, InMemoryStorage)
         assert storage.num_infosets() == 0
+        assert storage.checkpoint_dir is None
 
-    def test_build_invalid_backend(self, tmp_path):
-        """Test that invalid backend raises error."""
+    def test_build_storage_checkpointing_requires_run_dir(self):
+        """Test that checkpointing enabled without run_dir raises error."""
         config = Config.default()
-        config.set("storage.backend", "invalid_backend")
+        config.set("storage.checkpoint_enabled", True)
 
-        with pytest.raises(ValueError, match="Unknown storage backend"):
-            components.build_storage(config, run_dir=tmp_path)
-
-    def test_build_disk_storage_with_cache_size(self, tmp_path):
-        """Test that cache size configuration is applied."""
-        config = Config.default()
-        config.set("storage.backend", "disk")
-        config.set("storage.cache_size", 5000)
-
-        storage = components.build_storage(config, run_dir=tmp_path)
-
-        assert isinstance(storage, DiskBackedStorage)
-        assert storage.cache_size == 5000
-
-    def test_build_disk_storage_with_flush_frequency(self, tmp_path):
-        """Test that flush frequency configuration is applied."""
-        config = Config.default()
-        config.set("storage.backend", "disk")
-        config.set("storage.flush_frequency", 500)
-
-        storage = components.build_storage(config, run_dir=tmp_path)
-
-        assert isinstance(storage, DiskBackedStorage)
-        assert storage.flush_frequency == 500
+        with pytest.raises(ValueError, match="run_dir is required"):
+            components.build_storage(config, run_dir=None)
 
 
 class TestBuildSolver:
@@ -174,7 +154,7 @@ class TestComponentIntegration:
     def test_build_all_components_together(self, tmp_path):
         """Test building all components together for a training session."""
         config = Config.default()
-        config.set("storage.backend", "memory")
+        config.set("storage.checkpoint_enabled", True)
 
         # Build all components
         action_abs = components.build_action_abstraction(config)
@@ -192,14 +172,14 @@ class TestComponentIntegration:
         assert solver.storage == storage
         assert solver.action_abstraction == action_abs
 
-    def test_build_with_disk_storage_creates_directory(self, tmp_path):
-        """Test that disk storage properly initializes directory structure."""
+    def test_build_with_checkpointing_creates_directory(self, tmp_path):
+        """Test that storage with checkpointing properly initializes."""
         config = Config.default()
-        config.set("storage.backend", "disk")
+        config.set("storage.checkpoint_enabled", True)
 
         run_dir = tmp_path / "test_run"
+        run_dir.mkdir()  # Create run directory
         storage = components.build_storage(config, run_dir=run_dir)
 
-        assert isinstance(storage, DiskBackedStorage)
-        # Directory should be created
-        assert run_dir.exists()
+        assert isinstance(storage, InMemoryStorage)
+        assert storage.checkpoint_dir == run_dir

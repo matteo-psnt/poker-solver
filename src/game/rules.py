@@ -237,9 +237,12 @@ class GameRules:
             else:  # RAISE
                 bet_amount = to_call + action.amount
 
-            # Defensive: if bet exceeds stack, convert to all-in
+            if bet_amount <= 0:
+                raise ValueError("Bet amount must be positive")
+
+            # Reject oversize bets instead of silently converting to all-in
             if bet_amount > stacks[current_player]:
-                bet_amount = stacks[current_player]
+                raise ValueError("Bet exceeds available stack")
 
             stacks[current_player] -= bet_amount
             pot += bet_amount

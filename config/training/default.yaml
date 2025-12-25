@@ -52,15 +52,13 @@ solver:
 # ===== Training Configuration =====
 training:
   num_iterations: 100000  # 100K iterations for quick test with CFR+
-  checkpoint_frequency: 100  # Save checkpoint every 100 iterations
+  checkpoint_frequency: 2000  # Save checkpoint every 2000 iterations
   log_frequency: 1000  # Print progress every 1K iterations
   verbose: true
 
 # ===== Storage Configuration =====
 storage:
-  backend: "disk"  # Options: "memory", "disk"
-  cache_size: 100000  # LRU cache size for disk backend
-  flush_frequency: 10  # Flush dirty infosets every N iterations
+  checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended)
 
 # ===== System Configuration =====
 system:

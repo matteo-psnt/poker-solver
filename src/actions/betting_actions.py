@@ -45,36 +45,51 @@ class BettingActions:
         if config is None:
             config = self._default_config()
 
-        self.big_blind = big_blind
-        self.preflop_raises = config.get("preflop_raises", [2.5, 3.5, 5.0])
+        defaults = self._default_config()
 
-        # Street-dependent postflop bets
-        postflop_config = config.get("postflop", {})
-        if isinstance(postflop_config, dict) and (
-            "flop" in postflop_config or "turn" in postflop_config or "river" in postflop_config
-        ):
-            # New format: street-dependent
-            # Handle both {"flop": [0.33, ...]} and {"flop": {"bets": [0.33, ...]}}
-            self.postflop_bets = {}
+        self.big_blind = big_blind
+
+        # Preflop raises: new format only
+        preflop_raises = config.get("preflop_raises")
+        if preflop_raises is None:
+            preflop_section = config.get("preflop", {})
+            if isinstance(preflop_section, dict):
+                preflop_raises = preflop_section.get("raises") or preflop_section.get("bets")
+
+        self.preflop_raises = preflop_raises or defaults["preflop_raises"]
+
+        # Street-dependent postflop bets (new format only)
+        postflop_config = config.get("postflop")
+
+        self.postflop_bets = {}
+        default_postflop = defaults["postflop"]
+
+        if postflop_config is None:
+            self.postflop_bets = default_postflop.copy()
+        elif isinstance(postflop_config, list):
             for street in ["flop", "turn", "river"]:
-                street_config = postflop_config.get(street, [0.33, 0.66, 1.25])
+                self.postflop_bets[street] = postflop_config
+        elif isinstance(postflop_config, dict):
+            for street in ["flop", "turn", "river"]:
+                street_config = postflop_config.get(street, default_postflop[street])
                 if isinstance(street_config, dict):
-                    # Format: {"flop": {"bets": [...]}}
-                    self.postflop_bets[street] = street_config.get("bets", [0.33, 0.66, 1.25])
+                    self.postflop_bets[street] = street_config.get("bets") or street_config.get(
+                        "sizes", default_postflop[street]
+                    )
                 else:
-                    # Format: {"flop": [...]}
                     self.postflop_bets[street] = street_config
         else:
-            # Legacy format: same bets for all streets
-            legacy_bets = config.get("postflop_bets", [0.33, 0.75])
-            self.postflop_bets = {
-                "flop": legacy_bets,
-                "turn": legacy_bets,
-                "river": legacy_bets,
-            }
+            raise ValueError("Invalid postflop configuration format.")
+
+        # Fill any missing streets with defaults
+        for street in ["flop", "turn", "river"]:
+            if street not in self.postflop_bets or not self.postflop_bets[street]:
+                self.postflop_bets[street] = default_postflop[street]
 
         # All-in threshold (SPR)
-        self.all_in_spr_threshold = config.get("all_in_spr_threshold", 2.0)
+        self.all_in_spr_threshold = config.get(
+            "all_in_spr_threshold", defaults["all_in_spr_threshold"]
+        )
 
     @staticmethod
     def _default_config() -> Dict:
