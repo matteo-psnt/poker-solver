@@ -16,14 +16,14 @@ import pstats
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 
 import numpy as np
 from tqdm import tqdm
 
 from src.training import components
 from src.training.metrics import MetricsTracker
-from src.training.parallel import WorkerManager
+from src.training.parallel import SharedArrayWorkerManager
 from src.training.run_tracker import RunTracker
 from src.utils.config import Config
 
@@ -271,22 +271,26 @@ class TrainingSession:
         """Cleanup on deletion."""
         self._shutdown_checkpoint_executor()
 
-    def _train_parallel(
+    def _train_partitioned(
         self,
         num_iterations: int,
         num_workers: int,
         batch_size: Optional[int] = None,
     ) -> Dict:
         """
-        Run parallel training using persistent worker pool.
+        Run parallel training using shared array storage.
 
-        Uses WorkerManager to maintain persistent workers across batches,
-        eliminating process spawning overhead.
+        Architecture:
+        - Coordinator creates shared memory once at startup
+        - Workers attach to shared memory (no recreation)
+        - Flat NumPy arrays as live data structure
+        - Lock-free reads, owner-only writes
+        - Cross-partition updates via queues
 
         Args:
             num_iterations: Total iterations to run
             num_workers: Number of parallel workers
-            batch_size: Iterations per batch (configurable via training.iterations_per_worker; default: 100 * num_workers)
+            batch_size: Iterations per batch
 
         Returns:
             Training results dictionary
@@ -296,30 +300,33 @@ class TrainingSession:
                 self.config.get("training.iterations_per_worker", 100)
             )
             if not iterations_per_worker_multiplier:
-                iterations_per_worker_multiplier = 100  # Default multiplier
-
-            if iterations_per_worker_multiplier <= 0:
-                raise ValueError("training.iterations_per_worker must be positive")
-
+                iterations_per_worker_multiplier = 100
             batch_size = iterations_per_worker_multiplier * num_workers
 
         checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)
         verbose = self.config.get("training.verbose", True)
 
-        # Initialize run tracker (creates directory and .run.json)
+        # Shared array configuration
+        max_infosets = self.config.get("storage.max_infosets", 2_000_000)
+        max_actions = self.config.get("storage.max_actions", 10)
+
+        # Initialize run tracker
         self.run_tracker.initialize()
 
         if verbose:
-            print("\n🚀 Parallel Training")
+            print("\n🚀 Shared Array Parallel Training")
             print(f"   Workers: {num_workers}")
             print(f"   Iterations: {num_iterations}")
             print(f"   Batch size: {batch_size}")
-            print(f"   Expected speedup: {num_workers:.1f}x")
+            print(f"   Max infosets: {max_infosets:,}")
+            print(f"   Max actions: {max_actions}")
+            print("   Mode: Live shared memory arrays (no serialization)")
 
         training_start_time = time.time()
         completed_iterations = 0
+        total_infosets = 0
 
-        # Serialize abstractions once (sent to workers at startup)
+        # Serialize abstractions
         serialized_action_abstraction = pickle.dumps(self.solver.action_abstraction)
         serialized_card_abstraction = pickle.dumps(self.solver.card_abstraction)
 
@@ -330,20 +337,24 @@ class TrainingSession:
 
         pool_start_time = time.time()
 
-        # Create persistent worker pool (workers initialized once)
-        with WorkerManager(
+        # Create shared array worker manager
+        with SharedArrayWorkerManager(
             num_workers=num_workers,
             config_dict=self.config.to_dict(),
             serialized_action_abstraction=serialized_action_abstraction,
             serialized_card_abstraction=serialized_card_abstraction,
+            session_id=self.run_dir.name,
             base_seed=self.config.get("system.seed", 42) or 42,
+            max_infosets=max_infosets,
+            max_actions=max_actions,
+            checkpoint_dir=str(self.run_dir),
         ) as worker_manager:
             pool_init_time = time.time() - pool_start_time
 
             if verbose:
                 print(f"   Worker pool ready ({pool_init_time:.2f}s)\n")
 
-            # Progress bar for batches
+            # Progress tracking
             num_batches = (num_iterations + batch_size - 1) // batch_size
             if verbose:
                 batch_iterator: Union[range, tqdm] = tqdm(
@@ -363,160 +374,83 @@ class TrainingSession:
                     # Split work among workers
                     iters_per_worker_base = current_batch_size // num_workers
                     extra_iters = current_batch_size % num_workers
-
-                    # Build iteration list for each worker
                     iterations_per_worker = [
                         iters_per_worker_base + (1 if i < extra_iters else 0)
                         for i in range(num_workers)
                     ]
 
-                    # Submit batch to persistent workers (no process spawning!)
-                    # Results are merged incrementally as they arrive (overlap merge with worker computation)
-                    worker_results = worker_manager.submit_batch(
+                    # Run batch (data flows directly through shared arrays)
+                    batch_result = worker_manager.run_batch(
                         iterations_per_worker=iterations_per_worker,
                         batch_id=batch_idx,
                         start_iteration=completed_iterations,
-                        timeout_seconds=self.config.get(
-                            "training.parallel_result_timeout_seconds", None
-                        ),
                         verbose=verbose,
-                        storage=self.solver.storage,  # Enable incremental merge
                     )
 
-                    # Extract utilities (already merged incrementally during collection)
-                    batch_utilities = worker_results["utilities"]
+                    batch_utilities = batch_result["utilities"]
+                    completed_iterations += len(batch_utilities)
+                    total_infosets = batch_result.get("num_infosets", 0)
 
-                    print(
-                        "[Master] All worker results merged, updating metrics...",
-                        flush=True,
-                    )
+                    # Sync keys and apply updates between batches
+                    if batch_idx < num_batches - 1:
+                        worker_manager.sync_keys(verbose=verbose)
+                        worker_manager.apply_pending_updates(verbose=verbose)
 
-                    # Update solver iteration count
-                    self.solver.iteration = completed_iterations + len(batch_utilities)
-
-                    # Log metrics using master solver state after merge
-                    # This ensures num_infosets reflects the actual merged solver, not worker-local counts
-                    print(
-                        "[Master] Counting infosets in master storage...",
-                        flush=True,
-                    )
-                    master_num_infosets = self.solver.num_infosets()
-                    print(
-                        f"[Master] Master has {master_num_infosets} infosets",
-                        flush=True,
-                    )
-
-                    # Get infosets dict for sampling (only materialized when needed)
-                    infosets_dict = (
-                        self.solver.storage.infosets
-                        if hasattr(self.solver.storage, "infosets")
-                        else {}
-                    )
-
-                    # Create infoset sampler for solver-quality metrics
-                    # Lazy-loads keys array only when actually needed for sampling
-                    from typing import Optional, cast
-
-                    infoset_keys_cache: List[Optional[np.ndarray]] = [None]  # closure capture
-
-                    def sample_infosets(n: int):
-                        """Sample n random infosets from solver storage (lazy key caching)."""
-                        if not infosets_dict:
-                            return []
-
-                        # Only create keys array on first sample (not every batch)
-                        if infoset_keys_cache[0] is None:
-                            cache_start = time.time()
-                            infoset_keys_cache[0] = np.array(list(infosets_dict.keys()))
-                            cache_time = time.time() - cache_start
-                            if verbose and cache_time > 0.5:
-                                print(
-                                    # Cast for mypy: cache is now a numpy array
-                                    f"[Master] Cached {len(cast(np.ndarray, infoset_keys_cache[0]))} keys in {cache_time:.2f}s",
-                                    flush=True,
-                                )
-
-                        keys = infoset_keys_cache[0]
-                        assert keys is not None
-                        infoset_keys_array = cast(np.ndarray, keys)
-                        if len(infoset_keys_array) <= n:
-                            return list(infosets_dict.values())
-
-                        # Sample from cached keys array (fast)
-                        sampled_indices = np.random.choice(
-                            len(infoset_keys_array), size=n, replace=False
-                        )
-                        return [infosets_dict[infoset_keys_array[i]] for i in sampled_indices]
-
-                    # Log metrics for each iteration in the batch
-                    # Only compute expensive quality metrics every log_freq iterations
-                    metrics_start = time.time()
-                    log_freq = self.config.get("training.log_frequency", 100)
-                    for util in batch_utilities:
-                        completed_iterations += 1
-
-                        # Only sample infosets for quality metrics at log intervals
-                        # This avoids expensive sampling/computation 200x per batch
-                        should_sample = (completed_iterations % log_freq) == 0
-
+                    for i, util in enumerate(batch_utilities):
+                        iter_num = completed_iterations - len(batch_utilities) + i + 1
                         self.metrics.log_iteration(
-                            iteration=completed_iterations,
+                            iteration=iter_num,
                             utility=util,
-                            num_infosets=master_num_infosets,
-                            infoset_sampler=sample_infosets if should_sample else None,
+                            num_infosets=total_infosets,
+                            infoset_sampler=None,
                         )
-                    metrics_time = time.time() - metrics_start
-                    if verbose and metrics_time > 1.0:
-                        print(f"[Master] Metrics logging took {metrics_time:.2f}s", flush=True)
 
-                    # Update progress bar with solver-quality metrics
+                    # Update progress bar
                     if verbose and isinstance(batch_iterator, tqdm):
                         compact_summary = self.metrics.get_compact_summary()
                         batch_iterator.set_postfix_str(
-                            f"iter={completed_iterations} | {compact_summary}"
+                            f"iter={completed_iterations} infosets={total_infosets} | {compact_summary}"
                         )
 
-                    # Checkpoint if needed (async, non-blocking)
+                    # Checkpoint if needed
                     if completed_iterations % checkpoint_freq < batch_size:
-                        self._async_checkpoint(completed_iterations, training_start_time)
-
-                    # Ready to submit next batch
-                    if verbose:
-                        print(
-                            f"[Master] Batch {batch_idx} complete, preparing next batch...",
-                            flush=True,
+                        elapsed = time.time() - training_start_time
+                        self.run_tracker.update(
+                            iterations=completed_iterations,
+                            runtime_seconds=elapsed,
+                            num_infosets=total_infosets,
                         )
+                        worker_manager.checkpoint(completed_iterations)
+                        if verbose:
+                            print(
+                                f"[Coordinator] Checkpoint saved at iteration {completed_iterations}"
+                            )
 
             except KeyboardInterrupt:
                 if verbose:
                     print("\n⚠️  Training interrupted by user")
 
             finally:
-                # Wait for any pending background checkpoint
-                self._wait_for_checkpoint()
-
-                # Final checkpoint (synchronous)
+                # Final update
                 elapsed_time = time.time() - training_start_time
                 self.run_tracker.update(
                     iterations=completed_iterations,
                     runtime_seconds=elapsed_time,
-                    num_infosets=self.solver.num_infosets(),
+                    num_infosets=total_infosets,
                 )
-                self.storage.checkpoint(completed_iterations)
                 self.run_tracker.mark_completed()
 
                 if verbose:
-                    print("\n✅ Training complete!")
+                    print("\n✅ Shared Array Training complete!")
                     print(f"   Iterations: {completed_iterations}")
+                    print(f"   Infosets: {total_infosets:,}")
                     print(f"   Time: {elapsed_time:.1f}s")
                     if completed_iterations > 0:
                         print(f"   Speed: {completed_iterations / elapsed_time:.2f} iter/s")
-                        print(f"   Expected speedup: ~{num_workers:.1f}x (persistent pool)")
 
-        # Return final results
         return {
             "total_iterations": completed_iterations,
-            "final_infosets": self.solver.num_infosets(),
+            "final_infosets": total_infosets,
             "avg_utility": self.metrics.get_avg_utility(),
             "elapsed_time": elapsed_time,
         }
@@ -546,6 +480,7 @@ class TrainingSession:
         Note:
             For proper resume functionality that restores solver state from checkpoints,
             use the TrainingSession.resume() classmethod instead of resume=True parameter.
+            Parallel training uses hash-partitioned infosets for high performance.
         """
         # Enable profiling if requested
         profile_mode = self.config.get("training.profile_mode", False)
@@ -572,7 +507,7 @@ class TrainingSession:
             if use_parallel:
                 if num_workers is None:
                     num_workers = mp.cpu_count()
-                return self._train_parallel(num_iterations, num_workers, batch_size)
+                return self._train_partitioned(num_iterations, num_workers, batch_size)
 
             # Sequential training
             checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)

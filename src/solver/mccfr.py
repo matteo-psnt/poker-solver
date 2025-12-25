@@ -251,33 +251,37 @@ class MCCFRSolver(BaseSolver):
             # Node utility (expected value)
             node_utility = np.dot(strategy, action_utilities)
 
-            # Update regrets (weighted by opponent reach probability)
-            # Map back to original infoset indices
-            opponent = 1 - current_player
-            for i in range(len(legal_actions)):
-                regret = action_utilities[i] - node_utility
-                original_idx = valid_indices[i]
-                infoset.update_regret(
-                    original_idx,
-                    regret * reach_probs[opponent],
-                    cfr_plus=self.cfr_plus,
-                    linear_cfr=self.linear_cfr,
-                    iteration=self.iteration,
-                )
+            # Only update regrets/strategy if we OWN this infoset
+            # (For partitioned storage: hash(key) % num_workers == worker_id)
+            # (For non-partitioned storage: always True)
+            if self.storage.is_owned(infoset_key):
+                # Update regrets (weighted by opponent reach probability)
+                # Map back to original infoset indices
+                opponent = 1 - current_player
+                for i in range(len(legal_actions)):
+                    regret = action_utilities[i] - node_utility
+                    original_idx = valid_indices[i]
+                    infoset.update_regret(
+                        original_idx,
+                        regret * reach_probs[opponent],
+                        cfr_plus=self.cfr_plus,
+                        linear_cfr=self.linear_cfr,
+                        iteration=self.iteration,
+                    )
 
-            # Update average strategy (weighted by player reach probability)
-            # Only update valid actions in the strategy sum
-            for i in range(len(legal_actions)):
-                original_idx = valid_indices[i]
-                weight = strategy[i] * reach_probs[current_player]
-                if self.linear_cfr:
-                    weight *= self.iteration
-                infoset.strategy_sum[original_idx] += weight
-            infoset.reach_count += 1
-            infoset.cumulative_utility += node_utility
+                # Update average strategy (weighted by player reach probability)
+                # Only update valid actions in the strategy sum
+                for i in range(len(legal_actions)):
+                    original_idx = valid_indices[i]
+                    weight = strategy[i] * reach_probs[current_player]
+                    if self.linear_cfr:
+                        weight *= self.iteration
+                    infoset.strategy_sum[original_idx] += weight
+                infoset.reach_count += 1
+                infoset.cumulative_utility += node_utility
 
-            # Mark infoset as dirty since we modified regrets and strategy_sum
-            self.storage.mark_dirty(infoset_key)
+                # Mark infoset as dirty since we modified regrets and strategy_sum
+                self.storage.mark_dirty(infoset_key)
 
             return node_utility
 
@@ -387,8 +391,8 @@ class MCCFRSolver(BaseSolver):
         # Recursively compute utility for sampled action
         sampled_utility = self._cfr_outcome_sampling(next_state, traversing_player, reach_probs)
 
-        # Update regrets only for traversing player
-        if current_player == traversing_player:
+        # Update regrets only for traversing player AND only if we own the infoset
+        if current_player == traversing_player and self.storage.is_owned(infoset_key):
             # Standard outcome sampling with proper baseline (Lanctot 2009)
             # Uses importance sampling with a baseline to remain unbiased and reduce variance
             opponent = 1 - current_player
