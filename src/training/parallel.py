@@ -63,6 +63,14 @@ def _serialize_infosets_to_shm(infoset_data: Dict, shm_name: str):
         total_size += 8  # cumulative_utility (float64)
 
     # Create shared memory
+    try:
+        stale_shm = shared_memory.SharedMemory(name=shm_name)
+        stale_shm.close()
+        stale_shm.unlink()
+    except FileNotFoundError:
+        # Good - no stale shared memory
+        pass
+
     shm = shared_memory.SharedMemory(create=True, size=total_size, name=shm_name)
 
     try:
@@ -112,13 +120,16 @@ def _serialize_infosets_to_shm(infoset_data: Dict, shm_name: str):
         raise
 
 
-def _deserialize_infosets_from_shm(shm_name: str, shm_size: int) -> Dict:
+def _deserialize_infosets_from_shm(shm_name: str, shm_size: int, cleanup: bool = False) -> Dict:
     """
     Deserialize infosets from shared memory buffer.
 
     Args:
         shm_name: Name of the shared memory segment
         shm_size: Expected size of the shared memory (for validation)
+        cleanup: If True, unlink (delete) the shared memory after reading.
+                 Use True when reading worker results (worker created it, master should delete).
+                 Use False when reading broadcasts (master created it, workers shouldn't delete).
 
     Returns:
         Dict mapping InfoSetKey -> data dict with regrets, strategy_sum, etc.
@@ -173,10 +184,17 @@ def _deserialize_infosets_from_shm(shm_name: str, shm_size: int) -> Dict:
         return infoset_data
 
     finally:
-        # Always cleanup shared memory
+        # Close shared memory (detach from this process)
         if shm is not None:
             shm.close()
-            shm.unlink()
+            # Conditionally unlink based on who created it
+            if cleanup:
+                # Master reading worker results: delete the shm (worker created it)
+                try:
+                    shm.unlink()
+                except FileNotFoundError:
+                    pass  # Already cleaned up
+            # else: Workers reading broadcast: don't delete (master created it)
 
 
 def _persistent_worker_loop(
@@ -689,8 +707,9 @@ class WorkerManager:
                         flush=True,
                     )
                     try:
+                        # Master is reading worker's result, so cleanup=True (delete shm after reading)
                         infoset_data = _deserialize_infosets_from_shm(
-                            result["shm_name"], result["shm_size"]
+                            result["shm_name"], result["shm_size"], cleanup=True
                         )
                         # Merge legal_actions back into infoset_data
                         legal_actions_map = result.get("legal_actions_map", {})
