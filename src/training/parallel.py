@@ -845,10 +845,19 @@ class WorkerManager:
                 )
 
             # Wait for acknowledgments from all workers
+            # Timeout needs to be generous:
+            # - Workers might be finishing previous iterations
+            # - Checkpointing can block for 60-90+ seconds
+            # - Loading 164MB+ of shared memory takes time
+            # Use 5 minutes to be safe
             acks_received = 0
+            ack_timeout = 300  # 5 minutes
+            start_wait = time.time()
+
             while acks_received < self.num_workers:
                 try:
-                    result = self.result_queue.get(timeout=30)
+                    # Use shorter individual timeouts for better progress reporting
+                    result = self.result_queue.get(timeout=5)
                     if result.get("type") == "broadcast_ack":
                         acks_received += 1
                         if verbose:
@@ -859,10 +868,20 @@ class WorkerManager:
                                 flush=True,
                             )
                 except queue.Empty:
-                    raise RuntimeError(
-                        f"Timeout waiting for broadcast acknowledgments "
-                        f"({acks_received}/{self.num_workers} received)"
-                    )
+                    # Check if we've exceeded total timeout
+                    elapsed = time.time() - start_wait
+                    if elapsed > ack_timeout:
+                        raise RuntimeError(
+                            f"Timeout waiting for broadcast acknowledgments after {elapsed:.1f}s "
+                            f"({acks_received}/{self.num_workers} received)"
+                        )
+                    # Otherwise just continue waiting with periodic status
+                    if verbose and int(elapsed) % 10 == 0:  # Every 10 seconds
+                        print(
+                            f"[Master] Still waiting for acks... {elapsed:.0f}s elapsed, "
+                            f"{acks_received}/{self.num_workers} received",
+                            flush=True,
+                        )
 
             # Cleanup shared memory
             shm.close()

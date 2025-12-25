@@ -18,10 +18,10 @@ action_abstraction:
   max_raises_per_street: 3  # Standard poker cap
 
 training:
-  num_iterations: 10000
+  num_iterations: 3600
   checkpoint_frequency: 2000
   log_frequency: 100
-  iterations_per_worker: 50
+  iterations_per_worker: 100
   verbose: true
   profile_mode: false
   profile_output: "data/profiles"
