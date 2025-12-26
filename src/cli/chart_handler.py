@@ -9,7 +9,6 @@ import questionary
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.bucketing.utils.infoset import InfoSetKey
-from src.game.actions import ActionType
 from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
@@ -99,7 +98,11 @@ def handle_view_preflop_chart(
     if situation == "Cancel" or situation is None:
         return
 
-    betting_sequence = "" if "First" in situation else "r5"
+    # BTN first to act has empty sequence
+    # BB facing raise uses normalized betting sequence (e.g., "r1.33" for 2.5bb raise)
+    # The 2.5bb raise is normalized as: pot=3 (SB+BB), raise_total=5, so raise_amount=2
+    # Normalized: 2/3 = 0.67, but it's stored as "r1.33" (relative to pot before action)
+    betting_sequence = "" if "First" in situation else "r1.33"
 
     print("\nGenerating HTML preflop chart...")
     chart_path = generate_html_preflop_chart(
@@ -193,17 +196,45 @@ def _get_hand_strategy(
         return None
 
     strategy = infoset.get_average_strategy()
-    actions = infoset.legal_actions
+
+    # The stored infoset has placeholder fold() actions from checkpoint loading
+    # We need to reconstruct the correct action types based on the number of actions
+    # Action ordering is always: FOLD (if facing bet), CALL/CHECK, then RAISE/BET actions
+    n_actions = len(strategy)
 
     result = {"fold": 0.0, "call": 0.0, "raise": 0.0}
 
-    for action, prob in zip(actions, strategy):
-        if action.type == ActionType.FOLD:
-            result["fold"] += prob
-        elif action.type in [ActionType.CALL, ActionType.CHECK]:
-            result["call"] += prob
-        elif action.type in [ActionType.RAISE, ActionType.BET, ActionType.ALL_IN]:
-            result["raise"] += prob
+    # Determine if this is facing a bet (has FOLD) or first to act (has CHECK)
+    facing_bet = betting_sequence != ""
+
+    if facing_bet:
+        # Order: FOLD, CALL, RAISE1, RAISE2, ...
+        if n_actions >= 1:
+            result["fold"] = strategy[0]
+        if n_actions >= 2:
+            result["call"] = strategy[1]
+        if n_actions >= 3:
+            # All remaining actions are raises
+            result["raise"] = sum(strategy[2:])
+    else:
+        # First to act - Order: CHECK, RAISE1, RAISE2, ... (no FOLD when no bet)
+        # But wait, BTN first to act has to call the BB, so it's like facing a bet
+        if position == 0:
+            # BTN first to act still needs to call BB
+            # Order: FOLD, CALL, RAISE1, RAISE2, ...
+            if n_actions >= 1:
+                result["fold"] = strategy[0]
+            if n_actions >= 2:
+                result["call"] = strategy[1]
+            if n_actions >= 3:
+                result["raise"] = sum(strategy[2:])
+        else:
+            # BB in limped pot (very rare with this abstraction)
+            # Order: CHECK, BET1, BET2, ...
+            if n_actions >= 1:
+                result["call"] = strategy[0]  # CHECK
+            if n_actions >= 2:
+                result["raise"] = sum(strategy[1:])  # BETs
 
     return result
 

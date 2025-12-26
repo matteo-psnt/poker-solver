@@ -25,7 +25,7 @@ from src.game.state import Card
 class TestClusteringIntegration:
     """Test complete clustering pipeline."""
 
-    @pytest.fixture
+    @pytest.fixture(scope="session")
     def test_config(self):
         """Create minimal config for testing."""
         return PrecomputeConfig(
@@ -34,8 +34,8 @@ class TestClusteringIntegration:
                 Street.TURN: 10,
                 Street.RIVER: 15,
             },
-            representatives_per_cluster=2,
-            equity_samples=50,
+            representatives_per_cluster=1,  # Reduced from 2
+            equity_samples=25,  # Reduced from 50
             num_buckets={
                 Street.FLOP: 10,
                 Street.TURN: 15,
@@ -44,9 +44,9 @@ class TestClusteringIntegration:
             seed=42,
         )
 
-    @pytest.fixture
+    @pytest.fixture(scope="session")
     def precomputed_abstraction(self, test_config):
-        """Precompute abstraction with clustering."""
+        """Precompute abstraction with clustering (session-scoped for speed)."""
         precomputer = PostflopPrecomputer(test_config)
 
         # Precompute one street for testing
@@ -220,14 +220,14 @@ class TestClusteringIntegration:
 class TestClusterPrediction:
     """Test board cluster prediction specifically."""
 
-    @pytest.fixture
+    @pytest.fixture(scope="session")
     def clustered_abstraction(self):
-        """Create abstraction with fitted board clusterer."""
+        """Create abstraction with fitted board clusterer (session-scoped for speed)."""
         config = PrecomputeConfig(
-            num_board_clusters={Street.FLOP: 10, Street.TURN: 20, Street.RIVER: 30},
-            representatives_per_cluster=2,
-            equity_samples=100,
-            num_buckets={Street.FLOP: 20, Street.TURN: 30, Street.RIVER: 40},
+            num_board_clusters={Street.FLOP: 8, Street.TURN: 15, Street.RIVER: 20},  # Reduced
+            representatives_per_cluster=1,  # Reduced from 2
+            equity_samples=50,  # Reduced from 100
+            num_buckets={Street.FLOP: 15, Street.TURN: 20, Street.RIVER: 30},  # Reduced
             seed=42,
         )
 

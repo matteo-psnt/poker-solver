@@ -36,6 +36,10 @@ class MetricsTracker:
         self.start_time = time.time()
         self.last_log_time = time.time()
 
+        # For accurate iterations/second calculation
+        self.window_start_time = time.time()
+        self.window_start_iteration = 0
+
         # Utility tracking
         self.utilities: List[float] = []
         self.utility_window: Deque[float] = deque(maxlen=window_size)
@@ -44,7 +48,7 @@ class MetricsTracker:
         self.infoset_counts: List[int] = []
         self.infoset_window: Deque[int] = deque(maxlen=window_size)
 
-        # Timing tracking
+        # Timing tracking (kept for compatibility)
         self.iteration_times: Deque[float] = deque(maxlen=window_size)
 
         # Solver-quality metrics (CFR health indicators)
@@ -231,17 +235,30 @@ class MetricsTracker:
         """
         Get iterations per second (recent window).
 
+        Calculates based on total iterations in window divided by elapsed time,
+        which is more accurate for parallel training than averaging per-log times.
+
         Returns:
             Iterations/second
         """
-        if not self.iteration_times:
+        if self.iteration == 0:
             return 0.0
 
-        avg_time = np.mean(list(self.iteration_times))
-        if avg_time == 0:
+        # Calculate based on iterations completed in the current window
+        current_time = time.time()
+        elapsed = current_time - self.window_start_time
+
+        if elapsed <= 0:
             return 0.0
 
-        return float(1.0 / avg_time)
+        iterations_in_window = self.iteration - self.window_start_iteration
+
+        # Reset window if we've accumulated enough iterations
+        if iterations_in_window >= self.window_size:
+            self.window_start_time = current_time
+            self.window_start_iteration = self.iteration
+
+        return float(iterations_in_window / elapsed) if elapsed > 0 else 0.0
 
     def get_elapsed_time(self) -> float:
         """
