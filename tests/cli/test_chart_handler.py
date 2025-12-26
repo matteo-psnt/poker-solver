@@ -1,6 +1,6 @@
 """Tests for chart handler."""
 
-from src.cli.chart_handler import _ranks_to_hand_string
+from src.cli.chart_data import _ranks_to_hand_string
 
 
 def test_ranks_to_hand_string_pair():
