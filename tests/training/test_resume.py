@@ -85,7 +85,7 @@ def test_resume_basic(test_config, temp_run_dir):
 
     # Train for just 1 iteration to minimize infoset creation
     initial_iterations = 1
-    results1 = session1.train(num_iterations=initial_iterations, use_parallel=False)
+    results1 = session1.train(num_iterations=initial_iterations, num_workers=1)
 
     initial_infosets = results1["final_infosets"]
     print(
@@ -134,7 +134,7 @@ def test_resume_incomplete_checkpoint(test_config, temp_run_dir):
     """Test that resume fails if checkpoint is incomplete."""
     # Create a session and run minimal training
     session = TrainingSession(test_config, run_id=temp_run_dir.name)
-    session.train(num_iterations=1, use_parallel=False)
+    session.train(num_iterations=1, num_workers=1)
 
     # Delete one of the checkpoint files to make it incomplete
     (temp_run_dir / "regrets.h5").unlink()
@@ -148,7 +148,7 @@ def test_resume_metadata_tracking(test_config, temp_run_dir):
     """Test that resume correctly updates run metadata."""
     # Initial training
     session1 = TrainingSession(test_config, run_id=temp_run_dir.name)
-    session1.train(num_iterations=1, use_parallel=False)
+    session1.train(num_iterations=1, num_workers=1)
 
     # Resume
     session2 = TrainingSession.resume(temp_run_dir)

@@ -81,26 +81,20 @@ class Storage(ABC):
 
 class InMemoryStorage(Storage):
     """
-    In-memory dictionary storage for infosets with optional disk checkpointing.
+    Read-only storage for loading checkpoints (charts, analysis, debugging).
 
-    All operations are in-memory (fast), with periodic saves to disk for
-    persistence. This is the recommended approach for training:
-    - All training operations use RAM (no I/O overhead)
-    - Checkpoint to disk every N iterations to avoid losing progress
-    - Can resume from disk checkpoints
+    This is a lightweight storage class for tools that need to load and examine
+    solver strategies without modifying them. For training, use SharedArrayStorage.
 
-    Suitable for:
-    - Active training (up to ~1M infosets depending on RAM)
-    - Fast iteration with periodic persistence
+    NOT FOR TRAINING - use SharedArrayStorage for all training operations.
     """
 
     def __init__(self, checkpoint_dir: Optional[Path] = None):
         """
-        Initialize in-memory storage.
+        Initialize read-only storage from checkpoint.
 
         Args:
-            checkpoint_dir: Optional directory for saving checkpoints.
-                           If provided, enables checkpoint() to save to disk.
+            checkpoint_dir: Directory containing checkpoint files to load
         """
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
 
@@ -113,20 +107,16 @@ class InMemoryStorage(Storage):
             self._load_from_checkpoint()
 
     def get_or_create_infoset(self, key: InfoSetKey, legal_actions: List[Action]) -> InfoSet:
-        """Get existing infoset or create new one."""
+        """Get existing infoset (read-only - does not create new ones)."""
         infoset_id = self.key_to_id.get(key)
         if infoset_id is not None:
             return self._infosets_by_id[infoset_id]
 
-        infoset_id = self.next_id
-        self.next_id += 1
-
-        infoset = InfoSet(key, legal_actions)
-        self._infosets_by_id[infoset_id] = infoset
-        self.key_to_id[key] = infoset_id
-        self.id_to_key[infoset_id] = key
-
-        return infoset
+        # For read-only storage, return None or raise error
+        raise ValueError(
+            f"InMemoryStorage is read-only. Cannot create infoset for key {key}. "
+            "Use SharedArrayStorage for training."
+        )
 
     def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
         """Get existing infoset or None."""
@@ -152,18 +142,18 @@ class InMemoryStorage(Storage):
         }
 
     def mark_dirty(self, key: InfoSetKey):
-        """No-op for in-memory storage (always in sync)."""
+        """No-op for read-only storage."""
         pass
 
     def flush(self):
-        """No-op for in-memory storage (no cache to flush)."""
+        """No-op for read-only storage."""
         pass
 
     def checkpoint(self, iteration: int):
-        """Save current state to disk checkpoint."""
-        if not self.checkpoint_dir:
-            return
-        self._save_to_disk()
+        """Read-only storage cannot checkpoint."""
+        raise NotImplementedError(
+            "InMemoryStorage is read-only. Use SharedArrayStorage for training."
+        )
 
     def clear(self):
         """Clear all infosets."""
@@ -186,14 +176,14 @@ class InMemoryStorage(Storage):
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
 
-            # Support both InMemoryStorage and SharedArrayStorage checkpoint formats
+            # Support both old InMemoryStorage format and new SharedArrayStorage format
             if "key_to_id" in mapping_data:
-                # InMemoryStorage format
+                # Old InMemoryStorage format
                 self.key_to_id = mapping_data["key_to_id"]
                 self.id_to_key = mapping_data["id_to_key"]
                 self.next_id = mapping_data["next_id"]
             elif "owned_keys" in mapping_data:
-                # SharedArrayStorage format (parallel training)
+                # SharedArrayStorage format (from parallel training)
                 self.key_to_id = mapping_data["owned_keys"]
                 self.id_to_key = {v: k for k, v in self.key_to_id.items()}
                 self.next_id = mapping_data.get("max_id", len(self.key_to_id))
@@ -221,88 +211,6 @@ class InMemoryStorage(Storage):
                 self._infosets_by_id[infoset_id] = infoset
 
         logger.info(f"Loaded {len(self._infosets_by_id)} infosets from checkpoint")
-
-    def _save_to_disk(self):
-        """Save all infosets to disk using optimized matrix format."""
-        if not self.checkpoint_dir:
-            return
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-        key_to_id_snapshot = dict(self.key_to_id)
-        id_to_key_snapshot = dict(self.id_to_key)
-        next_id_snapshot = self.next_id
-
-        key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
-        with open(key_mapping_file, "wb") as f:
-            pickle.dump(
-                {
-                    "key_to_id": key_to_id_snapshot,
-                    "id_to_key": id_to_key_snapshot,
-                    "next_id": next_id_snapshot,
-                },
-                f,
-            )
-
-        num_infosets = len(id_to_key_snapshot)
-        if num_infosets == 0:
-            return
-
-        infoset_data = []
-        for infoset_id in range(num_infosets):
-            if infoset_id not in id_to_key_snapshot:
-                continue
-            if infoset_id not in self._infosets_by_id:
-                continue
-            infoset = self._infosets_by_id[infoset_id]
-            infoset_data.append(
-                {
-                    "id": infoset_id,
-                    "regrets": infoset.regrets.copy(),
-                    "strategies": infoset.strategy_sum.copy(),
-                }
-            )
-
-        if not infoset_data:
-            return
-
-        max_actions = max(len(item["regrets"]) for item in infoset_data)
-
-        all_regrets = np.zeros((num_infosets, max_actions), dtype=np.float32)
-        all_strategies = np.zeros((num_infosets, max_actions), dtype=np.float32)
-        action_counts = np.zeros(num_infosets, dtype=np.int32)
-
-        for item in infoset_data:
-            infoset_id = item["id"]
-            regrets = item["regrets"]
-            strategies = item["strategies"]
-            n_actions = len(regrets)
-
-            all_regrets[infoset_id, :n_actions] = regrets
-            all_strategies[infoset_id, :n_actions] = strategies
-            action_counts[infoset_id] = n_actions
-
-        # Save to HDF5 with compression
-        regrets_file = self.checkpoint_dir / "regrets.h5"
-        strategies_file = self.checkpoint_dir / "strategies.h5"
-
-        with h5py.File(regrets_file, "w") as regrets_h5:
-            regrets_h5.create_dataset(
-                "regrets",
-                data=all_regrets,
-                compression="gzip",
-                compression_opts=4,  # Compression level 1-9 (4 is good balance)
-                chunks=True,  # Enable chunking for better compression
-            )
-            regrets_h5.create_dataset("action_counts", data=action_counts)
-
-        with h5py.File(strategies_file, "w") as strategies_h5:
-            strategies_h5.create_dataset(
-                "strategies",
-                data=all_strategies,
-                compression="gzip",
-                compression_opts=4,
-                chunks=True,
-            )
 
     def __str__(self) -> str:
         checkpoint_info = f", checkpoint_dir={self.checkpoint_dir}" if self.checkpoint_dir else ""
@@ -427,6 +335,10 @@ class SharedArrayStorage(Storage):
             f"SharedArrayStorage initialized: worker={worker_id}, "
             f"coordinator={is_coordinator}, id_range=[{self.id_range_start}, {self.id_range_end})"
         )
+
+        # Load checkpoint if available
+        if checkpoint_dir:
+            self.load_checkpoint()
 
     # =========================================================================
     # Stable Hashing (replaces Python hash())
@@ -930,8 +842,17 @@ class SharedArrayStorage(Storage):
         logger.info(f"Checkpoint saved: {num_keys} infosets at iteration {iteration}")
 
     def load_checkpoint(self) -> bool:
-        """Load checkpoint from disk (coordinator only)."""
-        if not self.checkpoint_dir or not self.is_coordinator:
+        """
+        Load checkpoint from disk.
+
+        Supports loading checkpoints created with different worker configurations.
+        Each worker loads only the keys it owns based on current hash-based partitioning.
+        For sequential mode (num_workers=1), the single worker loads all keys.
+
+        Returns:
+            True if checkpoint was loaded, False otherwise
+        """
+        if not self.checkpoint_dir:
             return False
 
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
@@ -941,26 +862,45 @@ class SharedArrayStorage(Storage):
         if not all(f.exists() for f in [key_mapping_file, regrets_file, strategies_file]):
             return False
 
-        with open(key_mapping_file, "rb") as mapping_f:
-            mapping_data = pickle.load(mapping_f)
-            self._owned_keys = mapping_data["owned_keys"]
-            saved_start = mapping_data["id_range_start"]
-            self.next_local_id = mapping_data["next_local_id"]
+        # Load saved checkpoint data
+        with open(key_mapping_file, "rb") as f:
+            mapping_data = pickle.load(f)
+            saved_owned_keys = mapping_data["owned_keys"]
 
         with h5py.File(regrets_file, "r") as h5_f:
-            loaded_regrets = h5_f["regrets"][:]
-            loaded_action_counts = h5_f["action_counts"][:]
-
-            num_loaded = loaded_regrets.shape[0]
-            self.shared_regrets[saved_start : saved_start + num_loaded] = loaded_regrets
-            self.shared_action_counts[saved_start : saved_start + num_loaded] = loaded_action_counts
+            saved_regrets = h5_f["regrets"][:]
+            saved_action_counts = h5_f["action_counts"][:]
 
         with h5py.File(strategies_file, "r") as h5_f:
-            loaded_strategies = h5_f["strategies"][:]
-            num_loaded = loaded_strategies.shape[0]
-            self.shared_strategy_sum[saved_start : saved_start + num_loaded] = loaded_strategies
+            saved_strategies = h5_f["strategies"][:]
 
-        logger.info(f"Loaded checkpoint: {len(self._owned_keys)} owned infosets")
+        # Re-partition keys based on current worker configuration
+        # Each key is assigned to a worker using hash-based partitioning
+        loaded_count = 0
+        for key, old_id in list(saved_owned_keys.items()):
+            # Determine which worker should own this key
+            owner_id = self.get_owner(key)
+
+            # Only load keys that belong to this worker
+            if owner_id != self.worker_id:
+                continue
+
+            # Allocate new ID in this worker's range
+            new_id = self._allocate_id()
+            self._owned_keys[key] = new_id
+
+            # Copy data from old checkpoint position to new position
+            n_actions = saved_action_counts[old_id]
+            self.shared_action_counts[new_id] = n_actions
+            self.shared_regrets[new_id, :n_actions] = saved_regrets[old_id, :n_actions]
+            self.shared_strategy_sum[new_id, :n_actions] = saved_strategies[old_id, :n_actions]
+
+            loaded_count += 1
+
+        logger.info(
+            f"Worker {self.worker_id} loaded {loaded_count}/{len(saved_owned_keys)} "
+            f"infosets from checkpoint (worker owns {loaded_count} keys)"
+        )
         return True
 
     # =========================================================================

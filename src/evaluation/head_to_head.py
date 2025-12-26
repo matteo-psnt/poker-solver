@@ -32,8 +32,8 @@ class MatchResult:
         showdown: Whether hand went to showdown
     """
 
-    player0_payoff: int
-    player1_payoff: int
+    player0_payoff: float
+    player1_payoff: float
     hand_number: int
     final_street: Street
     showdown: bool
@@ -59,8 +59,8 @@ class MatchStatistics:
     num_hands: int
     player0_wins: float
     player1_wins: float
-    player0_total_won: int
-    player1_total_won: int
+    player0_total_won: float
+    player1_total_won: float
     player0_bb_per_hand: float
     player1_bb_per_hand: float
     showdown_pct: float
@@ -138,8 +138,8 @@ class HeadToHeadEvaluator:
         results = []
         player0_wins = 0.0
         player1_wins = 0.0
-        player0_total_won = 0
-        player1_total_won = 0
+        player0_total_won = 0.0
+        player1_total_won = 0.0
         showdown_count = 0
 
         for hand_num in range(num_hands):

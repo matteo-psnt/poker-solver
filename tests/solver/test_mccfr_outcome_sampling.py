@@ -9,7 +9,7 @@ import pytest
 
 from src.actions.betting_actions import BettingActions
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import InMemoryStorage
+from src.solver.storage import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction
 
 
@@ -20,7 +20,9 @@ class TestOutcomeSampling:
         """Test creating solver with outcome sampling enabled."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = MCCFRSolver(
             action_abs,
@@ -36,7 +38,9 @@ class TestOutcomeSampling:
         """Test that outcome sampling iteration completes."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = MCCFRSolver(
             action_abs,
@@ -55,7 +59,9 @@ class TestOutcomeSampling:
         """Test multiple iterations with outcome sampling."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = MCCFRSolver(
             action_abs,
@@ -74,7 +80,9 @@ class TestOutcomeSampling:
         """Test that outcome sampling creates and updates infosets."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = MCCFRSolver(
             action_abs,
@@ -91,7 +99,7 @@ class TestOutcomeSampling:
 
         # Check that at least some infosets have non-zero regrets
         infosets_with_regrets = 0
-        for infoset in storage._infosets_by_id.values():
+        for infoset in storage.infosets.values():
             if any(r != 0 for r in infoset.regrets):
                 infosets_with_regrets += 1
 
@@ -102,7 +110,9 @@ class TestOutcomeSampling:
         """Test outcome sampling works with CFR+."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = MCCFRSolver(
             action_abs,
@@ -121,7 +131,9 @@ class TestOutcomeSampling:
         """Test that outcome sampling produces valid strategies."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = MCCFRSolver(
             action_abs,
@@ -133,7 +145,7 @@ class TestOutcomeSampling:
         solver.train(num_iterations=50, verbose=False)
 
         # Check that strategies sum to 1.0 (or close)
-        for infoset in storage._infosets_by_id.values():
+        for infoset in storage.infosets.values():
             strategy = infoset.get_average_strategy()
             strategy_sum = sum(strategy)
 
@@ -149,7 +161,9 @@ class TestOutcomeSampling:
         card_abs = DummyCardAbstraction()
 
         # External sampling
-        storage_external = InMemoryStorage()
+        storage_external = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test_ext", is_coordinator=True
+        )
         solver_external = MCCFRSolver(
             action_abs,
             card_abs,
@@ -159,7 +173,9 @@ class TestOutcomeSampling:
         solver_external.train(num_iterations=5, verbose=False)
 
         # Outcome sampling
-        storage_outcome = InMemoryStorage()
+        storage_outcome = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test_out", is_coordinator=True
+        )
         solver_outcome = MCCFRSolver(
             action_abs,
             card_abs,
@@ -173,11 +189,11 @@ class TestOutcomeSampling:
         assert solver_outcome.num_infosets() > 0
 
         # Both should produce valid strategies
-        for infoset in storage_external._infosets_by_id.values():
+        for infoset in storage_external.infosets.values():
             strategy = infoset.get_average_strategy()
             assert 0.99 <= sum(strategy) <= 1.01
 
-        for infoset in storage_outcome._infosets_by_id.values():
+        for infoset in storage_outcome.infosets.values():
             strategy = infoset.get_average_strategy()
             assert 0.99 <= sum(strategy) <= 1.01
 
@@ -185,7 +201,9 @@ class TestOutcomeSampling:
         """Test that invalid sampling method raises error."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         # Invalid method should raise ValueError
         with pytest.raises(ValueError, match="Invalid sampling_method"):
@@ -200,7 +218,9 @@ class TestOutcomeSampling:
         """Test that outcome sampling shows convergence behavior."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = MCCFRSolver(
             action_abs,
@@ -214,14 +234,14 @@ class TestOutcomeSampling:
 
         # Check that infosets were discovered during training
         multi_action_infosets = sum(
-            1 for infoset in storage._infosets_by_id.values() if len(infoset.legal_actions) > 1
+            1 for infoset in storage.infosets.values() if len(infoset.legal_actions) > 1
         )
         assert multi_action_infosets > 0, "Should discover multi-action infosets"
 
         # Check that at least some infosets have accumulated regrets
         # (indicating the solver is updating correctly)
         infosets_with_regrets = 0
-        for infoset in storage._infosets_by_id.values():
+        for infoset in storage.infosets.values():
             if len(infoset.legal_actions) > 1:
                 # Check if any regret is non-zero (solver is learning)
                 if any(abs(r) > 0.001 for r in infoset.regrets):

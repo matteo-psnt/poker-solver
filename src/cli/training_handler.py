@@ -49,39 +49,28 @@ def handle_train(
             print("   Please precompute combo abstraction first (from main menu)")
             return None
 
-    # Ask about parallel training
-    use_parallel = questionary.confirm(
-        "Use parallel training? (faster with multiple CPU cores)",
-        default=True,
+    # Ask for number of workers (training is always parallel)
+    default_workers = mp.cpu_count()
+
+    num_workers = questionary.text(
+        f"Number of workers (default: {default_workers}):",
+        default=str(default_workers),
         style=custom_style,
     ).ask()
 
-    if use_parallel is None:
+    if num_workers is None:
         return None
 
-    num_workers = None
-    if use_parallel:
-        default_workers = mp.cpu_count()
-
-        num_workers = questionary.text(
-            f"Number of workers (default: {default_workers}):",
-            default=str(default_workers),
-            style=custom_style,
-        ).ask()
-
-        if num_workers is None:
-            return None
-
-        try:
-            num_workers = int(num_workers)
-            if num_workers < 1:
-                print("[ERROR] Number of workers must be at least 1")
-                input("Press Enter to continue...")
-                return None
-        except ValueError:
-            print("[ERROR] Invalid number")
+    try:
+        num_workers = int(num_workers)
+        if num_workers < 1:
+            print("[ERROR] Number of workers must be at least 1")
             input("Press Enter to continue...")
             return None
+    except ValueError:
+        print("[ERROR] Invalid number")
+        input("Press Enter to continue...")
+        return None
 
     # Create trainer
     print("\nInitializing trainer...")
@@ -91,11 +80,10 @@ def handle_train(
     print(f"\nStarting training for {config.get('training.num_iterations')} iterations...")
     print(f"Run directory: {trainer.run_dir}")
     print(f"Checkpoint frequency: every {config.get('training.checkpoint_frequency')} iterations")
-    if use_parallel:
-        print(f"Parallel workers: {num_workers}")
+    print(f"Workers: {num_workers}")
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
 
-    results = trainer.train(use_parallel=use_parallel, num_workers=num_workers)
+    results = trainer.train(num_workers=num_workers)
 
     print("\n[OK] Training completed!")
     print(f"   Total iterations: {results.get('iterations', results.get('total_iterations'))}")
@@ -121,7 +109,9 @@ def handle_resume(config: Config, run_id: str, latest_iter: int) -> TrainingSess
         TrainingSession instance
     """
     print("\nResuming trainer...")
-    trainer = TrainingSession(config, run_id=run_id)
+    runs_dir = Path(config.get("training.runs_dir", "data/runs"))
+    run_dir = runs_dir / run_id
+    trainer = TrainingSession.resume(run_dir)
 
     print(f"\nResuming training from iteration {latest_iter}...")
     print(
@@ -129,7 +119,7 @@ def handle_resume(config: Config, run_id: str, latest_iter: int) -> TrainingSess
     )
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
 
-    results = trainer.train(resume=True)
+    results = trainer.train()
 
     print("\n[OK] Training completed!")
     print(f"   Total iterations: {results['total_iterations']}")

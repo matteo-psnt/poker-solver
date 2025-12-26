@@ -4,7 +4,7 @@ Training orchestration for MCCFR solver.
 Manages the complete training loop: solver creation, iteration execution,
 checkpointing, metrics tracking, and progress reporting.
 
-Supports both sequential and parallel (multiprocessing) training modes.
+Training uses parallel multiprocessing with hash-partitioned shared memory.
 """
 
 import concurrent.futures
@@ -16,7 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Union
 
-import numpy as np
 from tqdm import tqdm
 
 from src.training import components
@@ -33,7 +32,7 @@ class TrainingSession:
     Manages solver initialization, training loop, checkpointing,
     metrics tracking, and progress reporting.
 
-    Supports both sequential and parallel training modes.
+    Training uses parallel multiprocessing with hash-partitioned shared memory.
     """
 
     def __init__(self, config: Config, run_id: Optional[str] = None):
@@ -335,6 +334,9 @@ class TrainingSession:
 
         pool_start_time = time.time()
 
+        # Respect checkpoint_enabled config
+        checkpoint_enabled = self.config.get("storage.checkpoint_enabled", True)
+
         # Create shared array worker manager
         with SharedArrayWorkerManager(
             num_workers=num_workers,
@@ -345,7 +347,7 @@ class TrainingSession:
             base_seed=self.config.get("system.seed", 42) or 42,
             max_infosets=max_infosets,
             max_actions=max_actions,
-            checkpoint_dir=str(self.run_dir),
+            checkpoint_dir=str(self.run_dir) if checkpoint_enabled else None,
         ) as worker_manager:
             pool_init_time = time.time() - pool_start_time
 
@@ -457,168 +459,40 @@ class TrainingSession:
     def train(
         self,
         num_iterations: Optional[int] = None,
-        resume: bool = False,
-        use_parallel: bool = True,
         num_workers: Optional[int] = None,
         batch_size: Optional[int] = None,
     ) -> Dict:
         """
-        Run training loop.
+        Run parallel training using hash-partitioned infosets.
+
+        Training always uses parallel mode with SharedArrayStorage. For sequential
+        behavior, simply use num_workers=1.
 
         Args:
             num_iterations: Number of iterations (overrides config if provided)
-            resume: (DEPRECATED) Only adjusts loop bounds, does not load checkpoint state.
-                Use TrainingSession.resume() classmethod instead for proper checkpoint restoration.
-            use_parallel: Whether to use parallel training (default: True)
-            num_workers: Number of parallel workers (default: CPU count)
+            num_workers: Number of parallel workers (default: CPU count, use 1 for sequential)
             batch_size: Iterations per batch for parallel mode
 
         Returns:
-            Training results dictionary
+            Training results dictionary with:
+                - total_iterations: Total iterations completed
+                - final_infosets: Number of infosets discovered
+                - avg_utility: Average utility over training
+                - elapsed_time: Total training time in seconds
 
         Note:
-            For proper resume functionality that restores solver state from checkpoints,
-            use the TrainingSession.resume() classmethod instead of resume=True parameter.
-            Parallel training uses hash-partitioned infosets for high performance.
+            To resume from a checkpoint, use TrainingSession.resume() instead of creating
+            a new session. This ensures proper state restoration from disk.
         """
         # Get iteration count
         if num_iterations is None:
             num_iterations = int(self.config.get("training.num_iterations", 1000))
 
-        # Resume from snapshot if requested
-        if resume:
-            print(f"Resuming from run: {self.run_dir.name}")
-            start_iteration = self.run_tracker.metadata.get("iterations", 0)
-            if start_iteration > 0:
-                print(f"Continuing from iteration {start_iteration}")
-                num_iterations = max(num_iterations, start_iteration)
+        # Default to CPU count for num_workers
+        if num_workers is None:
+            num_workers = mp.cpu_count()
 
-        # Use parallel training if requested
-        if use_parallel:
-            if num_workers is None:
-                num_workers = mp.cpu_count()
-            return self._train_partitioned(num_iterations, num_workers, batch_size)
-
-        # Sequential training
-        checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)
-        log_freq = self.config.get("training.log_frequency", 10)
-        verbose = self.config.get("training.verbose", True)
-
-        start_iteration = self.run_tracker.metadata.get("iterations", 0)
-
-        # Initialize run tracker (creates directory and .run.json)
-        self.run_tracker.initialize()
-
-        # Track training time
-        training_start_time = time.time()
-
-        # Create infoset sampler for solver-quality metrics
-        def sample_infosets(n: int):
-            """Sample n random infosets from solver storage."""
-            if hasattr(self.solver.storage, "infosets"):
-                all_infosets = list(self.solver.storage.infosets.values())
-                if len(all_infosets) <= n:
-                    return all_infosets
-                indices = np.random.choice(len(all_infosets), size=n, replace=False)
-                return [all_infosets[i] for i in indices]
-            return []
-
-        # Training loop
-        if verbose:
-            iterator: Union[range, tqdm] = tqdm(
-                range(start_iteration, num_iterations),
-                desc="Training",
-                unit="iter",
-            )
-        else:
-            iterator = range(start_iteration, num_iterations)
-
-        try:
-            for i in iterator:
-                # Run one iteration
-                utility = self.solver.train_iteration()
-
-                # Log metrics with solver-quality indicators
-                self.metrics.log_iteration(
-                    iteration=i + 1,
-                    utility=utility,
-                    num_infosets=self.solver.num_infosets(),
-                    infoset_sampler=sample_infosets,
-                )
-
-                # Periodic logging
-                if (i + 1) % log_freq == 0 and verbose:
-                    summary = self.metrics.get_summary()
-                    if isinstance(iterator, tqdm):
-                        # Use compact summary for progress bar
-                        compact_summary = self.metrics.get_compact_summary()
-                        iterator.set_postfix_str(compact_summary)
-
-                # Periodic checkpointing (async, non-blocking)
-                if (i + 1) % checkpoint_freq == 0:
-                    self._async_checkpoint(i + 1, training_start_time)
-
-            # Wait for any pending background checkpoint
-            self._wait_for_checkpoint()
-
-            # Final checkpoint (synchronous)
-            elapsed_time = time.time() - training_start_time
-
-            # Update final stats
-            self.run_tracker.update(
-                iterations=num_iterations,
-                runtime_seconds=elapsed_time,
-                num_infosets=self.solver.num_infosets(),
-            )
-
-            # Save final checkpoint
-            self.storage.checkpoint(num_iterations)
-
-            # Mark run as completed
-            self.run_tracker.mark_completed()
-
-            # Print final summary
-            if verbose:
-                self.metrics.print_summary()
-
-            return {
-                "total_iterations": num_iterations,
-                "final_infosets": self.solver.num_infosets(),
-                "avg_utility": self.metrics.get_avg_utility(),
-                "elapsed_time": elapsed_time,
-            }
-
-        except KeyboardInterrupt:
-            # User interrupted - save progress before exiting
-            if verbose:
-                print("\n⚠️  Training interrupted by user")
-
-            # Wait for any pending background checkpoint
-            self._wait_for_checkpoint()
-
-            elapsed_time = time.time() - training_start_time
-            current_iter = i + 1 if "i" in locals() else start_iteration  # type: ignore
-
-            # Save progress (synchronous)
-            self.run_tracker.update(
-                iterations=current_iter,
-                runtime_seconds=elapsed_time,
-                num_infosets=self.solver.num_infosets(),
-            )
-            self.storage.checkpoint(current_iter)
-
-            if verbose:
-                print(f"✅ Progress saved at iteration {current_iter}")
-
-            raise
-
-        except Exception:
-            # Wait for any pending background checkpoint
-            self._wait_for_checkpoint()
-
-            # Mark run as failed on exception
-            self.run_tracker.mark_failed()
-            raise
+        return self._train_partitioned(num_iterations, num_workers, batch_size)
 
     def evaluate(
         self,
