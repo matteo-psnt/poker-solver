@@ -6,7 +6,8 @@ High-performance shared array architecture:
 - Workers attach to shared memory (no recreation)
 - Flat NumPy arrays as live data structure
 - Lock-free reads, owner-only writes
-- Cross-partition updates via queues
+- Ownership by stable hash (xxhash), not Python hash()
+- No global key synchronization - owners create, non-owners request
 """
 
 import multiprocessing as mp
@@ -28,8 +29,9 @@ class JobType(Enum):
     """Job types for parallel training."""
 
     RUN_ITERATIONS = "run_iterations"
-    SYNC_KEYS = "sync_keys"  # Sync key mappings across workers
+    EXCHANGE_IDS = "exchange_ids"  # Batched ID request/response between workers
     APPLY_UPDATES = "apply_updates"  # Apply cross-partition updates
+    COLLECT_KEYS = "collect_keys"  # Collect owned keys for checkpointing
     SHUTDOWN = "shutdown"
 
 
@@ -44,6 +46,8 @@ def _worker_loop(
     job_queue: mp.Queue,
     result_queue: mp.Queue,
     update_queues: List[mp.Queue],  # One queue per worker for cross-partition updates
+    id_request_queues: List[mp.Queue],  # One queue per worker for ID requests
+    id_response_queues: List[mp.Queue],  # One queue per worker for ID responses
     max_infosets: int,
     max_actions: int,
     checkpoint_dir: str | None = None,
@@ -51,11 +55,12 @@ def _worker_loop(
     """
     Worker process for parallel MCCFR training with shared array storage.
 
-    Workers:
-    - Attach to shared memory created by coordinator
-    - Own infosets where infoset_id % num_workers == worker_id
-    - Write directly to shared arrays for owned infosets
-    - Buffer cross-partition updates and send to owner via queue
+    OWNERSHIP MODEL:
+    - Ownership determined by stable hash: owner(key) = xxhash(key) % num_workers
+    - Only owner creates key→ID mappings
+    - Only owner writes to infoset's arrays
+    - Non-owners get view into UNKNOWN_ID region (zeros = uniform strategy)
+    - Non-owners can request IDs from owners (batched, async)
 
     Args:
         worker_id: This worker's ID (0 to num_workers-1)
@@ -68,6 +73,8 @@ def _worker_loop(
         job_queue: Queue to receive jobs from coordinator
         result_queue: Queue to return results to coordinator
         update_queues: Per-worker queues for cross-partition updates
+        id_request_queues: Per-worker queues for ID requests
+        id_response_queues: Per-worker queues for ID responses
         max_infosets: Maximum infosets in shared arrays
         max_actions: Maximum actions per infoset
         checkpoint_dir: Optional checkpoint directory
@@ -122,7 +129,7 @@ def _worker_loop(
         )
 
         print(
-            f"[Worker {worker_id}] Ready (attached to shared memory)",
+            f"[Worker {worker_id}] Ready (id_range=[{storage.id_range_start}, {storage.id_range_end}))",
             file=sys.stderr,
             flush=True,
         )
@@ -130,8 +137,16 @@ def _worker_loop(
         # Worker loop
         batch_count = 0
         while True:
-            # Check for cross-partition updates from other workers
-            _process_incoming_updates(worker_id, update_queues[worker_id], storage)
+            # Process incoming cross-partition updates
+            _process_incoming_updates(update_queues[worker_id], storage)
+
+            # Process incoming ID requests (respond to other workers)
+            _process_id_requests(
+                worker_id, id_request_queues[worker_id], id_response_queues, storage
+            )
+
+            # Process incoming ID responses (learn IDs from owners)
+            _process_id_responses(id_response_queues[worker_id], storage)
 
             try:
                 job = job_queue.get(timeout=0.1)
@@ -148,27 +163,58 @@ def _worker_loop(
                 )
                 break
 
-            elif job_type == JobType.SYNC_KEYS:
-                # Receive merged key mapping from coordinator
-                merged_keys = job.get("key_mapping", {})
-                storage.set_key_mapping(merged_keys)
+            elif job_type == JobType.EXCHANGE_IDS:
+                # Send pending ID requests to owners
+                pending_requests = storage.get_pending_id_requests()
+                for owner_id, keys in pending_requests.items():
+                    if keys and owner_id != worker_id:
+                        try:
+                            id_request_queues[owner_id].put(
+                                {"requester": worker_id, "keys": keys}, timeout=5.0
+                            )
+                        except queue.Full:
+                            pass
+                storage.clear_pending_id_requests()
+
+                # Process any incoming requests/responses
+                _process_id_requests(
+                    worker_id, id_request_queues[worker_id], id_response_queues, storage
+                )
+                _process_id_responses(id_response_queues[worker_id], storage)
 
                 result_queue.put(
                     {
                         "worker_id": worker_id,
-                        "type": "sync_keys_ack",
-                        "num_keys": len(merged_keys),
+                        "type": "exchange_ids_ack",
+                        "num_owned": storage.num_owned_infosets(),
                     }
                 )
 
             elif job_type == JobType.APPLY_UPDATES:
                 # Process any pending incoming updates
-                _process_incoming_updates(worker_id, update_queues[worker_id], storage)
+                _process_incoming_updates(update_queues[worker_id], storage)
 
                 result_queue.put(
                     {
                         "worker_id": worker_id,
                         "type": "apply_updates_ack",
+                    }
+                )
+
+            elif job_type == JobType.COLLECT_KEYS:
+                # Collect owned keys for coordinator checkpointing
+                owned_keys = dict(storage._owned_keys)
+                legal_actions_cache = dict(storage._legal_actions_cache)
+
+                result_queue.put(
+                    {
+                        "worker_id": worker_id,
+                        "type": "keys_collected",
+                        "owned_keys": owned_keys,
+                        "legal_actions_cache": legal_actions_cache,
+                        "id_range_start": storage.id_range_start,
+                        "id_range_end": storage.id_range_end,
+                        "next_local_id": storage.next_local_id,
                     }
                 )
 
@@ -197,9 +243,13 @@ def _worker_loop(
 
                 try:
                     for i in range(num_iterations):
-                        # Check for incoming updates periodically
+                        # Periodically process incoming messages
                         if i % 50 == 0:
-                            _process_incoming_updates(worker_id, update_queues[worker_id], storage)
+                            _process_incoming_updates(update_queues[worker_id], storage)
+                            _process_id_requests(
+                                worker_id, id_request_queues[worker_id], id_response_queues, storage
+                            )
+                            _process_id_responses(id_response_queues[worker_id], storage)
 
                         util = solver.train_iteration()
                         utilities.append(util)
@@ -219,7 +269,9 @@ def _worker_loop(
                     # Send pending cross-partition updates to owners
                     pending = storage.get_pending_updates()
                     if pending:
-                        _send_updates_to_owners(worker_id, num_workers, pending, update_queues)
+                        _send_updates_to_owners(
+                            worker_id, num_workers, pending, update_queues, storage
+                        )
                         storage.clear_pending_updates()
 
                     print(
@@ -237,7 +289,6 @@ def _worker_loop(
                             "type": "iterations_done",
                             "utilities": utilities,
                             "num_owned_infosets": storage.num_owned_infosets(),
-                            "new_keys": storage.get_key_mapping(),  # For key sync
                             "iter_time": iter_time,
                         }
                     )
@@ -266,6 +317,8 @@ def _worker_loop(
         print(f"[Worker {worker_id}] Exiting cleanly", file=sys.stderr, flush=True)
 
     except Exception as e:
+        import sys
+
         print(f"[Worker {worker_id}] Fatal error: {e}", file=sys.stderr, flush=True)
         traceback.print_exc()
         try:
@@ -274,9 +327,7 @@ def _worker_loop(
             pass
 
 
-def _process_incoming_updates(
-    worker_id: int, update_queue: mp.Queue, storage: "SharedArrayStorage"
-) -> int:
+def _process_incoming_updates(update_queue: mp.Queue, storage: "SharedArrayStorage") -> int:
     """
     Process incoming cross-partition updates from other workers.
 
@@ -293,16 +344,65 @@ def _process_incoming_updates(
     return count
 
 
+def _process_id_requests(
+    worker_id: int,
+    request_queue: mp.Queue,
+    response_queues: List[mp.Queue],
+    storage: "SharedArrayStorage",
+) -> int:
+    """
+    Process incoming ID requests and send responses.
+
+    Only responds for keys we own and have allocated.
+    """
+    count = 0
+    while True:
+        try:
+            request = request_queue.get_nowait()
+            requester = request["requester"]
+            keys = request["keys"]
+
+            # Respond with IDs for keys we own
+            responses = storage.respond_to_id_requests(keys)
+
+            if responses:
+                try:
+                    response_queues[requester].put(responses, timeout=1.0)
+                    count += len(responses)
+                except queue.Full:
+                    pass
+
+        except queue.Empty:
+            break
+    return count
+
+
+def _process_id_responses(response_queue: mp.Queue, storage: "SharedArrayStorage") -> int:
+    """
+    Process incoming ID responses and update remote key cache.
+    """
+    count = 0
+    while True:
+        try:
+            responses = response_queue.get_nowait()
+            storage.receive_id_responses(responses)
+            count += len(responses)
+        except queue.Empty:
+            break
+    return count
+
+
 def _send_updates_to_owners(
     sender_id: int,
     num_workers: int,
     updates: Dict[int, Tuple[np.ndarray, np.ndarray]],
     update_queues: List[mp.Queue],
+    storage: "SharedArrayStorage",
 ) -> None:
     """
     Send cross-partition updates to their respective owners.
 
-    Groups updates by owner and sends to appropriate queue.
+    Ownership is determined by ID range, not modulo.
     """
     # Group updates by owner
     updates_by_owner: Dict[int, Dict[int, Tuple[np.ndarray, np.ndarray]]] = {
@@ -310,9 +410,21 @@ def _send_updates_to_owners(
     }
 
     for infoset_id, (regret_delta, strategy_delta) in updates.items():
-        owner = infoset_id % num_workers
-        if owner != sender_id:  # Don't send to self
-            updates_by_owner[owner][infoset_id] = (regret_delta, strategy_delta)
+        # Determine owner by ID range
+        for owner_id in range(num_workers):
+            if storage.id_range_start <= infoset_id < storage.id_range_end:
+                # This is our ID range - we own it (shouldn't happen)
+                continue
+            # Check if infoset_id is in owner_id's range
+            # Since we don't have other workers' ranges, use the formula
+            usable_slots = storage.max_infosets - 1
+            slots_per_worker = usable_slots // num_workers
+            owner_start = 1 + owner_id * slots_per_worker
+            owner_end = 1 + (owner_id + 1) * slots_per_worker
+            if owner_start <= infoset_id < owner_end:
+                if owner_id != sender_id:
+                    updates_by_owner[owner_id][infoset_id] = (regret_delta, strategy_delta)
+                break
 
     # Send to each owner's queue
     for owner_id, owner_updates in updates_by_owner.items():
@@ -330,10 +442,12 @@ class SharedArrayWorkerManager:
     """
     Manages parallel training with shared array storage.
 
-    Architecture:
-    - Coordinator (this class) creates shared memory once at startup
+    ARCHITECTURE:
+    - Coordinator creates shared memory once at startup
     - Workers attach to shared memory
-    - Data flows directly through shared arrays (no serialization)
+    - Ownership by stable hash (xxhash), not Python hash()
+    - No global key synchronization
+    - ID requests/responses flow directly between workers (batched)
     - Cross-partition updates via per-worker queues
     """
 
@@ -399,14 +513,15 @@ class SharedArrayWorkerManager:
         self.job_queue: mp.Queue = mp.Queue()
         self.result_queue: mp.Queue = mp.Queue()
 
-        # Per-worker update queues for cross-partition updates
+        # Per-worker queues for cross-partition updates
         self.update_queues: List[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
+
+        # Per-worker queues for ID requests/responses
+        self.id_request_queues: List[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
+        self.id_response_queues: List[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
 
         # Worker processes
         self.processes: List[mp.Process] = []
-
-        # Merged key mapping (coordinator maintains authoritative copy)
-        self._merged_keys: Dict = {}
 
         # Start workers
         self._start_workers()
@@ -429,6 +544,8 @@ class SharedArrayWorkerManager:
                     self.job_queue,
                     self.result_queue,
                     self.update_queues,
+                    self.id_request_queues,
+                    self.id_response_queues,
                     self.max_infosets,
                     self.max_actions,
                     self.checkpoint_dir,
@@ -441,43 +558,46 @@ class SharedArrayWorkerManager:
         time.sleep(1.0)
         print(f"[Coordinator] All {self.num_workers} workers started", flush=True)
 
-    def sync_keys(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
+    def exchange_ids(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
         """
-        Synchronize key mappings across all workers.
+        Trigger batched ID exchange between workers.
 
-        Collects new keys discovered by each worker and broadcasts
-        the merged mapping to all workers.
+        Workers send pending ID requests to owners and process responses.
+        This is owner-to-requester communication, not global broadcast.
 
         Returns:
-            Dict with sync stats
+            Dict with exchange stats
         """
         if verbose:
-            print("[Coordinator] Syncing key mappings...", flush=True)
+            print("[Coordinator] Exchanging IDs between workers...", flush=True)
 
-        # Broadcast merged keys to all workers
+        # Tell all workers to exchange IDs
         for _ in range(self.num_workers):
-            self.job_queue.put({"type": JobType.SYNC_KEYS.value, "key_mapping": self._merged_keys})
+            self.job_queue.put({"type": JobType.EXCHANGE_IDS.value})
 
         # Wait for acks
         acks = []
+        total_owned = 0
         for _ in range(self.num_workers):
             try:
                 result = self.result_queue.get(timeout=timeout)
-                if result.get("type") == "sync_keys_ack":
+                if result.get("type") == "exchange_ids_ack":
                     acks.append(result)
+                    total_owned += result.get("num_owned", 0)
             except queue.Empty:
-                raise RuntimeError("Timeout waiting for key sync acks")
+                raise RuntimeError("Timeout waiting for ID exchange acks")
 
         if verbose:
-            print(f"[Coordinator] Keys synced: {len(self._merged_keys)} total", flush=True)
+            print(
+                f"[Coordinator] ID exchange complete, {total_owned} total owned infosets",
+                flush=True,
+            )
 
-        return {"num_keys": len(self._merged_keys), "acks": acks}
+        return {"total_owned": total_owned, "acks": acks}
 
     def apply_pending_updates(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
         """
         Trigger workers to apply any pending cross-partition updates.
-
-        This ensures all buffered updates are processed.
 
         Returns:
             Dict with apply stats
@@ -513,8 +633,12 @@ class SharedArrayWorkerManager:
         """
         Run a batch of iterations across all workers.
 
-        Workers write directly to shared arrays for owned infosets.
-        Cross-partition updates are sent via queues.
+        Workers:
+        - Write directly to shared arrays for owned infosets
+        - Get UNKNOWN_ID (zeros) for non-owned undiscovered keys
+        - Send cross-partition updates via queues
+
+        No global key synchronization - ownership determined by stable hash.
 
         Args:
             iterations_per_worker: Iterations per worker
@@ -556,7 +680,7 @@ class SharedArrayWorkerManager:
         all_utilities = []
         results = []
         errors = []
-        new_keys_batch = []
+        total_owned = 0
 
         for _ in range(active_workers):
             try:
@@ -571,10 +695,7 @@ class SharedArrayWorkerManager:
                 elif result.get("type") == "iterations_done":
                     results.append(result)
                     all_utilities.extend(result.get("utilities", []))
-
-                    # Collect new keys for merging
-                    if "new_keys" in result:
-                        new_keys_batch.append(result["new_keys"])
+                    total_owned += result.get("num_owned_infosets", 0)
 
                     if verbose:
                         print(
@@ -589,13 +710,6 @@ class SharedArrayWorkerManager:
                     f"Timeout waiting for workers ({len(results)}/{active_workers} received)"
                 )
 
-        # Merge new keys from all workers
-        for keys in new_keys_batch:
-            self._merged_keys.update(keys)
-
-        # Update coordinator's storage key mapping
-        self.storage.set_key_mapping(self._merged_keys)
-
         batch_time = time.time() - batch_start
         total_iters = sum(iterations_per_worker)
 
@@ -603,7 +717,7 @@ class SharedArrayWorkerManager:
             print(
                 f"[Coordinator] Batch {batch_id} complete in {batch_time:.1f}s "
                 f"({total_iters / batch_time:.1f} iter/s), "
-                f"{self.storage.num_infosets()} total infosets",
+                f"{total_owned} total owned infosets",
                 flush=True,
             )
 
@@ -615,11 +729,64 @@ class SharedArrayWorkerManager:
             "batch_time": batch_time,
             "total_iterations": total_iters,
             "worker_results": results,
-            "num_infosets": self.storage.num_infosets(),
+            "num_infosets": total_owned,
+        }
+
+    def collect_keys(self, timeout: float = 60.0) -> Dict:
+        """
+        Collect owned keys from all workers for checkpointing.
+
+        Workers send their key→ID mappings to coordinator so the
+        coordinator can save a complete checkpoint.
+
+        Returns:
+            Dict with aggregated key mappings
+        """
+        # Tell all workers to send their keys
+        for _ in range(self.num_workers):
+            self.job_queue.put({"type": JobType.COLLECT_KEYS.value})
+
+        # Collect responses
+        all_owned_keys: Dict = {}
+        all_legal_actions: Dict = {}
+
+        for _ in range(self.num_workers):
+            try:
+                result = self.result_queue.get(timeout=timeout)
+                if result.get("type") == "keys_collected":
+                    owned_keys = result["owned_keys"]
+                    legal_actions = result["legal_actions_cache"]
+
+                    # Merge into coordinator's mappings
+                    all_owned_keys.update(owned_keys)
+                    all_legal_actions.update(legal_actions)
+            except queue.Empty:
+                raise RuntimeError("Timeout waiting for key collection")
+
+        return {
+            "owned_keys": all_owned_keys,
+            "legal_actions_cache": all_legal_actions,
         }
 
     def checkpoint(self, iteration: int):
-        """Save checkpoint to disk (coordinator writes shared arrays)."""
+        """
+        Save checkpoint to disk.
+
+        Collects keys from all workers first, then saves the complete state.
+        """
+        # Collect keys from all workers
+        collected = self.collect_keys()
+
+        # Merge into coordinator's storage for checkpointing
+        self.storage._owned_keys = collected["owned_keys"]
+        self.storage._legal_actions_cache = collected["legal_actions_cache"]
+
+        # Update next_local_id to reflect total infosets
+        if self.storage._owned_keys:
+            max_id = max(self.storage._owned_keys.values())
+            self.storage.next_local_id = max_id + 1
+
+        # Now checkpoint with complete key mappings
         self.storage.checkpoint(iteration)
 
     def get_storage(self) -> "SharedArrayStorage":
