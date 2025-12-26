@@ -379,6 +379,12 @@ class SharedArrayStorage(Storage):
     - Reads are lock-free and may be stale (acceptable for MCCFR)
     - Writes are owner-only (no locks needed)
     - Cross-partition updates are buffered and routed to owners
+
+    DYNAMIC RESIZING:
+    - Storage automatically expands when reaching capacity threshold (85%)
+    - Growth factor of 2x ensures amortized O(1) allocations
+    - Stop-the-world resize: coordinator pauses workers, creates new arrays, copies data
+    - Resized capacity persists across checkpoints
     """
 
     # Shared memory names (macOS limit: ~30 chars)
@@ -388,6 +394,10 @@ class SharedArrayStorage(Storage):
 
     # Reserved ID for unknown infosets (non-owners reading undiscovered keys)
     UNKNOWN_ID = 0
+
+    # Dynamic resizing constants
+    CAPACITY_THRESHOLD = 0.85  # Trigger resize at 85% capacity
+    GROWTH_FACTOR = 2.0  # Double capacity on resize
 
     def __init__(
         self,
@@ -418,6 +428,10 @@ class SharedArrayStorage(Storage):
         self.max_actions = max_actions
         self.is_coordinator = is_coordinator
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
+        self.base_max_infosets = max_infosets
+        self.base_slots_per_worker = (max_infosets - 1) // num_workers
+        self._extra_regions: list[tuple[int, int, int, int]] = []
+        self._extra_allocations: list[dict[str, int]] = []
 
         # =====================================================================
         # Per-worker ID allocation (race-free)
@@ -530,7 +544,38 @@ class SharedArrayStorage(Storage):
         """
         if infoset_id == self.UNKNOWN_ID:
             return False  # Reserved region has no owner
-        return self.id_range_start <= infoset_id < self.id_range_end
+        if self.id_range_start <= infoset_id < self.id_range_end:
+            return True
+        return any(alloc["start"] <= infoset_id < alloc["end"] for alloc in self._extra_allocations)
+
+    def get_owner_by_id(self, infoset_id: int) -> Optional[int]:
+        """
+        Determine owner worker for a given infoset ID.
+
+        Uses initial base ranges plus any appended resize regions.
+        """
+        if infoset_id == self.UNKNOWN_ID:
+            return None
+
+        # Base ranges (fixed at initialization)
+        base_end = 1 + self.base_slots_per_worker * self.num_workers
+        if 1 <= infoset_id < base_end:
+            return (infoset_id - 1) // self.base_slots_per_worker
+
+        # Extra regions (appended on resize)
+        for extra_start, extra_total, base, remainder in self._extra_regions:
+            extra_end = extra_start + extra_total
+            if extra_start <= infoset_id < extra_end:
+                offset = infoset_id - extra_start
+                # Distribute remainder to lower worker IDs
+                if base == 0:
+                    return offset if offset < remainder else None
+                threshold = (base + 1) * remainder
+                if offset < threshold:
+                    return offset // (base + 1)
+                return remainder + (offset - threshold) // base
+
+        return None
 
     # =========================================================================
     # Shared Memory Management
@@ -714,17 +759,207 @@ class SharedArrayStorage(Storage):
             Allocated infoset ID
 
         Raises:
-            RuntimeError if worker's ID range is exhausted
+            RuntimeError if worker's ID range is exhausted and resize not possible
         """
-        if self.next_local_id >= self.id_range_end:
+        if self.next_local_id < self.id_range_end:
+            infoset_id = self.next_local_id
+            self.next_local_id += 1
+            return infoset_id
+
+        for alloc in self._extra_allocations:
+            if alloc["next"] < alloc["end"]:
+                infoset_id = alloc["next"]
+                alloc["next"] += 1
+                return infoset_id
+
+        raise RuntimeError(
+            f"Worker {self.worker_id} exhausted ID ranges "
+            f"[{self.id_range_start}, {self.id_range_end}) and extras. "
+            f"Storage resize required - coordinator should trigger resize."
+        )
+
+    # =========================================================================
+    # Capacity Monitoring and Dynamic Resizing
+    # =========================================================================
+
+    def get_capacity_usage(self) -> float:
+        """
+        Get fraction of this worker's ID range that is used.
+
+        Returns:
+            Float between 0.0 and 1.0 representing capacity usage
+        """
+        base_size = self.id_range_end - self.id_range_start
+        extra_size = sum(alloc["end"] - alloc["start"] for alloc in self._extra_allocations)
+        total_size = base_size + extra_size
+        if total_size == 0:
+            return 1.0
+        base_used = max(0, min(self.next_local_id, self.id_range_end) - self.id_range_start)
+        extra_used = sum(alloc["next"] - alloc["start"] for alloc in self._extra_allocations)
+        return (base_used + extra_used) / total_size
+
+    def needs_resize(self) -> bool:
+        """
+        Check if storage needs to be resized.
+
+        Returns:
+            True if capacity usage >= CAPACITY_THRESHOLD (85%)
+        """
+        return self.get_capacity_usage() >= self.CAPACITY_THRESHOLD
+
+    def get_resize_stats(self) -> Dict[str, int]:
+        """
+        Get statistics for resize decision.
+
+        Returns:
+            Dict with current capacity info
+        """
+        range_size = self.id_range_end - self.id_range_start
+        extra_size = sum(alloc["end"] - alloc["start"] for alloc in self._extra_allocations)
+        used = max(0, min(self.next_local_id, self.id_range_end) - self.id_range_start)
+        extra_used = sum(alloc["next"] - alloc["start"] for alloc in self._extra_allocations)
+        return {
+            "worker_id": self.worker_id,
+            "id_range_start": self.id_range_start,
+            "id_range_end": self.id_range_end,
+            "next_local_id": self.next_local_id,
+            "range_size": range_size,
+            "extra_size": extra_size,
+            "used": used + extra_used,
+            "capacity_usage": self.get_capacity_usage(),  # type: ignore
+            "max_infosets": self.max_infosets,
+        }
+
+    def resize(self, new_max_infosets: int) -> None:
+        """
+        Resize storage to new capacity (coordinator only).
+
+        This is a stop-the-world operation:
+        1. Create new larger shared memory segments
+        2. Copy existing data to new arrays
+        3. Update ID ranges for all workers
+        4. Clean up old shared memory
+
+        Args:
+            new_max_infosets: New maximum number of infosets
+
+        Raises:
+            RuntimeError: If called by non-coordinator or new size is smaller
+        """
+        if not self.is_coordinator:
+            raise RuntimeError("Only coordinator can resize storage")
+
+        if new_max_infosets <= self.max_infosets:
             raise RuntimeError(
-                f"Worker {self.worker_id} exhausted ID range "
-                f"[{self.id_range_start}, {self.id_range_end}). "
-                f"Increase max_infosets or reduce worker count."
+                f"New size {new_max_infosets} must be larger than current {self.max_infosets}"
             )
-        infoset_id = self.next_local_id
-        self.next_local_id += 1
-        return infoset_id
+
+        old_max_infosets = self.max_infosets
+        old_regrets = self.shared_regrets
+        old_strategy = self.shared_strategy_sum
+        old_action_counts = self.shared_action_counts
+
+        logger.info(
+            f"Resizing storage: {old_max_infosets:,} -> {new_max_infosets:,} infosets "
+            f"(growth factor: {new_max_infosets / old_max_infosets:.1f}x)"
+        )
+
+        # Store old shared memory handles for cleanup
+        old_shm_regrets = self._shm_regrets
+        old_shm_strategy = self._shm_strategy
+        old_shm_actions = self._shm_actions
+
+        # Update max_infosets before creating new shared memory
+        old_max_infosets = self.max_infosets
+        self.max_infosets = new_max_infosets
+
+        # Create new session_id for resized shared memory
+        # Append a counter to ensure unique names
+        import uuid
+
+        self.session_id = uuid.uuid4().hex[:8]
+
+        # Create new shared memory segments
+        self._create_shared_memory()
+
+        # Copy existing data to new arrays
+        # Note: Only copy up to old_max_infosets rows
+        self.shared_regrets[:old_max_infosets, :] = old_regrets[:, :]
+        self.shared_strategy_sum[:old_max_infosets, :] = old_strategy[:, :]
+        self.shared_action_counts[:old_max_infosets] = old_action_counts[:]
+
+        # Append a new extra region for allocations to avoid overlapping ranges.
+        self._add_extra_region(old_max_infosets, new_max_infosets)
+
+        # Clean up old shared memory
+        try:
+            old_shm_regrets.close()
+            old_shm_regrets.unlink()
+            old_shm_strategy.close()
+            old_shm_strategy.unlink()
+            old_shm_actions.close()
+            old_shm_actions.unlink()
+        except Exception as e:
+            logger.warning(f"Error cleaning up old shared memory: {e}")
+
+        logger.info(
+            f"Resize complete: new capacity {new_max_infosets:,}, new session_id={self.session_id}"
+        )
+
+    def reattach_after_resize(
+        self,
+        new_session_id: str,
+        new_max_infosets: int,
+        preserved_keys: Dict["InfoSetKey", int],
+        preserved_next_id: int,
+    ) -> None:
+        """
+        Reattach to resized shared memory (worker only).
+
+        Called by workers after coordinator has resized storage.
+
+        IMPORTANT: Data positions (IDs) are preserved during resize.
+        The data is copied to the same positions in the new larger arrays.
+        id_range_start stays the same, only id_range_end is extended.
+
+        Args:
+            new_session_id: New session ID for shared memory names
+            new_max_infosets: New maximum infosets capacity
+            preserved_keys: Worker's owned keys to preserve
+            preserved_next_id: Worker's next_local_id to restore (absolute position)
+        """
+        # Close old shared memory handles
+        if self._shm_regrets:
+            self._shm_regrets.close()
+        if self._shm_strategy:
+            self._shm_strategy.close()
+        if self._shm_actions:
+            self._shm_actions.close()
+
+        old_max_infosets = self.max_infosets
+
+        # Update session and capacity
+        self.session_id = new_session_id
+        self.max_infosets = new_max_infosets
+
+        # next_local_id stays at same absolute position - data is not moved
+        self.next_local_id = preserved_next_id
+
+        # Restore owned keys - IDs point to same absolute positions
+        self._owned_keys = preserved_keys
+
+        # Attach to new shared memory
+        self._attach_shared_memory()
+
+        # Append a new extra region for allocations
+        self._add_extra_region(old_max_infosets, new_max_infosets)
+
+        logger.info(
+            f"Worker {self.worker_id} reattached after resize: "
+            f"session={new_session_id}, max_infosets={new_max_infosets:,}, "
+            f"id_range=[{self.id_range_start}, {self.id_range_end}), "
+            f"next_id={self.next_local_id}"
+        )
 
     def _create_infoset_view(
         self, infoset_id: int, key: InfoSetKey, legal_actions: List[Action]
@@ -765,6 +1000,28 @@ class SharedArrayStorage(Storage):
 
         return infoset
 
+    def _add_extra_region(self, extra_start: int, extra_end: int) -> None:
+        """
+        Register a new resize region and allocate this worker's slice.
+        """
+        total = extra_end - extra_start
+        if total <= 0:
+            return
+
+        base = total // self.num_workers
+        remainder = total % self.num_workers
+        self._extra_regions.append((extra_start, total, base, remainder))
+
+        if base == 0 and self.worker_id >= remainder:
+            return
+
+        start = extra_start + self.worker_id * base + min(self.worker_id, remainder)
+        end = start + base + (1 if self.worker_id < remainder else 0)
+        if start >= end:
+            return
+
+        self._extra_allocations.append({"start": start, "end": end, "next": start})
+
     def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
         """Get existing infoset or None."""
         owner = self.get_owner(key)
@@ -786,7 +1043,9 @@ class SharedArrayStorage(Storage):
 
     def num_infosets(self) -> int:
         """Get total number of infosets allocated by this worker."""
-        return self.next_local_id - self.id_range_start
+        base_used = max(0, min(self.next_local_id, self.id_range_end) - self.id_range_start)
+        extra_used = sum(alloc["next"] - alloc["start"] for alloc in self._extra_allocations)
+        return base_used + extra_used
 
     def num_owned_infosets(self) -> int:
         """Get number of infosets owned by this worker."""
@@ -928,6 +1187,7 @@ class SharedArrayStorage(Storage):
                     "owned_keys": dict(self._owned_keys),
                     "num_workers": self.num_workers,
                     "max_id": max_id,
+                    "max_infosets": self.max_infosets,  # Persist resized capacity
                 },
                 f,
             )
@@ -956,7 +1216,56 @@ class SharedArrayStorage(Storage):
                 compression_opts=4,
             )
 
-        logger.info(f"Checkpoint saved: {num_keys} infosets at iteration {iteration}")
+        # Save action signatures (action type and amount for each infoset)
+        # This allows reconstructing actual Action objects on load
+        action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
+        action_sigs = {}
+        for infoset_id, actions in self._legal_actions_cache.items():
+            # Store (action_type_name, amount) tuples
+            # Use .name instead of .value for readability and enum reordering safety
+            action_sigs[infoset_id] = [(action.type.name, action.amount) for action in actions]
+
+        with open(action_sigs_file, "wb") as f:
+            pickle.dump(action_sigs, f)
+
+        # Validate before declaring checkpoint done (fail fast on corruption)
+        _validate_action_signatures(
+            self.shared_action_counts[:max_id],
+            action_sigs,
+            f"SharedArrayStorage.checkpoint(iter={iteration})",
+        )
+
+        logger.info(
+            f"Checkpoint saved: {num_keys} infosets at iteration {iteration}, "
+            f"{len(action_sigs)} action signatures"
+        )
+
+    @staticmethod
+    def get_checkpoint_info(checkpoint_dir: Path) -> Optional[Dict]:
+        """
+        Get information about a checkpoint without loading it.
+
+        Useful for determining max_infosets before creating storage.
+
+        Args:
+            checkpoint_dir: Directory containing checkpoint files
+
+        Returns:
+            Dict with checkpoint info, or None if no valid checkpoint
+        """
+        key_mapping_file = checkpoint_dir / "key_mapping.pkl"
+        if not key_mapping_file.exists():
+            return None
+
+        with open(key_mapping_file, "rb") as f:
+            mapping_data = pickle.load(f)
+
+        return {
+            "num_infosets": len(mapping_data.get("owned_keys", {})),
+            "max_infosets": mapping_data.get("max_infosets"),  # May be None for old checkpoints
+            "num_workers": mapping_data.get("num_workers"),
+            "max_id": mapping_data.get("max_id"),
+        }
 
     def load_checkpoint(self) -> bool:
         """
@@ -983,6 +1292,14 @@ class SharedArrayStorage(Storage):
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
             saved_owned_keys = mapping_data["owned_keys"]
+            saved_max_infosets = mapping_data.get("max_infosets")
+
+            # Log if checkpoint was from a resized storage
+            if saved_max_infosets and saved_max_infosets != self.max_infosets:
+                logger.info(
+                    f"Checkpoint max_infosets ({saved_max_infosets:,}) differs from "
+                    f"current ({self.max_infosets:,})"
+                )
 
         with h5py.File(regrets_file, "r") as h5_f:
             saved_regrets = h5_f["regrets"][:]
