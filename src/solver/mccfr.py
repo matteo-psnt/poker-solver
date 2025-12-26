@@ -280,9 +280,6 @@ class MCCFRSolver(BaseSolver):
                 infoset.reach_count += 1
                 infoset.cumulative_utility += node_utility
 
-                # Mark infoset as dirty since we modified regrets and strategy_sum
-                self.storage.mark_dirty(infoset_key)
-
             return node_utility
 
         else:
@@ -440,9 +437,6 @@ class MCCFRSolver(BaseSolver):
 
             infoset.reach_count += 1
             infoset.cumulative_utility += sampled_utility
-
-            # Mark infoset as dirty since we modified regrets and strategy_sum
-            self.storage.mark_dirty(infoset_key)
 
         return sampled_utility
 

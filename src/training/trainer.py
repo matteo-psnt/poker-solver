@@ -14,7 +14,7 @@ import pickle
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from tqdm import tqdm
 
@@ -87,6 +87,13 @@ class TrainingSession:
             # Don't create run metadata if initialization fails
             self.run_tracker.mark_failed(cleanup_if_empty=True)
             raise
+
+    @property
+    def verbose(self) -> bool:
+        """Get verbose flag from config (cached for performance)."""
+        if not hasattr(self, "_verbose_cache"):
+            self._verbose_cache = self.config.get("training.verbose", True)
+        return self._verbose_cache
 
     @classmethod
     def resume(
@@ -208,7 +215,7 @@ class TrainingSession:
             try:
                 # Non-blocking check
                 self._pending_checkpoint.result(timeout=0.1)
-                if self.config.get("training.verbose", True):
+                if self.verbose:
                     print("[Master] Previous checkpoint completed", flush=True)
             except concurrent.futures.TimeoutError:
                 # Still running, will wait before next checkpoint
@@ -218,7 +225,7 @@ class TrainingSession:
         self._pending_checkpoint = self._checkpoint_executor.submit(
             self._checkpoint_with_timing, iteration, training_start_time
         )
-        if self.config.get("training.verbose", True):
+        if self.verbose:
             print("[Master] Checkpoint started in background (non-blocking)...", flush=True)
 
     def _checkpoint_with_timing(self, iteration: int, training_start_time: float):
@@ -241,18 +248,18 @@ class TrainingSession:
         )
         self.storage.checkpoint(iteration)
         checkpoint_time = time.time() - start
-        if self.config.get("training.verbose", True):
+        if self.verbose:
             print(f"[Background] Checkpoint saved in {checkpoint_time:.2f}s", flush=True)
         return checkpoint_time
 
     def _wait_for_checkpoint(self):
         """Wait for pending checkpoint to complete (called at shutdown)."""
         if self._pending_checkpoint is not None:
-            if self.config.get("training.verbose", True):
+            if self.verbose:
                 print("[Master] Waiting for background checkpoint to complete...", flush=True)
             try:
                 elapsed = self._pending_checkpoint.result()  # Block until done
-                if self.config.get("training.verbose", True):
+                if self.verbose:
                     print(f"[Master] Background checkpoint completed ({elapsed:.2f}s)", flush=True)
             except Exception as e:
                 print(f"[Master] Warning: Background checkpoint failed: {e}", flush=True)
@@ -267,6 +274,161 @@ class TrainingSession:
     def __del__(self):
         """Cleanup on deletion."""
         self._shutdown_checkpoint_executor()
+
+    def _get_training_config(self, num_workers: int, batch_size: Optional[int]) -> Dict[str, Any]:
+        """Parse training configuration with defaults."""
+        if batch_size is None:
+            iterations_per_worker_multiplier = int(
+                self.config.get("training.iterations_per_worker", 100)
+            )
+            if not iterations_per_worker_multiplier:
+                iterations_per_worker_multiplier = 100
+            batch_size = iterations_per_worker_multiplier * num_workers
+
+        return {
+            "batch_size": batch_size,
+            "checkpoint_freq": self.config.get("training.checkpoint_frequency", 100),
+            "verbose": self.verbose,
+            "max_infosets": self.config.get("storage.max_infosets", 2_000_000),
+            "max_actions": self.config.get("storage.max_actions", 10),
+            "checkpoint_enabled": self.config.get("storage.checkpoint_enabled", True),
+        }
+
+    def _print_training_header(
+        self,
+        num_workers: int,
+        num_iterations: int,
+        batch_size: int,
+        max_infosets: int,
+        max_actions: int,
+    ) -> None:
+        """Display training configuration header."""
+        print("\n🚀 Shared Array Parallel Training")
+        print(f"   Workers: {num_workers}")
+        print(f"   Iterations: {num_iterations}")
+        print(f"   Batch size: {batch_size}")
+        print(f"   Max infosets: {max_infosets:,}")
+        print(f"   Max actions: {max_actions}")
+        print("   Mode: Live shared memory arrays (no serialization)")
+
+    def _run_training_loop(
+        self,
+        worker_manager,
+        num_iterations: int,
+        num_workers: int,
+        batch_size: int,
+        checkpoint_freq: int,
+        verbose: bool,
+        training_start_time: float,
+    ) -> tuple[int, int]:
+        """
+        Execute the main training loop with batching and checkpointing.
+
+        Returns:
+            Tuple of (completed_iterations, total_infosets)
+        """
+        completed_iterations = 0
+        total_infosets = 0
+
+        # Progress tracking
+        num_batches = (num_iterations + batch_size - 1) // batch_size
+        if verbose:
+            batch_iterator: Union[range, tqdm] = tqdm(
+                range(num_batches),
+                desc="Training batches",
+                unit="batch",
+            )
+        else:
+            batch_iterator = range(num_batches)
+
+        try:
+            for batch_idx in batch_iterator:
+                # Determine iterations for this batch
+                remaining = num_iterations - completed_iterations
+                current_batch_size = min(batch_size, remaining)
+
+                # Split work among workers
+                iters_per_worker_base = current_batch_size // num_workers
+                extra_iters = current_batch_size % num_workers
+                iterations_per_worker = [
+                    iters_per_worker_base + (1 if i < extra_iters else 0)
+                    for i in range(num_workers)
+                ]
+
+                # Run batch (data flows directly through shared arrays)
+                batch_result = worker_manager.run_batch(
+                    iterations_per_worker=iterations_per_worker,
+                    batch_id=batch_idx,
+                    start_iteration=completed_iterations,
+                    verbose=verbose,
+                )
+
+                batch_utilities = batch_result["utilities"]
+                completed_iterations += len(batch_utilities)
+                total_infosets = batch_result.get("num_infosets", 0)
+
+                # Exchange IDs and apply updates between batches
+                # (owner-to-requester, not global broadcast)
+                if batch_idx < num_batches - 1:
+                    worker_manager.exchange_ids(verbose=verbose)
+                    worker_manager.apply_pending_updates(verbose=verbose)
+
+                for i, util in enumerate(batch_utilities):
+                    iter_num = completed_iterations - len(batch_utilities) + i + 1
+                    self.metrics.log_iteration(
+                        iteration=iter_num,
+                        utility=util,
+                        num_infosets=total_infosets,
+                        infoset_sampler=None,
+                    )
+
+                # Update progress bar
+                if verbose and isinstance(batch_iterator, tqdm):
+                    compact_summary = self.metrics.get_compact_summary()
+                    batch_iterator.set_postfix_str(
+                        f"iter={completed_iterations} infosets={total_infosets} | {compact_summary}"
+                    )
+
+                # Checkpoint if needed
+                if completed_iterations % checkpoint_freq < batch_size:
+                    elapsed = time.time() - training_start_time
+                    self.run_tracker.update(
+                        iterations=completed_iterations,
+                        runtime_seconds=elapsed,
+                        num_infosets=total_infosets,
+                    )
+                    worker_manager.checkpoint(completed_iterations)
+                    if verbose:
+                        print(f"[Coordinator] Checkpoint saved at iteration {completed_iterations}")
+
+        except KeyboardInterrupt:
+            if verbose:
+                print("\n⚠️  Training interrupted by user")
+
+        return completed_iterations, total_infosets
+
+    def _finalize_training(
+        self,
+        completed_iterations: int,
+        total_infosets: int,
+        elapsed_time: float,
+        verbose: bool,
+    ) -> None:
+        """Update trackers and print final training summary."""
+        self.run_tracker.update(
+            iterations=completed_iterations,
+            runtime_seconds=elapsed_time,
+            num_infosets=total_infosets,
+        )
+        self.run_tracker.mark_completed()
+
+        if verbose:
+            print("\n✅ Shared Array Training complete!")
+            print(f"   Iterations: {completed_iterations}")
+            print(f"   Infosets: {total_infosets:,}")
+            print(f"   Time: {elapsed_time:.1f}s")
+            if completed_iterations > 0:
+                print(f"   Speed: {completed_iterations / elapsed_time:.2f} iter/s")
 
     def _train_partitioned(
         self,
@@ -292,32 +454,23 @@ class TrainingSession:
         Returns:
             Training results dictionary
         """
-        if batch_size is None:
-            iterations_per_worker_multiplier = int(
-                self.config.get("training.iterations_per_worker", 100)
-            )
-            if not iterations_per_worker_multiplier:
-                iterations_per_worker_multiplier = 100
-            batch_size = iterations_per_worker_multiplier * num_workers
-
-        checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)
-        verbose = self.config.get("training.verbose", True)
-
-        # Shared array configuration
-        max_infosets = self.config.get("storage.max_infosets", 2_000_000)
-        max_actions = self.config.get("storage.max_actions", 10)
+        # Parse configuration
+        config = self._get_training_config(num_workers, batch_size)
+        batch_size_val = config["batch_size"]
+        checkpoint_freq = config["checkpoint_freq"]
+        verbose = config["verbose"]
+        max_infosets = config["max_infosets"]
+        max_actions = config["max_actions"]
+        checkpoint_enabled = config["checkpoint_enabled"]
 
         # Initialize run tracker
         self.run_tracker.initialize()
 
+        # Display header
         if verbose:
-            print("\n🚀 Shared Array Parallel Training")
-            print(f"   Workers: {num_workers}")
-            print(f"   Iterations: {num_iterations}")
-            print(f"   Batch size: {batch_size}")
-            print(f"   Max infosets: {max_infosets:,}")
-            print(f"   Max actions: {max_actions}")
-            print("   Mode: Live shared memory arrays (no serialization)")
+            self._print_training_header(
+                num_workers, num_iterations, batch_size_val, max_infosets, max_actions
+            )
 
         training_start_time = time.time()
         completed_iterations = 0
@@ -333,9 +486,6 @@ class TrainingSession:
             print("   Starting worker pool...")
 
         pool_start_time = time.time()
-
-        # Respect checkpoint_enabled config
-        checkpoint_enabled = self.config.get("storage.checkpoint_enabled", True)
 
         # Create shared array worker manager
         with SharedArrayWorkerManager(
@@ -354,100 +504,20 @@ class TrainingSession:
             if verbose:
                 print(f"   Worker pool ready ({pool_init_time:.2f}s)\n")
 
-            # Progress tracking
-            num_batches = (num_iterations + batch_size - 1) // batch_size
-            if verbose:
-                batch_iterator: Union[range, tqdm] = tqdm(
-                    range(num_batches),
-                    desc="Training batches",
-                    unit="batch",
-                )
-            else:
-                batch_iterator = range(num_batches)
-
+            # Run training loop
             try:
-                for batch_idx in batch_iterator:
-                    # Determine iterations for this batch
-                    remaining = num_iterations - completed_iterations
-                    current_batch_size = min(batch_size, remaining)
-
-                    # Split work among workers
-                    iters_per_worker_base = current_batch_size // num_workers
-                    extra_iters = current_batch_size % num_workers
-                    iterations_per_worker = [
-                        iters_per_worker_base + (1 if i < extra_iters else 0)
-                        for i in range(num_workers)
-                    ]
-
-                    # Run batch (data flows directly through shared arrays)
-                    batch_result = worker_manager.run_batch(
-                        iterations_per_worker=iterations_per_worker,
-                        batch_id=batch_idx,
-                        start_iteration=completed_iterations,
-                        verbose=verbose,
-                    )
-
-                    batch_utilities = batch_result["utilities"]
-                    completed_iterations += len(batch_utilities)
-                    total_infosets = batch_result.get("num_infosets", 0)
-
-                    # Exchange IDs and apply updates between batches
-                    # (owner-to-requester, not global broadcast)
-                    if batch_idx < num_batches - 1:
-                        worker_manager.exchange_ids(verbose=verbose)
-                        worker_manager.apply_pending_updates(verbose=verbose)
-
-                    for i, util in enumerate(batch_utilities):
-                        iter_num = completed_iterations - len(batch_utilities) + i + 1
-                        self.metrics.log_iteration(
-                            iteration=iter_num,
-                            utility=util,
-                            num_infosets=total_infosets,
-                            infoset_sampler=None,
-                        )
-
-                    # Update progress bar
-                    if verbose and isinstance(batch_iterator, tqdm):
-                        compact_summary = self.metrics.get_compact_summary()
-                        batch_iterator.set_postfix_str(
-                            f"iter={completed_iterations} infosets={total_infosets} | {compact_summary}"
-                        )
-
-                    # Checkpoint if needed
-                    if completed_iterations % checkpoint_freq < batch_size:
-                        elapsed = time.time() - training_start_time
-                        self.run_tracker.update(
-                            iterations=completed_iterations,
-                            runtime_seconds=elapsed,
-                            num_infosets=total_infosets,
-                        )
-                        worker_manager.checkpoint(completed_iterations)
-                        if verbose:
-                            print(
-                                f"[Coordinator] Checkpoint saved at iteration {completed_iterations}"
-                            )
-
-            except KeyboardInterrupt:
-                if verbose:
-                    print("\n⚠️  Training interrupted by user")
-
-            finally:
-                # Final update
-                elapsed_time = time.time() - training_start_time
-                self.run_tracker.update(
-                    iterations=completed_iterations,
-                    runtime_seconds=elapsed_time,
-                    num_infosets=total_infosets,
+                completed_iterations, total_infosets = self._run_training_loop(
+                    worker_manager=worker_manager,
+                    num_iterations=num_iterations,
+                    num_workers=num_workers,
+                    batch_size=batch_size_val,
+                    checkpoint_freq=checkpoint_freq,
+                    verbose=verbose,
+                    training_start_time=training_start_time,
                 )
-                self.run_tracker.mark_completed()
-
-                if verbose:
-                    print("\n✅ Shared Array Training complete!")
-                    print(f"   Iterations: {completed_iterations}")
-                    print(f"   Infosets: {total_infosets:,}")
-                    print(f"   Time: {elapsed_time:.1f}s")
-                    if completed_iterations > 0:
-                        print(f"   Speed: {completed_iterations / elapsed_time:.2f} iter/s")
+            finally:
+                elapsed_time = time.time() - training_start_time
+                self._finalize_training(completed_iterations, total_infosets, elapsed_time, verbose)
 
         return {
             "total_iterations": completed_iterations,

@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 import numpy as np
 
 
+def _log(prefix: str, message: str, flush: bool = True):
+    """Helper for consistent logging output in parallel training."""
+    print(f"[{prefix}] {message}", flush=flush)
+
+
 class JobType(Enum):
     """Job types for parallel training."""
 
@@ -203,6 +208,13 @@ def _worker_loop(
 
             elif job_type == JobType.COLLECT_KEYS:
                 # Collect owned keys for coordinator checkpointing
+                # Only respond if this job is targeted at this worker
+                target_worker = job.get("target_worker")
+                if target_worker is not None and target_worker != worker_id:
+                    # Not for us, put it back and continue
+                    job_queue.put(job)
+                    continue
+
                 owned_keys = dict(storage._owned_keys)
                 legal_actions_cache = dict(storage._legal_actions_cache)
 
@@ -493,7 +505,7 @@ class SharedArrayWorkerManager:
         self.checkpoint_dir = checkpoint_dir
 
         # Create coordinator storage (creates shared memory)
-        print(f"[Coordinator] Creating shared memory (session={self.session_id})...", flush=True)
+        _log("Coordinator", f"Creating shared memory (session={self.session_id})...")
         self.storage = SharedArrayStorage(
             num_workers=num_workers,
             worker_id=0,  # Coordinator uses worker_id 0 for ownership checks
@@ -528,7 +540,7 @@ class SharedArrayWorkerManager:
 
     def _start_workers(self):
         """Start all worker processes."""
-        print(f"[Coordinator] Starting {self.num_workers} workers...", flush=True)
+        _log("Coordinator", f"Starting {self.num_workers} workers...")
 
         for worker_id in range(self.num_workers):
             p = mp.Process(
@@ -556,7 +568,7 @@ class SharedArrayWorkerManager:
 
         # Wait a moment for workers to attach
         time.sleep(1.0)
-        print(f"[Coordinator] All {self.num_workers} workers started", flush=True)
+        _log("Coordinator", f"All {self.num_workers} workers started")
 
     def exchange_ids(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
         """
@@ -569,7 +581,7 @@ class SharedArrayWorkerManager:
             Dict with exchange stats
         """
         if verbose:
-            print("[Coordinator] Exchanging IDs between workers...", flush=True)
+            print("[Coordinator] Exchanging IDs between workers...")
 
         # Tell all workers to exchange IDs
         for _ in range(self.num_workers):
@@ -603,7 +615,7 @@ class SharedArrayWorkerManager:
             Dict with apply stats
         """
         if verbose:
-            print("[Coordinator] Applying pending updates...", flush=True)
+            print("[Coordinator] Applying pending updates...")
 
         for _ in range(self.num_workers):
             self.job_queue.put({"type": JobType.APPLY_UPDATES.value})
@@ -618,7 +630,7 @@ class SharedArrayWorkerManager:
                 raise RuntimeError("Timeout waiting for apply updates acks")
 
         if verbose:
-            print("[Coordinator] Pending updates applied", flush=True)
+            print("[Coordinator] Pending updates applied")
 
         return {"acks": acks}
 
@@ -742,9 +754,12 @@ class SharedArrayWorkerManager:
         Returns:
             Dict with aggregated key mappings
         """
-        # Tell all workers to send their keys
-        for _ in range(self.num_workers):
-            self.job_queue.put({"type": JobType.COLLECT_KEYS.value})
+        # Tell each worker to send their keys
+        for worker_id in range(self.num_workers):
+            self.job_queue.put({
+                "type": JobType.COLLECT_KEYS.value,
+                "target_worker": worker_id,
+            })
 
         # Collect responses
         all_owned_keys: Dict = {}
@@ -800,7 +815,7 @@ class SharedArrayWorkerManager:
 
     def shutdown(self):
         """Shutdown all workers cleanly."""
-        print("[Coordinator] Shutting down workers...", flush=True)
+        print("[Coordinator] Shutting down workers...")
 
         # Send shutdown to all workers
         for _ in range(self.num_workers):
@@ -810,7 +825,7 @@ class SharedArrayWorkerManager:
         for p in self.processes:
             p.join(timeout=10)
             if p.is_alive():
-                print(f"[Coordinator] Force terminating worker {p.pid}", flush=True)
+                _log("Coordinator", "Force terminating worker {p.pid}")
                 p.terminate()
 
         self.processes.clear()
@@ -818,7 +833,7 @@ class SharedArrayWorkerManager:
         # Cleanup shared memory (coordinator unlinks)
         self.storage.cleanup()
 
-        print("[Coordinator] All workers shut down", flush=True)
+        print("[Coordinator] All workers shut down")
 
     def __enter__(self):
         return self
