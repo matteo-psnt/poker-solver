@@ -5,7 +5,6 @@ Unified CLI for Poker Solver.
 Provides a TUI for training, evaluation, precomputation, and run management.
 """
 
-import signal
 import sys
 import traceback
 from pathlib import Path
@@ -58,36 +57,7 @@ class SolverCLI:
         self.equity_buckets_dir = self.base_dir / "data" / "equity_buckets"
         self.current_trainer: Optional[TrainingSession] = None
 
-        # Setup Ctrl+C handler
-        signal.signal(signal.SIGINT, self._handle_interrupt)
-
-    def _handle_interrupt(self, signum, frame):
-        """Handle Ctrl+C gracefully."""
-        print("\n\n[!] Interrupt received!")
-
-        if self.current_trainer:
-            print("Saving checkpoint before exit...")
-            try:
-                # Get current iteration from metrics
-                summary = self.current_trainer.metrics.get_summary()
-                current_iter = summary.get("total_iterations", 0)
-
-                if current_iter > 0:
-                    # Save checkpoint using storage
-                    self.current_trainer.storage.checkpoint(int(current_iter))
-
-                    # Update run tracker metadata
-                    self.current_trainer.run_tracker.update(
-                        iterations=int(current_iter),
-                        runtime_seconds=self.current_trainer.metrics.get_elapsed_time(),
-                        num_infosets=self.current_trainer.solver.num_infosets(),
-                    )
-                    print(f"[OK] Checkpoint saved at iteration {current_iter}")
-            except Exception as e:
-                print(f"[ERROR] Failed to save checkpoint: {e}")
-
-        print("Exiting...")
-        sys.exit(0)
+        # Use default Ctrl+C behavior; training handles interrupts internally.
 
     def run(self):
         """Run the main TUI loop."""

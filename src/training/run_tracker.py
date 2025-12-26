@@ -99,6 +99,13 @@ class RunTracker:
         self.metadata["completed_at"] = datetime.now().isoformat()
         self._save()
 
+    def mark_interrupted(self):
+        """Mark run as interrupted by user."""
+        self.initialize()  # Ensure directory exists
+        self.metadata["status"] = "interrupted"
+        self.metadata["completed_at"] = datetime.now().isoformat()
+        self._save()
+
     def mark_failed(self, cleanup_if_empty: bool = True):
         """Mark run as failed.
 
