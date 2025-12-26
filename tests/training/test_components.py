@@ -25,8 +25,7 @@ class TestBuildActionAbstraction:
 
     def test_build_with_custom_big_blind(self):
         """Test building with custom big blind."""
-        config = Config.default()
-        config.set("game.big_blind", 10)
+        config = Config.default().merge({"game": {"big_blind": 10}})
 
         action_abs = components.build_action_abstraction(config)
 
@@ -39,26 +38,27 @@ class TestBuildCardAbstraction:
 
     def test_build_fails_without_abstraction(self):
         """Test that building fails when no abstraction is configured."""
-        config = Config.default()
-        config.set("card_abstraction.abstraction_path", None)
-        config.set("card_abstraction.config", None)
+        config = Config.default().merge(
+            {"card_abstraction": {"abstraction_path": None, "config": None}}
+        )
 
         with pytest.raises(ValueError, match="card_abstraction requires either"):
             components.build_card_abstraction(config, prompt_user=False, auto_compute=False)
 
     def test_build_fails_with_missing_path(self):
         """Test that building fails when path doesn't exist."""
-        config = Config.default()
-        config.set("card_abstraction.abstraction_path", "/nonexistent/path.pkl")
+        config = Config.default().merge(
+            {"card_abstraction": {"abstraction_path": "/nonexistent/path.pkl"}}
+        )
 
         with pytest.raises(FileNotFoundError):
             components.build_card_abstraction(config, prompt_user=False, auto_compute=False)
 
     def test_build_fails_with_invalid_config_name(self):
         """Test that building fails when config has no matching abstraction."""
-        config = Config.default()
-        config.set("card_abstraction.abstraction_path", None)
-        config.set("card_abstraction.config", "nonexistent_config_xyz")
+        config = Config.default().merge(
+            {"card_abstraction": {"abstraction_path": None, "config": "nonexistent_config_xyz"}}
+        )
 
         with pytest.raises(FileNotFoundError, match="No combo abstraction found"):
             components.build_card_abstraction(config, prompt_user=False, auto_compute=False)
@@ -69,8 +69,7 @@ class TestBuildStorage:
 
     def test_build_storage_with_checkpointing(self, tmp_path):
         """Test building storage with checkpointing enabled."""
-        config = Config.default()
-        config.set("storage.checkpoint_enabled", True)
+        config = Config.default().merge({"storage": {"checkpoint_enabled": True}})
 
         storage = components.build_storage(config, run_dir=tmp_path)
 
@@ -80,8 +79,7 @@ class TestBuildStorage:
 
     def test_build_storage_without_checkpointing(self):
         """Test building storage without checkpointing."""
-        config = Config.default()
-        config.set("storage.checkpoint_enabled", False)
+        config = Config.default().merge({"storage": {"checkpoint_enabled": False}})
 
         storage = components.build_storage(config, run_dir=None)
 
@@ -91,8 +89,7 @@ class TestBuildStorage:
 
     def test_build_storage_checkpointing_requires_run_dir(self):
         """Test that checkpointing enabled without run_dir raises error."""
-        config = Config.default()
-        config.set("storage.checkpoint_enabled", True)
+        config = Config.default().merge({"storage": {"checkpoint_enabled": True}})
 
         with pytest.raises(ValueError, match="run_dir is required"):
             components.build_storage(config, run_dir=None)
@@ -121,8 +118,7 @@ class TestBuildSolver:
 
     def test_build_solver_with_seed(self):
         """Test that solver uses configured seed."""
-        config = Config.default()
-        config.set("system.seed", 42)
+        config = Config.default().merge({"system": {"seed": 42}})
 
         action_abs = components.build_action_abstraction(config)
         card_abs = DummyCardAbstraction()
@@ -137,10 +133,9 @@ class TestBuildSolver:
 
     def test_build_solver_respects_game_config(self):
         """Test that game configuration is passed to solver."""
-        config = Config.default()
-        config.set("game.starting_stack", 500)
-        config.set("game.small_blind", 5)
-        config.set("game.big_blind", 10)
+        config = Config.default().merge(
+            {"game": {"starting_stack": 500, "small_blind": 5, "big_blind": 10}}
+        )
 
         action_abs = components.build_action_abstraction(config)
         card_abs = DummyCardAbstraction()
@@ -159,8 +154,7 @@ class TestComponentIntegration:
 
     def test_build_all_components_together(self, tmp_path):
         """Test building all components together for a training session."""
-        config = Config.default()
-        config.set("storage.checkpoint_enabled", True)
+        config = Config.default().merge({"storage": {"checkpoint_enabled": True}})
 
         # Build all components
         action_abs = components.build_action_abstraction(config)
@@ -180,8 +174,7 @@ class TestComponentIntegration:
 
     def test_build_with_checkpointing_creates_directory(self, tmp_path):
         """Test that storage with checkpointing properly initializes."""
-        config = Config.default()
-        config.set("storage.checkpoint_enabled", True)
+        config = Config.default().merge({"storage": {"checkpoint_enabled": True}})
 
         run_dir = tmp_path / "test_run"
         run_dir.mkdir()  # Create run directory

@@ -2,30 +2,23 @@
 # For rapid testing and development (10K iterations)
 
 action_abstraction:
-  preflop:
-    raises: [2.5, 3.5, 5.0]
-
-  postflop:
-    flop:
-      bets: [0.33, 0.66, 1.25]
-    turn:
-      bets: [0.50, 1.0, 1.5]
-    river:
-      bets: [0.50, 1.0, 2.0]
+  preflop_raises: [2.5, 3.5, 5.0]
+  postflop_bets:
+    flop: [0.33, 0.66, 1.25]
+    turn: [0.50, 1.0, 1.5]
+    river: [0.50, 1.0, 2.0]
   all_in_spr_threshold: 2.0
-
-  # Max raises per street (prevents infinite action trees)
-  max_raises_per_street: 3  # Standard poker cap
+  max_raises_per_street: 3
 
 training:
   num_iterations: 3600
-  checkpoint_frequency: 2000
+  checkpoint_frequency: 1000
   log_frequency: 100
   iterations_per_worker: 100
   verbose: true
 
 solver:
-  sampling_method: "outcome"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
+  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
   cfr_plus: true
   linear_cfr: false
 

@@ -1,5 +1,9 @@
 """Tests for Trainer class."""
 
+import pickle
+import time
+
+import h5py
 import numpy as np
 import pytest
 
@@ -15,9 +19,7 @@ from tests.test_helpers import DummyCardAbstraction
 @pytest.fixture
 def config_with_dummy_abstraction(tmp_path, monkeypatch):
     """Create a config with dummy card abstraction."""
-    config = Config.default()
-    # Use tmp_path for runs_dir to prevent creating runs in data/runs
-    config.set("training.runs_dir", str(tmp_path / "runs"))
+    config = Config.default().merge({"training": {"runs_dir": str(tmp_path / "runs")}})
 
     # Mock the builder to return DummyCardAbstraction
     def mock_build_card_abstraction(config, prompt_user=False, auto_compute=False):
@@ -46,9 +48,9 @@ class TestTrainer:
         assert isinstance(action_abs, BettingActions)
 
     def test_build_storage_memory(self, config_with_dummy_abstraction):
-        config_with_dummy_abstraction.set("storage.checkpoint_enabled", False)
+        config = config_with_dummy_abstraction.merge({"storage": {"checkpoint_enabled": False}})
 
-        trainer = TrainingSession(config_with_dummy_abstraction)
+        trainer = TrainingSession(config)
         assert isinstance(trainer.storage, SharedArrayStorage)
         assert trainer.storage.checkpoint_dir is None
 
@@ -74,9 +76,12 @@ class TestTrainer:
 
         monkeypatch.setattr(components, "build_card_abstraction", mock_build_card_abstraction_fail)
 
-        config = Config.default()
-        config.set("training.runs_dir", str(tmp_path / "runs"))
-        config.set("storage.checkpoint_enabled", False)
+        config = Config.default().merge(
+            {
+                "training": {"runs_dir": str(tmp_path / "runs")},
+                "storage": {"checkpoint_enabled": False},
+            }
+        )
 
         # Attempt to create trainer (should fail)
         with pytest.raises(ValueError, match="Abstraction not found"):
@@ -101,10 +106,12 @@ class TestTrainer:
         3. Results contain valid iteration and infoset counts
         """
         # Configure for small parallel run
-        config = config_with_dummy_abstraction
-        config.set("training.num_iterations", 4)  # Reduced from 6
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", False)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": False},
+            }
+        )
 
         # Create trainer and run parallel training (uses partitioned storage)
         trainer = TrainingSession(config, run_id="test_parallel_discovery")
@@ -131,10 +138,12 @@ class TestTrainer:
         - Multi-worker parallel training completes
         - Both discover infosets (exact count may vary due to sampling)
         """
-        config = config_with_dummy_abstraction
-        config.set("training.num_iterations", 4)
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", False)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": False},
+            }
+        )
 
         # Run with 1 worker (sequential-like behavior)
         trainer_seq = TrainingSession(config, run_id="test_single_worker")
@@ -170,16 +179,15 @@ class TestTrainer:
         1. Training completes within reasonable time
         2. Throughput is acceptable
         """
-        config = config_with_dummy_abstraction
-        config.set("training.num_iterations", 4)
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", False)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": False},
+            }
+        )
 
         # Create trainer
         trainer = TrainingSession(config, run_id="test_perf")
-
-        # Track timing
-        import time
 
         start_time = time.time()
 
@@ -213,8 +221,8 @@ class TestTrainer:
         # The partitioned architecture ensures each worker owns different infosets
         # which eliminates action-set mismatch issues
 
-        config_with_dummy_abstraction.set("storage.checkpoint_enabled", False)
-        trainer = TrainingSession(config_with_dummy_abstraction, run_id="test_parallel_multi")
+        config = config_with_dummy_abstraction.merge({"storage": {"checkpoint_enabled": False}})
+        trainer = TrainingSession(config, run_id="test_parallel_multi")
 
         # Run parallel training with multiple workers
         results = trainer.train(
@@ -236,9 +244,9 @@ class TestAsyncCheckpointing:
     @pytest.mark.timeout(30)
     def test_async_checkpoint_executor_initialized(self, config_with_dummy_abstraction):
         """Test that async checkpoint executor is initialized."""
-        config_with_dummy_abstraction.set("storage.checkpoint_enabled", True)
+        config = config_with_dummy_abstraction.merge({"storage": {"checkpoint_enabled": True}})
 
-        trainer = TrainingSession(config_with_dummy_abstraction)
+        trainer = TrainingSession(config)
 
         # Verify async checkpoint infrastructure exists
         assert hasattr(trainer, "_checkpoint_executor")
@@ -249,11 +257,12 @@ class TestAsyncCheckpointing:
     @pytest.mark.timeout(60)
     def test_async_checkpoint_nonblocking(self, config_with_dummy_abstraction):
         """Test that checkpoints don't block training."""
-        config = config_with_dummy_abstraction
-        config.set("training.checkpoint_frequency", 2)  # Checkpoint every 2 iterations
-        config.set("training.num_iterations", 4)  # Short run
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", True)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"checkpoint_frequency": 2, "num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": True},
+            }
+        )
 
         trainer = TrainingSession(config, run_id="test_async_checkpoint")
 
@@ -269,11 +278,12 @@ class TestAsyncCheckpointing:
     @pytest.mark.timeout(60)
     def test_async_checkpoint_completes_on_shutdown(self, config_with_dummy_abstraction):
         """Test that pending checkpoints complete when training ends."""
-        config = config_with_dummy_abstraction
-        config.set("training.checkpoint_frequency", 2)
-        config.set("training.num_iterations", 4)
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", True)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"checkpoint_frequency": 2, "num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": True},
+            }
+        )
 
         trainer = TrainingSession(config, run_id="test_checkpoint_shutdown")
 
@@ -289,11 +299,12 @@ class TestAsyncCheckpointing:
     @pytest.mark.timeout(60)
     def test_async_checkpoint_parallel_training(self, config_with_dummy_abstraction):
         """Test async checkpointing with parallel training."""
-        config = config_with_dummy_abstraction
-        config.set("training.checkpoint_frequency", 2)
-        config.set("training.num_iterations", 4)
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", True)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"checkpoint_frequency": 2, "num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": True},
+            }
+        )
 
         trainer = TrainingSession(config, run_id="test_async_parallel")
 
@@ -311,9 +322,9 @@ class TestAsyncCheckpointing:
     @pytest.mark.timeout(30)
     def test_checkpoint_executor_cleanup(self, config_with_dummy_abstraction):
         """Test that checkpoint executor is properly cleaned up."""
-        config_with_dummy_abstraction.set("storage.checkpoint_enabled", True)
+        config = config_with_dummy_abstraction.merge({"storage": {"checkpoint_enabled": True}})
 
-        trainer = TrainingSession(config_with_dummy_abstraction)
+        trainer = TrainingSession(config)
 
         # Delete trainer (triggers __del__)
         del trainer
@@ -324,13 +335,13 @@ class TestAsyncCheckpointing:
     @pytest.mark.timeout(60)
     def test_checkpoint_collects_keys_from_all_workers(self, config_with_dummy_abstraction):
         """Test that parallel checkpoint collects and saves keys from all workers."""
-        import pickle
 
-        config = config_with_dummy_abstraction
-        config.set("training.checkpoint_frequency", 4)
-        config.set("training.num_iterations", 4)
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", True)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"checkpoint_frequency": 4, "num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": True},
+            }
+        )
 
         trainer = TrainingSession(config, run_id="test_key_collection")
 
@@ -361,15 +372,13 @@ class TestAsyncCheckpointing:
     @pytest.mark.timeout(40)  # Reduced from 60
     def test_checkpoint_round_trip_parallel(self, config_with_dummy_abstraction):
         """Test that parallel checkpoints can be saved and loaded correctly."""
-        import pickle
 
-        import h5py
-
-        config = config_with_dummy_abstraction
-        config.set("training.checkpoint_frequency", 4)
-        config.set("training.num_iterations", 4)  # Reduced from 6
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", True)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"checkpoint_frequency": 4, "num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": True},
+            }
+        )
 
         trainer = TrainingSession(config, run_id="test_checkpoint_roundtrip")
 
@@ -433,10 +442,12 @@ class TestParallelStress:
     @pytest.mark.timeout(60)  # Reduced from 120
     def test_high_worker_count_stress(self, config_with_dummy_abstraction):
         """Stress test with many workers to expose race conditions."""
-        config = config_with_dummy_abstraction
-        config.set("training.num_iterations", 12)  # Reduced from 20
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", False)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"num_iterations": 12, "verbose": False},
+                "storage": {"checkpoint_enabled": False},
+            }
+        )
 
         trainer = TrainingSession(config, run_id="test_stress_workers")
 
@@ -456,10 +467,12 @@ class TestParallelStress:
     @pytest.mark.timeout(60)  # Reduced from 120
     def test_repeated_batches_consistency(self, config_with_dummy_abstraction):
         """Test that repeated training batches maintain consistency."""
-        config = config_with_dummy_abstraction
-        config.set("training.num_iterations", 12)  # Reduced from 16
-        config.set("training.verbose", False)
-        config.set("storage.checkpoint_enabled", False)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"num_iterations": 12, "verbose": False},
+                "storage": {"checkpoint_enabled": False},
+            }
+        )
 
         trainer = TrainingSession(config, run_id="test_repeated_batches")
 
@@ -483,9 +496,9 @@ class TestCheckpointEnabledConfig:
 
     def test_checkpoint_enabled_true_creates_dir(self, config_with_dummy_abstraction):
         """Test that checkpoint_enabled=true sets up checkpointing."""
-        config_with_dummy_abstraction.set("storage.checkpoint_enabled", True)
+        config = config_with_dummy_abstraction.merge({"storage": {"checkpoint_enabled": True}})
 
-        trainer = TrainingSession(config_with_dummy_abstraction)
+        trainer = TrainingSession(config)
 
         # Verify checkpoint directory is set
         assert trainer.storage.checkpoint_dir is not None
@@ -493,9 +506,9 @@ class TestCheckpointEnabledConfig:
 
     def test_checkpoint_enabled_false_no_checkpointing(self, config_with_dummy_abstraction):
         """Test that checkpoint_enabled=false disables checkpointing."""
-        config_with_dummy_abstraction.set("storage.checkpoint_enabled", False)
+        config = config_with_dummy_abstraction.merge({"storage": {"checkpoint_enabled": False}})
 
-        trainer = TrainingSession(config_with_dummy_abstraction)
+        trainer = TrainingSession(config)
 
         # Verify no checkpoint directory
         assert trainer.storage.checkpoint_dir is None
@@ -503,10 +516,12 @@ class TestCheckpointEnabledConfig:
     @pytest.mark.timeout(30)
     def test_checkpoint_enabled_false_no_files_created(self, config_with_dummy_abstraction):
         """Test that no checkpoint files are created when disabled."""
-        config = config_with_dummy_abstraction
-        config.set("storage.checkpoint_enabled", False)
-        config.set("training.num_iterations", 4)
-        config.set("training.verbose", False)
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"num_iterations": 4, "verbose": False},
+                "storage": {"checkpoint_enabled": False},
+            }
+        )
 
         trainer = TrainingSession(config, run_id="test_no_checkpoint")
 
@@ -521,11 +536,16 @@ class TestCheckpointEnabledConfig:
     @pytest.mark.timeout(60)
     def test_checkpoint_enabled_resume(self, config_with_dummy_abstraction, tmp_path):
         """Test resuming from checkpoint with new config format."""
-        config = config_with_dummy_abstraction
-        config.set("storage.checkpoint_enabled", True)
-        config.set("training.num_iterations", 4)
-        config.set("training.verbose", False)
-        config.set("training.runs_dir", str(tmp_path / "runs"))
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {
+                    "num_iterations": 4,
+                    "verbose": False,
+                    "runs_dir": str(tmp_path / "runs"),
+                },
+                "storage": {"checkpoint_enabled": True},
+            }
+        )
 
         # First training session
         trainer1 = TrainingSession(config, run_id="test_resume")

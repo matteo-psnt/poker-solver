@@ -14,11 +14,17 @@ import multiprocessing as mp
 import pickle
 import queue
 import random
+import sys
 import time
 import traceback
-from dataclasses import asdict
+import uuid
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Tuple
+
+from src.solver.mccfr import MCCFRSolver
+from src.solver.storage import SharedArrayStorage
+from src.utils.config import Config
 
 if TYPE_CHECKING:
     from src.solver.storage import SharedArrayStorage
@@ -45,7 +51,7 @@ def _worker_loop(
     worker_id: int,
     num_workers: int,
     session_id: str,
-    config_dict: Dict,
+    config: "Config",
     serialized_action_abstraction: bytes,
     serialized_card_abstraction: bytes,
     base_seed: int,
@@ -72,7 +78,7 @@ def _worker_loop(
         worker_id: This worker's ID (0 to num_workers-1)
         num_workers: Total number of workers
         session_id: Unique session ID for shared memory namespace
-        config_dict: Configuration dictionary
+        config: Configuration object
         serialized_action_abstraction: Pickled BettingActions
         serialized_card_abstraction: Pickled BucketingStrategy
         base_seed: Base random seed
@@ -86,21 +92,11 @@ def _worker_loop(
         checkpoint_dir: Optional checkpoint directory
     """
     try:
-        import sys
-        from pathlib import Path
-
-        from src.solver.mccfr import MCCFRSolver
-        from src.solver.storage import SharedArrayStorage
-        from src.utils.config import Config
-
         print(
             f"[Worker {worker_id}] Initializing (attaching to shared memory)...",
             file=sys.stderr,
             flush=True,
         )
-
-        # Create config
-        config = Config.from_dict(config_dict)
 
         # Deserialize abstractions
         action_abstraction = pickle.loads(serialized_action_abstraction)
@@ -117,21 +113,22 @@ def _worker_loop(
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
         )
 
-        # Create solver config
-        solver_config = asdict(config.game).copy()
-        solver_config.update(asdict(config.system))
-        solver_config["seed"] = base_seed + worker_id * 10000
+        # Create solver config with worker-specific seed
+        # Each worker needs a unique seed to explore different parts of the game tree
+        if base_seed is None:
+            worker_seed = random.randint(0, 2**31 - 1) + worker_id * 10000
+        else:
+            worker_seed = base_seed + worker_id * 10000
 
-        # CFR+ can be applied directly since each worker owns its infosets
-        cfr_plus_enabled = config_dict.get("solver", {}).get("cfr_plus", False)
-        solver_config["cfr_plus"] = cfr_plus_enabled
+        # Create a new config with the worker-specific seed
+        worker_config = config.merge({"system": {"seed": worker_seed}})
 
         # Create solver with shared array storage
         solver = MCCFRSolver(
             action_abstraction=action_abstraction,
             card_abstraction=card_abstraction,
             storage=storage,
-            config=solver_config,
+            config=worker_config,
         )
 
         print(
@@ -143,16 +140,15 @@ def _worker_loop(
         # Worker loop
         batch_count = 0
         while True:
-            # Process incoming cross-partition updates
-            _process_incoming_updates(update_queues[worker_id], storage)
-
-            # Process incoming ID requests (respond to other workers)
-            _process_id_requests(
-                worker_id, id_request_queues[worker_id], id_response_queues, storage
+            # Process all pending messages
+            _process_all_messages(
+                worker_id,
+                update_queues[worker_id],
+                id_request_queues[worker_id],
+                id_response_queues[worker_id],
+                id_response_queues,
+                storage,
             )
-
-            # Process incoming ID responses (learn IDs from owners)
-            _process_id_responses(id_response_queues[worker_id], storage)
 
             try:
                 job = job_queue.get(timeout=0.1)
@@ -183,10 +179,14 @@ def _worker_loop(
                 storage.clear_pending_id_requests()
 
                 # Process any incoming requests/responses
-                _process_id_requests(
-                    worker_id, id_request_queues[worker_id], id_response_queues, storage
+                _process_all_messages(
+                    worker_id,
+                    update_queues[worker_id],
+                    id_request_queues[worker_id],
+                    id_response_queues[worker_id],
+                    id_response_queues,
+                    storage,
                 )
-                _process_id_responses(id_response_queues[worker_id], storage)
 
                 result_queue.put(
                     {
@@ -209,11 +209,10 @@ def _worker_loop(
 
             elif job_type == JobType.COLLECT_KEYS:
                 # Collect owned keys for coordinator checkpointing
-                # Only respond if this job is targeted at this worker
+                # If this job isn't for us, put it back on the queue
                 target_worker = job.get("target_worker")
                 if target_worker is not None and target_worker != worker_id:
-                    # Not for us, put it back and continue
-                    job_queue.put(job)
+                    job_queue.put(job)  # Put it back for the right worker
                     continue
 
                 owned_keys = dict(storage._owned_keys)
@@ -239,8 +238,11 @@ def _worker_loop(
                 # Update solver state
                 solver.iteration = iteration_offset
 
-                # Update seed for this batch
-                batch_seed = base_seed + worker_id * 10000 + batch_id * 1000
+                # Update seed for this batch (handle None seed)
+                if base_seed is None:
+                    batch_seed = random.randint(0, 2**31 - 1) + batch_id * 1000
+                else:
+                    batch_seed = base_seed + worker_id * 10000 + batch_id * 1000
                 random.seed(batch_seed)
                 np.random.seed(batch_seed)
 
@@ -258,11 +260,14 @@ def _worker_loop(
                     for i in range(num_iterations):
                         # Periodically process incoming messages
                         if i % 50 == 0:
-                            _process_incoming_updates(update_queues[worker_id], storage)
-                            _process_id_requests(
-                                worker_id, id_request_queues[worker_id], id_response_queues, storage
+                            _process_all_messages(
+                                worker_id,
+                                update_queues[worker_id],
+                                id_request_queues[worker_id],
+                                id_response_queues[worker_id],
+                                id_response_queues,
+                                storage,
                             )
-                            _process_id_responses(id_response_queues[worker_id], storage)
 
                         util = solver.train_iteration()
                         utilities.append(util)
@@ -330,8 +335,6 @@ def _worker_loop(
         print(f"[Worker {worker_id}] Exiting cleanly", file=sys.stderr, flush=True)
 
     except Exception as e:
-        import sys
-
         print(f"[Worker {worker_id}] Fatal error: {e}", file=sys.stderr, flush=True)
         traceback.print_exc()
         try:
@@ -451,6 +454,26 @@ def _send_updates_to_owners(
                 )
 
 
+def _process_all_messages(
+    worker_id: int,
+    update_queue: mp.Queue,
+    id_request_queue: mp.Queue,
+    id_response_queue: mp.Queue,
+    id_response_queues: List[mp.Queue],
+    storage: "SharedArrayStorage",
+) -> Dict[str, int]:
+    """
+    Process all pending messages from all queues.
+
+    Returns a dict with counts of processed items by type.
+    """
+    return {
+        "updates": _process_incoming_updates(update_queue, storage),
+        "requests": _process_id_requests(worker_id, id_request_queue, id_response_queues, storage),
+        "responses": _process_id_responses(id_response_queue, storage),
+    }
+
+
 class SharedArrayWorkerManager:
     """
     Manages parallel training with shared array storage.
@@ -467,7 +490,7 @@ class SharedArrayWorkerManager:
     def __init__(
         self,
         num_workers: int,
-        config_dict: Dict,
+        config: "Config",
         serialized_action_abstraction: bytes,
         serialized_card_abstraction: bytes,
         session_id: str | None = None,
@@ -481,7 +504,7 @@ class SharedArrayWorkerManager:
 
         Args:
             num_workers: Number of workers
-            config_dict: Configuration dictionary
+            config: Configuration object
             serialized_action_abstraction: Pickled BettingActions
             serialized_card_abstraction: Pickled BucketingStrategy
             session_id: Unique session ID (auto-generated if None)
@@ -490,13 +513,9 @@ class SharedArrayWorkerManager:
             max_actions: Maximum actions per infoset
             checkpoint_dir: Optional checkpoint directory
         """
-        import uuid
-        from pathlib import Path
-
-        from src.solver.storage import SharedArrayStorage
 
         self.num_workers = num_workers
-        self.config_dict = config_dict
+        self.config = config
         self.serialized_action_abstraction = serialized_action_abstraction
         self.serialized_card_abstraction = serialized_card_abstraction
         self.session_id = session_id or str(uuid.uuid4())[:8]
@@ -550,7 +569,7 @@ class SharedArrayWorkerManager:
                     worker_id,
                     self.num_workers,
                     self.session_id,
-                    self.config_dict,
+                    self.config,
                     self.serialized_action_abstraction,
                     self.serialized_card_abstraction,
                     self.base_seed,
@@ -735,7 +754,18 @@ class SharedArrayWorkerManager:
             )
 
         if errors:
-            raise RuntimeError(f"Workers failed: {errors}")
+            # Format detailed error message with worker details and tracebacks
+            error_details = "\n".join(
+                [
+                    f"  Worker {e['worker_id']}:\n"
+                    f"    Error: {e['error']}\n"
+                    f"    Traceback:\n{e.get('traceback', '    (no traceback available)')}"
+                    for e in errors
+                ]
+            )
+            raise RuntimeError(
+                f"{len(errors)} worker(s) failed during batch {batch_id}:\n{error_details}"
+            )
 
         return {
             "utilities": all_utilities,
@@ -757,10 +787,12 @@ class SharedArrayWorkerManager:
         """
         # Tell each worker to send their keys
         for worker_id in range(self.num_workers):
-            self.job_queue.put({
-                "type": JobType.COLLECT_KEYS.value,
-                "target_worker": worker_id,
-            })
+            self.job_queue.put(
+                {
+                    "type": JobType.COLLECT_KEYS.value,
+                    "target_worker": worker_id,
+                }
+            )
 
         # Collect responses
         all_owned_keys: Dict = {}

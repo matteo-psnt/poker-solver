@@ -272,5 +272,4 @@ class TestMetricsTracker:
 
         # Should include key metrics in compact format
         assert "it/s" in compact
-        assert "IS" in compact
         assert "R+" in compact or "H=" in compact  # Regret or entropy

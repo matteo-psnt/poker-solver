@@ -19,24 +19,18 @@ game:
 # ===== Action Abstraction =====
 action_abstraction:
   # Production-grade betting sizes based on solver research
-  preflop:
-    raises: [2.5, 3.5, 5.0]  # Min-raise, standard, larger sizing
-  postflop:
-    flop:
-      bets: [0.33, 0.66, 1.25]  # Range bet, standard bet, overbet
-    turn:
-      bets: [0.50, 1.0, 1.5]    # Half pot, pot, large overbet
-    river:
-      bets: [0.50, 1.0, 2.0]    # Thin value, pot, polarized overbet
-  all_in_spr_threshold: 2.0
+  preflop_raises: [2.5, 3.5, 5.0]  # Min-raise, standard, larger sizing
 
-  # Max raises per street (prevents infinite action trees)
-  max_raises_per_street: 5  # Standard poker cap (reduces infosets by 99.5%)
+  postflop_bets:
+    flop: [0.33, 0.66, 1.25]  # Range bet, standard bet, overbet
+    turn: [0.50, 1.0, 1.5]    # Half pot, pot, large overbet
+    river: [0.50, 1.0, 2.0]   # Thin value, pot, polarized overbet
+
+  all_in_spr_threshold: 2.0
+  max_raises_per_street: 5
 
 # ===== Card Abstraction =====
 card_abstraction:
-  # Combo-level abstraction with suit isomorphism (production settings)
-  # Provides correct postflop bucketing with no conflicts
   config: production
 
 # ===== SPR Bucketing =====

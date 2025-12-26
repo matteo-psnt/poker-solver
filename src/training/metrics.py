@@ -379,10 +379,7 @@ class MetricsTracker:
         """
         summary = self.get_summary()
 
-        parts = [
-            f"{summary['iter_per_sec']:.1f}it/s",
-            f"{summary['avg_infosets']:.0f}IS",
-        ]
+        parts = [f"{summary['iter_per_sec']:.1f}it/s"]
 
         # Add solver-quality metrics if available
         if "mean_pos_regret" in summary:

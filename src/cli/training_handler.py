@@ -27,8 +27,8 @@ def handle_train(
         TrainingSession instance or None if cancelled
     """
     # Check combo abstraction requirement
-    abstraction_path = config.get("card_abstraction.abstraction_path")
-    abstraction_config = config.get("card_abstraction.config")
+    abstraction_path = config.card_abstraction.abstraction_path
+    abstraction_config = config.card_abstraction.config
 
     if abstraction_path:
         if not Path(abstraction_path).exists():
@@ -77,9 +77,9 @@ def handle_train(
     trainer = TrainingSession(config)
 
     # Start training
-    print(f"\nStarting training for {config.get('training.num_iterations')} iterations...")
+    print(f"\nStarting training for {config.training.num_iterations} iterations...")
     print(f"Run directory: {trainer.run_dir}")
-    print(f"Checkpoint frequency: every {config.get('training.checkpoint_frequency')} iterations")
+    print(f"Checkpoint frequency: every {config.training.checkpoint_frequency} iterations")
     print(f"Workers: {num_workers}")
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
 
@@ -109,13 +109,13 @@ def handle_resume(config: Config, run_id: str, latest_iter: int) -> TrainingSess
         TrainingSession instance
     """
     print("\nResuming trainer...")
-    runs_dir = Path(config.get("training.runs_dir", "data/runs"))
+    runs_dir = Path(config.training.runs_dir)
     run_dir = runs_dir / run_id
     trainer = TrainingSession.resume(run_dir)
 
     print(f"\nResuming training from iteration {latest_iter}...")
     print(
-        f"Target: {config.get('training.num_iterations')} iterations (+{config.get('training.num_iterations') - latest_iter})"
+        f"Target: {config.training.num_iterations} iterations (+{config.training.num_iterations - latest_iter})"
     )
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
 

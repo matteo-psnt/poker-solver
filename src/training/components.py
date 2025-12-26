@@ -54,27 +54,21 @@ def build_card_abstraction(
         ValueError: If config is invalid
         FileNotFoundError: If abstraction file doesn't exist
     """
-    # Note: card_abstraction config structure is still being used as dict in YAML
-    # For now, convert config to dict and access card_abstraction section
-    # TODO: Add CardAbstractionConfig to config_schema.py if needed
-    config_dict = config.to_dict()
-    card_config = config_dict.get("card_abstraction", {})
-
     # Get the abstraction path/config
-    abstraction_path = card_config.get("abstraction_path")
-    abstraction_config = card_config.get("config")
+    abstraction_path = config.card_abstraction.abstraction_path
+    abstraction_config = config.card_abstraction.config
 
     if abstraction_path:
         # Direct path provided
-        abstraction_path = Path(abstraction_path)
-        if not abstraction_path.exists():
+        path_obj = Path(abstraction_path)
+        if not path_obj.exists():
             raise FileNotFoundError(
-                f"Combo abstraction file not found: {abstraction_path}\n"
+                f"Combo abstraction file not found: {path_obj}\n"
                 "Please run 'Precompute Combo Abstraction' from the CLI first."
             )
         from src.bucketing.postflop.precompute import PostflopPrecomputer
 
-        return PostflopPrecomputer.load(abstraction_path)
+        return PostflopPrecomputer.load(path_obj)
 
     elif abstraction_config:
         # Config name provided - look for matching abstraction
@@ -193,13 +187,6 @@ def build_solver(
     Raises:
         ValueError: If solver type is unknown
     """
-
-    # Merge game and system configs for solver
-    # MCCFRSolver expects a dict config
-    game_config = asdict(config.game)
-    system_config = asdict(config.system)
-    merged_config = {**game_config, **system_config}
-
     solver_type = config.solver.type
 
     if solver_type == "mccfr":
@@ -207,7 +194,7 @@ def build_solver(
             action_abstraction=action_abstraction,
             card_abstraction=card_abstraction,
             storage=storage,
-            config=merged_config,
+            config=config,
         )
     else:
         raise ValueError(f"Unknown solver type: {solver_type}")

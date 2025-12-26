@@ -5,7 +5,7 @@ Implements MCCFR with external sampling (default) or outcome sampling for scalab
 """
 
 import random
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import numpy as np
 from treys import Deck
@@ -17,6 +17,7 @@ from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
 from src.solver.base import BaseSolver
 from src.solver.storage import Storage
+from src.utils.config import Config
 
 
 class MCCFRSolver(BaseSolver):
@@ -41,7 +42,7 @@ class MCCFRSolver(BaseSolver):
         action_abstraction: BettingActions,
         card_abstraction: BucketingStrategy,
         storage: Storage,
-        config: Optional[Dict] = None,
+        config: Optional[Config] = None,
     ):
         """
         Initialize MCCFR solver.
@@ -50,40 +51,29 @@ class MCCFRSolver(BaseSolver):
             action_abstraction: Action abstraction
             card_abstraction: Card abstraction
             storage: Storage backend
-            config: Solver config {
-                'starting_stack': int (default 200),
-                'small_blind': int (default 1),
-                'big_blind': int (default 2),
-                'seed': int (optional),
-                'cfr_plus': bool (default True),
-                'linear_cfr': bool (default False),
-                'sampling_method': str (default 'external', options: 'external', 'outcome')
-            }
+            config: Config object (defaults to Config.default() if not provided)
         """
         super().__init__(action_abstraction, card_abstraction, storage, config)
 
-        # CFR variant configuration
-        self.cfr_plus = self.config.get("cfr_plus", True)  # Enable CFR+ by default
-        self.linear_cfr = self.config.get("linear_cfr", False)
-        self.sampling_method = self.config.get(
-            "sampling_method", "external"
-        )  # 'external' or 'outcome'
+        # Extract config values from typed Config object
+        cfg = self.config
+        self.cfr_plus = cfg.solver.cfr_plus
+        self.linear_cfr = cfg.solver.linear_cfr
+        self.sampling_method = cfg.solver.sampling_method
+        self.starting_stack = cfg.game.starting_stack
+        self.small_blind = cfg.game.small_blind
+        self.big_blind = cfg.game.big_blind
+        seed = cfg.system.seed
 
         if self.sampling_method not in ["external", "outcome"]:
             raise ValueError(
                 f"Invalid sampling_method: {self.sampling_method}. Must be 'external' or 'outcome'."
             )
 
-        # Game configuration
-        self.starting_stack = self.config.get("starting_stack", 200)
-        self.small_blind = self.config.get("small_blind", 1)
-        self.big_blind = self.config.get("big_blind", 2)
-
         # Game rules
         self.rules = GameRules(self.small_blind, self.big_blind)
 
         # RNG
-        seed = self.config.get("seed")
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)

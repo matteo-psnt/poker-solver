@@ -483,7 +483,7 @@ class TrainingSession:
         # Create shared array worker manager
         with SharedArrayWorkerManager(
             num_workers=num_workers,
-            config_dict=self.config.to_dict(),
+            config=self.config,
             serialized_action_abstraction=serialized_action_abstraction,
             serialized_card_abstraction=serialized_card_abstraction,
             session_id=self.run_dir.name,
