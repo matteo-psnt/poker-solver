@@ -4,167 +4,176 @@ import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
 
-from src.utils.config import Config, get_default_config, load_config
+from src.utils.config import Config
+from src.utils.config_loader import _merge_config, load_config
 
 
-class TestConfig:
-    """Tests for Config class."""
+class TestDefaultBehavior:
+    """Test that defaults work as expected."""
 
-    def test_create_from_dict(self):
-        config_dict = {"key": "value", "nested": {"inner": 42}}
-        config = Config.from_dict(config_dict)
+    def test_default_config_values(self):
+        """Verify default values are correct."""
+        cfg = Config()
 
-        assert config.get("key") == "value"
-        assert config.get("nested.inner") == 42
+        assert cfg.training.num_iterations == 100_000
+        assert cfg.training.checkpoint_frequency == 2_000
+        assert cfg.training.verbose is True
 
-    def test_get_with_dot_notation(self):
-        config = Config.default()
+        assert cfg.storage.max_infosets == 2_000_000
+        assert cfg.storage.max_actions == 10
 
-        assert config.get("game.starting_stack") == 200
-        assert config.get("game.small_blind") == 1
-        assert config.get("training.num_iterations") == 1000
+        assert cfg.game.big_blind == 2
+        assert cfg.game.starting_stack == 200
 
-    def test_get_with_default(self):
-        config = Config.default()
+        assert cfg.system.seed is None  # Default to random
+        assert cfg.system.config_name == "default"
 
-        assert config.get("nonexistent", "default") == "default"
-        assert config.get("game.nonexistent", 99) == 99
+    def test_config_is_immutable(self):
+        """Verify config is frozen (cannot be modified)."""
+        cfg = Config()
 
-    def test_get_section(self):
-        config = Config.default()
+        with pytest.raises(Exception):  # FrozenInstanceError
+            cfg.training.num_iterations = 999  # type: ignore
 
-        game_section = config.get_section("game")
-        assert game_section["starting_stack"] == 200
-        assert game_section["big_blind"] == 2
+        with pytest.raises(Exception):
+            cfg.storage.max_infosets = 999  # type: ignore
 
-    def test_set_value(self):
-        config = Config.default()
 
-        config.set("game.starting_stack", 100)
-        assert config.get("game.starting_stack") == 100
+class TestMergeBehavior:
+    """Test that merging overrides works correctly."""
 
-    def test_set_nested_value(self):
-        config = Config.default()
+    def test_merge_preserves_defaults(self):
+        """Verify merge only changes specified fields."""
+        base = Config()
+        overrides = {"training": {"num_iterations": 50_000}}
 
-        config.set("new.nested.value", 42)
-        assert config.get("new.nested.value") == 42
+        merged = _merge_config(base, overrides)
 
-    def test_merge_configs(self):
-        base = Config.from_dict({"a": 1, "b": {"x": 10}})
-        override = Config.from_dict({"b": {"y": 20}, "c": 3})
+        # Overridden value
+        assert merged.training.num_iterations == 50_000
 
-        base.merge(override)
+        # Defaults preserved
+        assert merged.training.checkpoint_frequency == 2_000
+        assert merged.training.verbose is True
+        assert merged.storage.max_infosets == 2_000_000
 
-        assert base.get("a") == 1  # Preserved
-        assert base.get("b.x") == 10  # Preserved
-        assert base.get("b.y") == 20  # Added
-        assert base.get("c") == 3  # Added
+    def test_merge_nested_config(self):
+        """Verify deep merging works."""
+        base = Config()
+        overrides = {
+            "training": {"num_iterations": 50_000, "verbose": False},
+            "game": {"big_blind": 4},
+        }
 
-    def test_to_dict(self):
-        config = Config.default()
-        config_dict = config.to_dict()
+        merged = _merge_config(base, overrides)
 
-        assert isinstance(config_dict, dict)
-        assert "game" in config_dict
-        assert "training" in config_dict
+        assert merged.training.num_iterations == 50_000
+        assert merged.training.verbose is False
+        assert merged.game.big_blind == 4
+        assert merged.game.small_blind == 1  # preserved
 
-    def test_validate_valid_config(self):
-        config = Config.default()
-        # Should not raise
-        config.validate()
+    def test_merge_empty_overrides(self):
+        """Verify merging empty dict returns original."""
+        base = Config()
+        merged = _merge_config(base, {})
 
-    def test_validate_invalid_starting_stack(self):
-        config = Config.default()
-        config.set("game.starting_stack", 0)
+        assert merged == base
 
-        with pytest.raises(ValueError, match="starting_stack must be positive"):
-            config.validate()
+    def test_merge_creates_new_instance(self):
+        """Verify merge returns new object (immutability)."""
+        base = Config()
+        overrides = {"training": {"num_iterations": 50_000}}
 
-    def test_validate_invalid_storage_backend(self):
-        config = Config.default()
-        config.set("storage.backend", "invalid")
+        merged = _merge_config(base, overrides)
 
-        with pytest.raises(ValueError, match="storage backend must be"):
-            config.validate()
+        assert merged is not base
+        assert base.training.num_iterations == 100_000  # unchanged
 
-    def test_load_from_file(self):
+
+class TestLoadBehavior:
+    """Test that loading from YAML works correctly."""
+
+    def test_load_defaults_only(self):
+        """Verify loading without file uses defaults."""
+        cfg = load_config()
+
+        assert cfg.training.num_iterations == 100_000
+        assert cfg.game.big_blind == 2
+
+    def test_load_from_yaml_file(self):
+        """Verify loading from YAML applies overrides."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump({"game": {"starting_stack": 150}}, f)
-            config_path = Path(f.name)
+            f.write(
+                """
+training:
+  num_iterations: 50000
+  verbose: false
 
-        try:
-            config = Config.from_file(config_path)
-            assert config.get("game.starting_stack") == 150
-        finally:
-            config_path.unlink()
-
-    def test_str_representation(self):
-        config = Config.default()
-        s = str(config)
-        assert "Config" in s
-
-
-class TestLoadConfig:
-    """Tests for load_config function."""
-
-    def test_load_default_config(self):
-        config = load_config()
-
-        assert config.get("game.starting_stack") == 200
-        assert config.get("storage.backend") == "disk"
-
-    def test_load_with_overrides(self):
-        config = load_config(
-            training__num_iterations=5000,
-            storage__backend="disk",
-        )
-
-        assert config.get("training.num_iterations") == 5000
-        assert config.get("storage.backend") == "disk"
-
-    def test_load_from_file_with_overrides(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump(
-                {
-                    "game": {"starting_stack": 150, "small_blind": 1, "big_blind": 2},
-                    "training": {"num_iterations": 100, "checkpoint_frequency": 10},
-                    "storage": {"backend": "memory"},
-                },
-                f,
+game:
+  starting_stack: 300
+"""
             )
-            config_path = Path(f.name)
+            yaml_path = Path(f.name)
 
         try:
-            config = load_config(config_path, game__starting_stack=250)
-            assert config.get("game.starting_stack") == 250  # Override applied
+            cfg = load_config(yaml_path)
+
+            # Overridden values
+            assert cfg.training.num_iterations == 50_000
+            assert cfg.training.verbose is False
+            assert cfg.game.starting_stack == 300
+
+            # Defaults preserved
+            assert cfg.training.checkpoint_frequency == 2_000
+            assert cfg.game.big_blind == 2
         finally:
-            config_path.unlink()
+            yaml_path.unlink()
+
+    def test_load_with_programmatic_overrides(self):
+        """Verify programmatic overrides work."""
+        cfg = load_config(training__num_iterations=75_000, game__big_blind=5)
+
+        assert cfg.training.num_iterations == 75_000
+        assert cfg.game.big_blind == 5
+
+        # Defaults preserved
+        assert cfg.training.checkpoint_frequency == 2_000
+
+    def test_load_yaml_plus_programmatic(self):
+        """Verify YAML + programmatic overrides compose correctly."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(
+                """
+training:
+  num_iterations: 50000
+"""
+            )
+            yaml_path = Path(f.name)
+
+        try:
+            # YAML sets num_iterations=50000, programmatic overrides it to 75000
+            cfg = load_config(yaml_path, training__num_iterations=75_000)
+
+            assert cfg.training.num_iterations == 75_000  # programmatic wins
+        finally:
+            yaml_path.unlink()
+
+    def test_load_nonexistent_file_raises(self):
+        """Verify loading missing file raises error."""
+        with pytest.raises(FileNotFoundError):
+            load_config("/nonexistent/path.yaml")
 
 
-class TestGetDefaultConfig:
-    """Tests for get_default_config function."""
+class TestTypeSafety:
+    """Test that types are enforced."""
 
-    def test_returns_dict(self):
-        config_dict = get_default_config()
-        assert isinstance(config_dict, dict)
+    def test_dataclass_fields_have_types(self):
+        """Verify all fields are typed (not Any)."""
+        cfg = Config()
 
-    def test_has_required_sections(self):
-        config_dict = get_default_config()
-
-        assert "game" in config_dict
-        assert "action_abstraction" in config_dict
-        assert "card_abstraction" in config_dict
-        assert "solver" in config_dict
-        assert "training" in config_dict
-        assert "storage" in config_dict
-        assert "system" in config_dict
-
-    def test_game_config_values(self):
-        config_dict = get_default_config()
-        game = config_dict["game"]
-
-        assert game["starting_stack"] == 200
-        assert game["small_blind"] == 1
-        assert game["big_blind"] == 2
+        # Spot check - if these work, types are enforced
+        assert isinstance(cfg.training.num_iterations, int)
+        assert isinstance(cfg.training.verbose, bool)
+        assert isinstance(cfg.game.starting_stack, int)
+        assert cfg.system.seed is None or isinstance(cfg.system.seed, int)

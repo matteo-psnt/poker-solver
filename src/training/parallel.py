@@ -16,6 +16,7 @@ import queue
 import random
 import time
 import traceback
+from dataclasses import asdict
 from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
@@ -117,8 +118,8 @@ def _worker_loop(
         )
 
         # Create solver config
-        solver_config = config.get_section("game").copy()
-        solver_config.update(config.get_section("system"))
+        solver_config = asdict(config.game).copy()
+        solver_config.update(asdict(config.system))
         solver_config["seed"] = base_seed + worker_id * 10000
 
         # CFR+ can be applied directly since each worker owns its infosets

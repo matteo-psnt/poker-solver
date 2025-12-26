@@ -54,15 +54,18 @@ solver:
 
 # ===== Training Configuration =====
 training:
-  num_iterations: 100000  # 100K iterations for quick test with CFR+
-  checkpoint_frequency: 2000  # Save checkpoint every 2000 iterations
-  log_frequency: 1000  # Print progress every 1K iterations
-  iterations_per_worker: 500  # Multiplier for batch size (batch_size = iterations_per_worker * num_workers)
-  verbose: true
+  num_iterations: 100000  # 100K iterations for quick test with CFR+ (default: 100_000)
+  checkpoint_frequency: 2000  # Save checkpoint every 2000 iterations (default: 2_000)
+  log_frequency: 1000  # Print progress every 1K iterations (default: 1_000)
+  iterations_per_worker: 500  # Multiplier for batch size (default: 500)
+  verbose: true  # Show verbose output (default: true)
+  runs_dir: "data/runs"  # Base directory for training runs (default: data/runs)
 
 # ===== Storage Configuration =====
 storage:
-  checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended)
+  checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended, default: true)
+  max_infosets: 2000000  # Maximum infosets in shared memory (default: 2_000_000)
+  max_actions: 10  # Maximum actions per infoset (default: 10)
 
 # ===== System Configuration =====
 system:
