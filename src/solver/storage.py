@@ -13,20 +13,80 @@ import pickle
 from abc import ABC, abstractmethod
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Set, Tuple
 
 import h5py
 import numpy as np
 import xxhash
 
 from src.bucketing.utils.infoset import InfoSet, InfoSetKey
-from src.game.actions import Action, fold
+from src.game.actions import Action, ActionType, fold
 
 if TYPE_CHECKING:
     from multiprocessing.shared_memory import SharedMemory
 
 # Setup logger
 logger = logging.getLogger(__name__)
+
+
+def _reconstruct_action(action_type_name: str, amount: int) -> Action:
+    """
+    Reconstruct Action object from serialized signature.
+
+    Args:
+        action_type_name: Name of ActionType enum (e.g., "FOLD", "CALL", "RAISE")
+        amount: Action amount
+
+    Returns:
+        Reconstructed Action object
+
+    Raises:
+        ValueError: If action_type_name is invalid
+    """
+    try:
+        action_type = ActionType[action_type_name]
+    except KeyError:
+        raise ValueError(f"Invalid action type name: {action_type_name}")
+
+    return Action(type=action_type, amount=amount)
+
+
+def _validate_action_signatures(
+    action_counts: np.ndarray, action_sigs: dict[int, list[tuple[str, int]]], context: str
+) -> None:
+    """
+    Ensure action signatures align with stored action counts and IDs are unique.
+
+    Raises:
+        ValueError with context if mismatches are detected.
+    """
+    # ID uniqueness check
+    ids = list(action_sigs.keys())
+    unique = len(set(ids))
+    if unique != len(ids):
+        raise ValueError(
+            f"{context}: duplicate infoset IDs in action_signatures "
+            f"({len(ids) - unique} duplicates)"
+        )
+
+    # Length alignment check
+    mismatches: list[tuple[int, int, int | None, str]] = []
+    for infoset_id, sigs in action_sigs.items():
+        if infoset_id >= len(action_counts):
+            mismatches.append((infoset_id, len(sigs), None, "id_out_of_range"))
+            continue
+        n_actions = int(action_counts[infoset_id])
+        if len(sigs) != n_actions:
+            mismatches.append((infoset_id, len(sigs), n_actions, "len_mismatch"))
+
+    if mismatches:
+        # Show a concise preview in the exception message
+        preview = "; ".join(
+            f"id {mid}: sig_len {slen} vs count {cnt}" for mid, slen, cnt, _ in mismatches[:5]
+        )
+        raise ValueError(
+            f"{context}: {len(mismatches)} action signature/count mismatches. Examples: {preview}"
+        )
 
 
 class Storage(ABC):
@@ -110,6 +170,75 @@ class InMemoryStorage(Storage):
             return None
         return self._infosets_by_id.get(infoset_id)
 
+    def get_strategy(
+        self,
+        key: InfoSetKey,
+        legal_actions: Optional[List[Action]] = None,
+        fallback: Literal["uniform", "error", "none"] = "uniform",
+        use_average: bool = True,
+    ) -> Optional[np.ndarray]:
+        """
+        Unified strategy retrieval with consistent fallback behavior.
+
+        This method provides a single, consistent interface for retrieving strategies
+        across the codebase, replacing ad-hoc patterns in mccfr.py, exploitability.py,
+        head_to_head.py, and chart_handler.py.
+
+        Args:
+            key: InfoSetKey identifier for the infoset
+            legal_actions: If provided, filter and remap strategy to these actions.
+                          If None, return full strategy over all stored actions.
+            fallback: How to handle missing infosets:
+                     - "uniform": Return uniform distribution over legal_actions (default)
+                     - "error": Raise ValueError
+                     - "none": Return None
+            use_average: If True, use average strategy (converged Nash).
+                        If False, use current strategy (regret matching).
+
+        Returns:
+            Normalized float64 strategy array summing to 1.0, or None if fallback="none"
+            and infoset not found.
+
+        Raises:
+            ValueError: If fallback="error" and infoset not found
+
+        Examples:
+            # Get average strategy for all actions
+            strategy = storage.get_strategy(key)
+
+            # Get current strategy for specific legal actions
+            strategy = storage.get_strategy(
+                key, legal_actions=[fold(), call()], use_average=False
+            )
+
+            # Strict mode: return None if missing
+            strategy = storage.get_strategy(key, fallback="none")
+            if strategy is None:
+                # Handle missing infoset
+                pass
+        """
+        infoset = self.get_infoset(key)
+
+        if infoset is None:
+            # Handle missing infoset based on fallback mode
+            if fallback == "error":
+                raise ValueError(f"Infoset not found: {key}")
+            elif fallback == "none":
+                return None
+            else:  # fallback == "uniform"
+                if legal_actions is None:
+                    return None
+                return np.ones(len(legal_actions), dtype=np.float64) / len(legal_actions)
+
+        # Infoset found - get strategy
+        if legal_actions is not None:
+            # Filter to specific legal actions
+            strategy, _ = infoset.get_strategy_safe(legal_actions, use_average)
+            return strategy
+
+        # Return full strategy over all stored actions
+        return infoset.get_filtered_strategy(use_average=use_average)
+
     def num_infosets(self) -> int:
         """Get total number of stored infosets."""
         return len(self._infosets_by_id)
@@ -163,6 +292,20 @@ class InMemoryStorage(Storage):
             else:
                 raise ValueError("Invalid checkpoint format: missing key mappings")
 
+        # Load action signatures if available (new checkpoint format)
+        action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
+        saved_action_sigs = {}
+
+        if action_sigs_file.exists():
+            with open(action_sigs_file, "rb") as f:
+                saved_action_sigs = pickle.load(f)
+            logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
+        else:
+            raise ValueError(
+                f"Checkpoint missing action_signatures.pkl at {action_sigs_file}. "
+                "Cannot reconstruct legal actions."
+            )
+
         with (
             h5py.File(regrets_file, "r") as regrets_h5,
             h5py.File(strategies_file, "r") as strategies_h5,
@@ -171,12 +314,29 @@ class InMemoryStorage(Storage):
             action_counts = regrets_h5["action_counts"][:]
             all_strategies = strategies_h5["strategies"][:]
 
+            # Validate alignment before constructing infosets
+            _validate_action_signatures(
+                action_counts, saved_action_sigs, "InMemoryStorage checkpoint load"
+            )
+
             for infoset_id, key in self.id_to_key.items():
                 n_actions = action_counts[infoset_id]
                 regrets = all_regrets[infoset_id, :n_actions].copy()
                 strategies = all_strategies[infoset_id, :n_actions].copy()
 
-                legal_actions = [fold() for _ in range(n_actions)]
+                # Reconstruct legal actions from signatures if available
+                if infoset_id in saved_action_sigs:
+                    action_sigs = saved_action_sigs[infoset_id]
+                    legal_actions = [
+                        _reconstruct_action(action_type_name, amount)
+                        for action_type_name, amount in action_sigs
+                    ]
+                else:
+                    raise ValueError(
+                        f"Missing action signatures for infoset ID {infoset_id} in checkpoint. "
+                        "Cannot reconstruct legal actions."
+                    )
+
                 infoset = InfoSet(key, legal_actions)
                 infoset.regrets = regrets
                 infoset.strategy_sum = strategies
@@ -831,6 +991,28 @@ class SharedArrayStorage(Storage):
         with h5py.File(strategies_file, "r") as h5_f:
             saved_strategies = h5_f["strategies"][:]
 
+        # Load action signatures (with backward compatibility for old checkpoints)
+        action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
+        saved_action_sigs = {}
+
+        if action_sigs_file.exists():
+            # New checkpoint format with action signatures
+            with open(action_sigs_file, "rb") as f:
+                saved_action_sigs = pickle.load(f)
+            logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
+
+            # Validate alignment (fail fast if counts/signatures diverge)
+            _validate_action_signatures(
+                saved_action_counts,
+                saved_action_sigs,
+                "SharedArrayStorage.load_checkpoint",
+            )
+        else:
+            raise ValueError(
+                f"Checkpoint missing action_signatures.pkl at {action_sigs_file}. "
+                "Cannot reconstruct legal actions."
+            )
+
         # Re-partition keys based on current worker configuration
         # Each key is assigned to a worker using hash-based partitioning
         loaded_count = 0
@@ -851,6 +1033,20 @@ class SharedArrayStorage(Storage):
             self.shared_action_counts[new_id] = n_actions
             self.shared_regrets[new_id, :n_actions] = saved_regrets[old_id, :n_actions]
             self.shared_strategy_sum[new_id, :n_actions] = saved_strategies[old_id, :n_actions]
+
+            # Reconstruct legal actions from signatures
+            if old_id not in saved_action_sigs:
+                raise ValueError(
+                    f"Missing action signatures for infoset {key} (id {old_id}). "
+                    "Cannot reconstruct legal actions."
+                )
+
+            action_sigs = saved_action_sigs[old_id]
+            legal_actions = [
+                _reconstruct_action(action_type_name, amount)
+                for action_type_name, amount in action_sigs
+            ]
+            self._legal_actions_cache[new_id] = legal_actions
 
             loaded_count += 1
 
