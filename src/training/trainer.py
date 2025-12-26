@@ -8,11 +8,9 @@ Supports both sequential and parallel (multiprocessing) training modes.
 """
 
 import concurrent.futures
-import cProfile
 import json
 import multiprocessing as mp
 import pickle
-import pstats
 import time
 from datetime import datetime
 from pathlib import Path
@@ -483,183 +481,144 @@ class TrainingSession:
             use the TrainingSession.resume() classmethod instead of resume=True parameter.
             Parallel training uses hash-partitioned infosets for high performance.
         """
-        # Enable profiling if requested
-        profile_mode = self.config.get("training.profile_mode", False)
-        profiler = None
-        if profile_mode:
-            profiler = cProfile.Profile()
-            profiler.enable()
-            print("🔍 Profiling mode enabled")
+        # Get iteration count
+        if num_iterations is None:
+            num_iterations = int(self.config.get("training.num_iterations", 1000))
+
+        # Resume from snapshot if requested
+        if resume:
+            print(f"Resuming from run: {self.run_dir.name}")
+            start_iteration = self.run_tracker.metadata.get("iterations", 0)
+            if start_iteration > 0:
+                print(f"Continuing from iteration {start_iteration}")
+                num_iterations = max(num_iterations, start_iteration)
+
+        # Use parallel training if requested
+        if use_parallel:
+            if num_workers is None:
+                num_workers = mp.cpu_count()
+            return self._train_partitioned(num_iterations, num_workers, batch_size)
+
+        # Sequential training
+        checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)
+        log_freq = self.config.get("training.log_frequency", 10)
+        verbose = self.config.get("training.verbose", True)
+
+        start_iteration = self.run_tracker.metadata.get("iterations", 0)
+
+        # Initialize run tracker (creates directory and .run.json)
+        self.run_tracker.initialize()
+
+        # Track training time
+        training_start_time = time.time()
+
+        # Create infoset sampler for solver-quality metrics
+        def sample_infosets(n: int):
+            """Sample n random infosets from solver storage."""
+            if hasattr(self.solver.storage, "infosets"):
+                all_infosets = list(self.solver.storage.infosets.values())
+                if len(all_infosets) <= n:
+                    return all_infosets
+                indices = np.random.choice(len(all_infosets), size=n, replace=False)
+                return [all_infosets[i] for i in indices]
+            return []
+
+        # Training loop
+        if verbose:
+            iterator: Union[range, tqdm] = tqdm(
+                range(start_iteration, num_iterations),
+                desc="Training",
+                unit="iter",
+            )
+        else:
+            iterator = range(start_iteration, num_iterations)
 
         try:
-            # Get iteration count
-            if num_iterations is None:
-                num_iterations = int(self.config.get("training.num_iterations", 1000))
+            for i in iterator:
+                # Run one iteration
+                utility = self.solver.train_iteration()
 
-            # Resume from snapshot if requested
-            if resume:
-                print(f"Resuming from run: {self.run_dir.name}")
-                start_iteration = self.run_tracker.metadata.get("iterations", 0)
-                if start_iteration > 0:
-                    print(f"Continuing from iteration {start_iteration}")
-                    num_iterations = max(num_iterations, start_iteration)
+                # Log metrics with solver-quality indicators
+                self.metrics.log_iteration(
+                    iteration=i + 1,
+                    utility=utility,
+                    num_infosets=self.solver.num_infosets(),
+                    infoset_sampler=sample_infosets,
+                )
 
-            # Use parallel training if requested
-            if use_parallel:
-                if num_workers is None:
-                    num_workers = mp.cpu_count()
-                return self._train_partitioned(num_iterations, num_workers, batch_size)
+                # Periodic logging
+                if (i + 1) % log_freq == 0 and verbose:
+                    summary = self.metrics.get_summary()
+                    if isinstance(iterator, tqdm):
+                        # Use compact summary for progress bar
+                        compact_summary = self.metrics.get_compact_summary()
+                        iterator.set_postfix_str(compact_summary)
 
-            # Sequential training
-            checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)
-            log_freq = self.config.get("training.log_frequency", 10)
-            verbose = self.config.get("training.verbose", True)
+                # Periodic checkpointing (async, non-blocking)
+                if (i + 1) % checkpoint_freq == 0:
+                    self._async_checkpoint(i + 1, training_start_time)
 
-            start_iteration = self.run_tracker.metadata.get("iterations", 0)
+            # Wait for any pending background checkpoint
+            self._wait_for_checkpoint()
 
-            # Initialize run tracker (creates directory and .run.json)
-            self.run_tracker.initialize()
+            # Final checkpoint (synchronous)
+            elapsed_time = time.time() - training_start_time
 
-            # Track training time
-            training_start_time = time.time()
+            # Update final stats
+            self.run_tracker.update(
+                iterations=num_iterations,
+                runtime_seconds=elapsed_time,
+                num_infosets=self.solver.num_infosets(),
+            )
 
-            # Create infoset sampler for solver-quality metrics
-            def sample_infosets(n: int):
-                """Sample n random infosets from solver storage."""
-                if hasattr(self.solver.storage, "infosets"):
-                    all_infosets = list(self.solver.storage.infosets.values())
-                    if len(all_infosets) <= n:
-                        return all_infosets
-                    indices = np.random.choice(len(all_infosets), size=n, replace=False)
-                    return [all_infosets[i] for i in indices]
-                return []
+            # Save final checkpoint
+            self.storage.checkpoint(num_iterations)
 
-            # Training loop
+            # Mark run as completed
+            self.run_tracker.mark_completed()
+
+            # Print final summary
             if verbose:
-                iterator: Union[range, tqdm] = tqdm(
-                    range(start_iteration, num_iterations),
-                    desc="Training",
-                    unit="iter",
-                )
-            else:
-                iterator = range(start_iteration, num_iterations)
+                self.metrics.print_summary()
 
-            try:
-                for i in iterator:
-                    # Run one iteration
-                    utility = self.solver.train_iteration()
+            return {
+                "total_iterations": num_iterations,
+                "final_infosets": self.solver.num_infosets(),
+                "avg_utility": self.metrics.get_avg_utility(),
+                "elapsed_time": elapsed_time,
+            }
 
-                    # Log metrics with solver-quality indicators
-                    self.metrics.log_iteration(
-                        iteration=i + 1,
-                        utility=utility,
-                        num_infosets=self.solver.num_infosets(),
-                        infoset_sampler=sample_infosets,
-                    )
+        except KeyboardInterrupt:
+            # User interrupted - save progress before exiting
+            if verbose:
+                print("\n⚠️  Training interrupted by user")
 
-                    # Periodic logging
-                    if (i + 1) % log_freq == 0 and verbose:
-                        summary = self.metrics.get_summary()
-                        if isinstance(iterator, tqdm):
-                            # Use compact summary for progress bar
-                            compact_summary = self.metrics.get_compact_summary()
-                            iterator.set_postfix_str(compact_summary)
+            # Wait for any pending background checkpoint
+            self._wait_for_checkpoint()
 
-                    # Periodic checkpointing (async, non-blocking)
-                    if (i + 1) % checkpoint_freq == 0:
-                        self._async_checkpoint(i + 1, training_start_time)
+            elapsed_time = time.time() - training_start_time
+            current_iter = i + 1 if "i" in locals() else start_iteration  # type: ignore
 
-                # Wait for any pending background checkpoint
-                self._wait_for_checkpoint()
+            # Save progress (synchronous)
+            self.run_tracker.update(
+                iterations=current_iter,
+                runtime_seconds=elapsed_time,
+                num_infosets=self.solver.num_infosets(),
+            )
+            self.storage.checkpoint(current_iter)
 
-                # Final checkpoint (synchronous)
-                elapsed_time = time.time() - training_start_time
+            if verbose:
+                print(f"✅ Progress saved at iteration {current_iter}")
 
-                # Update final stats
-                self.run_tracker.update(
-                    iterations=num_iterations,
-                    runtime_seconds=elapsed_time,
-                    num_infosets=self.solver.num_infosets(),
-                )
+            raise
 
-                # Save final checkpoint
-                self.storage.checkpoint(num_iterations)
+        except Exception:
+            # Wait for any pending background checkpoint
+            self._wait_for_checkpoint()
 
-                # Mark run as completed
-                self.run_tracker.mark_completed()
-
-                # Print final summary
-                if verbose:
-                    self.metrics.print_summary()
-
-                return {
-                    "total_iterations": num_iterations,
-                    "final_infosets": self.solver.num_infosets(),
-                    "avg_utility": self.metrics.get_avg_utility(),
-                    "elapsed_time": elapsed_time,
-                }
-
-            except KeyboardInterrupt:
-                # User interrupted - save progress before exiting
-                if verbose:
-                    print("\n⚠️  Training interrupted by user")
-
-                # Wait for any pending background checkpoint
-                self._wait_for_checkpoint()
-
-                elapsed_time = time.time() - training_start_time
-                current_iter = i + 1 if "i" in locals() else start_iteration  # type: ignore
-
-                # Save progress (synchronous)
-                self.run_tracker.update(
-                    iterations=current_iter,
-                    runtime_seconds=elapsed_time,
-                    num_infosets=self.solver.num_infosets(),
-                )
-                self.storage.checkpoint(current_iter)
-
-                if verbose:
-                    print(f"✅ Progress saved at iteration {current_iter}")
-
-                raise
-
-            except Exception:
-                # Wait for any pending background checkpoint
-                self._wait_for_checkpoint()
-
-                # Mark run as failed on exception
-                self.run_tracker.mark_failed()
-                raise
-
-        finally:
-            # Save and display profiling results if enabled
-            if profiler is not None:
-                profiler.disable()
-
-                # Save profile results
-                profile_dir = Path(self.config.get("training.profile_output", "data/profiles"))
-                profile_dir.mkdir(parents=True, exist_ok=True)
-                profile_file = profile_dir / f"profile_{self.run_dir.name}.prof"
-
-                profiler.dump_stats(str(profile_file))
-
-                # Print top bottlenecks
-                stats = pstats.Stats(profiler)
-                stats.sort_stats("cumulative")
-
-                print("\n" + "=" * 80)
-                print("PROFILING RESULTS (Top 30 functions by cumulative time)")
-                print("=" * 80)
-                stats.print_stats(30)
-
-                stats.sort_stats("tottime")
-                print("\n" + "=" * 80)
-                print("PROFILING RESULTS (Top 30 functions by total time)")
-                print("=" * 80)
-                stats.print_stats(30)
-
-                print(f"\n✅ Full profile saved to: {profile_file}")
-                print(f"💡 Analyze with: python -m pstats {profile_file}")
+            # Mark run as failed on exception
+            self.run_tracker.mark_failed()
+            raise
 
     def evaluate(
         self,

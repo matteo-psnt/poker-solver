@@ -60,8 +60,6 @@ training:
   log_frequency: 1000  # Log every 1K iterations
   iterations_per_worker: 200
   verbose: true
-  profile_mode: false
-  profile_output: "data/profiles"
 
 # ===== Storage Configuration =====
 storage:
