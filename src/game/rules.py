@@ -87,6 +87,59 @@ class GameRules:
             street_start_pot=pot,  # Initial pot from blinds
         )
 
+    def is_action_valid(self, state: GameState, action: Action) -> bool:
+        """
+        Check if an action is valid for the current state without creating a new state.
+
+        This is a lightweight validation method for use during MCCFR traversal
+        where we need to filter stored actions against the current state's constraints
+        (e.g., stack sizes may differ for states with the same InfoSetKey).
+
+        Args:
+            state: Current game state
+            action: Action to validate
+
+        Returns:
+            True if the action is valid, False otherwise
+        """
+        if state.is_terminal:
+            return False
+
+        current_stack = state.stacks[state.current_player]
+        to_call = state.to_call
+
+        # Basic legality checks (same as apply_action but without state creation)
+        if action.type == ActionType.FOLD:
+            # Can only fold when facing a bet
+            return to_call > 0
+
+        elif action.type == ActionType.CHECK:
+            # Can only check when not facing a bet
+            return to_call == 0
+
+        elif action.type == ActionType.CALL:
+            # Can only call when facing a bet and have chips
+            return to_call > 0 and current_stack > 0
+
+        elif action.type == ActionType.BET:
+            # Can only bet when not facing a bet and have enough chips
+            if to_call != 0:
+                return False
+            return action.amount <= current_stack and action.amount > 0
+
+        elif action.type == ActionType.RAISE:
+            # Can only raise when facing a bet and have enough chips for call + raise
+            if to_call == 0:
+                return False
+            total_needed = to_call + action.amount
+            return total_needed <= current_stack and action.amount > 0
+
+        elif action.type == ActionType.ALL_IN:
+            # All-in is always valid if we have chips
+            return current_stack > 0 and action.amount == current_stack
+
+        return False
+
     def get_legal_actions(self, state: GameState, action_abstraction=None) -> List[Action]:
         """
         Get all legal actions for the current player.
@@ -194,8 +247,8 @@ class GameRules:
 
         # Handle different action types
         if action.type == ActionType.FOLD:
-            # Opponent wins
-            return self._create_terminal_state(state, opponent, tuple(betting_history))
+            # Opponent wins (winner determined by last action being FOLD)
+            return self._create_terminal_state(state, tuple(betting_history))
 
         elif action.type == ActionType.CHECK:
             # Check is only legal if to_call == 0
@@ -462,9 +515,8 @@ class GameRules:
                 _skip_validation=True,  # Board may be incomplete
             )
 
-        winner = self._determine_winner(state.hole_cards, state.board)
-
-        return self._create_terminal_state(state, winner, betting_history, pot, stacks)
+        # Winner computed on-demand via get_payoff() using hand evaluation
+        return self._create_terminal_state(state, betting_history, pot, stacks)
 
     def _determine_winner(
         self,
@@ -483,12 +535,17 @@ class GameRules:
     def _create_terminal_state(
         self,
         state: GameState,
-        winner: int,
         betting_history: Tuple[Action, ...],
         pot: Optional[int] = None,
         stacks: Optional[Tuple[int, int]] = None,
     ) -> GameState:
-        """Create terminal state with payoffs."""
+        """
+        Create terminal state.
+
+        Note: Winner is not stored - it's computed on-demand from the state
+        via get_payoff() using either the last action (for folds) or
+        hand evaluation (for showdowns).
+        """
         return state.__class__(
             street=state.street,
             pot=pot or state.pot,

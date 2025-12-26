@@ -5,7 +5,10 @@ This module implements action abstraction that discretizes the continuous
 betting space into a small set of actions (e.g., bet 33%, 75%, all-in).
 """
 
+import json
 from typing import Dict, List, Optional
+
+import xxhash
 
 from src.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
 from src.game.state import GameState
@@ -370,6 +373,33 @@ class BettingActions:
             return action
 
         return action
+
+    def get_config_hash(self) -> str:
+        """
+        Compute a stable hash of the action abstraction configuration.
+
+        This hash is used to detect config changes between training runs.
+        If you load a checkpoint with a different config hash, the strategies
+        may be invalid because actions were abstracted differently.
+
+        Returns:
+            16-character hex string representing the config hash
+        """
+        # Build deterministic representation of config
+        # Sort keys to ensure consistent ordering
+        config_data = {
+            "big_blind": self.big_blind,
+            "preflop_raises": sorted(self.preflop_raises),
+            "postflop_bets": {
+                street: sorted(sizes) for street, sizes in sorted(self.postflop_bets.items())
+            },
+            "all_in_spr_threshold": self.all_in_spr_threshold,
+            "max_raises_per_street": self.max_raises_per_street,
+        }
+
+        # Use JSON for deterministic serialization
+        config_json = json.dumps(config_data, sort_keys=True, separators=(",", ":"))
+        return xxhash.xxh64(config_json.encode()).hexdigest()
 
     def __str__(self) -> str:
         """String representation of abstraction."""

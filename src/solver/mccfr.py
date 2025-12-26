@@ -136,7 +136,8 @@ class MCCFRSolver(BaseSolver):
         state = self.rules.create_initial_state(
             starting_stack=self.starting_stack,
             hole_cards=hole_cards,
-            button=self.iteration % 2,
+            button=(self.iteration // 2)
+            % 2,  # Alternate every 2 iterations (decoupled from traversing_player)
         )
 
         return state
@@ -190,17 +191,13 @@ class MCCFRSolver(BaseSolver):
 
         # Validate stored actions against current state
         # (states with same InfoSetKey might have different stack sizes)
+        # Use lightweight validation to avoid creating new state objects
         valid_actions = []
         valid_indices = []
         for i, action in enumerate(infoset.legal_actions):
-            try:
-                # Test if action is valid for current state
-                state.apply_action(action, self.rules)
+            if self.rules.is_action_valid(state, action):
                 valid_actions.append(action)
                 valid_indices.append(i)
-            except ValueError:
-                # Action invalid for current state (e.g., bet exceeds stack)
-                pass
 
         # If no stored actions are valid, use current legal actions
         if not valid_actions:
@@ -331,15 +328,13 @@ class MCCFRSolver(BaseSolver):
         infoset = self.storage.get_or_create_infoset(infoset_key, legal_actions)
 
         # Validate stored actions against current state
+        # Use lightweight validation to avoid creating new state objects
         valid_actions = []
         valid_indices = []
         for i, action in enumerate(infoset.legal_actions):
-            try:
-                state.apply_action(action, self.rules)
+            if self.rules.is_action_valid(state, action):
                 valid_actions.append(action)
                 valid_indices.append(i)
-            except ValueError:
-                pass
 
         # If no stored actions are valid, use current legal actions
         if not valid_actions:
