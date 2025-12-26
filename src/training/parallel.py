@@ -66,6 +66,7 @@ def _worker_loop(
     max_infosets: int,
     max_actions: int,
     checkpoint_dir: str | None = None,
+    ready_event=None,  # Optional[mp.Event]
 ) -> None:
     """
     Worker process for parallel MCCFR training with shared array storage.
@@ -109,6 +110,7 @@ def _worker_loop(
         card_abstraction = pickle.loads(serialized_card_abstraction)
 
         # Create storage (attach to existing shared memory)
+        # ready_event ensures we wait for coordinator to create memory first
         storage = SharedArrayStorage(
             num_workers=num_workers,
             worker_id=worker_id,
@@ -117,6 +119,7 @@ def _worker_loop(
             max_actions=max_actions,
             is_coordinator=False,  # Worker attaches, doesn't create
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
+            ready_event=ready_event,
         )
 
         # Create solver config with worker-specific seed
@@ -567,6 +570,10 @@ class SharedArrayWorkerManager:
         self.max_actions = max_actions
         self.checkpoint_dir = checkpoint_dir
 
+        # Create synchronization event for shared memory readiness
+        # Coordinator sets this after creating memory, workers wait for it
+        self.ready_event = mp.Event()
+
         # Create coordinator storage (creates shared memory)
         _log("Coordinator", f"Creating shared memory (session={self.session_id})...")
         self.storage = SharedArrayStorage(
@@ -577,6 +584,7 @@ class SharedArrayWorkerManager:
             max_actions=max_actions,
             is_coordinator=True,  # Create shared memory
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
+            ready_event=self.ready_event,  # Coordinator signals when memory is ready
         )
         print(
             f"[Coordinator] Shared memory created: "
@@ -624,13 +632,14 @@ class SharedArrayWorkerManager:
                     self.max_infosets,
                     self.max_actions,
                     self.checkpoint_dir,
+                    self.ready_event,  # Workers wait on this before attaching
                 ),
             )
             p.start()
             self.processes.append(p)
 
-        # Wait a moment for workers to attach
-        time.sleep(1.0)
+        # Workers will wait for ready_event before attaching to shared memory
+        # No need for arbitrary sleep - synchronization is handled by the event
         _log("Coordinator", f"All {self.num_workers} workers started")
 
     def exchange_ids(self, timeout: float = 60.0, verbose: bool = True) -> Dict:

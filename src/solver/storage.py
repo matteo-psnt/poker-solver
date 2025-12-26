@@ -10,6 +10,7 @@ flat NumPy arrays backed directly by shared memory.
 
 import logging
 import pickle
+import time
 from abc import ABC, abstractmethod
 from multiprocessing import shared_memory
 from pathlib import Path
@@ -24,6 +25,7 @@ from src.game.actions import Action, ActionType, fold
 
 if TYPE_CHECKING:
     from multiprocessing.shared_memory import SharedMemory
+    from multiprocessing.synchronize import Event as EventType
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -417,6 +419,7 @@ class SharedArrayStorage(Storage):
         is_coordinator: bool = False,
         checkpoint_dir: Optional[Path] = None,
         action_config_hash: Optional[str] = None,
+        ready_event: Optional["EventType"] = None,
     ):
         """
         Initialize shared array storage.
@@ -432,6 +435,11 @@ class SharedArrayStorage(Storage):
             action_config_hash: Optional hash of action abstraction config.
                                Used to detect config changes when loading checkpoints.
                                Generate with BettingActions.get_config_hash().
+            ready_event: Optional multiprocessing.Event for synchronization.
+                        If provided:
+                        - Coordinator sets it after creating shared memory
+                        - Workers wait for it before attempting to attach
+                        This eliminates race conditions during parallel startup.
         """
         self.num_workers = num_workers
         self.worker_id = worker_id
@@ -441,6 +449,7 @@ class SharedArrayStorage(Storage):
         self.is_coordinator = is_coordinator
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
         self.action_config_hash = action_config_hash
+        self.ready_event = ready_event
         self.base_max_infosets = max_infosets
         self.base_slots_per_worker = (max_infosets - 1) // num_workers
         self._extra_regions: list[tuple[int, int, int, int]] = []
@@ -724,12 +733,31 @@ class SharedArrayStorage(Storage):
             f"strategy={strategy_size // 1024 // 1024}MB"
         )
 
-    def _attach_shared_memory(self):
-        """Attach to existing shared memory segments (worker)."""
-        import time
+        # Signal workers that shared memory is ready
+        if self.ready_event is not None:
+            self.ready_event.set()
+            logger.debug("Coordinator signaled ready_event")
 
-        max_retries = 10
-        retry_delay = 0.5
+    def _attach_shared_memory(self):
+        """
+        Attach to existing shared memory segments (worker).
+
+        If ready_event is provided, waits for it before attempting to attach,
+        eliminating race conditions. Otherwise falls back to retry-with-sleep.
+        """
+        # Wait for coordinator signal if event is provided (preferred approach)
+        if self.ready_event is not None:
+            wait_timeout = 30.0  # seconds
+            if not self.ready_event.wait(timeout=wait_timeout):
+                raise RuntimeError(
+                    f"Worker {self.worker_id} timed out waiting for coordinator "
+                    f"to create shared memory (waited {wait_timeout}s)"
+                )
+            logger.debug(f"Worker {self.worker_id} received ready signal")
+
+        # Attach to shared memory (minimal retry for OS propagation delay)
+        max_retries = 5
+        retry_delay = 0.1
 
         for attempt in range(max_retries):
             try:
@@ -753,7 +781,8 @@ class SharedArrayStorage(Storage):
                 else:
                     raise RuntimeError(
                         f"Worker {self.worker_id} failed to attach to shared memory "
-                        f"after {max_retries} attempts"
+                        f"after {max_retries} attempts. "
+                        f"Ensure coordinator creates memory before workers start."
                     )
 
     def _create_numpy_views(self):

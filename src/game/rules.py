@@ -5,11 +5,30 @@ This module implements the betting rules, pot calculations, and state transition
 that govern how the game progresses.
 """
 
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 from src.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
 from src.game.evaluator import get_evaluator
 from src.game.state import Card, GameState, Street
+
+
+@lru_cache(maxsize=4)
+def get_rules(small_blind: int = 1, big_blind: int = 2) -> "GameRules":
+    """
+    Get a cached GameRules instance.
+
+    This avoids repeated instantiation when GameRules is needed frequently
+    (e.g., in state.legal_actions() which is called millions of times during training).
+
+    Args:
+        small_blind: Small blind size (default 1)
+        big_blind: Big blind size (default 2)
+
+    Returns:
+        Cached GameRules instance with specified blind sizes
+    """
+    return GameRules(small_blind=small_blind, big_blind=big_blind)
 
 
 class GameRules:

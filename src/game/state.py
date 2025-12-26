@@ -281,10 +281,9 @@ class GameState:
             List of legal actions (delegates to GameRules)
         """
         # Import here to avoid circular dependency
-        from src.game.rules import GameRules
+        from src.game.rules import get_rules
 
-        rules = GameRules()
-        return rules.get_legal_actions(self, action_abstraction)
+        return get_rules().get_legal_actions(self, action_abstraction)
 
     def apply_action(self, action: Action, rules=None) -> "GameState":
         """
@@ -292,16 +291,16 @@ class GameState:
 
         Args:
             action: Action to apply
-            rules: Optional GameRules instance (creates one if not provided)
+            rules: Optional GameRules instance (uses cached instance if not provided)
 
         Returns:
             Next game state (delegates to GameRules)
         """
-        # Import here to avoid circular dependency
-        from src.game.rules import GameRules
-
         if rules is None:
-            rules = GameRules()
+            # Import here to avoid circular dependency
+            from src.game.rules import get_rules
+
+            rules = get_rules()
         return rules.apply_action(self, action)
 
     def get_payoff(self, player: int, rules=None) -> float:
@@ -310,16 +309,16 @@ class GameState:
 
         Args:
             player: Player index (0 or 1)
-            rules: Optional GameRules instance
+            rules: Optional GameRules instance (uses cached instance if not provided)
 
         Returns:
             Chips won/lost (delegates to GameRules)
         """
-        # Import here to avoid circular dependency
-        from src.game.rules import GameRules
-
         if rules is None:
-            rules = GameRules()
+            # Import here to avoid circular dependency
+            from src.game.rules import get_rules
+
+            rules = get_rules()
         return rules.get_payoff(self, player)
 
     def get_infoset_key(self, player: int, card_abstraction):
