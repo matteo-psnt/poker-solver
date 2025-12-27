@@ -162,6 +162,12 @@ class Config:
             raise ValueError("num_iterations must be positive")
         if training.get("checkpoint_frequency", 0) <= 0:
             raise ValueError("checkpoint_frequency must be positive")
+        iterations_per_worker = training.get("iterations_per_worker")
+        if iterations_per_worker is not None:
+            if not isinstance(iterations_per_worker, (int, float)):
+                raise ValueError("iterations_per_worker must be a number when provided")
+            if iterations_per_worker <= 0:
+                raise ValueError("iterations_per_worker must be positive when provided")
 
         # Validate storage config
         storage = self.get_section("storage")
@@ -215,6 +221,7 @@ def get_default_config() -> Dict[str, Any]:
             "num_iterations": 1000,
             "checkpoint_frequency": 100,
             "log_frequency": 10,
+            "iterations_per_worker": 100,
         },
         "storage": {
             "backend": "disk",

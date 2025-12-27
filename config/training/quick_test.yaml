@@ -18,6 +18,7 @@ training:
   num_iterations: 10000
   checkpoint_frequency: 2000
   log_frequency: 100
+  iterations_per_worker: 50
   verbose: true
   profile_mode: false
   profile_output: "data/profiles"

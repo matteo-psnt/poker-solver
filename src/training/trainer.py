@@ -286,15 +286,22 @@ class TrainingSession:
         Args:
             num_iterations: Total iterations to run
             num_workers: Number of parallel workers
-            batch_size: Iterations per batch (default: num_workers * 200)
+            batch_size: Iterations per batch (configurable via training.iterations_per_worker; default: 100 * num_workers)
 
         Returns:
             Training results dictionary
         """
         if batch_size is None:
-            # Larger batch size reduces merge frequency (5x less overhead)
-            # Trade-off: higher memory usage, less frequent progress updates
-            batch_size = 100 * num_workers
+            iterations_per_worker_multiplier = int(
+                self.config.get("training.iterations_per_worker", 100)
+            )
+            if not iterations_per_worker_multiplier:
+                iterations_per_worker_multiplier = 100  # Default multiplier
+
+            if iterations_per_worker_multiplier <= 0:
+                raise ValueError("training.iterations_per_worker must be positive")
+
+            batch_size = iterations_per_worker_multiplier * num_workers
 
         checkpoint_freq = self.config.get("training.checkpoint_frequency", 100)
         verbose = self.config.get("training.verbose", True)
@@ -531,7 +538,7 @@ class TrainingSession:
                 Use TrainingSession.resume() classmethod instead for proper checkpoint restoration.
             use_parallel: Whether to use parallel training (default: True)
             num_workers: Number of parallel workers (default: CPU count)
-            batch_size: Iterations per batch for parallel mode (default: num_workers * 200)
+            batch_size: Iterations per batch for parallel mode
 
         Returns:
             Training results dictionary

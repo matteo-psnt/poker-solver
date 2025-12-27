@@ -54,6 +54,7 @@ training:
   num_iterations: 100000  # 100K iterations for quick test with CFR+
   checkpoint_frequency: 2000  # Save checkpoint every 2000 iterations
   log_frequency: 1000  # Print progress every 1K iterations
+  iterations_per_worker: 100  # Multiplier for batch size (batch_size = iterations_per_worker * num_workers)
   verbose: true
 
   # Profile mode for performance analysis
