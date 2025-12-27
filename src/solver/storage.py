@@ -8,7 +8,6 @@ Includes SharedArrayStorage for parallel MCCFR training using
 flat NumPy arrays backed directly by shared memory.
 """
 
-import logging
 import pickle
 import time
 from abc import ABC, abstractmethod
@@ -25,9 +24,6 @@ from src.game.actions import Action, ActionType, fold
 if TYPE_CHECKING:
     from multiprocessing.shared_memory import SharedMemory
     from multiprocessing.synchronize import Event as EventType
-
-# Setup logger
-logger = logging.getLogger(__name__)
 
 CHECKPOINT_REQUIRED_FILES = (
     "regrets.npy",
@@ -315,7 +311,7 @@ class InMemoryStorage(Storage):
         action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
         with open(action_sigs_file, "rb") as f:
             saved_action_sigs = pickle.load(f)
-        logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
+        print(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
 
         all_regrets = np.load(regrets_file, mmap_mode="r")
         action_counts = np.load(action_counts_file, mmap_mode="r")
@@ -350,7 +346,7 @@ class InMemoryStorage(Storage):
 
             self._infosets_by_id[infoset_id] = infoset
 
-        logger.info(f"Loaded {len(self._infosets_by_id)} infosets from checkpoint")
+        print(f"Loaded {len(self._infosets_by_id)} infosets from checkpoint")
 
     def __str__(self) -> str:
         checkpoint_info = f", checkpoint_dir={self.checkpoint_dir}" if self.checkpoint_dir else ""
@@ -497,7 +493,7 @@ class SharedArrayStorage(Storage):
         else:
             self._attach_shared_memory()
 
-        logger.info(
+        print(
             f"SharedArrayStorage initialized: worker={worker_id}, "
             f"coordinator={is_coordinator}, id_range=[{self.id_range_start}, {self.id_range_end})"
         )
@@ -724,8 +720,8 @@ class SharedArrayStorage(Storage):
         self.shared_strategy_sum.fill(0)
         self.shared_action_counts.fill(0)
 
-        logger.info(
-            f"Coordinator created shared memory: "
+        print(
+            "Coordinator created shared memory: "
             f"regrets={regrets_size // 1024 // 1024}MB, "
             f"strategy={strategy_size // 1024 // 1024}MB"
         )
@@ -733,7 +729,7 @@ class SharedArrayStorage(Storage):
         # Signal workers that shared memory is ready
         if self.ready_event is not None:
             self.ready_event.set()
-            logger.debug("Coordinator signaled ready_event")
+            print("DEBUG: Coordinator signaled ready_event")
 
     def _attach_shared_memory(self):
         """
@@ -750,7 +746,6 @@ class SharedArrayStorage(Storage):
                     f"Worker {self.worker_id} timed out waiting for coordinator "
                     f"to create shared memory (waited {wait_timeout}s)"
                 )
-            logger.debug(f"Worker {self.worker_id} received ready signal")
 
         # Attach to shared memory (minimal retry for OS propagation delay)
         max_retries = 5
@@ -769,7 +764,7 @@ class SharedArrayStorage(Storage):
                 )
 
                 self._create_numpy_views()
-                logger.info(f"Worker {self.worker_id} attached to shared memory")
+                print(f"Worker {self.worker_id} attached to shared memory")
                 return
 
             except FileNotFoundError:
@@ -984,7 +979,7 @@ class SharedArrayStorage(Storage):
         old_strategy = self.shared_strategy_sum
         old_action_counts = self.shared_action_counts
 
-        logger.info(
+        print(
             f"Resizing storage: {old_max_infosets:,} -> {new_max_infosets:,} infosets "
             f"(growth factor: {new_max_infosets / old_max_infosets:.1f}x)"
         )
@@ -1025,9 +1020,9 @@ class SharedArrayStorage(Storage):
             old_shm_actions.close()
             old_shm_actions.unlink()
         except Exception as e:
-            logger.warning(f"Error cleaning up old shared memory: {e}")
+            print(f"Warning: Error cleaning up old shared memory: {e}")
 
-        logger.info(
+        print(
             f"Resize complete: new capacity {new_max_infosets:,}, new session_id={self.session_id}"
         )
 
@@ -1079,7 +1074,7 @@ class SharedArrayStorage(Storage):
         # Append a new extra region for allocations
         self._add_extra_region(old_max_infosets, new_max_infosets)
 
-        logger.info(
+        print(
             f"Worker {self.worker_id} reattached after resize: "
             f"session={new_session_id}, max_infosets={new_max_infosets:,}, "
             f"id_range=[{self.id_range_start}, {self.id_range_end}), "
@@ -1266,8 +1261,8 @@ class SharedArrayStorage(Storage):
         """
         for infoset_id, (regret_delta, strategy_delta) in updates.items():
             if not self.is_owned_by_id(infoset_id):
-                logger.warning(
-                    f"Worker {self.worker_id} received update for non-owned infoset {infoset_id}"
+                print(
+                    f"Warning: Worker {self.worker_id} received update for non-owned infoset {infoset_id}"
                 )
                 continue
 
@@ -1362,7 +1357,7 @@ class SharedArrayStorage(Storage):
             f"SharedArrayStorage.checkpoint(iter={iteration})",
         )
 
-        logger.info(
+        print(
             f"Checkpoint saved: {num_keys} infosets at iteration {iteration}, "
             f"{len(action_sigs)} action signatures"
         )
@@ -1429,7 +1424,7 @@ class SharedArrayStorage(Storage):
 
             # Log if checkpoint was from a resized storage
             if saved_max_infosets and saved_max_infosets != self.max_infosets:
-                logger.info(
+                print(
                     f"Checkpoint max_infosets ({saved_max_infosets:,}) differs from "
                     f"current ({self.max_infosets:,})"
                 )
@@ -1437,20 +1432,20 @@ class SharedArrayStorage(Storage):
             # Validate action config hash if both are available
             if saved_config_hash and self.action_config_hash:
                 if saved_config_hash != self.action_config_hash:
-                    logger.warning(
-                        f"ACTION CONFIG MISMATCH DETECTED!\n"
+                    print(
+                        "WARNING: ACTION CONFIG MISMATCH DETECTED!\n"
                         f"  Checkpoint config hash: {saved_config_hash}\n"
                         f"  Current config hash:    {self.action_config_hash}\n"
-                        f"  Strategies may be INVALID if action abstraction changed.\n"
-                        f"  Consider starting fresh training or using the original config."
+                        "  Strategies may be INVALID if action abstraction changed.\n"
+                        "  Consider starting fresh training or using the original config."
                     )
             elif saved_config_hash and not self.action_config_hash:
-                logger.info(
+                print(
                     f"Checkpoint has config hash ({saved_config_hash}) but current "
                     f"storage was not initialized with one. Skipping validation."
                 )
             elif not saved_config_hash and self.action_config_hash:
-                logger.info(
+                print(
                     f"Checkpoint does not have config hash (old format). "
                     f"Current config hash: {self.action_config_hash}"
                 )
@@ -1463,7 +1458,7 @@ class SharedArrayStorage(Storage):
         action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
         with open(action_sigs_file, "rb") as f:
             saved_action_sigs = pickle.load(f)
-        logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
+        print(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
 
         # Validate alignment (fail fast if counts/signatures diverge)
         _validate_action_signatures(
@@ -1509,7 +1504,7 @@ class SharedArrayStorage(Storage):
 
             loaded_count += 1
 
-        logger.info(
+        print(
             f"Worker {self.worker_id} loaded {loaded_count}/{len(saved_owned_keys)} "
             f"infosets from checkpoint (worker owns {loaded_count} keys)"
         )
@@ -1540,7 +1535,7 @@ class SharedArrayStorage(Storage):
         self._shm_strategy = None
         self._shm_actions = None
 
-        logger.info(f"Worker {self.worker_id} cleaned up shared memory")
+        print(f"Worker {self.worker_id} cleaned up shared memory")
 
     def __del__(self):
         """Cleanup on deletion."""

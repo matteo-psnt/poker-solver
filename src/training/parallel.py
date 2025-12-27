@@ -586,9 +586,9 @@ class SharedArrayWorkerManager:
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
             ready_event=self.ready_event,  # Coordinator signals when memory is ready
         )
+        total_mb = max_infosets * max_actions * 4 * 2 // 1024 // 1024
         print(
-            f"[Coordinator] Shared memory created: "
-            f"{max_infosets * max_actions * 4 * 2 // 1024 // 1024}MB total",
+            f"[Coordinator] Shared memory created: {total_mb}MB total",
             flush=True,
         )
 
@@ -1111,7 +1111,7 @@ class SharedArrayWorkerManager:
         for p in self.processes:
             p.join(timeout=10)
             if p.is_alive():
-                _log("Coordinator", "Force terminating worker {p.pid}")
+                _log("Coordinator", f"Force terminating worker {p.pid}")
                 p.terminate()
 
         self.processes.clear()

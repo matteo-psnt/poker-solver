@@ -12,7 +12,6 @@ Key difference from 169-class abstraction:
 - But A♠K♠ on T♠9♠8♣ is equivalent to A♥K♥ on T♥9♥8♣ (suit isomorphism)
 """
 
-import logging
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
@@ -28,8 +27,6 @@ from src.bucketing.postflop.suit_isomorphism import (
     get_canonical_hand_id,
 )
 from src.game.state import Card, Street
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -201,12 +198,6 @@ class PostflopBucketer(BucketingStrategy):
             # Simple approach: use median bucket for this cluster
             available_buckets = list(cluster_buckets.values())
             median_bucket = sorted(available_buckets)[len(available_buckets) // 2]
-
-            # Log at DEBUG level only (not WARNING) to avoid spam during training
-            logger.debug(
-                f"Hand {combo.hand_id} not found in cluster {cluster_id} for {street.name}. "
-                f"Using cluster median bucket: {median_bucket}"
-            )
 
             return median_bucket
 
