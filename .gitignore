@@ -63,3 +63,7 @@ logs/
 # Profiling
 *.prof
 *.lprof
+
+# Data artifacts
+data/runs/
+data/profiles/
