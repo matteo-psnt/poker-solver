@@ -179,7 +179,6 @@ class GameRules:
         betting_history.append(action)
 
         to_call = state.to_call
-        last_aggressor = state.last_aggressor
         street = state.street
 
         # Handle different action types
@@ -192,24 +191,34 @@ class GameRules:
             if to_call != 0:
                 raise ValueError("Cannot check when facing a bet")
 
-            # If both players have acted this street, move to next street
-            if last_aggressor is None or self._street_complete(state, betting_history):
-                return self._advance_street(state, tuple(betting_history))
-            else:
-                # Pass action to opponent
-                return state.__class__(
-                    street=street,
-                    pot=pot,
-                    stacks=self._stacks_to_tuple(stacks),
-                    board=state.board,
-                    hole_cards=state.hole_cards,
-                    betting_history=tuple(betting_history),
-                    button_position=state.button_position,
-                    current_player=opponent,
-                    is_terminal=False,
-                    to_call=0,
-                    last_aggressor=last_aggressor,
-                )
+            # Get actions on current street to check for check-check
+            # Note: betting_history already includes current action (appended on line 179)
+            actions_this_street = self._get_actions_on_current_street(betting_history)
+
+            # Check-check: both players have checked on this street
+            if len(actions_this_street) >= 2:
+                # At least 2 actions on this street, check if last two are both checks
+                if (
+                    actions_this_street[-1].type == ActionType.CHECK
+                    and actions_this_street[-2].type == ActionType.CHECK
+                ):
+                    # Check-check: advance to next street
+                    return self._advance_street(state, tuple(betting_history))
+
+            # First check or not check-check: pass action to opponent
+            return state.__class__(
+                street=street,
+                pot=pot,
+                stacks=self._stacks_to_tuple(stacks),
+                board=state.board,
+                hole_cards=state.hole_cards,
+                betting_history=tuple(betting_history),
+                button_position=state.button_position,
+                current_player=opponent,
+                is_terminal=False,
+                to_call=0,
+                last_aggressor=None,  # No aggression on this street
+            )
 
         elif action.type == ActionType.CALL:
             # Add chips to pot
@@ -319,20 +328,44 @@ class GameRules:
         else:
             raise ValueError(f"Unknown action type: {action.type}")
 
-    def _street_complete(self, state: GameState, betting_history: List[Action]) -> bool:
-        """Check if betting is complete on current street."""
-        # Count actions on this street
+    def _get_actions_on_current_street(self, betting_history: List[Action]) -> List[Action]:
+        """
+        Extract actions that occurred on the current street.
+
+        Streets are separated by:
+        - CALL (closes betting, advances street)
+        - Two consecutive CHECKs (check-check advances street)
+        - Start of hand (preflop is first street)
+
+        Returns actions in chronological order (oldest first).
+        """
         actions_this_street: List[Action] = []
-        for action in reversed(betting_history):
+
+        # Walk backwards through history to find where current street started
+        for i in range(len(betting_history) - 1, -1, -1):
+            action = betting_history[i]
             actions_this_street.insert(0, action)
-            # Stop at street transition (would need to track street changes)
-            # For now, simplified: betting complete if last action was check or call
 
-        if len(actions_this_street) == 0:
-            return False
+            # Stop if we hit a CALL (previous street ended with call)
+            if action.type == ActionType.CALL:
+                # This CALL is on previous street, remove it
+                actions_this_street.pop(0)
+                break
 
-        last_action = actions_this_street[-1]
-        return last_action.type in (ActionType.CALL, ActionType.CHECK)
+            # Stop if we hit check-check that's followed by more actions
+            # (meaning it ended a previous street, not the current one)
+            if len(actions_this_street) >= 3:
+                # Check if positions 0 and 1 are both checks
+                if (
+                    actions_this_street[0].type == ActionType.CHECK
+                    and actions_this_street[1].type == ActionType.CHECK
+                ):
+                    # These two checks ended previous street, remove them
+                    actions_this_street.pop(0)
+                    actions_this_street.pop(0)
+                    break
+
+        return actions_this_street
 
     def _advance_street(
         self,
@@ -453,7 +486,7 @@ class GameRules:
             last_aggressor=state.last_aggressor,
         )
 
-    def get_payoff(self, state: GameState, player: int) -> int:
+    def get_payoff(self, state: GameState, player: int) -> float:
         """
         Get payoff for a player in a terminal state.
 
@@ -467,27 +500,22 @@ class GameRules:
         if not state.is_terminal:
             raise ValueError("Can only get payoff for terminal states")
 
-        # If someone folded, last action tells us
-        if state.betting_history and state.betting_history[-1].type == ActionType.FOLD:
-            # Player who folded was current_player at time of fold
-            # Winner is opponent
-            folder = len(state.betting_history) % 2  # Simplified
-            winner = 1 - folder
+        starting_stack = (state.pot + state.stacks[0] + state.stacks[1]) / 2
 
-            if player == winner:
-                return state.pot
-            else:
-                # Calculate how much this player lost
-                # This is tricky - need to track contributions
-                # For now, simplified
-                return -state.pot // 2
+        # Determine winner if fold or showdown
+        if state.betting_history and state.betting_history[-1].type == ActionType.FOLD:
+            # current_player is the folder at time of fold
+            winner = state.opponent(state.current_player)
         else:
-            # Showdown
             winner = self._determine_winner(state.hole_cards, state.board)
 
-            if winner == -1:  # Tie
-                return 0
-            elif player == winner:
-                return state.pot
-            else:
-                return -state.pot // 2
+        if winner == -1:
+            # Split pot on tie
+            pot_share = state.pot / 2
+            total_chips = state.stacks[player] + pot_share
+        elif player == winner:
+            total_chips = state.stacks[player] + state.pot
+        else:
+            total_chips = state.stacks[player]
+
+        return total_chips - starting_stack

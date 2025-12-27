@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 
 from treys import Card as TreysCard
 
-from src.game.actions import Action
+from src.game.actions import Action, ActionType
 
 # SPR (Stack-to-Pot Ratio) thresholds for bucketing
 # Shallow: SPR < 4 (push/fold decisions)
@@ -303,7 +303,7 @@ class GameState:
             rules = GameRules()
         return rules.apply_action(self, action)
 
-    def get_payoff(self, player: int, rules=None) -> int:
+    def get_payoff(self, player: int, rules=None) -> float:
         """
         Get payoff for a player (only valid in terminal states).
 
@@ -396,14 +396,47 @@ class GameState:
             return 2  # Deep
 
     def _normalize_betting_sequence(self) -> str:
-        """Normalize betting history to string for infoset key."""
+        """
+        Normalize betting history to string for infoset key.
+
+        Each action is normalized using the pot size at the time the action was made,
+        not the current pot size. This ensures equivalent betting sequences produce
+        the same normalized string regardless of when we observe them.
+
+        We replay the betting history backwards from the current pot to reconstruct
+        the pot size at each action.
+        """
         if not self.betting_history:
             return ""
 
-        # Convert actions to normalized strings
+        # Reconstruct pot sizes at each action by walking backwards
+        # Start with current pot and work backwards, removing each action's contribution
+        pot_at_action: List[int] = []
+        current_pot = self.pot
+
+        # Walk backwards through betting history
+        for i in range(len(self.betting_history) - 1, -1, -1):
+            action = self.betting_history[i]
+
+            # Record the pot BEFORE this action
+            # (subtract the action's contribution to get pot before action)
+            if action.type in (
+                ActionType.BET,
+                ActionType.RAISE,
+                ActionType.CALL,
+                ActionType.ALL_IN,
+            ):
+                pot_before = current_pot - action.amount
+                pot_at_action.insert(0, pot_before)
+                current_pot = pot_before
+            else:
+                # FOLD, CHECK don't change pot
+                pot_at_action.insert(0, current_pot)
+
+        # Now normalize each action with its contemporaneous pot size
         normalized = []
-        for action in self.betting_history:
-            normalized.append(action.normalize(self.pot))
+        for action, pot_before in zip(self.betting_history, pot_at_action):
+            normalized.append(action.normalize(pot_before))
 
         return "-".join(normalized)
 
