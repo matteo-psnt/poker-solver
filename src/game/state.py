@@ -411,21 +411,46 @@ class GameState:
 
         # Reconstruct pot sizes at each action by walking backwards
         # Start with current pot and work backwards, removing each action's contribution
+        # We need to track to_call to handle CALL actions correctly
         pot_at_action: List[int] = []
         current_pot = self.pot
+        current_to_call = 0  # Track to_call as we go backwards
 
         # Walk backwards through betting history
         for i in range(len(self.betting_history) - 1, -1, -1):
             action = self.betting_history[i]
 
             # Record the pot BEFORE this action
-            # (subtract the action's contribution to get pot before action)
-            if action.type in (
-                ActionType.BET,
-                ActionType.RAISE,
-                ActionType.CALL,
-                ActionType.ALL_IN,
-            ):
+            if action.type == ActionType.BET:
+                # BET: adds amount to pot, sets to_call to amount
+                pot_before = current_pot - action.amount
+                pot_at_action.insert(0, pot_before)
+                current_pot = pot_before
+                current_to_call = 0  # Before bet, to_call was 0
+            elif action.type == ActionType.RAISE:
+                # RAISE: adds amount to pot, increases to_call
+                pot_before = current_pot - action.amount
+                pot_at_action.insert(0, pot_before)
+                current_pot = pot_before
+                # Before this raise, to_call was what the raise was responding to
+                # This is complex to track backwards, so we use the amount
+                current_to_call = 0  # Simplified: reset
+            elif action.type == ActionType.CALL:
+                # CALL: adds current_to_call to pot (matching the bet/raise)
+                # We need to figure out what to_call was at this point
+                # Look ahead (backwards in time) to find the last BET/RAISE
+                call_amount = current_to_call
+                if call_amount == 0:
+                    # Find the previous BET or RAISE to know the call amount
+                    for j in range(i - 1, -1, -1):
+                        if self.betting_history[j].type in (ActionType.BET, ActionType.RAISE):
+                            call_amount = self.betting_history[j].amount
+                            break
+                pot_before = current_pot - call_amount
+                pot_at_action.insert(0, pot_before)
+                current_pot = pot_before
+                current_to_call = call_amount  # Before call, there was a bet to match
+            elif action.type == ActionType.ALL_IN:
                 pot_before = current_pot - action.amount
                 pot_at_action.insert(0, pot_before)
                 current_pot = pot_before

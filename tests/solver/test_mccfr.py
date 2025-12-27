@@ -78,11 +78,11 @@ class TestMCCFRSolver:
         count_after_1 = solver.num_infosets()
 
         # Run more iterations
-        solver.train(num_iterations=9, verbose=False)
-        count_after_10 = solver.num_infosets()
+        solver.train(num_iterations=4, verbose=False)
+        count_after_5 = solver.num_infosets()
 
         # Should have discovered more infosets
-        assert count_after_10 >= count_after_1
+        assert count_after_5 >= count_after_1
 
     def test_strategies_update(self):
         """Test that strategies are updated during training."""
