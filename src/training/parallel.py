@@ -254,13 +254,22 @@ def _persistent_worker_loop(
 
         # WORKER LOOP: Process jobs until shutdown
         while True:
-            # Wait for job from master
-            job = job_queue.get()
+            # Wait for job from master with timeout to check for termination
+            try:
+                job = job_queue.get(timeout=1.0)
+            except queue.Empty:
+                # Check if we should still be alive
+                continue
 
             job_type = JobType(job["type"])
 
             if job_type == JobType.SHUTDOWN:
                 # Clean shutdown
+                print(
+                    f"[Worker {worker_id}] Received shutdown signal, exiting...",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 break
 
             elif job_type == JobType.RUN_ITERATIONS:
@@ -385,39 +394,52 @@ def _persistent_worker_loop(
                     put_thread = threading.Thread(target=_put_result, daemon=True)
                     put_thread.start()
 
-                    # Wait with timeout
+                    # Wait with timeout - if it blocks too long, continue anyway
+                    # The daemon thread will be abandoned but worker can still exit
                     if not result_sent.wait(timeout=120):
                         print(
                             f"[Worker {worker_id}] WARNING: result_queue.put() blocked for >120s! "
-                            f"Queue may be full. Consider reducing batch size.",
+                            f"Queue may be full or master stopped listening. "
+                            f"Abandoning result send and continuing...",
                             file=sys.stderr,
                             flush=True,
                         )
-                        # Wait indefinitely now
-                        result_sent.wait()
-
-                    if put_error:
+                        # Don't wait indefinitely - allow worker to continue/exit
+                        # Shared memory will be cleaned up by master during shutdown
+                    elif put_error:
                         raise put_error[0]
-
-                    print(
-                        f"[Worker {worker_id}] Results sent successfully",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                    else:
+                        print(
+                            f"[Worker {worker_id}] Results sent successfully",
+                            file=sys.stderr,
+                            flush=True,
+                        )
 
                 finally:
                     # Worker closes shared memory (master will unlink)
                     if shm is not None:
                         shm.close()
 
+        print(f"[Worker {worker_id}] Exiting cleanly", file=sys.stderr, flush=True)
+
     except Exception as e:
-        # Report error and exit
-        result_queue.put(
-            {
-                "worker_id": worker_id,
-                "error": str(e),
-            }
-        )
+        # Report error and exit - but use try-except in case queue is closed
+        print(f"[Worker {worker_id}] Fatal error: {e}", file=sys.stderr, flush=True)
+        try:
+            result_queue.put(
+                {
+                    "worker_id": worker_id,
+                    "error": str(e),
+                },
+                timeout=5,
+            )
+        except Exception:
+            # Queue is closed or full - just exit
+            print(
+                f"[Worker {worker_id}] Could not report error to master, exiting",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 class WorkerManager:
@@ -466,6 +488,9 @@ class WorkerManager:
 
         # Worker processes
         self.processes: List[mp.Process] = []
+
+        # Track active shared memory objects for cleanup
+        self._active_shm_names: List[str] = []
 
         # Start workers
         self._start_workers()
@@ -581,6 +606,9 @@ class WorkerManager:
                             data["legal_actions"] = legal_actions_map.get(key, [])
                         # Inject infoset_data into result for merge function
                         result["infoset_data"] = infoset_data
+                        # Remove from tracking since it's been cleaned up
+                        if result["shm_name"] in self._active_shm_names:
+                            self._active_shm_names.remove(result["shm_name"])
                     except Exception as e:
                         print(
                             f"[Master] ERROR deserializing shared memory: {e}",
@@ -644,21 +672,78 @@ class WorkerManager:
     def shutdown(self):
         """Shutdown all workers cleanly."""
         print("[Master] Shutting down workers...", flush=True)
+
         # Send shutdown signal to all workers
         for _ in range(self.num_workers):
             self.job_queue.put({"type": JobType.SHUTDOWN.value})
 
-        # Wait for all processes to terminate
-        for p in self.processes:
-            p.join(timeout=5)
-            if p.is_alive():
-                print(f"Warning: Process {p.pid} did not terminate, killing it")
-                p.terminate()
-                p.join()
+        # Drain result queue to prevent workers from blocking on put()
+        print("[Master] Draining result queue...", flush=True)
+        drained_results = 0
+        while True:
+            try:
+                result = self.result_queue.get(timeout=0.1)
+                drained_results += 1
+                # Clean up any shared memory from unprocessed results
+                if "shm_name" in result:
+                    try:
+                        shm = shared_memory.SharedMemory(name=result["shm_name"])
+                        shm.close()
+                        shm.unlink()
+                        print(
+                            f"[Master] Cleaned up leaked shared memory: {result['shm_name']}",
+                            flush=True,
+                        )
+                    except FileNotFoundError:
+                        pass  # Already cleaned up
+                    except Exception as e:
+                        print(
+                            f"[Master] Warning: Could not cleanup shared memory {result['shm_name']}: {e}",
+                            flush=True,
+                        )
+            except queue.Empty:
+                break
 
-        # Clean up queues
+        if drained_results > 0:
+            print(f"[Master] Drained {drained_results} pending results from queue", flush=True)
+
+        # Wait for all processes to terminate with longer timeout
+        print("[Master] Waiting for workers to exit...", flush=True)
+        for i, p in enumerate(self.processes):
+            p.join(timeout=10)  # Increased timeout from 5 to 10 seconds
+            if p.is_alive():
+                print(f"Warning: Process {p.pid} (worker {i}) did not terminate, killing it")
+                p.terminate()
+                p.join(timeout=2)
+                if p.is_alive():
+                    print(f"Warning: Process {p.pid} still alive after terminate, using kill")
+                    p.kill()
+                    p.join()
+
+        # Clean up any remaining shared memory objects
+        if self._active_shm_names:
+            print(
+                f"[Master] Cleaning up {len(self._active_shm_names)} remaining shared memory objects...",
+                flush=True,
+            )
+            for shm_name in self._active_shm_names[:]:
+                try:
+                    shm = shared_memory.SharedMemory(name=shm_name)
+                    shm.close()
+                    shm.unlink()
+                    print(f"[Master] Cleaned up shared memory: {shm_name}", flush=True)
+                except FileNotFoundError:
+                    pass  # Already cleaned up
+                except Exception as e:
+                    print(f"[Master] Warning: Could not cleanup {shm_name}: {e}", flush=True)
+            self._active_shm_names.clear()
+
+        # Close and join queues
         self.job_queue.close()
+        self.job_queue.join_thread()
         self.result_queue.close()
+        self.result_queue.join_thread()
+
         print("[Master] Shutdown complete.", flush=True)
 
     def __enter__(self):
