@@ -23,6 +23,7 @@ class JobType(Enum):
     """Types of jobs that can be sent to worker processes."""
 
     RUN_ITERATIONS = "run_iterations"
+    BROADCAST_REGRETS = "broadcast_regrets"  # Sync master regrets to workers
     SHUTDOWN = "shutdown"
 
 
@@ -276,14 +277,76 @@ def _persistent_worker_loop(
                 )
                 break
 
+            elif job_type == JobType.BROADCAST_REGRETS:
+                # Load master's current regrets into worker storage
+                # This allows workers to sample from the learned strategy
+                print(
+                    f"[Worker {worker_id}] Receiving regret broadcast from master...",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+                # Clear existing storage before loading broadcast
+                storage.clear()
+
+                # Deserialize from shared memory if using shm transfer
+                if "shm_name" in job:
+                    try:
+                        print(
+                            f"[Worker {worker_id}] Loading from shared memory: {job['shm_name']} ({job['shm_size']} bytes)...",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        infoset_data = _deserialize_infosets_from_shm(
+                            job["shm_name"], job["shm_size"]
+                        )
+
+                        # Merge legal_actions back into infoset_data
+                        legal_actions_map = job.get("legal_actions_map", {})
+                        for key, data in infoset_data.items():
+                            data["legal_actions"] = legal_actions_map.get(key, [])
+
+                        # Load into worker storage
+                        for key, data in infoset_data.items():
+                            infoset = storage.get_or_create_infoset(key, data["legal_actions"])
+                            infoset.regrets = np.array(data["regrets"], dtype=np.float32)
+                            infoset.strategy_sum = np.array(data["strategy_sum"], dtype=np.float32)
+                            infoset.reach_count = data["reach_count"]
+                            infoset.cumulative_utility = data["cumulative_utility"]
+
+                        print(
+                            f"[Worker {worker_id}] Loaded {len(infoset_data)} infosets from master",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    except Exception as e:
+                        print(
+                            f"[Worker {worker_id}] ERROR loading regrets: {e}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        # Continue with empty storage if broadcast fails
+                        storage.clear()
+
+                # Send acknowledgment back
+                result_queue.put(
+                    {
+                        "worker_id": worker_id,
+                        "type": "broadcast_ack",
+                        "num_infosets_loaded": len(storage.infosets)
+                        if hasattr(storage, "infosets")
+                        else storage.num_infosets(),
+                    }
+                )
+
             elif job_type == JobType.RUN_ITERATIONS:
                 # Extract job parameters
                 num_iterations = job["num_iterations"]
                 batch_id = job.get("batch_id", 0)
                 iteration_offset = job.get("iteration_offset", 0)
 
-                # Reset worker state per job to avoid double-counting across batches
-                storage.clear()
+                # Do NOT clear storage - workers should have received regret broadcast
+                # Storage now contains master's current regrets for correct MCCFR sampling
                 solver.iteration = iteration_offset
                 solver.total_utility = 0.0
 
@@ -555,6 +618,23 @@ class WorkerManager:
         # Default to False if not specified
         cfr_plus_enabled = self.config_dict.get("system", {}).get("cfr_plus", False)
 
+        # Broadcast master regrets to workers before running iterations
+        # This ensures workers sample from the learned strategy (correct MCCFR)
+        if storage is not None and hasattr(storage, "infosets"):
+            num_infosets = (
+                storage.num_infosets()
+                if hasattr(storage, "num_infosets")
+                else len(storage.infosets)
+            )
+            if num_infosets > 0:
+                # Only broadcast if we have learned something
+                self.broadcast_regrets(storage, verbose=verbose)
+            elif verbose:
+                print(
+                    "[Master] No infosets to broadcast, workers will start with empty storage",
+                    flush=True,
+                )
+
         # Submit jobs to all workers
         iteration_offset = start_iteration
         for worker_id, num_iterations in enumerate(iterations_per_worker):
@@ -676,6 +756,116 @@ class WorkerManager:
             )
             # Return batch results (legacy batch merge mode - unused)
             return worker_results
+
+    def broadcast_regrets(self, storage, verbose: bool = False):
+        """
+        Broadcast master's current regrets to all workers.
+
+        This allows workers to sample from the current learned strategy (correct MCCFR).
+
+        Args:
+            storage: Master storage containing current regrets
+            verbose: Whether to print progress
+        """
+        if verbose:
+            print("[Master] Broadcasting regrets to workers...", flush=True)
+
+        broadcast_start = time.time()
+
+        # Serialize master's infosets
+        infoset_data = {}
+        for key in storage.infosets:
+            infoset = storage.get_infoset(key)
+            if infoset is not None:
+                infoset_data[key] = {
+                    "legal_actions": list(infoset.legal_actions),
+                    "regrets": infoset.regrets.tolist(),
+                    "strategy_sum": infoset.strategy_sum.tolist(),
+                    "reach_count": infoset.reach_count,
+                    "cumulative_utility": infoset.cumulative_utility,
+                }
+
+        if verbose:
+            print(
+                f"[Master] Serializing {len(infoset_data)} infosets for broadcast...",
+                flush=True,
+            )
+
+        # Use shared memory for efficient transfer
+        import uuid
+
+        shm_name = f"broadcast_regrets_{uuid.uuid4().hex[:8]}"
+
+        try:
+            # Serialize to shared memory
+            shm, shm_size = _serialize_infosets_to_shm(infoset_data, shm_name)
+            self._active_shm_names.append(shm_name)
+
+            if verbose:
+                print(
+                    f"[Master] Broadcast data serialized ({shm_size} bytes), sending to workers...",
+                    flush=True,
+                )
+
+            # Extract legal_actions for separate transfer (can't pickle Action objects in shm)
+            legal_actions_map = {key: data["legal_actions"] for key, data in infoset_data.items()}
+
+            # Send broadcast job to all workers
+            for worker_id in range(self.num_workers):
+                self.job_queue.put(
+                    {
+                        "type": JobType.BROADCAST_REGRETS.value,
+                        "shm_name": shm_name,
+                        "shm_size": shm_size,
+                        "legal_actions_map": legal_actions_map,
+                    }
+                )
+
+            # Wait for acknowledgments from all workers
+            acks_received = 0
+            while acks_received < self.num_workers:
+                try:
+                    result = self.result_queue.get(timeout=30)
+                    if result.get("type") == "broadcast_ack":
+                        acks_received += 1
+                        if verbose:
+                            print(
+                                f"[Master] Worker {result['worker_id']} acknowledged broadcast "
+                                f"({result.get('num_infosets_loaded', 0)} infosets loaded) "
+                                f"[{acks_received}/{self.num_workers}]",
+                                flush=True,
+                            )
+                except queue.Empty:
+                    raise RuntimeError(
+                        f"Timeout waiting for broadcast acknowledgments "
+                        f"({acks_received}/{self.num_workers} received)"
+                    )
+
+            # Cleanup shared memory
+            shm.close()
+            shm.unlink()
+            if shm_name in self._active_shm_names:
+                self._active_shm_names.remove(shm_name)
+
+            broadcast_time = time.time() - broadcast_start
+            if verbose:
+                print(
+                    f"[Master] Broadcast complete in {broadcast_time:.2f}s "
+                    f"({len(infoset_data)} infosets, {shm_size / 1024 / 1024:.1f} MB)",
+                    flush=True,
+                )
+
+        except Exception as e:
+            # Cleanup on error
+            try:
+                if shm_name in self._active_shm_names:
+                    shm = shared_memory.SharedMemory(name=shm_name)
+                    shm.close()
+                    shm.unlink()
+                    self._active_shm_names.remove(shm_name)
+            except Exception:
+                pass
+            raise RuntimeError(f"Failed to broadcast regrets: {e}") from e
 
     def shutdown(self):
         """Shutdown all workers cleanly."""
