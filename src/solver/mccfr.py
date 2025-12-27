@@ -259,8 +259,8 @@ class MCCFRSolver(BaseSolver):
                     if self.linear_cfr:
                         weight *= self.iteration
                     infoset.strategy_sum[original_idx] += weight
-                infoset.reach_count += 1
-                infoset.cumulative_utility += node_utility
+                infoset.increment_reach_count()
+                infoset.add_cumulative_utility(node_utility)
 
             return node_utility
 
@@ -410,8 +410,8 @@ class MCCFRSolver(BaseSolver):
                     weight *= self.iteration
                 infoset.strategy_sum[original_idx] += weight
 
-            infoset.reach_count += 1
-            infoset.cumulative_utility += sampled_utility
+                infoset.increment_reach_count()
+                infoset.add_cumulative_utility(sampled_utility)
 
         return sampled_utility
 

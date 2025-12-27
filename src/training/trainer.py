@@ -45,6 +45,7 @@ class TrainingSession:
             run_id: Optional run ID (for resuming or explicit naming)
         """
         self.config = config
+        self._fallback_stats: Optional[Dict[str, float]] = None
 
         # Determine run directory
         runs_base_dir = Path(self.config.training.runs_dir)
@@ -380,6 +381,8 @@ class TrainingSession:
                 batch_utilities = batch_result["utilities"]
                 completed_iterations += len(batch_utilities)
                 total_infosets = batch_result.get("num_infosets", 0)
+                if "fallback_stats" in batch_result:
+                    self._fallback_stats = batch_result["fallback_stats"]
                 if batch_result.get("interrupted"):
                     interrupted = True
 
@@ -475,6 +478,15 @@ class TrainingSession:
             print(f"   Time: {elapsed_time:.1f}s")
             if completed_iterations > 0:
                 print(f"   Speed: {completed_iterations / elapsed_time:.2f} iter/s")
+        if self._fallback_stats:
+            total_lookups = int(self._fallback_stats.get("total_lookups", 0))
+            fallback_count = int(self._fallback_stats.get("fallback_count", 0))
+            if total_lookups > 0:
+                fallback_rate = self._fallback_stats.get("fallback_rate", 0.0) * 100
+                print(
+                    f"   Abstraction fallbacks: {fallback_count:,}/{total_lookups:,} "
+                    f"({fallback_rate:.2f}%)"
+                )
 
     def _train_partitioned(
         self,

@@ -139,6 +139,50 @@ class InfoSet:
         # Statistics tracking
         self.reach_count = 0  # Number of times this infoset was reached
         self.cumulative_utility = 0.0  # Sum of node utilities (for average)
+        self._reach_counts_view: Optional[np.ndarray] = None
+        self._cumulative_utility_view: Optional[np.ndarray] = None
+        self._stats_index: Optional[int] = None
+        self._stats_read_only = False
+
+    def sync_stats_to_storage(
+        self,
+        reach_count: int,
+        cumulative_utility: float,
+    ) -> None:
+        """Update stats fields from storage-backed arrays."""
+        self.reach_count = int(reach_count)
+        self.cumulative_utility = float(cumulative_utility)
+
+    def attach_stats_views(
+        self,
+        reach_counts: np.ndarray,
+        cumulative_utilities: np.ndarray,
+        infoset_id: int,
+        read_only: bool = False,
+    ) -> None:
+        """Attach shared-memory views for stats updates."""
+        self._reach_counts_view = reach_counts
+        self._cumulative_utility_view = cumulative_utilities
+        self._stats_index = infoset_id
+        self._stats_read_only = read_only
+
+    def increment_reach_count(self, delta: int = 1) -> None:
+        """Increment reach count for this infoset."""
+        if self._reach_counts_view is not None and self._stats_index is not None:
+            if not self._stats_read_only:
+                self._reach_counts_view[self._stats_index] += delta
+            self.reach_count = int(self._reach_counts_view[self._stats_index])
+        else:
+            self.reach_count += delta
+
+    def add_cumulative_utility(self, value: float) -> None:
+        """Add to cumulative utility for this infoset."""
+        if self._cumulative_utility_view is not None and self._stats_index is not None:
+            if not self._stats_read_only:
+                self._cumulative_utility_view[self._stats_index] += value
+            self.cumulative_utility = float(self._cumulative_utility_view[self._stats_index])
+        else:
+            self.cumulative_utility += value
 
     def get_strategy(self) -> np.ndarray:
         """
