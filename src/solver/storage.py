@@ -86,10 +86,10 @@ class InMemoryStorage(Storage):
             checkpoint_dir: Optional directory for saving checkpoints.
                            If provided, enables checkpoint() to save to disk.
         """
-        self.infosets: Dict[InfoSetKey, InfoSet] = {}
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
 
-        # For disk checkpointing, we need key<->id mapping
+        # Integer ID optimization: Use integers as dict keys instead of InfoSetKey
+        self._infosets_by_id: Dict[int, InfoSet] = {}
         self.key_to_id: Dict[InfoSetKey, int] = {}
         self.id_to_key: Dict[int, InfoSetKey] = {}
         self.next_id = 0
@@ -100,26 +100,53 @@ class InMemoryStorage(Storage):
 
     def get_or_create_infoset(self, key: InfoSetKey, legal_actions: List[Action]) -> InfoSet:
         """Get existing infoset or create new one."""
-        if key not in self.infosets:
-            self.infosets[key] = InfoSet(key, legal_actions)
-            # Assign ID for checkpoint serialization
-            if key not in self.key_to_id:
-                self.key_to_id[key] = self.next_id
-                self.id_to_key[self.next_id] = key
-                self.next_id += 1
-        return self.infosets[key]
+        # Use integer ID lookup (fast integer hash instead of complex InfoSetKey hash)
+        infoset_id = self.key_to_id.get(key)
+        if infoset_id is not None:
+            return self._infosets_by_id[infoset_id]
+
+        # Create new infoset with integer ID
+        infoset_id = self.next_id
+        self.next_id += 1
+
+        infoset = InfoSet(key, legal_actions)
+        self._infosets_by_id[infoset_id] = infoset
+        self.key_to_id[key] = infoset_id
+        self.id_to_key[infoset_id] = key
+
+        return infoset
 
     def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
         """Get existing infoset or None."""
-        return self.infosets.get(key)
+        infoset_id = self.key_to_id.get(key)
+        if infoset_id is None:
+            return None
+        return self._infosets_by_id.get(infoset_id)
 
     def has_infoset(self, key: InfoSetKey) -> bool:
         """Check if infoset exists."""
-        return key in self.infosets
+        return key in self.key_to_id
 
     def num_infosets(self) -> int:
         """Get total number of stored infosets."""
-        return len(self.infosets)
+        return len(self._infosets_by_id)
+
+    @property
+    def infosets(self) -> Dict[InfoSetKey, InfoSet]:
+        """
+        Get all infosets as a dict keyed by InfoSetKey.
+
+        This property provides backward compatibility with code that expects
+        a Dict[InfoSetKey, InfoSet]. Built on-the-fly from internal integer
+        ID storage.
+
+        For iteration, prefer using the internal _infosets_by_id when possible
+        for better performance.
+        """
+        return {
+            self.id_to_key[infoset_id]: infoset
+            for infoset_id, infoset in self._infosets_by_id.items()
+        }
 
     def mark_dirty(self, key: InfoSetKey):
         """No-op for in-memory storage (always in sync)."""
@@ -146,7 +173,7 @@ class InMemoryStorage(Storage):
 
     def clear(self):
         """Clear all infosets."""
-        self.infosets.clear()
+        self._infosets_by_id.clear()
         self.key_to_id.clear()
         self.id_to_key.clear()
         self.next_id = 0
@@ -197,9 +224,9 @@ class InMemoryStorage(Storage):
                 infoset.regrets = regrets
                 infoset.strategy_sum = strategies
 
-                self.infosets[key] = infoset
+                self._infosets_by_id[infoset_id] = infoset
 
-        logger.info(f"Loaded {len(self.infosets)} infosets from checkpoint")
+        logger.info(f"Loaded {len(self._infosets_by_id)} infosets from checkpoint")
 
     def _save_to_disk(self):
         """
@@ -243,10 +270,9 @@ class InMemoryStorage(Storage):
         for infoset_id in range(num_infosets):
             if infoset_id not in id_to_key_snapshot:
                 continue
-            key = id_to_key_snapshot[infoset_id]
-            if key not in self.infosets:
+            if infoset_id not in self._infosets_by_id:
                 continue
-            infoset = self.infosets[key]
+            infoset = self._infosets_by_id[infoset_id]
             infoset_data.append(
                 {
                     "id": infoset_id,
