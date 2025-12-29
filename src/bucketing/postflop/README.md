@@ -189,8 +189,8 @@ representatives_per_cluster: 1
 
 ```bash
 # Via CLI
-uv run python -m scripts.cli
-# Select "Precompute Combo Abstraction"
+uv run poker-solver
+# Select "Combo Abstraction Tools" -> "Precompute Abstraction"
 
 # Or directly
 from src.bucketing.postflop.precompute import PostflopPrecomputer, PrecomputeConfig
