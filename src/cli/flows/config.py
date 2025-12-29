@@ -1,14 +1,12 @@
 """Configuration handling for CLI."""
 
-from typing import Optional
-
 from src.cli.ui import prompts, ui
 from src.cli.ui.context import CliContext
 from src.utils.config import Config
 from src.utils.config_loader import load_config
 
 
-def select_config(ctx: CliContext) -> Optional[Config]:
+def select_config(ctx: CliContext) -> Config | None:
     """
     Select and optionally edit a config file.
 

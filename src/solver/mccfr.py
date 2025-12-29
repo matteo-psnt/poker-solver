@@ -5,7 +5,6 @@ Implements MCCFR with external sampling (default) or outcome sampling for scalab
 """
 
 import random
-from typing import List, Optional
 
 import numpy as np
 from treys import Deck
@@ -42,7 +41,7 @@ class MCCFRSolver(BaseSolver):
         action_abstraction: BettingActions,
         card_abstraction: BucketingStrategy,
         storage: Storage,
-        config: Optional[Config] = None,
+        config: Config | None = None,
     ):
         """
         Initialize MCCFR solver.
@@ -146,7 +145,7 @@ class MCCFRSolver(BaseSolver):
         self,
         state: GameState,
         traversing_player: int,
-        reach_probs: List[float],
+        reach_probs: list[float],
     ) -> float:
         """
         Recursive MCCFR traversal with external sampling.
@@ -286,7 +285,7 @@ class MCCFRSolver(BaseSolver):
         self,
         state: GameState,
         traversing_player: int,
-        reach_probs: List[float],
+        reach_probs: list[float],
     ) -> float:
         """
         Recursive MCCFR traversal with outcome sampling.

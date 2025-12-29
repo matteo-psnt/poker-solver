@@ -2,7 +2,6 @@
 
 import multiprocessing as mp
 import pickle
-from typing import Set
 
 import pytest
 
@@ -26,7 +25,7 @@ def worker_use_card_in_set(card_str):
     card2 = Card.new(card_str)
 
     # Test set operations
-    card_set: Set[Card] = {card1, card2}
+    card_set: set[Card] = {card1, card2}
 
     # Both should hash to same value
     assert len(card_set) == 1, f"Expected 1 card in set, got {len(card_set)}"

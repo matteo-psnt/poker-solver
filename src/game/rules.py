@@ -6,7 +6,6 @@ that govern how the game progresses.
 """
 
 from functools import lru_cache
-from typing import List, Optional, Tuple
 
 from src.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
 from src.game.evaluator import get_evaluator
@@ -54,14 +53,14 @@ class GameRules:
         self.big_blind = big_blind
         self.evaluator = get_evaluator()
 
-    def _stacks_to_tuple(self, stacks: List[int]) -> Tuple[int, int]:
+    def _stacks_to_tuple(self, stacks: list[int]) -> tuple[int, int]:
         """Convert stacks list to fixed-size tuple for type safety."""
         return (stacks[0], stacks[1])
 
     def create_initial_state(
         self,
         starting_stack: int,
-        hole_cards: Tuple[Tuple[Card, Card], Tuple[Card, Card]],
+        hole_cards: tuple[tuple[Card, Card], tuple[Card, Card]],
         button: int = 0,
     ) -> GameState:
         """
@@ -159,7 +158,7 @@ class GameRules:
 
         return False
 
-    def get_legal_actions(self, state: GameState, action_abstraction=None) -> List[Action]:
+    def get_legal_actions(self, state: GameState, action_abstraction=None) -> list[Action]:
         """
         Get all legal actions for the current player.
 
@@ -259,7 +258,7 @@ class GameRules:
         # Copy mutable state
         pot = state.pot
         stacks = list(state.stacks)
-        betting_history: List[Action] = list(state.betting_history)
+        betting_history: list[Action] = list(state.betting_history)
         betting_history.append(action)
 
         street = state.street
@@ -415,7 +414,7 @@ class GameRules:
         else:
             raise ValueError(f"Unknown action type: {action.type}")
 
-    def _get_actions_on_current_street(self, betting_history: List[Action]) -> List[Action]:
+    def _get_actions_on_current_street(self, betting_history: list[Action]) -> list[Action]:
         """
         Extract actions that occurred on the current street.
 
@@ -426,7 +425,7 @@ class GameRules:
 
         Returns actions in chronological order (oldest first).
         """
-        actions_this_street: List[Action] = []
+        actions_this_street: list[Action] = []
 
         # Walk backwards through history to find where current street started
         for i in range(len(betting_history) - 1, -1, -1):
@@ -457,9 +456,9 @@ class GameRules:
     def _advance_street(
         self,
         state: GameState,
-        betting_history: Tuple[Action, ...],
-        pot: Optional[int] = None,
-        stacks: Optional[Tuple[int, int]] = None,
+        betting_history: tuple[Action, ...],
+        pot: int | None = None,
+        stacks: tuple[int, int] | None = None,
     ) -> GameState:
         """Advance to next betting street."""
         next_street = state.street.next_street()
@@ -496,9 +495,9 @@ class GameRules:
     def _advance_to_showdown(
         self,
         state: GameState,
-        betting_history: Tuple[Action, ...],
+        betting_history: tuple[Action, ...],
         pot: int,
-        stacks: Tuple[int, int],
+        stacks: tuple[int, int],
     ) -> GameState:
         """Advance directly to showdown (player all-in)."""
         # Run out remaining board cards and determine winner
@@ -507,9 +506,9 @@ class GameRules:
     def _create_showdown_state(
         self,
         state: GameState,
-        betting_history: Tuple[Action, ...],
+        betting_history: tuple[Action, ...],
         pot: int,
-        stacks: Tuple[int, int],
+        stacks: tuple[int, int],
     ) -> GameState:
         """Create terminal showdown state and determine winner."""
         # Note: Board might not be complete (all-in before river)
@@ -539,8 +538,8 @@ class GameRules:
 
     def _determine_winner(
         self,
-        hole_cards: Tuple[Tuple[Card, Card], Tuple[Card, Card]],
-        board: Tuple[Card, ...],
+        hole_cards: tuple[tuple[Card, Card], tuple[Card, Card]],
+        board: tuple[Card, ...],
     ) -> int:
         """Determine winner at showdown."""
         result = self.evaluator.compare_hands(hole_cards[0], hole_cards[1], board)
@@ -554,9 +553,9 @@ class GameRules:
     def _create_terminal_state(
         self,
         state: GameState,
-        betting_history: Tuple[Action, ...],
-        pot: Optional[int] = None,
-        stacks: Optional[Tuple[int, int]] = None,
+        betting_history: tuple[Action, ...],
+        pot: int | None = None,
+        stacks: tuple[int, int] | None = None,
     ) -> GameState:
         """
         Create terminal state.

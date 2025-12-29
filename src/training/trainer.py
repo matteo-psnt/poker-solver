@@ -12,7 +12,7 @@ import pickle
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 from src.evaluation.exploitability import compute_exploitability
 from src.solver.mccfr import MCCFRSolver
@@ -40,8 +40,8 @@ class TrainingSession:
     def __init__(
         self,
         config: Config,
-        run_id: Optional[str] = None,
-        run_tracker: Optional[RunTracker] = None,
+        run_id: str | None = None,
+        run_tracker: RunTracker | None = None,
     ):
         """
         Initialize trainer from configuration.
@@ -123,9 +123,7 @@ class TrainingSession:
             raise
 
     @classmethod
-    def resume(
-        cls, run_dir: Union[str, Path], checkpoint_id: Optional[int] = None
-    ) -> "TrainingSession":
+    def resume(cls, run_dir: str | Path, checkpoint_id: int | None = None) -> "TrainingSession":
         """
         Resume training from a checkpoint.
 
@@ -206,7 +204,7 @@ class TrainingSession:
         """Get verbose setting from config."""
         return self.config.training.verbose
 
-    def _get_training_config(self, num_workers: int, batch_size: Optional[int]) -> Dict[str, Any]:
+    def _get_training_config(self, num_workers: int, batch_size: int | None) -> dict[str, Any]:
         """Parse training configuration with defaults."""
         assert self.run_tracker is not None
         if batch_size is None:
@@ -235,8 +233,8 @@ class TrainingSession:
         self,
         num_iterations: int,
         num_workers: int,
-        batch_size: Optional[int] = None,
-    ) -> Dict:
+        batch_size: int | None = None,
+    ) -> dict[str, Any]:
         """
         Run parallel training using shared array storage.
 
@@ -352,10 +350,10 @@ class TrainingSession:
 
     def train(
         self,
-        num_iterations: Optional[int] = None,
-        num_workers: Optional[int] = None,
-        batch_size: Optional[int] = None,
-    ) -> Dict:
+        num_iterations: int | None = None,
+        num_workers: int | None = None,
+        batch_size: int | None = None,
+    ) -> dict[str, Any]:
         """
         Run parallel training using hash-partitioned infosets.
 
@@ -392,7 +390,7 @@ class TrainingSession:
         self,
         num_samples: int = 10000,
         num_rollouts_per_infoset: int = 100,
-    ) -> Dict:
+    ) -> dict[str, Any]:
         """
         Evaluate current solver using exploitability estimation.
 

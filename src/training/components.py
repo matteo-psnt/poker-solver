@@ -9,7 +9,6 @@ to eliminate code duplication.
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
 
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
@@ -125,8 +124,8 @@ def build_card_abstraction(
 
 def build_storage(
     config: Config,
-    run_dir: Optional[Path] = None,
-    run_metadata: Optional[RunMetadata] = None,
+    run_dir: Path | None = None,
+    run_metadata: RunMetadata | None = None,
 ) -> Storage:
     """
     Build storage backend for training (always returns SharedArrayStorage).

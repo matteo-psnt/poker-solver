@@ -8,7 +8,6 @@ complete game state dataclass that tracks all information needed for a poker han
 from dataclasses import dataclass
 from enum import Enum, auto
 from functools import lru_cache
-from typing import List, Optional, Tuple
 
 from treys import Card as TreysCard
 
@@ -39,7 +38,7 @@ class Street(Enum):
     def is_postflop(self) -> bool:
         return self != Street.PREFLOP
 
-    def next_street(self) -> Optional["Street"]:
+    def next_street(self) -> "Street | None":
         """Get the next street, or None if this is the river."""
         if self == Street.PREFLOP:
             return Street.FLOP
@@ -70,7 +69,7 @@ class Card:
             card_int: Integer representation from treys (use Card.new() to create)
         """
         self.card_int = card_int
-        self._hash: Optional[int] = None  # Cache hash value for performance
+        self._hash: int | None = None  # Cache hash value for performance
 
     @classmethod
     def new(cls, card_str: str) -> "Card":
@@ -96,7 +95,7 @@ class Card:
         return cls(TreysCard.new(card_str))
 
     @classmethod
-    def get_full_deck(cls) -> List["Card"]:
+    def get_full_deck(cls) -> list["Card"]:
         """
         Get a full 52-card deck.
 
@@ -110,7 +109,7 @@ class Card:
 
     @classmethod
     @lru_cache(maxsize=1)
-    def _full_deck_cached(cls) -> Tuple["Card", ...]:
+    def _full_deck_cached(cls) -> tuple["Card", ...]:
         ranks = "23456789TJQKA"
         suits = "shdc"
         return tuple(cls.new(f"{rank}{suit}") for rank in ranks for suit in suits)
@@ -179,15 +178,15 @@ class GameState:
 
     street: Street
     pot: int
-    stacks: Tuple[int, int]
-    board: Tuple[Card, ...]
-    hole_cards: Tuple[Tuple[Card, Card], Tuple[Card, Card]]
-    betting_history: Tuple[Action, ...]
+    stacks: tuple[int, int]
+    board: tuple[Card, ...]
+    hole_cards: tuple[tuple[Card, Card], tuple[Card, Card]]
+    betting_history: tuple[Action, ...]
     button_position: int
     current_player: int
     is_terminal: bool
     to_call: int = 0
-    last_aggressor: Optional[int] = None
+    last_aggressor: int | None = None
     street_start_pot: int = 0  # Pot at start of current betting round (for normalization)
     _skip_validation: bool = False
 
@@ -268,7 +267,7 @@ class GameState:
         """Check if current player can raise (facing a bet with chips left)."""
         return self.to_call > 0 and self.stacks[self.current_player] > self.to_call
 
-    def legal_actions(self, action_abstraction=None) -> List[Action]:
+    def legal_actions(self, action_abstraction=None) -> list[Action]:
         """
         Get legal actions for current player.
 
@@ -409,7 +408,7 @@ class GameState:
 
         # Reconstruct pot sizes by walking forward from street_start_pot
         # This correctly handles RAISE actions which add (to_call + raise_amount)
-        pot_at_action: List[int] = []
+        pot_at_action: list[int] = []
         current_pot = self.street_start_pot
         current_to_call = 0  # Track to_call as we go forward
 

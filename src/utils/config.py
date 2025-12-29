@@ -6,22 +6,22 @@ No duplication, no sync required, no wrapper classes.
 """
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
 class CardAbstractionConfig:
     """Card abstraction configuration with defaults."""
 
-    config: Optional[str] = "default_plus"
-    abstraction_path: Optional[str] = None
+    config: str | None = "default_plus"
+    abstraction_path: str | None = None
 
 
 @dataclass(frozen=True)
 class SprBucketsConfig:
     """SPR bucketing configuration with defaults."""
 
-    thresholds: List[float] = field(default_factory=lambda: [4.0, 13.0])
+    thresholds: list[float] = field(default_factory=lambda: [4.0, 13.0])
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class StorageConfig:
 class SystemConfig:
     """System configuration with defaults."""
 
-    seed: Optional[int] = None  # None means random
+    seed: int | None = None  # None means random
     config_name: str = "default"
     log_level: str = "INFO"
 
@@ -98,7 +98,7 @@ class Config:
     card_abstraction: CardAbstractionConfig = CardAbstractionConfig()
     spr_buckets: SprBucketsConfig = SprBucketsConfig()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary (for serialization, logging, etc.)."""
         return asdict(self)
 
@@ -107,14 +107,14 @@ class Config:
         """Return a Config populated with default values."""
         return cls()
 
-    def merge(self, overrides: Dict[str, Any]) -> "Config":
+    def merge(self, overrides: dict[str, Any]) -> "Config":
         """Return a new Config with the provided overrides merged in."""
         from src.utils.config_loader import _merge_config
 
         return _merge_config(self, overrides)
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "Config":
+    def from_dict(cls, config_dict: dict[str, Any]) -> "Config":
         """
         Create Config from dictionary.
 

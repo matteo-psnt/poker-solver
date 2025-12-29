@@ -4,8 +4,6 @@ Preflop hand representation and mapping.
 Maps hole card pairs to canonical 169-hand notation (e.g., AKs, 72o, TT).
 """
 
-from typing import Tuple
-
 from src.bucketing.utils.card_utils import cards_have_same_suit, get_rank_char
 from src.game.state import Card
 
@@ -27,7 +25,7 @@ class PreflopHandClasses:
         # Precompute rank values for fast lookup
         self.rank_values = {rank: 14 - idx for idx, rank in enumerate(self.RANKS)}
 
-    def get_hand_string(self, hole_cards: Tuple[Card, Card]) -> str:
+    def get_hand_string(self, hole_cards: tuple[Card, Card]) -> str:
         """
         Get canonical hand string for hole cards.
 
@@ -67,7 +65,7 @@ class PreflopHandClasses:
 
         return f"{high}{low}{suffix}"
 
-    def get_hand_index(self, hole_cards: Tuple[Card, Card]) -> int:
+    def get_hand_index(self, hole_cards: tuple[Card, Card]) -> int:
         """
         Get unique index (0-168) for a hand.
 
@@ -139,7 +137,7 @@ class PreflopHandClasses:
         return "PreflopHandClasses(169 hands)"
 
 
-def get_preflop_hand_string(hole_cards: Tuple[Card, Card]) -> str:
+def get_preflop_hand_string(hole_cards: tuple[Card, Card]) -> str:
     """
     Convenience function to get hand string.
 

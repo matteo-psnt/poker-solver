@@ -6,7 +6,6 @@ losses, and chip distributions.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 import numpy as np
 from treys import Deck
@@ -64,7 +63,7 @@ class MatchStatistics:
     player0_bb_per_hand: float
     player1_bb_per_hand: float
     showdown_pct: float
-    results: List[MatchResult]
+    results: list[MatchResult]
 
     def __str__(self) -> str:
         """Format statistics as string."""
@@ -117,7 +116,7 @@ class HeadToHeadEvaluator:
         solver1: BaseSolver,
         num_hands: int,
         alternate_button: bool = True,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ) -> MatchStatistics:
         """
         Play a match between two solvers.

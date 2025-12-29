@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from src.actions.betting_actions import BettingActions
 from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import Action, ActionType
@@ -281,7 +279,7 @@ def _get_hand_strategy(
     is_pair: bool,
     position: int,
     betting_sequence: str,
-) -> Optional[dict]:
+) -> dict | None:
     hand_string = _ranks_to_hand_string(rank1, rank2, suited, is_pair)
 
     spr_bucket = 2

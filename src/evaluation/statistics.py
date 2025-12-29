@@ -5,16 +5,16 @@ Provides confidence intervals, significance tests, and variance calculations
 for match results.
 """
 
-from typing import List, Sequence, Tuple
+from typing import Sequence
 
 import numpy as np
 from scipy import stats
 
 
 def compute_confidence_interval(
-    values: List[float],
+    values: list[float],
     confidence_level: float = 0.95,
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """
     Compute confidence interval for sample mean.
 
@@ -46,7 +46,7 @@ def compute_win_rate_confidence_interval(
     wins: int,
     total: int,
     confidence_level: float = 0.95,
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """
     Compute confidence interval for win rate using Wilson score interval.
 
@@ -79,7 +79,7 @@ def t_test_difference(
     values1: Sequence[float],
     values2: Sequence[float],
     confidence_level: float = 0.95,
-) -> Tuple[float, float, bool]:
+) -> tuple[float, float, bool]:
     """
     Perform t-test to determine if two samples are significantly different.
 
@@ -104,7 +104,7 @@ def t_test_difference(
     return float(t_stat), float(p_value), is_significant
 
 
-def compute_variance(values: List[float]) -> Tuple[float, float]:
+def compute_variance(values: list[float]) -> tuple[float, float]:
     """
     Compute variance and standard deviation.
 
@@ -126,7 +126,7 @@ def compute_variance(values: List[float]) -> Tuple[float, float]:
 def compute_percentiles(
     values: Sequence[float],
     percentiles: Sequence[int] = (25, 50, 75),
-) -> List[float]:
+) -> list[float]:
     """
     Compute percentiles of sample.
 
@@ -144,7 +144,7 @@ def compute_percentiles(
 
 
 def estimate_required_sample_size(
-    values: List[float],
+    values: list[float],
     target_margin_of_error: float,
     confidence_level: float = 0.95,
 ) -> int:
@@ -189,7 +189,7 @@ class MatchStatisticsAnalyzer:
 
     def analyze_payoffs(
         self,
-        payoffs: List[int],
+        payoffs: list[int],
         big_blind: int = 2,
     ) -> dict:
         """
@@ -229,8 +229,8 @@ class MatchStatisticsAnalyzer:
 
     def compare_strategies(
         self,
-        payoffs1: List[int],
-        payoffs2: List[int],
+        payoffs1: list[int],
+        payoffs2: list[int],
     ) -> dict:
         """
         Compare two strategies statistically.

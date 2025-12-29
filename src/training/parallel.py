@@ -21,7 +21,7 @@ import traceback
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any
 
 from src.bucketing.utils.infoset import InfoSetKey
 from src.solver.mccfr import MCCFRSolver
@@ -55,13 +55,13 @@ def _worker_loop(
     base_seed: int,
     job_queue: mp.Queue,
     result_queue: mp.Queue,
-    update_queues: List[mp.Queue],  # One queue per worker for cross-partition updates
-    id_request_queues: List[mp.Queue],  # One queue per worker for ID requests
-    id_response_queues: List[mp.Queue],  # One queue per worker for ID responses
+    update_queues: list[mp.Queue],  # One queue per worker for cross-partition updates
+    id_request_queues: list[mp.Queue],  # One queue per worker for ID requests
+    id_response_queues: list[mp.Queue],  # One queue per worker for ID responses
     initial_capacity: int,
     max_actions: int,
     checkpoint_dir: str | None = None,
-    ready_event=None,  # Optional[mp.Event]
+    ready_event=None,  # mp.Event | None
 ) -> None:
     """
     Worker process for parallel MCCFR training with shared array storage.
@@ -398,7 +398,7 @@ def _process_incoming_updates(update_queue: mp.Queue, storage: "SharedArrayStora
 def _process_id_requests(
     worker_id: int,
     request_queue: mp.Queue,
-    response_queues: List[mp.Queue],
+    response_queues: list[mp.Queue],
     storage: "SharedArrayStorage",
 ) -> int:
     """
@@ -446,8 +446,8 @@ def _process_id_responses(response_queue: mp.Queue, storage: "SharedArrayStorage
 def _send_updates_to_owners(
     sender_id: int,
     num_workers: int,
-    updates: Dict[int, Tuple[np.ndarray, np.ndarray]],
-    update_queues: List[mp.Queue],
+    updates: dict[int, tuple[np.ndarray, np.ndarray]],
+    update_queues: list[mp.Queue],
     storage: "SharedArrayStorage",
 ) -> None:
     """
@@ -456,7 +456,7 @@ def _send_updates_to_owners(
     Ownership is determined by ID range, not modulo.
     """
     # Group updates by owner
-    updates_by_owner: Dict[int, Dict[int, Tuple[np.ndarray, np.ndarray]]] = {
+    updates_by_owner: dict[int, dict[int, tuple[np.ndarray, np.ndarray]]] = {
         i: {} for i in range(num_workers)
     }
 
@@ -484,9 +484,9 @@ def _process_all_messages(
     update_queue: mp.Queue,
     id_request_queue: mp.Queue,
     id_response_queue: mp.Queue,
-    id_response_queues: List[mp.Queue],
+    id_response_queues: list[mp.Queue],
     storage: "SharedArrayStorage",
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     Process all pending messages from all queues.
 
@@ -558,7 +558,7 @@ class SharedArrayWorkerManager:
             f"[Master] Creating shared memory (session={self.session_id})...",
             flush=True,
         )
-        self.storage = SharedArrayStorage(
+        self.storage: SharedArrayStorage = SharedArrayStorage(
             num_workers=num_workers,
             worker_id=0,  # Coordinator uses worker_id 0 for ownership checks
             session_id=self.session_id,
@@ -577,15 +577,15 @@ class SharedArrayWorkerManager:
         self.result_queue: mp.Queue = mp.Queue()
 
         # Per-worker queues for cross-partition updates
-        self.update_queues: List[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
+        self.update_queues: list[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
 
         # Per-worker queues for ID requests/responses
-        self.id_request_queues: List[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
-        self.id_response_queues: List[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
+        self.id_request_queues: list[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
+        self.id_response_queues: list[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
 
         # Worker processes
-        self.processes: List[mp.Process] = []
-        self._fallback_stats_by_worker: Dict[int, Dict[str, float]] = {}
+        self.processes: list[mp.Process] = []
+        self._fallback_stats_by_worker: dict[int, dict[str, float]] = {}
 
         # Start workers
         self._start_workers()
@@ -623,7 +623,7 @@ class SharedArrayWorkerManager:
         # No need for arbitrary sleep - synchronization is handled by the event
         print(f"[Master] All {self.num_workers} workers started", flush=True)
 
-    def exchange_ids(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
+    def exchange_ids(self, timeout: float = 60.0, verbose: bool = True) -> dict[str, Any]:
         """
         Trigger batched ID exchange between workers.
 
@@ -654,7 +654,7 @@ class SharedArrayWorkerManager:
 
         return {"total_owned": total_owned, "acks": acks}
 
-    def apply_pending_updates(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
+    def apply_pending_updates(self, timeout: float = 60.0, verbose: bool = True) -> dict[str, Any]:
         """
         Trigger workers to apply any pending cross-partition updates.
 
@@ -805,13 +805,13 @@ class SharedArrayWorkerManager:
 
     def run_batch(
         self,
-        iterations_per_worker: List[int],
+        iterations_per_worker: list[int],
         batch_id: int = 0,
         start_iteration: int = 0,
         timeout: float = 600.0,
         verbose: bool = True,
         auto_resize: bool = True,
-    ) -> Dict:
+    ) -> dict[str, Any]:
         """
         Run a batch of iterations across all workers.
 
@@ -956,7 +956,7 @@ class SharedArrayWorkerManager:
             "fallback_stats": fallback_stats,
         }
 
-    def collect_keys(self, timeout: float = 60.0) -> Dict:
+    def collect_keys(self, timeout: float = 60.0) -> dict[str, Any]:
         """
         Collect owned keys from all workers for checkpointing.
 
@@ -976,10 +976,10 @@ class SharedArrayWorkerManager:
             )
 
         # Collect responses
-        all_owned_keys: Dict = {}
-        all_legal_actions: Dict = {}
-        worker_ranges: Dict[int, tuple[int, int]] = {}
-        id_owners: Dict[int, tuple[int, "InfoSetKey"]] = {}
+        all_owned_keys: dict = {}
+        all_legal_actions: dict = {}
+        worker_ranges: dict[int, tuple[int, int]] = {}
+        id_owners: dict[int, tuple[int, "InfoSetKey"]] = {}
 
         responses_received = 0
         while responses_received < self.num_workers:

@@ -6,7 +6,6 @@ Just saves basic metadata per run - no complex registry or manifests.
 
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from src.training.run_metadata import RunMetadata
 from src.utils.config import Config
@@ -28,8 +27,8 @@ class RunTracker:
         self,
         run_dir: Path,
         config_name: str = "default",
-        config: Optional["Config"] = None,
-        action_config_hash: Optional[str] = None,
+        config: "Config | None" = None,
+        action_config_hash: str | None = None,
     ):
         """
         Initialize run tracker.

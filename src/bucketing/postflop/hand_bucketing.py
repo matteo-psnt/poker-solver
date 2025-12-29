@@ -12,8 +12,8 @@ Key difference from 169-class abstraction:
 - But A♠K♠ on T♠9♠8♣ is equivalent to A♥K♥ on T♥9♥8♣ (suit isomorphism)
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from src.bucketing.base import BucketingStrategy
 from src.bucketing.postflop.suit_isomorphism import (
@@ -41,8 +41,8 @@ class CanonicalHand:
     This is the fundamental unit for combo-level bucketing.
     """
 
-    hand: Tuple[CanonicalCard, CanonicalCard]
-    board: Tuple[CanonicalCard, ...]
+    hand: tuple[CanonicalCard, CanonicalCard]
+    board: tuple[CanonicalCard, ...]
 
     @property
     def hand_id(self) -> int:
@@ -54,7 +54,7 @@ class CanonicalHand:
         """Unique ID for the canonical board."""
         return get_canonical_board_id(self.board)
 
-    def to_key(self) -> Tuple[int, int]:
+    def to_key(self) -> tuple[int, int]:
         """Get (board_id, hand_id) tuple for dictionary keys."""
         return (self.board_id, self.hand_id)
 
@@ -80,21 +80,21 @@ class PostflopBucketer(BucketingStrategy):
     def __init__(self):
         """Initialize empty abstraction."""
         # Bucket assignments: street -> cluster_id -> hand_id -> bucket
-        self._buckets: Dict[Street, Dict[int, Dict[int, int]]] = {
+        self._buckets: dict[Street, dict[int, dict[int, int]]] = {
             Street.FLOP: {},
             Street.TURN: {},
             Street.RIVER: {},
         }
 
         # Bucket counts per street (set during precomputation)
-        self._num_buckets: Dict[Street, int] = {}
+        self._num_buckets: dict[Street, int] = {}
 
         # Board clusterer for runtime cluster prediction
         # Set during precomputation
         self._board_clusterer = None
 
         # Preflop buckets (169 hand classes)
-        self._preflop_buckets: Optional[Dict[int, int]] = None
+        self._preflop_buckets: dict[int, int] | None = None
         self._num_preflop_buckets: int = 169  # One bucket per hand class by default
 
         # Fallback statistics (for monitoring abstraction coverage)
@@ -114,7 +114,7 @@ class PostflopBucketer(BucketingStrategy):
         if not hasattr(self, "_total_lookups"):
             self._total_lookups = 0
 
-    def canonicalize(self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...]) -> CanonicalHand:
+    def canonicalize(self, hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -> CanonicalHand:
         """
         Canonicalize a (hand, board) pair.
 
@@ -134,7 +134,7 @@ class PostflopBucketer(BucketingStrategy):
         return CanonicalHand(hand=canonical_hand, board=canonical_board)
 
     def get_bucket(
-        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
+        self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
     ) -> int:
         """
         Get bucket ID for a (hand, board) pair.
@@ -255,7 +255,7 @@ class PostflopBucketer(BucketingStrategy):
         return f"PostflopBucketer({', '.join(buckets_str)})"
 
 
-def generate_all_cards() -> List[Card]:
+def generate_all_cards() -> list[Card]:
     """Generate all 52 cards."""
     cards = []
     for rank in RANKS:
@@ -264,7 +264,7 @@ def generate_all_cards() -> List[Card]:
     return cards
 
 
-def generate_all_combos() -> List[Tuple[Card, Card]]:
+def generate_all_combos() -> list[tuple[Card, Card]]:
     """
     Generate all 1326 unique 2-card combinations.
 
@@ -282,7 +282,7 @@ def generate_all_combos() -> List[Tuple[Card, Card]]:
 
 
 def get_all_canonical_hands(
-    board: Tuple[Card, ...], exclude_board_cards: bool = True
+    board: tuple[Card, ...], exclude_board_cards: bool = True
 ) -> Iterator[CanonicalHand]:
     """
     Generate all canonical combos for a given board.
@@ -299,7 +299,7 @@ def get_all_canonical_hands(
     board_card_set = set(board)
 
     # Track seen canonical hands to avoid duplicates
-    seen_canonical: Set[Tuple[Tuple[int, int], Tuple[int, int]]] = set()
+    seen_canonical: set[tuple[tuple[int, int], tuple[int, int]]] = set()
 
     # Generate all valid hole card combinations
     cards = generate_all_cards()
@@ -325,7 +325,7 @@ def get_all_canonical_hands(
             yield CanonicalHand(hand=canonical_hand, board=canonical_board)
 
 
-def count_canonical_hands_for_board(board: Tuple[Card, ...]) -> int:
+def count_canonical_hands_for_board(board: tuple[Card, ...]) -> int:
     """
     Count unique canonical combos for a board.
 
@@ -335,8 +335,8 @@ def count_canonical_hands_for_board(board: Tuple[Card, ...]) -> int:
 
 
 def get_representative_hand(
-    canonical_hand: Tuple[CanonicalCard, CanonicalCard], suit_mapping: SuitMapping
-) -> Tuple[Card, Card]:
+    canonical_hand: tuple[CanonicalCard, CanonicalCard], suit_mapping: SuitMapping
+) -> tuple[Card, Card]:
     """
     Convert a canonical hand back to a concrete hand.
 

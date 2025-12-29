@@ -9,7 +9,6 @@ from collections import OrderedDict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 from src.cli.flows.chart.data import build_chart_metadata, build_preflop_chart_data
@@ -31,8 +30,8 @@ class ChartServer:
         self.base_url = f"http://127.0.0.1:{self.port}"
         self._cache: "OrderedDict[tuple[int, str], dict]" = OrderedDict()
         self._cache_max_size = 256
-        self._httpd: Optional[ThreadingHTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._httpd: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         static_dir = self.base_dir / "ui" / "dist"

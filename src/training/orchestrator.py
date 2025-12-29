@@ -5,7 +5,7 @@ Coordinates the core training loop, batch execution, and component coordination.
 """
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 from tqdm import tqdm
 
@@ -52,8 +52,8 @@ class TrainingOrchestrator:
         self._verbose = verbose
 
         # State tracking
-        self._fallback_stats: Optional[Dict[str, float]] = None
-        self._last_capacity: Optional[int] = None
+        self._fallback_stats: dict[str, float] | None = None
+        self._last_capacity: int | None = None
 
     def run_training(
         self,
@@ -63,7 +63,7 @@ class TrainingOrchestrator:
         batch_size: int,
         start_iteration: int,
         training_start_time: float,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Execute the main training loop.
 
@@ -81,8 +81,8 @@ class TrainingOrchestrator:
                 - final_infosets: int
                 - interrupted: bool
                 - elapsed_time: float
-                - last_capacity: Optional[int]
-                - fallback_stats: Optional[Dict[str, float]]
+                - last_capacity: int | None
+                - fallback_stats: dict[str, float] | None
         """
         # Setup
         num_batches = (num_iterations + batch_size - 1) // batch_size

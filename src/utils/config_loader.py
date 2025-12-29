@@ -6,14 +6,14 @@ Simple, clean, no duplication. All in one file.
 
 from dataclasses import fields, is_dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, Optional, Union, cast
+from typing import Any, cast
 
 import yaml
 
 from src.utils.config import Config
 
 
-def load_config(path: Optional[Union[str, Path]] = None, **overrides: Any) -> Config:
+def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
     """
     Load configuration from YAML file with optional programmatic overrides.
 
@@ -53,7 +53,7 @@ def load_config(path: Optional[Union[str, Path]] = None, **overrides: Any) -> Co
     return config
 
 
-def _merge_config(base: Any, overrides: Dict[str, Any]) -> Any:
+def _merge_config(base: Any, overrides: dict[str, Any]) -> Any:
     """
     Recursively merge dictionary overrides into a dataclass.
 
@@ -91,7 +91,7 @@ def _merge_config(base: Any, overrides: Dict[str, Any]) -> Any:
     return cast(Any, replace(base, **kwargs)) if kwargs else base  # type: ignore[type-var]
 
 
-def _load_yaml(path: Path) -> Dict[str, Any]:
+def _load_yaml(path: Path) -> dict[str, Any]:
     """Load YAML file and return as dict."""
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
@@ -102,7 +102,7 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
     return data or {}
 
 
-def _flatten_to_nested(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
+def _flatten_to_nested(flat_dict: dict[str, Any]) -> dict[str, Any]:
     """
     Convert flat dict with '__' separators to nested dict.
 
@@ -111,7 +111,7 @@ def _flatten_to_nested(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
         ->
         {"training": {"num_iterations": 50000}}
     """
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
 
     for key, value in flat_dict.items():
         parts = key.split("__")

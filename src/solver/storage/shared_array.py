@@ -2,7 +2,7 @@ import pickle
 import time
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
 import xxhash
@@ -77,8 +77,8 @@ class SharedArrayStorage(Storage):
         initial_capacity: int = 2_000_000,
         max_actions: int = 10,
         is_coordinator: bool = False,
-        checkpoint_dir: Optional[Path] = None,
-        ready_event: Optional["EventType"] = None,
+        checkpoint_dir: Path | None = None,
+        ready_event: "EventType | None" = None,
         load_checkpoint_on_init: bool = True,
     ):
         """
@@ -126,27 +126,27 @@ class SharedArrayStorage(Storage):
         # Key→ID mappings (owner-local, no global sync)
         # =====================================================================
         # Keys we own: authoritative mapping
-        self._owned_keys: Dict[InfoSetKey, int] = {}
+        self._owned_keys: dict[InfoSetKey, int] = {}
         # Keys we've learned about from ID requests (cached, read-only)
-        self._remote_keys: Dict[InfoSetKey, int] = {}
+        self._remote_keys: dict[InfoSetKey, int] = {}
 
         # Legal actions cache (can't store complex objects in shm)
-        self._legal_actions_cache: Dict[int, List[Action]] = {}
+        self._legal_actions_cache: dict[int, list[Action]] = {}
 
         # Pending ID requests to send to owners (batched)
-        self._pending_id_requests: Dict[int, Set[InfoSetKey]] = {
+        self._pending_id_requests: dict[int, set[InfoSetKey]] = {
             i: set() for i in range(num_workers)
         }
 
         # Cross-partition update buffers: {infoset_id: (regret_delta, strategy_delta)}
-        self._pending_updates: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+        self._pending_updates: dict[int, tuple[np.ndarray, np.ndarray]] = {}
 
         # Shared memory handles
-        self._shm_regrets: Optional["SharedMemory"] = None
-        self._shm_strategy: Optional["SharedMemory"] = None
-        self._shm_actions: Optional["SharedMemory"] = None
-        self._shm_reach: Optional["SharedMemory"] = None
-        self._shm_utility: Optional["SharedMemory"] = None
+        self._shm_regrets: "SharedMemory | None" = None
+        self._shm_strategy: "SharedMemory | None" = None
+        self._shm_actions: "SharedMemory | None" = None
+        self._shm_reach: "SharedMemory | None" = None
+        self._shm_utility: "SharedMemory | None" = None
 
         # NumPy views into shared memory (the live data)
         self.shared_regrets = np.empty((0, self.max_actions), dtype=np.float32)
@@ -226,7 +226,7 @@ class SharedArrayStorage(Storage):
             return True
         return any(alloc["start"] <= infoset_id < alloc["end"] for alloc in self._extra_allocations)
 
-    def get_owner_by_id(self, infoset_id: int) -> Optional[int]:
+    def get_owner_by_id(self, infoset_id: int) -> int | None:
         """
         Determine owner worker for a given infoset ID.
 
@@ -431,7 +431,7 @@ class SharedArrayStorage(Storage):
     # Storage Interface Implementation
     # =========================================================================
 
-    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: List[Action]) -> InfoSet:
+    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: list[Action]) -> InfoSet:
         """
         Get existing infoset or create new one.
 
@@ -543,7 +543,7 @@ class SharedArrayStorage(Storage):
         """
         return self.get_capacity_usage() >= self.CAPACITY_THRESHOLD
 
-    def get_resize_stats(self) -> Dict[str, int | float]:
+    def get_resize_stats(self) -> dict[str, int | float]:
         """
         Get statistics for resize decision.
 
@@ -655,7 +655,7 @@ class SharedArrayStorage(Storage):
         self,
         new_session_id: str,
         new_capacity: int,
-        preserved_keys: Dict["InfoSetKey", int],
+        preserved_keys: dict["InfoSetKey", int],
         preserved_next_id: int,
     ) -> None:
         """
@@ -711,7 +711,7 @@ class SharedArrayStorage(Storage):
         )
 
     def _create_infoset_view(
-        self, infoset_id: int, key: InfoSetKey, legal_actions: List[Action]
+        self, infoset_id: int, key: InfoSetKey, legal_actions: list[Action]
     ) -> InfoSet:
         """
         Create an InfoSet with arrays viewing shared memory.
@@ -783,7 +783,7 @@ class SharedArrayStorage(Storage):
 
         self._extra_allocations.append({"start": start, "end": end, "next": start})
 
-    def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
+    def get_infoset(self, key: InfoSetKey) -> InfoSet | None:
         """Get existing infoset or None."""
         owner = self.get_owner(key)
 
@@ -824,7 +824,7 @@ class SharedArrayStorage(Storage):
     # ID Request/Response (Batched, Async)
     # =========================================================================
 
-    def get_pending_id_requests(self) -> Dict[int, Set[InfoSetKey]]:
+    def get_pending_id_requests(self) -> dict[int, set[InfoSetKey]]:
         """
         Get pending ID requests to send to owners.
 
@@ -838,7 +838,7 @@ class SharedArrayStorage(Storage):
         for owner_id in self._pending_id_requests:
             self._pending_id_requests[owner_id].clear()
 
-    def respond_to_id_requests(self, requested_keys: Set[InfoSetKey]) -> Dict[InfoSetKey, int]:
+    def respond_to_id_requests(self, requested_keys: set[InfoSetKey]) -> dict[InfoSetKey, int]:
         """
         Respond to ID requests from other workers.
 
@@ -856,7 +856,7 @@ class SharedArrayStorage(Storage):
                 responses[key] = self._owned_keys[key]
         return responses
 
-    def receive_id_responses(self, responses: Dict[InfoSetKey, int]):
+    def receive_id_responses(self, responses: dict[InfoSetKey, int]):
         """
         Receive ID responses from owners.
 
@@ -891,7 +891,7 @@ class SharedArrayStorage(Storage):
         else:
             self._pending_updates[infoset_id] = (regret_delta.copy(), strategy_delta.copy())
 
-    def get_pending_updates(self) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+    def get_pending_updates(self) -> dict[int, tuple[np.ndarray, np.ndarray]]:
         """Get all pending cross-partition updates."""
         return self._pending_updates
 
@@ -899,7 +899,7 @@ class SharedArrayStorage(Storage):
         """Clear pending updates after they've been sent."""
         self._pending_updates.clear()
 
-    def apply_updates(self, updates: Dict[int, Tuple[np.ndarray, np.ndarray]]):
+    def apply_updates(self, updates: dict[int, tuple[np.ndarray, np.ndarray]]):
         """
         Apply updates to infosets we own.
 

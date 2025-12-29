@@ -6,7 +6,6 @@ betting space into a small set of actions (e.g., bet 33%, 75%, all-in).
 """
 
 import json
-from typing import Dict, List, Optional
 
 import xxhash
 
@@ -27,7 +26,7 @@ class BettingActions:
         Postflop: fold, call, check, bet 33% pot, bet 75% pot, all-in
     """
 
-    def __init__(self, config: Optional[Dict] = None, big_blind: int = 2):
+    def __init__(self, config: dict | None = None, big_blind: int = 2):
         """
         Initialize action abstraction from configuration.
 
@@ -100,7 +99,7 @@ class BettingActions:
         )
 
     @staticmethod
-    def _default_config() -> Dict:
+    def _default_config() -> dict:
         """Get default research-grade action abstraction."""
         return {
             "preflop_raises": [2.5, 3.5, 5.0],  # Standard raise sizes
@@ -113,7 +112,7 @@ class BettingActions:
             "max_raises_per_street": 4,  # Cap raises per street (prevents infinite action trees)
         }
 
-    def get_bet_sizes(self, state: GameState) -> List[int]:
+    def get_bet_sizes(self, state: GameState) -> list[int]:
         """
         Get legal bet sizes for current state.
 
@@ -206,7 +205,7 @@ class BettingActions:
 
         return raises_count
 
-    def get_raise_sizes(self, state: GameState) -> List[int]:
+    def get_raise_sizes(self, state: GameState) -> list[int]:
         """
         Get legal raise sizes for current state.
 
@@ -268,7 +267,7 @@ class BettingActions:
 
         return sorted(sizes)
 
-    def get_legal_actions(self, state: GameState) -> List[Action]:
+    def get_legal_actions(self, state: GameState) -> list[Action]:
         """
         Get all legal abstracted actions for current player.
 

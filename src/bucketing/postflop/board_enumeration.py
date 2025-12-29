@@ -14,9 +14,9 @@ This module provides:
 3. Storage-efficient board IDs for lookup tables
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Dict, Iterator, Optional, Set, Tuple
 
 from src.bucketing.postflop.suit_isomorphism import (
     RANKS,
@@ -39,10 +39,10 @@ class CanonicalBoardInfo:
         representative: A concrete example board (using real suits)
     """
 
-    canonical_board: Tuple[CanonicalCard, ...]
+    canonical_board: tuple[CanonicalCard, ...]
     board_id: int
     raw_count: int
-    representative: Tuple[Card, ...]
+    representative: tuple[Card, ...]
 
 
 class CanonicalBoardEnumerator:
@@ -66,10 +66,10 @@ class CanonicalBoardEnumerator:
         self.num_cards = self._get_num_cards(street)
 
         # Cache: board_id -> CanonicalBoardInfo
-        self._cache: Dict[int, CanonicalBoardInfo] = {}
+        self._cache: dict[int, CanonicalBoardInfo] = {}
 
         # Reverse lookup: canonical tuple -> board_id
-        self._canonical_to_id: Dict[Tuple[Tuple[int, int], ...], int] = {}
+        self._canonical_to_id: dict[tuple[tuple[int, int], ...], int] = {}
 
         self._enumerated = False
 
@@ -96,7 +96,7 @@ class CanonicalBoardEnumerator:
             return
 
         all_cards = Card.get_full_deck()
-        seen_canonical: Set[Tuple[Tuple[int, int], ...]] = set()
+        seen_canonical: set[tuple[tuple[int, int], ...]] = set()
 
         for card_combo in combinations(all_cards, self.num_cards):
             board = tuple(card_combo)
@@ -140,13 +140,13 @@ class CanonicalBoardEnumerator:
 
         yield from self._cache.values()
 
-    def get_by_id(self, board_id: int) -> Optional[CanonicalBoardInfo]:
+    def get_by_id(self, board_id: int) -> CanonicalBoardInfo | None:
         """Get canonical board info by ID."""
         if not self._enumerated:
             self.enumerate()
         return self._cache.get(board_id)
 
-    def get_canonical_id(self, board: Tuple[Card, ...]) -> int:
+    def get_canonical_id(self, board: tuple[Card, ...]) -> int:
         """Get canonical board ID for a raw board."""
         canonical_board, _ = canonicalize_board(board)
         return get_canonical_board_id(canonical_board)
@@ -188,8 +188,8 @@ def validate_canonical_count(street: Street) -> bool:
 
 
 def get_canonical_board_representative(
-    canonical_board: Tuple[CanonicalCard, ...],
-) -> Tuple[Card, ...]:
+    canonical_board: tuple[CanonicalCard, ...],
+) -> tuple[Card, ...]:
     """
     Convert a canonical board back to a concrete board.
 
@@ -212,7 +212,7 @@ def get_canonical_board_representative(
     return tuple(cards)
 
 
-def count_hands_without_conflicts(board: Tuple[Card, ...]) -> int:
+def count_hands_without_conflicts(board: tuple[Card, ...]) -> int:
     """
     Count how many 2-card hands don't share cards with the board.
 

@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Dict, Optional
 
 import numpy as np
 
@@ -21,12 +20,12 @@ class InMemoryStorage(Storage):
     Not for training; use SharedArrayStorage for training workloads.
     """
 
-    def __init__(self, checkpoint_dir: Optional[Path] = None):
+    def __init__(self, checkpoint_dir: Path | None = None):
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
 
-        self._infosets_by_id: Dict[int, InfoSet] = {}
-        self.key_to_id: Dict[InfoSetKey, int] = {}
-        self.id_to_key: Dict[int, InfoSetKey] = {}
+        self._infosets_by_id: dict[int, InfoSet] = {}
+        self.key_to_id: dict[InfoSetKey, int] = {}
+        self.id_to_key: dict[int, InfoSetKey] = {}
         self.next_id = 0
 
         if self.checkpoint_dir and self.checkpoint_dir.exists():
@@ -42,7 +41,7 @@ class InMemoryStorage(Storage):
             "Use SharedArrayStorage for training."
         )
 
-    def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
+    def get_infoset(self, key: InfoSetKey) -> InfoSet | None:
         infoset_id = self.key_to_id.get(key)
         if infoset_id is None:
             return None
@@ -55,7 +54,7 @@ class InMemoryStorage(Storage):
         return self._infosets_by_id.values()
 
     @property
-    def infosets(self) -> Dict[InfoSetKey, InfoSet]:
+    def infosets(self) -> dict[InfoSetKey, InfoSet]:
         return {
             self.id_to_key[infoset_id]: infoset
             for infoset_id, infoset in self._infosets_by_id.items()

@@ -6,7 +6,7 @@ Handles async checkpoint coordination, background execution, and run metadata up
 
 import concurrent.futures
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from src.training.run_tracker import RunTracker
 from src.utils.config import Config
@@ -50,8 +50,8 @@ class CheckpointManager:
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="checkpoint"
         )
-        self._pending_checkpoint: Optional[concurrent.futures.Future[float]] = None
-        self._checkpoint_failed: Optional[Exception] = None
+        self._pending_checkpoint: concurrent.futures.Future[float] | None = None
+        self._checkpoint_failed: Exception | None = None
 
     @property
     def checkpoint_enabled(self) -> bool:

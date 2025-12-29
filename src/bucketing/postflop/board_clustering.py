@@ -11,7 +11,6 @@ number of representatives per cluster.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.cluster import KMeans
@@ -31,8 +30,8 @@ class BoardCluster:
     cluster_id: int
     street: Street
     num_boards: int  # Number of canonical boards in this cluster
-    representative_boards: List[Tuple[Card, ...]]  # Small set of representative boards
-    canonical_representatives: List[Tuple[CanonicalCard, ...]]  # Canonical forms
+    representative_boards: list[tuple[Card, ...]]  # Small set of representative boards
+    canonical_representatives: list[tuple[CanonicalCard, ...]]  # Canonical forms
 
 
 class BoardClusterer:
@@ -44,7 +43,7 @@ class BoardClusterer:
     O(all_boards × all_hands) to O(num_clusters × representatives_per_cluster × all_hands).
     """
 
-    def __init__(self, num_clusters: Dict[Street, int]):
+    def __init__(self, num_clusters: dict[Street, int]):
         """
         Initialize board clusterer.
 
@@ -55,17 +54,17 @@ class BoardClusterer:
         self.num_clusters = num_clusters
 
         # Fitted KMeans models per street
-        self._kmeans: Dict[Street, KMeans] = {}
+        self._kmeans: dict[Street, KMeans] = {}
 
         # Cluster assignments: canonical_board_id -> cluster_id
-        self._board_to_cluster: Dict[Street, Dict[int, int]] = {}
+        self._board_to_cluster: dict[Street, dict[int, int]] = {}
 
         # Cluster info
-        self._clusters: Dict[Street, Dict[int, BoardCluster]] = {}
+        self._clusters: dict[Street, dict[int, BoardCluster]] = {}
 
         self.fitted = False
 
-    def extract_board_features(self, board: Tuple[Card, ...]) -> np.ndarray:
+    def extract_board_features(self, board: tuple[Card, ...]) -> np.ndarray:
         """
         Extract strategic texture features from a board.
 
@@ -168,8 +167,8 @@ class BoardClusterer:
 
     def fit(
         self,
-        canonical_boards: List[Tuple[CanonicalCard, ...]],
-        representative_boards: List[Tuple[Card, ...]],
+        canonical_boards: list[tuple[CanonicalCard, ...]],
+        representative_boards: list[tuple[Card, ...]],
         street: Street,
         representatives_per_cluster: int = 3,
     ) -> None:
@@ -242,7 +241,7 @@ class BoardClusterer:
 
         self.fitted = True
 
-    def predict(self, board: Tuple[Card, ...], street: Street) -> int:
+    def predict(self, board: tuple[Card, ...], street: Street) -> int:
         """
         Predict cluster for ANY board using feature-based inference.
 
@@ -269,14 +268,14 @@ class BoardClusterer:
 
         return cluster_id
 
-    def get_cluster(self, board_id: int, street: Street) -> Optional[int]:
+    def get_cluster(self, board_id: int, street: Street) -> int | None:
         """Get cluster for a canonical board ID."""
         return self._board_to_cluster.get(street, {}).get(board_id)
 
-    def get_cluster_info(self, cluster_id: int, street: Street) -> Optional[BoardCluster]:
+    def get_cluster_info(self, cluster_id: int, street: Street) -> BoardCluster | None:
         """Get info about a cluster."""
         return self._clusters.get(street, {}).get(cluster_id)
 
-    def get_all_clusters(self, street: Street) -> List[BoardCluster]:
+    def get_all_clusters(self, street: Street) -> list[BoardCluster]:
         """Get all clusters for a street."""
         return list(self._clusters.get(street, {}).values())

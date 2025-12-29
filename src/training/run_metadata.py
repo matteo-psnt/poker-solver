@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.utils.config import Config
 
@@ -14,8 +14,8 @@ class RunMetadata:
     run_id: str
     config_name: str
     started_at: str
-    resumed_at: Optional[str]
-    completed_at: Optional[str]
+    resumed_at: str | None
+    completed_at: str | None
     status: str
     iterations: int
     runtime_seconds: float
@@ -49,7 +49,7 @@ class RunMetadata:
         )
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RunMetadata":
+    def from_dict(cls, data: dict[str, Any]) -> "RunMetadata":
         config_dict = data.get("config")
         if not isinstance(config_dict, dict) or not config_dict:
             raise ValueError("Run metadata missing required config")
@@ -82,7 +82,7 @@ class RunMetadata:
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         config_dict = self.config.to_dict()
         return {
             "run_id": self.run_id,
