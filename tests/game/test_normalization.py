@@ -27,6 +27,7 @@ class TestBettingNormalization:
             to_call=50,
             last_aggressor=0,
             betting_history=(bet(50),),
+            street_start_pot=100,  # Pot at start of betting round
         )
 
         normalized = state._normalize_betting_sequence()
@@ -37,11 +38,11 @@ class TestBettingNormalization:
         """Bet and raise should each use their respective pot sizes."""
         # Initial pot: 100
         # After bet 50: pot = 150
-        # After raise 75: pot = 225
+        # After raise 75: pot = 275 (raise adds to_call + raise_amount = 50 + 75 = 125)
         state = GameState(
             street=Street.FLOP,
-            pot=225,
-            stacks=(850, 825),
+            pot=275,  # Correct pot: 100 + 50 + 125 = 275
+            stacks=(850, 775),  # Player 0: 900 - 50 = 850, Player 1: 900 - 125 = 775
             board=("Ah", "Kh", "Qh"),  # type: ignore
             hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
             button_position=0,
@@ -50,6 +51,7 @@ class TestBettingNormalization:
             to_call=75,
             last_aggressor=1,
             betting_history=(bet(50), raises(75)),
+            street_start_pot=100,  # Pot at start of betting round
         )
 
         normalized = state._normalize_betting_sequence()
@@ -59,11 +61,11 @@ class TestBettingNormalization:
 
     def test_normalize_different_amounts_same_fractions(self):
         """Different absolute amounts but same pot fractions should normalize identically."""
-        # Scenario 1: Bet 50 into 100, raise 75 into 150
+        # Scenario 1: Bet 50 into 100, raise 75 into 150 → pot 275
         state1 = GameState(
             street=Street.FLOP,
-            pot=225,
-            stacks=(850, 825),
+            pot=275,  # 100 + 50 + 125 = 275
+            stacks=(850, 775),  # Player 0: 900 - 50, Player 1: 900 - 125
             board=("Ah", "Kh", "Qh"),  # type: ignore
             hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
             button_position=0,
@@ -72,13 +74,14 @@ class TestBettingNormalization:
             to_call=75,
             last_aggressor=1,
             betting_history=(bet(50), raises(75)),
+            street_start_pot=100,
         )
 
-        # Scenario 2: Bet 100 into 200, raise 150 into 300
+        # Scenario 2: Bet 100 into 200, raise 150 into 300 → pot 550
         state2 = GameState(
             street=Street.FLOP,
-            pot=450,
-            stacks=(700, 650),
+            pot=550,  # 200 + 100 + 250 = 550
+            stacks=(700, 550),  # Player 0: 800 - 100, Player 1: 800 - 250
             board=("Ah", "Kh", "Qh"),  # type: ignore
             hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
             button_position=0,
@@ -87,6 +90,7 @@ class TestBettingNormalization:
             to_call=150,
             last_aggressor=1,
             betting_history=(bet(100), raises(150)),
+            street_start_pot=200,
         )
 
         norm1 = state1._normalize_betting_sequence()
@@ -116,6 +120,7 @@ class TestBettingNormalization:
             to_call=0,
             last_aggressor=None,
             betting_history=(check(), bet(50), call()),
+            street_start_pot=100,
         )
 
         normalized = state._normalize_betting_sequence()
@@ -136,6 +141,7 @@ class TestBettingNormalization:
             to_call=0,
             last_aggressor=None,
             betting_history=(),
+            street_start_pot=100,
         )
 
         normalized = state._normalize_betting_sequence()
@@ -145,12 +151,12 @@ class TestBettingNormalization:
         """Test complex betting sequence with multiple actions."""
         # Initial pot: 100
         # bet 30 into 100 → pot = 130
-        # raise 60 into 130 → pot = 190
-        # call 60 → pot = 250
+        # raise 60 into 130 → pot = 220 (adds to_call 30 + raise 60 = 90)
+        # call 60 → pot = 280
         state = GameState(
             street=Street.FLOP,
-            pot=250,  # 100 + 30 + 60 + 60
-            stacks=(810, 810),
+            pot=280,  # 100 + 30 + 90 + 60 = 280
+            stacks=(810, 810),  # Player 0: 900 - 30 - 60, Player 1: 900 - 90
             board=("Ah", "Kh", "Qh"),  # type: ignore
             hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
             button_position=0,
@@ -159,6 +165,7 @@ class TestBettingNormalization:
             to_call=0,
             last_aggressor=None,
             betting_history=(bet(30), raises(60), call()),
+            street_start_pot=100,
         )
 
         normalized = state._normalize_betting_sequence()
@@ -172,12 +179,12 @@ class TestBettingNormalization:
         """Verify pot evolution is tracked correctly through multiple bets."""
         # Initial: 100
         # After bet 25: 125
-        # After raise 50: 175
-        # After raise 75: 250
+        # After raise 50: 200 (adds to_call 25 + raise 50 = 75)
+        # After raise 75: 325 (adds to_call 50 + raise 75 = 125)
         state = GameState(
             street=Street.FLOP,
-            pot=250,
-            stacks=(800, 800),
+            pot=325,  # 100 + 25 + 75 + 125 = 325
+            stacks=(750, 825),  # P0: 900 - 25 - 125, P1: 900 - 75
             board=("Ah", "Kh", "Qh"),  # type: ignore
             hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
             button_position=0,
@@ -186,15 +193,16 @@ class TestBettingNormalization:
             to_call=75,
             last_aggressor=1,
             betting_history=(bet(25), raises(50), raises(75)),
+            street_start_pot=100,
         )
 
         normalized = state._normalize_betting_sequence()
 
         # bet 25 into 100 = 0.25
         # raise 50 into 125 = 0.40
-        # raise 75 into 175 = 0.43 (rounded)
+        # raise 75 into 200 = 0.375 ≈ 0.38 (rounded)
         assert normalized.startswith("b0.25"), f"First action should be 'b0.25', got '{normalized}'"
         assert "r0.40" in normalized, f"Should contain 'r0.40', got '{normalized}'"
-        assert "r0.43" in normalized or "r0.42" in normalized, (
-            f"Should contain 'r0.43' or 'r0.42' (rounding), got '{normalized}'"
+        assert "r0.38" in normalized or "r0.37" in normalized, (
+            f"Should contain 'r0.38' or 'r0.37' (rounding), got '{normalized}'"
         )

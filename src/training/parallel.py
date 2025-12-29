@@ -628,6 +628,10 @@ class WorkerManager:
             )
             if num_infosets > 0:
                 # Only broadcast if we have learned something
+                if verbose:
+                    print(
+                        f"[Master] Broadcasting {num_infosets} infosets to workers...", flush=True
+                    )
                 self.broadcast_regrets(storage, verbose=verbose)
             elif verbose:
                 print(

@@ -84,6 +84,7 @@ class GameRules:
             is_terminal=False,
             to_call=to_call,
             last_aggressor=bb_player,  # BB is initial aggressor preflop
+            street_start_pot=pot,  # Initial pot from blinds
         )
 
     def get_legal_actions(self, state: GameState, action_abstraction=None) -> List[Action]:
@@ -171,6 +172,17 @@ class GameRules:
 
         current_player = state.current_player
         opponent = state.opponent(current_player)
+        to_call = state.to_call
+
+        # Basic action legality checks that don't require an abstraction
+        if action.type == ActionType.FOLD and to_call == 0:
+            raise ValueError("Cannot fold when no bet is faced")
+        if action.type == ActionType.CALL and to_call == 0:
+            raise ValueError("Cannot call when no bet is faced")
+        if action.type == ActionType.BET and to_call != 0:
+            raise ValueError("Cannot bet when facing a bet")
+        if action.type == ActionType.RAISE and to_call == 0:
+            raise ValueError("Cannot raise when no bet is faced")
 
         # Copy mutable state
         pot = state.pot
@@ -178,7 +190,6 @@ class GameRules:
         betting_history: List[Action] = list(state.betting_history)
         betting_history.append(action)
 
-        to_call = state.to_call
         street = state.street
 
         # Handle different action types
@@ -218,6 +229,7 @@ class GameRules:
                 is_terminal=False,
                 to_call=0,
                 last_aggressor=None,  # No aggression on this street
+                street_start_pot=state.street_start_pot,  # Preserve street start pot
             )
 
         elif action.type == ActionType.CALL:
@@ -271,6 +283,7 @@ class GameRules:
                 is_terminal=False,
                 to_call=new_to_call,
                 last_aggressor=current_player,
+                street_start_pot=state.street_start_pot,  # Preserve street start pot
             )
 
         elif action.type == ActionType.ALL_IN:
@@ -303,6 +316,7 @@ class GameRules:
                             is_terminal=False,
                             to_call=new_to_call,
                             last_aggressor=current_player,
+                            street_start_pot=state.street_start_pot,  # Preserve street start pot
                         )
                 else:
                     # All-in for less than call, treat as call
@@ -323,6 +337,7 @@ class GameRules:
                     is_terminal=False,
                     to_call=all_in_amount,
                     last_aggressor=current_player,
+                    street_start_pot=state.street_start_pot,  # Preserve street start pot
                 )
 
         else:
@@ -402,6 +417,7 @@ class GameRules:
             is_terminal=False,
             to_call=0,
             last_aggressor=None,
+            street_start_pot=pot or state.pot,  # New street starts with current pot
             _skip_validation=True,  # Skip validation - board will be dealt by CFR
         )
 
@@ -442,6 +458,7 @@ class GameRules:
                 is_terminal=True,  # Mark as terminal
                 to_call=0,
                 last_aggressor=state.last_aggressor,
+                street_start_pot=state.street_start_pot,  # Preserve street start pot
                 _skip_validation=True,  # Board may be incomplete
             )
 
@@ -484,6 +501,7 @@ class GameRules:
             is_terminal=True,
             to_call=0,
             last_aggressor=state.last_aggressor,
+            street_start_pot=state.street_start_pot,  # Preserve street start pot
         )
 
     def get_payoff(self, state: GameState, player: int) -> float:
