@@ -1,4 +1,3 @@
-import pickle
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -9,9 +8,9 @@ from src.game.actions import Action
 from src.solver.storage.base import Storage
 from src.solver.storage.helpers import (
     CHECKPOINT_REQUIRED_FILES,
-    _reconstruct_action,
-    _validate_action_signatures,
+    build_legal_actions,
     get_missing_checkpoint_files,
+    load_checkpoint_data,
 )
 
 
@@ -83,53 +82,28 @@ class InMemoryStorage(Storage):
                 f"Required: {list(CHECKPOINT_REQUIRED_FILES)}"
             )
 
-        key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
-        regrets_file = self.checkpoint_dir / "regrets.npy"
-        strategies_file = self.checkpoint_dir / "strategies.npy"
-        action_counts_file = self.checkpoint_dir / "action_counts.npy"
-        reach_counts_file = self.checkpoint_dir / "reach_counts.npy"
-        cumulative_utility_file = self.checkpoint_dir / "cumulative_utility.npy"
+        data = load_checkpoint_data(self.checkpoint_dir, context="InMemoryStorage checkpoint load")
+        self.key_to_id = data.owned_keys
+        self.id_to_key = {v: k for k, v in self.key_to_id.items()}
+        self.next_id = data.max_id
 
-        with open(key_mapping_file, "rb") as f:
-            mapping_data = pickle.load(f)
-        try:
-            self.key_to_id = mapping_data["owned_keys"]
-            self.id_to_key = {v: k for k, v in self.key_to_id.items()}
-            self.next_id = mapping_data["max_id"]
-        except KeyError as exc:
-            raise ValueError("Invalid checkpoint format: missing key mappings") from exc
+        action_sigs = data.action_signatures
+        print(f"Loaded {len(action_sigs)} action signatures from checkpoint")
 
-        action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
-        with open(action_sigs_file, "rb") as f:
-            saved_action_sigs = pickle.load(f)
-        print(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
-
-        all_regrets = np.load(regrets_file, mmap_mode="r")
-        action_counts = np.load(action_counts_file, mmap_mode="r")
-        all_strategies = np.load(strategies_file, mmap_mode="r")
-        reach_counts = np.load(reach_counts_file, mmap_mode="r")
-        cumulative_utilities = np.load(cumulative_utility_file, mmap_mode="r")
-
-        _validate_action_signatures(
-            action_counts, saved_action_sigs, "InMemoryStorage checkpoint load"
-        )
+        all_regrets = data.arrays["regrets"]
+        action_counts = data.arrays["action_counts"]
+        all_strategies = data.arrays["strategies"]
+        reach_counts = data.arrays["reach_counts"]
+        cumulative_utilities = data.arrays["cumulative_utility"]
 
         for infoset_id, key in self.id_to_key.items():
             n_actions = action_counts[infoset_id]
             regrets = all_regrets[infoset_id, :n_actions].copy()
             strategies = all_strategies[infoset_id, :n_actions].astype(np.float64, copy=True)
 
-            if infoset_id not in saved_action_sigs:
-                raise ValueError(
-                    f"Missing action signatures for infoset ID {infoset_id} in checkpoint. "
-                    "Cannot reconstruct legal actions."
-                )
-
-            action_sigs = saved_action_sigs[infoset_id]
-            legal_actions = [
-                _reconstruct_action(action_type_name, amount)
-                for action_type_name, amount in action_sigs
-            ]
+            legal_actions = build_legal_actions(
+                action_sigs, infoset_id, "InMemoryStorage checkpoint load"
+            )
 
             infoset = InfoSet(key, legal_actions)
             infoset.regrets = regrets

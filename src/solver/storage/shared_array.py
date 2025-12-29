@@ -1,9 +1,8 @@
-import math
 import pickle
 import time
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import xxhash
@@ -12,9 +11,11 @@ from src.bucketing.utils.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action, fold
 from src.solver.storage.base import Storage
 from src.solver.storage.helpers import (
-    _reconstruct_action,
+    CheckpointPaths,
     _validate_action_signatures,
+    build_legal_actions,
     get_missing_checkpoint_files,
+    load_checkpoint_data,
 )
 
 if TYPE_CHECKING:
@@ -77,7 +78,6 @@ class SharedArrayStorage(Storage):
         max_actions: int = 10,
         is_coordinator: bool = False,
         checkpoint_dir: Optional[Path] = None,
-        action_config_hash: Optional[str] = None,
         ready_event: Optional["EventType"] = None,
         load_checkpoint_on_init: bool = True,
     ):
@@ -92,9 +92,6 @@ class SharedArrayStorage(Storage):
             max_actions: Maximum actions per infoset (pre-allocated)
             is_coordinator: If True, creates shared memory. If False, attaches.
             checkpoint_dir: Optional directory for checkpoints
-            action_config_hash: Optional hash of action abstraction config.
-                               Used to detect config changes when loading checkpoints.
-                               Generate with BettingActions.get_config_hash().
             ready_event: Optional multiprocessing.Event for synchronization.
                         If provided:
                         - Coordinator sets it after creating shared memory
@@ -109,7 +106,6 @@ class SharedArrayStorage(Storage):
         self.max_actions = max_actions
         self.is_coordinator = is_coordinator
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
-        self.action_config_hash = action_config_hash
         self.ready_event = ready_event
         self.base_capacity = initial_capacity  # Original base capacity
         self.base_slots_per_worker = (initial_capacity - 1) // num_workers
@@ -230,92 +226,6 @@ class SharedArrayStorage(Storage):
             return True
         return any(alloc["start"] <= infoset_id < alloc["end"] for alloc in self._extra_allocations)
 
-    def verify_ownership_invariants(self) -> Dict[str, Any]:
-        """
-        Verify ownership invariants for debugging and testing.
-
-        This method checks that:
-        1. All owned keys map to IDs within valid ranges
-        2. No ID is assigned to multiple keys
-        3. All allocated IDs have corresponding action counts > 0
-        4. ID ranges don't overlap
-
-        Returns:
-            Dict with verification results:
-            - 'valid': bool - True if all invariants hold
-            - 'errors': List[str] - List of error messages
-            - 'stats': Dict - Statistics about ownership
-
-        Note: This is a debugging tool and should not be called in hot paths.
-        """
-        errors = []
-        stats = {
-            "owned_keys": len(self._owned_keys),
-            "remote_keys": len(self._remote_keys),
-            "base_range_used": max(
-                0, min(self.next_local_id, self.id_range_end) - self.id_range_start
-            ),
-            "base_range_size": self.id_range_end - self.id_range_start,
-            "extra_allocations": len(self._extra_allocations),
-        }
-
-        # Check 1: All owned keys map to IDs we actually own
-        for key, infoset_id in self._owned_keys.items():
-            if not self.is_owned_by_id(infoset_id):
-                errors.append(f"Owned key {key} maps to ID {infoset_id} which is not in our ranges")
-
-        # Check 2: No duplicate IDs (each ID maps to at most one key)
-        id_to_keys: Dict[int, List[InfoSetKey]] = {}
-        for key, infoset_id in self._owned_keys.items():
-            if infoset_id not in id_to_keys:
-                id_to_keys[infoset_id] = []
-            id_to_keys[infoset_id].append(key)
-
-        for infoset_id, keys in id_to_keys.items():
-            if len(keys) > 1:
-                errors.append(f"ID {infoset_id} is assigned to multiple keys: {keys[:3]}...")
-
-        # Check 3: All used IDs in base range have action counts
-        for infoset_id in range(self.id_range_start, self.next_local_id):
-            if self.shared_action_counts[infoset_id] == 0:
-                # Check if this ID is actually used (has a key)
-                if infoset_id in id_to_keys:
-                    errors.append(f"ID {infoset_id} has key but action_count=0")
-
-        # Check 4: Extra allocation ranges don't overlap with base or each other
-        all_ranges = [(self.id_range_start, self.id_range_end, "base")]
-        for i, alloc in enumerate(self._extra_allocations):
-            all_ranges.append((alloc["start"], alloc["end"], f"extra_{i}"))
-
-        for i, (start1, end1, name1) in enumerate(all_ranges):
-            for j, (start2, end2, name2) in enumerate(all_ranges):
-                if i >= j:
-                    continue
-                # Check for overlap
-                if start1 < end2 and start2 < end1:
-                    errors.append(
-                        f"Range overlap: {name1}=[{start1},{end1}) and {name2}=[{start2},{end2})"
-                    )
-
-        # Check 5: next_local_id is within valid range
-        if self.next_local_id < self.id_range_start:
-            errors.append(
-                f"next_local_id ({self.next_local_id}) < id_range_start ({self.id_range_start})"
-            )
-        if self.next_local_id > self.id_range_end:
-            # This could be valid if we've exhausted base range and have extra allocations
-            if not self._extra_allocations:
-                errors.append(
-                    f"next_local_id ({self.next_local_id}) > id_range_end ({self.id_range_end}) "
-                    f"but no extra allocations"
-                )
-
-        return {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "stats": stats,
-        }
-
     def get_owner_by_id(self, infoset_id: int) -> Optional[int]:
         """
         Determine owner worker for a given infoset ID.
@@ -410,7 +320,6 @@ class SharedArrayStorage(Storage):
         # Signal workers that shared memory is ready
         if self.ready_event is not None:
             self.ready_event.set()
-            print("DEBUG: Master signaled ready_event")
 
     def _attach_shared_memory(self):
         """
@@ -1024,58 +933,47 @@ class SharedArrayStorage(Storage):
         if num_keys == 0:
             return
 
-        items = list(self._owned_keys.items())
+        items = sorted(self._owned_keys.items(), key=lambda item: item[1])
         dense_ids = {key: idx for idx, (key, _) in enumerate(items)}
         max_id = num_keys
 
         # Save key mapping
-        key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
-        with open(key_mapping_file, "wb") as f:
+        paths = CheckpointPaths.from_dir(self.checkpoint_dir)
+        with open(paths.key_mapping, "wb") as f:
             pickle.dump(
                 {
                     "owned_keys": dense_ids,
-                    "num_workers": self.num_workers,
-                    "max_id": max_id,
-                    "capacity": self.capacity,  # Persist current capacity
-                    "action_config_hash": self.action_config_hash,  # For config validation
-                    "id_mode": "dense",
                 },
                 f,
             )
 
         # Save shared arrays (densified rows)
-        regrets_file = self.checkpoint_dir / "regrets.npy"
-        strategies_file = self.checkpoint_dir / "strategies.npy"
-        action_counts_file = self.checkpoint_dir / "action_counts.npy"
-        reach_counts_file = self.checkpoint_dir / "reach_counts.npy"
-        cumulative_utility_file = self.checkpoint_dir / "cumulative_utility.npy"
-
         regrets_mm = np.lib.format.open_memmap(
-            regrets_file,
+            paths.regrets,
             mode="w+",
             dtype=self.shared_regrets.dtype,
             shape=(max_id, self.shared_regrets.shape[1]),
         )
         strategies_mm = np.lib.format.open_memmap(
-            strategies_file,
+            paths.strategies,
             mode="w+",
             dtype=self.shared_strategy_sum.dtype,
             shape=(max_id, self.shared_strategy_sum.shape[1]),
         )
         action_counts_mm = np.lib.format.open_memmap(
-            action_counts_file,
+            paths.action_counts,
             mode="w+",
             dtype=self.shared_action_counts.dtype,
             shape=(max_id,),
         )
         reach_counts_mm = np.lib.format.open_memmap(
-            reach_counts_file,
+            paths.reach_counts,
             mode="w+",
             dtype=self.shared_reach_counts.dtype,
             shape=(max_id,),
         )
         cumulative_utility_mm = np.lib.format.open_memmap(
-            cumulative_utility_file,
+            paths.cumulative_utility,
             mode="w+",
             dtype=self.shared_cumulative_utility.dtype,
             shape=(max_id,),
@@ -1098,7 +996,6 @@ class SharedArrayStorage(Storage):
 
         # Save action signatures (action type and amount for each infoset)
         # This allows reconstructing actual Action objects on load
-        action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
         action_sigs = {}
         for new_id, (_, old_id) in enumerate(items):
             actions = self._legal_actions_cache.get(old_id)
@@ -1108,63 +1005,15 @@ class SharedArrayStorage(Storage):
             # Use .name instead of .value for readability and enum reordering safety
             action_sigs[new_id] = [(action.type.name, action.amount) for action in actions]
 
-        with open(action_sigs_file, "wb") as f:
+        with open(paths.action_signatures, "wb") as f:
             pickle.dump(action_sigs, f)
 
         # Validate before declaring checkpoint done (fail fast on corruption)
         _validate_action_signatures(
-            np.lib.format.open_memmap(action_counts_file, mode="r"),
+            np.lib.format.open_memmap(paths.action_counts, mode="r"),
             action_sigs,
             f"SharedArrayStorage.checkpoint(iter={iteration})",
         )
-
-    @staticmethod
-    def get_checkpoint_info(checkpoint_dir: Path) -> Optional[Dict]:
-        """
-        Get information about a checkpoint without loading it.
-
-        Useful for determining initial_capacity before creating storage.
-
-        Args:
-            checkpoint_dir: Directory containing checkpoint files
-
-        Returns:
-            Dict with checkpoint info, or None if no valid checkpoint
-        """
-        key_mapping_file = checkpoint_dir / "key_mapping.pkl"
-        if not key_mapping_file.exists():
-            return None
-
-        with open(key_mapping_file, "rb") as f:
-            mapping_data = pickle.load(f)
-
-        num_infosets = len(mapping_data.get("owned_keys", {}))
-        max_id = mapping_data.get("max_id")
-        if max_id is None:
-            max_id = num_infosets
-
-        capacity = mapping_data.get("capacity")
-        if capacity is None or capacity <= 0:
-            # Older checkpoints may not persist capacity; infer with headroom.
-            min_capacity = max_id + 1  # Reserve slot 0.
-            if max_id > 0:
-                threshold_capacity = (
-                    int(math.ceil(max_id / SharedArrayStorage.CAPACITY_THRESHOLD)) + 1
-                )
-            else:
-                threshold_capacity = 1
-            capacity = max(min_capacity, threshold_capacity)
-        elif capacity < max_id + 1:
-            # Defensive: ensure capacity can hold all stored infosets.
-            capacity = max_id + 1
-
-        return {
-            "num_infosets": num_infosets,
-            "capacity": capacity,
-            "num_workers": mapping_data.get("num_workers"),
-            "max_id": max_id,
-            "action_config_hash": mapping_data.get("action_config_hash"),
-        }
 
     def load_checkpoint(self) -> bool:
         """
@@ -1184,55 +1033,32 @@ class SharedArrayStorage(Storage):
         if missing_files:
             return False
 
-        key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
-        regrets_file = self.checkpoint_dir / "regrets.npy"
-        strategies_file = self.checkpoint_dir / "strategies.npy"
-        action_counts_file = self.checkpoint_dir / "action_counts.npy"
-        reach_counts_file = self.checkpoint_dir / "reach_counts.npy"
-        cumulative_utility_file = self.checkpoint_dir / "cumulative_utility.npy"
+        data = load_checkpoint_data(
+            self.checkpoint_dir, context="SharedArrayStorage.load_checkpoint"
+        )
+        saved_owned_keys = data.owned_keys
 
-        # Load saved checkpoint data
-        with open(key_mapping_file, "rb") as f:
-            mapping_data = pickle.load(f)
-            saved_owned_keys = mapping_data["owned_keys"]
-            saved_capacity = mapping_data.get("capacity")
-            saved_config_hash = mapping_data.get("action_config_hash")
+        saved_regrets = data.arrays["regrets"]
+        saved_action_counts = data.arrays["action_counts"]
+        saved_strategies = data.arrays["strategies"]
+        saved_reach_counts = data.arrays["reach_counts"]
+        saved_cumulative_utility = data.arrays["cumulative_utility"]
 
-            # Log if checkpoint was from a resized storage
-            if saved_capacity and saved_capacity != self.capacity:
-                print(
-                    f"Checkpoint capacity ({saved_capacity:,}) differs from "
-                    f"current ({self.capacity:,})"
-                )
+        if data.max_actions != self.max_actions:
+            raise ValueError(
+                "Checkpoint max_actions does not match current storage "
+                f"({data.max_actions} vs {self.max_actions})"
+            )
 
-            if saved_config_hash and self.action_config_hash:
-                if saved_config_hash != self.action_config_hash:
-                    print(
-                        "WARNING: ACTION CONFIG MISMATCH DETECTED!\n"
-                        f"  Checkpoint config hash: {saved_config_hash}\n"
-                        f"  Current config hash:    {self.action_config_hash}\n"
-                        "  Strategies may be INVALID if action abstraction changed.\n"
-                        "  Consider starting fresh training or using the original config."
-                    )
-
-        saved_regrets = np.load(regrets_file, mmap_mode="r")
-        saved_action_counts = np.load(action_counts_file, mmap_mode="r")
-        saved_strategies = np.load(strategies_file, mmap_mode="r")
-        saved_reach_counts = np.load(reach_counts_file, mmap_mode="r")
-        saved_cumulative_utility = np.load(cumulative_utility_file, mmap_mode="r")
+        if self.capacity < data.max_id + 1:
+            raise ValueError(
+                "Storage capacity is smaller than checkpoint max_id + 1 "
+                f"({self.capacity} vs {data.max_id + 1})"
+            )
 
         # Load action signatures
-        action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
-        with open(action_sigs_file, "rb") as f:
-            saved_action_sigs = pickle.load(f)
+        saved_action_sigs = data.action_signatures
         print(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
-
-        # Validate alignment (fail fast if counts/signatures diverge)
-        _validate_action_signatures(
-            saved_action_counts,
-            saved_action_sigs,
-            "SharedArrayStorage.load_checkpoint",
-        )
 
         # Re-partition keys based on current worker configuration
         # Each key is assigned to a worker using hash-based partitioning
@@ -1258,17 +1084,9 @@ class SharedArrayStorage(Storage):
             self.shared_cumulative_utility[new_id] = saved_cumulative_utility[old_id]
 
             # Reconstruct legal actions from signatures
-            if old_id not in saved_action_sigs:
-                raise ValueError(
-                    f"Missing action signatures for infoset {key} (id {old_id}). "
-                    "Cannot reconstruct legal actions."
-                )
-
-            action_sigs = saved_action_sigs[old_id]
-            legal_actions = [
-                _reconstruct_action(action_type_name, amount)
-                for action_type_name, amount in action_sigs
-            ]
+            legal_actions = build_legal_actions(
+                saved_action_sigs, old_id, "SharedArrayStorage.load_checkpoint"
+            )
             self._legal_actions_cache[new_id] = legal_actions
 
             loaded_count += 1

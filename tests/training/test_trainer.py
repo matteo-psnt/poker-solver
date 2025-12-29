@@ -247,11 +247,12 @@ class TestAsyncCheckpointing:
 
         trainer = TrainingSession(config)
 
-        # Verify async checkpoint infrastructure exists
-        assert hasattr(trainer, "_checkpoint_executor")
-        assert hasattr(trainer, "_pending_checkpoint")
-        assert trainer._checkpoint_executor is not None
-        assert trainer._pending_checkpoint is None
+        # Verify checkpoint manager is initialized
+        assert hasattr(trainer, "checkpoint_manager")
+        assert trainer.checkpoint_manager is not None
+        assert hasattr(trainer.checkpoint_manager, "_executor")
+        assert hasattr(trainer.checkpoint_manager, "_pending_checkpoint")
+        assert trainer.checkpoint_manager._pending_checkpoint is None
 
     @pytest.mark.timeout(60)
     def test_async_checkpoint_nonblocking(self, config_with_dummy_abstraction):
@@ -290,7 +291,7 @@ class TestAsyncCheckpointing:
         trainer.train(num_iterations=4, num_workers=1)
 
         # After training, pending checkpoint should be None (completed)
-        assert trainer._pending_checkpoint is None
+        assert trainer.checkpoint_manager._pending_checkpoint is None
 
         # Verify checkpoint files exist
         assert (trainer.run_dir / "key_mapping.pkl").exists()
@@ -400,7 +401,8 @@ class TestAsyncCheckpointing:
             mapping = pickle.load(f)
 
         owned_keys = mapping["owned_keys"]
-        max_id = mapping["max_id"]
+        regrets_data = np.load(regrets_file, mmap_mode="r")
+        max_id = regrets_data.shape[0]
 
         # Verify max_id is consistent with keys
         assert max_id > 0
@@ -408,7 +410,6 @@ class TestAsyncCheckpointing:
             actual_max = max(owned_keys.values())
             assert max_id == actual_max + 1, f"max_id should be {actual_max + 1} but got {max_id}"
 
-        regrets_data = np.load(regrets_file, mmap_mode="r")
         action_counts = np.load(action_counts_file, mmap_mode="r")
 
         # Verify shapes match max_id

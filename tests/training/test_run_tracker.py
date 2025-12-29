@@ -2,12 +2,17 @@
 
 import json
 
+from src.training import components
 from src.training.run_tracker import RunTracker
 from src.utils.config import Config
 
 
 class TestRunTracker:
     """Tests for RunTracker class."""
+
+    def _action_config_hash(self) -> str:
+        config = Config.default()
+        return components.build_action_abstraction(config).get_config_hash()
 
     def test_create_new_tracker(self, tmp_path):
         """Test creating a new run tracker."""
@@ -18,6 +23,7 @@ class TestRunTracker:
             run_dir=run_dir,
             config_name="test",
             config=config,
+            action_config_hash=self._action_config_hash(),
         )
 
         assert tracker.run_id == "run-test"
@@ -46,6 +52,7 @@ class TestRunTracker:
             "iterations": 100,
             "runtime_seconds": 10.5,
             "num_infosets": 1000,
+            "action_config_hash": self._action_config_hash(),
             "config": Config.default().to_dict(),
         }
 
@@ -63,7 +70,12 @@ class TestRunTracker:
     def test_update_progress(self, tmp_path):
         """Test updating training progress."""
         run_dir = tmp_path / "run-update"
-        tracker = RunTracker(run_dir=run_dir, config_name="test", config=Config.default())
+        tracker = RunTracker(
+            run_dir=run_dir,
+            config_name="test",
+            config=Config.default(),
+            action_config_hash=self._action_config_hash(),
+        )
 
         tracker.update(
             iterations=50,
@@ -83,7 +95,12 @@ class TestRunTracker:
     def test_mark_completed(self, tmp_path):
         """Test marking run as completed."""
         run_dir = tmp_path / "run-complete"
-        tracker = RunTracker(run_dir=run_dir, config_name="test", config=Config.default())
+        tracker = RunTracker(
+            run_dir=run_dir,
+            config_name="test",
+            config=Config.default(),
+            action_config_hash=self._action_config_hash(),
+        )
 
         tracker.mark_completed()
 
@@ -93,14 +110,24 @@ class TestRunTracker:
     def test_mark_failed(self, tmp_path):
         """Test marking run as failed."""
         run_dir = tmp_path / "run-failed"
-        tracker = RunTracker(run_dir=run_dir, config_name="test", config=Config.default())
+        tracker = RunTracker(
+            run_dir=run_dir,
+            config_name="test",
+            config=Config.default(),
+            action_config_hash=self._action_config_hash(),
+        )
 
         # Mark as failed with no iterations - should NOT create directory
         tracker.mark_failed(cleanup_if_empty=True)
         assert not run_dir.exists()
 
         # Create a new tracker and do some work
-        tracker2 = RunTracker(run_dir=run_dir, config_name="test", config=Config.default())
+        tracker2 = RunTracker(
+            run_dir=run_dir,
+            config_name="test",
+            config=Config.default(),
+            action_config_hash=self._action_config_hash(),
+        )
         tracker2.update(iterations=5, runtime_seconds=1.0, num_infosets=100, storage_capacity=2000)
 
         # Now mark as failed - should keep directory since iterations > 0
