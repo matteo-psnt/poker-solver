@@ -86,28 +86,25 @@ def handle_train(
     return trainer
 
 
-def handle_resume(config: Config, run_id: str, latest_iter: int) -> TrainingSession:
+def handle_resume(run_dir: Path, latest_iter: int, additional_iters: int) -> TrainingSession:
     """
     Resume training from checkpoint.
 
     Args:
-        config: Configuration
-        run_id: Run identifier
+        run_dir: Run directory
         latest_iter: Latest iteration number
+        additional_iters: Iterations to run beyond latest checkpoint
 
     Returns:
         TrainingSession instance
     """
-    runs_dir = Path(config.training.runs_dir)
-    run_dir = runs_dir / run_id
     trainer = TrainingSession.resume(run_dir)
 
     print(f"\nResuming training from iteration {latest_iter}...")
-    print(
-        f"Target: {config.training.num_iterations} iterations (+{config.training.num_iterations - latest_iter})"
-    )
+    target_total = latest_iter + additional_iters
+    print(f"Target: {target_total} iterations (+{additional_iters})")
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
 
-    trainer.train()
+    trainer.train(num_iterations=additional_iters)
 
     return trainer

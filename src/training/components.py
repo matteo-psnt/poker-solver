@@ -17,6 +17,7 @@ from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.base import Storage
 from src.solver.storage.shared_array import SharedArrayStorage
+from src.training.run_metadata import RunMetadata
 from src.utils.config import Config
 
 
@@ -122,7 +123,11 @@ def build_card_abstraction(
         )
 
 
-def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
+def build_storage(
+    config: Config,
+    run_dir: Optional[Path] = None,
+    run_metadata: Optional[RunMetadata] = None,
+) -> Storage:
     """
     Build storage backend for training (always returns SharedArrayStorage).
 
@@ -136,6 +141,7 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
     Args:
         config: Configuration object
         run_dir: Optional run directory (required if checkpointing is enabled)
+        run_metadata: Optional run metadata for resume capacity
 
     Returns:
         SharedArrayStorage instance for coordinator/single-worker use
@@ -156,13 +162,10 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
     # Using run_dir.name as session_id to avoid conflicts between runs
     session_id = run_dir.name if run_dir else "default"
 
-    # Determine initial capacity: use checkpoint's capacity if resuming, else config
+    # Determine initial capacity: use run metadata if resuming, else config
     initial_capacity = config.storage.initial_capacity
-    if run_dir and run_dir.exists():
-        checkpoint_info = SharedArrayStorage.get_checkpoint_info(run_dir)
-        if checkpoint_info and checkpoint_info.get("capacity"):
-            # When resuming, always use checkpoint's capacity (it may have grown)
-            initial_capacity = checkpoint_info["capacity"]
+    if run_metadata and run_metadata.storage_capacity:
+        initial_capacity = run_metadata.storage_capacity
 
     return SharedArrayStorage(
         num_workers=1,
