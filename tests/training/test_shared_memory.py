@@ -203,7 +203,10 @@ class TestSharedMemorySerialization:
             shm.close()
 
     def test_cleanup_on_deserialization(self):
-        """Test that shared memory is properly cleaned up after deserialization."""
+        """Test that shared memory is properly handled during deserialization.
+
+        Workers should only close() but NOT unlink() - only the creator should unlink.
+        """
         key = InfoSetKey(
             player_position=0,
             street=Street.RIVER,
@@ -222,27 +225,71 @@ class TestSharedMemorySerialization:
             }
         }
 
-        # Serialize
+        # Serialize (creator creates it)
         shm, shm_size = _serialize_infosets_to_shm(infoset_data, "test_cleanup")
-        shm.close()  # Worker closes after sending
+        shm.close()  # Creator closes after writing
 
-        # Deserialize (should auto-cleanup)
+        # Deserialize (worker reads it)
+        # Worker should only close(), NOT unlink()
         result = _deserialize_infosets_from_shm("test_cleanup", shm_size)
 
         # Verify data was received
         assert len(result) == 1
 
-        # Try to access the shared memory again - should fail (already unlinked)
-        try:
-            from multiprocessing import shared_memory
+        # Shared memory should STILL EXIST because worker only closed, didn't unlink
+        from multiprocessing import shared_memory
 
-            # This should raise FileNotFoundError since memory was unlinked
+        try:
             shm_test = shared_memory.SharedMemory(name="test_cleanup")
+            # Success! Shared memory still exists (correct behavior)
+            # Now cleanup (simulating what master would do)
             shm_test.close()
             shm_test.unlink()
-            assert False, "Shared memory should have been cleaned up"
         except FileNotFoundError:
-            # Expected - memory was properly cleaned up
+            assert False, (
+                "Shared memory should still exist after worker read (worker should only close, not unlink)"
+            )
+
+    def test_cleanup_parameter(self):
+        """Test that cleanup=True properly deletes shared memory after reading."""
+        key = InfoSetKey(
+            player_position=0,
+            street=Street.RIVER,
+            betting_sequence="c",
+            preflop_hand=None,
+            postflop_bucket=75,
+            spr_bucket=0,
+        )
+
+        infoset_data = {
+            key: {
+                "regrets": np.array([1.0, 2.0], dtype=np.float32),
+                "strategy_sum": np.array([3.0, 4.0], dtype=np.float32),
+                "reach_count": 10,
+                "cumulative_utility": 5.0,
+            }
+        }
+
+        # Serialize
+        shm, shm_size = _serialize_infosets_to_shm(infoset_data, "test_cleanup_param")
+        shm.close()
+
+        # Deserialize with cleanup=True (simulating master reading worker results)
+        result = _deserialize_infosets_from_shm("test_cleanup_param", shm_size, cleanup=True)
+
+        # Verify data was received
+        assert len(result) == 1
+
+        # Shared memory should be DELETED because cleanup=True
+        from multiprocessing import shared_memory
+
+        try:
+            shm_test = shared_memory.SharedMemory(name="test_cleanup_param")
+            shm_test.close()
+            shm_test.unlink()
+            assert False, "Shared memory should have been deleted by cleanup=True"
+        except FileNotFoundError:
+            # Expected - cleanup=True deleted it
             pass
 
     def test_different_streets(self):
