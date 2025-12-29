@@ -101,11 +101,7 @@ def _validate_checkpoint_mapping(mapping_data: dict, context: str) -> tuple[int,
             raise ValueError(f"{context}: key_mapping contains invalid infoset IDs")
         if mapped_id >= max_id:
             max_id = mapped_id + 1
-    if num_infosets != max_id:
-        raise ValueError(
-            f"{context}: dense checkpoint requires num_infosets == max_id "
-            f"(num_infosets={num_infosets}, max_id={max_id})"
-        )
+
     return num_infosets, max_id
 
 
