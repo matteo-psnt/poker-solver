@@ -149,7 +149,7 @@ class SharedArrayStorage(Storage):
         self._shm_utility: "SharedMemory | None" = None
 
         # NumPy views into shared memory (the live data)
-        self.shared_regrets = np.empty((0, self.max_actions), dtype=np.float32)
+        self.shared_regrets = np.empty((0, self.max_actions), dtype=np.float64)
         self.shared_strategy_sum = np.empty((0, self.max_actions), dtype=np.float64)
         self.shared_action_counts = np.empty((0,), dtype=np.int32)
         self.shared_reach_counts = np.empty((0,), dtype=np.int64)
@@ -268,7 +268,7 @@ class SharedArrayStorage(Storage):
         self._cleanup_stale_shm()
 
         # Calculate sizes
-        regrets_size = self.capacity * self.max_actions * np.dtype(np.float32).itemsize
+        regrets_size = self.capacity * self.max_actions * np.dtype(np.float64).itemsize
         strategy_size = self.capacity * self.max_actions * np.dtype(np.float64).itemsize
         actions_size = self.capacity * np.dtype(np.int32).itemsize
         reach_size = self.capacity * np.dtype(np.int64).itemsize
@@ -385,7 +385,7 @@ class SharedArrayStorage(Storage):
 
         self.shared_regrets = np.ndarray(
             (self.capacity, self.max_actions),
-            dtype=np.float32,
+            dtype=np.float64,
             buffer=self._shm_regrets.buf,
         )
         self.shared_strategy_sum = np.ndarray(

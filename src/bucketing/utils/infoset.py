@@ -132,7 +132,7 @@ class InfoSet:
         self.num_actions = len(legal_actions)
 
         # CFR data structures
-        self.regrets = np.zeros(self.num_actions, dtype=np.float32)
+        self.regrets = np.zeros(self.num_actions, dtype=np.float64)
         self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)
 
         # Statistics tracking
@@ -385,7 +385,7 @@ class InfoSet:
 
     def reset_regrets(self):
         """Reset all regrets to zero (for some CFR variants)."""
-        self.regrets = np.zeros(self.num_actions, dtype=np.float32)
+        self.regrets = np.zeros(self.num_actions, dtype=np.float64)
 
     def reset_strategy_sum(self):
         """Reset strategy sum to zero (for some CFR variants)."""
