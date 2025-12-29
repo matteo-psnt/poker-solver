@@ -28,6 +28,7 @@ card_abstraction:
 
 storage:
   checkpoint_enabled: true  # Save periodic checkpoints to disk
+  initial_capacity: 1000000  # Start with 1M infosets for quick tests
 
 system:
   seed: 42  # Fixed seed for reproducibility

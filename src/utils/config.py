@@ -29,7 +29,7 @@ class TrainingConfig:
     """Training configuration with defaults."""
 
     num_iterations: int = 100_000
-    checkpoint_frequency: int = 5_000
+    checkpoint_frequency: int = 50_000
     log_frequency: int = 1_000
     iterations_per_worker: int = 1_000
     verbose: bool = True
@@ -40,7 +40,7 @@ class TrainingConfig:
 class StorageConfig:
     """Storage configuration with defaults."""
 
-    max_infosets: int = 2_000_000
+    initial_capacity: int = 2_000_000
     max_actions: int = 10
     checkpoint_enabled: bool = True
 

@@ -254,7 +254,7 @@ class TrainingSession:
         checkpoint_time = time.time() - start
         if self.verbose:
             print(
-                f"[Checkpoint] Iteration {iteration} saved in {checkpoint_time:.2f}s",
+                f"[Master] Checkpoint saved at iter={iteration} in {checkpoint_time:.2f}s",
                 flush=True,
             )
         return checkpoint_time
@@ -298,24 +298,25 @@ class TrainingSession:
         if batch_size is None:
             batch_size = self.config.training.iterations_per_worker * num_workers
 
-        # Use max_infosets from checkpoint if it's larger (handles resume after resize)
-        max_infosets = self.config.storage.max_infosets
+        # Determine initial capacity: use checkpoint's capacity if resuming, else config
+        initial_capacity = self.config.storage.initial_capacity
         if self.run_dir and self.run_dir.exists():
             checkpoint_info = SharedArrayStorage.get_checkpoint_info(self.run_dir)
-            if checkpoint_info and checkpoint_info.get("max_infosets"):
-                checkpoint_max = checkpoint_info["max_infosets"]
-                if checkpoint_max > max_infosets:
+            if checkpoint_info and checkpoint_info.get("capacity"):
+                checkpoint_capacity = checkpoint_info["capacity"]
+                # When resuming, always use checkpoint's capacity (it may have grown)
+                if checkpoint_capacity != initial_capacity:
                     print(
-                        f"[Resume] Using checkpoint max_infosets={checkpoint_max:,} "
-                        f"(config had {max_infosets:,})"
+                        f"[Resume] Using checkpoint capacity {checkpoint_capacity:,} "
+                        f"(config initial_capacity={initial_capacity:,})"
                     )
-                    max_infosets = checkpoint_max
+                initial_capacity = checkpoint_capacity
 
         return {
             "batch_size": batch_size,
             "checkpoint_freq": self.config.training.checkpoint_frequency,
             "verbose": self.config.training.verbose,
-            "max_infosets": max_infosets,
+            "initial_capacity": initial_capacity,
             "max_actions": self.config.storage.max_actions,
             "checkpoint_enabled": self.config.storage.checkpoint_enabled,
         }
@@ -325,7 +326,7 @@ class TrainingSession:
         num_workers: int,
         num_iterations: int,
         batch_size: int,
-        max_infosets: int,
+        initial_capacity: int,
         max_actions: int,
     ) -> None:
         """Display training configuration header."""
@@ -333,7 +334,7 @@ class TrainingSession:
         print(f"   Workers: {num_workers}")
         print(f"   Iterations: {num_iterations}")
         print(f"   Batch size: {batch_size}")
-        print(f"   Max infosets: {max_infosets:,}")
+        print(f"   Initial capacity: {initial_capacity:,}")
         print(f"   Max actions: {max_actions}")
         print("   Mode: Live shared memory arrays")
 
@@ -436,8 +437,6 @@ class TrainingSession:
 
         except KeyboardInterrupt:
             interrupted = True
-            if verbose:
-                print("\n⚠️  Training interrupted by user", flush=True)
 
         # Save checkpoint on interrupt if we haven't just saved
         if interrupted and checkpoint_enabled and completed_iterations > 0:
@@ -522,7 +521,7 @@ class TrainingSession:
         batch_size_val = config["batch_size"]
         checkpoint_freq = config["checkpoint_freq"]
         verbose = config["verbose"]
-        max_infosets = config["max_infosets"]
+        initial_capacity = config["initial_capacity"]
         max_actions = config["max_actions"]
         checkpoint_enabled = config["checkpoint_enabled"]
 
@@ -532,7 +531,7 @@ class TrainingSession:
         # Display header
         if verbose:
             self._print_training_header(
-                num_workers, num_iterations, batch_size_val, max_infosets, max_actions
+                num_workers, num_iterations, batch_size_val, initial_capacity, max_actions
             )
 
         training_start_time = time.time()
@@ -557,7 +556,7 @@ class TrainingSession:
             serialized_card_abstraction=serialized_card_abstraction,
             session_id=self.run_dir.name,
             base_seed=self.config.system.seed or 42,
-            max_infosets=max_infosets,
+            initial_capacity=initial_capacity,
             max_actions=max_actions,
             checkpoint_dir=str(self.run_dir) if checkpoint_enabled else None,
         ) as worker_manager:

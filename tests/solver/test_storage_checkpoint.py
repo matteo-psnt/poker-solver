@@ -19,7 +19,7 @@ def test_checkpoint_roundtrip_smoke(tmp_path):
         num_workers=1,
         worker_id=0,
         session_id=session_id,
-        max_infosets=64,
+        initial_capacity=64,
         max_actions=5,
         is_coordinator=True,
         checkpoint_dir=tmp_path,

@@ -20,7 +20,7 @@ class TestDefaultBehavior:
         assert cfg.training.checkpoint_frequency > 0
         assert cfg.training.verbose is True
 
-        assert cfg.storage.max_infosets > 0
+        assert cfg.storage.initial_capacity > 0
         assert cfg.storage.max_actions > 0
 
         assert cfg.game.big_blind > cfg.game.small_blind
@@ -37,7 +37,7 @@ class TestDefaultBehavior:
             cfg.training.num_iterations = 999  # type: ignore
 
         with pytest.raises(Exception):
-            cfg.storage.max_infosets = 999  # type: ignore
+            cfg.storage.initial_capacity = 999  # type: ignore
 
 
 class TestMergeBehavior:
