@@ -8,7 +8,7 @@ Provides a TUI for training, evaluation, precomputation, and run management.
 import sys
 import traceback
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, cast
 
 import questionary
 from questionary import Style
@@ -26,6 +26,14 @@ from src.cli.combo_handler import (
 )
 from src.cli.config_handler import select_config
 from src.cli.training_handler import handle_resume, handle_train
+from src.evaluation.exploitability import compute_exploitability
+from src.solver.mccfr import MCCFRSolver
+from src.solver.storage.in_memory import InMemoryStorage
+from src.training.components import (
+    build_action_abstraction,
+    build_card_abstraction,
+    build_solver,
+)
 from src.training.run_tracker import RunTracker
 from src.training.trainer import TrainingSession
 from src.utils.config import Config
@@ -149,9 +157,88 @@ class SolverCLI:
         if selected_run == "Cancel" or selected_run is None:
             return
 
-        # TODO: Implement evaluation
-        print(f"\n[!] Evaluation not yet implemented for {selected_run}")
-        print("   This will compare against baseline strategies")
+        run_dir = self.runs_dir / selected_run
+        tracker = RunTracker.load(run_dir)
+        meta = tracker.metadata
+
+        if not meta.get("config"):
+            print("\n[ERROR] No config found for this run")
+            input("Press Enter to continue...")
+            return
+
+        config = Config.from_dict(meta["config"])
+
+        num_samples_text = questionary.text(
+            "Num samples:",
+            default="500",
+            validate=lambda text: text.isdigit() and int(text) > 0,
+            style=custom_style,
+        ).ask()
+        if num_samples_text is None:
+            return
+
+        num_rollouts_text = questionary.text(
+            "Rollouts per infoset:",
+            default="50",
+            validate=lambda text: text.isdigit() and int(text) > 0,
+            style=custom_style,
+        ).ask()
+        if num_rollouts_text is None:
+            return
+
+        strategy_choice = questionary.select(
+            "Strategy to evaluate:",
+            choices=["Average (recommended)", "Current"],
+            style=custom_style,
+        ).ask()
+        if strategy_choice is None:
+            return
+
+        seed_text = questionary.text(
+            "Random seed (blank for random):",
+            default="",
+            style=custom_style,
+        ).ask()
+        if seed_text is None:
+            return
+
+        num_samples = int(num_samples_text)
+        num_rollouts = int(num_rollouts_text)
+        use_average = strategy_choice.startswith("Average")
+        seed = int(seed_text) if seed_text.strip() else None
+
+        print("\nLoading solver...")
+        storage = InMemoryStorage(checkpoint_dir=run_dir)
+        action_abstraction = build_action_abstraction(config)
+        card_abstraction = build_card_abstraction(config, prompt_user=False, auto_compute=False)
+        solver = build_solver(config, action_abstraction, card_abstraction, storage)
+
+        print(f"  Loaded {storage.num_infosets():,} infosets")
+        print("\nRunning exploitability estimate...\n")
+        # Cast to MCCFRSolver since compute_exploitability requires it
+        assert isinstance(solver, MCCFRSolver), f"Expected MCCFRSolver, got {type(solver)}"
+        results = compute_exploitability(
+            solver,
+            num_samples=num_samples,
+            use_average_strategy=use_average,
+            num_rollouts_per_infoset=num_rollouts,
+            seed=seed,
+        )
+
+        print("Exploitability Results")
+        print("-" * 60)
+        print(f"Exploitability: {results['exploitability_mbb']:.2f} mbb/g")
+        print(f"Std Error:      {results['std_error_mbb']:.2f} mbb/g")
+        confidence_interval = cast(Tuple[float, float], results["confidence_95_mbb"])
+        ci_lower, ci_upper = confidence_interval[0], confidence_interval[1]
+        print(f"95% CI:         [{ci_lower:.2f}, {ci_upper:.2f}] mbb/g")
+        print(f"BR Utility P0:  {results['player_0_br_utility']:.4f}")
+        print(f"BR Utility P1:  {results['player_1_br_utility']:.4f}")
+        print(f"Samples:        {results['num_samples']}")
+        print(
+            "\nRule of thumb (mbb/g): 100+ very exploitable, 20-100 weak, 5-20 decent, "
+            "1-5 good, 0.1-1 strong, <0.1 near-optimal."
+        )
 
         input("\nPress Enter to continue...")
 

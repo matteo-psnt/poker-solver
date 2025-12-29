@@ -365,6 +365,7 @@ def _worker_loop(
                             "type": "iterations_done",
                             "utilities": utilities,
                             "num_owned_infosets": storage.num_owned_infosets(),
+                            "capacity_usage": storage.get_capacity_usage(),
                             "iter_time": iter_time,
                             "fallback_stats": fallback_stats,
                         }
@@ -712,7 +713,7 @@ class SharedArrayWorkerManager:
 
     def check_and_resize_if_needed(
         self,
-        total_infosets: int = 0,
+        max_worker_capacity: float,
         timeout: float = 120.0,
         verbose: bool = True,
     ) -> bool:
@@ -720,33 +721,28 @@ class SharedArrayWorkerManager:
         Check if storage needs resizing and perform resize if necessary.
 
         This is a stop-the-world operation:
-        1. Check if total infosets approaching capacity (85%)
+        1. Check if ANY worker is approaching capacity (85% of their local range)
         2. If yes, coordinator resizes storage (2x growth)
         3. Workers reattach to new shared memory
 
         Args:
-            total_infosets: Total infosets across all workers (from batch results)
+            max_worker_capacity: Highest capacity usage among all workers (0.0 to 1.0)
             timeout: Max wait time for worker responses
             verbose: Print progress messages
 
         Returns:
             True if resize was performed, False otherwise
         """
-        # Calculate usage based on total infosets vs max capacity
-        # Don't use coordinator's internal stats as they get corrupted after key collection
-        current_max = self.max_infosets
-        usage = total_infosets / current_max if current_max > 0 else 0
-
-        if usage < self.storage.CAPACITY_THRESHOLD:
+        if max_worker_capacity < self.storage.CAPACITY_THRESHOLD:
             return False
 
-        new_max = int(current_max * self.storage.GROWTH_FACTOR)
+        new_max = int(self.max_infosets * self.storage.GROWTH_FACTOR)
 
         if verbose:
             print(
                 f"[Coordinator] Storage resize triggered: "
-                f"{usage:.1%} capacity used ({total_infosets:,}/{current_max:,}), "
-                f"growing to {new_max:,}",
+                f"worker at {max_worker_capacity:.1%} capacity, "
+                f"growing {self.max_infosets:,} -> {new_max:,}",
                 flush=True,
             )
 
@@ -901,6 +897,7 @@ class SharedArrayWorkerManager:
         results = []
         errors = []
         total_owned = 0
+        max_worker_capacity = 0.0
         interrupted = False
 
         received = 0
@@ -919,6 +916,8 @@ class SharedArrayWorkerManager:
                     results.append(result)
                     all_utilities.extend(result.get("utilities", []))
                     total_owned += result.get("num_owned_infosets", 0)
+                    worker_capacity = result.get("capacity_usage", 0.0)
+                    max_worker_capacity = max(max_worker_capacity, worker_capacity)
                     fallback_stats = result.get("fallback_stats")
                     if isinstance(fallback_stats, dict):
                         self._fallback_stats_by_worker[result["worker_id"]] = fallback_stats
@@ -927,6 +926,7 @@ class SharedArrayWorkerManager:
                         print(
                             f"[Coordinator] Worker {result['worker_id']} done: "
                             f"{result['num_owned_infosets']} owned infosets, "
+                            f"{worker_capacity:.1%} capacity, "
                             f"{result['iter_time']:.1f}s",
                             flush=True,
                         )
@@ -975,11 +975,11 @@ class SharedArrayWorkerManager:
                 f"{len(errors)} worker(s) failed during batch {batch_id}:\n{error_details}"
             )
 
-        # Check if resize is needed after batch
+        # Check if resize is needed after batch (based on per-worker capacity)
         resized = False
         if auto_resize:
             resized = self.check_and_resize_if_needed(
-                total_infosets=total_owned,
+                max_worker_capacity=max_worker_capacity,
                 timeout=timeout,
                 verbose=verbose,
             )
@@ -1002,6 +1002,7 @@ class SharedArrayWorkerManager:
             "total_iterations": total_iters,
             "worker_results": results,
             "num_infosets": total_owned,
+            "max_worker_capacity": max_worker_capacity,
             "resized": resized,
             "max_infosets": self.max_infosets,
             "interrupted": interrupted,

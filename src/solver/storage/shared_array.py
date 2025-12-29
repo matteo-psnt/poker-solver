@@ -1012,7 +1012,7 @@ class SharedArrayStorage(Storage):
         After key collection from workers, _owned_keys contains ALL keys
         from all workers, spanning multiple ID ranges. We save:
         1. Complete key→ID mapping
-        2. All used rows from shared arrays (determined by max ID)
+        2. Densified rows from shared arrays (avoid sparse ID gaps)
         """
         if not self.checkpoint_dir or not self.is_coordinator:
             return
@@ -1024,26 +1024,26 @@ class SharedArrayStorage(Storage):
         if num_keys == 0:
             return
 
-        # Find the range of IDs that need to be saved
-        # After key collection, IDs span multiple worker ranges
-        all_ids = list(self._owned_keys.values())
-        max_id = max(all_ids) + 1  # +1 because we slice [:max_id]
+        items = list(self._owned_keys.items())
+        dense_ids = {key: idx for idx, (key, _) in enumerate(items)}
+        max_id = num_keys
 
         # Save key mapping
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
         with open(key_mapping_file, "wb") as f:
             pickle.dump(
                 {
-                    "owned_keys": dict(self._owned_keys),
+                    "owned_keys": dense_ids,
                     "num_workers": self.num_workers,
                     "max_id": max_id,
                     "max_infosets": self.max_infosets,  # Persist resized capacity
                     "action_config_hash": self.action_config_hash,  # For config validation
+                    "id_mode": "dense",
                 },
                 f,
             )
 
-        # Save shared arrays (all used rows up to max_id)
+        # Save shared arrays (densified rows)
         regrets_file = self.checkpoint_dir / "regrets.npy"
         strategies_file = self.checkpoint_dir / "strategies.npy"
         action_counts_file = self.checkpoint_dir / "action_counts.npy"
@@ -1056,37 +1056,64 @@ class SharedArrayStorage(Storage):
             dtype=self.shared_regrets.dtype,
             shape=(max_id, self.shared_regrets.shape[1]),
         )
-        regrets_mm[:] = self.shared_regrets[:max_id, :]
-        del regrets_mm
-
         strategies_mm = np.lib.format.open_memmap(
             strategies_file,
             mode="w+",
             dtype=self.shared_strategy_sum.dtype,
             shape=(max_id, self.shared_strategy_sum.shape[1]),
         )
-        strategies_mm[:] = self.shared_strategy_sum[:max_id, :]
-        del strategies_mm
+        action_counts_mm = np.lib.format.open_memmap(
+            action_counts_file,
+            mode="w+",
+            dtype=self.shared_action_counts.dtype,
+            shape=(max_id,),
+        )
+        reach_counts_mm = np.lib.format.open_memmap(
+            reach_counts_file,
+            mode="w+",
+            dtype=self.shared_reach_counts.dtype,
+            shape=(max_id,),
+        )
+        cumulative_utility_mm = np.lib.format.open_memmap(
+            cumulative_utility_file,
+            mode="w+",
+            dtype=self.shared_cumulative_utility.dtype,
+            shape=(max_id,),
+        )
 
-        np.save(action_counts_file, self.shared_action_counts[:max_id])
-        np.save(reach_counts_file, self.shared_reach_counts[:max_id])
-        np.save(cumulative_utility_file, self.shared_cumulative_utility[:max_id])
+        for new_id, (_, old_id) in enumerate(items):
+            n_actions = int(self.shared_action_counts[old_id])
+            if n_actions > 0:
+                regrets_mm[new_id, :n_actions] = self.shared_regrets[old_id, :n_actions]
+                strategies_mm[new_id, :n_actions] = self.shared_strategy_sum[old_id, :n_actions]
+            action_counts_mm[new_id] = n_actions
+            reach_counts_mm[new_id] = self.shared_reach_counts[old_id]
+            cumulative_utility_mm[new_id] = self.shared_cumulative_utility[old_id]
+
+        del regrets_mm
+        del strategies_mm
+        del action_counts_mm
+        del reach_counts_mm
+        del cumulative_utility_mm
 
         # Save action signatures (action type and amount for each infoset)
         # This allows reconstructing actual Action objects on load
         action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
         action_sigs = {}
-        for infoset_id, actions in self._legal_actions_cache.items():
+        for new_id, (_, old_id) in enumerate(items):
+            actions = self._legal_actions_cache.get(old_id)
+            if actions is None:
+                continue
             # Store (action_type_name, amount) tuples
             # Use .name instead of .value for readability and enum reordering safety
-            action_sigs[infoset_id] = [(action.type.name, action.amount) for action in actions]
+            action_sigs[new_id] = [(action.type.name, action.amount) for action in actions]
 
         with open(action_sigs_file, "wb") as f:
             pickle.dump(action_sigs, f)
 
         # Validate before declaring checkpoint done (fail fast on corruption)
         _validate_action_signatures(
-            self.shared_action_counts[:max_id],
+            np.lib.format.open_memmap(action_counts_file, mode="r"),
             action_sigs,
             f"SharedArrayStorage.checkpoint(iter={iteration})",
         )
@@ -1266,7 +1293,7 @@ class SharedArrayStorage(Storage):
         self._shm_reach = None
         self._shm_utility = None
 
-        print(f"Worker {self.worker_id} cleaned up shared memory")
+        print(f"[Worker {self.worker_id}] cleaned up shared memory")
 
     def __del__(self):
         """Cleanup on deletion."""

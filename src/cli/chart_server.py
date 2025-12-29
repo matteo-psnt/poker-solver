@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import threading
+from collections import OrderedDict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,7 +29,8 @@ class ChartServer:
         self.base_dir = base_dir
         self.port = port
         self.base_url = f"http://127.0.0.1:{self.port}"
-        self._cache: dict[tuple[int, str], dict] = {}
+        self._cache: "OrderedDict[tuple[int, str], dict]" = OrderedDict()
+        self._cache_max_size = 256
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -58,10 +60,14 @@ class ChartServer:
 
     def get_chart(self, position: int, situation_id: str) -> dict:
         key = (position, situation_id)
-        if key in self._cache:
-            return self._cache[key]
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+            return cached
         data = build_preflop_chart_data(self.solver, position, situation_id, self.run_id)
         self._cache[key] = data
+        if len(self._cache) > self._cache_max_size:
+            self._cache.popitem(last=False)
         return data
 
 
