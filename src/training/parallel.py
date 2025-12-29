@@ -25,11 +25,11 @@ from typing import TYPE_CHECKING, Dict, List, Tuple
 
 from src.bucketing.utils.infoset import InfoSetKey
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import SharedArrayStorage
+from src.solver.storage.shared_array import SharedArrayStorage
 from src.utils.config import Config
 
 if TYPE_CHECKING:
-    from src.solver.storage import SharedArrayStorage
+    from src.solver.storage.shared_array import SharedArrayStorage
 
 import numpy as np
 

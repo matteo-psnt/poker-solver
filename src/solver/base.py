@@ -12,7 +12,7 @@ import numpy as np
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.bucketing.utils.infoset import InfoSetKey
-from src.solver.storage import Storage
+from src.solver.storage.base import Storage
 from src.utils.config import Config
 
 

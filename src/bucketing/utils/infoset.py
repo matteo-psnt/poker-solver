@@ -134,7 +134,7 @@ class InfoSet:
 
         # CFR data structures
         self.regrets = np.zeros(self.num_actions, dtype=np.float32)
-        self.strategy_sum = np.zeros(self.num_actions, dtype=np.float32)
+        self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)
 
         # Statistics tracking
         self.reach_count = 0  # Number of times this infoset was reached
@@ -390,7 +390,7 @@ class InfoSet:
 
     def reset_strategy_sum(self):
         """Reset strategy sum to zero (for some CFR variants)."""
-        self.strategy_sum = np.zeros(self.num_actions, dtype=np.float32)
+        self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)
 
     def prune(self, threshold: float = 1e-9):
         """

@@ -3,13 +3,12 @@
 import pickle
 import time
 
-import h5py
 import numpy as np
 import pytest
 
 from src.actions.betting_actions import BettingActions
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import SharedArrayStorage
+from src.solver.storage.shared_array import SharedArrayStorage
 from src.training import components
 from src.training.trainer import TrainingSession
 from src.utils.config import Config
@@ -162,7 +161,7 @@ class TestTrainer:
 
         # Both use SharedArrayStorage
         assert isinstance(trainer_seq.solver.storage, SharedArrayStorage)
-        for key, infoset in trainer_seq.solver.storage.infosets.items():
+        for infoset in trainer_seq.solver.storage.iter_infosets():
             assert not np.any(np.isnan(infoset.regrets))
             assert not np.any(np.isnan(infoset.strategy_sum))
 
@@ -316,8 +315,8 @@ class TestAsyncCheckpointing:
 
         # Verify checkpoint was saved
         assert (trainer.run_dir / "key_mapping.pkl").exists()
-        assert (trainer.run_dir / "regrets.h5").exists()
-        assert (trainer.run_dir / "strategies.h5").exists()
+        assert (trainer.run_dir / "regrets.npy").exists()
+        assert (trainer.run_dir / "strategies.npy").exists()
 
     @pytest.mark.timeout(30)
     def test_checkpoint_executor_cleanup(self, config_with_dummy_abstraction):
@@ -387,12 +386,14 @@ class TestAsyncCheckpointing:
 
         # Verify checkpoint files exist
         key_mapping_file = trainer.run_dir / "key_mapping.pkl"
-        regrets_file = trainer.run_dir / "regrets.h5"
-        strategies_file = trainer.run_dir / "strategies.h5"
+        regrets_file = trainer.run_dir / "regrets.npy"
+        strategies_file = trainer.run_dir / "strategies.npy"
+        action_counts_file = trainer.run_dir / "action_counts.npy"
 
         assert key_mapping_file.exists()
         assert regrets_file.exists()
         assert strategies_file.exists()
+        assert action_counts_file.exists()
 
         # Load and verify the checkpoint contains valid data
         with open(key_mapping_file, "rb") as f:
@@ -407,27 +408,23 @@ class TestAsyncCheckpointing:
             actual_max = max(owned_keys.values())
             assert max_id == actual_max + 1, f"max_id should be {actual_max + 1} but got {max_id}"
 
-        # Load regrets and verify shape
-        with h5py.File(regrets_file, "r") as f:
-            regrets_data = f["regrets"][:]
-            action_counts = f["action_counts"][:]
+        regrets_data = np.load(regrets_file, mmap_mode="r")
+        action_counts = np.load(action_counts_file, mmap_mode="r")
 
-            # Verify shapes match max_id
-            assert regrets_data.shape[0] == max_id
-            assert action_counts.shape[0] == max_id
+        # Verify shapes match max_id
+        assert regrets_data.shape[0] == max_id
+        assert action_counts.shape[0] == max_id
 
-            # Verify some regrets are non-zero (solver actually updated)
-            non_zero_regrets = (regrets_data != 0).any(axis=1).sum()
-            assert non_zero_regrets > 0, "Some regrets should be non-zero"
+        # Verify some regrets are non-zero (solver actually updated)
+        non_zero_regrets = (regrets_data != 0).any(axis=1).sum()
+        assert non_zero_regrets > 0, "Some regrets should be non-zero"
 
-        # Load strategies and verify shape
-        with h5py.File(strategies_file, "r") as f:
-            strategy_data = f["strategies"][:]
-            assert strategy_data.shape[0] == max_id
+        strategy_data = np.load(strategies_file, mmap_mode="r")
+        assert strategy_data.shape[0] == max_id
 
-            # Verify some strategies are non-zero
-            non_zero_strategies = (strategy_data != 0).any(axis=1).sum()
-            assert non_zero_strategies > 0, "Some strategies should be non-zero"
+        # Verify some strategies are non-zero
+        non_zero_strategies = (strategy_data != 0).any(axis=1).sum()
+        assert non_zero_strategies > 0, "Some strategies should be non-zero"
 
         print("\nCheckpoint verification:")
         print(f"  Keys: {len(owned_keys)}")
@@ -530,8 +527,8 @@ class TestCheckpointEnabledConfig:
 
         # Verify NO checkpoint files created
         assert not (trainer.run_dir / "key_mapping.pkl").exists()
-        assert not (trainer.run_dir / "regrets.h5").exists()
-        assert not (trainer.run_dir / "strategies.h5").exists()
+        assert not (trainer.run_dir / "regrets.npy").exists()
+        assert not (trainer.run_dir / "strategies.npy").exists()
 
     @pytest.mark.timeout(60)
     def test_checkpoint_enabled_resume(self, config_with_dummy_abstraction, tmp_path):

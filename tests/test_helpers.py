@@ -63,3 +63,6 @@ class DummyCardAbstraction(BucketingStrategy):
     def num_buckets(self, street):
         """Single bucket per street."""
         return 1
+
+    def get_fallback_stats(self) -> dict:
+        return {"total_lookups": 0, "fallback_count": 0, "fallback_rate": 0.0}

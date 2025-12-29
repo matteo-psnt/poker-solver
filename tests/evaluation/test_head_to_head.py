@@ -9,7 +9,7 @@ from src.evaluation.head_to_head import (
 from src.game.rules import GameRules
 from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import SharedArrayStorage
+from src.solver.storage.shared_array import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 

@@ -16,7 +16,7 @@ class TestSharedArrayStorage:
         """Test that UNKNOWN_ID placeholder infosets are read-only to prevent corruption."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
         num_workers = 4
@@ -81,7 +81,7 @@ class TestSharedArrayStorage:
         """Test that UNKNOWN_ID views prevent dangerous in-place operations like +=."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -135,7 +135,7 @@ class TestSharedArrayStorage:
         """Test that owned infosets can be written to."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -184,7 +184,7 @@ class TestSharedArrayStorage:
         """Test that xxhash provides stable ownership across calls."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -222,7 +222,7 @@ class TestSharedArrayStorage:
         """Test that each worker has non-overlapping ID ranges."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
         num_workers = 4
@@ -266,7 +266,7 @@ class TestSharedArrayStorage:
         """Test that ownership is deterministic for the same key."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -319,7 +319,7 @@ class TestSharedArrayStorage:
         """Test that ID allocation uses the correct worker range."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
         num_workers = 4
@@ -366,7 +366,7 @@ class TestSharedArrayStorage:
         """Test that requests for non-owned keys are tracked."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -420,7 +420,7 @@ class TestSharedArrayStorage:
         """Test that remote key cache is updated when receiving ID responses."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -461,7 +461,7 @@ class TestSharedArrayStorage:
         """Test that exhausting a worker's ID range raises RuntimeError."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -516,7 +516,7 @@ class TestSharedArrayStorage:
         """Test behavior at max_actions boundary."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -571,7 +571,7 @@ class TestSharedArrayStorage:
         """Test capacity usage monitoring."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -623,7 +623,7 @@ class TestSharedArrayStorage:
         """Test that resize extends ID range correctly."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
@@ -697,7 +697,7 @@ class TestSharedArrayStorage:
         """Test that resize preserves all existing infoset data."""
         import uuid
 
-        from src.solver.storage import SharedArrayStorage
+        from src.solver.storage.shared_array import SharedArrayStorage
 
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 

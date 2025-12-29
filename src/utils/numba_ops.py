@@ -49,11 +49,8 @@ def average_strategy(strategy_sum):
     sum_total = np.sum(strategy_sum)
     num_actions = len(strategy_sum)
 
-    # Ensure float64 for consistency
-    strategy_sum_f64 = strategy_sum.astype(np.float64)
-
     if sum_total > 0:
-        return strategy_sum_f64 / sum_total
+        return strategy_sum / sum_total
     else:
         # Return uniform strategy (float64)
         return np.ones(num_actions, dtype=np.float64) / np.float64(num_actions)

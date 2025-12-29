@@ -9,7 +9,7 @@ import pytest
 
 from src.actions.betting_actions import BettingActions
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import SharedArrayStorage
+from src.solver.storage.shared_array import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
@@ -99,7 +99,7 @@ class TestOutcomeSampling:
 
         # Check that at least some infosets have non-zero regrets
         infosets_with_regrets = 0
-        for infoset in storage.infosets.values():
+        for infoset in storage.iter_infosets():
             if any(r != 0 for r in infoset.regrets):
                 infosets_with_regrets += 1
 
@@ -145,7 +145,7 @@ class TestOutcomeSampling:
         solver.train(num_iterations=50, verbose=False)
 
         # Check that strategies sum to 1.0 (or close)
-        for infoset in storage.infosets.values():
+        for infoset in storage.iter_infosets():
             strategy = infoset.get_average_strategy()
             strategy_sum = sum(strategy)
 
@@ -189,11 +189,11 @@ class TestOutcomeSampling:
         assert solver_outcome.num_infosets() > 0
 
         # Both should produce valid strategies
-        for infoset in storage_external.infosets.values():
+        for infoset in storage_external.iter_infosets():
             strategy = infoset.get_average_strategy()
             assert 0.99 <= sum(strategy) <= 1.01
 
-        for infoset in storage_outcome.infosets.values():
+        for infoset in storage_outcome.iter_infosets():
             strategy = infoset.get_average_strategy()
             assert 0.99 <= sum(strategy) <= 1.01
 
@@ -234,14 +234,14 @@ class TestOutcomeSampling:
 
         # Check that infosets were discovered during training
         multi_action_infosets = sum(
-            1 for infoset in storage.infosets.values() if len(infoset.legal_actions) > 1
+            1 for infoset in storage.iter_infosets() if len(infoset.legal_actions) > 1
         )
         assert multi_action_infosets > 0, "Should discover multi-action infosets"
 
         # Check that at least some infosets have accumulated regrets
         # (indicating the solver is updating correctly)
         infosets_with_regrets = 0
-        for infoset in storage.infosets.values():
+        for infoset in storage.iter_infosets():
             if len(infoset.legal_actions) > 1:
                 # Check if any regret is non-zero (solver is learning)
                 if any(abs(r) > 0.001 for r in infoset.regrets):
