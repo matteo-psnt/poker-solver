@@ -54,7 +54,7 @@ class TrainingSession:
 
         # Determine run directory
         self.run_tracker = run_tracker
-        if self.run_tracker is not None:
+        if self.run_tracker:
             self.run_dir = self.run_tracker.run_dir
         else:
             runs_base_dir = Path(self.config.training.runs_dir)
@@ -185,9 +185,11 @@ class TrainingSession:
             )
 
         # Restore solver iteration counter
+        assert checkpoint_iter is not None
         session.solver.iteration = checkpoint_iter
 
         # Mark run as resumed
+        assert session.run_tracker is not None
         session.run_tracker.mark_resumed()
 
         print(f"✅ Resumed from checkpoint at iteration {checkpoint_iter}")
@@ -206,6 +208,7 @@ class TrainingSession:
 
     def _get_training_config(self, num_workers: int, batch_size: Optional[int]) -> Dict[str, Any]:
         """Parse training configuration with defaults."""
+        assert self.run_tracker is not None
         if batch_size is None:
             batch_size = self.config.training.iterations_per_worker * num_workers
 
@@ -252,6 +255,7 @@ class TrainingSession:
         Returns:
             Training results dictionary
         """
+        assert self.run_tracker is not None
         # Parse configuration
         config = self._get_training_config(num_workers, batch_size)
         batch_size_val = config["batch_size"]

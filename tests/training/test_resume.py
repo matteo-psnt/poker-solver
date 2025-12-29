@@ -167,6 +167,7 @@ def test_resume_metadata_tracking(test_config, temp_run_dir):
     session2 = TrainingSession.resume(temp_run_dir)
 
     # Check metadata was updated
+    assert session2.run_tracker is not None
     metadata = session2.run_tracker.metadata
     assert metadata.resumed_at is not None, "resumed_at should be set"
     assert metadata.started_at is not None, "started_at should still be set"

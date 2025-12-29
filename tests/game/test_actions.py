@@ -124,7 +124,7 @@ class TestAction:
     def test_action_immutable(self):
         action = bet(50)
         with pytest.raises(AttributeError):
-            action.amount = 100
+            setattr(action, "amount", 100)
 
     def test_action_str(self):
         assert str(fold()) == "FOLD"

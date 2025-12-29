@@ -1,6 +1,7 @@
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -70,7 +71,12 @@ def load_action_signatures(paths: CheckpointPaths) -> dict[int, list[tuple[str, 
     return action_sigs
 
 
-def load_checkpoint_arrays(paths: CheckpointPaths, mmap_mode: str = "r") -> dict[str, np.ndarray]:
+MmapMode = Literal["r+", "r", "w+", "c"]
+
+
+def load_checkpoint_arrays(
+    paths: CheckpointPaths, mmap_mode: MmapMode | None = "r"
+) -> dict[str, np.ndarray]:
     return {
         "regrets": np.load(paths.regrets, mmap_mode=mmap_mode),
         "strategies": np.load(paths.strategies, mmap_mode=mmap_mode),
@@ -206,7 +212,7 @@ class CheckpointData:
 
 
 def load_checkpoint_data(
-    checkpoint_dir: Path, *, context: str, mmap_mode: str = "r"
+    checkpoint_dir: Path, *, context: str, mmap_mode: MmapMode | None = "r"
 ) -> CheckpointData:
     paths = CheckpointPaths.from_dir(checkpoint_dir)
     mapping_data = load_key_mapping(paths)

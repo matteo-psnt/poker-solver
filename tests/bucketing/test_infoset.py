@@ -99,7 +99,7 @@ class TestInfoSetKey:
         """InfoSetKeys should be immutable (frozen)."""
         key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         with pytest.raises(AttributeError):
-            key.postflop_bucket = 30
+            setattr(key, "postflop_bucket", 30)
 
     def test_create_infoset_key_helper_preflop(self):
         """Test helper function for preflop."""
