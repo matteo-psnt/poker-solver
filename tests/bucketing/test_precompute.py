@@ -82,6 +82,7 @@ class TestCanonicalComboGeneration:
             assert combo.board == canonicalize_board(board)[0]
 
 
+@pytest.mark.slow
 class TestEquityComputation:
     """Tests for equity computation."""
 

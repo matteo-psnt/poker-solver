@@ -7,6 +7,8 @@ from src.bucketing.postflop.board_clustering import BoardClusterer
 from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.game.state import Street
 
+pytestmark = pytest.mark.slow
+
 
 class TestBoardClusteringIntegration:
     """Test board clustering integration with precomputation."""

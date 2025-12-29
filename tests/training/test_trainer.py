@@ -94,7 +94,8 @@ class TestTrainer:
                 f"Run directory should not exist after init failure, found: {run_dirs}"
             )
 
-    @pytest.mark.timeout(20)  # Reduced from 30
+    @pytest.mark.slow
+    @pytest.mark.timeout(20)
     def test_parallel_training_discovers_infosets(self, config_with_dummy_abstraction):
         """
         Test that parallel training discovers infosets using partitioned storage.
@@ -126,6 +127,7 @@ class TestTrainer:
         # Verify metrics tracked the correct number of iterations
         assert trainer.metrics.iteration == 4
 
+    @pytest.mark.slow
     @pytest.mark.timeout(30)
     def test_parallel_vs_sequential_both_work(self, config_with_dummy_abstraction):
         """
@@ -169,6 +171,7 @@ class TestTrainer:
         assert trainer_par.metrics.iteration == 4
         assert len(trainer_par.metrics.infoset_counts) == 4
 
+    @pytest.mark.slow
     @pytest.mark.timeout(20)  # Reduced from 60
     def test_parallel_training_performance(self, config_with_dummy_abstraction):
         """
@@ -213,6 +216,7 @@ class TestTrainer:
             f"Throughput too low: {throughput:.2f} iter/s"
         )  # Increased from 0.2
 
+    @pytest.mark.slow
     @pytest.mark.timeout(20)  # Reduced from 30
     def test_parallel_training_completes_without_errors(self, config_with_dummy_abstraction):
         """Test that parallel training completes without errors with multiple workers."""
@@ -237,6 +241,7 @@ class TestTrainer:
         # The partitioned architecture ensures workers only write to their owned infosets
 
 
+@pytest.mark.slow
 class TestAsyncCheckpointing:
     """Tests for async (non-blocking) checkpointing."""
 
@@ -434,6 +439,7 @@ class TestAsyncCheckpointing:
         print(f"  Non-zero strategies: {non_zero_strategies}/{max_id}")
 
 
+@pytest.mark.slow
 class TestParallelStress:
     """Stress tests for parallel training to catch race conditions."""
 
@@ -511,6 +517,7 @@ class TestCheckpointEnabledConfig:
         # Verify no checkpoint directory
         assert trainer.storage.checkpoint_dir is None
 
+    @pytest.mark.slow
     @pytest.mark.timeout(30)
     def test_checkpoint_enabled_false_no_files_created(self, config_with_dummy_abstraction):
         """Test that no checkpoint files are created when disabled."""
@@ -531,6 +538,7 @@ class TestCheckpointEnabledConfig:
         assert not (trainer.run_dir / "regrets.npy").exists()
         assert not (trainer.run_dir / "strategies.npy").exists()
 
+    @pytest.mark.slow
     @pytest.mark.timeout(60)
     def test_checkpoint_enabled_resume(self, config_with_dummy_abstraction, tmp_path):
         """Test resuming from checkpoint with new config format."""
