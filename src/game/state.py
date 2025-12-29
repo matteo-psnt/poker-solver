@@ -7,6 +7,7 @@ complete game state dataclass that tracks all information needed for a poker han
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 from treys import Card as TreysCard
@@ -50,11 +51,6 @@ class Street(Enum):
             return None
 
 
-# Module-level caches for performance
-_CARD_CACHE = {}  # Cache for Card.new()
-_FULL_DECK_CACHE = None  # Cache for full deck
-
-
 class Card:
     """
     Card representation using the treys library.
@@ -92,9 +88,12 @@ class Card:
         Returns:
             Card instance (cached)
         """
-        if card_str not in _CARD_CACHE:
-            _CARD_CACHE[card_str] = cls(TreysCard.new(card_str))
-        return _CARD_CACHE[card_str]
+        return cls._new_cached(card_str)
+
+    @classmethod
+    @lru_cache(maxsize=52)
+    def _new_cached(cls, card_str: str) -> "Card":
+        return cls(TreysCard.new(card_str))
 
     @classmethod
     def get_full_deck(cls) -> List["Card"]:
@@ -107,15 +106,14 @@ class Card:
         Returns:
             List of all 52 cards
         """
-        global _FULL_DECK_CACHE
+        return list(cls._full_deck_cached())
 
-        if _FULL_DECK_CACHE is None:
-            ranks = "23456789TJQKA"
-            suits = "shdc"
-            _FULL_DECK_CACHE = [cls.new(f"{rank}{suit}") for rank in ranks for suit in suits]
-
-        # Return a copy to prevent mutation
-        return _FULL_DECK_CACHE.copy()
+    @classmethod
+    @lru_cache(maxsize=1)
+    def _full_deck_cached(cls) -> Tuple["Card", ...]:
+        ranks = "23456789TJQKA"
+        suits = "shdc"
+        return tuple(cls.new(f"{rank}{suit}") for rank in ranks for suit in suits)
 
     def __str__(self) -> str:
         """String representation (e.g., '[ A ♠ ]')."""
