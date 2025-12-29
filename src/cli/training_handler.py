@@ -73,29 +73,15 @@ def handle_train(
         return None
 
     # Create trainer
-    print("\nInitializing trainer...")
     trainer = TrainingSession(config)
 
     # Start training
-    print(f"\nStarting training for {config.training.num_iterations} iterations...")
+    print("\nStarting training...")
     print(f"Run directory: {trainer.run_dir}")
     print(f"Checkpoint frequency: every {config.training.checkpoint_frequency} iterations")
-    print(f"Workers: {num_workers}")
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
 
-    results = trainer.train(num_workers=num_workers)
-
-    if results.get("interrupted"):
-        print("\n[OK] Training interrupted; checkpoint saved.")
-    else:
-        print("\n[OK] Training completed!")
-
-    print(f"   Total iterations: {results.get('iterations', results.get('total_iterations'))}")
-    print(f"   Final infosets: {results.get('num_infosets', results.get('final_infosets'))}")
-    print(
-        f"   Average utility: {results.get('metrics', {}).get('avg_utility', results.get('avg_utility', 0)):.4f}"
-    )
-    print(f"   Elapsed time: {results.get('elapsed_time', 0):.2f}s")
+    trainer.train(num_workers=num_workers)
 
     return trainer
 
@@ -112,7 +98,6 @@ def handle_resume(config: Config, run_id: str, latest_iter: int) -> TrainingSess
     Returns:
         TrainingSession instance
     """
-    print("\nResuming trainer...")
     runs_dir = Path(config.training.runs_dir)
     run_dir = runs_dir / run_id
     trainer = TrainingSession.resume(run_dir)
@@ -123,14 +108,6 @@ def handle_resume(config: Config, run_id: str, latest_iter: int) -> TrainingSess
     )
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
 
-    results = trainer.train()
-
-    if results.get("interrupted"):
-        print("\n[OK] Training interrupted; checkpoint saved.")
-    else:
-        print("\n[OK] Training completed!")
-
-    print(f"   Total iterations: {results['total_iterations']}")
-    print(f"   Final infosets: {results['final_infosets']}")
+    trainer.train()
 
     return trainer

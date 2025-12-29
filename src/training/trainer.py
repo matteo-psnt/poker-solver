@@ -161,7 +161,6 @@ class TrainingSession:
         session.run_tracker.mark_resumed()
 
         print(f"✅ Resumed from checkpoint at iteration {checkpoint_iter}")
-        print(f"   Loaded {session.storage.num_infosets()} infosets")
 
         return session
 
@@ -193,36 +192,47 @@ class TrainingSession:
             return None
             raise
 
-    def _async_checkpoint(self, iteration: int, training_start_time: float):
+    def _async_checkpoint(
+        self,
+        worker_manager,
+        iteration: int,
+        total_infosets: int,
+        training_start_time: float,
+    ):
         """
         Non-blocking checkpoint save.
 
-        Ensures previous checkpoint completes before starting new one.
+        Skips if a checkpoint is already running.
         Submits new checkpoint to background thread.
 
         Args:
             iteration: Current iteration number
             training_start_time: Training start time for calculating elapsed time
         """
-        # Wait for previous checkpoint to finish (if any)
-        if self._pending_checkpoint is not None:
-            try:
-                # Non-blocking check
-                self._pending_checkpoint.result(timeout=0.1)
-                if self.verbose:
-                    print("[Master] Previous checkpoint completed", flush=True)
-            except concurrent.futures.TimeoutError:
-                # Still running, will wait before next checkpoint
-                pass
+        if not self.config.storage.checkpoint_enabled or iteration == 0:
+            return
+
+        if self._pending_checkpoint is not None and not self._pending_checkpoint.done():
+            if self.verbose:
+                print("[Master] Previous checkpoint still running; skipping", flush=True)
+            return
 
         # Submit new checkpoint in background
         self._pending_checkpoint = self._checkpoint_executor.submit(
-            self._checkpoint_with_timing, iteration, training_start_time
+            self._checkpoint_with_timing,
+            worker_manager,
+            iteration,
+            total_infosets,
+            training_start_time,
         )
-        if self.verbose:
-            print("[Master] Checkpoint started in background (non-blocking)...", flush=True)
 
-    def _checkpoint_with_timing(self, iteration: int, training_start_time: float):
+    def _checkpoint_with_timing(
+        self,
+        worker_manager,
+        iteration: int,
+        total_infosets: int,
+        training_start_time: float,
+    ):
         """
         Execute checkpoint with timing (runs in background thread).
 
@@ -234,27 +244,36 @@ class TrainingSession:
             Elapsed time for checkpoint operation
         """
         start = time.time()
+        worker_manager.checkpoint(iteration)
         elapsed_time = time.time() - training_start_time
         self.run_tracker.update(
             iterations=iteration,
             runtime_seconds=elapsed_time,
-            num_infosets=self.solver.num_infosets(),
+            num_infosets=total_infosets,
         )
-        self.storage.checkpoint(iteration)
         checkpoint_time = time.time() - start
         if self.verbose:
-            print(f"[Background] Checkpoint saved in {checkpoint_time:.2f}s", flush=True)
+            print(
+                f"[Checkpoint] Iteration {iteration} saved in {checkpoint_time:.2f}s",
+                flush=True,
+            )
         return checkpoint_time
 
     def _wait_for_checkpoint(self):
         """Wait for pending checkpoint to complete (called at shutdown)."""
         if self._pending_checkpoint is not None:
             if self.verbose:
-                print("[Master] Waiting for background checkpoint to complete...", flush=True)
+                print(
+                    "[Master] Waiting for background checkpoint to complete...",
+                    flush=True,
+                )
             try:
                 elapsed = self._pending_checkpoint.result()  # Block until done
                 if self.verbose:
-                    print(f"[Master] Background checkpoint completed ({elapsed:.2f}s)", flush=True)
+                    print(
+                        f"[Master] Background checkpoint completed ({elapsed:.2f}s)",
+                        flush=True,
+                    )
             except Exception as e:
                 print(f"[Master] Warning: Background checkpoint failed: {e}", flush=True)
             finally:
@@ -318,31 +337,6 @@ class TrainingSession:
         print(f"   Max actions: {max_actions}")
         print("   Mode: Live shared memory arrays")
 
-    def _save_checkpoint(
-        self,
-        worker_manager,
-        completed_iterations: int,
-        total_infosets: int,
-        training_start_time: float,
-    ) -> None:
-        """Save a checkpoint and update run metadata."""
-        if not self.config.storage.checkpoint_enabled or completed_iterations == 0:
-            return
-
-        checkpoint_start = time.time()
-        worker_manager.checkpoint(completed_iterations)
-        elapsed = time.time() - training_start_time
-        self.run_tracker.update(
-            iterations=completed_iterations,
-            runtime_seconds=elapsed,
-            num_infosets=total_infosets,
-        )
-        checkpoint_time = time.time() - checkpoint_start
-        print(
-            f"[Coordinator] Checkpoint saved at iteration {completed_iterations} "
-            f"in {checkpoint_time:.2f}s"
-        )
-
     def _run_training_loop(
         self,
         worker_manager,
@@ -366,17 +360,16 @@ class TrainingSession:
 
         # Progress tracking
         num_batches = (num_iterations + batch_size - 1) // batch_size
-        if verbose:
-            batch_iterator: Union[range, tqdm] = tqdm(
-                range(num_batches),
-                desc="Training batches",
-                unit="batch",
-            )
-        else:
-            batch_iterator = range(num_batches)
+        batch_iterator: Union[range, tqdm] = tqdm(
+            range(num_batches),
+            desc="Training batches",
+            unit="batch",
+        )
 
         try:
             for batch_idx in batch_iterator:
+                self._wait_for_checkpoint()
+
                 # Determine iterations for this batch
                 remaining = num_iterations - completed_iterations
                 current_batch_size = min(batch_size, remaining)
@@ -431,9 +424,9 @@ class TrainingSession:
 
                 # Checkpoint if needed
                 if checkpoint_enabled and completed_iterations % checkpoint_freq < batch_size:
-                    self._save_checkpoint(
+                    self._async_checkpoint(
                         worker_manager=worker_manager,
-                        completed_iterations=completed_iterations,
+                        iteration=completed_iterations,
                         total_infosets=total_infosets,
                         training_start_time=training_start_time,
                     )
@@ -449,10 +442,10 @@ class TrainingSession:
         # Save checkpoint on interrupt if we haven't just saved
         if interrupted and checkpoint_enabled and completed_iterations > 0:
             if verbose:
-                print("[Coordinator] Saving checkpoint...", flush=True)
-            self._save_checkpoint(
+                print("[Master] Saving checkpoint...", flush=True)
+            self._async_checkpoint(
                 worker_manager=worker_manager,
-                completed_iterations=completed_iterations,
+                iteration=completed_iterations,
                 total_infosets=total_infosets,
                 training_start_time=training_start_time,
             )
@@ -472,7 +465,7 @@ class TrainingSession:
         if interrupted:
             self.run_tracker.mark_interrupted()
             if verbose:
-                print("\n🟡 Training interrupted")
+                print("🟡 Training interrupted")
         else:
             if not checkpoint_enabled:
                 self.run_tracker.update(
@@ -482,7 +475,7 @@ class TrainingSession:
                 )
             self.run_tracker.mark_completed()
             if verbose:
-                print("\n✅ Shared Array Training complete!")
+                print("✅ Shared Array Training complete!")
 
         if verbose:
             print(f"   Iterations: {completed_iterations}")
@@ -553,7 +546,6 @@ class TrainingSession:
         if verbose:
             abstraction_size = len(serialized_action_abstraction) + len(serialized_card_abstraction)
             print(f"   Serialized abstractions: {abstraction_size:,} bytes")
-            print("   Starting worker pool...")
 
         pool_start_time = time.time()
 
@@ -588,6 +580,7 @@ class TrainingSession:
                     training_start_time=training_start_time,
                 )
             finally:
+                self._wait_for_checkpoint()
                 elapsed_time = time.time() - training_start_time
                 self._finalize_training(
                     completed_iterations,
