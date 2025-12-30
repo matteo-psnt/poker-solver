@@ -11,18 +11,7 @@ from functools import lru_cache
 
 import eval7
 
-from src.bucketing.preflop.hand_classes import PreflopHandClasses
-from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import Action, ActionType
-
-# SPR (Stack-to-Pot Ratio) thresholds for bucketing
-# Shallow: SPR < 4 (push/fold decisions)
-# Medium: 4 <= SPR < 13 (standard play)
-# Deep: SPR >= 13 (complex postflop play)
-SPR_SHALLOW_THRESHOLD = 4.0
-SPR_DEEP_THRESHOLD = 13.0
-
-_PREFLOP_HAND_CLASSES = PreflopHandClasses()
 
 
 class Street(Enum):
@@ -340,72 +329,19 @@ class GameState:
 
     def get_infoset_key(self, player: int, card_abstraction):
         """
-        Get information set key for a player.
+        Compatibility wrapper for infoset-key encoding.
 
         Args:
             player: Player index (0 or 1)
             card_abstraction: BucketingStrategy instance for bucketing
 
         Returns:
-            InfoSetKey (will be implemented in abstraction module)
+            InfoSetKey
         """
-        # Compute SPR bucket
-        effective_stack = min(self.stacks)
-        spr = effective_stack / self.pot if self.pot > 0 else 0
-        spr_bucket = self._get_spr_bucket(spr)
+        # Lazy import keeps game/domain layer decoupled from solver path.
+        from src.solver.infoset_encoder import encode_infoset_key
 
-        # Normalize betting history
-        betting_sequence = self._normalize_betting_sequence()
-
-        # Hybrid representation: preflop uses hand strings, postflop uses buckets
-        if self.street == Street.PREFLOP:
-            # Get canonical hand string (e.g., "AKs", "72o", "TT")
-            preflop_hand = _PREFLOP_HAND_CLASSES.get_hand_string(self.hole_cards[player])
-
-            return InfoSetKey(
-                player_position=player,
-                street=self.street,
-                betting_sequence=betting_sequence,
-                preflop_hand=preflop_hand,
-                postflop_bucket=None,
-                spr_bucket=spr_bucket,
-            )
-        else:
-            # Get bucket for postflop streets
-            postflop_bucket = card_abstraction.get_bucket(
-                self.hole_cards[player], self.board, self.street
-            )
-
-            return InfoSetKey(
-                player_position=player,
-                street=self.street,
-                betting_sequence=betting_sequence,
-                preflop_hand=None,
-                postflop_bucket=postflop_bucket,
-                spr_bucket=spr_bucket,
-            )
-
-    def _get_spr_bucket(self, spr: float) -> int:
-        """
-        Get SPR bucket (0=shallow, 1=medium, 2=deep).
-
-        SPR (Stack-to-Pot Ratio) thresholds:
-        - Shallow: SPR < 4 (push/fold decisions)
-        - Medium: 4 <= SPR < 13 (standard play)
-        - Deep: SPR >= 13 (complex postflop play)
-
-        Args:
-            spr: Stack-to-pot ratio
-
-        Returns:
-            Bucket index (0, 1, or 2)
-        """
-        if spr < SPR_SHALLOW_THRESHOLD:
-            return 0  # Shallow
-        elif spr < SPR_DEEP_THRESHOLD:
-            return 1  # Medium
-        else:
-            return 2  # Deep
+        return encode_infoset_key(self, player, card_abstraction)
 
     def _normalize_betting_sequence(self) -> str:
         """

@@ -15,6 +15,7 @@ from src.bucketing.base import BucketingStrategy
 from src.game.actions import Action, ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
+from src.solver.infoset_encoder import encode_infoset_key
 from src.solver.mccfr import MCCFRSolver
 
 
@@ -266,7 +267,7 @@ class HeadToHeadEvaluator:
             Chosen action
         """
         # Get infoset
-        infoset_key = state.get_infoset_key(player, self.card_abstraction)
+        infoset_key = encode_infoset_key(state, player, self.card_abstraction)
         infoset = solver.storage.get_infoset(infoset_key)
 
         if infoset is None:

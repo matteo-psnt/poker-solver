@@ -5,31 +5,25 @@ from __future__ import annotations
 import json
 import mimetypes
 import threading
-from collections import OrderedDict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from src.cli.flows.chart.data import build_chart_metadata, build_preflop_chart_data
-from src.solver.mccfr import MCCFRSolver
+from src.api.chart_service import ChartService
 
 
 class ChartServer:
     def __init__(
         self,
-        solver: MCCFRSolver,
-        run_id: str,
+        chart_service: ChartService,
         base_dir: Path,
         port: int = 5173,
     ) -> None:
-        self.solver = solver
-        self.run_id = run_id
+        self.chart_service = chart_service
         self.base_dir = base_dir
         self.port = port
         self.base_url = f"http://127.0.0.1:{self.port}"
-        self._cache: "OrderedDict[tuple[int, str], dict]" = OrderedDict()
-        self._cache_max_size = 256
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -55,19 +49,10 @@ class ChartServer:
         self._thread = None
 
     def get_metadata(self) -> dict:
-        return build_chart_metadata(self.run_id, self.solver.action_abstraction)
+        return self.chart_service.get_metadata()
 
     def get_chart(self, position: int, situation_id: str) -> dict:
-        key = (position, situation_id)
-        cached = self._cache.get(key)
-        if cached is not None:
-            self._cache.move_to_end(key)
-            return cached
-        data = build_preflop_chart_data(self.solver, position, situation_id, self.run_id)
-        self._cache[key] = data
-        if len(self._cache) > self._cache_max_size:
-            self._cache.popitem(last=False)
-        return data
+        return self.chart_service.get_chart(position, situation_id)
 
 
 def _make_handler(server: ChartServer, static_dir: Path):

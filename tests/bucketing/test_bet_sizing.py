@@ -1,8 +1,9 @@
 """Tests for action abstraction."""
 
 from src.actions.betting_actions import BettingActions
-from src.game.actions import ActionType, bet
+from src.game.actions import ActionType, all_in, bet, call, raises
 from src.game.state import Card, GameState, Street
+from src.utils.config import ActionAbstractionConfig
 
 
 class TestActionAbstraction:
@@ -198,3 +199,229 @@ class TestActionAbstraction:
         assert "BettingActions" in s
         assert "preflop" in s.lower()
         assert "postflop" in s.lower()
+
+    def test_init_validation_errors(self):
+        try:
+            BettingActions(config="bad")  # type: ignore[arg-type]
+            assert False, "Expected TypeError"
+        except TypeError:
+            pass
+
+        try:
+            BettingActions(
+                ActionAbstractionConfig(
+                    postflop={"flop": [0.33], "turn": [0.5]},
+                )
+            )
+            assert False, "Expected ValueError for missing river config"
+        except ValueError:
+            pass
+
+        try:
+            BettingActions(
+                ActionAbstractionConfig(
+                    preflop_raises=[],
+                )
+            )
+            assert False, "Expected ValueError for empty preflop raises"
+        except ValueError:
+            pass
+
+        try:
+            BettingActions(
+                ActionAbstractionConfig(
+                    postflop={"flop": [], "turn": [0.5], "river": [0.5]},
+                )
+            )
+            assert False, "Expected ValueError for empty street sizes"
+        except ValueError:
+            pass
+
+    def test_bet_sizes_respect_raise_cap(self):
+        abstraction = BettingActions(ActionAbstractionConfig(max_raises_per_street=0))
+        state = GameState(
+            street=Street.FLOP,
+            pot=100,
+            stacks=(200, 200),
+            board=(Card.new("As"), Card.new("Kh"), Card.new("Qd")),
+            hole_cards=(
+                (Card.new("Jc"), Card.new("Th")),
+                (Card.new("9s"), Card.new("8h")),
+            ),
+            betting_history=tuple(),
+            button_position=0,
+            current_player=0,
+            is_terminal=False,
+            to_call=0,
+        )
+        assert abstraction.get_bet_sizes(state) == []
+
+    def test_raise_sizes_when_not_facing_bet(self):
+        abstraction = BettingActions()
+        state = GameState(
+            street=Street.FLOP,
+            pot=100,
+            stacks=(200, 200),
+            board=(Card.new("As"), Card.new("Kh"), Card.new("Qd")),
+            hole_cards=(
+                (Card.new("Jc"), Card.new("Th")),
+                (Card.new("9s"), Card.new("8h")),
+            ),
+            betting_history=tuple(),
+            button_position=0,
+            current_player=0,
+            is_terminal=False,
+            to_call=0,
+        )
+        assert abstraction.get_raise_sizes(state) == []
+
+    def test_legal_actions_terminal_state(self):
+        abstraction = BettingActions()
+        state = GameState(
+            street=Street.RIVER,
+            pot=100,
+            stacks=(0, 0),
+            board=(
+                Card.new("As"),
+                Card.new("Kh"),
+                Card.new("Qd"),
+                Card.new("Jc"),
+                Card.new("Th"),
+            ),
+            hole_cards=(
+                (Card.new("2c"), Card.new("3c")),
+                (Card.new("4d"), Card.new("5d")),
+            ),
+            betting_history=(all_in(100), call()),
+            button_position=0,
+            current_player=0,
+            is_terminal=True,
+            to_call=0,
+            _skip_validation=True,
+        )
+        assert abstraction.get_legal_actions(state) == []
+
+    def test_discretize_passthrough_for_non_aggressive_actions(self):
+        abstraction = BettingActions()
+        state = GameState(
+            street=Street.FLOP,
+            pot=100,
+            stacks=(200, 200),
+            board=(Card.new("As"), Card.new("Kh"), Card.new("Qd")),
+            hole_cards=(
+                (Card.new("Jc"), Card.new("Th")),
+                (Card.new("9s"), Card.new("8h")),
+            ),
+            betting_history=(bet(50),),
+            button_position=0,
+            current_player=0,
+            is_terminal=False,
+            to_call=50,
+        )
+        assert abstraction.discretize_action(state, call()) == call()
+
+    def test_discretize_bet_without_bet_actions_falls_back_to_all_in(self):
+        abstraction = BettingActions()
+        state = GameState(
+            street=Street.FLOP,
+            pot=150,
+            stacks=(150, 200),
+            board=(Card.new("As"), Card.new("Kh"), Card.new("Qd")),
+            hole_cards=(
+                (Card.new("Jc"), Card.new("Th")),
+                (Card.new("9s"), Card.new("8h")),
+            ),
+            betting_history=(bet(50),),
+            button_position=0,
+            current_player=0,
+            is_terminal=False,
+            to_call=50,
+        )
+        assert abstraction.discretize_action(state, bet(20)).type == ActionType.ALL_IN
+
+    def test_discretize_raise_without_raise_actions_falls_back_to_all_in(self):
+        abstraction = BettingActions()
+        state = GameState(
+            street=Street.FLOP,
+            pot=300,
+            stacks=(40, 200),
+            board=(Card.new("As"), Card.new("Kh"), Card.new("Qd")),
+            hole_cards=(
+                (Card.new("Jc"), Card.new("Th")),
+                (Card.new("9s"), Card.new("8h")),
+            ),
+            betting_history=(bet(80),),
+            button_position=0,
+            current_player=0,
+            is_terminal=False,
+            to_call=80,
+            _skip_validation=True,
+        )
+        assert abstraction.discretize_action(state, raises(10)).type == ActionType.ALL_IN
+
+    def test_discretize_all_in_branches(self):
+        abstraction = BettingActions()
+
+        # Existing all-in action available.
+        facing_all_in = GameState(
+            street=Street.FLOP,
+            pot=300,
+            stacks=(40, 200),
+            board=(Card.new("As"), Card.new("Kh"), Card.new("Qd")),
+            hole_cards=(
+                (Card.new("Jc"), Card.new("Th")),
+                (Card.new("9s"), Card.new("8h")),
+            ),
+            betting_history=(bet(80),),
+            button_position=0,
+            current_player=0,
+            is_terminal=False,
+            to_call=80,
+            _skip_validation=True,
+        )
+        assert abstraction.discretize_action(facing_all_in, all_in(40)).type == ActionType.ALL_IN
+
+        # No all-in action, but aggressive actions exist -> return max aggressive.
+        open_state = GameState(
+            street=Street.FLOP,
+            pot=100,
+            stacks=(400, 400),
+            board=(Card.new("As"), Card.new("Kh"), Card.new("Qd")),
+            hole_cards=(
+                (Card.new("Jc"), Card.new("Th")),
+                (Card.new("9s"), Card.new("8h")),
+            ),
+            betting_history=tuple(),
+            button_position=0,
+            current_player=0,
+            is_terminal=False,
+            to_call=0,
+        )
+        mapped = abstraction.discretize_action(open_state, all_in(400))
+        assert mapped.is_aggressive()
+
+        # No legal actions at all -> return original action.
+        terminal_state = GameState(
+            street=Street.RIVER,
+            pot=0,
+            stacks=(0, 0),
+            board=(
+                Card.new("As"),
+                Card.new("Kh"),
+                Card.new("Qd"),
+                Card.new("Jc"),
+                Card.new("Th"),
+            ),
+            hole_cards=(
+                (Card.new("2c"), Card.new("3c")),
+                (Card.new("4d"), Card.new("5d")),
+            ),
+            betting_history=tuple(),
+            button_position=0,
+            current_player=0,
+            is_terminal=True,
+            to_call=0,
+            _skip_validation=True,
+        )
+        action = all_in(1)
+        assert abstraction.discretize_action(terminal_state, action) == action

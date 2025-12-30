@@ -9,7 +9,7 @@ The training system orchestrates Monte Carlo Counterfactual Regret Minimization 
 - Automatic checkpointing and resume capability
 - Real-time metrics tracking and reporting
 - Configurable abstractions (card/action) and storage backends
-- Production-ready with 100+ tests and ~65% coverage
+- Production-ready with 100+ tests
 
 ---
 

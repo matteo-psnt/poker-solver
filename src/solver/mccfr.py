@@ -14,6 +14,7 @@ from src.bucketing.base import BucketingStrategy
 from src.game.actions import ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
+from src.solver.infoset_encoder import encode_infoset_key
 from src.solver.storage.base import Storage
 from src.utils.config import Config
 
@@ -192,7 +193,7 @@ class MCCFRSolver:
         current_player = state.current_player
 
         # Get infoset
-        infoset_key = state.get_infoset_key(current_player, self.card_abstraction)
+        infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
         legal_actions = self.action_abstraction.get_legal_actions(state)
 
         if not legal_actions:
@@ -331,7 +332,7 @@ class MCCFRSolver:
         current_player = state.current_player
 
         # Get infoset
-        infoset_key = state.get_infoset_key(current_player, self.card_abstraction)
+        infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
         legal_actions = self.action_abstraction.get_legal_actions(state)
 
         if not legal_actions:
