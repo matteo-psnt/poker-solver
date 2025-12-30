@@ -558,26 +558,26 @@ class SharedArrayWorkerManager:
         collected = self.collect_keys()
 
         # Merge into coordinator's storage for checkpointing
-        self.storage._owned_keys = collected["owned_keys"]
-        self.storage._legal_actions_cache = collected["legal_actions_cache"]
+        self.storage.state.owned_keys = collected["owned_keys"]
+        self.storage.state.legal_actions_cache = collected["legal_actions_cache"]
 
         # Update next_local_id to reflect total infosets
-        if self.storage._owned_keys:
-            max_id = max(self.storage._owned_keys.values())
-            self.storage.next_local_id = max_id + 1
+        if self.storage.state.owned_keys:
+            max_id = max(self.storage.state.owned_keys.values())
+            self.storage.state.next_local_id = max_id + 1
 
         if self.config.training.verbose:
             print(
                 f"[Master] Checkpointing iter={iteration}: "
-                f"{len(self.storage._owned_keys):,} infosets "
-                f"(max_id={self.storage.next_local_id})...",
+                f"{len(self.storage.state.owned_keys):,} infosets "
+                f"(max_id={self.storage.state.next_local_id})...",
                 flush=True,
             )
 
         # Now checkpoint with complete key mappings
         self.storage.checkpoint(iteration)
 
-    def get_storage(self) -> "SharedArrayStorage":
+    def get_storage(self) -> SharedArrayStorage:
         """Get coordinator's storage instance (for accessing results)."""
         return self.storage
 

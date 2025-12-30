@@ -348,7 +348,7 @@ class TestSharedArrayStorage:
                 )
                 if storage.get_owner(key) == 0:
                     storage.get_or_create_infoset(key, [fold(), call()])
-                    infoset_id = storage._owned_keys[key]
+                    infoset_id = storage.state.owned_keys[key]
                     created_ids.append(infoset_id)
 
                     # Verify ID is in worker 0's range
@@ -445,14 +445,14 @@ class TestSharedArrayStorage:
             )
 
             # Initially, remote key should not be in cache
-            assert remote_key not in storage._remote_keys
+            assert remote_key not in storage.state.remote_keys
 
             # Simulate receiving response from owner
             storage.receive_id_responses({remote_key: 500})
 
             # Now it should be in cache
-            assert remote_key in storage._remote_keys
-            assert storage._remote_keys[remote_key] == 500
+            assert remote_key in storage.state.remote_keys
+            assert storage.state.remote_keys[remote_key] == 500
 
         finally:
             storage.cleanup()
@@ -667,8 +667,8 @@ class TestSharedArrayStorage:
             infoset = storage.get_or_create_infoset(key, [fold(), call()])
             infoset.regrets[:] = [1.0, 2.0]
 
-            infoset_id = storage._owned_keys[key]
-            next_id_before = storage.next_local_id
+            infoset_id = storage.state.owned_keys[key]
+            next_id_before = storage.state.next_local_id
 
             # Resize to 2x capacity
             new_max = initial_max * 2
@@ -678,9 +678,11 @@ class TestSharedArrayStorage:
             assert storage.capacity == new_max
             assert storage.id_range_start == initial_range_start  # Start stays same
             assert storage.id_range_end == initial_range_end  # Base range unchanged
-            assert storage._extra_allocations  # Extra capacity allocated
-            assert any(alloc["end"] > initial_range_end for alloc in storage._extra_allocations)
-            assert storage.next_local_id == next_id_before  # next_id preserved
+            assert storage.state.extra_allocations  # Extra capacity allocated
+            assert any(
+                alloc["end"] > initial_range_end for alloc in storage.state.extra_allocations
+            )
+            assert storage.state.next_local_id == next_id_before  # next_id preserved
 
             # Verify data was preserved
             assert np.allclose(storage.shared_regrets[infoset_id, :2], [1.0, 2.0])
