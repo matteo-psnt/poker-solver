@@ -945,7 +945,6 @@ class SharedArrayStorage(Storage):
 
         items = sorted(self._owned_keys.items(), key=lambda item: item[1])
         dense_ids = {key: idx for idx, (key, _) in enumerate(items)}
-        max_id = num_keys
 
         # Save key mapping
         paths = CheckpointPaths.from_dir(self.checkpoint_dir)
@@ -957,52 +956,26 @@ class SharedArrayStorage(Storage):
                 f,
             )
 
-        # Save shared arrays (densified rows)
-        regrets_mm = np.lib.format.open_memmap(
-            paths.regrets,
-            mode="w+",
-            dtype=self.shared_regrets.dtype,
-            shape=(max_id, self.shared_regrets.shape[1]),
-        )
-        strategies_mm = np.lib.format.open_memmap(
-            paths.strategies,
-            mode="w+",
-            dtype=self.shared_strategy_sum.dtype,
-            shape=(max_id, self.shared_strategy_sum.shape[1]),
-        )
-        action_counts_mm = np.lib.format.open_memmap(
-            paths.action_counts,
-            mode="w+",
-            dtype=self.shared_action_counts.dtype,
-            shape=(max_id,),
-        )
-        reach_counts_mm = np.lib.format.open_memmap(
-            paths.reach_counts,
-            mode="w+",
-            dtype=self.shared_reach_counts.dtype,
-            shape=(max_id,),
-        )
-        cumulative_utility_mm = np.lib.format.open_memmap(
-            paths.cumulative_utility,
-            mode="w+",
-            dtype=self.shared_cumulative_utility.dtype,
-            shape=(max_id,),
-        )
+        # Vectorized array extraction (much faster than row-by-row loop)
+        # Extract old IDs in order, then use fancy indexing for bulk copy
+        old_ids = np.array([old_id for (_, old_id) in items], dtype=np.int32)
 
-        for new_id, (_, old_id) in enumerate(items):
-            n_actions = int(self.shared_action_counts[old_id])
-            if n_actions > 0:
-                regrets_mm[new_id, :n_actions] = self.shared_regrets[old_id, :n_actions]
-                strategies_mm[new_id, :n_actions] = self.shared_strategy_sum[old_id, :n_actions]
-            action_counts_mm[new_id] = n_actions
-            reach_counts_mm[new_id] = self.shared_reach_counts[old_id]
-            cumulative_utility_mm[new_id] = self.shared_cumulative_utility[old_id]
+        # Single vectorized operations instead of Python loop
+        regrets_dense = self.shared_regrets[old_ids, :].copy()
+        strategies_dense = self.shared_strategy_sum[old_ids, :].copy()
+        action_counts_dense = self.shared_action_counts[old_ids].copy()
+        reach_counts_dense = self.shared_reach_counts[old_ids].copy()
+        cumulative_utility_dense = self.shared_cumulative_utility[old_ids].copy()
 
-        del regrets_mm
-        del strategies_mm
-        del action_counts_mm
-        del reach_counts_mm
-        del cumulative_utility_mm
+        # Save as compressed NPZ (single file, 5-10x compression on sparse arrays)
+        np.savez_compressed(
+            paths.checkpoint_npz,
+            regrets=regrets_dense,
+            strategies=strategies_dense,
+            action_counts=action_counts_dense,
+            reach_counts=reach_counts_dense,
+            cumulative_utility=cumulative_utility_dense,
+        )
 
         # Save action signatures (action type and amount for each infoset)
         # This allows reconstructing actual Action objects on load
@@ -1020,7 +993,7 @@ class SharedArrayStorage(Storage):
 
         # Validate before declaring checkpoint done (fail fast on corruption)
         _validate_action_signatures(
-            np.lib.format.open_memmap(paths.action_counts, mode="r"),
+            action_counts_dense,
             action_sigs,
             f"SharedArrayStorage.checkpoint(iter={iteration})",
         )
@@ -1135,8 +1108,6 @@ class SharedArrayStorage(Storage):
         self._shm_actions = None
         self._shm_reach = None
         self._shm_utility = None
-
-        print(f"[Worker {self.worker_id}] cleaned up shared memory")
 
     def __del__(self):
         """Cleanup on deletion."""

@@ -162,11 +162,6 @@ def _worker_loop(
             job_type = JobType(job["type"])
 
             if job_type == JobType.SHUTDOWN:
-                print(
-                    f"[Worker {worker_id}] Shutdown signal received",
-                    file=sys.stderr,
-                    flush=True,
-                )
                 break
 
             elif job_type == JobType.EXCHANGE_IDS:
@@ -370,9 +365,7 @@ def _worker_loop(
                 batch_count += 1
 
         # Cleanup (just close handles, don't unlink - coordinator does that)
-        print(f"[Worker {worker_id}] Cleaning up...", file=sys.stderr, flush=True)
         storage.cleanup()
-        print(f"[Worker {worker_id}] Exiting cleanly", file=sys.stderr, flush=True)
 
     except Exception as e:
         print(f"[Worker {worker_id}] Fatal error: {e}", file=sys.stderr, flush=True)

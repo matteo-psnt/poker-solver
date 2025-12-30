@@ -321,8 +321,8 @@ class TestAsyncCheckpointing:
 
         # Verify checkpoint was saved
         assert (trainer.run_dir / "key_mapping.pkl").exists()
-        assert (trainer.run_dir / "regrets.npy").exists()
-        assert (trainer.run_dir / "strategies.npy").exists()
+        assert (trainer.run_dir / "checkpoint.npz").exists()
+        assert (trainer.run_dir / "action_signatures.pkl").exists()
 
     @pytest.mark.timeout(30)
     def test_checkpoint_executor_cleanup(self, config_with_dummy_abstraction):
@@ -392,21 +392,20 @@ class TestAsyncCheckpointing:
 
         # Verify checkpoint files exist
         key_mapping_file = trainer.run_dir / "key_mapping.pkl"
-        regrets_file = trainer.run_dir / "regrets.npy"
-        strategies_file = trainer.run_dir / "strategies.npy"
-        action_counts_file = trainer.run_dir / "action_counts.npy"
+        checkpoint_file = trainer.run_dir / "checkpoint.npz"
+        action_sigs_file = trainer.run_dir / "action_signatures.pkl"
 
         assert key_mapping_file.exists()
-        assert regrets_file.exists()
-        assert strategies_file.exists()
-        assert action_counts_file.exists()
+        assert checkpoint_file.exists()
+        assert action_sigs_file.exists()
 
         # Load and verify the checkpoint contains valid data
         with open(key_mapping_file, "rb") as f:
             mapping = pickle.load(f)
 
         owned_keys = mapping["owned_keys"]
-        regrets_data = np.load(regrets_file, mmap_mode="r")
+        npz_data = np.load(checkpoint_file)
+        regrets_data = npz_data["regrets"]
         max_id = regrets_data.shape[0]
 
         # Verify max_id is consistent with keys
@@ -415,7 +414,7 @@ class TestAsyncCheckpointing:
             actual_max = max(owned_keys.values())
             assert max_id == actual_max + 1, f"max_id should be {actual_max + 1} but got {max_id}"
 
-        action_counts = np.load(action_counts_file, mmap_mode="r")
+        action_counts = npz_data["action_counts"]
 
         # Verify shapes match max_id
         assert regrets_data.shape[0] == max_id
@@ -425,7 +424,7 @@ class TestAsyncCheckpointing:
         non_zero_regrets = (regrets_data != 0).any(axis=1).sum()
         assert non_zero_regrets > 0, "Some regrets should be non-zero"
 
-        strategy_data = np.load(strategies_file, mmap_mode="r")
+        strategy_data = npz_data["strategies"]
         assert strategy_data.shape[0] == max_id
 
         # Verify some strategies are non-zero
@@ -535,8 +534,8 @@ class TestCheckpointEnabledConfig:
 
         # Verify NO checkpoint files created
         assert not (trainer.run_dir / "key_mapping.pkl").exists()
-        assert not (trainer.run_dir / "regrets.npy").exists()
-        assert not (trainer.run_dir / "strategies.npy").exists()
+        assert not (trainer.run_dir / "checkpoint.npz").exists()
+        assert not (trainer.run_dir / "action_signatures.pkl").exists()
 
     @pytest.mark.slow
     @pytest.mark.timeout(60)
