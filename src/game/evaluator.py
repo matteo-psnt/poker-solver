@@ -1,25 +1,56 @@
 """
-Hand evaluation using the treys library.
+Hand evaluation using eval7.
 
-This module wraps the treys poker evaluator to provide fast hand strength
+This module wraps the eval7 evaluator to provide fast hand strength
 calculations for Texas Hold'em.
 """
 
-from treys import Evaluator as TreysEvaluator
+import eval7
+from treys import Card as TreysCard
 
 from src.game.state import Card
+
+_HAND_TYPE_TO_CLASS = {
+    "Straight Flush": 1,
+    "Four of a Kind": 2,
+    "Full House": 3,
+    "Flush": 4,
+    "Straight": 5,
+    "Three of a Kind": 6,
+    "Two Pair": 7,
+    "One Pair": 8,
+    "High Card": 9,
+}
+_CLASS_TO_HAND_TYPE = {value: key for key, value in _HAND_TYPE_TO_CLASS.items()}
+_EVAL7_CARD_CACHE: dict[int, eval7.Card] | None = None
+
+
+def _get_eval7_card_cache() -> dict[int, eval7.Card]:
+    global _EVAL7_CARD_CACHE
+    if _EVAL7_CARD_CACHE is None:
+        cache: dict[int, eval7.Card] = {}
+        for card in Card.get_full_deck():
+            card_str = TreysCard.int_to_str(card.card_int)
+            cache[card.card_int] = eval7.Card(card_str)
+        _EVAL7_CARD_CACHE = cache
+    return _EVAL7_CARD_CACHE
 
 
 class HandEvaluator:
     """
-    Fast hand evaluator for Texas Hold'em using treys.
+    Fast hand evaluator for Texas Hold'em using eval7.
 
-    The treys library uses a perfect hash algorithm for fast evaluation.
-    Lower rank values = stronger hands (1 = Royal Flush, 7462 = worst hand).
+    eval7 returns higher rank values = stronger hands.
+    This wrapper inverts the rank so lower values remain stronger hands.
     """
 
     def __init__(self):
-        self.evaluator = TreysEvaluator()
+        self._card_cache = _get_eval7_card_cache()
+
+    @staticmethod
+    def _normalize_rank(rank: int) -> int:
+        """Convert internal rank to eval7's positive rank for classification."""
+        return -rank if rank < 0 else rank
 
     def evaluate(self, hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -> int:
         """
@@ -30,17 +61,18 @@ class HandEvaluator:
             board: Community cards (3-5 cards)
 
         Returns:
-            Hand rank (1 = best, 7462 = worst)
+            Hand rank where lower values are stronger
         """
         if len(board) < 3:
             raise ValueError("Board must have at least 3 cards for evaluation")
         if len(hole_cards) != 2:
             raise ValueError("Must have exactly 2 hole cards")
 
-        hole_ints = [card.card_int for card in hole_cards]
-        board_ints = [card.card_int for card in board]
+        cards = [self._card_cache[card.card_int] for card in board]
+        cards.extend(self._card_cache[card.card_int] for card in hole_cards)
 
-        return self.evaluator.evaluate(board_ints, hole_ints)
+        # Invert rank to preserve "lower is better" semantics.
+        return -eval7.evaluate(cards)
 
     def get_rank_class(self, rank: int) -> int:
         """
@@ -52,7 +84,11 @@ class HandEvaluator:
         Returns:
             Hand class (1-9)
         """
-        return self.evaluator.get_rank_class(rank)
+        hand_type = eval7.handtype(self._normalize_rank(rank))
+        try:
+            return _HAND_TYPE_TO_CLASS[hand_type]
+        except KeyError as exc:
+            raise ValueError(f"Unknown hand type: {hand_type}") from exc
 
     def class_to_string(self, class_int: int) -> str:
         """
@@ -64,7 +100,10 @@ class HandEvaluator:
         Returns:
             Hand class name (e.g., "Straight Flush", "Pair")
         """
-        return self.evaluator.class_to_string(class_int)
+        try:
+            return _CLASS_TO_HAND_TYPE[class_int]
+        except KeyError as exc:
+            raise ValueError(f"Unknown hand class: {class_int}") from exc
 
     def rank_to_string(self, rank: int) -> str:
         """
@@ -78,7 +117,8 @@ class HandEvaluator:
         """
         hand_class = self.get_rank_class(rank)
         class_str = self.class_to_string(hand_class)
-        return f"{class_str} (rank {rank})"
+        rank_display = self._normalize_rank(rank)
+        return f"{class_str} (rank {rank_display})"
 
     def compare_hands(
         self,

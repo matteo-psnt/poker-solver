@@ -1,0 +1,37 @@
+{
+  "config": {
+    "config_name": "production",
+    "config_hash": "8e3e82d53b505b18",
+    "num_board_clusters": {
+      "FLOP": 100,
+      "TURN": 200,
+      "RIVER": 400
+    },
+    "representatives_per_cluster": 3,
+    "representative_selection": "closest",
+    "num_buckets": {
+      "FLOP": 100,
+      "TURN": 300,
+      "RIVER": 600
+    },
+    "equity_samples": 2000,
+    "seed": 42
+  },
+  "statistics": {
+    "FLOP": {
+      "num_clusters": 100,
+      "num_combos": 87508,
+      "num_buckets": 100
+    },
+    "TURN": {
+      "num_clusters": 200,
+      "num_combos": 201275,
+      "num_buckets": 300
+    },
+    "RIVER": {
+      "num_clusters": 400,
+      "num_combos": 433527,
+      "num_buckets": 600
+    }
+  }
+}

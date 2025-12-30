@@ -108,28 +108,23 @@ def _get_config_choice(ctx: CliContext) -> tuple:
         return None, None
 
 
-# Time estimation constants (empirically calibrated)
-# Derived from multiple benchmark runs with varying configs
+# Time estimation constants (empirically calibrated with 7eval)
+# Derived from actual benchmark runs with 7eval evaluator
 # Unit: seconds per work item (cluster × representative)
 # Baseline: 12 workers, 1000 equity samples
 #
-# Benchmark data used for calibration:
-#   fast_test (10/20/30 clusters, 1 rep, 100 samples, 12 workers):
-#     FLOP: 10 items, ~30s total → 3.0s/item @ 100 samples
-#     TURN: 20 items, ~68s total → 3.4s/item @ 100 samples
-#     RIVER: 30 items, ~147s total → 4.9s/item @ 100 samples
-#
-#   default_plus (50/100/200 clusters, 3 reps, 2000 samples, 12 workers):
-#     FLOP: 150 items, 7.5min → 3.0s/item @ 2000 samples
-#     TURN: 300 items, 17min → 3.4s/item @ 2000 samples
-#     RIVER: 600 items, 49min → 4.9s/item @ 2000 samples
+# Benchmark data used for calibration (with 7eval):
+#   production (100/200/400 clusters, 3 reps, 2000 samples, 12 workers):
+#     FLOP: 300 items, 3:42 (222s) → 0.74s/item @ 2000 samples → 0.37s/item @ 1000 samples
+#     TURN: 600 items, 7:49 (469s) → 0.78s/item @ 2000 samples → 0.39s/item @ 1000 samples
+#     RIVER: 1200 items, 16:13 (973s) → 0.81s/item @ 2000 samples → 0.41s/item @ 1000 samples
 #
 # Pattern: time scales linearly with equity_samples, inversely with workers
-# Street differences: RIVER ~60% slower than FLOP due to more opponent cards
+# 7eval is ~4x faster than the old treys-based evaluator
 TIME_PER_ITEM_BASELINE = {
-    Street.FLOP: 1.5,  # seconds per item at 1000 samples, 12 workers
-    Street.TURN: 1.7,
-    Street.RIVER: 2.45,
+    Street.FLOP: 0.37,  # seconds per item at 1000 samples, 12 workers
+    Street.TURN: 0.39,
+    Street.RIVER: 0.41,
 }
 TIME_BASELINE_WORKERS = 12
 TIME_BASELINE_SAMPLES = 1000
@@ -203,7 +198,11 @@ def _get_output_path(base_dir: Path, config_name: str, config: PrecomputeConfig)
     base_path = base_dir / "data" / "combo_abstraction"
 
     # Create deterministic hash from config parameters
-    config_str = f"{config.num_board_clusters}{config.representatives_per_cluster}{config.num_buckets}{config.equity_samples}{config.seed}"
+    config_str = (
+        f"{config.num_board_clusters}{config.representatives_per_cluster}"
+        f"{config.representative_selection}{config.num_buckets}"
+        f"{config.equity_samples}{config.seed}"
+    )
     config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
 
     # Format: buckets-F<flop>T<turn>R<river>-C<flop_clusters>C<turn_clusters>C<river_clusters>-s<samples>-<hash>
@@ -225,7 +224,6 @@ def handle_combo_precompute(ctx: CliContext) -> None:
     print()
     print("=" * 60)
     print("  COMBO-LEVEL ABSTRACTION PRECOMPUTATION")
-    print("  (Correct postflop bucketing under suit isomorphism)")
     print("=" * 60)
     print()
 
@@ -276,6 +274,7 @@ def handle_combo_precompute(ctx: CliContext) -> None:
         f"R={config.num_board_clusters[Street.RIVER]}"
     )
     print(f"Representatives/cluster: {config.representatives_per_cluster}")
+    print(f"Representative selection: {config.representative_selection}")
     print(f"Equity samples: {config.equity_samples}")
     print(f"Workers: {config.num_workers or mp.cpu_count()}")
     print(f"Output: {output_path}")
@@ -368,6 +367,7 @@ def handle_combo_info(ctx: CliContext) -> None:
             print(
                 f"   Representatives per cluster: {config.get('representatives_per_cluster', 'N/A')}"
             )
+            print(f"   Representative selection: {config.get('representative_selection', 'N/A')}")
 
         # Statistics per street
         if "statistics" in metadata:

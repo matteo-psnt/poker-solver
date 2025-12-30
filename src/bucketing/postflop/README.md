@@ -161,7 +161,7 @@ Handles the one-time computation of bucket assignments.
 **Steps:**
 1. **Enumerate** all canonical boards for each street
 2. **Cluster** boards by texture (K-means on features)
-3. **Select representatives** from each cluster
+3. **Select representatives** from each cluster (closest or diverse spread)
 4. **Compute equity** for each (representative_board, hand) pair
 5. **Bucket hands** using K-means on equity values
 6. **Save** abstraction to disk
@@ -181,6 +181,7 @@ buckets:
 
 equity_samples: 1000
 representatives_per_cluster: 1
+representative_selection: closest  # closest | diverse | random
 ```
 
 ## Usage

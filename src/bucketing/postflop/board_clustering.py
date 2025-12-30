@@ -171,6 +171,8 @@ class BoardClusterer:
         representative_boards: list[tuple[Card, ...]],
         street: Street,
         representatives_per_cluster: int = 3,
+        representative_selection: str = "closest",
+        selection_seed: int | None = None,
     ) -> None:
         """
         Fit clusterer on canonical boards.
@@ -180,6 +182,8 @@ class BoardClusterer:
             representative_boards: Corresponding real board representations (for feature extraction)
             street: Which street
             representatives_per_cluster: How many representative boards to keep per cluster
+            representative_selection: Strategy for selecting representatives
+            selection_seed: RNG seed for selection when needed
         """
         if street not in self.num_clusters:
             raise ValueError(f"No cluster count specified for {street.name}")
@@ -202,6 +206,8 @@ class BoardClusterer:
         # Build cluster info
         self._board_to_cluster[street] = {}
         self._clusters[street] = {}
+        representative_selection = representative_selection.lower()
+        rng = np.random.default_rng(selection_seed)
 
         for cluster_id in range(n_clusters):
             # Find all boards in this cluster
@@ -210,16 +216,19 @@ class BoardClusterer:
             if len(cluster_indices) == 0:
                 continue
 
-            # Select representatives (boards closest to cluster center)
+            # Select representatives using the configured strategy
             cluster_features = features[cluster_indices]
             center = kmeans.cluster_centers_[cluster_id]
 
-            # Compute distances to center
-            distances = np.linalg.norm(cluster_features - center, axis=1)
-
-            # Select top N closest as representatives
             n_reps = min(representatives_per_cluster, len(cluster_indices))
-            closest_indices = cluster_indices[np.argsort(distances)[:n_reps]]
+            local_indices = self._select_representative_indices(
+                cluster_features=cluster_features,
+                center=center,
+                n_reps=n_reps,
+                representative_selection=representative_selection,
+                rng=rng,
+            )
+            closest_indices = cluster_indices[local_indices]
 
             reps = [representative_boards[i] for i in closest_indices]
             canonical_reps = [canonical_boards[i] for i in closest_indices]
@@ -240,6 +249,45 @@ class BoardClusterer:
                 self._board_to_cluster[street][board_id] = cluster_id
 
         self.fitted = True
+
+    def _select_representative_indices(
+        self,
+        cluster_features: np.ndarray,
+        center: np.ndarray,
+        n_reps: int,
+        representative_selection: str,
+        rng: np.random.Generator,
+    ) -> np.ndarray:
+        if n_reps <= 0:
+            return np.array([], dtype=int)
+
+        distances = np.linalg.norm(cluster_features - center, axis=1)
+
+        if representative_selection == "closest":
+            return np.argsort(distances)[:n_reps]
+
+        if representative_selection == "random":
+            return rng.choice(len(cluster_features), size=n_reps, replace=False)
+
+        if representative_selection == "diverse":
+            selected = [int(np.argmin(distances))]
+            if n_reps == 1:
+                return np.array(selected, dtype=int)
+
+            min_dist = np.linalg.norm(cluster_features - cluster_features[selected[0]], axis=1)
+            min_dist[selected[0]] = -np.inf
+
+            while len(selected) < n_reps:
+                next_idx = int(np.argmax(min_dist))
+                selected.append(next_idx)
+                dist_to_new = np.linalg.norm(cluster_features - cluster_features[next_idx], axis=1)
+                min_dist = np.minimum(min_dist, dist_to_new)
+                for idx in selected:
+                    min_dist[idx] = -np.inf
+
+            return np.array(selected, dtype=int)
+
+        raise ValueError("representative_selection must be one of: closest, diverse, random")
 
     def predict(self, board: tuple[Card, ...], street: Street) -> int:
         """
