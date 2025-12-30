@@ -7,16 +7,11 @@ from typing import cast
 from src.cli.flows.config import select_config
 from src.cli.ui import prompts, ui
 from src.cli.ui.context import CliContext
-from src.evaluation.exploitability import compute_exploitability
-from src.solver.mccfr import MCCFRSolver
-from src.solver.storage.in_memory import InMemoryStorage
+from src.training import services
 from src.training.components import (
-    build_action_abstraction,
     build_card_abstraction,
-    build_solver,
 )
-from src.training.run_tracker import RunTracker
-from src.training.trainer import TrainingSession
+from src.training.services import EvaluationOutput
 from src.utils.config import Config
 
 
@@ -47,7 +42,7 @@ def evaluate_solver(ctx: CliContext) -> None:
     """Evaluate a trained solver."""
     ui.header("Evaluate Solver")
 
-    runs = RunTracker.list_runs(ctx.runs_dir)
+    runs = services.list_runs(ctx.runs_dir)
 
     if not runs:
         ui.error(f"No trained runs found in {ctx.runs_dir}")
@@ -64,10 +59,6 @@ def evaluate_solver(ctx: CliContext) -> None:
         return
 
     run_dir = ctx.runs_dir / selected_run
-    tracker = RunTracker.load(run_dir)
-    meta = tracker.metadata
-
-    config = meta.config
 
     num_samples = prompts.prompt_int(
         ctx,
@@ -114,15 +105,14 @@ def evaluate_solver(ctx: CliContext) -> None:
     use_average = strategy_choice.startswith("Average")
     seed = int(seed_text) if seed_text.strip() else None
 
-    print("\nLoading solver...")
-    storage = InMemoryStorage(checkpoint_dir=run_dir)
-    action_abstraction = build_action_abstraction(config)
-
+    print("\nLoading solver and running exploitability estimate...")
     try:
-        card_abstraction = build_card_abstraction(
-            config,
-            prompt_user=False,
-            auto_compute=False,
+        output = services.evaluate_run(
+            run_dir=run_dir,
+            num_samples=num_samples,
+            num_rollouts=num_rollouts,
+            use_average_strategy=use_average,
+            seed=seed,
         )
     except FileNotFoundError as e:
         ui.error(str(e))
@@ -137,18 +127,14 @@ def evaluate_solver(ctx: CliContext) -> None:
         ui.pause()
         return
 
-    solver = build_solver(config, action_abstraction, card_abstraction, storage)
+    _print_evaluation_results(output)
+    ui.pause()
 
-    print(f"  Loaded {storage.num_infosets():,} infosets")
-    print("\nRunning exploitability estimate...\n")
-    assert isinstance(solver, MCCFRSolver), f"Expected MCCFRSolver, got {type(solver)}"
-    results = compute_exploitability(
-        solver,
-        num_samples=num_samples,
-        use_average_strategy=use_average,
-        num_rollouts_per_infoset=num_rollouts,
-        seed=seed,
-    )
+
+def _print_evaluation_results(output: EvaluationOutput) -> None:
+    print(f"  Loaded {output.infosets:,} infosets")
+    print()
+    results = output.results
 
     print("Exploitability Results")
     print("-" * 60)
@@ -165,14 +151,12 @@ def evaluate_solver(ctx: CliContext) -> None:
         "1-5 good, 0.1-1 strong, <0.1 near-optimal."
     )
 
-    ui.pause()
-
 
 def view_runs(ctx: CliContext) -> None:
     """View past training runs."""
     ui.header("Past Training Runs")
 
-    runs = RunTracker.list_runs(ctx.runs_dir)
+    runs = services.list_runs(ctx.runs_dir)
 
     if not runs:
         ui.error(f"No training runs found in {ctx.runs_dir}")
@@ -189,8 +173,7 @@ def view_runs(ctx: CliContext) -> None:
         return
 
     run_dir = ctx.runs_dir / selected
-    tracker = RunTracker.load(run_dir)
-    meta = tracker.metadata
+    meta = services.load_run_metadata(run_dir)
 
     print(f"\nRun: {selected}")
     print("-" * 60)
@@ -216,7 +199,7 @@ def resume_training(ctx: CliContext) -> None:
     """Resume training from a checkpoint."""
     ui.header("Resume Training")
 
-    runs = RunTracker.list_runs(ctx.runs_dir)
+    runs = services.list_runs(ctx.runs_dir)
 
     if not runs:
         ui.error(f"No training runs found in {ctx.runs_dir}")
@@ -233,8 +216,7 @@ def resume_training(ctx: CliContext) -> None:
         return
 
     run_dir = ctx.runs_dir / selected
-    tracker = RunTracker.load(run_dir)
-    meta = tracker.metadata
+    meta = services.load_run_metadata(run_dir)
 
     latest_iter = meta.iterations
     if latest_iter > 0:
@@ -251,7 +233,7 @@ def resume_training(ctx: CliContext) -> None:
     if additional_iters is None:
         return
 
-    _resume_training(run_dir, latest_iter, additional_iters)
+    _resume_training(run_dir, additional_iters)
     ui.pause()
 
 
@@ -351,27 +333,21 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
         return False
 
 
-def _start_training(config: Config, num_workers: int) -> TrainingSession:
-    trainer = TrainingSession(config)
+def _start_training(config: Config, num_workers: int) -> None:
+    trainer = services.create_training_session(config)
 
     print("\nStarting training...")
     print(f"Run directory: {trainer.run_dir}")
     print(f"Checkpoint frequency: every {config.training.checkpoint_frequency} iterations")
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
-
-    trainer.train(num_workers=num_workers)
-
-    return trainer
+    services.run_training(trainer, num_workers=num_workers)
 
 
-def _resume_training(run_dir: Path, latest_iter: int, additional_iters: int) -> TrainingSession:
-    trainer = TrainingSession.resume(run_dir)
+def _resume_training(run_dir: Path, additional_iters: int) -> None:
+    trainer, latest_iter = services.create_resumed_session(run_dir)
 
     print(f"\nResuming training from iteration {latest_iter}...")
     target_total = latest_iter + additional_iters
     print(f"Target: {target_total} iterations (+{additional_iters})")
     print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
-
-    trainer.train(num_iterations=additional_iters)
-
-    return trainer
+    services.run_training(trainer, num_iterations=additional_iters)
