@@ -249,6 +249,24 @@ def _prompt_num_workers(ctx: CliContext) -> int | None:
     )
 
 
+def _run_precompute_and_verify(ctx: CliContext, config: Config) -> bool:
+    """Run precomputation and verify it completed successfully."""
+    print("\n" + "=" * 60)
+    print("RUNNING PRECOMPUTATION")
+    print("=" * 60)
+    handle_combo_precompute(ctx)
+
+    try:
+        build_card_abstraction(config, prompt_user=False, auto_compute=False)
+        print("\n✓ Precomputation completed successfully!")
+        print("Continuing with training setup...\n")
+        return True
+    except (FileNotFoundError, ValueError):
+        ui.error("\nPrecomputation did not complete successfully.")
+        print("Training cancelled.")
+        return False
+
+
 def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
     """
     Ensure combo abstraction exists for the given config.
@@ -258,12 +276,10 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
     Returns:
         True if abstraction exists or was successfully created, False otherwise
     """
-    # Try to build the card abstraction
     try:
         build_card_abstraction(config, prompt_user=False, auto_compute=False)
         return True
     except FileNotFoundError as e:
-        # Abstraction not found - prompt user to run precomputation
         ui.error(str(e))
         print()
 
@@ -277,57 +293,26 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
             print("\nTraining cancelled. Please run precomputation from the main menu first.")
             return False
 
-        # Run precomputation
-        print("\n" + "=" * 60)
-        print("RUNNING PRECOMPUTATION")
-        print("=" * 60)
-        handle_combo_precompute(ctx)
+        return _run_precompute_and_verify(ctx, config)
 
-        # Verify it was successful
-        try:
-            build_card_abstraction(config, prompt_user=False, auto_compute=False)
-            print("\n✓ Precomputation completed successfully!")
-            print("Continuing with training setup...\n")
-            return True
-        except FileNotFoundError:
-            ui.error("\nPrecomputation did not complete successfully.")
-            print("Training cancelled.")
-            return False
     except ValueError as e:
-        # Config hash mismatch or other config error
         ui.error(str(e))
         print()
 
-        # Check if this is a hash mismatch that can be fixed by recomputing
-        if "hash mismatch" in str(e).lower():
-            run_precompute = prompts.confirm(
-                ctx,
-                "Would you like to recompute the abstraction now?",
-                default=True,
-            )
+        if "hash mismatch" not in str(e).lower():
+            return False
 
-            if not run_precompute:
-                print("\nTraining cancelled.")
-                return False
+        run_precompute = prompts.confirm(
+            ctx,
+            "Would you like to recompute the abstraction now?",
+            default=True,
+        )
 
-            # Run precomputation
-            print("\n" + "=" * 60)
-            print("RUNNING PRECOMPUTATION")
-            print("=" * 60)
-            handle_combo_precompute(ctx)
+        if not run_precompute:
+            print("\nTraining cancelled.")
+            return False
 
-            # Verify it was successful
-            try:
-                build_card_abstraction(config, prompt_user=False, auto_compute=False)
-                print("\n✓ Precomputation completed successfully!")
-                print("Continuing with training setup...\n")
-                return True
-            except (FileNotFoundError, ValueError):
-                ui.error("\nPrecomputation did not complete successfully.")
-                print("Training cancelled.")
-                return False
-
-        return False
+        return _run_precompute_and_verify(ctx, config)
 
 
 def _start_training(config: Config, num_workers: int) -> None:

@@ -5,7 +5,7 @@ import random
 from questionary import Choice
 
 from src.bucketing.postflop.precompute import PostflopPrecomputer
-from src.cli.flows.combo_precompute.common import _select_abstraction
+from src.cli.flows.combo_precompute.common import BOARD_CARDS_BY_STREET, _select_abstraction
 from src.cli.ui import prompts
 from src.cli.ui.context import CliContext
 from src.game.state import Card, Street
@@ -68,7 +68,7 @@ def handle_combo_coverage(ctx: CliContext) -> None:
         print(f"\nAnalyzing {street.name}...")
         print("-" * 60)
 
-        num_board_cards = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}[street]
+        num_board_cards = BOARD_CARDS_BY_STREET[street]
         abstraction.reset_stats()
 
         successful_lookups = 0
