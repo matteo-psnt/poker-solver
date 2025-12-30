@@ -15,6 +15,7 @@ import pytest
 from src.training import components
 from src.training.trainer import TrainingSession
 from src.utils.config import Config
+from tests.test_helpers import DummyCardAbstraction
 
 
 @pytest.fixture
@@ -25,6 +26,16 @@ def temp_run_dir():
     # Cleanup
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
+
+
+@pytest.fixture(autouse=True)
+def mock_card_abstraction(monkeypatch):
+    """Use a dummy card abstraction so resume tests don't depend on persisted artifacts."""
+
+    def _build_dummy_card_abstraction(*_args, **_kwargs):
+        return DummyCardAbstraction()
+
+    monkeypatch.setattr(components, "build_card_abstraction", _build_dummy_card_abstraction)
 
 
 @pytest.fixture
@@ -49,7 +60,8 @@ def test_config(temp_run_dir):
             },
         },
         "card_abstraction": {
-            "config": "fast_test",  # Uses a small precomputed abstraction
+            "config": None,
+            "abstraction_path": None,
         },
         "storage": {
             # Storage config uses defaults - checkpoint enabled, zarr format

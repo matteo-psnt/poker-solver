@@ -20,6 +20,18 @@ from src.training.run_tracker import RunMetadata
 from src.utils.config import Config
 
 
+def _read_metadata(path: Path) -> dict | None:
+    """Read abstraction metadata.json; return None for unreadable files."""
+    metadata_file = path / "metadata.json"
+    if not metadata_file.exists():
+        return None
+    try:
+        with open(metadata_file) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def build_action_abstraction(config: Config) -> BettingActions:
     """
     Build action abstraction from config.
@@ -36,7 +48,10 @@ def build_action_abstraction(config: Config) -> BettingActions:
 
 
 def build_card_abstraction(
-    config: Config, prompt_user: bool = False, auto_compute: bool = False
+    config: Config,
+    prompt_user: bool = False,
+    auto_compute: bool = False,
+    abstractions_dir: Path | None = None,
 ) -> BucketingStrategy:
     """
     Build card abstraction from config.
@@ -47,6 +62,7 @@ def build_card_abstraction(
         config: Configuration object
         prompt_user: Whether to prompt user if abstraction not found (default: False for tests)
         auto_compute: Whether to auto-compute if abstraction not found
+        abstractions_dir: Optional directory containing precomputed abstractions
 
     Returns:
         BucketingStrategy instance (PostflopBucketer)
@@ -71,7 +87,7 @@ def build_card_abstraction(
 
     elif abstraction_config:
         # Config name provided - look for matching abstraction
-        base_path = Path("data/combo_abstraction")
+        base_path = abstractions_dir or Path("data/combo_abstraction")
 
         if not base_path.exists():
             raise FileNotFoundError(
@@ -83,26 +99,21 @@ def build_card_abstraction(
         expected_hash = expected_config.get_config_hash()
 
         # Find abstraction matching this config name
-        matching = []
-        if base_path.exists():
-            for path in base_path.iterdir():
-                if not path.is_dir():
-                    continue
-
-                metadata_file = path / "metadata.json"
-                if not metadata_file.exists():
-                    continue
-
-                try:
-                    with open(metadata_file) as f:
-                        metadata = json.load(f)
-
-                    # Check if config_name matches
-                    saved_config_name = metadata.get("config", {}).get("config_name")
-                    if saved_config_name == abstraction_config:
-                        matching.append(path)
-                except Exception:
-                    continue
+        matching: list[tuple[Path, str | None]] = []
+        for path in base_path.iterdir():
+            if not path.is_dir():
+                continue
+            metadata = _read_metadata(path)
+            if not metadata:
+                continue
+            config_data = metadata.get("config", {})
+            if not isinstance(config_data, dict):
+                continue
+            saved_config_name = config_data.get("config_name")
+            if saved_config_name != abstraction_config:
+                continue
+            saved_hash = config_data.get("config_hash")
+            matching.append((path, saved_hash if isinstance(saved_hash, str) else None))
 
         if not matching:
             raise FileNotFoundError(
@@ -110,24 +121,42 @@ def build_card_abstraction(
                 f"Please run 'Precompute Combo Abstraction' from the CLI first with {abstraction_config}.yaml."
             )
 
-        # Use most recent if multiple matches
-        most_recent = max(matching, key=lambda p: p.stat().st_mtime)
+        hash_matches = [
+            (path, saved_hash) for path, saved_hash in matching if saved_hash == expected_hash
+        ]
+        if len(hash_matches) == 1:
+            return PostflopPrecomputer.load(hash_matches[0][0])
 
-        # Verify config hash matches
-        metadata_file = most_recent / "metadata.json"
-        with open(metadata_file) as f:
-            metadata = json.load(f)
-        saved_hash = metadata.get("config", {}).get("config_hash")
-
-        if saved_hash and saved_hash != expected_hash:
+        if len(hash_matches) > 1:
+            options = ", ".join(sorted(str(path) for path, _ in hash_matches))
             raise ValueError(
-                f"Card abstraction config hash mismatch for '{abstraction_config}':\n"
-                f"  Expected: {expected_hash}\n"
-                f"  Saved:    {saved_hash}\n"
-                f"The saved abstraction was computed with different parameters.\n"
-                f"Please re-run 'Precompute Combo Abstraction' with the current config."
+                f"Multiple combo abstractions found for config '{abstraction_config}' "
+                f"with matching hash {expected_hash}:\n"
+                f"  {options}\n"
+                "Set card_abstraction.abstraction_path to disambiguate."
             )
-        return PostflopPrecomputer.load(most_recent)
+
+        # No exact hash match. If there is exactly one candidate, keep old behavior:
+        # accept missing hash or fail on mismatch.
+        if len(matching) == 1:
+            only_path, saved_hash = matching[0]
+            if saved_hash and saved_hash != expected_hash:
+                raise ValueError(
+                    f"Card abstraction config hash mismatch for '{abstraction_config}':\n"
+                    f"  Expected: {expected_hash}\n"
+                    f"  Saved:    {saved_hash}\n"
+                    f"The saved abstraction was computed with different parameters.\n"
+                    f"Please re-run 'Precompute Combo Abstraction' with the current config."
+                )
+            return PostflopPrecomputer.load(only_path)
+
+        options = ", ".join(sorted(str(path) for path, _ in matching))
+        raise ValueError(
+            f"Multiple combo abstractions found for config '{abstraction_config}' "
+            f"but none match expected hash {expected_hash}.\n"
+            f"  {options}\n"
+            "Recompute abstractions or set card_abstraction.abstraction_path explicitly."
+        )
 
     else:
         raise ValueError(

@@ -253,7 +253,7 @@ src/abstraction/isomorphism/
 └── README.md                 # This file
 
 config/abstraction/
-├── fast_test.yaml            # Quick testing (10/20/30 buckets)
+├── quick_test.yaml            # Quick testing (10/20/30 buckets)
 ├── default.yaml              # Balanced (50/100/200 buckets)
 ├── production.yaml           # High quality (100/300/600 buckets)
 └── README.md
@@ -271,7 +271,7 @@ data/combo_abstraction/
 
 | Config | Board Clusters | Equity Samples | Time Estimate |
 |--------|---------------|----------------|---------------|
-| fast_test | 10/20/30 | 100 | ~5 minutes |
+| quick_test | 10/20/30 | 100 | ~5 minutes |
 | default | 50/100/200 | 1,000 | ~20 minutes |
 | production | 100/200/400 | 2,000 | ~2 hours |
 
@@ -283,7 +283,7 @@ data/combo_abstraction/
 
 ### Training Results
 
-From a 100-iteration test run with `fast_test` abstraction:
+From a 100-iteration test run with `quick_test` abstraction:
 - **425,012 infosets** created
 - **16.9% fallback rate** (hands not in precomputed coverage)
 - **0.07 iterations/second** (limited by CFR traversal, not abstraction)

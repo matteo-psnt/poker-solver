@@ -1,8 +1,11 @@
 """Tests for training component builders."""
 
+import json
+
 import pytest
 
 from src.actions.betting_actions import BettingActions
+from src.bucketing.config import PrecomputeConfig
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.shared_array import SharedArrayStorage
 from src.training import components
@@ -61,6 +64,74 @@ class TestBuildCardAbstraction:
 
         with pytest.raises(FileNotFoundError, match="Config file not found"):
             components.build_card_abstraction(config, prompt_user=False, auto_compute=False)
+
+    def test_build_loads_unique_hash_match(self, tmp_path, monkeypatch):
+        """Build uses the unique abstraction path matching the expected config hash."""
+        expected_hash = PrecomputeConfig.from_yaml("default_plus").get_config_hash()
+        base_path = tmp_path / "data" / "combo_abstraction"
+        candidate = base_path / "default-plus-a"
+        candidate.mkdir(parents=True)
+        with open(candidate / "metadata.json", "w") as f:
+            json.dump(
+                {
+                    "config": {
+                        "config_name": "default_plus",
+                        "config_hash": expected_hash,
+                    }
+                },
+                f,
+            )
+
+        loaded_path = None
+
+        def _mock_load(path):
+            nonlocal loaded_path
+            loaded_path = path
+            return DummyCardAbstraction()
+
+        monkeypatch.setattr(components.PostflopPrecomputer, "load", _mock_load)
+        config = Config.default().merge(
+            {"card_abstraction": {"abstraction_path": None, "config": "default_plus"}}
+        )
+
+        abstraction = components.build_card_abstraction(
+            config,
+            prompt_user=False,
+            auto_compute=False,
+            abstractions_dir=base_path,
+        )
+
+        assert isinstance(abstraction, DummyCardAbstraction)
+        assert loaded_path == candidate
+
+    def test_build_fails_when_multiple_hash_matches(self, tmp_path):
+        """Multiple matching abstractions should fail and ask for explicit path."""
+        expected_hash = PrecomputeConfig.from_yaml("default_plus").get_config_hash()
+        base_path = tmp_path / "data" / "combo_abstraction"
+        for name in ["default-plus-a", "default-plus-b"]:
+            candidate = base_path / name
+            candidate.mkdir(parents=True)
+            with open(candidate / "metadata.json", "w") as f:
+                json.dump(
+                    {
+                        "config": {
+                            "config_name": "default_plus",
+                            "config_hash": expected_hash,
+                        }
+                    },
+                    f,
+                )
+
+        config = Config.default().merge(
+            {"card_abstraction": {"abstraction_path": None, "config": "default_plus"}}
+        )
+        with pytest.raises(ValueError, match="Multiple combo abstractions found"):
+            components.build_card_abstraction(
+                config,
+                prompt_user=False,
+                auto_compute=False,
+                abstractions_dir=base_path,
+            )
 
 
 class TestBuildStorage:

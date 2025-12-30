@@ -59,7 +59,7 @@ class TestClusteringIntegration:
 
     def test_config_loading_from_yaml(self):
         """Test loading config from YAML file."""
-        config = PrecomputeConfig.from_yaml("fast_test")
+        config = PrecomputeConfig.from_yaml("quick_test")
 
         # Check clustering parameters loaded
         assert Street.FLOP in config.num_board_clusters

@@ -18,10 +18,10 @@ def _load_yaml_config(name: str) -> dict:
 class TestPrecomputeConfig:
     """Test configuration loading from YAML files."""
 
-    def test_load_fast_test(self):
-        """Test loading fast_test config."""
-        config = PrecomputeConfig.from_yaml("fast_test")
-        data = _load_yaml_config("fast_test")
+    def test_load_quick_test(self):
+        """Test loading quick_test config."""
+        config = PrecomputeConfig.from_yaml("quick_test")
+        data = _load_yaml_config("quick_test")
 
         assert config.num_board_clusters[Street.FLOP] == data["board_clusters"]["flop"]
         assert config.num_board_clusters[Street.TURN] == data["board_clusters"]["turn"]
@@ -75,8 +75,8 @@ class TestPrecomputeConfig:
         production = PrecomputeConfig.from_yaml("production")
         assert production.config_name == "production"
 
-        fast_test = PrecomputeConfig.from_yaml("fast_test")
-        assert fast_test.config_name == "fast_test"
+        quick_test = PrecomputeConfig.from_yaml("quick_test")
+        assert quick_test.config_name == "quick_test"
 
         default = PrecomputeConfig.from_yaml("default")
         assert default.config_name == "default"
@@ -85,6 +85,6 @@ class TestPrecomputeConfig:
         """Test that all expected config files exist."""
         config_dir = Path(__file__).parent.parent.parent / "config" / "abstraction"
 
-        assert (config_dir / "fast_test.yaml").exists()
+        assert (config_dir / "quick_test.yaml").exists()
         assert (config_dir / "default.yaml").exists()
         assert (config_dir / "production.yaml").exists()
