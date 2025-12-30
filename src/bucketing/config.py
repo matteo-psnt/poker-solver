@@ -6,11 +6,12 @@ Uses the same pattern as main Config - defaults in dataclass, YAML contains only
 
 import hashlib
 import json
-from dataclasses import dataclass, fields
+from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
 from typing import Any
 
 from src.game.state import Street
+from src.utils.config_loader import _load_yaml, _merge_config
 
 
 @dataclass(init=False)
@@ -67,9 +68,6 @@ class PrecomputeConfig:
                 kwargs.setdefault("buckets_flop", buckets.get(Street.FLOP, 50))
                 kwargs.setdefault("buckets_turn", buckets.get(Street.TURN, 100))
                 kwargs.setdefault("buckets_river", buckets.get(Street.RIVER, 200))
-
-        # Get all field names and their defaults
-        from dataclasses import MISSING
 
         # Set fields, using defaults for missing values
         for field in fields(self.__class__):
@@ -134,8 +132,6 @@ class PrecomputeConfig:
         Returns:
             PrecomputeConfig instance with YAML overrides applied
         """
-        from src.utils.config_loader import _load_yaml, _merge_config
-
         config_path = (
             Path(__file__).parent.parent.parent / "config" / "abstraction" / f"{config_name}.yaml"
         )
