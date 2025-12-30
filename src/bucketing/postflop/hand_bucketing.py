@@ -12,8 +12,11 @@ Key difference from 169-class abstraction:
 - But A♠K♠ on T♠9♠8♣ is equivalent to A♥K♥ on T♥9♥8♣ (suit isomorphism)
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from src.bucketing.base import BucketingStrategy
 from src.bucketing.postflop.suit_isomorphism import (
@@ -27,6 +30,9 @@ from src.bucketing.postflop.suit_isomorphism import (
     get_canonical_hand_id,
 )
 from src.game.state import Card, Street
+
+if TYPE_CHECKING:
+    from src.bucketing.postflop.board_clustering import BoardClusterer
 
 
 @dataclass(frozen=True)
@@ -91,7 +97,7 @@ class PostflopBucketer(BucketingStrategy):
 
         # Board clusterer for runtime cluster prediction
         # Set during precomputation
-        self._board_clusterer = None
+        self._board_clusterer: BoardClusterer | None = None
 
         # Preflop buckets (169 hand classes)
         self._preflop_buckets: dict[int, int] | None = None
@@ -101,13 +107,13 @@ class PostflopBucketer(BucketingStrategy):
         self._fallback_count: int = 0
         self._total_lookups: int = 0
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict:
         """Pickle support."""
-        return self.__dict__
+        return dict(self.__dict__)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: dict) -> None:
         """Unpickle support - handles objects saved before new attributes were added."""
-        self.__dict__.update(state)
+        self.__dict__.update(state)  # type: ignore[attr-defined]
         # Initialize new attributes if they don't exist (backward compatibility)
         if not hasattr(self, "_fallback_count"):
             self._fallback_count = 0

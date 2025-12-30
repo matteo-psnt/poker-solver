@@ -16,7 +16,7 @@ from typing import Any
 
 from src.evaluation.exploitability import compute_exploitability
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage.helpers import CHECKPOINT_REQUIRED_FILES, get_missing_checkpoint_files
+from src.solver.storage.helpers import get_missing_checkpoint_files
 from src.training import components
 from src.training.checkpoint_manager import CheckpointManager
 from src.training.metrics import MetricsTracker
@@ -161,10 +161,7 @@ class TrainingSession:
         # Verify checkpoint artifacts exist
         missing_files = get_missing_checkpoint_files(run_path)
         if missing_files:
-            raise ValueError(
-                f"Checkpoint is incomplete. Missing files: {missing_files}\n"
-                f"Required: {list(CHECKPOINT_REQUIRED_FILES)}"
-            )
+            raise ValueError(f"Checkpoint is incomplete. Missing files: {missing_files}")
 
         # Reconstruct config from metadata
         if metadata.config is None:
