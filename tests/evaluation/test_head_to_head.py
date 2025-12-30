@@ -105,8 +105,9 @@ class TestHeadToHeadEvaluator:
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=43))
 
         # Train briefly so they have some strategy
-        solver1.train(num_iterations=3, verbose=False)
-        solver2.train(num_iterations=3, verbose=False)
+        for _ in range(3):
+            solver1.train_iteration()
+            solver2.train_iteration()
 
         # Create evaluator
         evaluator = HeadToHeadEvaluator(
@@ -147,8 +148,8 @@ class TestHeadToHeadEvaluator:
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=43))
 
         # Train briefly
-        solver1.train(num_iterations=1, verbose=False)
-        solver2.train(num_iterations=1, verbose=False)
+        solver1.train_iteration()
+        solver2.train_iteration()
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
@@ -180,7 +181,8 @@ class TestHeadToHeadEvaluator:
         solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
 
         # Train
-        solver.train(num_iterations=3, verbose=False)
+        for _ in range(3):
+            solver.train_iteration()
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
@@ -221,8 +223,8 @@ class TestHeadToHeadEvaluator:
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config=make_test_config(seed=42))
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=43))
 
-        solver1.train(num_iterations=1, verbose=False)
-        solver2.train(num_iterations=1, verbose=False)
+        solver1.train_iteration()
+        solver2.train_iteration()
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,

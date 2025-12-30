@@ -14,7 +14,6 @@ action_abstraction:
 training:
   num_iterations: 10000000
   checkpoint_frequency: 10000
-  log_frequency: 1000
   iterations_per_worker: 500
   verbose: true
 

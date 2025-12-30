@@ -283,7 +283,7 @@ def handle_combo_precompute(ctx: CliContext) -> None:
     confirm = prompts.confirm(
         ctx,
         "Start precomputation?",
-        default=False,
+        default=True,
     )
 
     if not confirm:

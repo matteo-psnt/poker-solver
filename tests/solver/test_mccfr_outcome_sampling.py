@@ -71,10 +71,10 @@ class TestOutcomeSampling:
             config=make_test_config(sampling_method="outcome", seed=42),
         )
 
-        results = solver.train(num_iterations=10, verbose=False)
+        for _ in range(10):
+            solver.train_iteration()
 
         assert solver.iteration == 10
-        assert results["total_iterations"] == 10
         assert solver.num_infosets() > 0
 
     def test_outcome_sampling_creates_infosets(self):
@@ -93,7 +93,8 @@ class TestOutcomeSampling:
         )
 
         # Run iterations
-        solver.train(num_iterations=20, verbose=False)
+        for _ in range(20):
+            solver.train_iteration()
 
         # Should have created infosets
         assert solver.num_infosets() > 0
@@ -123,7 +124,8 @@ class TestOutcomeSampling:
         )
 
         # Should complete without errors
-        solver.train(num_iterations=10, verbose=False)
+        for _ in range(10):
+            solver.train_iteration()
 
         assert solver.iteration == 10
         assert solver.num_infosets() > 0
@@ -143,7 +145,8 @@ class TestOutcomeSampling:
             config=make_test_config(sampling_method="outcome", seed=42),
         )
 
-        solver.train(num_iterations=50, verbose=False)
+        for _ in range(50):
+            solver.train_iteration()
 
         # Check that strategies sum to 1.0 (or close)
         for infoset in storage.iter_infosets():
@@ -171,7 +174,8 @@ class TestOutcomeSampling:
             storage_external,
             config=make_test_config(sampling_method="external", seed=42),
         )
-        solver_external.train(num_iterations=5, verbose=False)
+        for _ in range(5):
+            solver_external.train_iteration()
 
         # Outcome sampling
         storage_outcome = SharedArrayStorage(
@@ -183,7 +187,8 @@ class TestOutcomeSampling:
             storage_outcome,
             config=make_test_config(sampling_method="outcome", seed=42),
         )
-        solver_outcome.train(num_iterations=5, verbose=False)
+        for _ in range(5):
+            solver_outcome.train_iteration()
 
         # Both should create infosets
         assert solver_external.num_infosets() > 0
@@ -231,7 +236,8 @@ class TestOutcomeSampling:
         )
 
         # Train for many iterations
-        solver.train(num_iterations=100, verbose=False)
+        for _ in range(100):
+            solver.train_iteration()
 
         # Check that infosets were discovered during training
         multi_action_infosets = sum(

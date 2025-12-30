@@ -23,7 +23,6 @@ class TrainingConfig:
 
     num_iterations: int = 100_000
     checkpoint_frequency: int = 50_000
-    log_frequency: int = 1_000
     iterations_per_worker: int = 1_000
     verbose: bool = True
     runs_dir: str = "data/runs"

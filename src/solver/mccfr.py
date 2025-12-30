@@ -14,12 +14,11 @@ from src.bucketing.base import BucketingStrategy
 from src.game.actions import ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
-from src.solver.base import BaseSolver
 from src.solver.storage.base import Storage
 from src.utils.config import Config
 
 
-class MCCFRSolver(BaseSolver):
+class MCCFRSolver:
     """
     Monte Carlo CFR with external sampling or outcome sampling.
 
@@ -52,7 +51,14 @@ class MCCFRSolver(BaseSolver):
             storage: Storage backend
             config: Config object (defaults to Config.default() if not provided)
         """
-        super().__init__(action_abstraction, card_abstraction, storage, config)
+        self.action_abstraction = action_abstraction
+        self.card_abstraction = card_abstraction
+        self.storage = storage
+        self.config = config if config is not None else Config.default()
+
+        # Training state
+        self.iteration = 0
+        self.total_utility = 0.0
 
         # Extract config values from typed Config object
         cfg = self.config
@@ -80,6 +86,14 @@ class MCCFRSolver(BaseSolver):
         # Cache: Reuse deck instance to avoid repeated Random() creation
         self._deck = Deck()
         self._deck_cards = self._deck.cards[:]  # Keep original card list
+
+    def checkpoint(self) -> None:
+        """Save a checkpoint of the current solver state."""
+        self.storage.checkpoint(self.iteration)
+
+    def num_infosets(self) -> int:
+        """Get total number of infosets discovered."""
+        return self.storage.num_infosets()
 
     def train_iteration(self) -> float:
         """

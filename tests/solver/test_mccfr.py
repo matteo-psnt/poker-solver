@@ -3,7 +3,6 @@
 import pytest
 
 from src.actions.betting_actions import BettingActions
-from src.bucketing.utils.infoset import InfoSetKey
 from src.game.state import Card, GameState, Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.shared_array import SharedArrayStorage
@@ -68,10 +67,10 @@ class TestMCCFRSolver:
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
 
-        results = solver.train(num_iterations=5, verbose=False)
+        for _ in range(5):
+            solver.train_iteration()
 
         assert solver.iteration == 5
-        assert results["total_iterations"] == 5
         assert solver.num_infosets() > 0
 
     def test_infosets_accumulate(self):
@@ -88,7 +87,8 @@ class TestMCCFRSolver:
         count_after_1 = solver.num_infosets()
 
         # Run more iterations
-        solver.train(num_iterations=4, verbose=False)
+        for _ in range(4):
+            solver.train_iteration()
         count_after_5 = solver.num_infosets()
 
         # Should have discovered more infosets
@@ -110,7 +110,8 @@ class TestMCCFRSolver:
         )
 
         # Train for enough iterations to update strategies
-        solver.train(num_iterations=10, verbose=False)
+        for _ in range(10):
+            solver.train_iteration()
 
         # Check that at least some infosets have been updated
         # (not all may be updated due to alternating player traversal)
@@ -191,7 +192,8 @@ class TestMCCFRSolver:
             num_workers=1, worker_id=0, session_id="test1", is_coordinator=True
         )
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config=make_test_config(seed=42))
-        solver1.train(num_iterations=5, verbose=False)
+        for _ in range(5):
+            solver1.train_iteration()
         infosets1 = solver1.num_infosets()
 
         # Run again with same seed
@@ -199,7 +201,8 @@ class TestMCCFRSolver:
             num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
         )
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=42))
-        solver2.train(num_iterations=5, verbose=False)
+        for _ in range(5):
+            solver2.train_iteration()
         infosets2 = solver2.num_infosets()
 
         # Should produce similar results (within 20% variance)
@@ -219,7 +222,8 @@ class TestMCCFRSolver:
         )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
-        solver.train(num_iterations=10, verbose=False)
+        for _ in range(10):
+            solver.train_iteration()
         solver.checkpoint()  # Should not crash
 
     def test_str_representation(self):
@@ -250,79 +254,3 @@ class TestMCCFRSolver:
         # Check custom stack size
         assert state.stacks[0] == 99  # 100 - 1 (SB)
         assert state.stacks[1] == 98  # 100 - 2 (BB)
-
-    def test_train_verbose(self):
-        """Test verbose training runs without error."""
-        action_abs = BettingActions()
-        card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
-
-        # Train with verbose=True (note: output only prints every 1000 iterations)
-        # Just verify it runs without error
-        solver.train(num_iterations=2, verbose=True)
-
-    def test_train_return_statistics(self):
-        """Test that train() returns correct statistics."""
-        action_abs = BettingActions()
-        card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
-
-        stats = solver.train(num_iterations=2, verbose=False)
-
-        assert "start_iteration" in stats
-        assert "end_iteration" in stats
-        assert "total_iterations" in stats
-        assert stats["total_iterations"] == 2
-        assert "final_avg_utility" in stats
-
-    def test_get_average_strategy_nonexistent_infoset(self):
-        """Test get_average_strategy with non-existent infoset."""
-        action_abs = BettingActions()
-        card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
-
-        # Create fake infoset key (preflop uses hand string)
-        fake_key = InfoSetKey(
-            player_position=0,
-            street=Street.PREFLOP,
-            betting_sequence="fake",
-            preflop_hand="AA",
-            postflop_bucket=None,
-            spr_bucket=0,
-        )
-
-        # Should raise ValueError
-        with pytest.raises(ValueError, match="Infoset not found"):
-            solver.get_average_strategy(fake_key)
-
-    def test_get_current_strategy_nonexistent_infoset(self):
-        """Test get_current_strategy with non-existent infoset."""
-        action_abs = BettingActions()
-        card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
-
-        # Create fake infoset key (preflop uses hand string)
-        fake_key = InfoSetKey(
-            player_position=0,
-            street=Street.PREFLOP,
-            betting_sequence="fake",
-            preflop_hand="AA",
-            postflop_bucket=None,
-            spr_bucket=0,
-        )
-
-        # Should raise ValueError
-        with pytest.raises(ValueError, match="Infoset not found"):
-            solver.get_current_strategy(fake_key)

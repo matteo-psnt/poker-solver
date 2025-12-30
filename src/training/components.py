@@ -13,7 +13,6 @@ from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop.precompute import PostflopPrecomputer
-from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.base import Storage
 from src.solver.storage.shared_array import SharedArrayStorage
@@ -197,7 +196,7 @@ def build_solver(
     action_abstraction: BettingActions,
     card_abstraction: BucketingStrategy,
     storage: Storage,
-) -> BaseSolver:
+) -> MCCFRSolver:
     """
     Build solver from config and components.
 
@@ -208,10 +207,10 @@ def build_solver(
         storage: Pre-built storage backend
 
     Returns:
-        BaseSolver instance (typically MCCFRSolver)
+        MCCFRSolver instance
 
     Raises:
-        ValueError: If solver type is unknown
+        ValueError: If solver configuration is invalid
     """
 
     return MCCFRSolver(

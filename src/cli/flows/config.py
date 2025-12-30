@@ -121,12 +121,6 @@ def _edit_training_params(ctx: CliContext, config: Config) -> Config:
         default=config.training.checkpoint_frequency,
         min_value=1,
     )
-    log_freq = prompts.prompt_int(
-        ctx,
-        "Log frequency (print progress every N iterations):",
-        default=config.training.log_frequency,
-        min_value=1,
-    )
     iterations_per_worker = prompts.prompt_int(
         ctx,
         "Iterations per worker (batch size multiplier for parallel training):",
@@ -145,7 +139,7 @@ def _edit_training_params(ctx: CliContext, config: Config) -> Config:
         default=config.training.runs_dir,
     )
 
-    if None in (iterations, checkpoint_freq, log_freq, iterations_per_worker, verbose, runs_dir):
+    if None in (iterations, checkpoint_freq, iterations_per_worker, verbose, runs_dir):
         return config
 
     return config.merge(
@@ -153,7 +147,6 @@ def _edit_training_params(ctx: CliContext, config: Config) -> Config:
             "training": {
                 "num_iterations": iterations,
                 "checkpoint_frequency": checkpoint_freq,
-                "log_frequency": log_freq,
                 "iterations_per_worker": iterations_per_worker,
                 "verbose": verbose,
                 "runs_dir": runs_dir,
