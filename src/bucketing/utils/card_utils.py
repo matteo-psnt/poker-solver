@@ -5,7 +5,12 @@ Provides common operations for extracting rank and suit from cards,
 eliminating duplicate code across the abstraction system.
 """
 
-from src.game.state import Card
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.game.state import Card
 
 
 def get_rank_char(card: Card) -> str:

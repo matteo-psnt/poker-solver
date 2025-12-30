@@ -5,13 +5,18 @@ An information set groups together all game states that are indistinguishable
 to a player given their information (hole cards, board, betting history).
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.game.actions import Action
-from src.game.state import Street
 from src.utils.numba_ops import average_strategy, regret_matching
+
+if TYPE_CHECKING:
+    from src.game.state import Street
 
 
 @dataclass(frozen=True)
@@ -47,7 +52,7 @@ class InfoSetKey:
 
     def __post_init__(self):
         """Validate that exactly one of preflop_hand or postflop_bucket is set."""
-        if self.street == Street.PREFLOP:
+        if self.street.name == "PREFLOP":
             if self.preflop_hand is None:
                 raise ValueError("preflop_hand must be set for PREFLOP street")
             if self.postflop_bucket is not None:
@@ -86,7 +91,7 @@ class InfoSetKey:
 
     def get_hand_repr(self) -> str:
         """Get human-readable hand representation."""
-        if self.street == Street.PREFLOP:
+        if self.street.name == "PREFLOP":
             return self.preflop_hand or ""
         else:
             return f"B{self.postflop_bucket}"

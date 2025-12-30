@@ -21,16 +21,14 @@ import traceback
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import numpy as np
 
 from src.bucketing.utils.infoset import InfoSetKey
 from src.solver.mccfr import MCCFRSolver
+from src.solver.storage.shared_array import SharedArrayStorage
 from src.utils.config import Config
-
-if TYPE_CHECKING:
-    from src.solver.storage.shared_array import SharedArrayStorage
-
-import numpy as np
 
 
 class JobType(Enum):

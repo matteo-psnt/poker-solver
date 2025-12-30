@@ -4,8 +4,14 @@ Preflop hand representation and mapping.
 Maps hole card pairs to canonical 169-hand notation (e.g., AKs, 72o, TT).
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from src.bucketing.utils.card_utils import cards_have_same_suit, get_rank_char
-from src.game.state import Card
+
+if TYPE_CHECKING:
+    from src.game.state import Card
 
 
 class PreflopHandClasses:

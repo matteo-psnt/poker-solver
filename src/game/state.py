@@ -11,6 +11,8 @@ from functools import lru_cache
 
 from treys import Card as TreysCard
 
+from src.bucketing.preflop.hand_classes import PreflopHandClasses
+from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import Action, ActionType
 
 # SPR (Stack-to-Pot Ratio) thresholds for bucketing
@@ -329,10 +331,6 @@ class GameState:
         Returns:
             InfoSetKey (will be implemented in abstraction module)
         """
-        # Imports here to avoid circular dependencies
-        from src.bucketing.preflop.hand_classes import PreflopHandClasses
-        from src.bucketing.utils.infoset import InfoSetKey
-
         # Compute SPR bucket
         effective_stack = min(self.stacks)
         spr = effective_stack / self.pot if self.pot > 0 else 0
