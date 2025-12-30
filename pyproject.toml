@@ -3,7 +3,7 @@ name = "poker-solver"
 version = "0.1.0"
 description = "Heads-Up No-Limit Hold'em solver using Monte Carlo CFR"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
     { name = "Matteo Pesenti" }
 ]
@@ -42,7 +42,7 @@ packages = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
