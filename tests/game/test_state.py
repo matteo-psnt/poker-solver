@@ -61,7 +61,7 @@ class TestCard:
         assert repr(card) == "As"
 
     def test_card_ordering(self):
-        # Test that cards can be compared (actual ordering depends on treys internals)
+        # Test that cards can be compared
         ace = Card.new("As")
         king = Card.new("Kh")
         deuce = Card.new("2s")

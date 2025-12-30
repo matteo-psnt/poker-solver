@@ -6,51 +6,39 @@ calculations for Texas Hold'em.
 """
 
 import eval7
-from treys import Card as TreysCard
 
 from src.game.state import Card
 
 _HAND_TYPE_TO_CLASS = {
     "Straight Flush": 1,
-    "Four of a Kind": 2,
+    "Quads": 2,  # eval7 uses "Quads" instead of "Four of a Kind"
     "Full House": 3,
     "Flush": 4,
     "Straight": 5,
-    "Three of a Kind": 6,
+    "Trips": 6,  # eval7 uses "Trips" instead of "Three of a Kind"
     "Two Pair": 7,
-    "One Pair": 8,
+    "Pair": 8,  # eval7 uses "Pair" instead of "One Pair"
     "High Card": 9,
 }
 _CLASS_TO_HAND_TYPE = {value: key for key, value in _HAND_TYPE_TO_CLASS.items()}
-_EVAL7_CARD_CACHE: dict[int, eval7.Card] | None = None
-
-
-def _get_eval7_card_cache() -> dict[int, eval7.Card]:
-    global _EVAL7_CARD_CACHE
-    if _EVAL7_CARD_CACHE is None:
-        cache: dict[int, eval7.Card] = {}
-        for card in Card.get_full_deck():
-            card_str = TreysCard.int_to_str(card.card_int)
-            cache[card.card_int] = eval7.Card(card_str)
-        _EVAL7_CARD_CACHE = cache
-    return _EVAL7_CARD_CACHE
 
 
 class HandEvaluator:
     """
     Fast hand evaluator for Texas Hold'em using eval7.
 
-    eval7 returns higher rank values = stronger hands.
+    eval7 returns rank values where higher is better.
     This wrapper inverts the rank so lower values remain stronger hands.
     """
 
-    def __init__(self):
-        self._card_cache = _get_eval7_card_cache()
+    # Max possible eval7 rank value (used for inversion)
+    _MAX_RANK = 100000000  # Larger than any possible eval7 rank
 
     @staticmethod
     def _normalize_rank(rank: int) -> int:
-        """Convert internal rank to eval7's positive rank for classification."""
-        return -rank if rank < 0 else rank
+        """Convert internal rank back to eval7's rank for classification."""
+        # Our internal ranks are inverted (MAX - eval7_rank), convert back to eval7's rank
+        return HandEvaluator._MAX_RANK - rank
 
     def evaluate(self, hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -> int:
         """
@@ -68,11 +56,12 @@ class HandEvaluator:
         if len(hole_cards) != 2:
             raise ValueError("Must have exactly 2 hole cards")
 
-        cards = [self._card_cache[card.card_int] for card in board]
-        cards.extend(self._card_cache[card.card_int] for card in hole_cards)
+        # Cards are already eval7.Card objects internally
+        cards = [card._card for card in board] + [card._card for card in hole_cards]
 
-        # Invert rank to preserve "lower is better" semantics.
-        return -eval7.evaluate(cards)
+        # eval7 uses "higher is better" semantics, invert to get "lower is better"
+        eval7_rank = eval7.evaluate(cards)
+        return self._MAX_RANK - eval7_rank
 
     def get_rank_class(self, rank: int) -> int:
         """

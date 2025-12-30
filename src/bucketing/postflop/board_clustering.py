@@ -14,7 +14,6 @@ from dataclasses import dataclass
 
 import numpy as np
 from sklearn.cluster import KMeans
-from treys import Card as TreysCard
 
 from src.bucketing.postflop.suit_isomorphism import (
     CanonicalCard,
@@ -87,7 +86,7 @@ class BoardClusterer:
         # === Suit Distribution Features ===
         suit_counts: dict[int, int] = {}
         for card in board:
-            suit = TreysCard.get_suit_int(card.card_int)
+            suit = card._card.suit  # suit (0-3)
             suit_counts[suit] = suit_counts.get(suit, 0) + 1
 
         sorted_suit_counts = sorted(suit_counts.values(), reverse=True)
@@ -108,7 +107,7 @@ class BoardClusterer:
         # === Rank Pairing Features ===
         rank_counts: dict[int, int] = {}
         for card in board:
-            rank = TreysCard.get_rank_int(card.card_int)
+            rank = card._card.rank  # rank (0=2, 12=A)
             rank_counts[rank] = rank_counts.get(rank, 0) + 1
 
         sorted_rank_counts = sorted(rank_counts.values(), reverse=True)
@@ -126,9 +125,7 @@ class BoardClusterer:
         features.append(1.0 if list(sorted_rank_counts[:2]) == [2, 2] else 0.0)  # Two pair
 
         # === Connectivity Features ===
-        ranks_sorted = sorted(
-            [TreysCard.get_rank_int(card.card_int) for card in board], reverse=True
-        )
+        ranks_sorted = sorted([card._card.rank for card in board], reverse=True)
 
         # Gap analysis (lower gaps = more connected)
         gaps = []

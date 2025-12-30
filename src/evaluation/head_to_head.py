@@ -7,8 +7,8 @@ losses, and chip distributions.
 
 from dataclasses import dataclass
 
+import eval7
 import numpy as np
-from treys import Deck
 
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
@@ -285,10 +285,10 @@ class HeadToHeadEvaluator:
     def _deal_initial_state(self, button: int) -> GameState:
         """Deal initial state with random cards."""
         # Create and shuffle deck
-        deck = Deck()
+        deck = eval7.Deck()
         np.random.shuffle(deck.cards)
 
-        # Deal hole cards
+        # Deal hole cards (wrap eval7.Card in our Card wrapper)
         hole_cards = (
             (Card(deck.cards[0]), Card(deck.cards[1])),
             (Card(deck.cards[2]), Card(deck.cards[3])),
@@ -314,17 +314,17 @@ class HeadToHeadEvaluator:
     def _deal_next_cards(self, state: GameState) -> GameState:
         """Deal next community cards."""
         # Create deck and remove known cards
-        deck = Deck()
+        deck = eval7.Deck()
         known_cards = set()
 
         for player_cards in state.hole_cards:
             for card in player_cards:
-                known_cards.add(card.card_int)
+                known_cards.add(card.mask)
 
         for card in state.board:
-            known_cards.add(card.card_int)
+            known_cards.add(card.mask)
 
-        deck.cards = [c for c in deck.cards if c not in known_cards]
+        deck.cards = [c for c in deck.cards if c.mask not in known_cards]
         np.random.shuffle(deck.cards)
 
         # Deal cards based on street
@@ -360,17 +360,17 @@ class HeadToHeadEvaluator:
     def _deal_remaining_cards(self, state: GameState) -> GameState:
         """Deal all remaining board cards for showdown (all-in situation)."""
         # Create deck and remove known cards
-        deck = Deck()
+        deck = eval7.Deck()
         known_cards = set()
 
         for player_cards in state.hole_cards:
             for card in player_cards:
-                known_cards.add(card.card_int)
+                known_cards.add(card.mask)
 
         for card in state.board:
-            known_cards.add(card.card_int)
+            known_cards.add(card.mask)
 
-        deck.cards = [c for c in deck.cards if c not in known_cards]
+        deck.cards = [c for c in deck.cards if c.mask not in known_cards]
         np.random.shuffle(deck.cards)
 
         # Deal remaining cards to complete board

@@ -6,8 +6,8 @@ Implements MCCFR with external sampling (default) or outcome sampling for scalab
 
 import random
 
+import eval7
 import numpy as np
-from treys import Deck
 
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
@@ -83,8 +83,8 @@ class MCCFRSolver:
             np.random.seed(seed)
 
         # Cache: Reuse deck instance to avoid repeated Random() creation
-        self._deck = Deck()
-        self._deck_cards = self._deck.cards[:]  # Keep original card list
+        self._deck = eval7.Deck()
+        self._deck_cards = list(self._deck.cards)  # Keep original card list
 
     def checkpoint(self) -> None:
         """Save a checkpoint of the current solver state."""
@@ -135,10 +135,10 @@ class MCCFRSolver:
         """
         # Reuse deck instance and shuffle
         # Much faster than creating new Deck() which creates new Random()
-        self._deck.cards = self._deck_cards[:]
+        self._deck.cards = list(self._deck_cards)
         random.shuffle(self._deck.cards)
 
-        # Deal hole cards
+        # Deal hole cards (wrap eval7.Card in our Card wrapper)
         hole_cards = (
             (Card(self._deck.cards[0]), Card(self._deck.cards[1])),
             (Card(self._deck.cards[2]), Card(self._deck.cards[3])),
@@ -488,20 +488,20 @@ class MCCFRSolver:
             New state with cards dealt
         """
         # Reuse deck instance
-        self._deck.cards = self._deck_cards[:]
+        self._deck.cards = list(self._deck_cards)
         known_cards = set()
 
         # Remove hole cards
         for player_cards in state.hole_cards:
             for card in player_cards:
-                known_cards.add(card.card_int)
+                known_cards.add(card.mask)
 
         # Remove board cards
         for card in state.board:
-            known_cards.add(card.card_int)
+            known_cards.add(card.mask)
 
-        # Filter deck
-        self._deck.cards = [c for c in self._deck.cards if c not in known_cards]
+        # Filter deck (deck contains eval7.Card objects)
+        self._deck.cards = [c for c in self._deck.cards if c.mask not in known_cards]
         random.shuffle(self._deck.cards)
 
         # Deal cards based on what's missing
@@ -549,17 +549,17 @@ class MCCFRSolver:
             State with complete 5-card board
         """
         # Reuse deck instance
-        self._deck.cards = self._deck_cards[:]
+        self._deck.cards = list(self._deck_cards)
         known_cards = set()
 
         for player_cards in state.hole_cards:
             for card in player_cards:
-                known_cards.add(card.card_int)
+                known_cards.add(card.mask)
 
         for card in state.board:
-            known_cards.add(card.card_int)
+            known_cards.add(card.mask)
 
-        self._deck.cards = [c for c in self._deck.cards if c not in known_cards]
+        self._deck.cards = [c for c in self._deck.cards if c.mask not in known_cards]
         random.shuffle(self._deck.cards)
 
         # Deal remaining cards to complete board
