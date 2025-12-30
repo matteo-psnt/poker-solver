@@ -397,6 +397,7 @@ class PostflopPrecomputer:
         metadata = {
             "config": {
                 "config_name": self.config.config_name,
+                "config_hash": self.config.get_config_hash(),
                 "num_board_clusters": {s.name: n for s, n in self.num_board_clusters.items()},
                 "representatives_per_cluster": self.config.representatives_per_cluster,
                 "num_buckets": {s.name: n for s, n in self.num_buckets.items()},

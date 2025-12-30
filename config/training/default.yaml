@@ -1,69 +1,79 @@
-# Default Configuration for HUNLHE Solver
+# Default Configuration Template for HUNLHE Solver
 # Heads-Up No-Limit Hold'em Monte Carlo CFR Solver
+#
+# This file shows ALL configurable options with explanations.
+# All values are COMMENTED OUT to use Python defaults from src/utils/config.py
+# Uncomment and modify only what you need to change.
 
 # ===== Game Configuration =====
-game:
-  starting_stack: 200  # BB units
-  small_blind: 1
-  big_blind: 2
+# game:
+#   starting_stack: 200  # BB units (default: 200)
+#   small_blind: 1       # (default: 1)
+#   big_blind: 2         # (default: 2)
 
 # ===== Action Abstraction =====
-# Research-grade abstraction for 200BB deep-stack HUNLHE
-# Based on standard CFR research (Johanson et al., Brown & Sandholm, DeepStack)
-action_abstraction:
-  # Preflop raise sizes (in BB units)
-  preflop_raises: [2.5, 3.5, 5.0]
-
-  # Postflop betting sizes (pot fractions, street-dependent)
-  postflop_bets:
-    flop: [0.33, 0.66, 1.25]  # Range bet, standard, overbet
-    turn: [0.50, 1.0, 1.5]    # Medium, pot, large overbet
-    river: [0.50, 1.0, 2.0]   # Thin value, pot, large overbet
-
-  # All-in handling: Only allowed when SPR < 2
-  all_in_spr_threshold: 2.0  # Disable all-in above this SPR
-
-  # Max raises per street (prevents infinite action trees)
-  max_raises_per_street: 4
+# action_abstraction:
+#   # Preflop raise sizes (in BB units)
+#   # preflop_raises: [2.5, 3.5, 5.0]  # default: [2.5, 3.5, 5.0]
+#
+#   # Postflop betting sizes (pot fractions, street-dependent)
+#   # postflop:
+#   #   flop: [0.33, 0.66, 1.25]   # Range bet, standard, overbet (default)
+#   #   turn: [0.50, 1.0, 1.5]     # Medium, pot, large overbet (default)
+#   #   river: [0.50, 1.0, 2.0]    # Thin value, pot, large overbet (default)
+#
+#   # All-in handling: Only allowed when SPR < threshold
+#   # all_in_spr_threshold: 2.0  # default: 2.0
+#
+#   # Max raises per street (prevents infinite action trees)
+#   # max_raises_per_street: 4   # default: 4
 
 # ===== Card Abstraction =====
-card_abstraction:
-  # Reference to precomputed abstraction config
-  config: default_plus
-  # Or use direct file path:
-  # abstraction_path: "data/combo_abstraction/combo-20251220-120000/combo_abstraction.pkl"
-
-# ===== SPR Bucketing =====
-spr_buckets:
-  # Thresholds for [shallow/medium, medium/deep]
-  thresholds: [4, 13]
+# card_abstraction:
+#   # Reference to precomputed abstraction config
+#   # config: default_plus  # default: "default_plus"
+#   # Or use direct file path:
+#   # abstraction_path: "data/combo_abstraction/combo-20251220-120000/combo_abstraction.pkl"
 
 # ===== Solver Configuration =====
-solver:
-  type: "mccfr"
-  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
-  cfr_plus: true  # Use CFR+ (100x faster convergence than vanilla CFR)
-  linear_cfr: true  # Use Linear CFR (additional 2-3x speedup)
+# solver:
+#   # Sampling method options:
+#   # - "external": Lower variance, slower (recommended for production)
+#   # - "outcome": Higher variance, faster (good for testing)
+#   # sampling_method: "external"  # default: "external"
+#
+#   # CFR+ provides ~100x faster convergence than vanilla CFR
+#   # cfr_plus: true  # default: true
+#
+#   # Linear CFR provides additional 2-3x speedup
+#   # linear_cfr: true  # default: true
 
 # ===== Training Configuration =====
-training:
-  num_iterations: 100000  # 100K iterations for quick test with CFR+ (default: 100_000)
-  checkpoint_frequency: 50000  # Save checkpoint every 5000 iterations (default: 50_000)
-  log_frequency: 1000  # Print progress every 1K iterations (default: 1_000)
-  iterations_per_worker: 1000  # Multiplier for batch size (default: 1_000)
-  verbose: true  # Show verbose output (default: true)
-  runs_dir: "data/runs"  # Base directory for training runs (default: data/runs)
+# training:
+#   # num_iterations: 100000           # Total iterations (default: 100_000)
+#   # checkpoint_frequency: 50000      # Save every N iterations (default: 50_000)
+#   # log_frequency: 1000              # Print progress every N iterations (default: 1_000)
+#   # iterations_per_worker: 1000      # Batch size multiplier for parallel (default: 1_000)
+#   # verbose: true                    # Show verbose output (default: true)
+#   # runs_dir: "data/runs"            # Output directory (default: "data/runs")
 
 # ===== Storage Configuration =====
-storage:
-  checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended, default: true)
-  initial_capacity: 2000000  # Initial infosets capacity, grows automatically (default: 2_000_000)
-  max_actions: 10  # Maximum actions per infoset (default: 10)
-  zarr_compression_level: 1  # ZStd level (1-9). Level 1 for fastest I/O, Level 3 for balance
-  zarr_chunk_size: 50000  # Infosets per chunk. Larger chunks = fewer files, faster loading
+# storage:
+#   # checkpoint_enabled: true         # Save periodic checkpoints (default: true, recommended)
+#   # initial_capacity: 2000000        # Initial infosets capacity (default: 2_000_000, grows automatically)
+#   # max_actions: 10                  # Max actions per infoset (default: 10)
+#
+#   # Zarr checkpoint compression (used since 2026-01-18)
+#   # zarr_compression_level: 3        # ZStd level (default: 3)
+#   #   - Level 1: Fastest I/O, larger files (~270MB for 2M infosets)
+#   #   - Level 3: Balanced (5.6x faster than old NPZ, 163MB for 2M infosets)
+#   #   - Level 5: Smaller files, slower writes (161MB for 2M infosets)
+#   # zarr_chunk_size: 10000           # Infosets per chunk (default: 10_000)
+#   #   - Larger chunks (50K-100K): Fewer files, faster loading
+#   #   - Smaller chunks (10K): Better for partial reads
 
 # ===== System Configuration =====
-system:
-  config_name: "default"  # Name of the config file
-  seed: null  # Random seed (null = random)
-  log_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+# system:
+#   # config_name: "default"           # Name of this config (default: "default")
+#   # seed: null                       # Random seed (default: null = random each run)
+#   # log_level: "INFO"                # Options: DEBUG, INFO, WARNING, ERROR (default: "INFO")

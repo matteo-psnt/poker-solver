@@ -62,9 +62,7 @@ def view_preflop_chart(ctx: CliContext) -> None:
 
     # For viewing charts, we don't need the full solver - just the storage
     # But MCCFRSolver requires action/card abstraction, so provide minimal instances
-    action_abs = BettingActions(
-        config.to_dict().get("action_abstraction"), big_blind=config.game.big_blind
-    )
+    action_abs = BettingActions(config.action_abstraction, big_blind=config.game.big_blind)
 
     solver = MCCFRSolver(
         action_abstraction=action_abs,

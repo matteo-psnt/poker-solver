@@ -4,7 +4,7 @@
 # ===== Action Abstraction =====
 action_abstraction:
   preflop_raises: [2.5, 3.5, 5.0]
-  postflop_bets:
+  postflop:
     flop: [0.33, 0.66, 1.25]
     turn: [0.50, 1.0, 1.5]
     river: [0.50, 1.0, 2.0]

@@ -4,6 +4,7 @@ Configuration loading - YAML overrides applied to dataclass defaults.
 Simple, clean, no duplication. All in one file.
 """
 
+import warnings
 from dataclasses import fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any, cast
@@ -72,6 +73,7 @@ def _merge_config(base: Any, overrides: dict[str, Any]) -> Any:
 
     # Build kwargs for replace()
     kwargs = {}
+    valid_field_names = {field.name for field in fields(base)}
 
     for field in fields(base):
         field_name = field.name
@@ -87,6 +89,17 @@ def _merge_config(base: Any, overrides: dict[str, Any]) -> Any:
                 # Direct override
                 kwargs[field_name] = override_value
         # else: keep current value (implicit)
+
+    # Warn about unknown keys in overrides
+    unknown_keys = set(overrides.keys()) - valid_field_names
+    if unknown_keys:
+        dataclass_name = type(base).__name__
+        warnings.warn(
+            f"Unknown keys in config for {dataclass_name}: {sorted(unknown_keys)}. "
+            f"Valid keys are: {sorted(valid_field_names)}",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return cast(Any, replace(base, **kwargs)) if kwargs else base  # type: ignore[type-var]
 

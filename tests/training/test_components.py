@@ -60,7 +60,7 @@ class TestBuildCardAbstraction:
             {"card_abstraction": {"abstraction_path": None, "config": "nonexistent_config_xyz"}}
         )
 
-        with pytest.raises(FileNotFoundError, match="No combo abstraction found"):
+        with pytest.raises(FileNotFoundError, match="Config file not found"):
             components.build_card_abstraction(config, prompt_user=False, auto_compute=False)
 
 

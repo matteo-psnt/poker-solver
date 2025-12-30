@@ -14,11 +14,11 @@ def main() -> None:
 
     items = [
         MenuItem("Train Solver", training.train_solver),
-        MenuItem("Evaluate Solver", training.evaluate_solver),
-        MenuItem("Combo Abstraction Tools", combo.combo_menu),
-        MenuItem("View Past Runs", training.view_runs),
         MenuItem("Resume Training", training.resume_training),
+        MenuItem("View Past Runs", training.view_runs),
+        MenuItem("Evaluate Solver", training.evaluate_solver),
         MenuItem("View Preflop Chart", view_preflop_chart),
+        MenuItem("Combo Abstraction Tools", combo.combo_menu),
     ]
 
     run_menu(ctx, "What would you like to do?", items, exit_label="Exit")

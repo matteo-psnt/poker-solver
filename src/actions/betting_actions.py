@@ -11,6 +11,7 @@ import xxhash
 
 from src.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
 from src.game.state import GameState
+from src.utils.config import ActionAbstractionConfig
 
 
 class BettingActions:
@@ -26,91 +27,45 @@ class BettingActions:
         Postflop: fold, call, check, bet 33% pot, bet 75% pot, all-in
     """
 
-    def __init__(self, config: dict | None = None, big_blind: int = 2):
+    def __init__(self, config: ActionAbstractionConfig | None = None, big_blind: int = 2):
         """
         Initialize action abstraction from configuration.
 
         Args:
-            config: Dictionary with abstraction parameters
-                   {
-                       'preflop_raises': [2.5, 3.5, 5.0],  # BB units
-                       'postflop': {  # Street-dependent
-                           'flop': [0.33, 0.66, 1.25],
-                           'turn': [0.50, 1.0, 1.5],
-                           'river': [0.50, 1.0, 2.0],
-                       },
-                       'all_in_spr_threshold': 2.0,  # Only allow all-in if SPR < threshold
-                   }
-                   If None, uses default abstraction.
+            config: ActionAbstractionConfig object. If None, uses default config.
             big_blind: Big blind size for preflop raise calculations
         """
         if config is None:
-            config = self._default_config()
-
-        defaults = self._default_config()
+            config = ActionAbstractionConfig()
+        if not isinstance(config, ActionAbstractionConfig):
+            raise TypeError("config must be an ActionAbstractionConfig")
 
         self.big_blind = big_blind
 
-        # Preflop raises: new format only
-        preflop_raises = config.get("preflop_raises")
-        if preflop_raises is None:
-            preflop_section = config.get("preflop", {})
-            if isinstance(preflop_section, dict):
-                preflop_raises = preflop_section.get("raises") or preflop_section.get("bets")
+        self.preflop_raises = list(config.preflop_raises)
 
-        self.preflop_raises = preflop_raises or defaults["preflop_raises"]
+        required_streets = ["flop", "turn", "river"]
+        postflop_keys = set(config.postflop.keys())
+        missing_streets = set(required_streets) - postflop_keys
+        if missing_streets:
+            raise ValueError(
+                "postflop must include all streets: "
+                f"{', '.join(required_streets)}. Missing: {', '.join(sorted(missing_streets))}."
+            )
 
-        # Street-dependent postflop bets (new format only)
-        postflop_config = config.get("postflop")
+        self.postflop_bets = {street: list(config.postflop[street]) for street in required_streets}
 
-        self.postflop_bets = {}
-        default_postflop = defaults["postflop"]
-
-        if postflop_config is None:
-            self.postflop_bets = default_postflop.copy()
-        elif isinstance(postflop_config, list):
-            for street in ["flop", "turn", "river"]:
-                self.postflop_bets[street] = postflop_config
-        elif isinstance(postflop_config, dict):
-            for street in ["flop", "turn", "river"]:
-                street_config = postflop_config.get(street, default_postflop[street])
-                if isinstance(street_config, dict):
-                    self.postflop_bets[street] = street_config.get("bets") or street_config.get(
-                        "sizes", default_postflop[street]
-                    )
-                else:
-                    self.postflop_bets[street] = street_config
-        else:
-            raise ValueError("Invalid postflop configuration format.")
-
-        # Fill any missing streets with defaults
-        for street in ["flop", "turn", "river"]:
-            if street not in self.postflop_bets or not self.postflop_bets[street]:
-                self.postflop_bets[street] = default_postflop[street]
+        if not self.preflop_raises:
+            raise ValueError("preflop_raises must contain at least one size.")
+        for street, sizes in self.postflop_bets.items():
+            if not sizes:
+                raise ValueError(f"postflop sizes for {street} must contain at least one size.")
 
         # All-in threshold (SPR)
-        self.all_in_spr_threshold = config.get(
-            "all_in_spr_threshold", defaults["all_in_spr_threshold"]
-        )
+        self.all_in_spr_threshold = config.all_in_spr_threshold
 
         # Max raises per street (caps action tree depth)
-        self.max_raises_per_street = config.get(
-            "max_raises_per_street", defaults["max_raises_per_street"]
-        )
-
-    @staticmethod
-    def _default_config() -> dict:
-        """Get default research-grade action abstraction."""
-        return {
-            "preflop_raises": [2.5, 3.5, 5.0],  # Standard raise sizes
-            "postflop": {
-                "flop": [0.33, 0.66, 1.25],  # Range, standard, overbet
-                "turn": [0.50, 1.0, 1.5],  # Medium, pot, large
-                "river": [0.50, 1.0, 2.0],  # Thin, pot, large overbet
-            },
-            "all_in_spr_threshold": 2.0,  # Only allow all-in when SPR < 2
-            "max_raises_per_street": 4,  # Cap raises per street (prevents infinite action trees)
-        }
+        self.max_raises_per_street = config.max_raises_per_street
 
     def get_bet_sizes(self, state: GameState) -> list[int]:
         """

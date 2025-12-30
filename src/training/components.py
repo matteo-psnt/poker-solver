@@ -7,11 +7,11 @@ to eliminate code duplication.
 """
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
+from src.bucketing.config import PrecomputeConfig
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.base import Storage
@@ -30,7 +30,7 @@ def build_action_abstraction(config: Config) -> BettingActions:
     Returns:
         BettingActions instance
     """
-    action_config = asdict(config.action_abstraction)
+    action_config = config.action_abstraction
     big_blind = config.game.big_blind
     return BettingActions(action_config, big_blind=big_blind)
 
@@ -81,6 +81,9 @@ def build_card_abstraction(
                 f"Please run 'Precompute Combo Abstraction' from the CLI with config '{abstraction_config}'.yaml first."
             )
 
+        expected_config = PrecomputeConfig.from_yaml(abstraction_config)
+        expected_hash = expected_config.get_config_hash()
+
         # Find abstraction matching this config name
         matching = []
         if base_path.exists():
@@ -111,6 +114,22 @@ def build_card_abstraction(
 
         # Use most recent if multiple matches
         most_recent = max(matching, key=lambda p: p.stat().st_mtime)
+
+        # Verify config hash matches
+        metadata_file = most_recent / "metadata.json"
+        with open(metadata_file) as f:
+            metadata = json.load(f)
+        saved_hash = metadata.get("config", {}).get("config_hash")
+
+        if saved_hash and saved_hash != expected_hash:
+            raise ValueError(
+                f"Card abstraction config hash mismatch for '{abstraction_config}':\n"
+                f"  Expected: {expected_hash}\n"
+                f"  Saved:    {saved_hash}\n"
+                f"The saved abstraction was computed with different parameters.\n"
+                f"Please re-run 'Precompute Combo Abstraction' with the current config."
+            )
+
         from src.bucketing.postflop.precompute import PostflopPrecomputer
 
         return PostflopPrecomputer.load(most_recent)
@@ -198,14 +217,10 @@ def build_solver(
     Raises:
         ValueError: If solver type is unknown
     """
-    solver_type = config.solver.type
 
-    if solver_type == "mccfr":
-        return MCCFRSolver(
-            action_abstraction=action_abstraction,
-            card_abstraction=card_abstraction,
-            storage=storage,
-            config=config,
-        )
-    else:
-        raise ValueError(f"Unknown solver type: {solver_type}")
+    return MCCFRSolver(
+        action_abstraction=action_abstraction,
+        card_abstraction=card_abstraction,
+        storage=storage,
+        config=config,
+    )

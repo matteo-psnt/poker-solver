@@ -113,7 +113,7 @@ class PostflopBucketer(BucketingStrategy):
 
     def __setstate__(self, state: dict) -> None:
         """Unpickle support - handles objects saved before new attributes were added."""
-        self.__dict__.update(state)  # type: ignore[attr-defined]
+        self.__dict__.update(state)
         # Initialize new attributes if they don't exist (backward compatibility)
         if not hasattr(self, "_fallback_count"):
             self._fallback_count = 0

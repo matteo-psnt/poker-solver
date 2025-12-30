@@ -4,6 +4,8 @@ Abstraction precomputation configuration - Single source of truth.
 Uses the same pattern as main Config - defaults in dataclass, YAML contains only overrides.
 """
 
+import hashlib
+import json
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -164,3 +166,33 @@ class PrecomputeConfig:
     def default(cls) -> "PrecomputeConfig":
         """Return default configuration (just dataclass defaults)."""
         return cls()
+
+    def get_config_hash(self) -> str:
+        """
+        Compute a stable hash of the abstraction configuration.
+
+        This hash is used to verify that a loaded abstraction matches the expected config.
+        If you load an abstraction with a different config hash, the bucketing may be
+        invalid because it was computed with different parameters.
+
+        Returns:
+            16-character hex string representing the config hash
+        """
+        # Create a stable dict representation of the config
+        # Exclude config_name since it's just a label, not a parameter
+        config_dict = {
+            "board_clusters_flop": self.board_clusters_flop,
+            "board_clusters_turn": self.board_clusters_turn,
+            "board_clusters_river": self.board_clusters_river,
+            "buckets_flop": self.buckets_flop,
+            "buckets_turn": self.buckets_turn,
+            "buckets_river": self.buckets_river,
+            "representatives_per_cluster": self.representatives_per_cluster,
+            "equity_samples": self.equity_samples,
+        }
+
+        # Sort keys for stability
+        stable_json = json.dumps(config_dict, sort_keys=True)
+
+        # Return first 16 chars of hex digest
+        return hashlib.sha256(stable_json.encode()).hexdigest()[:16]
