@@ -1,11 +1,14 @@
 import pickle
 import time
+import warnings
 from multiprocessing import shared_memory
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numcodecs
 import numpy as np
 import xxhash
+import zarr
 
 from src.bucketing.utils.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action, fold
@@ -15,7 +18,9 @@ from src.solver.storage.helpers import (
     _validate_action_signatures,
     build_legal_actions,
     get_missing_checkpoint_files,
+    load_action_signatures,
     load_checkpoint_data,
+    load_key_mapping,
 )
 
 if TYPE_CHECKING:
@@ -80,6 +85,8 @@ class SharedArrayStorage(Storage):
         checkpoint_dir: Path | None = None,
         ready_event: "EventType | None" = None,
         load_checkpoint_on_init: bool = True,
+        zarr_compression_level: int = 3,
+        zarr_chunk_size: int = 10_000,
     ):
         """
         Initialize shared array storage.
@@ -98,6 +105,8 @@ class SharedArrayStorage(Storage):
                         - Workers wait for it before attempting to attach
                         This eliminates race conditions during parallel startup.
             load_checkpoint_on_init: If True, load checkpoint data during initialization.
+            zarr_compression_level: ZStd compression level for Zarr checkpoints (1-9, default 3)
+            zarr_chunk_size: Number of infosets per chunk in Zarr format (default 10000)
         """
         self.num_workers = num_workers
         self.worker_id = worker_id
@@ -111,6 +120,10 @@ class SharedArrayStorage(Storage):
         self.base_slots_per_worker = (initial_capacity - 1) // num_workers
         self._extra_regions: list[tuple[int, int, int, int]] = []
         self._extra_allocations: list[dict[str, int]] = []
+
+        # Zarr checkpoint configuration
+        self.zarr_compression_level = zarr_compression_level
+        self.zarr_chunk_size = zarr_chunk_size
 
         # =====================================================================
         # Per-worker ID allocation (race-free)
@@ -928,10 +941,9 @@ class SharedArrayStorage(Storage):
         """
         Save checkpoint to disk (coordinator only).
 
-        After key collection from workers, _owned_keys contains ALL keys
-        from all workers, spanning multiple ID ranges. We save:
-        1. Complete key→ID mapping
-        2. Densified rows from shared arrays (avoid sparse ID gaps)
+        Uses Zarr format with ZStd compression for fast I/O and chunked storage.
+        After key collection from workers, saves complete key→ID mapping and
+        densified arrays to avoid sparse ID gaps.
         """
         if not self.checkpoint_dir or not self.is_coordinator:
             return
@@ -967,31 +979,76 @@ class SharedArrayStorage(Storage):
         reach_counts_dense = self.shared_reach_counts[old_ids].copy()
         cumulative_utility_dense = self.shared_cumulative_utility[old_ids].copy()
 
-        # Save as compressed NPZ (single file, 5-10x compression on sparse arrays)
-        np.savez_compressed(
-            paths.checkpoint_npz,
-            regrets=regrets_dense,
-            strategies=strategies_dense,
-            action_counts=action_counts_dense,
-            reach_counts=reach_counts_dense,
-            cumulative_utility=cumulative_utility_dense,
-        )
+        # Suppress harmless Zarr/zipfile warning about duplicate .zattrs entries
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Duplicate name")
+            store = zarr.ZipStore(paths.checkpoint_zarr, mode="w")
+            root = zarr.open(store, mode="w")
 
-        # Save action signatures (action type and amount for each infoset)
-        # This allows reconstructing actual Action objects on load
+            compressor = numcodecs.Blosc(
+                cname="zstd",
+                clevel=self.zarr_compression_level,
+                shuffle=numcodecs.Blosc.BITSHUFFLE,
+            )
+
+            chunk_size = self.zarr_chunk_size
+
+            root.create_dataset(
+                "regrets",
+                data=regrets_dense,
+                chunks=(chunk_size, self.max_actions),
+                compressor=compressor,
+                dtype=np.float64,
+            )
+            root.create_dataset(
+                "strategies",
+                data=strategies_dense,
+                chunks=(chunk_size, self.max_actions),
+                compressor=compressor,
+                dtype=np.float64,
+            )
+            root.create_dataset(
+                "action_counts",
+                data=action_counts_dense,
+                chunks=(chunk_size,),
+                compressor=compressor,
+                dtype=np.int32,
+            )
+            root.create_dataset(
+                "reach_counts",
+                data=reach_counts_dense,
+                chunks=(chunk_size,),
+                compressor=compressor,
+                dtype=np.int64,
+            )
+            root.create_dataset(
+                "cumulative_utility",
+                data=cumulative_utility_dense,
+                chunks=(chunk_size,),
+                compressor=compressor,
+                dtype=np.float64,
+            )
+
+            # Store metadata
+            root.attrs["iteration"] = iteration
+            root.attrs["num_infosets"] = len(items)
+            root.attrs["max_actions"] = self.max_actions
+            root.attrs["timestamp"] = time.time()
+            root.attrs["format_version"] = "1.0"
+
+            store.close()
+
+        # Save action signatures
         action_sigs = {}
         for new_id, (_, old_id) in enumerate(items):
             actions = self._legal_actions_cache.get(old_id)
             if actions is None:
                 continue
-            # Store (action_type_name, amount) tuples
-            # Use .name instead of .value for readability and enum reordering safety
             action_sigs[new_id] = [(action.type.name, action.amount) for action in actions]
 
         with open(paths.action_signatures, "wb") as f:
             pickle.dump(action_sigs, f)
 
-        # Validate before declaring checkpoint done (fail fast on corruption)
         _validate_action_signatures(
             action_counts_dense,
             action_sigs,
@@ -1002,9 +1059,10 @@ class SharedArrayStorage(Storage):
         """
         Load checkpoint from disk.
 
-        Supports loading checkpoints created with different worker configurations.
-        Each worker loads only the keys it owns based on current hash-based partitioning.
-        For sequential mode (num_workers=1), the single worker loads all keys.
+        Optimized version:
+        1. Pre-filter keys by ownership (vectorized hash computation)
+        2. Load only the data we need (via array indexing)
+        3. Bulk copy using NumPy fancy indexing
 
         Returns:
             True if checkpoint was loaded, False otherwise
@@ -1016,67 +1074,82 @@ class SharedArrayStorage(Storage):
         if missing_files:
             return False
 
+        # Load metadata first (cheap)
+        paths = CheckpointPaths.from_dir(self.checkpoint_dir)
+        mapping_data = load_key_mapping(paths)
+        saved_owned_keys = mapping_data["owned_keys"]
+        saved_action_sigs = load_action_signatures(paths)
+
+        if not saved_owned_keys:
+            return True
+
+        # Pre-filter keys by ownership (vectorized)
+        # Build list of (key, old_id) for keys this worker owns
+        my_keys = []
+        my_old_ids = []
+        for key, old_id in saved_owned_keys.items():
+            if self.get_owner(key) == self.worker_id:
+                my_keys.append(key)
+                my_old_ids.append(old_id)
+
+        if not my_keys:
+            print(f"Worker {self.worker_id} owns 0/{len(saved_owned_keys)} keys from checkpoint")
+            return True
+
+        # Convert to numpy array for vectorized indexing
+        my_old_ids_array = np.array(my_old_ids, dtype=np.int32)
+
+        # Load checkpoint arrays (full load, but only once)
         data = load_checkpoint_data(
             self.checkpoint_dir, context="SharedArrayStorage.load_checkpoint"
         )
-        saved_owned_keys = data.owned_keys
-
-        saved_regrets = data.arrays["regrets"]
-        saved_action_counts = data.arrays["action_counts"]
-        saved_strategies = data.arrays["strategies"]
-        saved_reach_counts = data.arrays["reach_counts"]
-        saved_cumulative_utility = data.arrays["cumulative_utility"]
 
         if data.max_actions != self.max_actions:
             raise ValueError(
-                "Checkpoint max_actions does not match current storage "
-                f"({data.max_actions} vs {self.max_actions})"
+                f"Checkpoint max_actions mismatch: {data.max_actions} vs {self.max_actions}"
             )
 
         if self.capacity < data.max_id + 1:
-            raise ValueError(
-                "Storage capacity is smaller than checkpoint max_id + 1 "
-                f"({self.capacity} vs {data.max_id + 1})"
-            )
+            raise ValueError(f"Storage capacity too small: {self.capacity} vs {data.max_id + 1}")
 
-        # Load action signatures
-        saved_action_sigs = data.action_signatures
-        print(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
+        # Extract only the rows we need (vectorized fancy indexing)
+        my_regrets = data.arrays["regrets"][my_old_ids_array, :]
+        my_strategies = data.arrays["strategies"][my_old_ids_array, :]
+        my_action_counts = data.arrays["action_counts"][my_old_ids_array]
+        my_reach_counts = data.arrays["reach_counts"][my_old_ids_array]
+        my_utility = data.arrays["cumulative_utility"][my_old_ids_array]
 
-        # Re-partition keys based on current worker configuration
-        # Each key is assigned to a worker using hash-based partitioning
-        loaded_count = 0
-        for key, old_id in list(saved_owned_keys.items()):
-            # Determine which worker should own this key
-            owner_id = self.get_owner(key)
-
-            # Only load keys that belong to this worker
-            if owner_id != self.worker_id:
-                continue
-
-            # Allocate new ID in this worker's range
+        # Allocate new IDs for all keys at once
+        new_ids = []
+        for key in my_keys:
             new_id = self._allocate_id()
             self._owned_keys[key] = new_id
+            new_ids.append(new_id)
 
-            # Copy data from old checkpoint position to new position
-            n_actions = saved_action_counts[old_id]
-            self.shared_action_counts[new_id] = n_actions
-            self.shared_regrets[new_id, :n_actions] = saved_regrets[old_id, :n_actions]
-            self.shared_strategy_sum[new_id, :n_actions] = saved_strategies[old_id, :n_actions]
-            self.shared_reach_counts[new_id] = saved_reach_counts[old_id]
-            self.shared_cumulative_utility[new_id] = saved_cumulative_utility[old_id]
+        new_ids_array = np.array(new_ids, dtype=np.int32)
 
-            # Reconstruct legal actions from signatures
+        # Bulk copy using vectorized operations
+        self.shared_action_counts[new_ids_array] = my_action_counts
+        self.shared_reach_counts[new_ids_array] = my_reach_counts
+        self.shared_cumulative_utility[new_ids_array] = my_utility
+
+        # Copy variable-length arrays (regrets/strategies)
+        # Still need a loop, but much smaller and more cache-friendly
+        for idx, (new_id, old_id) in enumerate(zip(new_ids, my_old_ids)):
+            n_actions = my_action_counts[idx]
+            if n_actions > 0:
+                self.shared_regrets[new_id, :n_actions] = my_regrets[idx, :n_actions]
+                self.shared_strategy_sum[new_id, :n_actions] = my_strategies[idx, :n_actions]
+
+            # Reconstruct legal actions
             legal_actions = build_legal_actions(
                 saved_action_sigs, old_id, "SharedArrayStorage.load_checkpoint"
             )
             self._legal_actions_cache[new_id] = legal_actions
 
-            loaded_count += 1
-
         print(
-            f"Worker {self.worker_id} loaded {loaded_count}/{len(saved_owned_keys)} "
-            f"infosets from checkpoint (worker owns {loaded_count} keys)"
+            f"Worker {self.worker_id} loaded {len(my_keys)}/{len(saved_owned_keys)} "
+            f"infosets from checkpoint"
         )
         return True
 

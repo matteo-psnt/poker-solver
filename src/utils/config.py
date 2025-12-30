@@ -43,6 +43,8 @@ class StorageConfig:
     initial_capacity: int = 2_000_000
     max_actions: int = 10
     checkpoint_enabled: bool = True
+    zarr_compression_level: int = 3
+    zarr_chunk_size: int = 10_000
 
 
 @dataclass(frozen=True)

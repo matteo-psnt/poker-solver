@@ -115,6 +115,8 @@ def _worker_loop(
             is_coordinator=False,  # Worker attaches, doesn't create
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
             ready_event=ready_event,
+            zarr_compression_level=config.storage.zarr_compression_level,
+            zarr_chunk_size=config.storage.zarr_chunk_size,
         )
 
         # Create solver config with worker-specific seed
@@ -571,6 +573,8 @@ class SharedArrayWorkerManager:
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
             ready_event=self.ready_event,  # Coordinator signals when memory is ready
             load_checkpoint_on_init=False,
+            zarr_compression_level=config.storage.zarr_compression_level,
+            zarr_chunk_size=config.storage.zarr_chunk_size,
         )
         total_mb = initial_capacity * max_actions * 4 * 2 // 1024 // 1024
         print(f"[Master] Shared memory created: {total_mb}MB total", flush=True)

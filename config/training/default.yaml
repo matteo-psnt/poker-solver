@@ -59,6 +59,8 @@ storage:
   checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended, default: true)
   initial_capacity: 2000000  # Initial infosets capacity, grows automatically (default: 2_000_000)
   max_actions: 10  # Maximum actions per infoset (default: 10)
+  zarr_compression_level: 3  # ZStd level (1-9). Level 3 is optimal: 5.6x faster writes, reasonable file size
+  zarr_chunk_size: 10000  # Infosets per chunk. Lower=faster partial loads, higher=better compression
 
 # ===== System Configuration =====
 system:
