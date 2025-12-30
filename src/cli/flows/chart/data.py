@@ -21,6 +21,7 @@ class ChartDataSource(Protocol):
     @property
     def starting_stack(self) -> int: ...
 
+
 POSITION_OPTIONS = [
     {"id": 0, "label": "Button (BTN)"},
     {"id": 1, "label": "Big Blind (BB)"},
