@@ -27,6 +27,11 @@ limit enforced by Ruff. Use `snake_case` for functions/variables, `PascalCase`
 for classes, and `UPPER_SNAKE_CASE` for constants. Keep modules focused and
 prefer explicit, typed interfaces between solver, training, and evaluation
 layers.
+Imports must be placed at the top of the file unless absolutely necessary;
+avoid importing inside functions.
+This is a research-grade project; call out anything that does not meet that
+bar, including bugs, correctness risks, or unelegant code that can be
+optimized.
 
 ## Testing Guidelines
 Tests are written with pytest and should follow the configured patterns:
