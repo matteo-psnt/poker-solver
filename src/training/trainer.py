@@ -23,7 +23,7 @@ from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.helpers import get_missing_checkpoint_files
 from src.training import components
 from src.training.metrics import MetricsTracker
-from src.training.parallel import SharedArrayWorkerManager
+from src.training.parallel_manager import SharedArrayWorkerManager
 from src.training.run_tracker import RunTracker
 from src.utils.config import Config
 

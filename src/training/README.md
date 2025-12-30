@@ -385,7 +385,7 @@ def external_sampling_cfr(state, player, reach_prob):
         return sample_chance_action()
 
     # Get information set (abstract state)
-    infoset_key = get_infoset_key(state, player)
+    infoset_key = encode_infoset_key(state, player, card_abstraction)
     infoset = storage.get_infoset(infoset_key)
 
     # Compute strategy from regrets

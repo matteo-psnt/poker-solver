@@ -327,22 +327,6 @@ class GameState:
             rules = get_rules()
         return rules.get_payoff(self, player)
 
-    def get_infoset_key(self, player: int, card_abstraction):
-        """
-        Compatibility wrapper for infoset-key encoding.
-
-        Args:
-            player: Player index (0 or 1)
-            card_abstraction: BucketingStrategy instance for bucketing
-
-        Returns:
-            InfoSetKey
-        """
-        # Lazy import keeps game/domain layer decoupled from solver path.
-        from src.solver.infoset_encoder import encode_infoset_key
-
-        return encode_infoset_key(self, player, card_abstraction)
-
     def _normalize_betting_sequence(self) -> str:
         """
         Normalize betting history to string for infoset key.
