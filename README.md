@@ -179,8 +179,7 @@ uv run ty check
 
 The preflop chart viewer now serves data through FastAPI.
 
-- Default: FastAPI server (`/health`, `/api/meta`, `/api/chart`) + static UI from `ui/dist`
-- Fallback: legacy stdlib HTTP server by setting `POKER_SOLVER_USE_LEGACY_CHART_SERVER=1`
+- FastAPI server (`/health`, `/api/meta`, `/api/chart`) + static UI from `ui/dist`
 
 ### Project Structure
 

@@ -1,8 +1,12 @@
 """Menu composition for combo abstraction CLI flows."""
 
-from src.cli.flows.combo_analysis import handle_combo_analyze_bucketing, handle_combo_coverage
-from src.cli.flows.combo_inspect import handle_combo_info, handle_combo_test_lookup
-from src.cli.flows.combo_precompute import handle_combo_precompute
+from src.cli.flows.combo_precompute import (
+    handle_combo_analyze_bucketing,
+    handle_combo_coverage,
+    handle_combo_info,
+    handle_combo_precompute,
+    handle_combo_test_lookup,
+)
 from src.cli.ui.context import CliContext
 from src.cli.ui.menu import MenuItem, run_menu
 
@@ -18,11 +22,3 @@ def combo_menu(ctx: CliContext) -> None:
     ]
 
     run_menu(ctx, "Combo Abstraction Tools:", items, exit_label="Back")
-
-
-def combo_abstraction_menu(ctx: CliContext) -> None:
-    """Backward-compatible alias for the combo menu."""
-    combo_menu(ctx)
-
-
-__all__ = ["combo_menu", "combo_abstraction_menu"]
