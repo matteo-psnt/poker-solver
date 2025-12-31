@@ -4,12 +4,13 @@
 
 # Board clustering (public-state abstraction)
 board_clusters:
-  flop: 50    # 50 clusters × 1 rep × ~450 hands = ~22.5k equity computations
-  turn: 100   # 100 clusters × 1 rep × ~450 hands = ~45k equity computations
-  river: 200  # 200 clusters × 1 rep × ~450 hands = ~90k equity computations
+  flop: 50    # 50 clusters × 5 reps × ~450 hands = ~112.5k equity computations
+  turn: 100   # 100 clusters × 5 reps × ~450 hands = ~225k equity computations
+  river: 200  # 200 clusters × 5 reps × ~450 hands = ~450k equity computations
 
 # Representatives per cluster (for equity computation)
-representatives_per_cluster: 1
+representatives_per_cluster: 5
+representative_selection: closest
 
 # Equity buckets per street
 buckets:
@@ -18,7 +19,7 @@ buckets:
   river: 200
 
 # Equity calculation settings
-equity_samples: 1000  # Monte Carlo samples per (board, hand) pair
+equity_samples: 2000  # Monte Carlo samples per (board, hand) pair
 
 # Clustering algorithm settings
 kmeans_max_iter: 300

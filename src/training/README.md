@@ -447,7 +447,7 @@ action_abstraction:
   river_bets: [0.5, 0.75, 1.0, "allin"]
 
 card_abstraction:
-  config: "default_plus"  # References precomputed abstraction
+  config: "default"  # References precomputed abstraction
 
 storage:
   backend: "disk"

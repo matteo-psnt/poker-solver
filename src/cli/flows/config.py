@@ -67,7 +67,7 @@ def edit_config(ctx: CliContext, config: Config) -> Config:
         "Training Parameters (iterations, checkpoints, etc.)",
         "Game Settings (stack size, blinds)",
         "Solver Settings (CFR+, Linear CFR, sampling)",
-        "Action Abstraction (bet sizes, raise cap)",
+        "Action Model & Resolver (templates, raise cap)",
         "Card Abstraction",
         "Storage Settings (capacity, compression)",
         "System Settings (seed, logging)",
@@ -91,7 +91,7 @@ def edit_config(ctx: CliContext, config: Config) -> Config:
             config = _edit_game_settings(ctx, config)
         elif "Solver Settings" in category:
             config = _edit_solver_settings(ctx, config)
-        elif "Action Abstraction" in category:
+        elif "Action Model" in category:
             config = _edit_action_abstraction(ctx, config)
         elif "Card Abstraction" in category:
             config = _edit_card_abstraction(ctx, config)
@@ -251,20 +251,20 @@ def _edit_solver_settings(ctx: CliContext, config: Config) -> Config:
 
 
 def _edit_action_abstraction(ctx: CliContext, config: Config) -> Config:
-    """Edit action abstraction settings."""
-    print("Action Abstraction")
+    """Edit action model and resolver settings."""
+    print("Action Model & Resolver")
     print("-" * 40)
 
     max_raises = prompts.prompt_int(
         ctx,
         "Max raises per street (prevents infinite trees):",
-        default=config.action_abstraction.max_raises_per_street,
+        default=config.resolver.max_raises_per_street,
         min_value=1,
     )
-    spr_threshold = prompts.prompt_float(
+    jam_spr_cutoff = prompts.prompt_float(
         ctx,
-        "All-in SPR threshold (allow all-in when SPR < threshold):",
-        default=config.action_abstraction.all_in_spr_threshold,
+        "Jam SPR cutoff for 'jam_low_spr' templates:",
+        default=config.action_model.all_in_spr_threshold,
         min_value=0.0,
     )
 
@@ -275,49 +275,75 @@ def _edit_action_abstraction(ctx: CliContext, config: Config) -> Config:
         default=False,
     )
 
-    if None in (max_raises, spr_threshold):
+    if None in (max_raises, jam_spr_cutoff):
         return config
 
+    existing_buckets = list(config.action_model.spr_buckets)
+    if len(existing_buckets) < 2:
+        existing_buckets = [jam_spr_cutoff, max(jam_spr_cutoff, 6.0)]
+    else:
+        existing_buckets[0] = jam_spr_cutoff
+
     merge_dict = {
-        "action_abstraction": {
+        "resolver": {
             "max_raises_per_street": max_raises,
-            "all_in_spr_threshold": spr_threshold,
-        }
+        },
+        "action_model": {
+            "spr_buckets": existing_buckets,
+        },
     }
 
     if customize_bets:
         ui.info("\nPreflop Raise Sizes (BB units):")
+        default_preflop = [
+            float(v)
+            for v in config.action_model.preflop_templates.get("sb_first_in", [])
+            if isinstance(v, (int, float))
+        ]
         preflop_raises = _edit_list_of_floats(
             ctx,
             "Enter raise sizes separated by commas",
-            default=config.action_abstraction.preflop_raises,
+            default=default_preflop or [2.0, 2.5],
         )
 
         ui.info("\nPostflop Bet Sizes (pot fractions):")
+        first_aggressive = [
+            float(v)
+            for v in config.action_model.postflop_templates.get("first_aggressive", [])
+            if isinstance(v, (int, float))
+        ]
         flop_bets = _edit_list_of_floats(
             ctx,
             "Flop bet sizes (e.g. 0.33, 0.66, 1.25):",
-            default=config.action_abstraction.postflop["flop"],
+            default=first_aggressive or [0.33, 0.75, 1.25],
         )
         turn_bets = _edit_list_of_floats(
             ctx,
             "Turn bet sizes (e.g. 0.50, 1.0, 1.5):",
-            default=config.action_abstraction.postflop["turn"],
+            default=first_aggressive or [0.5, 1.0, 1.5],
         )
         river_bets = _edit_list_of_floats(
             ctx,
             "River bet sizes (e.g. 0.50, 1.0, 2.0):",
-            default=config.action_abstraction.postflop["river"],
+            default=first_aggressive or [0.5, 1.0, 2.0],
         )
 
+        preflop_templates = dict(config.action_model.preflop_templates)
+        postflop_templates = dict(config.action_model.postflop_templates)
+
         if preflop_raises:
-            merge_dict["action_abstraction"]["preflop_raises"] = preflop_raises
+            passive = [
+                token
+                for token in preflop_templates.get("sb_first_in", [])
+                if isinstance(token, str) and token in {"fold", "call", "limp"}
+            ]
+            preflop_templates["sb_first_in"] = passive + preflop_raises
         if flop_bets and turn_bets and river_bets:
-            merge_dict["action_abstraction"]["postflop"] = {
-                "flop": flop_bets,
-                "turn": turn_bets,
-                "river": river_bets,
-            }
+            # Keep one shared aggressive template for simplicity in the editor.
+            postflop_templates["first_aggressive"] = flop_bets
+
+        merge_dict["action_model"]["preflop_templates"] = preflop_templates
+        merge_dict["action_model"]["postflop_templates"] = postflop_templates
 
     return config.merge(merge_dict)
 
@@ -410,11 +436,11 @@ def _edit_card_abstraction(ctx: CliContext, config: Config) -> Config:
         ui.error(f"No abstraction config files found in {ctx.config_dir / 'abstraction'}/")
         return config
 
-    default_config = config.card_abstraction.config or "default_plus"
+    default_config = config.card_abstraction.config or "default"
     if default_config in available_configs:
         prompt_default = default_config
-    elif "default_plus" in available_configs:
-        prompt_default = "default_plus"
+    elif "default" in available_configs:
+        prompt_default = "default"
     else:
         prompt_default = available_configs[0]
 
