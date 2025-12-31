@@ -750,7 +750,8 @@ class SharedArrayWorkerManager:
         all_owned_keys: Dict = {}
         all_legal_actions: Dict = {}
 
-        for _ in range(self.num_workers):
+        responses_received = 0
+        while responses_received < self.num_workers:
             try:
                 result = self.result_queue.get(timeout=timeout)
                 if result.get("type") == "keys_collected":
@@ -760,8 +761,12 @@ class SharedArrayWorkerManager:
                     # Merge into coordinator's mappings
                     all_owned_keys.update(owned_keys)
                     all_legal_actions.update(legal_actions)
+                    responses_received += 1
+                # Ignore other message types that might be in the queue
             except queue.Empty:
-                raise RuntimeError("Timeout waiting for key collection")
+                raise RuntimeError(
+                    f"Timeout waiting for key collection ({responses_received}/{self.num_workers} received)"
+                )
 
         return {
             "owned_keys": all_owned_keys,
