@@ -1,410 +1,254 @@
 """
 Parallel training infrastructure for MCCFR solver.
 
-Manages persistent worker pools, job distribution, and result merging
-for multi-process training.
+High-performance shared array architecture:
+- Coordinator creates shared memory once at startup
+- Workers attach to shared memory (no recreation)
+- Flat NumPy arrays as live data structure
+- Lock-free reads, owner-only writes
+- Cross-partition updates via queues
 """
 
 import multiprocessing as mp
 import pickle
 import queue
 import random
-import struct
 import time
 import traceback
 from enum import Enum
-from multiprocessing import shared_memory
-from typing import Any, Dict, List, Union
+from typing import TYPE_CHECKING, Dict, List, Tuple
+
+if TYPE_CHECKING:
+    from src.solver.storage import SharedArrayStorage
 
 import numpy as np
 
 
 class JobType(Enum):
-    """Types of jobs that can be sent to worker processes."""
+    """Job types for parallel training."""
 
     RUN_ITERATIONS = "run_iterations"
-    BROADCAST_REGRETS = "broadcast_regrets"  # Sync master regrets to workers
+    SYNC_KEYS = "sync_keys"  # Sync key mappings across workers
+    APPLY_UPDATES = "apply_updates"  # Apply cross-partition updates
     SHUTDOWN = "shutdown"
 
 
-def _serialize_infosets_to_shm(infoset_data: Dict, shm_name: str):
-    """
-    Serialize infosets to shared memory buffer for zero-copy transfer.
-
-    Format:
-    - 4 bytes: num_infosets (uint32)
-    - For each infoset:
-      - 4 bytes: key_length (uint32)
-      - key_length bytes: pickled key
-      - 4 bytes: num_actions (uint32)
-      - num_actions * 4 bytes: regrets (float32)
-      - num_actions * 4 bytes: strategies (float32)
-      - 4 bytes: reach_count (uint32)
-      - 8 bytes: cumulative_utility (float64)
-
-    Args:
-        infoset_data: Dictionary mapping InfoSetKey -> data dict
-        shm_name: Name for the shared memory segment
-
-    Returns:
-        tuple: (SharedMemory object, total size in bytes)
-    """
-    # Calculate total size needed
-    total_size = 4  # num_infosets
-    key_bytes_list = []
-    for key, data in infoset_data.items():
-        key_bytes = pickle.dumps(key)
-        key_bytes_list.append((key, key_bytes))
-        total_size += 4 + len(key_bytes)  # key_length + key
-        total_size += 4  # num_actions
-        total_size += len(data["regrets"]) * 4  # regrets (float32)
-        total_size += len(data["strategy_sum"]) * 4  # strategies (float32)
-        total_size += 4  # reach_count (uint32)
-        total_size += 8  # cumulative_utility (float64)
-
-    # Create shared memory
-    try:
-        stale_shm = shared_memory.SharedMemory(name=shm_name)
-        stale_shm.close()
-        stale_shm.unlink()
-    except FileNotFoundError:
-        # Good - no stale shared memory
-        pass
-
-    shm = shared_memory.SharedMemory(create=True, size=total_size, name=shm_name)
-
-    try:
-        # Write data
-        buf = shm.buf
-        offset = 0
-
-        # Write num_infosets
-        struct.pack_into("I", buf, offset, len(infoset_data))
-        offset += 4
-
-        # Write each infoset
-        for key, key_bytes in key_bytes_list:
-            data = infoset_data[key]
-
-            # Write key
-            struct.pack_into("I", buf, offset, len(key_bytes))
-            offset += 4
-            buf[offset : offset + len(key_bytes)] = key_bytes
-            offset += len(key_bytes)
-
-            # Write regrets/strategies
-            num_actions = len(data["regrets"])
-            struct.pack_into("I", buf, offset, num_actions)
-            offset += 4
-
-            regrets_bytes = np.array(data["regrets"], dtype=np.float32).tobytes()
-            buf[offset : offset + len(regrets_bytes)] = regrets_bytes
-            offset += len(regrets_bytes)
-
-            strategies_bytes = np.array(data["strategy_sum"], dtype=np.float32).tobytes()
-            buf[offset : offset + len(strategies_bytes)] = strategies_bytes
-            offset += len(strategies_bytes)
-
-            # Write metadata
-            struct.pack_into("I", buf, offset, data["reach_count"])
-            offset += 4
-            struct.pack_into("d", buf, offset, data["cumulative_utility"])
-            offset += 8
-
-        return shm, total_size
-
-    except Exception:
-        # Cleanup on error
-        shm.close()
-        shm.unlink()
-        raise
-
-
-def _deserialize_infosets_from_shm(shm_name: str, shm_size: int, cleanup: bool = False) -> Dict:
-    """
-    Deserialize infosets from shared memory buffer.
-
-    Args:
-        shm_name: Name of the shared memory segment
-        shm_size: Expected size of the shared memory (for validation)
-        cleanup: If True, unlink (delete) the shared memory after reading.
-                 Use True when reading worker results (worker created it, master should delete).
-                 Use False when reading broadcasts (master created it, workers shouldn't delete).
-
-    Returns:
-        Dict mapping InfoSetKey -> data dict with regrets, strategy_sum, etc.
-    """
-    shm = None
-    try:
-        shm = shared_memory.SharedMemory(name=shm_name)
-        buf = shm.buf
-        offset = 0
-
-        # Read num_infosets
-        num_infosets = struct.unpack_from("I", buf, offset)[0]
-        offset += 4
-
-        infoset_data = {}
-
-        # Read each infoset
-        for _ in range(num_infosets):
-            # Read key
-            key_length = struct.unpack_from("I", buf, offset)[0]
-            offset += 4
-            key_bytes = bytes(buf[offset : offset + key_length])
-            key = pickle.loads(key_bytes)
-            offset += key_length
-
-            # Read arrays
-            num_actions = struct.unpack_from("I", buf, offset)[0]
-            offset += 4
-
-            regrets = np.frombuffer(buf, dtype=np.float32, count=num_actions, offset=offset).copy()
-            offset += num_actions * 4
-
-            strategies = np.frombuffer(
-                buf, dtype=np.float32, count=num_actions, offset=offset
-            ).copy()
-            offset += num_actions * 4
-
-            # Read metadata
-            reach_count = struct.unpack_from("I", buf, offset)[0]
-            offset += 4
-            cumulative_utility = struct.unpack_from("d", buf, offset)[0]
-            offset += 8
-
-            infoset_data[key] = {
-                "regrets": regrets,
-                "strategy_sum": strategies,
-                "reach_count": reach_count,
-                "cumulative_utility": cumulative_utility,
-                # Note: legal_actions not included in shm transfer (reconstructed from storage)
-            }
-
-        return infoset_data
-
-    finally:
-        # Close shared memory (detach from this process)
-        if shm is not None:
-            shm.close()
-            # Conditionally unlink based on who created it
-            if cleanup:
-                # Master reading worker results: delete the shm (worker created it)
-                try:
-                    shm.unlink()
-                except FileNotFoundError:
-                    pass  # Already cleaned up
-            # else: Workers reading broadcast: don't delete (master created it)
-
-
-def _persistent_worker_loop(
+def _worker_loop(
     worker_id: int,
+    num_workers: int,
+    session_id: str,
     config_dict: Dict,
     serialized_action_abstraction: bytes,
     serialized_card_abstraction: bytes,
     base_seed: int,
     job_queue: mp.Queue,
     result_queue: mp.Queue,
+    update_queues: List[mp.Queue],  # One queue per worker for cross-partition updates
+    max_infosets: int,
+    max_actions: int,
+    checkpoint_dir: str | None = None,
 ) -> None:
     """
-    Persistent worker process that runs in a loop processing jobs.
+    Worker process for parallel MCCFR training with shared array storage.
 
-    This worker:
-    1. Initializes solver once at startup (avoiding repeated process spawning overhead)
-    2. Loops waiting for jobs from the master process
-    3. Executes jobs (run N iterations) and returns results
-    4. Exits cleanly on shutdown signal
+    Workers:
+    - Attach to shared memory created by coordinator
+    - Own infosets where infoset_id % num_workers == worker_id
+    - Write directly to shared arrays for owned infosets
+    - Buffer cross-partition updates and send to owner via queue
 
     Args:
-        worker_id: Unique worker identifier
+        worker_id: This worker's ID (0 to num_workers-1)
+        num_workers: Total number of workers
+        session_id: Unique session ID for shared memory namespace
         config_dict: Configuration dictionary
         serialized_action_abstraction: Pickled BettingActions
         serialized_card_abstraction: Pickled BucketingStrategy
-        base_seed: Base random seed for this worker
-        job_queue: Queue to receive job specifications
-        result_queue: Queue to return results
+        base_seed: Base random seed
+        job_queue: Queue to receive jobs from coordinator
+        result_queue: Queue to return results to coordinator
+        update_queues: Per-worker queues for cross-partition updates
+        max_infosets: Maximum infosets in shared arrays
+        max_actions: Maximum actions per infoset
+        checkpoint_dir: Optional checkpoint directory
     """
     try:
         import sys
+        from pathlib import Path
 
         from src.solver.mccfr import MCCFRSolver
-        from src.solver.storage import InMemoryStorage
+        from src.solver.storage import SharedArrayStorage
         from src.utils.config import Config
 
-        print(f"[Worker {worker_id}] Initializing...", file=sys.stderr, flush=True)
+        print(
+            f"[Worker {worker_id}] Initializing (attaching to shared memory)...",
+            file=sys.stderr,
+            flush=True,
+        )
 
-        # ONE-TIME INITIALIZATION (avoids per-batch overhead)
-        # Recreate config
+        # Create config
         config = Config.from_dict(config_dict)
-        print(f"[Worker {worker_id}] Config loaded", file=sys.stderr, flush=True)
 
-        # Deserialize pre-built abstractions
-        print(
-            f"[Worker {worker_id}] Deserializing action abstraction ({len(serialized_action_abstraction)} bytes)...",
-            file=sys.stderr,
-            flush=True,
-        )
+        # Deserialize abstractions
         action_abstraction = pickle.loads(serialized_action_abstraction)
-        print(
-            f"[Worker {worker_id}] Deserializing card abstraction ({len(serialized_card_abstraction)} bytes)...",
-            file=sys.stderr,
-            flush=True,
-        )
         card_abstraction = pickle.loads(serialized_card_abstraction)
-        print(f"[Worker {worker_id}] Abstractions loaded", file=sys.stderr, flush=True)
 
-        # Workers always use in-memory storage
-        storage = InMemoryStorage()
+        # Create storage (attach to existing shared memory)
+        storage = SharedArrayStorage(
+            num_workers=num_workers,
+            worker_id=worker_id,
+            session_id=session_id,
+            max_infosets=max_infosets,
+            max_actions=max_actions,
+            is_coordinator=False,  # Worker attaches, doesn't create
+            checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
+        )
 
-        # Create solver config with unique seed
+        # Create solver config
         solver_config = config.get_section("game").copy()
         solver_config.update(config.get_section("system"))
-        solver_config["seed"] = base_seed  # Base seed per worker
+        solver_config["seed"] = base_seed + worker_id * 10000
 
-        # Workers must use vanilla CFR (no regret flooring) for mathematically correct merging
-        # CFR+ flooring will be applied at master after merge
-        solver_config["cfr_plus"] = False
+        # CFR+ can be applied directly since each worker owns its infosets
+        cfr_plus_enabled = config_dict.get("solver", {}).get("cfr_plus", False)
+        solver_config["cfr_plus"] = cfr_plus_enabled
 
-        # Build solver once
-        print(f"[Worker {worker_id}] Creating solver...", file=sys.stderr, flush=True)
+        # Create solver with shared array storage
         solver = MCCFRSolver(
             action_abstraction=action_abstraction,
             card_abstraction=card_abstraction,
             storage=storage,
             config=solver_config,
         )
-        print(f"[Worker {worker_id}] Solver created, ready for jobs", file=sys.stderr, flush=True)
 
-        # WORKER LOOP: Process jobs until shutdown
+        print(
+            f"[Worker {worker_id}] Ready (attached to shared memory)",
+            file=sys.stderr,
+            flush=True,
+        )
+
+        # Worker loop
+        batch_count = 0
         while True:
-            # Wait for job from master with timeout to check for termination
+            # Check for cross-partition updates from other workers
+            _process_incoming_updates(worker_id, update_queues[worker_id], storage)
+
             try:
-                job = job_queue.get(timeout=1.0)
+                job = job_queue.get(timeout=0.1)
             except queue.Empty:
-                # Check if we should still be alive
                 continue
 
             job_type = JobType(job["type"])
 
             if job_type == JobType.SHUTDOWN:
-                # Clean shutdown
                 print(
-                    f"[Worker {worker_id}] Received shutdown signal, exiting...",
+                    f"[Worker {worker_id}] Shutdown signal received",
                     file=sys.stderr,
                     flush=True,
                 )
                 break
 
-            elif job_type == JobType.BROADCAST_REGRETS:
-                # Load master's current regrets into worker storage
-                # This allows workers to sample from the learned strategy
-                print(
-                    f"[Worker {worker_id}] Receiving regret broadcast from master...",
-                    file=sys.stderr,
-                    flush=True,
-                )
+            elif job_type == JobType.SYNC_KEYS:
+                # Receive merged key mapping from coordinator
+                merged_keys = job.get("key_mapping", {})
+                storage.set_key_mapping(merged_keys)
 
-                # Clear existing storage before loading broadcast
-                storage.clear()
-
-                # Deserialize from shared memory if using shm transfer
-                if "shm_name" in job:
-                    try:
-                        print(
-                            f"[Worker {worker_id}] Loading from shared memory: {job['shm_name']} ({job['shm_size']} bytes)...",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                        infoset_data = _deserialize_infosets_from_shm(
-                            job["shm_name"], job["shm_size"]
-                        )
-
-                        # Merge legal_actions back into infoset_data
-                        legal_actions_map = job.get("legal_actions_map", {})
-                        for key, data in infoset_data.items():
-                            data["legal_actions"] = legal_actions_map.get(key, [])
-
-                        # Load into worker storage
-                        for key, data in infoset_data.items():
-                            infoset = storage.get_or_create_infoset(key, data["legal_actions"])
-                            infoset.regrets = np.array(data["regrets"], dtype=np.float32)
-                            infoset.strategy_sum = np.array(data["strategy_sum"], dtype=np.float32)
-                            infoset.reach_count = data["reach_count"]
-                            infoset.cumulative_utility = data["cumulative_utility"]
-
-                        print(
-                            f"[Worker {worker_id}] Loaded {len(infoset_data)} infosets from master",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                    except Exception as e:
-                        print(
-                            f"[Worker {worker_id}] ERROR loading regrets: {e}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                        # Continue with empty storage if broadcast fails
-                        storage.clear()
-
-                # Send acknowledgment back
                 result_queue.put(
                     {
                         "worker_id": worker_id,
-                        "type": "broadcast_ack",
-                        "num_infosets_loaded": len(storage.infosets)
-                        if hasattr(storage, "infosets")
-                        else storage.num_infosets(),
+                        "type": "sync_keys_ack",
+                        "num_keys": len(merged_keys),
+                    }
+                )
+
+            elif job_type == JobType.APPLY_UPDATES:
+                # Process any pending incoming updates
+                _process_incoming_updates(worker_id, update_queues[worker_id], storage)
+
+                result_queue.put(
+                    {
+                        "worker_id": worker_id,
+                        "type": "apply_updates_ack",
                     }
                 )
 
             elif job_type == JobType.RUN_ITERATIONS:
-                # Extract job parameters
                 num_iterations = job["num_iterations"]
-                batch_id = job.get("batch_id", 0)
+                batch_id = job.get("batch_id", batch_count)
                 iteration_offset = job.get("iteration_offset", 0)
 
-                # Do NOT clear storage - workers should have received regret broadcast
-                # Storage now contains master's current regrets for correct MCCFR sampling
+                # Update solver state
                 solver.iteration = iteration_offset
-                solver.total_utility = 0.0
 
-                # Update seed for this batch (ensures different rollouts per batch)
-                batch_seed = base_seed + batch_id * 1000
+                # Update seed for this batch
+                batch_seed = base_seed + worker_id * 10000 + batch_id * 1000
                 random.seed(batch_seed)
                 np.random.seed(batch_seed)
 
                 # Run iterations
-                utilities = []
-                try:
-                    import sys
+                print(
+                    f"[Worker {worker_id}] Running {num_iterations} iterations...",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
-                    print(
-                        f"[Worker {worker_id}] Starting {num_iterations} iterations...",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                utilities = []
+                iter_start = time.time()
+
+                try:
                     for i in range(num_iterations):
+                        # Check for incoming updates periodically
+                        if i % 50 == 0:
+                            _process_incoming_updates(worker_id, update_queues[worker_id], storage)
+
                         util = solver.train_iteration()
                         utilities.append(util)
-                        # Progress update every 50 iterations
-                        if (i + 1) % 50 == 0:
+
+                        if (i + 1) % 100 == 0:
+                            elapsed = time.time() - iter_start
+                            rate = (i + 1) / elapsed
                             print(
-                                f"[Worker {worker_id}] Progress: {i + 1}/{num_iterations} iterations",
+                                f"[Worker {worker_id}] Progress: {i + 1}/{num_iterations} "
+                                f"({rate:.1f} iter/s)",
                                 file=sys.stderr,
                                 flush=True,
                             )
+
+                    iter_time = time.time() - iter_start
+
+                    # Send pending cross-partition updates to owners
+                    pending = storage.get_pending_updates()
+                    if pending:
+                        _send_updates_to_owners(worker_id, num_workers, pending, update_queues)
+                        storage.clear_pending_updates()
+
                     print(
-                        f"[Worker {worker_id}] Completed {num_iterations} iterations, discovered {len(storage.infosets)} infosets",
+                        f"[Worker {worker_id}] Completed {num_iterations} iterations "
+                        f"in {iter_time:.1f}s ({num_iterations / iter_time:.1f} iter/s), "
+                        f"owns {storage.num_owned_infosets()} infosets",
                         file=sys.stderr,
                         flush=True,
                     )
+
+                    result_queue.put(
+                        {
+                            "worker_id": worker_id,
+                            "batch_id": batch_id,
+                            "type": "iterations_done",
+                            "utilities": utilities,
+                            "num_owned_infosets": storage.num_owned_infosets(),
+                            "new_keys": storage.get_key_mapping(),  # For key sync
+                            "iter_time": iter_time,
+                        }
+                    )
+
                 except Exception as e:
-                    # Report error back to master
                     print(
-                        f"[Worker {worker_id}] ERROR during iterations: {e}",
+                        f"[Worker {worker_id}] Error: {e}",
                         file=sys.stderr,
                         flush=True,
                     )
+                    traceback.print_exc()
                     result_queue.put(
                         {
                             "worker_id": worker_id,
@@ -413,134 +257,84 @@ def _persistent_worker_loop(
                             "traceback": traceback.format_exc(),
                         }
                     )
-                    continue
 
-                # Extract infoset data for merging
-                print(
-                    f"[Worker {worker_id}] Extracting {len(storage.infosets)} infosets...",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                infoset_data = {}
-                legal_actions_map = {}  # Store separately (not in shared memory)
-                for key, infoset in storage.infosets.items():
-                    infoset_data[key] = {
-                        "regrets": infoset.regrets.copy(),
-                        "strategy_sum": infoset.strategy_sum.copy(),
-                        "reach_count": infoset.reach_count,
-                        "cumulative_utility": infoset.cumulative_utility,
-                    }
-                    legal_actions_map[key] = infoset.legal_actions
+                batch_count += 1
 
-                # Return results using shared memory for large arrays
-                print(
-                    f"[Worker {worker_id}] Serializing {len(infoset_data)} infosets to shared memory...",
-                    file=sys.stderr,
-                    flush=True,
-                )
-
-                # Serialize to shared memory
-                shm_name = f"worker_{worker_id}_batch_{batch_id}"
-                shm = None
-                try:
-                    shm, shm_size = _serialize_infosets_to_shm(infoset_data, shm_name)
-
-                    print(
-                        f"[Worker {worker_id}] Sending results to master (shm: {shm_size} bytes, ~{len(infoset_data)} infosets)...",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-
-                    # Use a separate thread to put results with timeout detection
-                    # This prevents deadlock if the queue buffer fills up
-                    import threading
-
-                    result_sent = threading.Event()
-                    put_error = []
-
-                    def _put_result():
-                        try:
-                            result_queue.put(
-                                {
-                                    "worker_id": worker_id,
-                                    "batch_id": batch_id,
-                                    "utilities": utilities,
-                                    "shm_name": shm_name,
-                                    "shm_size": shm_size,
-                                    "legal_actions_map": legal_actions_map,
-                                    "num_infosets": len(infoset_data),
-                                }
-                            )
-                            result_sent.set()
-                        except Exception as e:
-                            put_error.append(e)
-                            result_sent.set()
-
-                    put_thread = threading.Thread(target=_put_result, daemon=True)
-                    put_thread.start()
-
-                    # Wait with timeout - if it blocks too long, continue anyway
-                    # The daemon thread will be abandoned but worker can still exit
-                    if not result_sent.wait(timeout=120):
-                        print(
-                            f"[Worker {worker_id}] WARNING: result_queue.put() blocked for >120s! "
-                            f"Queue may be full or master stopped listening. "
-                            f"Abandoning result send and continuing...",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                        # Don't wait indefinitely - allow worker to continue/exit
-                        # Shared memory will be cleaned up by master during shutdown
-                    elif put_error:
-                        raise put_error[0]
-                    else:
-                        print(
-                            f"[Worker {worker_id}] Results sent successfully",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-
-                finally:
-                    # Worker closes shared memory (master will unlink)
-                    if shm is not None:
-                        shm.close()
-
+        # Cleanup (just close handles, don't unlink - coordinator does that)
+        print(f"[Worker {worker_id}] Cleaning up...", file=sys.stderr, flush=True)
+        storage.cleanup()
         print(f"[Worker {worker_id}] Exiting cleanly", file=sys.stderr, flush=True)
 
     except Exception as e:
-        # Report error and exit - but use try-except in case queue is closed
         print(f"[Worker {worker_id}] Fatal error: {e}", file=sys.stderr, flush=True)
+        traceback.print_exc()
         try:
-            result_queue.put(
-                {
-                    "worker_id": worker_id,
-                    "error": str(e),
-                },
-                timeout=5,
-            )
+            result_queue.put({"worker_id": worker_id, "error": str(e)}, timeout=5)
         except Exception:
-            # Queue is closed or full - just exit
-            print(
-                f"[Worker {worker_id}] Could not report error to master, exiting",
-                file=sys.stderr,
-                flush=True,
-            )
+            pass
 
 
-class WorkerManager:
+def _process_incoming_updates(
+    worker_id: int, update_queue: mp.Queue, storage: "SharedArrayStorage"
+) -> int:
     """
-    Manages a persistent pool of worker processes for parallel training.
+    Process incoming cross-partition updates from other workers.
 
-    This manager:
-    - Starts N worker processes once at initialization
-    - Distributes jobs to workers via queues
-    - Collects results from workers
-    - Handles clean shutdown
+    Returns number of updates processed.
+    """
+    count = 0
+    while True:
+        try:
+            update_batch = update_queue.get_nowait()
+            storage.apply_updates(update_batch)
+            count += len(update_batch)
+        except queue.Empty:
+            break
+    return count
 
-    Benefits over per-batch process spawning:
-    - Eliminates process startup overhead
-    - Avoids repeated serialization/deserialization
-    - Provides stable, predictable throughput
+
+def _send_updates_to_owners(
+    sender_id: int,
+    num_workers: int,
+    updates: Dict[int, Tuple[np.ndarray, np.ndarray]],
+    update_queues: List[mp.Queue],
+) -> None:
+    """
+    Send cross-partition updates to their respective owners.
+
+    Groups updates by owner and sends to appropriate queue.
+    """
+    # Group updates by owner
+    updates_by_owner: Dict[int, Dict[int, Tuple[np.ndarray, np.ndarray]]] = {
+        i: {} for i in range(num_workers)
+    }
+
+    for infoset_id, (regret_delta, strategy_delta) in updates.items():
+        owner = infoset_id % num_workers
+        if owner != sender_id:  # Don't send to self
+            updates_by_owner[owner][infoset_id] = (regret_delta, strategy_delta)
+
+    # Send to each owner's queue
+    for owner_id, owner_updates in updates_by_owner.items():
+        if owner_updates:
+            try:
+                update_queues[owner_id].put(owner_updates, timeout=5.0)
+            except queue.Full:
+                print(
+                    f"[Worker {sender_id}] Warning: Update queue for worker {owner_id} is full",
+                    flush=True,
+                )
+
+
+class SharedArrayWorkerManager:
+    """
+    Manages parallel training with shared array storage.
+
+    Architecture:
+    - Coordinator (this class) creates shared memory once at startup
+    - Workers attach to shared memory
+    - Data flows directly through shared arrays (no serialization)
+    - Cross-partition updates via per-worker queues
     """
 
     def __init__(
@@ -549,620 +343,314 @@ class WorkerManager:
         config_dict: Dict,
         serialized_action_abstraction: bytes,
         serialized_card_abstraction: bytes,
+        session_id: str | None = None,
         base_seed: int = 42,
+        max_infosets: int = 2_000_000,
+        max_actions: int = 10,
+        checkpoint_dir: str | None = None,
     ):
         """
-        Initialize worker pool.
+        Initialize shared array worker manager.
 
         Args:
-            num_workers: Number of worker processes
+            num_workers: Number of workers
             config_dict: Configuration dictionary
             serialized_action_abstraction: Pickled BettingActions
             serialized_card_abstraction: Pickled BucketingStrategy
-            base_seed: Base random seed (each worker gets base_seed + worker_id)
+            session_id: Unique session ID (auto-generated if None)
+            base_seed: Base random seed
+            max_infosets: Maximum infosets in shared arrays
+            max_actions: Maximum actions per infoset
+            checkpoint_dir: Optional checkpoint directory
         """
+        import uuid
+        from pathlib import Path
+
+        from src.solver.storage import SharedArrayStorage
+
         self.num_workers = num_workers
         self.config_dict = config_dict
         self.serialized_action_abstraction = serialized_action_abstraction
         self.serialized_card_abstraction = serialized_card_abstraction
+        self.session_id = session_id or str(uuid.uuid4())[:8]
         self.base_seed = base_seed
+        self.max_infosets = max_infosets
+        self.max_actions = max_actions
+        self.checkpoint_dir = checkpoint_dir
+
+        # Create coordinator storage (creates shared memory)
+        print(f"[Coordinator] Creating shared memory (session={self.session_id})...", flush=True)
+        self.storage = SharedArrayStorage(
+            num_workers=num_workers,
+            worker_id=0,  # Coordinator uses worker_id 0 for ownership checks
+            session_id=self.session_id,
+            max_infosets=max_infosets,
+            max_actions=max_actions,
+            is_coordinator=True,  # Create shared memory
+            checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
+        )
+        print(
+            f"[Coordinator] Shared memory created: "
+            f"{max_infosets * max_actions * 4 * 2 // 1024 // 1024}MB total",
+            flush=True,
+        )
 
         # Communication queues
         self.job_queue: mp.Queue = mp.Queue()
         self.result_queue: mp.Queue = mp.Queue()
 
+        # Per-worker update queues for cross-partition updates
+        self.update_queues: List[mp.Queue] = [mp.Queue() for _ in range(num_workers)]
+
         # Worker processes
         self.processes: List[mp.Process] = []
 
-        # Track active shared memory objects for cleanup
-        self._active_shm_names: List[str] = []
+        # Merged key mapping (coordinator maintains authoritative copy)
+        self._merged_keys: Dict = {}
 
         # Start workers
         self._start_workers()
 
     def _start_workers(self):
         """Start all worker processes."""
-        for worker_id in range(self.num_workers):
-            # Each worker gets a unique seed
-            worker_seed = self.base_seed + worker_id * 10000
+        print(f"[Coordinator] Starting {self.num_workers} workers...", flush=True)
 
+        for worker_id in range(self.num_workers):
             p = mp.Process(
-                target=_persistent_worker_loop,
+                target=_worker_loop,
                 args=(
                     worker_id,
+                    self.num_workers,
+                    self.session_id,
                     self.config_dict,
                     self.serialized_action_abstraction,
                     self.serialized_card_abstraction,
-                    worker_seed,
+                    self.base_seed,
                     self.job_queue,
                     self.result_queue,
+                    self.update_queues,
+                    self.max_infosets,
+                    self.max_actions,
+                    self.checkpoint_dir,
                 ),
             )
             p.start()
             self.processes.append(p)
 
-    def submit_batch(
+        # Wait a moment for workers to attach
+        time.sleep(1.0)
+        print(f"[Coordinator] All {self.num_workers} workers started", flush=True)
+
+    def sync_keys(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
+        """
+        Synchronize key mappings across all workers.
+
+        Collects new keys discovered by each worker and broadcasts
+        the merged mapping to all workers.
+
+        Returns:
+            Dict with sync stats
+        """
+        if verbose:
+            print("[Coordinator] Syncing key mappings...", flush=True)
+
+        # Broadcast merged keys to all workers
+        for _ in range(self.num_workers):
+            self.job_queue.put({"type": JobType.SYNC_KEYS.value, "key_mapping": self._merged_keys})
+
+        # Wait for acks
+        acks = []
+        for _ in range(self.num_workers):
+            try:
+                result = self.result_queue.get(timeout=timeout)
+                if result.get("type") == "sync_keys_ack":
+                    acks.append(result)
+            except queue.Empty:
+                raise RuntimeError("Timeout waiting for key sync acks")
+
+        if verbose:
+            print(f"[Coordinator] Keys synced: {len(self._merged_keys)} total", flush=True)
+
+        return {"num_keys": len(self._merged_keys), "acks": acks}
+
+    def apply_pending_updates(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
+        """
+        Trigger workers to apply any pending cross-partition updates.
+
+        This ensures all buffered updates are processed.
+
+        Returns:
+            Dict with apply stats
+        """
+        if verbose:
+            print("[Coordinator] Applying pending updates...", flush=True)
+
+        for _ in range(self.num_workers):
+            self.job_queue.put({"type": JobType.APPLY_UPDATES.value})
+
+        acks = []
+        for _ in range(self.num_workers):
+            try:
+                result = self.result_queue.get(timeout=timeout)
+                if result.get("type") == "apply_updates_ack":
+                    acks.append(result)
+            except queue.Empty:
+                raise RuntimeError("Timeout waiting for apply updates acks")
+
+        if verbose:
+            print("[Coordinator] Pending updates applied", flush=True)
+
+        return {"acks": acks}
+
+    def run_batch(
         self,
         iterations_per_worker: List[int],
         batch_id: int = 0,
         start_iteration: int = 0,
-        timeout_seconds: float | None = None,
-        verbose: bool = False,
-        storage=None,
-    ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+        timeout: float = 600.0,
+        verbose: bool = True,
+    ) -> Dict:
         """
-        Submit a batch of jobs to workers and collect results.
+        Run a batch of iterations across all workers.
 
-        With incremental merging enabled (storage provided):
-        - Merges each worker's results immediately upon arrival
-        - Returns dict with utilities: {"utilities": [list of floats]}
-
-        Without storage (legacy batch merge mode):
-        - Collects all worker results
-        - Returns list of result dicts (unused in current codebase)
+        Workers write directly to shared arrays for owned infosets.
+        Cross-partition updates are sent via queues.
 
         Args:
-            iterations_per_worker: List of iteration counts (one per worker)
-            batch_id: Batch identifier for seeding
-            start_iteration: Global iteration offset for this batch
-            timeout_seconds: Optional total timeout for the batch (None = wait indefinitely)
-            verbose: Whether to print periodic wait warnings
-            storage: Optional master storage to merge into as results arrive (enables incremental merging)
+            iterations_per_worker: Iterations per worker
+            batch_id: Batch identifier
+            start_iteration: Global iteration offset
+            timeout: Max wait time
+            verbose: Print progress
 
         Returns:
-            Dict with utilities (incremental merge mode) or List of worker results (legacy mode)
+            Dict with batch results and utilities
         """
-        # Extract CFR+ setting from config for merge operation
-        # Default to False if not specified
-        cfr_plus_enabled = self.config_dict.get("system", {}).get("cfr_plus", False)
+        batch_start = time.time()
 
-        # Broadcast master regrets to workers before running iterations
-        # This ensures workers sample from the learned strategy (correct MCCFR)
-        if storage is not None and hasattr(storage, "infosets"):
-            num_infosets = (
-                storage.num_infosets()
-                if hasattr(storage, "num_infosets")
-                else len(storage.infosets)
+        if verbose:
+            total_iters = sum(iterations_per_worker)
+            print(
+                f"[Coordinator] Running batch {batch_id}: {total_iters} total iterations "
+                f"across {self.num_workers} workers",
+                flush=True,
             )
-            if num_infosets > 0:
-                # Only broadcast if we have learned something
-                if verbose:
-                    print(
-                        f"[Master] Broadcasting {num_infosets} infosets to workers...", flush=True
-                    )
-                self.broadcast_regrets(storage, verbose=verbose)
-            elif verbose:
-                print(
-                    "[Master] No infosets to broadcast, workers will start with empty storage",
-                    flush=True,
-                )
 
-        # Submit jobs to all workers
+        # Submit jobs
         iteration_offset = start_iteration
+        active_workers = 0
         for worker_id, num_iterations in enumerate(iterations_per_worker):
             if num_iterations > 0:
-                job = {
-                    "type": JobType.RUN_ITERATIONS.value,
-                    "num_iterations": num_iterations,
-                    "batch_id": batch_id,
-                    "iteration_offset": iteration_offset,
-                }
-                self.job_queue.put(job)
-                iteration_offset += num_iterations
-
-        # Collect results (merge incrementally if storage provided)
-        worker_results: List[Dict] = []
-        all_utilities: List[float] = []
-        num_active_workers = sum(1 for n in iterations_per_worker if n > 0)
-        results_received = 0
-
-        print(f"[Master] Waiting for {num_active_workers} worker results...", flush=True)
-
-        start_time = time.time()
-        last_warning = start_time
-        warn_after = 60.0
-        warn_interval = 30.0
-
-        while results_received < num_active_workers:
-            try:
-                result = self.result_queue.get(timeout=5)
-
-                results_received += 1
-                print(
-                    f"[Master] Received result from worker {result.get('worker_id', '?')} "
-                    f"({results_received}/{num_active_workers})",
-                    flush=True,
-                )
-
-                if "error" in result:
-                    traceback_text = result.get("traceback", "")
-                    raise RuntimeError(
-                        f"Worker {result['worker_id']} error: {result['error']}\n{traceback_text}"
-                    )
-
-                # Deserialize from shared memory if using shm transfer
-                if "shm_name" in result:
-                    print(
-                        f"[Master] Deserializing from shared memory: {result['shm_name']} ({result['shm_size']} bytes)...",
-                        flush=True,
-                    )
-                    try:
-                        # Master is reading worker's result, so cleanup=True (delete shm after reading)
-                        infoset_data = _deserialize_infosets_from_shm(
-                            result["shm_name"], result["shm_size"], cleanup=True
-                        )
-                        # Merge legal_actions back into infoset_data
-                        legal_actions_map = result.get("legal_actions_map", {})
-                        for key, data in infoset_data.items():
-                            data["legal_actions"] = legal_actions_map.get(key, [])
-                        # Inject infoset_data into result for merge function
-                        result["infoset_data"] = infoset_data
-                        # Remove from tracking since it's been cleaned up
-                        if result["shm_name"] in self._active_shm_names:
-                            self._active_shm_names.remove(result["shm_name"])
-                    except Exception as e:
-                        print(
-                            f"[Master] ERROR deserializing shared memory: {e}",
-                            flush=True,
-                        )
-                        raise
-
-                # Incremental merge: merge this worker's results immediately
-                if storage is not None:
-                    merge_start = time.time()
-                    merge_worker_results(storage, [result], cfr_plus=cfr_plus_enabled)
-                    merge_time = time.time() - merge_start
-                    if verbose:
-                        print(
-                            f"[Master] Merged worker {result.get('worker_id', '?')} results in {merge_time:.2f}s",
-                            flush=True,
-                        )
-                    # Collect utilities for metrics
-                    all_utilities.extend(result.get("utilities", []))
-                else:
-                    # Traditional mode: collect all results for batch merge
-                    worker_results.append(result)
-
-            except queue.Empty as e:
-                dead = [p for p in self.processes if not p.is_alive()]
-                if dead:
-                    details = ", ".join(f"pid={p.pid}, exitcode={p.exitcode}" for p in dead)
-                    raise RuntimeError(
-                        f"Worker process exited unexpectedly while waiting for results: {details}"
-                    ) from e
-                elapsed = time.time() - start_time
-                if timeout_seconds is not None and elapsed >= timeout_seconds:
-                    raise TimeoutError(
-                        "Timed out waiting for worker results. "
-                        "Workers are alive but not responding."
-                    ) from e
-                if verbose and elapsed >= warn_after and (elapsed - last_warning) >= warn_interval:
-                    print(
-                        f"Waiting for worker results... {elapsed:.0f}s elapsed "
-                        f"({results_received}/{num_active_workers} received)"
-                    )
-                    last_warning = elapsed
-            except Exception:
-                raise
-
-        if storage is not None:
-            print(
-                f"[Master] All {num_active_workers} worker results merged incrementally",
-                flush=True,
-            )
-            # Return utilities directly (incremental merge mode)
-            return {"utilities": all_utilities}
-        else:
-            print(
-                f"[Master] All {num_active_workers} results collected, returning to caller...",
-                flush=True,
-            )
-            # Return batch results (legacy batch merge mode - unused)
-            return worker_results
-
-    def broadcast_regrets(self, storage, verbose: bool = False):
-        """
-        Broadcast master's current regrets to all workers.
-
-        This allows workers to sample from the current learned strategy (correct MCCFR).
-
-        Args:
-            storage: Master storage containing current regrets
-            verbose: Whether to print progress
-        """
-        if verbose:
-            print("[Master] Broadcasting regrets to workers...", flush=True)
-
-        broadcast_start = time.time()
-
-        # Serialize master's infosets
-        infoset_data = {}
-        for key in storage.infosets:
-            infoset = storage.get_infoset(key)
-            if infoset is not None:
-                infoset_data[key] = {
-                    "legal_actions": list(infoset.legal_actions),
-                    "regrets": infoset.regrets.tolist(),
-                    "strategy_sum": infoset.strategy_sum.tolist(),
-                    "reach_count": infoset.reach_count,
-                    "cumulative_utility": infoset.cumulative_utility,
-                }
-
-        if verbose:
-            print(
-                f"[Master] Serializing {len(infoset_data)} infosets for broadcast...",
-                flush=True,
-            )
-
-        # Use shared memory for efficient transfer
-        import uuid
-
-        shm_name = f"broadcast_regrets_{uuid.uuid4().hex[:8]}"
-
-        try:
-            # Serialize to shared memory
-            shm, shm_size = _serialize_infosets_to_shm(infoset_data, shm_name)
-            self._active_shm_names.append(shm_name)
-
-            if verbose:
-                print(
-                    f"[Master] Broadcast data serialized ({shm_size} bytes), sending to workers...",
-                    flush=True,
-                )
-
-            # Extract legal_actions for separate transfer (can't pickle Action objects in shm)
-            legal_actions_map = {key: data["legal_actions"] for key, data in infoset_data.items()}
-
-            # Send broadcast job to all workers
-            for worker_id in range(self.num_workers):
                 self.job_queue.put(
                     {
-                        "type": JobType.BROADCAST_REGRETS.value,
-                        "shm_name": shm_name,
-                        "shm_size": shm_size,
-                        "legal_actions_map": legal_actions_map,
+                        "type": JobType.RUN_ITERATIONS.value,
+                        "num_iterations": num_iterations,
+                        "batch_id": batch_id,
+                        "iteration_offset": iteration_offset,
                     }
                 )
+                iteration_offset += num_iterations
+                active_workers += 1
 
-            # Wait for acknowledgments from all workers
-            # Timeout needs to be generous:
-            # - Workers might be finishing previous iterations
-            # - Checkpointing can block for 60-90+ seconds
-            # - Loading 164MB+ of shared memory takes time
-            # Use 5 minutes to be safe
-            acks_received = 0
-            ack_timeout = 300  # 5 minutes
-            start_wait = time.time()
+        # Collect results
+        all_utilities = []
+        results = []
+        errors = []
+        new_keys_batch = []
 
-            while acks_received < self.num_workers:
-                try:
-                    # Use shorter individual timeouts for better progress reporting
-                    result = self.result_queue.get(timeout=5)
-                    if result.get("type") == "broadcast_ack":
-                        acks_received += 1
-                        if verbose:
-                            print(
-                                f"[Master] Worker {result['worker_id']} acknowledged broadcast "
-                                f"({result.get('num_infosets_loaded', 0)} infosets loaded) "
-                                f"[{acks_received}/{self.num_workers}]",
-                                flush=True,
-                            )
-                except queue.Empty:
-                    # Check if we've exceeded total timeout
-                    elapsed = time.time() - start_wait
-                    if elapsed > ack_timeout:
-                        raise RuntimeError(
-                            f"Timeout waiting for broadcast acknowledgments after {elapsed:.1f}s "
-                            f"({acks_received}/{self.num_workers} received)"
-                        )
-                    # Otherwise just continue waiting with periodic status
-                    if verbose and int(elapsed) % 10 == 0:  # Every 10 seconds
+        for _ in range(active_workers):
+            try:
+                result = self.result_queue.get(timeout=timeout)
+
+                if "error" in result:
+                    errors.append(result)
+                    print(
+                        f"[Coordinator] Worker {result['worker_id']} error: {result['error']}",
+                        flush=True,
+                    )
+                elif result.get("type") == "iterations_done":
+                    results.append(result)
+                    all_utilities.extend(result.get("utilities", []))
+
+                    # Collect new keys for merging
+                    if "new_keys" in result:
+                        new_keys_batch.append(result["new_keys"])
+
+                    if verbose:
                         print(
-                            f"[Master] Still waiting for acks... {elapsed:.0f}s elapsed, "
-                            f"{acks_received}/{self.num_workers} received",
+                            f"[Coordinator] Worker {result['worker_id']} done: "
+                            f"{result['num_owned_infosets']} owned infosets, "
+                            f"{result['iter_time']:.1f}s",
                             flush=True,
                         )
 
-            # Cleanup shared memory
-            shm.close()
-            shm.unlink()
-            if shm_name in self._active_shm_names:
-                self._active_shm_names.remove(shm_name)
-
-            broadcast_time = time.time() - broadcast_start
-            if verbose:
-                print(
-                    f"[Master] Broadcast complete in {broadcast_time:.2f}s "
-                    f"({len(infoset_data)} infosets, {shm_size / 1024 / 1024:.1f} MB)",
-                    flush=True,
+            except queue.Empty:
+                raise RuntimeError(
+                    f"Timeout waiting for workers ({len(results)}/{active_workers} received)"
                 )
 
-        except Exception as e:
-            # Cleanup on error
-            try:
-                if shm_name in self._active_shm_names:
-                    shm = shared_memory.SharedMemory(name=shm_name)
-                    shm.close()
-                    shm.unlink()
-                    self._active_shm_names.remove(shm_name)
-            except Exception:
-                pass
-            raise RuntimeError(f"Failed to broadcast regrets: {e}") from e
+        # Merge new keys from all workers
+        for keys in new_keys_batch:
+            self._merged_keys.update(keys)
+
+        # Update coordinator's storage key mapping
+        self.storage.set_key_mapping(self._merged_keys)
+
+        batch_time = time.time() - batch_start
+        total_iters = sum(iterations_per_worker)
+
+        if verbose:
+            print(
+                f"[Coordinator] Batch {batch_id} complete in {batch_time:.1f}s "
+                f"({total_iters / batch_time:.1f} iter/s), "
+                f"{self.storage.num_infosets()} total infosets",
+                flush=True,
+            )
+
+        if errors:
+            raise RuntimeError(f"Workers failed: {errors}")
+
+        return {
+            "utilities": all_utilities,
+            "batch_time": batch_time,
+            "total_iterations": total_iters,
+            "worker_results": results,
+            "num_infosets": self.storage.num_infosets(),
+        }
+
+    def checkpoint(self, iteration: int):
+        """Save checkpoint to disk (coordinator writes shared arrays)."""
+        self.storage.checkpoint(iteration)
+
+    def get_storage(self) -> "SharedArrayStorage":
+        """Get coordinator's storage instance (for accessing results)."""
+        return self.storage
 
     def shutdown(self):
         """Shutdown all workers cleanly."""
-        print("[Master] Shutting down workers...", flush=True)
+        print("[Coordinator] Shutting down workers...", flush=True)
 
-        # Send shutdown signal to all workers
+        # Send shutdown to all workers
         for _ in range(self.num_workers):
             self.job_queue.put({"type": JobType.SHUTDOWN.value})
 
-        # Drain result queue to prevent workers from blocking on put()
-        print("[Master] Draining result queue...", flush=True)
-        drained_results = 0
-        while True:
-            try:
-                result = self.result_queue.get(timeout=0.1)
-                drained_results += 1
-                # Clean up any shared memory from unprocessed results
-                if "shm_name" in result:
-                    try:
-                        shm = shared_memory.SharedMemory(name=result["shm_name"])
-                        shm.close()
-                        shm.unlink()
-                        print(
-                            f"[Master] Cleaned up leaked shared memory: {result['shm_name']}",
-                            flush=True,
-                        )
-                    except FileNotFoundError:
-                        pass  # Already cleaned up
-                    except Exception as e:
-                        print(
-                            f"[Master] Warning: Could not cleanup shared memory {result['shm_name']}: {e}",
-                            flush=True,
-                        )
-            except queue.Empty:
-                break
-
-        if drained_results > 0:
-            print(f"[Master] Drained {drained_results} pending results from queue", flush=True)
-
-        # Wait for all processes to terminate with longer timeout
-        print("[Master] Waiting for workers to exit...", flush=True)
-        for i, p in enumerate(self.processes):
-            p.join(timeout=10)  # Increased timeout from 5 to 10 seconds
+        # Wait for processes to exit
+        for p in self.processes:
+            p.join(timeout=10)
             if p.is_alive():
-                print(f"Warning: Process {p.pid} (worker {i}) did not terminate, killing it")
+                print(f"[Coordinator] Force terminating worker {p.pid}", flush=True)
                 p.terminate()
-                p.join(timeout=2)
-                if p.is_alive():
-                    print(f"Warning: Process {p.pid} still alive after terminate, using kill")
-                    p.kill()
-                    p.join()
 
-        # Clean up any remaining shared memory objects
-        if self._active_shm_names:
-            print(
-                f"[Master] Cleaning up {len(self._active_shm_names)} remaining shared memory objects...",
-                flush=True,
-            )
-            for shm_name in self._active_shm_names[:]:
-                try:
-                    shm = shared_memory.SharedMemory(name=shm_name)
-                    shm.close()
-                    shm.unlink()
-                    print(f"[Master] Cleaned up shared memory: {shm_name}", flush=True)
-                except FileNotFoundError:
-                    pass  # Already cleaned up
-                except Exception as e:
-                    print(f"[Master] Warning: Could not cleanup {shm_name}: {e}", flush=True)
-            self._active_shm_names.clear()
+        self.processes.clear()
 
-        # Close and join queues
-        self.job_queue.close()
-        self.job_queue.join_thread()
-        self.result_queue.close()
-        self.result_queue.join_thread()
+        # Cleanup shared memory (coordinator unlinks)
+        self.storage.cleanup()
 
-        print("[Master] Shutdown complete.", flush=True)
+        print("[Coordinator] All workers shut down", flush=True)
 
     def __enter__(self):
-        """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - ensure cleanup."""
         self.shutdown()
-
-
-def _fast_action_sum(worker_infosets, action_index, num_actions):
-    """
-    Fast action alignment and summation with minimized hash lookups.
-
-    Optimized to cache index lookups and use direct array indexing.
-    """
-    sum_regrets = np.zeros(num_actions, dtype=np.float32)
-    sum_strategies = np.zeros(num_actions, dtype=np.float32)
-
-    for data in worker_infosets:
-        actions = data["legal_actions"]
-        regrets = data["regrets"]
-        strategies = data["strategy_sum"]
-
-        # Cache index lookups (minimize hashing)
-        indices = [action_index[action] for action in actions]
-
-        # Direct numpy array operations (no loops)
-        n_regrets = min(len(indices), len(regrets))
-        n_strategies = min(len(indices), len(strategies))
-
-        for i in range(n_regrets):
-            sum_regrets[indices[i]] += regrets[i]
-        for i in range(n_strategies):
-            sum_strategies[indices[i]] += strategies[i]
-
-    return sum_regrets, sum_strategies
-
-
-def merge_worker_results(solver_storage, worker_results: List[Dict], cfr_plus: bool = False):
-    """
-    Merge worker results into master storage.
-
-    For each infoset:
-    - Sum regrets across workers (CFR theory: regrets accumulate additively)
-    - Sum strategy counts (CFR theory: strategies accumulate additively)
-    - Sum reach counts (total visits across all workers)
-    - Sum cumulative utilities (for proper averaging later)
-    - Apply CFR+ flooring if enabled (after merge, not during worker updates)
-
-    Args:
-        solver_storage: Master storage to merge into
-        worker_results: List of result dicts from workers
-        cfr_plus: If True, apply CFR+ regret flooring after merging
-    """
-    merge_start_time = time.time()
-    print(f"[Master] Starting merge of {len(worker_results)} worker results...", flush=True)
-
-    # Collect all infoset keys (use set union for speed)
-    all_keys = set().union(*(result.get("infoset_data", {}).keys() for result in worker_results))
-
-    print(
-        f"[Master] Merging {len(all_keys)} unique infosets...",
-        flush=True,
-    )
-
-    # Track dirty keys for batch marking at end (use set to avoid duplicates)
-    dirty_keys = set()
-
-    # Merge each infoset
-    merged_count = 0
-    merge_loop_start = time.time()
-    for key in all_keys:
-        merged_count += 1
-        if merged_count % 100000 == 0:
-            elapsed = time.time() - merge_loop_start
-            print(
-                f"[Master] Merge progress: {merged_count}/{len(all_keys)} infosets "
-                f"({elapsed:.1f}s, {merged_count / elapsed:.0f}/s)...",
-                flush=True,
-            )
-
-        # Collect data from all workers for this key
-        worker_infosets = []
-        for result in worker_results:
-            if "infoset_data" not in result:
-                continue
-            data = result["infoset_data"].get(key)
-            if data is None:
-                continue
-            worker_infosets.append(data)
-
-        if not worker_infosets:
-            continue
-
-        # Build unified action list using master (if present) + any new worker actions
-        existing_infoset = solver_storage.get_infoset(key)
-        if existing_infoset is not None:
-            legal_actions = list(existing_infoset.legal_actions)
-        else:
-            legal_actions = list(worker_infosets[0]["legal_actions"])
-
-        action_index = {action: idx for idx, action in enumerate(legal_actions)}
-        for data in worker_infosets:
-            for action in data["legal_actions"]:
-                if action not in action_index:
-                    action_index[action] = len(legal_actions)
-                    legal_actions.append(action)
-
-        # Get or create infoset
-        if existing_infoset is not None:
-            infoset = existing_infoset
-        else:
-            infoset = solver_storage.get_or_create_infoset(key, legal_actions)
-
-        # Ensure master infoset has correct size (may need extending with newly discovered actions)
-        if infoset.num_actions < len(legal_actions):
-            target_size = len(legal_actions)
-            infoset.legal_actions = legal_actions
-            infoset.num_actions = target_size
-            if hasattr(solver_storage, "infoset_actions"):
-                solver_storage.infoset_actions[key] = legal_actions
-
-            pad_size = target_size - len(infoset.regrets)
-            infoset.regrets = np.pad(
-                infoset.regrets, (0, pad_size), mode="constant", constant_values=0
-            )
-            infoset.strategy_sum = np.pad(
-                infoset.strategy_sum, (0, pad_size), mode="constant", constant_values=0
-            )
-
-        # Sum regrets/strategies aligned by action identity
-        sum_regrets = np.zeros(len(legal_actions), dtype=np.float32)
-        sum_strategies = np.zeros(len(legal_actions), dtype=np.float32)
-
-        for data in worker_infosets:
-            actions = data["legal_actions"]
-            regrets = data["regrets"]
-            strategies = data["strategy_sum"]
-
-            # Direct summation with minimal overhead
-            for idx, action in enumerate(actions):
-                target_idx = action_index[action]
-                if idx < len(regrets):
-                    sum_regrets[target_idx] += regrets[idx]
-                if idx < len(strategies):
-                    sum_strategies[target_idx] += strategies[idx]
-
-        # Update master infoset with summed values
-        infoset.regrets += sum_regrets
-        infoset.strategy_sum += sum_strategies
-
-        # Apply CFR+ flooring after merge (mathematically correct)
-        # Workers use vanilla CFR (no flooring) so regrets sum correctly
-        if cfr_plus:
-            infoset.regrets = np.maximum(0, infoset.regrets)
-
-        # Sum reach counts (total visits across all workers)
-        infoset.reach_count += sum(data["reach_count"] for data in worker_infosets)
-
-        # Sum cumulative utilities (for proper averaging later)
-        infoset.cumulative_utility += sum(data["cumulative_utility"] for data in worker_infosets)
-
-        # Track for batch dirty marking
-        dirty_keys.add(key)
-
-    # Batch mark dirty at end
-    if dirty_keys:
-        # Check if storage has bulk dirty marking support
-        if hasattr(solver_storage, "mark_dirty_batch"):
-            solver_storage.mark_dirty_batch(dirty_keys)
-        else:
-            for key in dirty_keys:
-                solver_storage.mark_dirty(key)
-
-    total_merge_time = time.time() - merge_start_time
-    print(
-        f"[Master] Merge complete! Merged {len(all_keys)} infosets in {total_merge_time:.2f}s "
-        f"(throughput: {len(all_keys) / total_merge_time:.0f} infosets/s)",
-        flush=True,
-    )
+        return False
