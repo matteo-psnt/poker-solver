@@ -69,10 +69,46 @@ class MCCFRSolver:
         self.big_blind = cfg.game.big_blind
         seed = cfg.system.seed
 
+        # DCFR config
+        self.enable_dcfr = cfg.solver.enable_dcfr
+        self.dcfr_alpha = cfg.solver.dcfr_alpha
+        self.dcfr_beta = cfg.solver.dcfr_beta
+        self.dcfr_gamma = cfg.solver.dcfr_gamma
+
+        # Pruning config
+        self.enable_pruning = cfg.solver.enable_pruning
+        self.pruning_threshold = cfg.solver.pruning_threshold
+        self.prune_start_iteration = cfg.solver.prune_start_iteration
+        self.prune_reactivate_frequency = cfg.solver.prune_reactivate_frequency
+
+        # Validation
         if self.sampling_method not in ["external", "outcome"]:
             raise ValueError(
                 f"Invalid sampling_method: {self.sampling_method}. Must be 'external' or 'outcome'."
             )
+
+        # DCFR and Linear CFR are redundant - disable Linear CFR if both enabled
+        if self.enable_dcfr and self.linear_cfr:
+            import warnings
+
+            warnings.warn(
+                "DCFR and Linear CFR are both enabled. DCFR subsumes Linear CFR weighting. "
+                "Disabling Linear CFR.",
+                UserWarning,
+                stacklevel=2,
+            )
+            self.linear_cfr = False
+
+        # Pruning only works with external sampling
+        if self.enable_pruning and self.sampling_method != "external":
+            import warnings
+
+            warnings.warn(
+                "Pruning is only supported with external sampling. Disabling pruning.",
+                UserWarning,
+                stacklevel=2,
+            )
+            self.enable_pruning = False
 
         # Game rules
         self.rules = GameRules(self.small_blind, self.big_blind)
@@ -230,6 +266,13 @@ class MCCFRSolver:
             action_utilities = np.zeros(len(legal_actions))
 
             for i, action in enumerate(legal_actions):
+                original_idx = valid_indices[i]
+
+                # PRUNING: Skip traversal of pruned actions
+                if self.enable_pruning and infoset.is_pruned(original_idx):
+                    # Keep utility at 0 (don't traverse this branch)
+                    continue
+
                 # Apply action (all actions are pre-validated now)
                 next_state = state.apply_action(action, self.rules)
 
@@ -253,14 +296,31 @@ class MCCFRSolver:
                 # Map back to original infoset indices
                 opponent = 1 - current_player
                 for i in range(len(legal_actions)):
-                    regret = action_utilities[i] - node_utility
                     original_idx = valid_indices[i]
+
+                    # Skip regret update for pruned actions (preserve negative regret)
+                    if self.enable_pruning and infoset.is_pruned(original_idx):
+                        continue
+
+                    regret = action_utilities[i] - node_utility
                     infoset.update_regret(
                         original_idx,
                         regret * reach_probs[opponent],
                         cfr_plus=self.cfr_plus,
                         linear_cfr=self.linear_cfr,
                         iteration=self.iteration,
+                        enable_dcfr=self.enable_dcfr,
+                        dcfr_alpha=self.dcfr_alpha,
+                        dcfr_beta=self.dcfr_beta,
+                    )
+
+                # Update pruning state after regret updates
+                if self.enable_pruning:
+                    infoset.update_pruning(
+                        iteration=self.iteration,
+                        pruning_threshold=self.pruning_threshold,
+                        prune_start_iteration=self.prune_start_iteration,
+                        prune_reactivate_frequency=self.prune_reactivate_frequency,
                     )
 
                 # Update average strategy (weighted by player reach probability)
@@ -268,8 +328,17 @@ class MCCFRSolver:
                 for i in range(len(legal_actions)):
                     original_idx = valid_indices[i]
                     weight = strategy[i] * reach_probs[current_player]
-                    if self.linear_cfr:
+
+                    if self.enable_dcfr:
+                        # DCFR: Apply gamma-weighted discounting
+                        from src.utils.numba_ops import compute_dcfr_strategy_weight
+
+                        gamma_weight = compute_dcfr_strategy_weight(self.iteration, self.dcfr_gamma)
+                        weight *= gamma_weight
+                    elif self.linear_cfr:
+                        # Linear CFR: multiply by iteration
                         weight *= self.iteration
+
                     infoset.strategy_sum[original_idx] += weight
                 infoset.increment_reach_count()
                 infoset.add_cumulative_utility(node_utility)

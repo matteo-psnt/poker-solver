@@ -24,6 +24,16 @@ def make_test_config(**overrides) -> Config:
         "sampling_method": ("solver", "sampling_method"),
         "cfr_plus": ("solver", "cfr_plus"),
         "linear_cfr": ("solver", "linear_cfr"),
+        # DCFR parameters
+        "enable_dcfr": ("solver", "enable_dcfr"),
+        "dcfr_alpha": ("solver", "dcfr_alpha"),
+        "dcfr_beta": ("solver", "dcfr_beta"),
+        "dcfr_gamma": ("solver", "dcfr_gamma"),
+        # Pruning parameters
+        "enable_pruning": ("solver", "enable_pruning"),
+        "pruning_threshold": ("solver", "pruning_threshold"),
+        "prune_start_iteration": ("solver", "prune_start_iteration"),
+        "prune_reactivate_frequency": ("solver", "prune_reactivate_frequency"),
     }
 
     # Build nested dict from overrides
