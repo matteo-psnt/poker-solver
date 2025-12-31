@@ -185,9 +185,20 @@ class InMemoryStorage(Storage):
 
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
-            self.key_to_id = mapping_data["key_to_id"]
-            self.id_to_key = mapping_data["id_to_key"]
-            self.next_id = mapping_data["next_id"]
+
+            # Support both InMemoryStorage and SharedArrayStorage checkpoint formats
+            if "key_to_id" in mapping_data:
+                # InMemoryStorage format
+                self.key_to_id = mapping_data["key_to_id"]
+                self.id_to_key = mapping_data["id_to_key"]
+                self.next_id = mapping_data["next_id"]
+            elif "owned_keys" in mapping_data:
+                # SharedArrayStorage format (parallel training)
+                self.key_to_id = mapping_data["owned_keys"]
+                self.id_to_key = {v: k for k, v in self.key_to_id.items()}
+                self.next_id = mapping_data.get("max_id", len(self.key_to_id))
+            else:
+                raise ValueError("Invalid checkpoint format: missing key mappings")
 
         with (
             h5py.File(regrets_file, "r") as regrets_h5,

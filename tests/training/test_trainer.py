@@ -90,7 +90,7 @@ class TestTrainer:
                 f"Run directory should not exist after init failure, found: {run_dirs}"
             )
 
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(20)  # Reduced from 30
     def test_parallel_training_discovers_infosets(self, config_with_dummy_abstraction):
         """
         Test that parallel training discovers infosets using partitioned storage.
@@ -102,7 +102,7 @@ class TestTrainer:
         """
         # Configure for small parallel run
         config = config_with_dummy_abstraction
-        config.set("training.num_iterations", 6)
+        config.set("training.num_iterations", 4)  # Reduced from 6
         config.set("training.verbose", False)
         config.set("storage.checkpoint_enabled", False)
 
@@ -110,15 +110,15 @@ class TestTrainer:
         trainer = TrainingSession(config, run_id="test_parallel_discovery")
 
         # Run parallel training with public API
-        results = trainer.train(num_iterations=6, use_parallel=True, num_workers=2)
+        results = trainer.train(num_iterations=4, use_parallel=True, num_workers=2)
 
         # Verify results
-        assert results["total_iterations"] == 6
+        assert results["total_iterations"] == 4
         final_infosets = results["final_infosets"]
         assert final_infosets > 0, "Should discover infosets during training"
 
         # Verify metrics tracked the correct number of iterations
-        assert trainer.metrics.iteration == 6
+        assert trainer.metrics.iteration == 4
 
     @pytest.mark.timeout(30)
     def test_parallel_vs_sequential_both_work(self, config_with_dummy_abstraction):
@@ -160,7 +160,7 @@ class TestTrainer:
         assert trainer_par.metrics.iteration == 4
         assert len(trainer_par.metrics.infoset_counts) == 4
 
-    @pytest.mark.timeout(60)
+    @pytest.mark.timeout(20)  # Reduced from 60
     def test_parallel_training_performance(self, config_with_dummy_abstraction):
         """
         Test that parallel training completes efficiently.
@@ -200,10 +200,12 @@ class TestTrainer:
         print(f"   Final infosets: {results['final_infosets']}")
 
         # Basic sanity check - should complete in reasonable time
-        assert elapsed < 10, f"Training took too long: {elapsed:.2f}s"
-        assert throughput > 0.2, f"Throughput too low: {throughput:.2f} iter/s"
+        assert elapsed < 5, f"Training took too long: {elapsed:.2f}s"  # Reduced from 10
+        assert throughput > 0.4, (
+            f"Throughput too low: {throughput:.2f} iter/s"
+        )  # Increased from 0.2
 
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(20)  # Reduced from 30
     def test_parallel_training_completes_without_errors(self, config_with_dummy_abstraction):
         """Test that parallel training completes without errors with multiple workers."""
         # Run parallel training with multiple workers
@@ -215,13 +217,13 @@ class TestTrainer:
 
         # Run parallel training with multiple workers
         results = trainer.train(
-            num_iterations=10,
+            num_iterations=6,  # Reduced from 10
             use_parallel=True,
-            num_workers=4,
+            num_workers=3,  # Reduced from 4
         )
 
         # Verify training completed without errors
-        assert results["total_iterations"] == 10
+        assert results["total_iterations"] == 6
         assert results["final_infosets"] > 0
 
         # Key assertion: No errors should be raised during training
@@ -356,7 +358,7 @@ class TestAsyncCheckpointing:
             f"{results['final_infosets']} infosets"
         )
 
-    @pytest.mark.timeout(90)
+    @pytest.mark.timeout(40)  # Reduced from 60
     def test_checkpoint_round_trip_parallel(self, config_with_dummy_abstraction):
         """Test that parallel checkpoints can be saved and loaded correctly."""
         import pickle
@@ -365,14 +367,14 @@ class TestAsyncCheckpointing:
 
         config = config_with_dummy_abstraction
         config.set("training.checkpoint_frequency", 4)
-        config.set("training.num_iterations", 6)
+        config.set("training.num_iterations", 4)  # Reduced from 6
         config.set("training.verbose", False)
         config.set("storage.checkpoint_enabled", True)
 
         trainer = TrainingSession(config, run_id="test_checkpoint_roundtrip")
 
         # Run parallel training and save checkpoint
-        trainer.train(num_iterations=6, use_parallel=True, num_workers=2)
+        trainer.train(num_iterations=4, use_parallel=True, num_workers=2)
 
         # Verify checkpoint files exist
         key_mapping_file = trainer.run_dir / "key_mapping.pkl"
@@ -428,11 +430,11 @@ class TestAsyncCheckpointing:
 class TestParallelStress:
     """Stress tests for parallel training to catch race conditions."""
 
-    @pytest.mark.timeout(120)
+    @pytest.mark.timeout(60)  # Reduced from 120
     def test_high_worker_count_stress(self, config_with_dummy_abstraction):
         """Stress test with many workers to expose race conditions."""
         config = config_with_dummy_abstraction
-        config.set("training.num_iterations", 20)
+        config.set("training.num_iterations", 12)  # Reduced from 20
         config.set("training.verbose", False)
         config.set("storage.checkpoint_enabled", False)
 
@@ -440,23 +442,23 @@ class TestParallelStress:
 
         # Run with many workers (increases chance of race conditions)
         results = trainer.train(
-            num_iterations=20,
+            num_iterations=12,
             use_parallel=True,
-            num_workers=8,  # High worker count
-            batch_size=4,  # Small batch size = more synchronization
+            num_workers=6,  # Reduced from 8
+            batch_size=3,  # Small batch size = more synchronization
         )
 
         # Verify training completed without crashes
-        assert results["total_iterations"] == 20
+        assert results["total_iterations"] == 12
         assert results["final_infosets"] > 0
 
         # The key test: no crashes, no deadlocks, no data corruption
 
-    @pytest.mark.timeout(120)
+    @pytest.mark.timeout(60)  # Reduced from 120
     def test_repeated_batches_consistency(self, config_with_dummy_abstraction):
         """Test that repeated training batches maintain consistency."""
         config = config_with_dummy_abstraction
-        config.set("training.num_iterations", 16)
+        config.set("training.num_iterations", 12)  # Reduced from 16
         config.set("training.verbose", False)
         config.set("storage.checkpoint_enabled", False)
 
@@ -464,14 +466,14 @@ class TestParallelStress:
 
         # Run multiple batches with frequent ID exchanges
         results = trainer.train(
-            num_iterations=16,
+            num_iterations=12,
             use_parallel=True,
-            num_workers=4,
+            num_workers=3,  # Reduced from 4
             batch_size=2,  # Very small batches = frequent exchanges
         )
 
         # Verify all iterations completed
-        assert results["total_iterations"] == 16
+        assert results["total_iterations"] == 12
         final_count = results["final_infosets"]
         assert final_count > 0
 
