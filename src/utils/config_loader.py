@@ -4,14 +4,12 @@ Configuration loading - YAML overrides applied to dataclass defaults.
 Simple, clean, no duplication. All in one file.
 """
 
-import warnings
-from dataclasses import fields, is_dataclass, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import yaml
 
-from src.utils.config import Config
+from src.utils.config import Config, merge_dataclass_config
 
 
 def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
@@ -55,53 +53,8 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
 
 
 def _merge_config(base: Any, overrides: dict[str, Any]) -> Any:
-    """
-    Recursively merge dictionary overrides into a dataclass.
-
-    Args:
-        base: Base dataclass with defaults
-        overrides: Dictionary of overrides (typically from YAML)
-
-    Returns:
-        New dataclass instance with overrides applied
-    """
-    if not is_dataclass(base):
-        raise TypeError(f"base must be a dataclass, got {type(base)}")
-
-    if not overrides:
-        return base
-
-    # Build kwargs for replace()
-    kwargs = {}
-    valid_field_names = {field.name for field in fields(base)}
-
-    for field in fields(base):
-        field_name = field.name
-        current_value = getattr(base, field_name)
-
-        if field_name in overrides:
-            override_value = overrides[field_name]
-
-            # Recursively merge if both are dataclasses
-            if is_dataclass(current_value) and isinstance(override_value, dict):
-                kwargs[field_name] = _merge_config(current_value, override_value)
-            else:
-                # Direct override
-                kwargs[field_name] = override_value
-        # else: keep current value (implicit)
-
-    # Warn about unknown keys in overrides
-    unknown_keys = set(overrides.keys()) - valid_field_names
-    if unknown_keys:
-        dataclass_name = type(base).__name__
-        warnings.warn(
-            f"Unknown keys in config for {dataclass_name}: {sorted(unknown_keys)}. "
-            f"Valid keys are: {sorted(valid_field_names)}",
-            UserWarning,
-            stacklevel=2,
-        )
-
-    return cast(Any, replace(base, **kwargs)) if kwargs else base  # type: ignore[type-var]
+    """Backward-compatible wrapper around dataclass config merging."""
+    return merge_dataclass_config(base, overrides)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

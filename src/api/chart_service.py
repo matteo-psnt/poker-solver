@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.actions.betting_actions import BettingActions
-from src.cli.flows.chart.data import build_chart_metadata, build_preflop_chart_data
+from src.chart.data import build_chart_metadata, build_preflop_chart_data
 from src.game.rules import GameRules
 from src.solver.storage.in_memory import InMemoryStorage
 from src.training import services
