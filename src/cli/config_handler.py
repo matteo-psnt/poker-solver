@@ -142,18 +142,11 @@ def _edit_training_params(config: Config, custom_style) -> Config:
         style=custom_style,
     ).ask()
 
-    profile_mode = questionary.confirm(
-        "Enable profiling mode? (performance analysis)",
-        default=config.get("training.profile_mode", False),
-        style=custom_style,
-    ).ask()
-
     config.set("training.num_iterations", int(iterations))
     config.set("training.checkpoint_frequency", int(checkpoint_freq))
     config.set("training.log_frequency", int(log_freq))
     config.set("training.iterations_per_worker", int(iterations_per_worker))
     config.set("training.verbose", verbose)
-    config.set("training.profile_mode", profile_mode)
 
     return config
 
