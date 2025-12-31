@@ -391,9 +391,10 @@ class TrainingSession:
                     completed_iterations += len(batch_utilities)
                     total_infosets = batch_result.get("num_infosets", 0)
 
-                    # Sync keys and apply updates between batches
+                    # Exchange IDs and apply updates between batches
+                    # (owner-to-requester, not global broadcast)
                     if batch_idx < num_batches - 1:
-                        worker_manager.sync_keys(verbose=verbose)
+                        worker_manager.exchange_ids(verbose=verbose)
                         worker_manager.apply_pending_updates(verbose=verbose)
 
                     for i, util in enumerate(batch_utilities):

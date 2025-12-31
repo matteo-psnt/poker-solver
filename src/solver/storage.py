@@ -13,10 +13,11 @@ import pickle
 from abc import ABC, abstractmethod
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import h5py
 import numpy as np
+import xxhash
 
 from src.bucketing.utils.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action, fold
@@ -31,7 +32,6 @@ logger = logging.getLogger(__name__)
 class Storage(ABC):
     """Abstract base class for infoset storage."""
 
-    # Optional attribute expected by tests and tooling; implementations may set this
     checkpoint_dir: Optional[Path] = None
 
     @abstractmethod
@@ -65,10 +65,8 @@ class Storage(ABC):
 
         For non-partitioned storage, all keys are "owned" (returns True).
         For partitioned storage, only keys mapping to this worker's partition are owned.
-
-        This determines whether regret/strategy updates should be applied.
         """
-        return True  # Default: non-partitioned storage owns all keys
+        return True
 
     @abstractmethod
     def flush(self):
@@ -106,24 +104,20 @@ class InMemoryStorage(Storage):
         """
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
 
-        # Integer ID optimization: Use integers as dict keys instead of InfoSetKey
         self._infosets_by_id: Dict[int, InfoSet] = {}
         self.key_to_id: Dict[InfoSetKey, int] = {}
         self.id_to_key: Dict[int, InfoSetKey] = {}
         self.next_id = 0
 
-        # Load existing checkpoint if present
         if self.checkpoint_dir and self.checkpoint_dir.exists():
             self._load_from_checkpoint()
 
     def get_or_create_infoset(self, key: InfoSetKey, legal_actions: List[Action]) -> InfoSet:
         """Get existing infoset or create new one."""
-        # Use integer ID lookup (fast integer hash instead of complex InfoSetKey hash)
         infoset_id = self.key_to_id.get(key)
         if infoset_id is not None:
             return self._infosets_by_id[infoset_id]
 
-        # Create new infoset with integer ID
         infoset_id = self.next_id
         self.next_id += 1
 
@@ -151,16 +145,7 @@ class InMemoryStorage(Storage):
 
     @property
     def infosets(self) -> Dict[InfoSetKey, InfoSet]:
-        """
-        Get all infosets as a dict keyed by InfoSetKey.
-
-        This property provides backward compatibility with code that expects
-        a Dict[InfoSetKey, InfoSet]. Built on-the-fly from internal integer
-        ID storage.
-
-        For iteration, prefer using the internal _infosets_by_id when possible
-        for better performance.
-        """
+        """Get all infosets as a dict keyed by InfoSetKey."""
         return {
             self.id_to_key[infoset_id]: infoset
             for infoset_id, infoset in self._infosets_by_id.items()
@@ -175,18 +160,9 @@ class InMemoryStorage(Storage):
         pass
 
     def checkpoint(self, iteration: int):
-        """
-        Save current state to disk checkpoint.
-
-        If checkpoint_dir was provided, saves all infosets to HDF5 files.
-        Otherwise, this is a no-op.
-
-        Args:
-            iteration: Current iteration number (for logging)
-        """
+        """Save current state to disk checkpoint."""
         if not self.checkpoint_dir:
             return
-
         self._save_to_disk()
 
     def clear(self):
@@ -197,11 +173,7 @@ class InMemoryStorage(Storage):
         self.next_id = 0
 
     def _load_from_checkpoint(self):
-        """
-        Load infosets from disk checkpoint using optimized matrix format.
-
-        Reads large compressed matrices and reconstructs individual infosets.
-        """
+        """Load infosets from disk checkpoint."""
         if not self.checkpoint_dir:
             return
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
@@ -209,34 +181,27 @@ class InMemoryStorage(Storage):
         strategies_file = self.checkpoint_dir / "strategies.h5"
 
         if not all(f.exists() for f in [key_mapping_file, regrets_file, strategies_file]):
-            return  # No checkpoint to load
+            return
 
-        # Load key mapping
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
             self.key_to_id = mapping_data["key_to_id"]
             self.id_to_key = mapping_data["id_to_key"]
             self.next_id = mapping_data["next_id"]
 
-        # Load regrets and strategies from HDF5 (optimized matrix format only)
         with (
             h5py.File(regrets_file, "r") as regrets_h5,
             h5py.File(strategies_file, "r") as strategies_h5,
         ):
-            # Load matrices
             all_regrets = regrets_h5["regrets"][:]
             action_counts = regrets_h5["action_counts"][:]
             all_strategies = strategies_h5["strategies"][:]
 
-            # Reconstruct infosets from matrices
             for infoset_id, key in self.id_to_key.items():
                 n_actions = action_counts[infoset_id]
-
-                # Extract this infoset's data
                 regrets = all_regrets[infoset_id, :n_actions].copy()
                 strategies = all_strategies[infoset_id, :n_actions].copy()
 
-                # Create infoset with placeholder legal actions (solver will set real actions)
                 legal_actions = [fold() for _ in range(n_actions)]
                 infoset = InfoSet(key, legal_actions)
                 infoset.regrets = regrets
@@ -247,27 +212,15 @@ class InMemoryStorage(Storage):
         logger.info(f"Loaded {len(self._infosets_by_id)} infosets from checkpoint")
 
     def _save_to_disk(self):
-        """
-        Save all infosets to disk using optimized matrix format.
-
-        Instead of creating individual datasets per infoset (slow),
-        we stack all data into large matrices and save with compression.
-        This provides 10-50x speedup for checkpoint saves.
-
-        Thread-safe: Creates snapshots of data to avoid issues with
-        concurrent modifications during async checkpointing.
-        """
+        """Save all infosets to disk using optimized matrix format."""
         if not self.checkpoint_dir:
             return
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create snapshots to avoid "dictionary changed size" errors
-        # when running in background thread (async checkpointing)
         key_to_id_snapshot = dict(self.key_to_id)
         id_to_key_snapshot = dict(self.id_to_key)
         next_id_snapshot = self.next_id
 
-        # Save key mapping
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
         with open(key_mapping_file, "wb") as f:
             pickle.dump(
@@ -283,7 +236,6 @@ class InMemoryStorage(Storage):
         if num_infosets == 0:
             return
 
-        # Snapshot infoset data (copy arrays to avoid concurrent modifications)
         infoset_data = []
         for infoset_id in range(num_infosets):
             if infoset_id not in id_to_key_snapshot:
@@ -302,15 +254,12 @@ class InMemoryStorage(Storage):
         if not infoset_data:
             return
 
-        # Determine max actions across all infosets
         max_actions = max(len(item["regrets"]) for item in infoset_data)
 
-        # Pre-allocate arrays
         all_regrets = np.zeros((num_infosets, max_actions), dtype=np.float32)
         all_strategies = np.zeros((num_infosets, max_actions), dtype=np.float32)
         action_counts = np.zeros(num_infosets, dtype=np.int32)
 
-        # Fill arrays from snapshot
         for item in infoset_data:
             infoset_id = item["id"]
             regrets = item["regrets"]
@@ -358,32 +307,35 @@ class SharedArrayStorage(Storage):
     """
     High-performance partitioned storage using flat NumPy arrays in shared memory.
 
-    Architecture:
-    - Shared memory is THE LIVE DATA STRUCTURE, not a transport mechanism
-    - Pre-allocated flat arrays: shared_regrets[infoset_id, max_actions]
-    - Coordinator creates shared memory once at startup
-    - Workers attach to (not recreate) shared memory
-    - Lock-free reads (stale data acceptable for MCCFR)
-    - Only owning worker writes to an infoset (owner = infoset_id % num_workers)
+    OWNERSHIP MODEL:
+    - Ownership is determined by stable hash: owner(key) = xxhash(key) % num_workers
+    - Only the owning worker may create key→ID mappings
+    - Only the owning worker may write to an infoset's regrets/strategy
+    - Non-owners get read-only views into shared memory
 
-    Data layout:
-    - shared_regrets: float32[max_infosets, max_actions]
-    - shared_strategy_sum: float32[max_infosets, max_actions]
-    - shared_action_counts: int32[max_infosets] (number of actions per infoset)
-    - shared_infoset_count: int32[1] (current number of infosets)
+    ID ALLOCATION:
+    - Each worker has an exclusive ID range: [worker_id * range_size, (worker_id+1) * range_size)
+    - ID 0 is reserved as the "unknown" region for non-owner reads of undiscovered keys
+    - No shared counter, no races
 
-    Cold path (key → infoset_id mapping) is stored separately in dict.
-    Hot path (array access) uses direct integer indexing.
+    DATA LAYOUT:
+    - shared_regrets: float32[max_infosets, max_actions] - live data
+    - shared_strategy_sum: float32[max_infosets, max_actions] - live data
+    - shared_action_counts: int32[max_infosets] - number of actions per infoset
 
-    Cross-partition updates are buffered locally and applied by owner.
+    CONSISTENCY:
+    - Reads are lock-free and may be stale (acceptable for MCCFR)
+    - Writes are owner-only (no locks needed)
+    - Cross-partition updates are buffered and routed to owners
     """
 
     # Shared memory names (macOS limit: ~30 chars)
     SHM_REGRETS = "sas_reg"
     SHM_STRATEGY = "sas_str"
     SHM_ACTIONS = "sas_act"
-    SHM_COUNT = "sas_cnt"
-    SHM_KEYS = "sas_key"
+
+    # Reserved ID for unknown infosets (non-owners reading undiscovered keys)
+    UNKNOWN_ID = 0
 
     def __init__(
         self,
@@ -415,29 +367,44 @@ class SharedArrayStorage(Storage):
         self.is_coordinator = is_coordinator
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
 
-        # Cold path: key → infoset_id mapping (local dict, synced via shm)
-        self._key_to_id: Dict[InfoSetKey, int] = {}
-        self._id_to_key: Dict[int, InfoSetKey] = {}
+        # =====================================================================
+        # Per-worker ID allocation (race-free)
+        # ID 0 is reserved for "unknown" region, so usable range starts at 1
+        # =====================================================================
+        usable_slots = max_infosets - 1  # Reserve slot 0
+        slots_per_worker = usable_slots // num_workers
+        self.id_range_start = 1 + worker_id * slots_per_worker
+        self.id_range_end = 1 + (worker_id + 1) * slots_per_worker
+        self.next_local_id = self.id_range_start
 
-        # Local cache for legal actions (since we can't store complex objects in shm)
+        # =====================================================================
+        # Key→ID mappings (owner-local, no global sync)
+        # =====================================================================
+        # Keys we own: authoritative mapping
+        self._owned_keys: Dict[InfoSetKey, int] = {}
+        # Keys we've learned about from ID requests (cached, read-only)
+        self._remote_keys: Dict[InfoSetKey, int] = {}
+
+        # Legal actions cache (can't store complex objects in shm)
         self._legal_actions_cache: Dict[int, List[Action]] = {}
 
+        # Pending ID requests to send to owners (batched)
+        self._pending_id_requests: Dict[int, Set[InfoSetKey]] = {
+            i: set() for i in range(num_workers)
+        }
+
         # Cross-partition update buffers: {infoset_id: (regret_delta, strategy_delta)}
-        # These are updates for infosets we don't own
         self._pending_updates: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
 
         # Shared memory handles
         self._shm_regrets: Optional["SharedMemory"] = None
         self._shm_strategy: Optional["SharedMemory"] = None
         self._shm_actions: Optional["SharedMemory"] = None
-        self._shm_count: Optional["SharedMemory"] = None
-        self._shm_keys: Optional["SharedMemory"] = None
 
         # NumPy views into shared memory (the live data)
         self.shared_regrets: Optional[np.ndarray] = None
         self.shared_strategy_sum: Optional[np.ndarray] = None
         self.shared_action_counts: Optional[np.ndarray] = None
-        self.shared_infoset_count: Optional[np.ndarray] = None
 
         # Initialize shared memory
         if is_coordinator:
@@ -447,8 +414,71 @@ class SharedArrayStorage(Storage):
 
         logger.info(
             f"SharedArrayStorage initialized: worker={worker_id}, "
-            f"coordinator={is_coordinator}, max_infosets={max_infosets}"
+            f"coordinator={is_coordinator}, id_range=[{self.id_range_start}, {self.id_range_end})"
         )
+
+    # =========================================================================
+    # Stable Hashing (replaces Python hash())
+    # =========================================================================
+
+    def _stable_hash(self, key: InfoSetKey) -> int:
+        """
+        Compute stable hash of InfoSetKey using xxhash.
+
+        Python's built-in hash() is randomized per process, which breaks
+        ownership consistency across workers. xxhash provides a stable,
+        fast, cross-process hash.
+
+        Args:
+            key: InfoSetKey to hash
+
+        Returns:
+            64-bit integer hash
+        """
+        # Build deterministic byte representation (no pickle randomization)
+        parts = [
+            str(key.player_position).encode(),
+            key.street.name.encode(),
+            key.betting_sequence.encode(),
+            (key.preflop_hand or "").encode(),
+            str(key.postflop_bucket if key.postflop_bucket is not None else -1).encode(),
+            str(key.spr_bucket).encode(),
+        ]
+        key_bytes = b"|".join(parts)
+        return xxhash.xxh64(key_bytes).intdigest()
+
+    def get_owner(self, key: InfoSetKey) -> int:
+        """
+        Determine which worker owns this key.
+
+        Ownership is determined by stable hash of the key.
+        This is consistent across all processes.
+
+        Args:
+            key: InfoSetKey to check
+
+        Returns:
+            Worker ID that owns this key
+        """
+        return self._stable_hash(key) % self.num_workers
+
+    def is_owned(self, key: InfoSetKey) -> bool:
+        """Check if this worker owns the given infoset key."""
+        return self.get_owner(key) == self.worker_id
+
+    def is_owned_by_id(self, infoset_id: int) -> bool:
+        """
+        Check if this worker owns the given infoset ID.
+
+        Ownership by ID is determined by which worker's range contains the ID.
+        """
+        if infoset_id == self.UNKNOWN_ID:
+            return False  # Reserved region has no owner
+        return self.id_range_start <= infoset_id < self.id_range_end
+
+    # =========================================================================
+    # Shared Memory Management
+    # =========================================================================
 
     def _get_shm_name(self, base: str) -> str:
         """Get session-namespaced shared memory name."""
@@ -456,15 +486,12 @@ class SharedArrayStorage(Storage):
 
     def _create_shared_memory(self):
         """Create all shared memory segments (coordinator only)."""
-        # Clean up any stale shared memory from previous runs
         self._cleanup_stale_shm()
 
         # Calculate sizes
         regrets_size = self.max_infosets * self.max_actions * 4  # float32
         strategy_size = self.max_infosets * self.max_actions * 4  # float32
         actions_size = self.max_infosets * 4  # int32
-        count_size = 4  # single int32 for infoset count
-        keys_size = self.max_infosets * 1024  # ~1KB per key for pickled data
 
         # Create shared memory segments
         self._shm_regrets = shared_memory.SharedMemory(
@@ -482,25 +509,14 @@ class SharedArrayStorage(Storage):
             size=actions_size,
             name=self._get_shm_name(self.SHM_ACTIONS),
         )
-        self._shm_count = shared_memory.SharedMemory(
-            create=True,
-            size=count_size,
-            name=self._get_shm_name(self.SHM_COUNT),
-        )
-        self._shm_keys = shared_memory.SharedMemory(
-            create=True,
-            size=keys_size,
-            name=self._get_shm_name(self.SHM_KEYS),
-        )
 
         # Create NumPy views
         self._create_numpy_views()
 
-        # Initialize to zero
+        # Initialize to zero (including reserved UNKNOWN_ID slot)
         self.shared_regrets.fill(0)
         self.shared_strategy_sum.fill(0)
         self.shared_action_counts.fill(0)
-        self.shared_infoset_count[0] = 0
 
         logger.info(
             f"Coordinator created shared memory: "
@@ -510,6 +526,8 @@ class SharedArrayStorage(Storage):
 
     def _attach_shared_memory(self):
         """Attach to existing shared memory segments (worker)."""
+        import time
+
         max_retries = 10
         retry_delay = 0.5
 
@@ -524,20 +542,13 @@ class SharedArrayStorage(Storage):
                 self._shm_actions = shared_memory.SharedMemory(
                     name=self._get_shm_name(self.SHM_ACTIONS)
                 )
-                self._shm_count = shared_memory.SharedMemory(
-                    name=self._get_shm_name(self.SHM_COUNT)
-                )
-                self._shm_keys = shared_memory.SharedMemory(name=self._get_shm_name(self.SHM_KEYS))
 
-                # Create NumPy views
                 self._create_numpy_views()
                 logger.info(f"Worker {self.worker_id} attached to shared memory")
                 return
 
             except FileNotFoundError:
                 if attempt < max_retries - 1:
-                    import time
-
                     time.sleep(retry_delay)
                 else:
                     raise RuntimeError(
@@ -562,11 +573,6 @@ class SharedArrayStorage(Storage):
             dtype=np.int32,
             buffer=self._shm_actions.buf,
         )
-        self.shared_infoset_count = np.ndarray(
-            (1,),
-            dtype=np.int32,
-            buffer=self._shm_count.buf,
-        )
 
     def _cleanup_stale_shm(self):
         """Clean up stale shared memory from previous runs."""
@@ -574,8 +580,6 @@ class SharedArrayStorage(Storage):
             self._get_shm_name(self.SHM_REGRETS),
             self._get_shm_name(self.SHM_STRATEGY),
             self._get_shm_name(self.SHM_ACTIONS),
-            self._get_shm_name(self.SHM_COUNT),
-            self._get_shm_name(self.SHM_KEYS),
         ]
 
         for name in shm_names:
@@ -590,112 +594,131 @@ class SharedArrayStorage(Storage):
     # Storage Interface Implementation
     # =========================================================================
 
-    def get_partition_id(self, infoset_id: int) -> int:
-        """Get partition (owner worker) for an infoset ID."""
-        return infoset_id % self.num_workers
-
-    def is_owned(self, key: InfoSetKey) -> bool:
-        """Check if this worker owns the given infoset key."""
-        infoset_id = self._key_to_id.get(key)
-        if infoset_id is None:
-            # New key - check by hash
-            return hash(key) % self.num_workers == self.worker_id
-        return self.get_partition_id(infoset_id) == self.worker_id
-
-    def is_owned_by_id(self, infoset_id: int) -> bool:
-        """Check if this worker owns the given infoset ID."""
-        return self.get_partition_id(infoset_id) == self.worker_id
-
     def get_or_create_infoset(self, key: InfoSetKey, legal_actions: List[Action]) -> InfoSet:
         """
         Get existing infoset or create new one.
 
-        For owned keys: Creates in shared arrays
-        For non-owned keys: Returns view into shared arrays (read-only for caller)
-        """
-        # Check if key exists
-        infoset_id = self._key_to_id.get(key)
+        OWNERSHIP RULES:
+        - Only the owner may create the key→ID mapping
+        - Only the owner may write to the infoset's arrays
+        - Non-owners receive a view into shared memory (may be UNKNOWN_ID if key undiscovered)
 
-        if infoset_id is not None:
-            # Existing infoset - return view
+        Args:
+            key: InfoSetKey to look up or create
+            legal_actions: Legal actions at this infoset
+
+        Returns:
+            InfoSet with arrays backed by shared memory
+        """
+        owner = self.get_owner(key)
+
+        if owner == self.worker_id:
+            # =================================================================
+            # OWNER PATH: We own this key
+            # =================================================================
+            if key in self._owned_keys:
+                # Known key - return view
+                infoset_id = self._owned_keys[key]
+            else:
+                # New key - allocate ID from our exclusive range
+                infoset_id = self._allocate_id()
+                self._owned_keys[key] = infoset_id
+                self.shared_action_counts[infoset_id] = len(legal_actions)
+                self._legal_actions_cache[infoset_id] = legal_actions
+
             return self._create_infoset_view(infoset_id, key, legal_actions)
 
-        # New infoset - only owner can create
-        owner = hash(key) % self.num_workers
-        if owner != self.worker_id:
-            # Not owner - return empty infoset (will be read-only)
-            # The owner will create the canonical entry
-            infoset = InfoSet(key, legal_actions)
-            return infoset
+        else:
+            # =================================================================
+            # NON-OWNER PATH: Another worker owns this key
+            # =================================================================
+            if key in self._remote_keys:
+                # We've learned this key's ID (from previous batch sync)
+                infoset_id = self._remote_keys[key]
+                return self._create_infoset_view(infoset_id, key, legal_actions)
+            else:
+                # Unknown key - buffer request, return view into UNKNOWN_ID region
+                # The UNKNOWN_ID region contains zeros (uniform strategy)
+                # This is acceptable: non-owners don't update, staleness is OK
+                self._pending_id_requests[owner].add(key)
+                return self._create_infoset_view(self.UNKNOWN_ID, key, legal_actions)
 
-        # We are the owner - create new entry in shared arrays
-        infoset_id = self._allocate_infoset_id()
-
-        # Register key mapping
-        self._key_to_id[key] = infoset_id
-        self._id_to_key[infoset_id] = key
-        self._legal_actions_cache[infoset_id] = legal_actions
-
-        # Initialize in shared arrays (already zeroed)
-        num_actions = len(legal_actions)
-        self.shared_action_counts[infoset_id] = num_actions
-
-        return self._create_infoset_view(infoset_id, key, legal_actions)
-
-    def _allocate_infoset_id(self) -> int:
+    def _allocate_id(self) -> int:
         """
-        Allocate a new infoset ID (atomic operation).
+        Allocate ID from this worker's exclusive range (race-free).
 
-        Uses atomic increment on shared counter.
+        Each worker has a non-overlapping range:
+        - Worker 0: [1, 1 + slots_per_worker)
+        - Worker 1: [1 + slots_per_worker, 1 + 2*slots_per_worker)
+        - etc.
+
+        This eliminates all races - no shared counter needed.
+
+        Returns:
+            Allocated infoset ID
+
+        Raises:
+            RuntimeError if worker's ID range is exhausted
         """
-        # Simple atomic increment using a view
-        current = self.shared_infoset_count[0]
-        self.shared_infoset_count[0] = current + 1
-
-        if current >= self.max_infosets:
+        if self.next_local_id >= self.id_range_end:
             raise RuntimeError(
-                f"Exceeded max_infosets ({self.max_infosets}). Increase max_infosets parameter."
+                f"Worker {self.worker_id} exhausted ID range "
+                f"[{self.id_range_start}, {self.id_range_end}). "
+                f"Increase max_infosets or reduce worker count."
             )
-
-        return current
+        infoset_id = self.next_local_id
+        self.next_local_id += 1
+        return infoset_id
 
     def _create_infoset_view(
         self, infoset_id: int, key: InfoSetKey, legal_actions: List[Action]
     ) -> InfoSet:
         """
-        Create an InfoSet object that views the shared arrays.
+        Create an InfoSet with arrays viewing shared memory.
 
-        The returned InfoSet has its regrets and strategy_sum arrays
-        pointing directly into shared memory.
+        The returned InfoSet has regrets and strategy_sum pointing directly
+        into the shared memory arrays. Modifications by the owner are
+        immediately visible to all workers (lock-free reads).
+
+        Args:
+            infoset_id: ID in shared arrays (or UNKNOWN_ID for unknown keys)
+            key: InfoSetKey
+            legal_actions: Legal actions at this infoset
+
+        Returns:
+            InfoSet backed by shared memory (read-only if UNKNOWN_ID)
         """
         num_actions = len(legal_actions)
         infoset = InfoSet(key, legal_actions)
 
         # Point arrays to shared memory (sliced view)
-        # These are VIEWS, not copies - modifications write directly to shared memory
-        infoset.regrets = self.shared_regrets[infoset_id, :num_actions]
-        infoset.strategy_sum = self.shared_strategy_sum[infoset_id, :num_actions]
+        regrets_view = self.shared_regrets[infoset_id, :num_actions]
+        strategy_view = self.shared_strategy_sum[infoset_id, :num_actions]
+
+        # CRITICAL SAFETY: Make UNKNOWN_ID views read-only to prevent
+        # accidental writes corrupting the placeholder region.
+        # Any attempt to write will raise ValueError.
+        if infoset_id == self.UNKNOWN_ID:
+            regrets_view = regrets_view.copy()  # Copy to avoid modifying shared flag
+            regrets_view.setflags(write=False)
+            strategy_view = strategy_view.copy()
+            strategy_view.setflags(write=False)
+
+        infoset.regrets = regrets_view
+        infoset.strategy_sum = strategy_view
 
         return infoset
 
     def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
         """Get existing infoset or None."""
-        infoset_id = self._key_to_id.get(key)
+        owner = self.get_owner(key)
+
+        if owner == self.worker_id:
+            infoset_id = self._owned_keys.get(key)
+        else:
+            infoset_id = self._remote_keys.get(key)
+
         if infoset_id is None:
-            return None
-
-        legal_actions = self._legal_actions_cache.get(infoset_id)
-        if legal_actions is None:
-            # Unknown legal actions - create placeholder
-            num_actions = self.shared_action_counts[infoset_id]
-            legal_actions = [fold() for _ in range(num_actions)]
-
-        return self._create_infoset_view(infoset_id, key, legal_actions)
-
-    def get_infoset_by_id(self, infoset_id: int) -> Optional[InfoSet]:
-        """Get infoset by integer ID (fast path)."""
-        key = self._id_to_key.get(infoset_id)
-        if key is None:
             return None
 
         legal_actions = self._legal_actions_cache.get(infoset_id)
@@ -706,20 +729,20 @@ class SharedArrayStorage(Storage):
         return self._create_infoset_view(infoset_id, key, legal_actions)
 
     def has_infoset(self, key: InfoSetKey) -> bool:
-        """Check if infoset exists."""
-        return key in self._key_to_id
+        """Check if infoset exists (in owned or remote cache)."""
+        owner = self.get_owner(key)
+        if owner == self.worker_id:
+            return key in self._owned_keys
+        else:
+            return key in self._remote_keys
 
     def num_infosets(self) -> int:
-        """Get total number of infosets."""
-        return int(self.shared_infoset_count[0])
+        """Get total number of infosets allocated by this worker."""
+        return self.next_local_id - self.id_range_start
 
     def num_owned_infosets(self) -> int:
         """Get number of infosets owned by this worker."""
-        count = 0
-        for infoset_id in self._key_to_id.values():
-            if self.is_owned_by_id(infoset_id):
-                count += 1
-        return count
+        return len(self._owned_keys)
 
     def mark_dirty(self, key: InfoSetKey):
         """No-op for shared array storage (writes go directly to shared memory)."""
@@ -728,6 +751,53 @@ class SharedArrayStorage(Storage):
     def flush(self):
         """No-op for shared array storage (data is always in shared memory)."""
         pass
+
+    # =========================================================================
+    # ID Request/Response (Batched, Async)
+    # =========================================================================
+
+    def get_pending_id_requests(self) -> Dict[int, Set[InfoSetKey]]:
+        """
+        Get pending ID requests to send to owners.
+
+        Returns:
+            Dict mapping owner_id → set of keys to request
+        """
+        return self._pending_id_requests
+
+    def clear_pending_id_requests(self):
+        """Clear pending ID requests after they've been sent."""
+        for owner_id in self._pending_id_requests:
+            self._pending_id_requests[owner_id].clear()
+
+    def respond_to_id_requests(self, requested_keys: Set[InfoSetKey]) -> Dict[InfoSetKey, int]:
+        """
+        Respond to ID requests from other workers.
+
+        Called by owner to provide IDs for keys they own.
+
+        Args:
+            requested_keys: Keys that other workers are asking about
+
+        Returns:
+            Dict mapping key → infoset_id for keys we own and have allocated
+        """
+        responses = {}
+        for key in requested_keys:
+            if key in self._owned_keys:
+                responses[key] = self._owned_keys[key]
+        return responses
+
+    def receive_id_responses(self, responses: Dict[InfoSetKey, int]):
+        """
+        Receive ID responses from owners.
+
+        Updates remote key cache with learned IDs.
+
+        Args:
+            responses: Dict mapping key → infoset_id from owner
+        """
+        self._remote_keys.update(responses)
 
     # =========================================================================
     # Cross-Partition Updates (for non-owned infosets)
@@ -778,89 +848,75 @@ class SharedArrayStorage(Storage):
                 continue
 
             num_actions = self.shared_action_counts[infoset_id]
-            self.shared_regrets[infoset_id, :num_actions] += regret_delta[:num_actions]
-            self.shared_strategy_sum[infoset_id, :num_actions] += strategy_delta[:num_actions]
-
-    # =========================================================================
-    # Key Synchronization
-    # =========================================================================
-
-    def sync_keys_from_workers(self, all_key_mappings: List[Dict[InfoSetKey, int]]):
-        """
-        Merge key mappings from all workers.
-
-        Called by coordinator after workers discover new infosets.
-
-        Args:
-            all_key_mappings: List of {key: infoset_id} from each worker
-        """
-        for mapping in all_key_mappings:
-            for key, infoset_id in mapping.items():
-                if key not in self._key_to_id:
-                    self._key_to_id[key] = infoset_id
-                    self._id_to_key[infoset_id] = key
-
-    def get_key_mapping(self) -> Dict[InfoSetKey, int]:
-        """Get this worker's key mapping (for syncing)."""
-        return dict(self._key_to_id)
-
-    def set_key_mapping(self, mapping: Dict[InfoSetKey, int]):
-        """Set key mapping from coordinator broadcast."""
-        self._key_to_id = dict(mapping)
-        self._id_to_key = {v: k for k, v in mapping.items()}
+            if num_actions > 0:
+                self.shared_regrets[infoset_id, :num_actions] += regret_delta[:num_actions]
+                self.shared_strategy_sum[infoset_id, :num_actions] += strategy_delta[:num_actions]
 
     # =========================================================================
     # Checkpointing
     # =========================================================================
 
     def checkpoint(self, iteration: int):
-        """Save checkpoint to disk (coordinator only)."""
+        """
+        Save checkpoint to disk (coordinator only).
+
+        After key collection from workers, _owned_keys contains ALL keys
+        from all workers, spanning multiple ID ranges. We save:
+        1. Complete key→ID mapping
+        2. All used rows from shared arrays (determined by max ID)
+        """
         if not self.checkpoint_dir or not self.is_coordinator:
             return
 
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        num_infosets = self.num_infosets()
-        if num_infosets == 0:
+        # After key collection, _owned_keys contains all keys from all workers
+        num_keys = len(self._owned_keys)
+        if num_keys == 0:
             return
+
+        # Find the range of IDs that need to be saved
+        # After key collection, IDs span multiple worker ranges
+        all_ids = list(self._owned_keys.values())
+        max_id = max(all_ids) + 1  # +1 because we slice [:max_id]
 
         # Save key mapping
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
         with open(key_mapping_file, "wb") as f:
             pickle.dump(
                 {
-                    "key_to_id": dict(self._key_to_id),
-                    "id_to_key": dict(self._id_to_key),
-                    "num_infosets": num_infosets,
+                    "owned_keys": dict(self._owned_keys),
+                    "num_workers": self.num_workers,
+                    "max_id": max_id,
                 },
                 f,
             )
 
-        # Save shared arrays directly (no copying - just slice the used portion)
+        # Save shared arrays (all used rows up to max_id)
         regrets_file = self.checkpoint_dir / "regrets.h5"
         strategies_file = self.checkpoint_dir / "strategies.h5"
 
         with h5py.File(regrets_file, "w") as f:
             f.create_dataset(
                 "regrets",
-                data=self.shared_regrets[:num_infosets],
+                data=self.shared_regrets[:max_id],
                 compression="gzip",
                 compression_opts=4,
             )
             f.create_dataset(
                 "action_counts",
-                data=self.shared_action_counts[:num_infosets],
+                data=self.shared_action_counts[:max_id],
             )
 
         with h5py.File(strategies_file, "w") as f:
             f.create_dataset(
                 "strategies",
-                data=self.shared_strategy_sum[:num_infosets],
+                data=self.shared_strategy_sum[:max_id],
                 compression="gzip",
                 compression_opts=4,
             )
 
-        logger.info(f"Checkpoint saved: {num_infosets} infosets at iteration {iteration}")
+        logger.info(f"Checkpoint saved: {num_keys} infosets at iteration {iteration}")
 
     def load_checkpoint(self) -> bool:
         """Load checkpoint from disk (coordinator only)."""
@@ -874,32 +930,26 @@ class SharedArrayStorage(Storage):
         if not all(f.exists() for f in [key_mapping_file, regrets_file, strategies_file]):
             return False
 
-        # Load key mapping
         with open(key_mapping_file, "rb") as mapping_f:
             mapping_data = pickle.load(mapping_f)
-            self._key_to_id = mapping_data["key_to_id"]
-            self._id_to_key = mapping_data["id_to_key"]
-            num_infosets = mapping_data["num_infosets"]
+            self._owned_keys = mapping_data["owned_keys"]
+            saved_start = mapping_data["id_range_start"]
+            self.next_local_id = mapping_data["next_local_id"]
 
-        # Load into shared arrays
         with h5py.File(regrets_file, "r") as h5_f:
             loaded_regrets = h5_f["regrets"][:]
             loaded_action_counts = h5_f["action_counts"][:]
 
-            self.shared_regrets[: loaded_regrets.shape[0], : loaded_regrets.shape[1]] = (
-                loaded_regrets
-            )
-            self.shared_action_counts[: loaded_action_counts.shape[0]] = loaded_action_counts
+            num_loaded = loaded_regrets.shape[0]
+            self.shared_regrets[saved_start : saved_start + num_loaded] = loaded_regrets
+            self.shared_action_counts[saved_start : saved_start + num_loaded] = loaded_action_counts
 
         with h5py.File(strategies_file, "r") as h5_f:
             loaded_strategies = h5_f["strategies"][:]
-            self.shared_strategy_sum[: loaded_strategies.shape[0], : loaded_strategies.shape[1]] = (
-                loaded_strategies
-            )
+            num_loaded = loaded_strategies.shape[0]
+            self.shared_strategy_sum[saved_start : saved_start + num_loaded] = loaded_strategies
 
-        self.shared_infoset_count[0] = num_infosets
-
-        logger.info(f"Loaded checkpoint: {num_infosets} infosets")
+        logger.info(f"Loaded checkpoint: {len(self._owned_keys)} owned infosets")
         return True
 
     # =========================================================================
@@ -912,8 +962,6 @@ class SharedArrayStorage(Storage):
             self._shm_regrets,
             self._shm_strategy,
             self._shm_actions,
-            self._shm_count,
-            self._shm_keys,
         ]
 
         for shm in handles:
@@ -928,8 +976,6 @@ class SharedArrayStorage(Storage):
         self._shm_regrets = None
         self._shm_strategy = None
         self._shm_actions = None
-        self._shm_count = None
-        self._shm_keys = None
 
         logger.info(f"Worker {self.worker_id} cleaned up shared memory")
 
@@ -941,7 +987,8 @@ class SharedArrayStorage(Storage):
         return (
             f"SharedArrayStorage(worker={self.worker_id}, "
             f"coordinator={self.is_coordinator}, "
-            f"infosets={self.num_infosets()}/{self.max_infosets})"
+            f"owned={self.num_owned_infosets()}, "
+            f"id_range=[{self.id_range_start}, {self.id_range_end}))"
         )
 
     # =========================================================================
@@ -952,20 +999,27 @@ class SharedArrayStorage(Storage):
     def owned_partition(self) -> Dict[InfoSetKey, InfoSet]:
         """Get owned infosets as dict (for backward compatibility)."""
         result = {}
-        for key, infoset_id in self._key_to_id.items():
-            if self.is_owned_by_id(infoset_id):
-                legal_actions = self._legal_actions_cache.get(infoset_id, [])
-                if not legal_actions:
-                    num_actions = self.shared_action_counts[infoset_id]
-                    legal_actions = [fold() for _ in range(num_actions)]
-                result[key] = self._create_infoset_view(infoset_id, key, legal_actions)
+        for key, infoset_id in self._owned_keys.items():
+            legal_actions = self._legal_actions_cache.get(infoset_id, [])
+            if not legal_actions:
+                num_actions = self.shared_action_counts[infoset_id]
+                legal_actions = [fold() for _ in range(num_actions)]
+            result[key] = self._create_infoset_view(infoset_id, key, legal_actions)
         return result
 
     @property
     def infosets(self) -> Dict[InfoSetKey, InfoSet]:
-        """Get all infosets as dict (for backward compatibility)."""
+        """Get all known infosets as dict (owned + remote)."""
         result = {}
-        for key, infoset_id in self._key_to_id.items():
+        # Owned keys
+        for key, infoset_id in self._owned_keys.items():
+            legal_actions = self._legal_actions_cache.get(infoset_id, [])
+            if not legal_actions:
+                num_actions = self.shared_action_counts[infoset_id]
+                legal_actions = [fold() for _ in range(num_actions)]
+            result[key] = self._create_infoset_view(infoset_id, key, legal_actions)
+        # Remote keys
+        for key, infoset_id in self._remote_keys.items():
             legal_actions = self._legal_actions_cache.get(infoset_id, [])
             if not legal_actions:
                 num_actions = self.shared_action_counts[infoset_id]
