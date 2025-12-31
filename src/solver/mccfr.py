@@ -16,6 +16,7 @@ from src.game.state import Card, GameState, Street
 from src.solver.infoset_encoder import encode_infoset_key
 from src.solver.storage.base import Storage
 from src.utils.config import Config
+from src.utils.numba_ops import compute_dcfr_strategy_weight
 
 
 class MCCFRSolver:
@@ -331,8 +332,6 @@ class MCCFRSolver:
 
                     if self.enable_dcfr:
                         # DCFR: Apply gamma-weighted discounting
-                        from src.utils.numba_ops import compute_dcfr_strategy_weight
-
                         gamma_weight = compute_dcfr_strategy_weight(self.iteration, self.dcfr_gamma)
                         weight *= gamma_weight
                     elif self.linear_cfr:
@@ -519,6 +518,28 @@ class MCCFRSolver:
         # If board doesn't match expected size for this street, need to deal
         return len(state.board) < expected_board_size[state.street]
 
+    def _prepare_shuffled_deck(self, state: GameState) -> None:
+        """
+        Prepare deck by removing known cards and shuffling.
+
+        Mutates self._deck.cards in place for performance.
+
+        Args:
+            state: Current game state with hole cards and board
+        """
+        self._deck.cards = list(self._deck_cards)
+        known_cards = set()
+
+        for player_cards in state.hole_cards:
+            for card in player_cards:
+                known_cards.add(card.mask)
+
+        for card in state.board:
+            known_cards.add(card.mask)
+
+        self._deck.cards = [c for c in self._deck.cards if c.mask not in known_cards]
+        random.shuffle(self._deck.cards)
+
     def _sample_chance_outcome(self, state: GameState) -> GameState:
         """
         Sample cards to deal at chance node.
@@ -529,22 +550,7 @@ class MCCFRSolver:
         Returns:
             New state with cards dealt
         """
-        # Reuse deck instance
-        self._deck.cards = list(self._deck_cards)
-        known_cards = set()
-
-        # Remove hole cards
-        for player_cards in state.hole_cards:
-            for card in player_cards:
-                known_cards.add(card.mask)
-
-        # Remove board cards
-        for card in state.board:
-            known_cards.add(card.mask)
-
-        # Filter deck (deck contains eval7.Card objects)
-        self._deck.cards = [c for c in self._deck.cards if c.mask not in known_cards]
-        random.shuffle(self._deck.cards)
+        self._prepare_shuffled_deck(state)
 
         # Deal cards based on what's missing
         new_board = list(state.board)
@@ -590,21 +596,7 @@ class MCCFRSolver:
         Returns:
             State with complete 5-card board
         """
-        # Reuse deck instance
-        self._deck.cards = list(self._deck_cards)
-        known_cards = set()
-
-        for player_cards in state.hole_cards:
-            for card in player_cards:
-                known_cards.add(card.mask)
-
-        for card in state.board:
-            known_cards.add(card.mask)
-
-        self._deck.cards = [c for c in self._deck.cards if c.mask not in known_cards]
-        random.shuffle(self._deck.cards)
-
-        # Deal remaining cards to complete board
+        self._prepare_shuffled_deck(state)
         new_board = list(state.board)
         cards_needed = 5 - len(state.board)
 
