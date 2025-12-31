@@ -22,7 +22,10 @@ from src.solver.storage.shared_array.ownership import (
 from src.solver.storage.shared_array.ownership import (
     stable_hash as _stable_hash,
 )
-from src.solver.storage.shared_array.types import SharedArrayMutableState
+from src.solver.storage.shared_array.types import (
+    PendingUpdateQueue,
+    SharedArrayMutableState,
+)
 
 from . import infoset as infoset_ops
 from . import memory as memory_ops
@@ -68,13 +71,8 @@ class SharedArrayStorage(Storage):
     reattach_after_resize = resize_ops.reattach_after_resize
     _add_extra_region = resize_ops.add_extra_region
 
-    get_pending_id_requests = sync_ops.get_pending_id_requests
-    clear_pending_id_requests = sync_ops.clear_pending_id_requests
     respond_to_id_requests = sync_ops.respond_to_id_requests
-    receive_id_responses = sync_ops.receive_id_responses
     buffer_update = sync_ops.buffer_update
-    get_pending_updates = sync_ops.get_pending_updates
-    clear_pending_updates = sync_ops.clear_pending_updates
     apply_updates = sync_ops.apply_updates
 
     checkpoint = checkpoint_storage
@@ -116,6 +114,7 @@ class SharedArrayStorage(Storage):
             next_local_id=self.id_range_start,
             pending_id_requests={i: set() for i in range(num_workers)},
         )
+        self.update_queue = PendingUpdateQueue()
 
         self.shared_regrets = np.empty((0, self.max_actions), dtype=np.float64)
         self.shared_strategy_sum = np.empty((0, self.max_actions), dtype=np.float64)

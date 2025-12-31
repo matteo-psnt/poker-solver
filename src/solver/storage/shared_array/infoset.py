@@ -18,9 +18,8 @@ def get_or_create_infoset(
     owner = storage.get_owner(key)
 
     if owner == storage.worker_id:
-        if key in storage.state.owned_keys:
-            infoset_id = storage.state.owned_keys[key]
-        else:
+        infoset_id = storage.state.owned_keys.get(key)
+        if infoset_id is None:
             num_actions = len(legal_actions)
             if num_actions > storage.max_actions:
                 raise ValueError(
@@ -35,8 +34,8 @@ def get_or_create_infoset(
 
         return create_infoset_view(storage, infoset_id, key, legal_actions)
 
-    if key in storage.state.remote_keys:
-        infoset_id = storage.state.remote_keys[key]
+    infoset_id = storage.state.remote_keys.get(key)
+    if infoset_id is not None:
         return create_infoset_view(storage, infoset_id, key, legal_actions)
 
     storage.state.pending_id_requests[owner].add(key)

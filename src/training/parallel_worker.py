@@ -148,7 +148,7 @@ def _worker_loop(
 
             elif job_type == JobType.EXCHANGE_IDS:
                 # Send pending ID requests to owners
-                pending_requests = storage.get_pending_id_requests()
+                pending_requests = storage.state.pending_id_requests
                 for owner_id, keys in pending_requests.items():
                     if keys and owner_id != worker_id:
                         # Snapshot keys so the multiprocessing pickler doesn't see mutations.
@@ -164,7 +164,8 @@ def _worker_loop(
                                 file=sys.stderr,
                                 flush=True,
                             )
-                storage.clear_pending_id_requests()
+                for owner_id in storage.state.pending_id_requests:
+                    storage.state.pending_id_requests[owner_id].clear()
 
                 # Process any incoming requests/responses
                 _process_all_messages(
@@ -301,12 +302,12 @@ def _worker_loop(
                     iter_time = time.time() - iter_start
 
                     # Send pending cross-partition updates to owners
-                    pending = storage.get_pending_updates()
+                    pending = storage.update_queue.snapshot()
                     if pending:
                         _send_updates_to_owners(
                             worker_id, num_workers, pending, update_queues, storage
                         )
-                        storage.clear_pending_updates()
+                        storage.update_queue.clear()
 
                     fallback_stats = None
                     if hasattr(card_abstraction, "get_fallback_stats"):

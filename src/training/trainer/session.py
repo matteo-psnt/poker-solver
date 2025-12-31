@@ -6,8 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.evaluation.exploitability import compute_exploitability
-from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.helpers import get_missing_checkpoint_files
 from src.training import components
 from src.training.metrics import MetricsTracker
@@ -43,9 +41,7 @@ class TrainingSession:
 
         try:
             self.action_abstraction = components.build_action_abstraction(config)
-            self.card_abstraction = components.build_card_abstraction(
-                config, prompt_user=False, auto_compute=False
-            )
+            self.card_abstraction = components.build_card_abstraction(config)
             action_config_hash = self.action_abstraction.get_config_hash()
 
             if self.run_tracker is None:
@@ -150,15 +146,16 @@ class TrainingSession:
         self,
         num_samples: int = 10000,
         num_rollouts_per_infoset: int = 100,
+        use_average_strategy: bool = True,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         """Evaluate current solver using exploitability estimation."""
-        if not isinstance(self.solver, MCCFRSolver):
-            raise TypeError("Exploitability computation requires MCCFRSolver")
-
-        results = compute_exploitability(
+        results = components.evaluate_solver_exploitability(
             self.solver,
             num_samples=num_samples,
+            use_average_strategy=use_average_strategy,
             num_rollouts_per_infoset=num_rollouts_per_infoset,
+            seed=seed,
         )
 
         return {

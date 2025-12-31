@@ -1,7 +1,5 @@
 """Inspection/info flows for combo abstractions."""
 
-from collections import Counter
-
 from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.cli.flows.combo_precompute.common import (
     _get_config_name_from_metadata,
@@ -107,23 +105,17 @@ def _show_detailed_info(ctx: CliContext, abstractions: list) -> None:
             abstraction = PostflopPrecomputer.load(path)
 
             for street in [Street.FLOP, Street.TURN, Street.RIVER]:
-                if street not in abstraction._buckets:
-                    continue
-
                 print(f"\n{street.name} Bucket Distribution:")
                 print("-" * 60)
 
-                all_buckets: list[int] = []
-                for cluster_buckets in abstraction._buckets[street].values():
-                    all_buckets.extend(cluster_buckets.values())
-
-                if not all_buckets:
+                bucket_counts = abstraction.get_bucket_distribution(street)
+                if not bucket_counts:
                     continue
 
-                bucket_counts = Counter(all_buckets)
                 num_unique = len(bucket_counts)
+                total_combos = sum(bucket_counts.values())
 
-                print(f"  Total combos: {len(all_buckets):,}")
+                print(f"  Total combos: {total_combos:,}")
                 print(f"  Unique buckets: {num_unique}")
 
                 min_count = min(bucket_counts.values())

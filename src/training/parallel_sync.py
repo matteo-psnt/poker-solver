@@ -76,7 +76,7 @@ def _process_id_responses(response_queue: mp.Queue, storage: SharedArrayStorage)
     while True:
         try:
             responses = response_queue.get_nowait()
-            storage.receive_id_responses(responses)
+            storage.state.remote_keys.update(responses)
             count += len(responses)
         except queue.Empty:
             break

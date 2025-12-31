@@ -99,14 +99,14 @@ def test_evaluate_run_returns_output(monkeypatch, tmp_path):
     }
 
     monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
-    monkeypatch.setattr(services, "InMemoryStorage", lambda checkpoint_dir: storage)
-    monkeypatch.setattr(services, "build_action_abstraction", lambda cfg: "action_abs")
-    monkeypatch.setattr(services, "build_card_abstraction", lambda cfg, **kwargs: "card_abs")
-    monkeypatch.setattr(services, "build_solver", lambda cfg, action, card, st: FakeSolver())
-    monkeypatch.setattr(services, "MCCFRSolver", FakeSolver)
     monkeypatch.setattr(
         services,
-        "compute_exploitability",
+        "build_evaluation_solver",
+        lambda cfg, checkpoint_dir: (FakeSolver(), storage),
+    )
+    monkeypatch.setattr(
+        services,
+        "evaluate_solver_exploitability",
         lambda solver, **kwargs: expected_results,
     )
 

@@ -226,6 +226,17 @@ class PostflopBucketer(BucketingStrategy):
         self._fallback_count = 0
         self._total_lookups = 0
 
+    def get_bucket_distribution(self, street: Street) -> dict[int, int]:
+        """Get bucket_id -> combo_count distribution for a given street."""
+        if street == Street.PREFLOP:
+            return {}
+
+        counts: dict[int, int] = {}
+        for cluster_buckets in self._buckets.get(street, {}).values():
+            for bucket_id in cluster_buckets.values():
+                counts[bucket_id] = counts.get(bucket_id, 0) + 1
+        return counts
+
     def num_buckets(self, street: Street) -> int:
         """Get number of buckets for a street."""
         if street == Street.PREFLOP:

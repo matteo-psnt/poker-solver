@@ -12,6 +12,7 @@ from tqdm import tqdm
 from src.training.parallel_manager import SharedArrayWorkerManager
 
 from . import checkpointing, reporting
+from .batch_coordinator import BatchLoopState, TrainingBatchCoordinator
 
 if TYPE_CHECKING:
     from src.training.trainer.session import TrainingSession
@@ -107,85 +108,33 @@ def train_partitioned(
         interrupted = False
         fallback_stats: dict[str, float] | None = None
         last_capacity: int | None = None
+        loop_state = BatchLoopState()
+        batch_coordinator = TrainingBatchCoordinator(
+            session,
+            worker_manager,
+            num_workers=num_workers,
+            num_iterations=num_iterations,
+            batch_size=batch_size_val,
+            num_batches=num_batches,
+            start_iteration=start_iteration,
+            training_start_time=training_start_time,
+            verbose=verbose,
+        )
 
         try:
             for batch_idx in batch_iterator:
-                checkpointing.wait_for_checkpoint(session)
-
-                remaining = num_iterations - completed_iterations
-                current_batch_size = min(batch_size_val, remaining)
-
-                iters_per_worker_base = current_batch_size // num_workers
-                extra_iters = current_batch_size % num_workers
-                iterations_per_worker = [
-                    iters_per_worker_base + (1 if i < extra_iters else 0)
-                    for i in range(num_workers)
-                ]
-
-                batch_result = worker_manager.run_batch(
-                    iterations_per_worker=iterations_per_worker,
-                    batch_id=batch_idx,
-                    start_iteration=start_iteration + completed_iterations,
-                    verbose=verbose,
-                )
-
-                batch_utilities = batch_result["utilities"]
-                completed_iterations += len(batch_utilities)
-                total_infosets = batch_result.get("num_infosets", 0)
-                max_worker_capacity = batch_result.get("max_worker_capacity", 0.0)
-                last_capacity = batch_result.get("capacity", last_capacity)
-
-                if "fallback_stats" in batch_result:
-                    fallback_stats = batch_result["fallback_stats"]
-
-                if batch_result.get("interrupted"):
-                    interrupted = True
-
-                if batch_idx < num_batches - 1:
-                    inter_batch_timeout = max(60.0, batch_result["batch_time"] * 2.0)
-                    worker_manager.exchange_ids(
-                        timeout=inter_batch_timeout,
-                        verbose=verbose,
-                    )
-                    worker_manager.apply_pending_updates(
-                        timeout=inter_batch_timeout,
-                        verbose=verbose,
-                    )
-
-                for i, util in enumerate(batch_utilities):
-                    iter_num = start_iteration + completed_iterations - len(batch_utilities) + i + 1
-                    session.metrics.log_iteration(
-                        iteration=iter_num,
-                        utility=util,
-                        num_infosets=total_infosets,
-                        infoset_sampler=None,
-                    )
-
-                reporting.update_progress_bar(
-                    session,
-                    batch_iterator,
-                    start_iteration + completed_iterations,
-                    total_infosets,
-                    max_worker_capacity,
-                )
-
-                if checkpointing.should_checkpoint(
-                    session, start_iteration + completed_iterations, batch_size_val
-                ):
-                    checkpointing.async_checkpoint(
-                        session=session,
-                        worker_manager=worker_manager,
-                        iteration=start_iteration + completed_iterations,
-                        total_infosets=total_infosets,
-                        storage_capacity=last_capacity or 0,
-                        training_start_time=training_start_time,
-                    )
-
-                if interrupted:
+                batch_coordinator.run_batch(batch_idx, batch_iterator, loop_state)
+                if loop_state.interrupted:
                     break
 
         except KeyboardInterrupt:
-            interrupted = True
+            loop_state.interrupted = True
+
+        completed_iterations = loop_state.completed_iterations
+        total_infosets = loop_state.total_infosets
+        interrupted = loop_state.interrupted
+        fallback_stats = loop_state.fallback_stats
+        last_capacity = loop_state.last_capacity
 
         if interrupted and checkpointing.checkpoint_enabled(session) and completed_iterations > 0:
             if verbose:

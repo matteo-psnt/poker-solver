@@ -4,13 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.evaluation.exploitability import compute_exploitability
-from src.solver.mccfr import MCCFRSolver
-from src.solver.storage.in_memory import InMemoryStorage
 from src.training.components import (
-    build_action_abstraction,
-    build_card_abstraction,
-    build_solver,
+    build_evaluation_solver,
+    evaluate_solver_exploitability,
 )
 from src.training.run_tracker import RunMetadata, RunTracker
 from src.training.trainer import TrainingSession
@@ -92,17 +88,11 @@ def evaluate_run(
     metadata = load_run_metadata(run_dir)
     config = metadata.config
 
-    storage = InMemoryStorage(checkpoint_dir=run_dir)
-    action_abstraction = build_action_abstraction(config)
-    card_abstraction = build_card_abstraction(
+    solver, storage = build_evaluation_solver(
         config,
-        prompt_user=False,
-        auto_compute=False,
+        checkpoint_dir=run_dir,
     )
-    solver = build_solver(config, action_abstraction, card_abstraction, storage)
-    assert isinstance(solver, MCCFRSolver), f"Expected MCCFRSolver, got {type(solver)}"
-
-    results = compute_exploitability(
+    results = evaluate_solver_exploitability(
         solver,
         num_samples=num_samples,
         use_average_strategy=use_average_strategy,

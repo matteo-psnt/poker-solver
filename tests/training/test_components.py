@@ -45,7 +45,7 @@ class TestBuildCardAbstraction:
         )
 
         with pytest.raises(ValueError, match="card_abstraction requires either"):
-            components.build_card_abstraction(config, prompt_user=False, auto_compute=False)
+            components.build_card_abstraction(config)
 
     def test_build_fails_with_missing_path(self):
         """Test that building fails when path doesn't exist."""
@@ -54,7 +54,7 @@ class TestBuildCardAbstraction:
         )
 
         with pytest.raises(FileNotFoundError):
-            components.build_card_abstraction(config, prompt_user=False, auto_compute=False)
+            components.build_card_abstraction(config)
 
     def test_build_fails_with_invalid_config_name(self):
         """Test that building fails when config has no matching abstraction."""
@@ -63,7 +63,7 @@ class TestBuildCardAbstraction:
         )
 
         with pytest.raises(FileNotFoundError, match="Config file not found"):
-            components.build_card_abstraction(config, prompt_user=False, auto_compute=False)
+            components.build_card_abstraction(config)
 
     def test_build_loads_unique_hash_match(self, tmp_path, monkeypatch):
         """Build uses the unique abstraction path matching the expected config hash."""
@@ -96,8 +96,6 @@ class TestBuildCardAbstraction:
 
         abstraction = components.build_card_abstraction(
             config,
-            prompt_user=False,
-            auto_compute=False,
             abstractions_dir=base_path,
         )
 
@@ -128,8 +126,6 @@ class TestBuildCardAbstraction:
         with pytest.raises(ValueError, match="Multiple combo abstractions found"):
             components.build_card_abstraction(
                 config,
-                prompt_user=False,
-                auto_compute=False,
                 abstractions_dir=base_path,
             )
 
