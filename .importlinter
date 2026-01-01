@@ -1,0 +1,22 @@
+[importlinter]
+root_package = src
+
+[importlinter:contract:layered_architecture]
+name = Enforce src layering
+type = layers
+layers =
+    src.interfaces
+    src.pipeline
+    src.engine
+    src.core
+
+[importlinter:contract:shared_is_layer_neutral]
+name = Shared must not import layer packages
+type = forbidden
+source_modules =
+    src.shared
+forbidden_modules =
+    src.interfaces
+    src.pipeline
+    src.engine
+    src.core

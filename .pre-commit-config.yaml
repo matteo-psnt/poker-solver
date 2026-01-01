@@ -38,3 +38,8 @@ repos:
         language: system
         pass_filenames: false
         args: [check]
+      - id: import-linter
+        name: import-linter
+        entry: uv run lint-imports
+        language: system
+        pass_filenames: false
