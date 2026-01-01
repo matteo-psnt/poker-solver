@@ -15,7 +15,7 @@ The training system orchestrates Monte Carlo Counterfactual Regret Minimization 
 
 ## System Components
 
-### 1. TrainingSession (`src/training/trainer.py`)
+### 1. TrainingSession (`src/pipeline/training/trainer/session.py`)
 
 **Purpose:** Main orchestration class that manages the complete training lifecycle.
 
@@ -61,7 +61,7 @@ TrainingSession
 
 ---
 
-### 2. Component Builders (`src/training/components.py`)
+### 2. Component Builders (`src/pipeline/training/components.py`)
 
 **Purpose:** Centralized builder functions for creating solver components from configuration.
 
@@ -198,7 +198,7 @@ else:
 
 ---
 
-### 4. Storage System (`src/solver/storage.py`)
+### 4. Storage System (`src/engine/solver/storage/`)
 
 **Two Implementations:**
 
@@ -262,7 +262,7 @@ training:
 
 ---
 
-### 5. Metrics Tracking (`src/training/metrics.py`)
+### 5. Metrics Tracking (`src/pipeline/training/metrics.py`)
 
 **MetricsTracker:**
 
@@ -303,7 +303,7 @@ Iteration 1000/10000 [===>    ] 10.0%
 
 ---
 
-### 6. Run Tracking (`src/training/run_tracker.py`)
+### 6. Run Tracking (`src/pipeline/training/run_tracker.py`)
 
 **Purpose:** Lightweight metadata tracking for training runs.
 
@@ -355,7 +355,7 @@ list_runs(runs_dir: Path) -> list[str]
 
 ---
 
-### 8. MCCFR Solver (`src/solver/mccfr.py`)
+### 8. MCCFR Solver (`src/engine/solver/mccfr.py`)
 
 **Core Algorithm Implementation:**
 
@@ -545,10 +545,10 @@ trainer.train(num_iterations=10000)  # Continue for 10k more iterations
 **Test Coverage: ~65% overall**
 
 **Test Files:**
-- `tests/training/test_trainer.py` - TrainingSession tests (6 tests, fast)
-- `tests/training/test_components.py` - Component builders (15 tests)
-- `tests/training/test_run_tracker.py` - Metadata tracking (8 tests)
-- `tests/training/test_metrics.py` - Metrics tracking (15 tests)
+- `tests/pipeline/training/test_trainer.py` - TrainingSession tests (6 tests, fast)
+- `tests/pipeline/training/test_components.py` - Component builders (15 tests)
+- `tests/pipeline/training/test_run_tracker.py` - Metadata tracking (8 tests)
+- `tests/pipeline/training/test_metrics.py` - Metrics tracking (15 tests)
 
 **Testing Philosophy:**
 - ✅ **DO:** Test initialization, configuration, error handling
@@ -575,7 +575,7 @@ assert trainer.storage.num_infosets() == 0
 **Training Commands:**
 ```bash
 # Interactive CLI
-$ uv run python -m src.interfaces.cli
+$ uv run poker-solver
 > Train Solver
   - Select config: production.yaml
   - Select card abstraction
@@ -592,7 +592,7 @@ $ uv run python -m src.interfaces.cli
   - Specify additional iterations
 ```
 
-**CLI Implementation (`src/cli/flows/training.py`):**
+**CLI Implementation (`src/interfaces/cli/flows/training.py`):**
 ```python
 def train_solver():
     config = select_config(ctx)
@@ -723,6 +723,6 @@ config = Config.default().merge({
 
 ---
 
-**Last Updated:** February 19, 2026
+**Last Updated:** February 23, 2026
 **Author:** Training system maintainer
-**Related Docs:** ARCHITECTURE.md, README.md
+**Related Docs:** `README.md`, `AGENTS.md`, `src/pipeline/evaluation/README.md`
