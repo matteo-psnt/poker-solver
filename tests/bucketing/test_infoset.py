@@ -318,12 +318,16 @@ class TestInfoSet:
     # DCFR and pruning tests
 
     def test_update_regret_with_dcfr(self):
-        """Test that DCFR regret updates apply weighting."""
+        """Test that DCFR applies discount to cumulative regrets (Brown & Sandholm 2019)."""
         key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
+        # Set initial cumulative regret
+        infoset.regrets[0] = 100.0
+
         # Update with DCFR enabled at iteration 100
+        # Should: (1) discount cumulative regret, (2) add new regret
         infoset.update_regret(
             0,
             10.0,
@@ -333,18 +337,23 @@ class TestInfoSet:
             dcfr_beta=0.0,
         )
 
-        # Regret should be weighted by DCFR formula: 10.0 * 100^0.5 = 100
-        expected_weight = 100.0**0.5  # = 10
-        expected_regret = 10.0 * expected_weight  # = 100
+        # Discount factor for positive regret: 100^1.5 / (100^1.5 + 1)
+        t_exp = 100.0**1.5
+        discount_factor = t_exp / (t_exp + 1.0)
+        expected_regret = 100.0 * discount_factor + 10.0
         assert abs(infoset.regrets[0] - expected_regret) < 1e-6
 
     def test_update_regret_dcfr_negative_regret(self):
-        """Test DCFR with negative regret using beta parameter."""
+        """Test DCFR with negative cumulative regret using beta parameter."""
         key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         actions = [fold(), call(), bet(50)]
         infoset = InfoSet(key, actions)
 
-        # Negative regret with beta=0 should not be weighted
+        # Set initial negative cumulative regret
+        infoset.regrets[0] = -50.0
+
+        # Update with DCFR enabled at iteration 100
+        # With beta=0, negative cumulative regrets get discount factor 1.0 (no discount)
         infoset.update_regret(
             0,
             -10.0,
@@ -354,8 +363,66 @@ class TestInfoSet:
             dcfr_beta=0.0,
         )
 
-        # With beta=0, negative regrets get weight 1.0
-        assert abs(infoset.regrets[0] - (-10.0)) < 1e-6
+        # With beta=0, cumulative negative regret is not discounted
+        # Result: -50.0 * 1.0 + (-10.0) = -60.0
+        assert abs(infoset.regrets[0] - (-60.0)) < 1e-6
+
+    def test_dcfr_cumulative_discounting_over_iterations(self):
+        """Test that DCFR correctly discounts cumulative regrets over multiple iterations."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # Simulate multiple iterations with constant regret updates
+        # This demonstrates the exponential discounting effect
+        constant_regret = 10.0
+        alpha = 1.5
+
+        for iteration in range(1, 6):  # iterations 1-5
+            infoset.update_regret(
+                0,
+                constant_regret,
+                iteration=iteration,
+                enable_dcfr=True,
+                dcfr_alpha=alpha,
+                dcfr_beta=0.0,
+            )
+
+        # Manually compute expected regret after 5 iterations
+        # Iteration 1: 0 * (discount) + 10 = 10
+        # Iteration 2: 10 * (2^1.5/(2^1.5+1)) + 10 ≈ 10 * 0.738 + 10 = 17.38
+        # ... and so on
+        # Verify the final regret is reasonable
+        assert infoset.regrets[0] > 0
+        assert infoset.regrets[0] < 100  # Should not grow unbounded
+
+    def test_dcfr_vs_vanilla_cfr_discounting(self):
+        """Compare DCFR discounting to vanilla CFR (no discounting)."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+
+        # DCFR infoset
+        infoset_dcfr = InfoSet(key, actions)
+        # Vanilla CFR infoset
+        infoset_vanilla = InfoSet(key, actions)
+
+        # Both start with same cumulative regret
+        infoset_dcfr.regrets[0] = 100.0
+        infoset_vanilla.regrets[0] = 100.0
+
+        # Update both with same new regret
+        new_regret = 20.0
+        iteration = 100
+
+        infoset_dcfr.update_regret(
+            0, new_regret, iteration=iteration, enable_dcfr=True, dcfr_alpha=1.5
+        )
+        infoset_vanilla.update_regret(0, new_regret, iteration=iteration, enable_dcfr=False)
+
+        # DCFR should have smaller cumulative regret due to discounting old regret
+        assert infoset_dcfr.regrets[0] < infoset_vanilla.regrets[0]
+        # Vanilla: 100 + 20 = 120
+        assert abs(infoset_vanilla.regrets[0] - 120.0) < 1e-6
 
     def test_pruning_initialization(self):
         """Pruned array should be initialized to False."""

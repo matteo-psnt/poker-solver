@@ -59,22 +59,22 @@ def average_strategy(strategy_sum):
 @jit(nopython=True, cache=True)
 def compute_dcfr_weight(iteration, alpha, beta, is_positive):
     """
-    Compute DCFR discount weight for the current iteration.
+    Compute DCFR discount factor for cumulative regrets.
 
-    Uses linear discounting formula: t^(exponent-1)
+    Uses standard DCFR formula: t^exponent / (t^exponent + 1)
     where exponent = alpha for positive regrets, beta for negative regrets.
 
-    This gives more weight to recent iterations, implementing
-    Discounted CFR (Brown & Sandholm 2019).
+    This discount is applied to cumulative regrets each iteration, giving
+    exponentially less weight to older iterations (Brown & Sandholm 2019).
 
     Args:
         iteration: Current iteration number (1-indexed)
         alpha: Exponent for positive regrets (typically 1.5)
         beta: Exponent for negative regrets (typically 0.0)
-        is_positive: True if regret is positive, False if negative
+        is_positive: True if cumulative regret is positive, False if negative
 
     Returns:
-        Weight multiplier for this regret update (float64)
+        Discount factor to multiply cumulative regret by (float64, range [0, 1])
     """
     if iteration <= 1:
         return 1.0
@@ -85,18 +85,20 @@ def compute_dcfr_weight(iteration, alpha, beta, is_positive):
     if exponent == 0.0:
         return 1.0
 
-    # Linear discount: t^(exponent-1)
-    # For current iteration t, this gives t^(exponent-1)
-    # Higher t and higher exponent → higher weight → more emphasis on recent
-    return t ** (exponent - 1.0)
+    # Standard DCFR discount: t^exponent / (t^exponent + 1)
+    # As t increases, this approaches 1.0, meaning less discount
+    # Higher exponent → stronger discounting early on
+    t_exp = t**exponent
+    return t_exp / (t_exp + 1.0)
 
 
 @jit(nopython=True, cache=True)
 def compute_dcfr_strategy_weight(iteration, gamma):
     """
-    Compute DCFR discount weight for strategy_sum updates.
+    Compute DCFR weight for strategy_sum updates.
 
-    Uses linear discounting formula: t^(gamma-1)
+    Uses standard DCFR formula: t^gamma
+    This weights the contribution to the average strategy by iteration number.
 
     Args:
         iteration: Current iteration number (1-indexed)
@@ -113,4 +115,6 @@ def compute_dcfr_strategy_weight(iteration, gamma):
     if gamma == 0.0:
         return 1.0
 
-    return t ** (gamma - 1.0)
+    # Standard DCFR strategy weight: t^gamma
+    # Higher gamma → more weight to recent iterations
+    return t**gamma

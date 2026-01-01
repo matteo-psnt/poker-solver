@@ -294,7 +294,29 @@ class MCCFRSolver:
                 )
 
             # Node utility (expected value)
-            node_utility = np.dot(strategy, action_utilities)
+            # When pruning is enabled, only consider unpruned actions
+            if self.enable_pruning:
+                # Create mask for unpruned actions
+                unpruned_mask = np.array(
+                    [not infoset.is_pruned(valid_indices[i]) for i in range(len(legal_actions))]
+                )
+
+                if np.any(unpruned_mask):
+                    # Normalize strategy over unpruned actions only
+                    unpruned_strategy = strategy[unpruned_mask]
+                    unpruned_strategy_sum = unpruned_strategy.sum()
+                    if unpruned_strategy_sum > 0:
+                        unpruned_strategy = unpruned_strategy / unpruned_strategy_sum
+                    else:
+                        # Uniform over unpruned actions
+                        unpruned_strategy = np.ones(unpruned_mask.sum()) / unpruned_mask.sum()
+
+                    node_utility = np.dot(unpruned_strategy, action_utilities[unpruned_mask])
+                else:
+                    # All actions pruned (shouldn't happen due to safety check)
+                    node_utility = np.dot(strategy, action_utilities)
+            else:
+                node_utility = np.dot(strategy, action_utilities)
 
             # Only update regrets/strategy if we OWN this infoset
             # (For partitioned storage: hash(key) % num_workers == worker_id)
@@ -491,14 +513,24 @@ class MCCFRSolver:
                     cfr_plus=self.cfr_plus,
                     linear_cfr=self.linear_cfr,
                     iteration=self.iteration,
+                    enable_dcfr=self.enable_dcfr,
+                    dcfr_alpha=self.dcfr_alpha,
+                    dcfr_beta=self.dcfr_beta,
                 )
 
             # Update average strategy (weighted by player reach probability)
             for i in range(len(legal_actions)):
                 original_idx = valid_indices[i]
                 weight = strategy[i] * reach_probs[current_player]
-                if self.linear_cfr:
+
+                if self.enable_dcfr:
+                    # DCFR: Apply gamma-weighted discounting
+                    gamma_weight = compute_dcfr_strategy_weight(self.iteration, self.dcfr_gamma)
+                    weight *= gamma_weight
+                elif self.linear_cfr:
+                    # Linear CFR: multiply by iteration
                     weight *= self.iteration
+
                 infoset.strategy_sum[original_idx] += weight
 
             # Update statistics once per infoset update (not per action)

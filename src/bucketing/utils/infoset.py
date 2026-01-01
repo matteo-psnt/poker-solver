@@ -299,7 +299,7 @@ class InfoSet:
         - Vanilla CFR: regrets can be negative
         - CFR+: regrets are floored at 0 (much faster convergence)
         - Linear CFR: regrets weighted by iteration number
-        - DCFR: regrets discounted to emphasize recent iterations
+        - DCFR: cumulative regrets discounted each iteration (Brown & Sandholm 2019)
 
         Args:
             action_idx: Index of action in legal_actions
@@ -314,16 +314,17 @@ class InfoSet:
         if action_idx < 0 or action_idx >= self.num_actions:
             raise ValueError(f"Invalid action index: {action_idx}")
 
-        # Apply weighting
-        weighted_regret = regret
+        # DCFR: Discount cumulative regret BEFORE adding new regret
         if enable_dcfr:
-            # DCFR: Apply iteration-based discount weighting
-            # Weight = t^(exponent-1) where t = iteration
-            # Higher exponent and higher t → more weight to recent iterations
-            is_positive = regret > 0
-            discount_weight = compute_dcfr_weight(iteration, dcfr_alpha, dcfr_beta, is_positive)
-            weighted_regret = regret * discount_weight
-        elif linear_cfr:
+            # Apply discount factor to existing cumulative regret
+            # Discount based on whether cumulative regret is positive or negative
+            is_positive = self.regrets[action_idx] > 0
+            discount_factor = compute_dcfr_weight(iteration, dcfr_alpha, dcfr_beta, is_positive)
+            self.regrets[action_idx] *= discount_factor
+
+        # Apply weighting to incoming regret
+        weighted_regret = regret
+        if linear_cfr and not enable_dcfr:
             # Linear CFR: multiply by iteration number
             weighted_regret = regret * iteration
 
