@@ -1,6 +1,5 @@
 """Precompute execution flow for combo abstraction CLI."""
 
-import hashlib
 import multiprocessing as mp
 from pathlib import Path
 
@@ -24,14 +23,14 @@ def _list_available_configs(ctx: CliContext) -> list:
     return configs
 
 
-def _get_config_choice(ctx: CliContext) -> tuple:
+def _get_config_choice(ctx: CliContext) -> PrecomputeConfig | None:
     """Prompt user for configuration choice."""
     available_configs = _list_available_configs(ctx)
 
     if not available_configs:
         print("\nNo configuration files found in config/abstraction/")
         print("Please create a YAML config file first.")
-        return None, None
+        return None
 
     choices = [f"{name}.yaml" for name in available_configs]
     choice = prompts.select(
@@ -41,16 +40,16 @@ def _get_config_choice(ctx: CliContext) -> tuple:
     )
 
     if choice is None:
-        return None, None
+        return None
 
     config_name = choice.replace(".yaml", "")
 
     try:
         config = PrecomputeConfig.from_yaml(config_name)
-        return config_name, config
+        return config
     except Exception as exc:
         print(f"\nError loading config '{config_name}': {exc}")
-        return None, None
+        return None
 
 
 TIME_PER_ITEM_BASELINE = {
@@ -60,6 +59,7 @@ TIME_PER_ITEM_BASELINE = {
 }
 TIME_BASELINE_WORKERS = 12
 TIME_BASELINE_SAMPLES = 1000
+OUTPUT_HASH_LENGTH = 8
 
 
 def _estimate_time(config: PrecomputeConfig) -> None:
@@ -117,16 +117,15 @@ def _estimate_time(config: PrecomputeConfig) -> None:
     print()
 
 
-def _get_output_path(base_dir: Path, config_name: str, config: PrecomputeConfig) -> Path:
+def _output_config_hash(config: PrecomputeConfig) -> str:
+    """Return the normalized short hash used in output directory names."""
+    return config.get_config_hash()[:OUTPUT_HASH_LENGTH]
+
+
+def _get_output_path(base_dir: Path, config: PrecomputeConfig) -> Path:
     """Generate deterministic output path based on config."""
     base_path = base_dir / "data" / "combo_abstraction"
-
-    config_str = (
-        f"{config.num_board_clusters}{config.representatives_per_cluster}"
-        f"{config.representative_selection}{config.num_buckets}"
-        f"{config.equity_samples}{config.seed}"
-    )
-    config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
+    config_hash = _output_config_hash(config)
 
     dirname = (
         f"buckets-F{config.num_buckets[Street.FLOP]}T{config.num_buckets[Street.TURN]}"
@@ -147,12 +146,13 @@ def handle_combo_precompute(ctx: CliContext) -> None:
     print("=" * 60)
     print()
 
-    config_name, config = _get_config_choice(ctx)
+    config = _get_config_choice(ctx)
     if config is None:
         print("Cancelled.")
         return
+    config_name = config.config_name or "unknown"
 
-    output_path = _get_output_path(ctx.base_dir, config_name, config)
+    output_path = _get_output_path(ctx.base_dir, config)
 
     if output_path.exists() and (output_path / "combo_abstraction.pkl").exists():
         print(f"\n[!] Abstraction already exists: {output_path}")

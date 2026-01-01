@@ -1,8 +1,11 @@
 """Configuration handling for CLI."""
 
+from pydantic import ValidationError
+
 from src.cli.flows.combo_precompute import handle_combo_precompute
 from src.cli.ui import prompts, ui
 from src.cli.ui.context import CliContext
+from src.training.components import build_card_abstraction
 from src.utils.config import Config
 from src.utils.config_loader import load_config
 
@@ -11,11 +14,8 @@ def select_config(ctx: CliContext) -> Config | None:
     """
     Select and optionally edit a config file.
 
-    Args:
-        ctx: CLI context
-
     Returns:
-        Loaded Config object or None if cancelled
+        Loaded Config object or None if cancelled.
     """
     training_config_dir = ctx.config_dir / "training"
     config_files = sorted(training_config_dir.glob("*.yaml"))
@@ -26,11 +26,7 @@ def select_config(ctx: CliContext) -> Config | None:
 
     choices = [f.stem for f in config_files] + ["Cancel"]
 
-    selected = prompts.select(
-        ctx,
-        "Select configuration:",
-        choices=choices,
-    )
+    selected = prompts.select(ctx, "Select configuration:", choices=choices)
 
     if selected is None or selected == "Cancel":
         return None
@@ -38,11 +34,7 @@ def select_config(ctx: CliContext) -> Config | None:
     config_path = training_config_dir / f"{selected}.yaml"
     config = load_config(config_path)
 
-    edit = prompts.confirm(
-        ctx,
-        "Edit configuration before running?",
-        default=False,
-    )
+    edit = prompts.confirm(ctx, "Edit configuration before running?", default=False)
 
     if edit:
         config = edit_config(ctx, config)
@@ -54,55 +46,52 @@ def edit_config(ctx: CliContext, config: Config) -> Config:
     """
     Interactive config editor with multiple categories.
 
-    Args:
-        ctx: CLI context
-        config: Config to edit
-
     Returns:
-        Modified config
+        Modified config (original is returned unchanged on cancel).
     """
     ui.header("Edit Configuration")
 
     choices = [
-        "Training Parameters (iterations, checkpoints, etc.)",
-        "Game Settings (stack size, blinds)",
-        "Solver Settings (CFR+, Linear CFR, sampling)",
-        "Action Model & Resolver (templates, raise cap)",
+        "Training Parameters",
+        "Game Settings",
+        "Solver Settings",
+        "Pruning",
+        "Action Model & Resolver",
         "Card Abstraction",
-        "Storage Settings (capacity, compression)",
-        "System Settings (seed, logging)",
+        "Storage Settings",
+        "System Settings",
         "Done",
     ]
 
     while True:
-        category = prompts.select(
-            ctx,
-            "What would you like to edit?",
-            choices=choices,
-        )
+        category = prompts.select(ctx, "What would you like to edit?", choices=choices)
 
         if category == "Done" or category is None:
             break
 
         print()
-        if "Training Parameters" in category:
-            config = _edit_training_params(ctx, config)
-        elif "Game Settings" in category:
-            config = _edit_game_settings(ctx, config)
-        elif "Solver Settings" in category:
-            config = _edit_solver_settings(ctx, config)
-        elif "Action Model" in category:
-            config = _edit_action_model(ctx, config)
-        elif "Card Abstraction" in category:
-            config = _edit_card_abstraction(ctx, config)
-        elif "Storage Settings" in category:
-            config = _edit_storage_settings(ctx, config)
-        elif "System Settings" in category:
-            config = _edit_system_settings(ctx, config)
+        handler = {
+            "Training Parameters": _edit_training_params,
+            "Game Settings": _edit_game_settings,
+            "Solver Settings": _edit_solver_settings,
+            "Pruning": _edit_dcfr_pruning,
+            "Action Model & Resolver": _edit_action_model,
+            "Card Abstraction": _edit_card_abstraction,
+            "Storage Settings": _edit_storage_settings,
+            "System Settings": _edit_system_settings,
+        }.get(category)
+
+        if handler:
+            config = handler(ctx, config)
 
         print()
 
     return config
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _list_abstraction_configs(ctx: CliContext) -> list[str]:
@@ -110,18 +99,33 @@ def _list_abstraction_configs(ctx: CliContext) -> list[str]:
     abstraction_config_dir = ctx.config_dir / "abstraction"
     if not abstraction_config_dir.exists():
         return []
+    return sorted(f.stem for f in abstraction_config_dir.glob("*.yaml") if f.is_file())
 
-    return sorted(
-        config_file.stem
-        for config_file in abstraction_config_dir.glob("*.yaml")
-        if config_file.is_file()
-    )
+
+def _try_merge(config: Config, overrides: dict) -> Config:
+    """
+    Attempt config.merge(overrides), printing a clear error and returning
+    the original config unchanged if Pydantic validation fails.
+    """
+    try:
+        return config.merge(overrides)
+    except ValidationError as exc:
+        ui.error("Invalid configuration — changes not applied:")
+        for error in exc.errors():
+            field = " → ".join(str(p) for p in error["loc"])
+            print(f"  {field}: {error['msg']}")
+        return config
+
+
+# ---------------------------------------------------------------------------
+# Section editors
+# ---------------------------------------------------------------------------
 
 
 def _edit_training_params(ctx: CliContext, config: Config) -> Config:
-    """Edit training parameters."""
     print("Training Parameters")
     print("-" * 40)
+    ui.info("Total iterations run × iterations_per_worker = total work per training session.")
 
     iterations = prompts.prompt_int(
         ctx,
@@ -129,34 +133,42 @@ def _edit_training_params(ctx: CliContext, config: Config) -> Config:
         default=config.training.num_iterations,
         min_value=1,
     )
+    if iterations is None:
+        return config
+
     checkpoint_freq = prompts.prompt_int(
         ctx,
         "Checkpoint frequency (save every N iterations):",
         default=config.training.checkpoint_frequency,
         min_value=1,
+        max_value=iterations,
     )
+    if checkpoint_freq is None:
+        return config
+
     iterations_per_worker = prompts.prompt_int(
         ctx,
-        "Iterations per worker (batch size multiplier for parallel training):",
+        "Iterations per worker (batch size for parallel training):",
         default=config.training.iterations_per_worker,
         min_value=1,
     )
-    verbose = prompts.confirm(
-        ctx,
-        "Verbose output?",
-        default=config.training.verbose,
-    )
+    if iterations_per_worker is None:
+        return config
+
+    verbose = prompts.confirm(ctx, "Verbose output?", default=config.training.verbose)
+    if verbose is None:
+        return config
 
     runs_dir = prompts.text(
         ctx,
         "Output directory for training runs:",
         default=config.training.runs_dir,
     )
-
-    if None in (iterations, checkpoint_freq, iterations_per_worker, verbose, runs_dir):
+    if runs_dir is None:
         return config
 
-    return config.merge(
+    return _try_merge(
+        config,
         {
             "training": {
                 "num_iterations": iterations,
@@ -165,12 +177,11 @@ def _edit_training_params(ctx: CliContext, config: Config) -> Config:
                 "verbose": verbose,
                 "runs_dir": runs_dir,
             }
-        }
+        },
     )
 
 
 def _edit_game_settings(ctx: CliContext, config: Config) -> Config:
-    """Edit game settings."""
     print("Game Settings")
     print("-" * 40)
 
@@ -180,35 +191,40 @@ def _edit_game_settings(ctx: CliContext, config: Config) -> Config:
         default=config.game.starting_stack,
         min_value=1,
     )
+    if stack is None:
+        return config
+
     small_blind = prompts.prompt_int(
         ctx,
-        "Small blind:",
+        "Small blind (chips):",
         default=config.game.small_blind,
         min_value=1,
     )
+    if small_blind is None:
+        return config
+
     big_blind = prompts.prompt_int(
         ctx,
-        "Big blind:",
+        "Big blind (chips):",
         default=config.game.big_blind,
         min_value=1,
     )
-
-    if None in (stack, small_blind, big_blind):
+    if big_blind is None:
         return config
 
-    return config.merge(
+    return _try_merge(
+        config,
         {
             "game": {
                 "starting_stack": stack,
                 "small_blind": small_blind,
                 "big_blind": big_blind,
             }
-        }
+        },
     )
 
 
 def _edit_solver_settings(ctx: CliContext, config: Config) -> Config:
-    """Edit solver settings."""
     print("Solver Settings")
     print("-" * 40)
 
@@ -216,79 +232,178 @@ def _edit_solver_settings(ctx: CliContext, config: Config) -> Config:
         ctx,
         "Sampling method:",
         choices=[
-            "external (lower variance, slower)",
-            "outcome (higher variance, faster)",
+            "external (lower variance, recommended for production)",
+            "outcome (higher variance, faster per iteration)",
         ],
-        default="outcome (higher variance, faster)"
-        if config.solver.sampling_method == "outcome"
-        else "external (lower variance, slower)",
+        default=(
+            "outcome (higher variance, faster per iteration)"
+            if config.solver.sampling_method == "outcome"
+            else "external (lower variance, recommended for production)"
+        ),
     )
-    cfr_plus = prompts.confirm(
-        ctx,
-        "Use CFR+? (100x faster convergence)",
-        default=config.solver.cfr_plus,
-    )
-    linear_cfr = prompts.confirm(
-        ctx,
-        "Use Linear CFR? (2-3x additional speedup)",
-        default=config.solver.linear_cfr,
-    )
-
-    if None in (sampling, cfr_plus, linear_cfr):
+    if sampling is None:
         return config
 
-    sampling_method = "outcome" if "outcome" in sampling else "external"
-
-    return config.merge(
-        {
-            "solver": {
-                "sampling_method": sampling_method,
-                "cfr_plus": cfr_plus,
-                "linear_cfr": linear_cfr,
-            }
-        }
+    cfr_plus = prompts.confirm(
+        ctx,
+        "Use CFR+? (floors regrets at 0 — ~100x faster convergence)",
+        default=config.solver.cfr_plus,
     )
+    if cfr_plus is None:
+        return config
+
+    weighting = prompts.select(
+        ctx,
+        "Iteration weighting:",
+        choices=[
+            "linear (weights later iterations more — 2–3x speedup, recommended)",
+            "dcfr (Discounted CFR — Brown & Sandholm 2019)",
+            "none (uniform weighting — vanilla CFR)",
+        ],
+        default={
+            "linear": "linear (weights later iterations more — 2–3x speedup, recommended)",
+            "dcfr": "dcfr (Discounted CFR — Brown & Sandholm 2019)",
+            "none": "none (uniform weighting — vanilla CFR)",
+        }.get(config.solver.iteration_weighting),
+    )
+    if weighting is None:
+        return config
+
+    iteration_weighting = weighting.split(" ")[0]  # extract "linear" / "dcfr" / "none"
+
+    overrides: dict = {
+        "solver": {
+            "sampling_method": "outcome" if "outcome" in sampling else "external",
+            "cfr_plus": cfr_plus,
+            "iteration_weighting": iteration_weighting,
+        }
+    }
+
+    if iteration_weighting == "dcfr":
+        dcfr_alpha = prompts.prompt_float(
+            ctx,
+            "DCFR alpha — positive-regret discount exponent (recommended: 1.5):",
+            default=config.solver.dcfr_alpha,
+            min_value=0.001,
+        )
+        if dcfr_alpha is None:
+            return config
+
+        dcfr_beta = prompts.prompt_float(
+            ctx,
+            "DCFR beta — negative-regret discount exponent (recommended: 0.0):",
+            default=config.solver.dcfr_beta,
+            min_value=0.0,
+        )
+        if dcfr_beta is None:
+            return config
+
+        dcfr_gamma = prompts.prompt_float(
+            ctx,
+            "DCFR gamma — strategy discount exponent (recommended: 2.0):",
+            default=config.solver.dcfr_gamma,
+            min_value=0.001,
+        )
+        if dcfr_gamma is None:
+            return config
+
+        overrides["solver"].update(
+            {
+                "dcfr_alpha": dcfr_alpha,
+                "dcfr_beta": dcfr_beta,
+                "dcfr_gamma": dcfr_gamma,
+            }
+        )
+
+    return _try_merge(config, overrides)
+
+
+def _edit_dcfr_pruning(ctx: CliContext, config: Config) -> Config:
+    print("Pruning")
+    print("-" * 40)
+
+    enable_pruning = prompts.confirm(
+        ctx,
+        "Enable regret-based pruning? (skips low-regret actions during training)",
+        default=config.solver.enable_pruning,
+    )
+    if enable_pruning is None:
+        return config
+
+    overrides: dict = {"solver": {"enable_pruning": enable_pruning}}
+
+    if enable_pruning:
+        threshold = prompts.prompt_float(
+            ctx,
+            "Pruning threshold (actions with regret below −threshold are pruned):",
+            default=config.solver.pruning_threshold,
+            min_value=0.0,
+        )
+        if threshold is None:
+            return config
+
+        prune_start = prompts.prompt_int(
+            ctx,
+            "Start pruning after iteration:",
+            default=config.solver.prune_start_iteration,
+            min_value=1,
+        )
+        if prune_start is None:
+            return config
+
+        reactivate_freq = prompts.prompt_int(
+            ctx,
+            "Re-enable all pruned actions every N iterations:",
+            default=config.solver.prune_reactivate_frequency,
+            min_value=1,
+        )
+        if reactivate_freq is None:
+            return config
+
+        overrides["solver"].update(
+            {
+                "pruning_threshold": threshold,
+                "prune_start_iteration": prune_start,
+                "prune_reactivate_frequency": reactivate_freq,
+            }
+        )
+
+    return _try_merge(config, overrides)
 
 
 def _edit_action_model(ctx: CliContext, config: Config) -> Config:
-    """Edit action model and resolver settings."""
     print("Action Model & Resolver")
     print("-" * 40)
 
     max_raises = prompts.prompt_int(
         ctx,
-        "Max raises per street (prevents infinite trees):",
+        "Max raises per street in the resolver subgame:",
         default=config.resolver.max_raises_per_street,
         min_value=1,
     )
+    if max_raises is None:
+        return config
+
     jam_spr_cutoff = prompts.prompt_float(
         ctx,
-        "Jam SPR cutoff for 'jam_low_spr' templates:",
+        "Jam SPR threshold (jam_low_spr fires when pot-to-stack ratio is below this):",
         default=config.action_model.jam_spr_threshold,
         min_value=0.0,
     )
-
-    # Ask if user wants to customize bet sizes
-    customize_bets = prompts.confirm(
-        ctx,
-        "Customize bet sizes? (Advanced)",
-        default=False,
-    )
-
-    if None in (max_raises, jam_spr_cutoff):
+    if jam_spr_cutoff is None:
         return config
 
-    merge_dict = {
-        "resolver": {
-            "max_raises_per_street": max_raises,
-        },
-        "action_model": {
-            "jam_spr_threshold": jam_spr_cutoff,
-        },
+    customize_bets = prompts.confirm(ctx, "Customise bet sizes? (Advanced)", default=False)
+    if customize_bets is None:
+        return config
+
+    merge_dict: dict = {
+        "resolver": {"max_raises_per_street": max_raises},
+        "action_model": {"jam_spr_threshold": jam_spr_cutoff},
     }
 
     if customize_bets:
-        ui.info("\nPreflop Raise Sizes (BB units):")
+        ui.info("\nPreflop Raise Sizes (BB units, comma-separated):")
         default_preflop = [
             float(v)
             for v in config.action_model.preflop_templates.get("sb_first_in", [])
@@ -296,11 +411,13 @@ def _edit_action_model(ctx: CliContext, config: Config) -> Config:
         ]
         preflop_raises = _edit_list_of_floats(
             ctx,
-            "Enter raise sizes separated by commas",
-            default=default_preflop or [2.0, 2.5],
+            "Enter raise sizes (e.g. 2.5, 3.5, 5.0):",
+            default=default_preflop or [2.5, 3.5, 5.0],
         )
+        if preflop_raises is None:
+            return config
 
-        ui.info("\nPostflop Bet Sizes (pot fractions):")
+        ui.info("\nPostflop Bet Sizes (pot fractions, comma-separated):")
         first_aggressive = [
             float(v)
             for v in config.action_model.postflop_templates.get("first_aggressive", [])
@@ -308,108 +425,97 @@ def _edit_action_model(ctx: CliContext, config: Config) -> Config:
         ]
         flop_bets = _edit_list_of_floats(
             ctx,
-            "Flop bet sizes (e.g. 0.33, 0.66, 1.25):",
-            default=first_aggressive or [0.33, 0.75, 1.25],
+            "First-to-act bet sizes (e.g. 0.33, 0.66, 1.25):",
+            default=first_aggressive or [0.33, 0.66, 1.25],
         )
-        turn_bets = _edit_list_of_floats(
-            ctx,
-            "Turn bet sizes (e.g. 0.50, 1.0, 1.5):",
-            default=first_aggressive or [0.5, 1.0, 1.5],
-        )
-        river_bets = _edit_list_of_floats(
-            ctx,
-            "River bet sizes (e.g. 0.50, 1.0, 2.0):",
-            default=first_aggressive or [0.5, 1.0, 2.0],
-        )
+        if flop_bets is None:
+            return config
 
         preflop_templates = dict(config.action_model.preflop_templates)
         postflop_templates = dict(config.action_model.postflop_templates)
 
-        if preflop_raises:
-            passive = [
-                token
-                for token in preflop_templates.get("sb_first_in", [])
-                if isinstance(token, str) and token in {"fold", "call", "limp"}
-            ]
-            preflop_templates["sb_first_in"] = passive + preflop_raises
-        if flop_bets and turn_bets and river_bets:
-            postflop_templates["first_aggressive"] = flop_bets
-            postflop_templates["first_aggressive_turn"] = turn_bets
-            postflop_templates["first_aggressive_river"] = river_bets
+        passive = [
+            t
+            for t in preflop_templates.get("sb_first_in", [])
+            if isinstance(t, str) and t in {"fold", "call", "limp"}
+        ]
+        preflop_templates["sb_first_in"] = passive + preflop_raises
+        postflop_templates["first_aggressive"] = flop_bets
 
         merge_dict["action_model"]["preflop_templates"] = preflop_templates
         merge_dict["action_model"]["postflop_templates"] = postflop_templates
 
-    return config.merge(merge_dict)
+    return _try_merge(config, merge_dict)
 
 
 def _edit_list_of_floats(ctx: CliContext, prompt: str, default: list[float]) -> list[float] | None:
-    """Helper to edit a list of floats."""
+    """Prompt for a comma-separated list of positive floats."""
     default_str = ", ".join(str(x) for x in default)
 
     def validate(value: str) -> bool | str:
         try:
-            parts = [float(x.strip()) for x in value.split(",")]
-            if len(parts) == 0:
-                return "Need at least one value"
-            if any(x <= 0 for x in parts):
-                return "All values must be positive"
-            return True
+            parts = [float(x.strip()) for x in value.split(",") if x.strip()]
         except ValueError:
-            return "Invalid number format"
+            return "Invalid number — use comma-separated values like 0.33, 0.66, 1.25"
+        if not parts:
+            return "Enter at least one value"
+        if any(x <= 0 for x in parts):
+            return "All values must be positive"
+        return True
 
     result = prompts.text(ctx, prompt, default=default_str, validate=validate)
     if result is None:
         return None
-
     try:
-        return [float(x.strip()) for x in result.split(",")]
+        return [float(x.strip()) for x in result.split(",") if x.strip()]
     except ValueError:
         return None
 
 
 def _edit_storage_settings(ctx: CliContext, config: Config) -> Config:
-    """Edit storage settings."""
     print("Storage Settings")
     print("-" * 40)
-
-    ui.info("These settings affect memory usage and checkpoint performance.")
+    ui.info("These settings affect memory usage and checkpoint I/O performance.")
 
     initial_capacity = prompts.prompt_int(
         ctx,
-        "Initial infoset capacity (grows automatically):",
+        "Initial infoset capacity (grows automatically if exceeded):",
         default=config.storage.initial_capacity,
         min_value=10_000,
     )
+    if initial_capacity is None:
+        return config
 
     max_actions = prompts.prompt_int(
         ctx,
-        "Max actions per infoset:",
+        "Max actions stored per infoset:",
         default=config.storage.max_actions,
         min_value=2,
     )
+    if max_actions is None:
+        return config
 
     zarr_compression = prompts.prompt_int(
         ctx,
-        "Zarr compression level (1=fastest, 3=balanced, 9=smallest, 1-9):",
+        "Zarr compression level (1=fastest I/O, 9=smallest files):",
         default=config.storage.zarr_compression_level,
         min_value=1,
+        max_value=9,
     )
-    if zarr_compression is not None and zarr_compression > 9:
-        print("⚠️  Warning: Compression level > 9 is unusual. Using 9.")
-        zarr_compression = 9
+    if zarr_compression is None:
+        return config
 
     zarr_chunk = prompts.prompt_int(
         ctx,
-        "Zarr chunk size (infosets per chunk, 10K-100K typical):",
+        "Zarr chunk size in infosets (10K–100K typical; larger = faster sequential reads):",
         default=config.storage.zarr_chunk_size,
         min_value=1_000,
     )
-
-    if None in (initial_capacity, max_actions, zarr_compression, zarr_chunk):
+    if zarr_chunk is None:
         return config
 
-    return config.merge(
+    return _try_merge(
+        config,
         {
             "storage": {
                 "initial_capacity": initial_capacity,
@@ -417,12 +523,11 @@ def _edit_storage_settings(ctx: CliContext, config: Config) -> Config:
                 "zarr_compression_level": zarr_compression,
                 "zarr_chunk_size": zarr_chunk,
             }
-        }
+        },
     )
 
 
 def _edit_card_abstraction(ctx: CliContext, config: Config) -> Config:
-    """Edit card abstraction settings."""
     print("Card Abstraction")
     print("-" * 40)
 
@@ -432,12 +537,11 @@ def _edit_card_abstraction(ctx: CliContext, config: Config) -> Config:
         return config
 
     default_config = config.card_abstraction.config or "default"
-    if default_config in available_configs:
-        prompt_default = default_config
-    elif "default" in available_configs:
-        prompt_default = "default"
-    else:
-        prompt_default = available_configs[0]
+    prompt_default = (
+        default_config
+        if default_config in available_configs
+        else ("default" if "default" in available_configs else available_configs[0])
+    )
 
     config_name = prompts.select(
         ctx,
@@ -445,72 +549,74 @@ def _edit_card_abstraction(ctx: CliContext, config: Config) -> Config:
         choices=available_configs,
         default=prompt_default,
     )
-
     if config_name is None:
         return config
 
-    config = config.merge({"card_abstraction": {"config": config_name}})
+    config = _try_merge(config, {"card_abstraction": {"config": config_name}})
 
-    # Check if abstraction exists
-    base_path = ctx.base_dir / "data" / "combo_abstraction"
-
-    abstraction_found = False
-    if base_path.exists():
-        for path in base_path.iterdir():
-            if path.is_dir() and (path / "combo_abstraction.pkl").exists():
-                abstraction_found = True
-                break
-
-    if not abstraction_found:
-        ui.warn("Warning: No combo abstraction found.")
-        precompute = prompts.confirm(
-            ctx,
-            "Would you like to precompute combo abstraction now?",
-            default=True,
-        )
-
-        if precompute:
+    # Verify the selected abstraction actually exists and the hash matches.
+    # build_card_abstraction uses the same resolver logic as training, so this
+    # catches both "never precomputed" and "config changed since last precompute".
+    try:
+        build_card_abstraction(config)
+    except FileNotFoundError:
+        ui.warn(f"No precomputed abstraction found for '{config_name}'.")
+        if prompts.confirm(ctx, "Run precomputation now?", default=True):
             handle_combo_precompute(ctx)
+    except ValueError as exc:
+        if "hash mismatch" in str(exc).lower():
+            ui.warn(f"Abstraction for '{config_name}' was built with different parameters.")
+            if prompts.confirm(ctx, "Recompute now?", default=True):
+                handle_combo_precompute(ctx)
+        else:
+            ui.error(str(exc))
 
     return config
 
 
 def _edit_system_settings(ctx: CliContext, config: Config) -> Config:
-    """Edit system settings."""
     print("System Settings")
     print("-" * 40)
 
     def _validate_seed(value: str) -> bool | str:
         if not value.strip():
             return True
-        if value.isdigit():
+        try:
+            int(value)
             return True
-        return "Enter a whole number"
+        except ValueError:
+            return "Enter a whole number, or leave blank for a random seed"
 
     seed_text = prompts.text(
         ctx,
-        "Random seed (leave blank for random):",
+        "Random seed (leave blank for a different seed each run):",
         default=str(config.system.seed) if config.system.seed is not None else "",
         validate=_validate_seed,
     )
+    if seed_text is None:
+        return config
+
     log_level = prompts.select(
         ctx,
         "Log level:",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default=config.system.log_level,
     )
+    if log_level is None:
+        return config
+
     checkpoint_enabled = prompts.confirm(
         ctx,
-        "Enable checkpointing?",
+        "Enable checkpointing? (saves periodic snapshots to disk)",
         default=config.storage.checkpoint_enabled,
     )
-
-    if seed_text is None or log_level is None or checkpoint_enabled is None:
+    if checkpoint_enabled is None:
         return config
 
     seed = int(seed_text) if seed_text.strip() else None
 
-    return config.merge(
+    return _try_merge(
+        config,
         {
             "system": {
                 "seed": seed,
@@ -519,5 +625,5 @@ def _edit_system_settings(ctx: CliContext, config: Config) -> Config:
             "storage": {
                 "checkpoint_enabled": checkpoint_enabled,
             },
-        }
+        },
     )

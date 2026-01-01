@@ -39,10 +39,10 @@ class MCCFRSolver:
 
     def __init__(
         self,
-        action_model: ActionModel | None = None,
-        card_abstraction: BucketingStrategy | None = None,
-        storage: Storage | None = None,
-        config: Config | None = None,
+        action_model: ActionModel,
+        card_abstraction: BucketingStrategy,
+        storage: Storage,
+        config: Config,
     ):
         """
         Initialize MCCFR solver.
@@ -51,80 +51,23 @@ class MCCFRSolver:
             action_model: Action model
             card_abstraction: Card abstraction
             storage: Storage backend
-            config: Config object (defaults to Config.default() if not provided)
+            config: Config object
         """
-        if action_model is None:
-            raise ValueError("action_model is required")
-        if card_abstraction is None:
-            raise ValueError("card_abstraction is required")
-        if storage is None:
-            raise ValueError("storage is required")
         self.action_model = action_model
         self.card_abstraction = card_abstraction
         self.storage = storage
-        self.config = config if config is not None else Config.default()
+        self.config = config
 
         # Training state
         self.iteration = 0
 
-        # Extract config values from typed Config object
-        cfg = self.config
-        self.cfr_plus = cfg.solver.cfr_plus
-        self.linear_cfr = cfg.solver.linear_cfr
-        self.sampling_method = cfg.solver.sampling_method
-        self.starting_stack = cfg.game.starting_stack
-        self.small_blind = cfg.game.small_blind
-        self.big_blind = cfg.game.big_blind
-        seed = cfg.system.seed
-
-        # DCFR config
-        self.enable_dcfr = cfg.solver.enable_dcfr
-        self.dcfr_alpha = cfg.solver.dcfr_alpha
-        self.dcfr_beta = cfg.solver.dcfr_beta
-        self.dcfr_gamma = cfg.solver.dcfr_gamma
-
-        # Pruning config
-        self.enable_pruning = cfg.solver.enable_pruning
-        self.pruning_threshold = cfg.solver.pruning_threshold
-        self.prune_start_iteration = cfg.solver.prune_start_iteration
-        self.prune_reactivate_frequency = cfg.solver.prune_reactivate_frequency
-
-        # Validation
-        if self.sampling_method not in ["external", "outcome"]:
-            raise ValueError(
-                f"Invalid sampling_method: {self.sampling_method}. Must be 'external' or 'outcome'."
-            )
-
-        # DCFR and Linear CFR are redundant - disable Linear CFR if both enabled
-        if self.enable_dcfr and self.linear_cfr:
-            import warnings
-
-            warnings.warn(
-                "DCFR and Linear CFR are both enabled. DCFR subsumes Linear CFR weighting. "
-                "Disabling Linear CFR.",
-                UserWarning,
-                stacklevel=2,
-            )
-            self.linear_cfr = False
-
-        # Pruning only works with external sampling
-        if self.enable_pruning and self.sampling_method != "external":
-            import warnings
-
-            warnings.warn(
-                "Pruning is only supported with external sampling. Disabling pruning.",
-                UserWarning,
-                stacklevel=2,
-            )
-            self.enable_pruning = False
-
         # Game rules
-        self.rules = GameRules(self.small_blind, self.big_blind)
+        self.rules = GameRules(self.config.game.small_blind, self.config.game.big_blind)
 
         # RNG
-        if seed is not None:
-            random.seed(seed)
-            np.random.seed(seed)
+        if self.config.system.seed is not None:
+            random.seed(self.config.system.seed)
+            np.random.seed(self.config.system.seed)
 
         # Cache: Reuse deck instance to avoid repeated Random() creation
         self._deck = eval7.Deck()
@@ -156,7 +99,7 @@ class MCCFRSolver:
         # This halves computational cost while preserving CFR convergence
         traversing_player = self.iteration % 2
 
-        if self.sampling_method == "external":
+        if self.config.solver.sampling_method == "external":
             util = self._cfr_external_sampling(state, traversing_player, [1.0, 1.0])
         else:  # outcome sampling
             util = self._cfr_outcome_sampling(state, traversing_player, [1.0, 1.0])
@@ -190,7 +133,7 @@ class MCCFRSolver:
 
         # Create initial state (after blinds)
         state = self.rules.create_initial_state(
-            starting_stack=self.starting_stack,
+            starting_stack=self.config.game.starting_stack,
             hole_cards=hole_cards,
             button=(self.iteration // 2)
             % 2,  # Alternate every 2 iterations (decoupled from traversing_player)
@@ -277,7 +220,7 @@ class MCCFRSolver:
                 original_idx = valid_indices[i]
 
                 # PRUNING: Skip traversal of pruned actions
-                if self.enable_pruning and infoset.is_pruned(original_idx):
+                if self.config.solver.enable_pruning and infoset.is_pruned(original_idx):
                     # Keep utility at 0 (don't traverse this branch)
                     continue
 
@@ -295,7 +238,7 @@ class MCCFRSolver:
 
             # Node utility (expected value)
             # When pruning is enabled, only consider unpruned actions
-            if self.enable_pruning:
+            if self.config.solver.enable_pruning:
                 # Create mask for unpruned actions
                 unpruned_mask = np.array(
                     [not infoset.is_pruned(valid_indices[i]) for i in range(len(legal_actions))]
@@ -329,28 +272,27 @@ class MCCFRSolver:
                     original_idx = valid_indices[i]
 
                     # Skip regret update for pruned actions (preserve negative regret)
-                    if self.enable_pruning and infoset.is_pruned(original_idx):
+                    if self.config.solver.enable_pruning and infoset.is_pruned(original_idx):
                         continue
 
                     regret = action_utilities[i] - node_utility
                     infoset.update_regret(
                         original_idx,
                         regret * reach_probs[opponent],
-                        cfr_plus=self.cfr_plus,
-                        linear_cfr=self.linear_cfr,
+                        cfr_plus=self.config.solver.cfr_plus,
                         iteration=self.iteration,
-                        enable_dcfr=self.enable_dcfr,
-                        dcfr_alpha=self.dcfr_alpha,
-                        dcfr_beta=self.dcfr_beta,
+                        iteration_weighting=self.config.solver.iteration_weighting,
+                        dcfr_alpha=self.config.solver.dcfr_alpha,
+                        dcfr_beta=self.config.solver.dcfr_beta,
                     )
 
                 # Update pruning state after regret updates
-                if self.enable_pruning:
+                if self.config.solver.enable_pruning:
                     infoset.update_pruning(
                         iteration=self.iteration,
-                        pruning_threshold=self.pruning_threshold,
-                        prune_start_iteration=self.prune_start_iteration,
-                        prune_reactivate_frequency=self.prune_reactivate_frequency,
+                        pruning_threshold=self.config.solver.pruning_threshold,
+                        prune_start_iteration=self.config.solver.prune_start_iteration,
+                        prune_reactivate_frequency=self.config.solver.prune_reactivate_frequency,
                     )
 
                 # Update average strategy (weighted by player reach probability)
@@ -359,11 +301,13 @@ class MCCFRSolver:
                     original_idx = valid_indices[i]
                     weight = strategy[i] * reach_probs[current_player]
 
-                    if self.enable_dcfr:
+                    if self.config.solver.iteration_weighting == "dcfr":
                         # DCFR: Apply gamma-weighted discounting
-                        gamma_weight = compute_dcfr_strategy_weight(self.iteration, self.dcfr_gamma)
+                        gamma_weight = compute_dcfr_strategy_weight(
+                            self.iteration, self.config.solver.dcfr_gamma
+                        )
                         weight *= gamma_weight
-                    elif self.linear_cfr:
+                    elif self.config.solver.iteration_weighting == "linear":
                         # Linear CFR: multiply by iteration
                         weight *= self.iteration
 
@@ -510,12 +454,11 @@ class MCCFRSolver:
                 infoset.update_regret(
                     original_idx,
                     regret,
-                    cfr_plus=self.cfr_plus,
-                    linear_cfr=self.linear_cfr,
+                    cfr_plus=self.config.solver.cfr_plus,
                     iteration=self.iteration,
-                    enable_dcfr=self.enable_dcfr,
-                    dcfr_alpha=self.dcfr_alpha,
-                    dcfr_beta=self.dcfr_beta,
+                    iteration_weighting=self.config.solver.iteration_weighting,
+                    dcfr_alpha=self.config.solver.dcfr_alpha,
+                    dcfr_beta=self.config.solver.dcfr_beta,
                 )
 
             # Update average strategy (weighted by player reach probability)
@@ -523,11 +466,13 @@ class MCCFRSolver:
                 original_idx = valid_indices[i]
                 weight = strategy[i] * reach_probs[current_player]
 
-                if self.enable_dcfr:
+                if self.config.solver.iteration_weighting == "dcfr":
                     # DCFR: Apply gamma-weighted discounting
-                    gamma_weight = compute_dcfr_strategy_weight(self.iteration, self.dcfr_gamma)
+                    gamma_weight = compute_dcfr_strategy_weight(
+                        self.iteration, self.config.solver.dcfr_gamma
+                    )
                     weight *= gamma_weight
-                elif self.linear_cfr:
+                elif self.config.solver.iteration_weighting == "linear":
                     # Linear CFR: multiply by iteration
                     weight *= self.iteration
 
@@ -717,5 +662,6 @@ class MCCFRSolver:
     def __str__(self) -> str:
         return (
             f"MCCFRSolver(iteration={self.iteration}, infosets={self.num_infosets()}, "
-            f"sampling={self.sampling_method}, stack={self.starting_stack})"
+            f"sampling={self.config.solver.sampling_method}, "
+            f"stack={self.config.game.starting_stack})"
         )

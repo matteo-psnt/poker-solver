@@ -2,7 +2,7 @@
 
 import json
 
-from src.training import components
+from src.actions.action_model import ActionModel
 from src.training.run_tracker import RunTracker
 from src.utils.config import Config
 
@@ -12,7 +12,7 @@ class TestRunTracker:
 
     def _action_config_hash(self) -> str:
         config = Config.default()
-        return components.build_action_model(config).get_config_hash()
+        return ActionModel(config).get_config_hash()
 
     def test_create_new_tracker(self, tmp_path):
         """Test creating a new run tracker."""

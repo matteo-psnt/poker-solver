@@ -1,42 +1,23 @@
 # Quick Test Configuration
-# For rapid testing and development (10K iterations)
-
-action_model:
-  preflop_templates:
-    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
-  postflop_templates:
-    first_aggressive: [0.33, 0.66, 1.25]
-  jam_spr_threshold: 2.0
-  off_tree_mapping: "probabilistic"
+# For rapid iteration and CI (~3.6K iterations, small infoset capacity).
 
 resolver:
-  enabled: true
-  time_budget_ms: 300
-  max_depth: 2
   max_raises_per_street: 3
-  leaf_value_mode: "blueprint_rollout"
+
+solver:
+  iteration_weighting: none
 
 training:
   num_iterations: 3600
   checkpoint_frequency: 1000
   iterations_per_worker: 100
-  verbose: true
-
-solver:
-  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
-  cfr_plus: true
-  linear_cfr: false
 
 card_abstraction:
-  # Combo-level abstraction (fast test settings)
   config: quick_test
 
 storage:
-  checkpoint_enabled: true  # Save periodic checkpoints to disk
-  initial_capacity: 1000000  # Start with 1M infosets for quick tests
-  zarr_compression_level: 1  # Fast compression for testing
-  zarr_chunk_size: 50000
+  initial_capacity: 1000000
 
 system:
-  seed: 42  # Fixed seed for reproducibility
-  log_level: "INFO"
+  seed: 42
+  config_name: "quick_test"

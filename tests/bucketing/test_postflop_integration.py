@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from src.bucketing.config import PrecomputeConfig
+from src.bucketing.config import PrecomputeConfig, StreetBucketConfig
 from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.bucketing.postflop.hand_bucketing import PostflopBucketer
 from src.bucketing.postflop.precompute import PostflopPrecomputer
@@ -32,18 +32,10 @@ class TestClusteringIntegration:
     def test_config(self):
         """Create minimal config for testing."""
         return PrecomputeConfig(
-            num_board_clusters={
-                Street.FLOP: 5,
-                Street.TURN: 10,
-                Street.RIVER: 15,
-            },
+            board_clusters=StreetBucketConfig(flop=5, turn=10, river=15),
             representatives_per_cluster=1,  # Reduced from 2
             equity_samples=25,  # Reduced from 50
-            num_buckets={
-                Street.FLOP: 10,
-                Street.TURN: 15,
-                Street.RIVER: 20,
-            },
+            buckets=StreetBucketConfig(flop=10, turn=15, river=20),
             seed=42,
         )
 
@@ -167,28 +159,29 @@ class TestClusteringIntegration:
 
             # Check config has clustering parameters
             config = metadata["config"]
-            assert "num_board_clusters" in config
+            assert "board_clusters" in config
+            assert "buckets" in config
             assert "representatives_per_cluster" in config
+            assert "config_hash" in metadata
 
-    def test_different_boards_different_clusters(self, precomputed_abstraction):
-        """Test that texturally different boards map to different clusters."""
+    def test_different_boards_span_multiple_clusters(self, precomputed_abstraction):
+        """Test that texturally different boards are not all mapped to one cluster."""
         abstraction, _ = precomputed_abstraction
-
-        hole_cards = (Card.new("Ah"), Card.new("Kd"))
 
         # Very different board textures
         paired_board = (Card.new("Qs"), Card.new("Qc"), Card.new("9h"))  # Paired
         straight_board = (Card.new("Ts"), Card.new("9c"), Card.new("8h"))  # Connected
         rainbow_board = (Card.new("As"), Card.new("7c"), Card.new("2h"))  # Rainbow high card
 
-        bucket_paired = abstraction.get_bucket(hole_cards, paired_board, Street.FLOP)
-        bucket_straight = abstraction.get_bucket(hole_cards, straight_board, Street.FLOP)
-        bucket_rainbow = abstraction.get_bucket(hole_cards, rainbow_board, Street.FLOP)
+        clusterer = abstraction._board_clusterer
+        assert clusterer is not None
 
-        # Should have different buckets (likely from different clusters)
-        # Note: Not guaranteed, but highly likely with proper clustering
-        buckets = {bucket_paired, bucket_straight, bucket_rainbow}
-        assert len(buckets) >= 2, "Expected different textures to map to different buckets"
+        cluster_ids = {
+            clusterer.predict(paired_board, Street.FLOP),
+            clusterer.predict(straight_board, Street.FLOP),
+            clusterer.predict(rainbow_board, Street.FLOP),
+        }
+        assert len(cluster_ids) >= 2, "Expected different textures to span multiple clusters"
 
     def test_computational_savings(self, test_config):
         """Verify clustering reduces computation vs full enumeration."""
@@ -227,10 +220,10 @@ class TestClusterPrediction:
     def clustered_abstraction(self):
         """Create abstraction with fitted board clusterer (session-scoped for speed)."""
         config = PrecomputeConfig(
-            num_board_clusters={Street.FLOP: 8, Street.TURN: 15, Street.RIVER: 20},  # Reduced
+            board_clusters=StreetBucketConfig(flop=8, turn=15, river=20),  # Reduced
             representatives_per_cluster=1,  # Reduced from 2
             equity_samples=50,  # Reduced from 100
-            num_buckets={Street.FLOP: 15, Street.TURN: 20, Street.RIVER: 30},  # Reduced
+            buckets=StreetBucketConfig(flop=15, turn=20, river=30),  # Reduced
             seed=42,
         )
 

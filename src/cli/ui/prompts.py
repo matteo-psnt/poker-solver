@@ -62,6 +62,7 @@ def prompt_int(
     message: str,
     default: int | None = None,
     min_value: int | None = None,
+    max_value: int | None = None,
     allow_blank: bool = False,
 ) -> int | None:
     default_text = "" if default is None else str(default)
@@ -75,6 +76,8 @@ def prompt_int(
             return "Enter a whole number"
         if min_value is not None and parsed < min_value:
             return f"Must be >= {min_value}"
+        if max_value is not None and parsed > max_value:
+            return f"Must be <= {max_value}"
         return True
 
     answer = text(ctx, message, default=default_text, validate=_validate)

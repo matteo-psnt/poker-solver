@@ -7,7 +7,7 @@ from src.game.actions import ActionType, raises
 from src.game.rules import GameRules
 from src.game.state import Card
 from src.search.action_translation import translate_action_distribution, translate_off_tree_action
-from src.utils.config import ActionModelConfig
+from src.utils.config import Config
 
 
 def _initial_state():
@@ -21,8 +21,8 @@ def _initial_state():
 
 def test_nearest_translation_is_deterministic():
     state = _initial_state()
-    config = ActionModelConfig(off_tree_mapping="nearest")
-    model = ActionModel(config=config, big_blind=2)
+    config = Config.default().merge({"action_model": {"off_tree_mapping": "nearest"}})
+    model = ActionModel(config)
 
     dist = translate_action_distribution(state, raises(7), model)
     assert len(dist) == 1
@@ -33,8 +33,8 @@ def test_nearest_translation_is_deterministic():
 
 def test_probabilistic_translation_interpolates_between_sizes():
     state = _initial_state()
-    config = ActionModelConfig(off_tree_mapping="probabilistic")
-    model = ActionModel(config=config, big_blind=2)
+    config = Config.default().merge({"action_model": {"off_tree_mapping": "probabilistic"}})
+    model = ActionModel(config)
 
     dist = translate_action_distribution(state, raises(5), model)
     assert len(dist) == 2
@@ -44,8 +44,8 @@ def test_probabilistic_translation_interpolates_between_sizes():
 
 def test_probabilistic_sampling_returns_legal_action():
     state = _initial_state()
-    config = ActionModelConfig(off_tree_mapping="probabilistic")
-    model = ActionModel(config=config, big_blind=2)
+    config = Config.default().merge({"action_model": {"off_tree_mapping": "probabilistic"}})
+    model = ActionModel(config)
     rng = np.random.default_rng(42)
 
     translated = translate_off_tree_action(state, raises(5), model, rng=rng)

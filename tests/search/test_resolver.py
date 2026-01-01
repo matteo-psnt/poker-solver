@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from src.actions.action_model import ActionModel
 from src.game.rules import GameRules
@@ -25,7 +26,7 @@ def _make_initial_state():
 def test_resolver_returns_legal_action():
     state, rules = _make_initial_state()
     config = make_test_config(seed=42)
-    action_model = ActionModel(config.action_model, big_blind=config.game.big_blind)
+    action_model = ActionModel(config)
     solver = MCCFRSolver(
         action_model=action_model,
         card_abstraction=DummyCardAbstraction(),
@@ -46,7 +47,7 @@ def test_resolver_returns_legal_action():
 def test_solver_act_with_resolver_enabled():
     state, _ = _make_initial_state()
     config = make_test_config(seed=42)
-    action_model = ActionModel(config.action_model, big_blind=config.game.big_blind)
+    action_model = ActionModel(config)
     solver = MCCFRSolver(
         action_model=action_model,
         card_abstraction=DummyCardAbstraction(),
@@ -61,7 +62,7 @@ def test_solver_act_with_resolver_enabled():
 def test_resolver_uses_depth_cutoff_leaves(monkeypatch):
     state, rules = _make_initial_state()
     config = make_test_config(seed=42, **{"resolver.max_depth": 2})
-    action_model = ActionModel(config.action_model, big_blind=config.game.big_blind)
+    action_model = ActionModel(config)
     solver = MCCFRSolver(
         action_model=action_model,
         card_abstraction=DummyCardAbstraction(),
@@ -88,31 +89,17 @@ def test_resolver_uses_depth_cutoff_leaves(monkeypatch):
     assert observed["leaf_count"] > 0
 
 
-def test_resolver_leaf_mode_validation():
-    state, rules = _make_initial_state()
-    config = make_test_config(seed=42, **{"resolver.leaf_value_mode": "unsupported_mode"})
-    action_model = ActionModel(config.action_model, big_blind=config.game.big_blind)
-    solver = MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=DummyCardAbstraction(),
-        storage=InMemoryStorage(),
-        config=config,
-    )
-    resolver = HUResolver(
-        blueprint=solver,
-        action_model=action_model,
-        rules=rules,
-        config=config.resolver,
-    )
-
-    with pytest.raises(ValueError):
-        resolver.solve(state, time_budget_ms=25)
+@pytest.mark.parametrize("field", ["resolver.leaf_value_mode", "resolver.range_update_mode"])
+def test_resolver_unknown_field_rejected(field):
+    # Removed fields — ResolverConfig uses extra="forbid".
+    with pytest.raises(ValidationError):
+        make_test_config(seed=42, **{field: "any_value"})
 
 
 def test_resolver_blend_alpha_zero_returns_blueprint_mix():
     state, rules = _make_initial_state()
     config = make_test_config(seed=42, **{"resolver.policy_blend_alpha": 0.0})
-    action_model = ActionModel(config.action_model, big_blind=config.game.big_blind)
+    action_model = ActionModel(config)
     solver = MCCFRSolver(
         action_model=action_model,
         card_abstraction=DummyCardAbstraction(),

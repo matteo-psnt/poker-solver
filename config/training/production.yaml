@@ -1,24 +1,12 @@
 # Production Training Configuration for HUNLHE Solver
-# Optimized for creating viable GTO strategies with CFR+
+# Optimized for GTO strategies with CFR+.
 #
-# Expected training time with CFR+:
-# - 100M iterations: ~8 hours (single core) or ~1-2 hours (8 cores parallel)
-# - 1B iterations: ~3.6 days (single core) or ~12-18 hours (8 cores parallel)
-#
-# Convergence targets (with CFR+):
-# - 10M iterations: ~50-100 mbb/g exploitability (weak amateur)
-# - 100M iterations: ~10-20 mbb/g exploitability (decent player)
-# - 1B iterations: ~1-5 mbb/g exploitability (good player)
+# Convergence targets:
+# - 10M iterations:  ~50-100 mbb/g exploitability
+# - 100M iterations: ~10-20 mbb/g exploitability
+# - 1B iterations:   ~1-5 mbb/g exploitability
 
-# ===== Game Configuration =====
-game:
-  starting_stack: 200  # BB units (standard deep stack)
-  small_blind: 1
-  big_blind: 2
-
-# ===== Action Model =====
 action_model:
-  # Node-template abstraction with SPR-gated jamming and off-tree translation.
   preflop_templates:
     sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
     bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
@@ -28,47 +16,20 @@ action_model:
     facing_bet: ["min_raise", "pot_raise", "jam"]
     after_one_raise: ["pot_raise", "jam"]
     after_two_raises: ["jam"]
-  jam_spr_threshold: 2.0
-  off_tree_mapping: "probabilistic"
 
 resolver:
-  enabled: true
-  time_budget_ms: 300
-  max_depth: 2
   max_raises_per_street: 5
-  leaf_value_mode: "blueprint_rollout"
 
-# ===== Card Abstraction =====
 card_abstraction:
   config: production
 
-# ===== Solver Configuration =====
-solver:
-  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
-  # CFR+ provides ~100x faster convergence than vanilla CFR
-  cfr_plus: true
-  # Linear CFR provides additional 2-3x speedup
-  linear_cfr: true
-
-# ===== Training Configuration =====
 training:
-  # Start with 1M iterations, increase if exploitability is too high
-  num_iterations: 1000000  # 1M iterations
-  checkpoint_frequency: 100000  # Checkpoint every 100k iterations
+  num_iterations: 1000000
+  checkpoint_frequency: 100000
   iterations_per_worker: 5000
-  verbose: true
 
-# ===== Storage Configuration =====
 storage:
-  checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended)
-  initial_capacity: 4000000  # Start with 4M infosets for production (grows automatically)
+  initial_capacity: 4000000
 
-  # Zarr checkpoint configuration
-  zarr_compression_level: 1  # Fastest I/O for production training
-  zarr_chunk_size: 50000  # Larger chunks for faster loading
-
-# ===== System Configuration =====
 system:
-  seed: null  # Random seed for diversity
-  log_level: "INFO"
   config_name: "production"

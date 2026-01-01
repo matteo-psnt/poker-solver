@@ -68,10 +68,6 @@ TrainingSession
 **Key Functions:**
 
 ```python
-build_action_model(config: Config) -> ActionModel
-    # Creates betting action abstraction from config
-    # Defines available bet/raise sizes per street
-
 build_card_abstraction(config: Config, ...) -> BucketingStrategy
     # Loads precomputed combo-level abstraction
     # Uses suit isomorphism and board clustering

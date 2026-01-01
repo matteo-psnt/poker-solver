@@ -1,43 +1,22 @@
 # Full Training Configuration
-# Production-scale training (10M iterations with disk-backed storage)
-
-# ===== Action Model =====
-action_model:
-  preflop_templates:
-    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
-  postflop_templates:
-    first_aggressive: [0.33, 0.66, 1.25]
-  jam_spr_threshold: 2.0
-  off_tree_mapping: "probabilistic"
+# Large-scale training (10M iterations, 8M infoset capacity).
 
 resolver:
-  enabled: true
-  time_budget_ms: 300
-  max_depth: 2
   max_raises_per_street: 4
-  leaf_value_mode: "blueprint_rollout"
+
+solver:
+  iteration_weighting: none
 
 training:
   num_iterations: 10000000
   checkpoint_frequency: 10000
   iterations_per_worker: 500
-  verbose: true
-
-solver:
-  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
-  cfr_plus: true
-  linear_cfr: false
 
 card_abstraction:
-  # Combo-level abstraction (production settings for full training)
   config: production
 
 storage:
-  checkpoint_enabled: true  # Save periodic checkpoints to disk
-  initial_capacity: 8000000  # Start with 8M infosets for full training (grows automatically)
-  zarr_compression_level: 1  # Fastest for large-scale training
-  zarr_chunk_size: 50000
+  initial_capacity: 8000000
 
 system:
-  seed: null  # Random for diversity
-  log_level: "INFO"
+  config_name: "full_training"

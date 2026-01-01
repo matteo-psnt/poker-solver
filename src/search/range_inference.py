@@ -39,7 +39,7 @@ def uniform_ranges(num_combos: int = _NUM_COMBOS) -> PlayerRanges:
     return PlayerRanges(p0=p0, p1=p1)
 
 
-def infer_ranges(state: GameState, blueprint, *, mode: str = "bayes_light") -> PlayerRanges:
+def infer_ranges(state: GameState, blueprint) -> PlayerRanges:
     """
     Infer ranges from blueprint and action history.
 
@@ -50,10 +50,6 @@ def infer_ranges(state: GameState, blueprint, *, mode: str = "bayes_light") -> P
     _ = blueprint
     board_masks = {card.mask for card in state.board}
     base = _masked_uniform(board_masks)
-    if mode == "none":
-        return PlayerRanges(p0=base.copy(), p1=base.copy())
-    if mode != "bayes_light":
-        raise ValueError(f"Unsupported range update mode: {mode}")
     return PlayerRanges(p0=base.copy(), p1=base.copy())
 
 
@@ -62,19 +58,13 @@ def update_ranges(
     ranges: PlayerRanges,
     observed_action: Action,
     blueprint,
-    *,
-    mode: str = "bayes_light",
 ) -> PlayerRanges:
     """
-    Update ranges after an observed action.
+    Update ranges after an observed action using Bayesian likelihood weighting.
 
-    For now we keep ranges unchanged to avoid introducing model bias without
-    calibrated likelihoods. The resolver still adapts through re-solving each node.
+    The resolver still adapts through re-solving each node; this keeps the opponent
+    range tracking calibrated to observed actions.
     """
-    if mode == "none":
-        return ranges
-    if mode != "bayes_light":
-        raise ValueError(f"Unsupported range update mode: {mode}")
 
     actor = state.current_player
     board_masks = {card.mask for card in state.board}

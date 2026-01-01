@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 from sklearn.cluster import KMeans
 
+from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop.suit_isomorphism import (
     CanonicalCard,
     get_canonical_board_id,
@@ -42,15 +43,14 @@ class BoardClusterer:
     O(all_boards × all_hands) to O(num_clusters × representatives_per_cluster × all_hands).
     """
 
-    def __init__(self, num_clusters: dict[Street, int]):
+    def __init__(self, config: PrecomputeConfig):
         """
         Initialize board clusterer.
 
         Args:
-            num_clusters: Number of clusters per street
-                         Example: {FLOP: 50, TURN: 100, RIVER: 200}
+            config: Precompute configuration (single source of truth).
         """
-        self.num_clusters = num_clusters
+        self.config = config
 
         # Fitted KMeans models per street
         self._kmeans: dict[Street, KMeans] = {}
@@ -167,9 +167,6 @@ class BoardClusterer:
         canonical_boards: list[tuple[CanonicalCard, ...]],
         representative_boards: list[tuple[Card, ...]],
         street: Street,
-        representatives_per_cluster: int = 3,
-        representative_selection: str = "closest",
-        selection_seed: int | None = None,
     ) -> None:
         """
         Fit clusterer on canonical boards.
@@ -178,23 +175,20 @@ class BoardClusterer:
             canonical_boards: List of canonical board representations
             representative_boards: Corresponding real board representations (for feature extraction)
             street: Which street
-            representatives_per_cluster: How many representative boards to keep per cluster
-            representative_selection: Strategy for selecting representatives
-            selection_seed: RNG seed for selection when needed
         """
-        if street not in self.num_clusters:
+        if street not in self.config.num_board_clusters:
             raise ValueError(f"No cluster count specified for {street.name}")
 
         # Extract features for all boards
         features = np.array([self.extract_board_features(board) for board in representative_boards])
 
         # Cluster
-        n_clusters = min(self.num_clusters[street], len(canonical_boards))
+        n_clusters = min(self.config.num_board_clusters[street], len(canonical_boards))
         kmeans = KMeans(
             n_clusters=n_clusters,
-            random_state=42,
-            n_init=10,
-            max_iter=300,
+            random_state=self.config.seed,
+            n_init=self.config.kmeans_n_init,
+            max_iter=self.config.kmeans_max_iter,
         )
         labels = kmeans.fit_predict(features)
 
@@ -203,8 +197,8 @@ class BoardClusterer:
         # Build cluster info
         self._board_to_cluster[street] = {}
         self._clusters[street] = {}
-        representative_selection = representative_selection.lower()
-        rng = np.random.default_rng(selection_seed)
+        representative_selection = self.config.representative_selection
+        rng = np.random.default_rng(self.config.seed)
 
         for cluster_id in range(n_clusters):
             # Find all boards in this cluster
@@ -217,7 +211,7 @@ class BoardClusterer:
             cluster_features = features[cluster_indices]
             center = kmeans.cluster_centers_[cluster_id]
 
-            n_reps = min(representatives_per_cluster, len(cluster_indices))
+            n_reps = min(self.config.representatives_per_cluster, len(cluster_indices))
             local_indices = self._select_representative_indices(
                 cluster_features=cluster_features,
                 center=center,
@@ -260,9 +254,6 @@ class BoardClusterer:
 
         distances = np.linalg.norm(cluster_features - center, axis=1)
 
-        if representative_selection == "closest":
-            return np.argsort(distances)[:n_reps]
-
         if representative_selection == "random":
             return rng.choice(len(cluster_features), size=n_reps, replace=False)
 
@@ -284,7 +275,7 @@ class BoardClusterer:
 
             return np.array(selected, dtype=int)
 
-        raise ValueError("representative_selection must be one of: closest, diverse, random")
+        return np.argsort(distances)[:n_reps]
 
     def predict(self, board: tuple[Card, ...], street: Street) -> int:
         """

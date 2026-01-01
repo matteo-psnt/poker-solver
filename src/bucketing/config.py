@@ -1,198 +1,94 @@
-"""
-Abstraction precomputation configuration - Single source of truth.
-
-Uses the same pattern as main Config - defaults in dataclass, YAML contains only overrides.
-"""
+from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.game.state import Street
-from src.utils.config_loader import _load_yaml, _merge_config
+from src.utils.config_loader import _load_yaml
+
+PositiveInt = Annotated[int, Field(gt=0)]
 
 
-@dataclass(init=False)
-class PrecomputeConfig:
-    """Abstraction precomputation configuration with defaults."""
+class StrictFrozenModel(BaseModel):
+    """Base model for immutable abstraction config with strict key validation."""
 
-    # Board clustering (public-state abstraction)
-    board_clusters_flop: int = 8
-    board_clusters_turn: int = 8
-    board_clusters_river: int = 8
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    # Hand bucketing (hand abstraction)
-    buckets_flop: int = 50
-    buckets_turn: int = 100
-    buckets_river: int = 200
 
-    # Representatives per cluster (for equity computation)
-    representatives_per_cluster: int = 3
+class StreetBucketConfig(StrictFrozenModel):
+    """Per-street integer values for flop, turn, and river."""
 
-    # Representative selection strategy: closest | diverse | random
-    representative_selection: str = "closest"
+    flop: PositiveInt
+    turn: PositiveInt
+    river: PositiveInt
 
-    # Monte Carlo samples for equity calculation
-    equity_samples: int = 1000
+    def as_street_dict(self) -> dict[Street, int]:
+        return {
+            Street.FLOP: self.flop,
+            Street.TURN: self.turn,
+            Street.RIVER: self.river,
+        }
 
-    # Parallel workers (None = CPU count)
-    num_workers: int | None = None
 
-    # Random seed for reproducibility
+class PrecomputeConfig(StrictFrozenModel):
+    """Configuration for board clustering and postflop bucket precomputation."""
+
+    board_clusters: StreetBucketConfig = Field(
+        default_factory=lambda: StreetBucketConfig(flop=8, turn=8, river=8)
+    )
+    buckets: StreetBucketConfig = Field(
+        default_factory=lambda: StreetBucketConfig(flop=50, turn=100, river=200)
+    )
+    representatives_per_cluster: PositiveInt = 3
+    representative_selection: Literal["closest", "diverse", "random"] = "closest"
+    equity_samples: PositiveInt = 1000
+    num_workers: PositiveInt | None = None
     seed: int = 42
-
-    # K-means settings
-    kmeans_max_iter: int = 300
-    kmeans_n_init: int = 10
-
-    # Config name (for matching during training)
+    kmeans_max_iter: PositiveInt = 300
+    kmeans_n_init: PositiveInt = 10
     config_name: str | None = None
-
-    def __init__(self, **kwargs: Any):
-        """
-        Initialize config with support for dict-style arguments.
-
-        Converts num_board_clusters and num_buckets dicts to individual fields.
-        """
-        # Handle num_board_clusters dict -> individual fields
-        if "num_board_clusters" in kwargs:
-            clusters = kwargs.pop("num_board_clusters")
-            if isinstance(clusters, dict):
-                kwargs.setdefault("board_clusters_flop", clusters.get(Street.FLOP, 8))
-                kwargs.setdefault("board_clusters_turn", clusters.get(Street.TURN, 8))
-                kwargs.setdefault("board_clusters_river", clusters.get(Street.RIVER, 8))
-
-        # Handle num_buckets dict -> individual fields
-        if "num_buckets" in kwargs:
-            buckets = kwargs.pop("num_buckets")
-            if isinstance(buckets, dict):
-                kwargs.setdefault("buckets_flop", buckets.get(Street.FLOP, 50))
-                kwargs.setdefault("buckets_turn", buckets.get(Street.TURN, 100))
-                kwargs.setdefault("buckets_river", buckets.get(Street.RIVER, 200))
-
-        # Set fields, using defaults for missing values
-        for field in fields(self.__class__):
-            if field.name in kwargs:
-                value = kwargs.pop(field.name)
-            elif field.default is not MISSING:
-                value = field.default
-            elif field.default_factory is not MISSING:
-                value = field.default_factory()
-            else:
-                raise TypeError(f"Missing required argument: {field.name}")
-            object.__setattr__(self, field.name, value)
-
-        # Warn about unexpected kwargs
-        if kwargs:
-            raise TypeError(f"Unexpected keyword arguments: {list(kwargs.keys())}")
 
     @property
     def num_board_clusters(self) -> dict[Street, int]:
-        """Get board clusters as Street dict."""
-        return self.to_street_dict("board_clusters")
+        """Board cluster counts keyed by street enum."""
+        return self.board_clusters.as_street_dict()
 
     @property
     def num_buckets(self) -> dict[Street, int]:
-        """Get buckets as Street dict."""
-        return self.to_street_dict("buckets")
-
-    def to_street_dict(self, field_prefix: str) -> dict[Street, int]:
-        """
-        Helper to convert flop/turn/river fields to Street dict.
-
-        Args:
-            field_prefix: Prefix like "board_clusters" or "buckets"
-
-        Returns:
-            Dictionary mapping Street enum to values
-
-        Examples:
-            >>> config.to_street_dict("board_clusters")
-            {Street.FLOP: 8, Street.TURN: 8, Street.RIVER: 8}
-
-            >>> config.to_street_dict("buckets")
-            {Street.FLOP: 50, Street.TURN: 100, Street.RIVER: 200}
-        """
-        return {
-            Street.FLOP: getattr(self, f"{field_prefix}_flop"),
-            Street.TURN: getattr(self, f"{field_prefix}_turn"),
-            Street.RIVER: getattr(self, f"{field_prefix}_river"),
-        }
+        """Bucket counts keyed by street enum."""
+        return self.buckets.as_street_dict()
 
     @classmethod
     def from_yaml(cls, config_name: str) -> "PrecomputeConfig":
-        """
-        Load configuration from YAML file.
-
-        Uses shared merge logic - YAML contains only overrides, not full defaults.
-
-        Args:
-            config_name: Name of config file (without .yaml extension)
-                        e.g., 'quick_test', 'default', 'production'
-
-        Returns:
-            PrecomputeConfig instance with YAML overrides applied
-        """
+        """Load precompute config from ``config/abstraction/<name>.yaml``."""
         config_path = (
             Path(__file__).parent.parent.parent / "config" / "abstraction" / f"{config_name}.yaml"
         )
-
-        # Load YAML (only contains overrides!)
         yaml_data = _load_yaml(config_path)
-
-        # Flatten nested structures (board_clusters: {flop:, turn:, river:})
-        if "board_clusters" in yaml_data and isinstance(yaml_data["board_clusters"], dict):
-            clusters = yaml_data.pop("board_clusters")
-            yaml_data["board_clusters_flop"] = clusters.get("flop")
-            yaml_data["board_clusters_turn"] = clusters.get("turn")
-            yaml_data["board_clusters_river"] = clusters.get("river")
-
-        if "buckets" in yaml_data and isinstance(yaml_data["buckets"], dict):
-            buckets = yaml_data.pop("buckets")
-            yaml_data["buckets_flop"] = buckets.get("flop")
-            yaml_data["buckets_turn"] = buckets.get("turn")
-            yaml_data["buckets_river"] = buckets.get("river")
-
-        # Auto-set config_name from filename
         yaml_data["config_name"] = config_name
-
-        # Merge into defaults using shared logic
-        return _merge_config(cls(), yaml_data)
+        return cls.model_validate(yaml_data)
 
     @classmethod
     def default(cls) -> "PrecomputeConfig":
-        """Return default configuration (just dataclass defaults)."""
+        """Return defaults-only config."""
         return cls()
 
     def get_config_hash(self) -> str:
         """
-        Compute a stable hash of the abstraction configuration.
+        Compute a stable hash for abstraction compatibility checks.
 
-        This hash is used to verify that a loaded abstraction matches the expected config.
-        If you load an abstraction with a different config hash, the bucketing may be
-        invalid because it was computed with different parameters.
-
-        Returns:
-            16-character hex string representing the config hash
+        Excludes non-abstraction identity fields like ``config_name``.
         """
-        # Create a stable dict representation of the config
-        # Exclude config_name since it's just a label, not a parameter
         config_dict = {
-            "board_clusters_flop": self.board_clusters_flop,
-            "board_clusters_turn": self.board_clusters_turn,
-            "board_clusters_river": self.board_clusters_river,
-            "buckets_flop": self.buckets_flop,
-            "buckets_turn": self.buckets_turn,
-            "buckets_river": self.buckets_river,
+            "board_clusters": self.board_clusters.model_dump(),
+            "buckets": self.buckets.model_dump(),
             "representatives_per_cluster": self.representatives_per_cluster,
             "representative_selection": self.representative_selection,
             "equity_samples": self.equity_samples,
         }
-
-        # Sort keys for stability
         stable_json = json.dumps(config_dict, sort_keys=True)
-
-        # Return first 16 chars of hex digest
         return hashlib.sha256(stable_json.encode()).hexdigest()[:16]

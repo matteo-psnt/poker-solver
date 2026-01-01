@@ -40,7 +40,7 @@ class TestTrainer:
         assert trainer.action_model is not None
         assert trainer.card_abstraction is not None
 
-    def test_build_action_model(self, config_with_dummy_abstraction):
+    def test_trainer_has_action_model(self, config_with_dummy_abstraction):
         trainer = TrainingSession(config_with_dummy_abstraction)
 
         action_model = trainer.action_model

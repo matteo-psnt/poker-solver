@@ -1,12 +1,10 @@
 """Tests for the node-template ActionModel."""
 
-import pytest
-
 from src.actions.action_model import ActionModel
 from src.game.actions import ActionType
 from src.game.rules import GameRules
 from src.game.state import Card
-from src.utils.config import ActionModelConfig
+from src.utils.config import Config
 
 
 def _initial_state():
@@ -20,7 +18,7 @@ def _initial_state():
 
 def test_action_model_preflop_legal_actions():
     state, _ = _initial_state()
-    model = ActionModel(big_blind=2)
+    model = ActionModel(Config.default())
     actions = model.get_legal_actions(state)
     types = {a.type for a in actions}
 
@@ -30,19 +28,13 @@ def test_action_model_preflop_legal_actions():
 
 
 def test_action_model_hash_stable_for_same_config():
-    model1 = ActionModel(big_blind=2)
-    model2 = ActionModel(big_blind=2)
+    model1 = ActionModel(Config.default())
+    model2 = ActionModel(Config.default())
     assert model1.get_config_hash() == model2.get_config_hash()
 
 
 def test_preflop_open_sizes_exposed():
-    model = ActionModel(big_blind=2)
+    model = ActionModel(Config.default())
     opens = model.get_preflop_open_sizes_bb()
     assert opens
     assert all(size > 0 for size in opens)
-
-
-def test_invalid_off_tree_mapping_raises():
-    config = ActionModelConfig(off_tree_mapping="invalid")
-    with pytest.raises(ValueError):
-        ActionModel(config=config, big_blind=2)

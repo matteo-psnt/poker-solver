@@ -113,13 +113,8 @@ class PostflopBucketer(BucketingStrategy):
         return dict(self.__dict__)
 
     def __setstate__(self, state: dict) -> None:
-        """Unpickle support - handles objects saved before new attributes were added."""
+        """Unpickle support."""
         self.__dict__.update(state)
-        # Initialize new attributes if they don't exist (backward compatibility)
-        if not hasattr(self, "_fallback_count"):
-            self._fallback_count = 0
-        if not hasattr(self, "_total_lookups"):
-            self._total_lookups = 0
 
     def canonicalize(self, hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -> CanonicalHand:
         """

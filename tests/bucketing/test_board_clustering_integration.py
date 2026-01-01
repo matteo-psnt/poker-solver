@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.bucketing.config import PrecomputeConfig
+from src.bucketing.config import PrecomputeConfig, StreetBucketConfig
 from src.bucketing.postflop.board_clustering import BoardClusterer
 from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.bucketing.postflop.precompute import PostflopPrecomputer
@@ -16,13 +16,10 @@ class TestBoardClusteringIntegration:
 
     def test_board_clusterer_creation(self):
         """Test creating a board clusterer."""
-        clusterer = BoardClusterer(
-            {
-                Street.FLOP: 10,
-                Street.TURN: 20,
-                Street.RIVER: 30,
-            }
+        config = PrecomputeConfig(
+            board_clusters=StreetBucketConfig(flop=10, turn=20, river=30),
         )
+        clusterer = BoardClusterer(config)
         assert clusterer is not None
 
     def test_board_enumeration_and_clustering(self):
@@ -39,10 +36,12 @@ class TestBoardClusteringIntegration:
         representative_boards = [info.representative for info in board_infos[:100]]
 
         # Create clusterer and fit
-        clusterer = BoardClusterer({Street.FLOP: 10})
-        clusterer.fit(
-            canonical_boards, representative_boards, Street.FLOP, representatives_per_cluster=1
+        config = PrecomputeConfig(
+            board_clusters=StreetBucketConfig(flop=10, turn=10, river=10),
+            representatives_per_cluster=1,
         )
+        clusterer = BoardClusterer(config)
+        clusterer.fit(canonical_boards, representative_boards, Street.FLOP)
 
         # Get clusters
         clusters = clusterer.get_all_clusters(Street.FLOP)
@@ -80,16 +79,8 @@ class TestBoardClusteringIntegration:
     def test_precomputer_initialization(self):
         """Test that precomputer initializes correctly."""
         config = PrecomputeConfig(
-            num_buckets={
-                Street.FLOP: 5,
-                Street.TURN: 5,
-                Street.RIVER: 5,
-            },
-            num_board_clusters={
-                Street.FLOP: 5,
-                Street.TURN: 5,
-                Street.RIVER: 5,
-            },
+            buckets=StreetBucketConfig(flop=5, turn=5, river=5),
+            board_clusters=StreetBucketConfig(flop=5, turn=5, river=5),
             representatives_per_cluster=1,
             equity_samples=10,
             num_workers=1,
@@ -103,16 +94,8 @@ class TestBoardClusteringIntegration:
         """Test running minimal precomputation (single street, few boards)."""
         # Create a very minimal config
         config = PrecomputeConfig(
-            num_buckets={
-                Street.FLOP: 5,
-                Street.TURN: 5,
-                Street.RIVER: 5,
-            },
-            num_board_clusters={
-                Street.FLOP: 5,
-                Street.TURN: 5,
-                Street.RIVER: 5,
-            },
+            buckets=StreetBucketConfig(flop=5, turn=5, river=5),
+            board_clusters=StreetBucketConfig(flop=5, turn=5, river=5),
             representatives_per_cluster=1,
             equity_samples=10,  # Very few samples for speed
             num_workers=1,
@@ -130,16 +113,8 @@ class TestBoardClusteringIntegration:
         """Test saving and loading precomputed abstraction."""
         # Create minimal abstraction
         config = PrecomputeConfig(
-            num_buckets={
-                Street.FLOP: 3,
-                Street.TURN: 3,
-                Street.RIVER: 3,
-            },
-            num_board_clusters={
-                Street.FLOP: 3,
-                Street.TURN: 3,
-                Street.RIVER: 3,
-            },
+            buckets=StreetBucketConfig(flop=3, turn=3, river=3),
+            board_clusters=StreetBucketConfig(flop=3, turn=3, river=3),
             representatives_per_cluster=1,
             equity_samples=10,
             num_workers=1,
@@ -162,10 +137,12 @@ class TestBoardClusteringIntegration:
         canonical_boards = [info.canonical_board for info in board_infos]
         representative_boards = [info.representative for info in board_infos]
 
-        clusterer = BoardClusterer({Street.FLOP: 5})
-        clusterer.fit(
-            canonical_boards, representative_boards, Street.FLOP, representatives_per_cluster=1
+        config = PrecomputeConfig(
+            board_clusters=StreetBucketConfig(flop=5, turn=5, river=5),
+            representatives_per_cluster=1,
         )
+        clusterer = BoardClusterer(config)
+        clusterer.fit(canonical_boards, representative_boards, Street.FLOP)
 
         # Predict cluster for a board (use representative, not canonical)
         test_board = representative_boards[0]
@@ -174,25 +151,30 @@ class TestBoardClusteringIntegration:
         assert isinstance(cluster_id, int)
         assert 0 <= cluster_id < 5
 
-    def test_error_handling_invalid_street(self):
-        """Test error handling for invalid street."""
-        clusterer = BoardClusterer({Street.FLOP: 10})
+    def test_error_handling_unfitted_street_predict(self):
+        """Test error when predicting for a street that was not fitted."""
+        config = PrecomputeConfig(
+            board_clusters=StreetBucketConfig(flop=10, turn=10, river=10),
+            representatives_per_cluster=1,
+        )
+        clusterer = BoardClusterer(config)
 
-        # Try to fit on TURN (not configured)
+        # Fit FLOP only
         enumerator = CanonicalBoardEnumerator(Street.FLOP)
         enumerator.enumerate()
         board_infos = list(enumerator.iterate())[:10]
 
         canonical_boards = [info.canonical_board for info in board_infos]
         representative_boards = [info.representative for info in board_infos]
+        clusterer.fit(
+            canonical_boards,
+            representative_boards,
+            Street.FLOP,
+        )
 
-        with pytest.raises(ValueError, match="No cluster count specified"):
-            clusterer.fit(
-                canonical_boards,
-                representative_boards,
-                Street.TURN,  # Not configured
-                representatives_per_cluster=1,
-            )
+        # Predicting TURN before fitting TURN should fail
+        with pytest.raises(ValueError, match="Clusterer not fitted for TURN"):
+            clusterer.predict(representative_boards[0], Street.TURN)
 
 
 class TestPrecomputeConfigYAML:
