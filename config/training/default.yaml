@@ -11,33 +11,26 @@ game:
 # Research-grade abstraction for 200BB deep-stack HUNLHE
 # Based on standard CFR research (Johanson et al., Brown & Sandholm, DeepStack)
 action_abstraction:
-  # Preflop betting sizes (in BB units)
-  # No all-in preflop at 200BB (almost never correct)
-  preflop:
-    raises: [2.5, 3.5, 5.0]  # Range construction sizes
+  # Preflop raise sizes (in BB units)
+  preflop_raises: [2.5, 3.5, 5.0]
 
   # Postflop betting sizes (pot fractions, street-dependent)
-  postflop:
-    flop:
-      bets: [0.33, 0.66, 1.25]  # Range bet, standard, overbet
-    turn:
-      bets: [0.50, 1.0, 1.5]  # Medium, pot, large overbet
-    river:
-      bets: [0.50, 1.0, 2.0]  # Thin value, pot, large overbet
+  postflop_bets:
+    flop: [0.33, 0.66, 1.25]  # Range bet, standard, overbet
+    turn: [0.50, 1.0, 1.5]    # Medium, pot, large overbet
+    river: [0.50, 1.0, 2.0]   # Thin value, pot, large overbet
 
   # All-in handling: Only allowed when SPR < 2
   all_in_spr_threshold: 2.0  # Disable all-in above this SPR
 
   # Max raises per street (prevents infinite action trees)
-  max_raises_per_street: 4  # Standard poker cap (dramatically reduces infoset count)
+  max_raises_per_street: 4
 
 # ===== Card Abstraction =====
 card_abstraction:
-  # Combo-level abstraction with suit isomorphism
-  # This provides correct postflop bucketing with no conflicts
+  # Reference to precomputed abstraction config
   config: default_plus
-
-  # Alternative: Direct file path
+  # Or use direct file path:
   # abstraction_path: "data/combo_abstraction/combo-20251220-120000/combo_abstraction.pkl"
 
 # ===== SPR Bucketing =====
@@ -48,16 +41,16 @@ spr_buckets:
 # ===== Solver Configuration =====
 solver:
   type: "mccfr"
-  sampling_method: "outcome"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
+  sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
   cfr_plus: true  # Use CFR+ (100x faster convergence than vanilla CFR)
   linear_cfr: true  # Use Linear CFR (additional 2-3x speedup)
 
 # ===== Training Configuration =====
 training:
   num_iterations: 100000  # 100K iterations for quick test with CFR+ (default: 100_000)
-  checkpoint_frequency: 2000  # Save checkpoint every 2000 iterations (default: 2_000)
+  checkpoint_frequency: 5000  # Save checkpoint every 5000 iterations (default: 2_000)
   log_frequency: 1000  # Print progress every 1K iterations (default: 1_000)
-  iterations_per_worker: 500  # Multiplier for batch size (default: 500)
+  iterations_per_worker: 1000  # Multiplier for batch size (default: 1_000)
   verbose: true  # Show verbose output (default: true)
   runs_dir: "data/runs"  # Base directory for training runs (default: data/runs)
 

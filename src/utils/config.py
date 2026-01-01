@@ -5,8 +5,23 @@ Defaults are defined as dataclass field defaults. YAML files provide overrides.
 No duplication, no sync required, no wrapper classes.
 """
 
-from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+@dataclass(frozen=True)
+class CardAbstractionConfig:
+    """Card abstraction configuration with defaults."""
+
+    config: Optional[str] = "default_plus"
+    abstraction_path: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class SprBucketsConfig:
+    """SPR bucketing configuration with defaults."""
+
+    thresholds: List[float] = field(default_factory=lambda: [4.0, 13.0])
 
 
 @dataclass(frozen=True)
@@ -14,9 +29,9 @@ class TrainingConfig:
     """Training configuration with defaults."""
 
     num_iterations: int = 100_000
-    checkpoint_frequency: int = 2_000
+    checkpoint_frequency: int = 5_000
     log_frequency: int = 1_000
-    iterations_per_worker: int = 500
+    iterations_per_worker: int = 1_000
     verbose: bool = True
     runs_dir: str = "data/runs"
 
@@ -61,7 +76,7 @@ class SolverConfig:
     """Solver configuration with defaults."""
 
     type: str = "mccfr"
-    sampling_method: str = "outcome"
+    sampling_method: str = "external"
     cfr_plus: bool = True
     linear_cfr: bool = True
 
@@ -80,10 +95,23 @@ class Config:
     game: GameConfig = GameConfig()
     action_abstraction: ActionAbstractionConfig = ActionAbstractionConfig()
     solver: SolverConfig = SolverConfig()
+    card_abstraction: CardAbstractionConfig = CardAbstractionConfig()
+    spr_buckets: SprBucketsConfig = SprBucketsConfig()
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary (for serialization, logging, etc.)."""
         return asdict(self)
+
+    @classmethod
+    def default(cls) -> "Config":
+        """Return a Config populated with default values."""
+        return cls()
+
+    def merge(self, overrides: Dict[str, Any]) -> "Config":
+        """Return a new Config with the provided overrides merged in."""
+        from src.utils.config_loader import _merge_config
+
+        return _merge_config(self, overrides)
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "Config":

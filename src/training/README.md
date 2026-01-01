@@ -691,10 +691,10 @@ results = trainer.train(num_iterations=1000)  # num_workers defaults to CPU coun
 
 **Custom Configuration:**
 ```python
-config = Config.default()
-config.set("storage.backend", "memory")
-config.set("training.checkpoint_frequency", 500)
-config.set("training.num_iterations", 5000)
+config = Config.default().merge({
+    "storage": {"backend": "memory"},
+    "training": {"checkpoint_frequency": 500, "num_iterations": 5000},
+})
 ```
 
 ## Architecture Review Questions

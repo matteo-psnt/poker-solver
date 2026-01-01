@@ -7,7 +7,7 @@ from src.bucketing.utils.infoset import InfoSetKey
 from src.game.state import Card, GameState, Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import SharedArrayStorage
-from tests.test_helpers import DummyCardAbstraction
+from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
 class TestMCCFRSolver:
@@ -50,7 +50,7 @@ class TestMCCFRSolver:
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
 
         utility = solver.train_iteration()
 
@@ -66,7 +66,7 @@ class TestMCCFRSolver:
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
 
         results = solver.train(num_iterations=5, verbose=False)
 
@@ -81,7 +81,7 @@ class TestMCCFRSolver:
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
 
         # Run first iteration
         solver.train_iteration()
@@ -101,19 +101,24 @@ class TestMCCFRSolver:
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
+        # Use external sampling which updates strategy_sum for all actions
+        solver = MCCFRSolver(
+            action_abs,
+            card_abs,
+            storage,
+            config=make_test_config(seed=42, sampling_method="external"),
+        )
 
-        # Train for a few iterations
-        solver.train(num_iterations=5, verbose=False)
+        # Train for enough iterations to update strategies
+        solver.train(num_iterations=10, verbose=False)
 
-        # Get any infoset
-        if storage.num_infosets() > 0:
-            # Get first infoset
-            first_key = next(iter(storage.infosets.keys()))
-            infoset = storage.infosets[first_key]
-
-            # Check that strategy sum has been updated
-            assert infoset.strategy_sum.sum() > 0
+        # Check that at least some infosets have been updated
+        # (not all may be updated due to alternating player traversal)
+        assert storage.num_infosets() > 0
+        updated_infosets = sum(
+            1 for infoset in storage.infosets.values() if infoset.strategy_sum.sum() > 0
+        )
+        assert updated_infosets > 0, "At least some infosets should have updated strategy_sum"
 
     def test_is_chance_node(self):
         """Test chance node detection."""
@@ -185,7 +190,7 @@ class TestMCCFRSolver:
         storage1 = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test1", is_coordinator=True
         )
-        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
+        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config=make_test_config(seed=42))
         solver1.train(num_iterations=5, verbose=False)
         infosets1 = solver1.num_infosets()
 
@@ -193,7 +198,7 @@ class TestMCCFRSolver:
         storage2 = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
         )
-        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 42})
+        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=42))
         solver2.train(num_iterations=5, verbose=False)
         infosets2 = solver2.num_infosets()
 
@@ -236,7 +241,9 @@ class TestMCCFRSolver:
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config={"starting_stack": 100})
+        solver = MCCFRSolver(
+            action_abs, card_abs, storage, config=make_test_config(starting_stack=100)
+        )
 
         state = solver._deal_initial_state()
 

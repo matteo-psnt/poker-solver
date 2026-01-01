@@ -73,14 +73,13 @@ class SolverCLI:
                 current_iter = summary.get("total_iterations", 0)
 
                 if current_iter > 0:
-                    self.current_trainer.training_run.save_snapshot(
-                        self.current_trainer.solver,
-                        current_iter,
-                        tags=["interrupted"],
-                    )
-                    self.current_trainer.training_run.update_stats(
-                        total_iterations=current_iter,
-                        total_runtime_seconds=self.current_trainer.metrics.get_elapsed_time(),
+                    # Save checkpoint using storage
+                    self.current_trainer.storage.checkpoint(int(current_iter))
+
+                    # Update run tracker metadata
+                    self.current_trainer.run_tracker.update(
+                        iterations=int(current_iter),
+                        runtime_seconds=self.current_trainer.metrics.get_elapsed_time(),
                         num_infosets=self.current_trainer.solver.num_infosets(),
                     )
                     print(f"[OK] Checkpoint saved at iteration {current_iter}")
@@ -281,7 +280,7 @@ class SolverCLI:
             return
 
         total_iters = latest_iter + int(add_iters)
-        config.set("training.num_iterations", total_iters)
+        config = config.merge({"training": {"num_iterations": total_iters}})
 
         try:
             self.current_trainer = handle_resume(config, selected, latest_iter)

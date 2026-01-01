@@ -10,7 +10,7 @@ from src.game.rules import GameRules
 from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import SharedArrayStorage
-from tests.test_helpers import DummyCardAbstraction
+from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
 class TestMatchResult:
@@ -101,8 +101,8 @@ class TestHeadToHeadEvaluator:
             num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
         )
 
-        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
-        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
+        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config=make_test_config(seed=42))
+        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=43))
 
         # Train briefly so they have some strategy
         solver1.train(num_iterations=3, verbose=False)
@@ -143,8 +143,8 @@ class TestHeadToHeadEvaluator:
             num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
         )
 
-        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
-        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
+        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config=make_test_config(seed=42))
+        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=43))
 
         # Train briefly
         solver1.train(num_iterations=1, verbose=False)
@@ -177,7 +177,7 @@ class TestHeadToHeadEvaluator:
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
 
         # Train
         solver.train(num_iterations=3, verbose=False)
@@ -218,8 +218,8 @@ class TestHeadToHeadEvaluator:
             num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
         )
 
-        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
-        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
+        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config=make_test_config(seed=42))
+        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=43))
 
         solver1.train(num_iterations=1, verbose=False)
         solver2.train(num_iterations=1, verbose=False)

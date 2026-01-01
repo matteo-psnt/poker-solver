@@ -13,6 +13,7 @@ from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import InMemoryStorage
 from src.training.run_tracker import RunTracker
+from src.utils.config import Config
 
 
 def handle_view_preflop_chart(
@@ -76,7 +77,7 @@ def handle_view_preflop_chart(
         action_abstraction=action_abs,
         card_abstraction=DummyCardAbstraction(),
         storage=storage,
-        config={"seed": 42, "starting_stack": 200},
+        config=Config.default().merge({"system": {"seed": 42}}),
     )
 
     position_choice = questionary.select(

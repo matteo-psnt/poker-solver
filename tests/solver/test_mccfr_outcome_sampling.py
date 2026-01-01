@@ -10,7 +10,7 @@ import pytest
 from src.actions.betting_actions import BettingActions
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import SharedArrayStorage
-from tests.test_helpers import DummyCardAbstraction
+from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
 class TestOutcomeSampling:
@@ -28,7 +28,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage,
-            config={"sampling_method": "outcome", "seed": 42},
+            config=make_test_config(sampling_method="outcome", seed=42),
         )
 
         assert solver.sampling_method == "outcome"
@@ -46,7 +46,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage,
-            config={"sampling_method": "outcome", "seed": 42},
+            config=make_test_config(sampling_method="outcome", seed=42),
         )
 
         utility = solver.train_iteration()
@@ -67,7 +67,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage,
-            config={"sampling_method": "outcome", "seed": 42},
+            config=make_test_config(sampling_method="outcome", seed=42),
         )
 
         results = solver.train(num_iterations=10, verbose=False)
@@ -88,7 +88,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage,
-            config={"sampling_method": "outcome", "seed": 42},
+            config=make_test_config(sampling_method="outcome", seed=42),
         )
 
         # Run iterations
@@ -118,7 +118,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage,
-            config={"sampling_method": "outcome", "cfr_plus": True, "seed": 42},
+            config=make_test_config(sampling_method="outcome", cfr_plus=True, seed=42),
         )
 
         # Should complete without errors
@@ -139,7 +139,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage,
-            config={"sampling_method": "outcome", "seed": 42},
+            config=make_test_config(sampling_method="outcome", seed=42),
         )
 
         solver.train(num_iterations=50, verbose=False)
@@ -168,7 +168,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage_external,
-            config={"sampling_method": "external", "seed": 42},
+            config=make_test_config(sampling_method="external", seed=42),
         )
         solver_external.train(num_iterations=5, verbose=False)
 
@@ -180,7 +180,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage_outcome,
-            config={"sampling_method": "outcome", "seed": 42},
+            config=make_test_config(sampling_method="outcome", seed=42),
         )
         solver_outcome.train(num_iterations=5, verbose=False)
 
@@ -211,7 +211,7 @@ class TestOutcomeSampling:
                 action_abs,
                 card_abs,
                 storage,
-                config={"sampling_method": "invalid_method", "seed": 42},
+                config=make_test_config(sampling_method="invalid_method", seed=42),
             )
 
     def test_outcome_sampling_converges_over_iterations(self):
@@ -226,7 +226,7 @@ class TestOutcomeSampling:
             action_abs,
             card_abs,
             storage,
-            config={"sampling_method": "outcome", "seed": 42},
+            config=make_test_config(sampling_method="outcome", seed=42),
         )
 
         # Train for many iterations

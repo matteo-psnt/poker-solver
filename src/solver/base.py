@@ -13,6 +13,7 @@ from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.bucketing.utils.infoset import InfoSetKey
 from src.solver.storage import Storage
+from src.utils.config import Config
 
 
 class BaseSolver(ABC):
@@ -27,7 +28,7 @@ class BaseSolver(ABC):
         action_abstraction: BettingActions,
         card_abstraction: BucketingStrategy,
         storage: Storage,
-        config: Optional[Dict] = None,
+        config: Optional[Config] = None,
     ):
         """
         Initialize solver.
@@ -36,12 +37,12 @@ class BaseSolver(ABC):
             action_abstraction: Action abstraction for betting
             card_abstraction: Card abstraction for bucketing
             storage: Storage backend for infosets
-            config: Solver-specific configuration
+            config: Config object (defaults to Config.default() if not provided)
         """
         self.action_abstraction = action_abstraction
         self.card_abstraction = card_abstraction
         self.storage = storage
-        self.config = config or {}
+        self.config = config if config is not None else Config.default()
 
         # Training state
         self.iteration = 0
