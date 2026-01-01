@@ -176,7 +176,7 @@ class PostflopPrecomputer:
         self.abstraction = PostflopBucketer()
 
         # Attach board clusterer to abstraction for runtime use
-        self.abstraction._board_clusterer = self.board_clusterer
+        self.abstraction.set_board_clusterer(self.board_clusterer)
 
     def precompute_street(
         self,
@@ -345,10 +345,7 @@ class PostflopPrecomputer:
         # Assign buckets to abstraction (indexed by cluster_id, not board_id)
         for (cluster_id, hand_id, equity), label in zip(all_data, labels):
             bucket = label_map[label]
-
-            if cluster_id not in self.abstraction._buckets[street]:
-                self.abstraction._buckets[street][cluster_id] = {}
-            self.abstraction._buckets[street][cluster_id][hand_id] = bucket
+            self.abstraction.assign_bucket(street, cluster_id, hand_id, bucket)
 
         self.abstraction.set_num_buckets(street, len(set(labels)))
 

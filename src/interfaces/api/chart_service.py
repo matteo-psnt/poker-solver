@@ -3,24 +3,15 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
 from pathlib import Path
 
-from src.core.actions.action_model import ActionModel
-from src.core.game.rules import GameRules
-from src.engine.solver.storage.in_memory import InMemoryStorage
-from src.interfaces.chart.data import build_chart_metadata, build_preflop_chart_data
+from src.interfaces.chart.data import (
+    ChartDataRuntime,
+    build_chart_metadata,
+    build_preflop_chart_data,
+)
 from src.pipeline.training import services
-
-
-@dataclass(frozen=True)
-class ChartDataRuntime:
-    """Minimal runtime state required to render preflop chart data."""
-
-    action_model: ActionModel
-    rules: GameRules
-    storage: InMemoryStorage
-    starting_stack: int
+from src.pipeline.training.components import build_evaluation_solver
 
 
 class ChartService:
@@ -37,13 +28,14 @@ class ChartService:
         metadata = services.load_run_metadata(run_dir)
         config = metadata.config
 
-        action_model = ActionModel(config)
-        rules = GameRules(config.game.small_blind, config.game.big_blind)
-        storage = InMemoryStorage(checkpoint_dir=run_dir)
+        solver, storage = build_evaluation_solver(
+            config,
+            checkpoint_dir=run_dir,
+        )
 
         runtime = ChartDataRuntime(
-            action_model=action_model,
-            rules=rules,
+            action_model=solver.action_model,
+            rules=solver.rules,
             storage=storage,
             starting_stack=config.game.starting_stack,
         )

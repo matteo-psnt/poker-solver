@@ -66,7 +66,7 @@ def encode_infoset_key(
     effective_stack = min(state.stacks)
     spr = effective_stack / state.pot if state.pot > 0 else 0
     spr_bucket = _get_spr_bucket(spr)
-    betting_sequence = state._normalize_betting_sequence()
+    betting_sequence = state.normalized_betting_sequence()
 
     if state.street == Street.PREFLOP:
         preflop_hand = _preflop_hand_string(state.hole_cards[player])

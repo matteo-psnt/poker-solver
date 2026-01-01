@@ -30,7 +30,7 @@ class TestBettingNormalization:
             street_start_pot=100,  # Pot at start of betting round
         )
 
-        normalized = state._normalize_betting_sequence()
+        normalized = state.normalized_betting_sequence()
         # Bet 50 into pot of 100 (before bet) = 0.50
         assert normalized == "b0.50", f"Expected 'b0.50', got '{normalized}'"
 
@@ -54,7 +54,7 @@ class TestBettingNormalization:
             street_start_pot=100,  # Pot at start of betting round
         )
 
-        normalized = state._normalize_betting_sequence()
+        normalized = state.normalized_betting_sequence()
         # Bet 50 into 100 = 0.50
         # Raise 75 into 150 = 0.50
         assert normalized == "b0.50-r0.50", f"Expected 'b0.50-r0.50', got '{normalized}'"
@@ -93,8 +93,8 @@ class TestBettingNormalization:
             street_start_pot=200,
         )
 
-        norm1 = state1._normalize_betting_sequence()
-        norm2 = state2._normalize_betting_sequence()
+        norm1 = state1.normalized_betting_sequence()
+        norm2 = state2.normalized_betting_sequence()
 
         assert norm1 == norm2 == "b0.50-r0.50", (
             f"Different amounts with same fractions should normalize identically: "
@@ -123,7 +123,7 @@ class TestBettingNormalization:
             street_start_pot=100,
         )
 
-        normalized = state._normalize_betting_sequence()
+        normalized = state.normalized_betting_sequence()
         # Check = x, bet 50 into 100 = b0.50, call = c
         assert normalized == "x-b0.50-c", f"Expected 'x-b0.50-c', got '{normalized}'"
 
@@ -144,7 +144,7 @@ class TestBettingNormalization:
             street_start_pot=100,
         )
 
-        normalized = state._normalize_betting_sequence()
+        normalized = state.normalized_betting_sequence()
         assert normalized == "", f"Expected empty string, got '{normalized}'"
 
     def test_normalize_complex_sequence(self):
@@ -168,7 +168,7 @@ class TestBettingNormalization:
             street_start_pot=100,
         )
 
-        normalized = state._normalize_betting_sequence()
+        normalized = state.normalized_betting_sequence()
         # bet 30 into 100 = 0.30
         # raise 60 into 130 = 0.46 (rounded)
         assert "b0.30" in normalized, f"Expected 'b0.30' in sequence, got '{normalized}'"
@@ -196,7 +196,7 @@ class TestBettingNormalization:
             street_start_pot=100,
         )
 
-        normalized = state._normalize_betting_sequence()
+        normalized = state.normalized_betting_sequence()
 
         # bet 25 into 100 = 0.25
         # raise 50 into 125 = 0.40

@@ -33,14 +33,14 @@ def async_checkpoint(
     storage_capacity: int,
     training_start_time: float,
 ) -> None:
-    if not checkpoint_enabled(session) or session._checkpoint_executor is None:
+    if not checkpoint_enabled(session) or session.checkpoint_executor is None:
         return
-    if session._pending_checkpoint is not None and not session._pending_checkpoint.done():
+    if session.pending_checkpoint is not None and not session.pending_checkpoint.done():
         if session.verbose:
             print("[Master] Previous checkpoint still running; skipping", flush=True)
         return
 
-    session._pending_checkpoint = session._checkpoint_executor.submit(
+    session.pending_checkpoint = session.checkpoint_executor.submit(
         checkpoint_with_timing,
         session,
         worker_manager,
@@ -52,24 +52,24 @@ def async_checkpoint(
 
 
 def wait_for_checkpoint(session: TrainingSession) -> None:
-    if session._pending_checkpoint is None:
+    if session.pending_checkpoint is None:
         return
     if session.verbose:
         print("[Master] Waiting for background checkpoint to complete...", flush=True)
     try:
-        session._pending_checkpoint.result()
+        session.pending_checkpoint.result()
     except Exception as exc:
         print(f"[Master] ERROR: Background checkpoint failed: {exc}", flush=True)
         raise
     finally:
-        session._pending_checkpoint = None
+        session.pending_checkpoint = None
 
 
 def shutdown_checkpoint_executor(session: TrainingSession) -> None:
-    if session._checkpoint_executor is None:
+    if session.checkpoint_executor is None:
         return
     wait_for_checkpoint(session)
-    session._checkpoint_executor.shutdown(wait=True)
+    session.checkpoint_executor.shutdown(wait=True)
 
 
 def checkpoint_with_timing(

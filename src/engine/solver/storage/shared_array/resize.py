@@ -87,7 +87,7 @@ def resize(storage: SharedArrayStorage, new_capacity: int) -> None:
     storage.capacity = new_capacity
     storage.session_id = uuid.uuid4().hex[:8]
 
-    storage._create_shared_memory()
+    storage.create_shared_memory()
 
     storage.shared_regrets[:old_capacity, :] = old_regrets[:, :]
     storage.shared_strategy_sum[:old_capacity, :] = old_strategy[:, :]
@@ -141,7 +141,7 @@ def reattach_after_resize(
     storage.state.next_local_id = preserved_next_id
     storage.state.owned_keys = preserved_keys
 
-    storage._attach_shared_memory()
+    storage.attach_shared_memory()
     add_extra_region(storage, old_capacity, new_capacity)
 
     print(

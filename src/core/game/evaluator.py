@@ -57,7 +57,7 @@ class HandEvaluator:
             raise ValueError("Must have exactly 2 hole cards")
 
         # Cards are already eval7.Card objects internally
-        cards = [card._card for card in board] + [card._card for card in hole_cards]
+        cards = [card.to_eval7() for card in board] + [card.to_eval7() for card in hole_cards]
 
         # eval7 uses "higher is better" semantics, invert to get "lower is better"
         eval7_rank = eval7.evaluate(cards)

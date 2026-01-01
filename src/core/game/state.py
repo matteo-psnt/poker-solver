@@ -76,6 +76,18 @@ class Card:
         """Get the unique integer identifier for this card (eval7's mask)."""
         return self._card.mask
 
+    def to_eval7(self) -> eval7.Card:
+        """Return the underlying eval7 card object."""
+        return self._card
+
+    def rank_eval7(self) -> int:
+        """Return eval7 rank encoding (0=2, ..., 12=A)."""
+        return self._card.rank
+
+    def suit_eval7(self) -> int:
+        """Return eval7 suit encoding (0=c, 1=d, 2=h, 3=s)."""
+        return self._card.suit
+
     @classmethod
     def new(cls, card_str: str) -> "Card":
         """
@@ -300,6 +312,10 @@ class GameState:
         if rules is None:
             raise ValueError("rules is required for GameState.get_payoff()")
         return rules.get_payoff(self, player)
+
+    def normalized_betting_sequence(self) -> str:
+        """Return canonical betting-sequence encoding used in infoset keys."""
+        return self._normalize_betting_sequence()
 
     def _normalize_betting_sequence(self) -> str:
         """
