@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
-poker-solver = "src.cli.app:main"
+poker-solver = "src.interfaces.cli.app:main"
 
 [project.optional-dependencies]
 # Visualization and performance profiling

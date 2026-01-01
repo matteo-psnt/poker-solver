@@ -1,9 +1,22 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`src/` contains the Python package, with core modules in `solver/`, `training/`,
-`evaluation/`, `game/`, `bucketing/`, `actions/`, `utils/`, and `cli/`. Tests
-live in `tests/` and generally mirror `src/` by feature area, with integration
+`src/` follows a layered package structure:
+- `src/core/` (`game/`, `actions/`) for foundational poker domain logic.
+- `src/engine/` (`solver/`, `search/`) for solving/search internals.
+- `src/pipeline/` (`training/`, `evaluation/`, `abstraction/`) for offline
+  workflows, experiments, and abstraction/bucketing.
+- `src/interfaces/` (`cli/`, `api/`, `chart/`) for user-facing entrypoints.
+- `src/shared/` for reusable cross-layer helpers (config loading, utility
+  primitives).
+
+Soft dependency convention (enforced by review and contributor discipline):
+- `interfaces -> pipeline -> engine -> core`
+- `shared` is importable by all layers.
+- Avoid reverse imports across these layer boundaries.
+
+Tests live in `tests/` and mirror this layout (`tests/core/`, `tests/engine/`,
+`tests/pipeline/`, `tests/interfaces/`, `tests/shared/`) with integration
 coverage in `tests/integration/`. Configuration is stored in YAML under
 `config/` (e.g., `config/training/quick_test.yaml`). Generated artifacts and
 runtime outputs go in `data/` (`runs/`, `profiles/`, `combo_abstraction/`). The
@@ -42,8 +55,9 @@ Tests are written with pytest and should follow the configured patterns:
 Use this workflow:
 - While developing, run focused tests first: `uv run pytest tests/<path>::<test_name>`.
 - Before handing off changes, run the fast gate: `uv run pytest -m "not slow"`.
-- Run full suite (`uv run pytest`) when your change impacts training, bucketing,
-  evaluator logic, config loading, or shared infrastructure.
+- Run full suite (`uv run pytest`) when your change impacts training,
+  abstraction/bucketing, evaluator logic, config loading, or shared
+  infrastructure.
 
 Marker and timeout policy:
 - Mark expensive tests with `@pytest.mark.slow`.

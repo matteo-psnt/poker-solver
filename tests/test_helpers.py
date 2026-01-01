@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from src.bucketing.base import BucketingStrategy
-from src.utils.config import Config
+from src.pipeline.abstraction.base import BucketingStrategy
+from src.shared.config import Config
 
 
 def make_test_config(**overrides) -> Config:
