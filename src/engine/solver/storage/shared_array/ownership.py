@@ -7,8 +7,8 @@ from typing import cast
 
 import xxhash
 
+from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.shared_array.types import AllocationLike, RegionLike
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
 
 
 def _unpack_region(region: tuple[int, int, int, int] | RegionLike) -> tuple[int, int, int, int]:

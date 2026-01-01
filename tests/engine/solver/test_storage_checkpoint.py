@@ -4,9 +4,9 @@ import numpy as np
 
 from src.core.game.actions import bet, call, fold
 from src.core.game.state import Street
+from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.in_memory import InMemoryStorage
 from src.engine.solver.storage.shared_array import SharedArrayStorage
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
 
 
 def _action_signature(actions):

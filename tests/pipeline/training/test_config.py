@@ -154,7 +154,7 @@ training:
         with pytest.raises(FileNotFoundError):
             load_config("/nonexistent/path.yaml")
 
-    def test_load_legacy_action_abstraction_raises(self):
+    def test_load_removed_action_abstraction_key_raises(self):
         """Strict schema should reject removed action_abstraction key."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(

@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from src.core.game.actions import Action
-from src.pipeline.abstraction.utils.infoset import InfoSet, InfoSetKey
+from src.engine.solver.infoset import InfoSet, InfoSetKey
 
 
 class Storage(ABC):

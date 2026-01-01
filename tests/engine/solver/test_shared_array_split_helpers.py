@@ -1,13 +1,13 @@
 """Tests for extracted shared-array helper modules."""
 
 from src.core.game.state import Street
+from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.shared_array.ownership import (
     owner_for_id,
     owner_for_key,
     stable_hash,
 )
 from src.engine.solver.storage.shared_array_layout import get_shm_name
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
 
 
 def _sample_key() -> InfoSetKey:

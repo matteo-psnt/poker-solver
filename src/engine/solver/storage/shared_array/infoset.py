@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.core.game.actions import Action, fold
-from src.pipeline.abstraction.utils.infoset import InfoSet, InfoSetKey
+from src.engine.solver.infoset import InfoSet, InfoSetKey
 
 if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage

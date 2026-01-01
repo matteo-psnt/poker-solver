@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from src.engine.solver.infoset import InfoSetKey
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage
-    from src.pipeline.abstraction.utils.infoset import InfoSetKey
 
 
 def respond_to_id_requests(

@@ -5,8 +5,8 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.shared_array.types import ExtraAllocation, ExtraRegion
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
 
 if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage

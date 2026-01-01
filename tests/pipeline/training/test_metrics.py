@@ -7,7 +7,7 @@ import pytest
 
 from src.core.game.actions import Action, ActionType
 from src.core.game.state import Street
-from src.pipeline.abstraction.utils.infoset import InfoSet, InfoSetKey
+from src.engine.solver.infoset import InfoSet, InfoSetKey
 from src.pipeline.training.metrics import MetricsTracker
 
 
