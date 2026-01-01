@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.interfaces.cli.flows import config as config_flow
-from src.interfaces.cli.flows.config import select_config
+from src.interfaces.cli.flows.config_editors import abstraction as abstraction_editor
+from src.interfaces.cli.flows.config_menu import select_config
 from src.interfaces.cli.ui.context import CliContext
 from src.shared.config import Config
 
@@ -58,11 +58,11 @@ def test_edit_card_abstraction_uses_dynamic_yaml_choices(tmp_path, monkeypatch, 
         captured["default"] = default
         return "alpha"
 
-    monkeypatch.setattr(config_flow.prompts, "select", _mock_select)
-    monkeypatch.setattr(config_flow.prompts, "confirm", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(config_flow.ui, "warn", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(abstraction_editor.prompts, "select", _mock_select)
+    monkeypatch.setattr(abstraction_editor.prompts, "confirm", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(abstraction_editor.ui, "warn", lambda *_args, **_kwargs: None)
 
-    updated = config_flow._edit_card_abstraction(ctx, base_config)
+    updated = abstraction_editor.edit_card_abstraction(ctx, base_config)
 
     assert captured["choices"] == ["alpha", "zzz"]
     assert captured["default"] == "alpha"
@@ -86,13 +86,13 @@ def test_edit_card_abstraction_no_configs_returns_original(tmp_path, monkeypatch
     errors: list[str] = []
 
     monkeypatch.setattr(
-        config_flow.prompts,
+        abstraction_editor.prompts,
         "select",
         lambda *_args, **_kwargs: pytest.fail("prompts.select should not be called"),
     )
-    monkeypatch.setattr(config_flow.ui, "error", lambda message: errors.append(message))
+    monkeypatch.setattr(abstraction_editor.ui, "error", lambda message: errors.append(message))
 
-    updated = config_flow._edit_card_abstraction(ctx, base_config)
+    updated = abstraction_editor.edit_card_abstraction(ctx, base_config)
 
     assert updated == base_config
     assert errors

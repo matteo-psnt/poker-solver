@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import cast
 
 from src.interfaces.cli.flows.combo_precompute import handle_combo_precompute
-from src.interfaces.cli.flows.config import select_config
+from src.interfaces.cli.flows.config_menu import select_config
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
 from src.pipeline.training import services

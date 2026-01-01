@@ -43,6 +43,8 @@ limit enforced by Ruff. Use `snake_case` for functions/variables, `PascalCase`
 for classes, and `UPPER_SNAKE_CASE` for constants. Keep modules focused and
 prefer explicit, typed interfaces between solver, training, and evaluation
 layers.
+Do not assume backward compatibility is required. Unless explicitly requested,
+prefer clean breaks over compatibility shims, aliases, or legacy import paths.
 Imports must be placed at the top of the file unless absolutely necessary;
 avoid importing inside functions.
 This is a research-grade project; call out anything that does not meet that
