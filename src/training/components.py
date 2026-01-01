@@ -14,7 +14,7 @@ from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import InMemoryStorage, Storage
+from src.solver.storage import SharedArrayStorage, Storage
 from src.utils.config import Config
 
 
@@ -125,17 +125,28 @@ def build_card_abstraction(
 
 def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
     """
-    Build storage backend from config.
+    Build storage backend for training (always returns SharedArrayStorage).
+
+    This function is ONLY for use by TrainingSession during training initialization.
+    For read-only access to checkpoints (charts, analysis, debugging), use
+    InMemoryStorage directly.
+
+    Creates a single-worker SharedArrayStorage instance. The actual training will
+    create the full multi-worker storage when parallel training starts.
 
     Args:
         config: Configuration object
         run_dir: Optional run directory (required if checkpointing is enabled)
 
     Returns:
-        InMemoryStorage instance (with optional disk checkpointing)
+        SharedArrayStorage instance for coordinator/single-worker use
 
     Raises:
         ValueError: If checkpointing is enabled but run_dir is not provided
+
+    Note:
+        This storage instance is primarily for the solver's interface. Actual
+        parallel training creates its own multi-worker shared memory pools.
     """
     storage_config = config.get_section("storage")
     checkpoint_enabled = storage_config.get("checkpoint_enabled", True)
@@ -143,7 +154,19 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
     if checkpoint_enabled and run_dir is None:
         raise ValueError("run_dir is required when checkpoint_enabled is true")
 
-    return InMemoryStorage(checkpoint_dir=run_dir if checkpoint_enabled else None)
+    # Create a minimal storage instance (actual parallel training uses its own)
+    # Using run_dir.name as session_id to avoid conflicts between runs
+    session_id = run_dir.name if run_dir else "default"
+
+    return SharedArrayStorage(
+        num_workers=1,
+        worker_id=0,
+        session_id=session_id,
+        max_infosets=2_000_000,
+        max_actions=10,
+        is_coordinator=True,
+        checkpoint_dir=run_dir if checkpoint_enabled else None,
+    )
 
 
 def build_solver(

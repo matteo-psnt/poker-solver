@@ -6,7 +6,7 @@ from src.actions.betting_actions import BettingActions
 from src.bucketing.utils.infoset import InfoSetKey
 from src.game.state import Card, GameState, Street
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import InMemoryStorage
+from src.solver.storage import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction
 
 
@@ -16,7 +16,9 @@ class TestMCCFRSolver:
     def test_create_solver(self):
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
@@ -26,7 +28,9 @@ class TestMCCFRSolver:
     def test_deal_initial_state(self):
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         state = solver._deal_initial_state()
@@ -43,7 +47,9 @@ class TestMCCFRSolver:
         """Test that one iteration completes without error."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
         utility = solver.train_iteration()
@@ -57,7 +63,9 @@ class TestMCCFRSolver:
         """Test multiple training iterations."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
         results = solver.train(num_iterations=5, verbose=False)
@@ -70,7 +78,9 @@ class TestMCCFRSolver:
         """Test that infosets accumulate over iterations."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
         # Run first iteration
@@ -88,7 +98,9 @@ class TestMCCFRSolver:
         """Test that strategies are updated during training."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
         # Train for a few iterations
@@ -107,7 +119,9 @@ class TestMCCFRSolver:
         """Test chance node detection."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         state = solver._deal_initial_state()
@@ -121,7 +135,9 @@ class TestMCCFRSolver:
         """Test that chance node sampling deals cards."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         # Create state needing flop
@@ -166,13 +182,17 @@ class TestMCCFRSolver:
         card_abs = DummyCardAbstraction()
 
         # Run with seed 42
-        storage1 = InMemoryStorage()
+        storage1 = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test1", is_coordinator=True
+        )
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
         solver1.train(num_iterations=5, verbose=False)
         infosets1 = solver1.num_infosets()
 
         # Run again with same seed
-        storage2 = InMemoryStorage()
+        storage2 = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
+        )
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 42})
         solver2.train(num_iterations=5, verbose=False)
         infosets2 = solver2.num_infosets()
@@ -189,7 +209,9 @@ class TestMCCFRSolver:
         """Test that checkpoint doesn't crash."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         solver.train(num_iterations=10, verbose=False)
@@ -198,7 +220,9 @@ class TestMCCFRSolver:
     def test_str_representation(self):
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         s = str(solver)
@@ -209,7 +233,9 @@ class TestMCCFRSolver:
         """Test solver with custom stack size."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"starting_stack": 100})
 
         state = solver._deal_initial_state()
@@ -222,7 +248,9 @@ class TestMCCFRSolver:
         """Test verbose training runs without error."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         # Train with verbose=True (note: output only prints every 1000 iterations)
@@ -233,7 +261,9 @@ class TestMCCFRSolver:
         """Test that train() returns correct statistics."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         stats = solver.train(num_iterations=2, verbose=False)
@@ -248,7 +278,9 @@ class TestMCCFRSolver:
         """Test get_average_strategy with non-existent infoset."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         # Create fake infoset key (preflop uses hand string)
@@ -269,7 +301,9 @@ class TestMCCFRSolver:
         """Test get_current_strategy with non-existent infoset."""
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage)
 
         # Create fake infoset key (preflop uses hand string)

@@ -47,6 +47,7 @@ def handle_view_preflop_chart(
 
     print(f"\nLoading solver from {selected_run}...")
     run_dir = runs_dir / selected_run
+    # Use read-only InMemoryStorage for viewing charts
     storage = InMemoryStorage(checkpoint_dir=run_dir)
 
     print(f"  Loaded {storage.num_infosets():,} infosets")

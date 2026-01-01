@@ -5,7 +5,7 @@ import pytest
 from src.actions.betting_actions import BettingActions
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import InMemoryStorage
+from src.solver.storage import SharedArrayStorage
 from src.training import components
 from src.utils.config import Config
 from tests.test_helpers import DummyCardAbstraction
@@ -74,7 +74,7 @@ class TestBuildStorage:
 
         storage = components.build_storage(config, run_dir=tmp_path)
 
-        assert isinstance(storage, InMemoryStorage)
+        assert isinstance(storage, SharedArrayStorage)
         assert storage.num_infosets() == 0
         assert storage.checkpoint_dir == tmp_path
 
@@ -85,7 +85,7 @@ class TestBuildStorage:
 
         storage = components.build_storage(config, run_dir=None)
 
-        assert isinstance(storage, InMemoryStorage)
+        assert isinstance(storage, SharedArrayStorage)
         assert storage.num_infosets() == 0
         assert storage.checkpoint_dir is None
 
@@ -107,7 +107,9 @@ class TestBuildSolver:
 
         action_abs = components.build_action_abstraction(config)
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = components.build_solver(config, action_abs, card_abs, storage)
 
@@ -124,7 +126,9 @@ class TestBuildSolver:
 
         action_abs = components.build_action_abstraction(config)
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = components.build_solver(config, action_abs, card_abs, storage)
 
@@ -140,7 +144,9 @@ class TestBuildSolver:
 
         action_abs = components.build_action_abstraction(config)
         card_abs = DummyCardAbstraction()
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
 
         solver = components.build_solver(config, action_abs, card_abs, storage)
 
@@ -167,7 +173,7 @@ class TestComponentIntegration:
 
         # Verify everything is connected
         assert isinstance(action_abs, BettingActions)
-        assert isinstance(storage, InMemoryStorage)
+        assert isinstance(storage, SharedArrayStorage)
         assert isinstance(solver, MCCFRSolver)
         assert solver.storage == storage
         assert solver.action_abstraction == action_abs
@@ -181,5 +187,5 @@ class TestComponentIntegration:
         run_dir.mkdir()  # Create run directory
         storage = components.build_storage(config, run_dir=run_dir)
 
-        assert isinstance(storage, InMemoryStorage)
+        assert isinstance(storage, SharedArrayStorage)
         assert storage.checkpoint_dir == run_dir

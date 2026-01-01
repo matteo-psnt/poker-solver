@@ -9,7 +9,7 @@ from src.evaluation.head_to_head import (
 from src.game.rules import GameRules
 from src.game.state import Street
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import InMemoryStorage
+from src.solver.storage import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction
 
 
@@ -94,8 +94,12 @@ class TestHeadToHeadEvaluator:
         card_abs = DummyCardAbstraction()
 
         # Create two solvers
-        storage1 = InMemoryStorage()
-        storage2 = InMemoryStorage()
+        storage1 = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test1", is_coordinator=True
+        )
+        storage2 = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
+        )
 
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
@@ -132,8 +136,12 @@ class TestHeadToHeadEvaluator:
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
 
-        storage1 = InMemoryStorage()
-        storage2 = InMemoryStorage()
+        storage1 = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test1", is_coordinator=True
+        )
+        storage2 = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
+        )
 
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})
@@ -166,7 +174,9 @@ class TestHeadToHeadEvaluator:
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
 
-        storage = InMemoryStorage()
+        storage = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
+        )
         solver = MCCFRSolver(action_abs, card_abs, storage, config={"seed": 42})
 
         # Train
@@ -201,8 +211,12 @@ class TestHeadToHeadEvaluator:
         action_abs = BettingActions()
         card_abs = DummyCardAbstraction()
 
-        storage1 = InMemoryStorage()
-        storage2 = InMemoryStorage()
+        storage1 = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test1", is_coordinator=True
+        )
+        storage2 = SharedArrayStorage(
+            num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
+        )
 
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config={"seed": 42})
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config={"seed": 43})

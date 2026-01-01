@@ -5,7 +5,7 @@ import pytest
 
 from src.actions.betting_actions import BettingActions
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import InMemoryStorage
+from src.solver.storage import SharedArrayStorage
 from src.training import components
 from src.training.trainer import TrainingSession
 from src.utils.config import Config
@@ -49,7 +49,7 @@ class TestTrainer:
         config_with_dummy_abstraction.set("storage.checkpoint_enabled", False)
 
         trainer = TrainingSession(config_with_dummy_abstraction)
-        assert isinstance(trainer.storage, InMemoryStorage)
+        assert isinstance(trainer.storage, SharedArrayStorage)
         assert trainer.storage.checkpoint_dir is None
 
     def test_build_solver(self, config_with_dummy_abstraction):
@@ -110,7 +110,7 @@ class TestTrainer:
         trainer = TrainingSession(config, run_id="test_parallel_discovery")
 
         # Run parallel training with public API
-        results = trainer.train(num_iterations=4, use_parallel=True, num_workers=2)
+        results = trainer.train(num_iterations=4, num_workers=2)
 
         # Verify results
         assert results["total_iterations"] == 4
@@ -123,25 +123,26 @@ class TestTrainer:
     @pytest.mark.timeout(30)
     def test_parallel_vs_sequential_both_work(self, config_with_dummy_abstraction):
         """
-        Test that both parallel and sequential training modes work.
+        Test that training works with different worker counts.
 
-        Note: Due to different architectures (InMemoryStorage vs SharedArrayStorage),
-        and different sampling paths, exact values won't match. This test verifies:
-        - Both modes complete training
-        - Both modes discover infosets
+        All training uses SharedArrayStorage with hash-partitioned infosets.
+        This test verifies:
+        - Single worker (sequential-like) training completes
+        - Multi-worker parallel training completes
+        - Both discover infosets (exact count may vary due to sampling)
         """
         config = config_with_dummy_abstraction
         config.set("training.num_iterations", 4)
         config.set("training.verbose", False)
         config.set("storage.checkpoint_enabled", False)
 
-        # Run sequential training
-        trainer_seq = TrainingSession(config, run_id="test_sequential")
-        results_seq = trainer_seq.train(num_iterations=4, use_parallel=False)
+        # Run with 1 worker (sequential-like behavior)
+        trainer_seq = TrainingSession(config, run_id="test_single_worker")
+        results_seq = trainer_seq.train(num_iterations=4, num_workers=1)
 
-        # Run parallel training with same total iterations
-        trainer_par = TrainingSession(config, run_id="test_parallel")
-        results_par = trainer_par.train(num_iterations=4, use_parallel=True, num_workers=2)
+        # Run with 2 workers (parallel)
+        trainer_par = TrainingSession(config, run_id="test_multi_worker")
+        results_par = trainer_par.train(num_iterations=4, num_workers=2)
 
         # Both should complete same number of iterations
         assert results_seq["total_iterations"] == results_par["total_iterations"]
@@ -150,8 +151,8 @@ class TestTrainer:
         assert results_seq["final_infosets"] > 0
         assert results_par["final_infosets"] > 0
 
-        # Verify metrics are valid for sequential (uses InMemoryStorage)
-        assert isinstance(trainer_seq.solver.storage, InMemoryStorage)
+        # Both use SharedArrayStorage
+        assert isinstance(trainer_seq.solver.storage, SharedArrayStorage)
         for key, infoset in trainer_seq.solver.storage.infosets.items():
             assert not np.any(np.isnan(infoset.regrets))
             assert not np.any(np.isnan(infoset.strategy_sum))
@@ -183,7 +184,7 @@ class TestTrainer:
         start_time = time.time()
 
         # Run parallel training
-        results = trainer.train(num_iterations=4, use_parallel=True, num_workers=2, batch_size=2)
+        results = trainer.train(num_iterations=4, num_workers=2, batch_size=2)
 
         elapsed = time.time() - start_time
 
@@ -218,7 +219,6 @@ class TestTrainer:
         # Run parallel training with multiple workers
         results = trainer.train(
             num_iterations=6,  # Reduced from 10
-            use_parallel=True,
             num_workers=3,  # Reduced from 4
         )
 
@@ -258,7 +258,7 @@ class TestAsyncCheckpointing:
         trainer = TrainingSession(config, run_id="test_async_checkpoint")
 
         # Run training with checkpointing enabled
-        results = trainer.train(num_iterations=4, use_parallel=False)
+        results = trainer.train(num_iterations=4, num_workers=1)
 
         # Verify training completed
         assert results["total_iterations"] == 4
@@ -278,7 +278,7 @@ class TestAsyncCheckpointing:
         trainer = TrainingSession(config, run_id="test_checkpoint_shutdown")
 
         # Run training
-        trainer.train(num_iterations=4, use_parallel=False)
+        trainer.train(num_iterations=4, num_workers=1)
 
         # After training, pending checkpoint should be None (completed)
         assert trainer._pending_checkpoint is None
@@ -298,7 +298,7 @@ class TestAsyncCheckpointing:
         trainer = TrainingSession(config, run_id="test_async_parallel")
 
         # Run parallel training with checkpointing
-        results = trainer.train(num_iterations=4, use_parallel=True, num_workers=2)
+        results = trainer.train(num_iterations=4, num_workers=2)
 
         # Verify training completed
         assert results["total_iterations"] == 4
@@ -335,7 +335,7 @@ class TestAsyncCheckpointing:
         trainer = TrainingSession(config, run_id="test_key_collection")
 
         # Run parallel training with multiple workers
-        results = trainer.train(num_iterations=4, use_parallel=True, num_workers=2)
+        results = trainer.train(num_iterations=4, num_workers=2)
 
         # Verify training completed
         assert results["total_iterations"] == 4
@@ -374,7 +374,7 @@ class TestAsyncCheckpointing:
         trainer = TrainingSession(config, run_id="test_checkpoint_roundtrip")
 
         # Run parallel training and save checkpoint
-        trainer.train(num_iterations=4, use_parallel=True, num_workers=2)
+        trainer.train(num_iterations=4, num_workers=2)
 
         # Verify checkpoint files exist
         key_mapping_file = trainer.run_dir / "key_mapping.pkl"
@@ -443,7 +443,6 @@ class TestParallelStress:
         # Run with many workers (increases chance of race conditions)
         results = trainer.train(
             num_iterations=12,
-            use_parallel=True,
             num_workers=6,  # Reduced from 8
             batch_size=3,  # Small batch size = more synchronization
         )
@@ -467,7 +466,6 @@ class TestParallelStress:
         # Run multiple batches with frequent ID exchanges
         results = trainer.train(
             num_iterations=12,
-            use_parallel=True,
             num_workers=3,  # Reduced from 4
             batch_size=2,  # Very small batches = frequent exchanges
         )
@@ -513,7 +511,7 @@ class TestCheckpointEnabledConfig:
         trainer = TrainingSession(config, run_id="test_no_checkpoint")
 
         # Run training
-        trainer.train(num_iterations=4, use_parallel=False)
+        trainer.train(num_iterations=4, num_workers=1)
 
         # Verify NO checkpoint files created
         assert not (trainer.run_dir / "key_mapping.pkl").exists()
@@ -531,7 +529,7 @@ class TestCheckpointEnabledConfig:
 
         # First training session
         trainer1 = TrainingSession(config, run_id="test_resume")
-        results1 = trainer1.train(num_iterations=4, use_parallel=False)
+        results1 = trainer1.train(num_iterations=4, num_workers=1)
 
         # Verify checkpoint exists
         assert (trainer1.run_dir / "key_mapping.pkl").exists()
