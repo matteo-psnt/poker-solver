@@ -7,6 +7,7 @@ to eliminate code duplication.
 """
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
@@ -28,9 +29,8 @@ def build_action_abstraction(config: Config) -> BettingActions:
     Returns:
         BettingActions instance
     """
-    action_config = config.get_section("action_abstraction")
-    game_config = config.get_section("game")
-    big_blind = game_config.get("big_blind", 2)
+    action_config = asdict(config.action_abstraction)
+    big_blind = config.game.big_blind
     return BettingActions(action_config, big_blind=big_blind)
 
 
@@ -54,7 +54,11 @@ def build_card_abstraction(
         ValueError: If config is invalid
         FileNotFoundError: If abstraction file doesn't exist
     """
-    card_config = config.get_section("card_abstraction")
+    # Note: card_abstraction config structure is still being used as dict in YAML
+    # For now, convert config to dict and access card_abstraction section
+    # TODO: Add CardAbstractionConfig to config_schema.py if needed
+    config_dict = config.to_dict()
+    card_config = config_dict.get("card_abstraction", {})
 
     # Get the abstraction path/config
     abstraction_path = card_config.get("abstraction_path")
@@ -148,8 +152,7 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
         This storage instance is primarily for the solver's interface. Actual
         parallel training creates its own multi-worker shared memory pools.
     """
-    storage_config = config.get_section("storage")
-    checkpoint_enabled = storage_config.get("checkpoint_enabled", True)
+    checkpoint_enabled = config.storage.checkpoint_enabled
 
     if checkpoint_enabled and run_dir is None:
         raise ValueError("run_dir is required when checkpoint_enabled is true")
@@ -162,8 +165,8 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
         num_workers=1,
         worker_id=0,
         session_id=session_id,
-        max_infosets=2_000_000,
-        max_actions=10,
+        max_infosets=config.storage.max_infosets,
+        max_actions=config.storage.max_actions,
         is_coordinator=True,
         checkpoint_dir=run_dir if checkpoint_enabled else None,
     )
@@ -190,14 +193,14 @@ def build_solver(
     Raises:
         ValueError: If solver type is unknown
     """
-    solver_config = config.get_section("solver")
-    game_config = config.get_section("game")
-    system_config = config.get_section("system")
 
-    # Merge configs for solver
+    # Merge game and system configs for solver
+    # MCCFRSolver expects a dict config
+    game_config = asdict(config.game)
+    system_config = asdict(config.system)
     merged_config = {**game_config, **system_config}
 
-    solver_type = solver_config.get("type", "mccfr")
+    solver_type = config.solver.type
 
     if solver_type == "mccfr":
         return MCCFRSolver(

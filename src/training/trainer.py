@@ -46,7 +46,7 @@ class TrainingSession:
         self.config = config
 
         # Determine run directory
-        runs_base_dir = Path(config.get("training.runs_dir", "data/runs"))
+        runs_base_dir = Path(self.config.training.runs_dir)
         if run_id is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             run_id = f"run-{timestamp}"
@@ -56,7 +56,7 @@ class TrainingSession:
         # Initialize run tracker
         self.run_tracker = RunTracker(
             run_dir=self.run_dir,
-            config_name=config.get("system.config_name", "default"),
+            config_name=self.config.system.config_name,
             config=config.to_dict(),
         )
 
@@ -76,7 +76,7 @@ class TrainingSession:
             )
 
             # Initialize metrics tracker
-            self.metrics = MetricsTracker(window_size=config.get("training.log_frequency", 100))
+            self.metrics = MetricsTracker(window_size=self.config.training.log_frequency)
 
             # Initialize async checkpointing (single background thread)
             self._checkpoint_executor = concurrent.futures.ThreadPoolExecutor(
@@ -87,13 +87,6 @@ class TrainingSession:
             # Don't create run metadata if initialization fails
             self.run_tracker.mark_failed(cleanup_if_empty=True)
             raise
-
-    @property
-    def verbose(self) -> bool:
-        """Get verbose flag from config (cached for performance)."""
-        if not hasattr(self, "_verbose_cache"):
-            self._verbose_cache = self.config.get("training.verbose", True)
-        return self._verbose_cache
 
     @classmethod
     def resume(
@@ -275,23 +268,23 @@ class TrainingSession:
         """Cleanup on deletion."""
         self._shutdown_checkpoint_executor()
 
+    @property
+    def verbose(self) -> bool:
+        """Get verbose setting from config."""
+        return self.config.training.verbose
+
     def _get_training_config(self, num_workers: int, batch_size: Optional[int]) -> Dict[str, Any]:
         """Parse training configuration with defaults."""
         if batch_size is None:
-            iterations_per_worker_multiplier = int(
-                self.config.get("training.iterations_per_worker", 100)
-            )
-            if not iterations_per_worker_multiplier:
-                iterations_per_worker_multiplier = 100
-            batch_size = iterations_per_worker_multiplier * num_workers
+            batch_size = self.config.training.iterations_per_worker * num_workers
 
         return {
             "batch_size": batch_size,
-            "checkpoint_freq": self.config.get("training.checkpoint_frequency", 100),
-            "verbose": self.verbose,
-            "max_infosets": self.config.get("storage.max_infosets", 2_000_000),
-            "max_actions": self.config.get("storage.max_actions", 10),
-            "checkpoint_enabled": self.config.get("storage.checkpoint_enabled", True),
+            "checkpoint_freq": self.config.training.checkpoint_frequency,
+            "verbose": self.config.training.verbose,
+            "max_infosets": self.config.storage.max_infosets,
+            "max_actions": self.config.storage.max_actions,
+            "checkpoint_enabled": self.config.storage.checkpoint_enabled,
         }
 
     def _print_training_header(
@@ -494,7 +487,7 @@ class TrainingSession:
             serialized_action_abstraction=serialized_action_abstraction,
             serialized_card_abstraction=serialized_card_abstraction,
             session_id=self.run_dir.name,
-            base_seed=self.config.get("system.seed", 42) or 42,
+            base_seed=self.config.system.seed,
             max_infosets=max_infosets,
             max_actions=max_actions,
             checkpoint_dir=str(self.run_dir) if checkpoint_enabled else None,
@@ -556,7 +549,7 @@ class TrainingSession:
         """
         # Get iteration count
         if num_iterations is None:
-            num_iterations = int(self.config.get("training.num_iterations", 1000))
+            num_iterations = self.config.training.num_iterations
 
         # Default to CPU count for num_workers
         if num_workers is None:
