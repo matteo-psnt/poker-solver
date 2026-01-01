@@ -41,22 +41,12 @@ class Storage(ABC):
 
     @abstractmethod
     def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
-        """Get existing infoset or None."""
-        pass
-
-    @abstractmethod
-    def has_infoset(self, key: InfoSetKey) -> bool:
-        """Check if infoset exists."""
+        """Get existing infoset or None if not found."""
         pass
 
     @abstractmethod
     def num_infosets(self) -> int:
         """Get total number of stored infosets."""
-        pass
-
-    @abstractmethod
-    def mark_dirty(self, key: InfoSetKey):
-        """Mark infoset as modified (needs to be persisted)."""
         pass
 
     def is_owned(self, key: InfoSetKey) -> bool:
@@ -67,11 +57,6 @@ class Storage(ABC):
         For partitioned storage, only keys mapping to this worker's partition are owned.
         """
         return True
-
-    @abstractmethod
-    def flush(self):
-        """Flush any pending writes to storage."""
-        pass
 
     @abstractmethod
     def checkpoint(self, iteration: int):
@@ -125,10 +110,6 @@ class InMemoryStorage(Storage):
             return None
         return self._infosets_by_id.get(infoset_id)
 
-    def has_infoset(self, key: InfoSetKey) -> bool:
-        """Check if infoset exists."""
-        return key in self.key_to_id
-
     def num_infosets(self) -> int:
         """Get total number of stored infosets."""
         return len(self._infosets_by_id)
@@ -140,14 +121,6 @@ class InMemoryStorage(Storage):
             self.id_to_key[infoset_id]: infoset
             for infoset_id, infoset in self._infosets_by_id.items()
         }
-
-    def mark_dirty(self, key: InfoSetKey):
-        """No-op for read-only storage."""
-        pass
-
-    def flush(self):
-        """No-op for read-only storage."""
-        pass
 
     def checkpoint(self, iteration: int):
         """Read-only storage cannot checkpoint."""
@@ -651,14 +624,6 @@ class SharedArrayStorage(Storage):
 
         return self._create_infoset_view(infoset_id, key, legal_actions)
 
-    def has_infoset(self, key: InfoSetKey) -> bool:
-        """Check if infoset exists (in owned or remote cache)."""
-        owner = self.get_owner(key)
-        if owner == self.worker_id:
-            return key in self._owned_keys
-        else:
-            return key in self._remote_keys
-
     def num_infosets(self) -> int:
         """Get total number of infosets allocated by this worker."""
         return self.next_local_id - self.id_range_start
@@ -666,14 +631,6 @@ class SharedArrayStorage(Storage):
     def num_owned_infosets(self) -> int:
         """Get number of infosets owned by this worker."""
         return len(self._owned_keys)
-
-    def mark_dirty(self, key: InfoSetKey):
-        """No-op for shared array storage (writes go directly to shared memory)."""
-        pass
-
-    def flush(self):
-        """No-op for shared array storage (data is always in shared memory)."""
-        pass
 
     # =========================================================================
     # ID Request/Response (Batched, Async)

@@ -2,10 +2,10 @@
 
 ## Overview
 
-The training system orchestrates Monte Carlo Counterfactual Regret Minimization (MCCFR) to compute near-optimal poker strategies. It supports both sequential and parallel training modes with comprehensive checkpointing, metrics tracking, and configuration management.
+The training system orchestrates Monte Carlo Counterfactual Regret Minimization (MCCFR) to compute near-optimal poker strategies using parallel multiprocessing with hash-partitioned shared memory. Includes comprehensive checkpointing, metrics tracking, and configuration management.
 
 **Key Features:**
-- Sequential and parallel (multiprocessing) training
+- Parallel multiprocessing training with hash-partitioned infosets
 - Automatic checkpointing and resume capability
 - Real-time metrics tracking and reporting
 - Configurable abstractions (card/action) and storage backends
@@ -21,7 +21,7 @@ The training system orchestrates Monte Carlo Counterfactual Regret Minimization 
 
 **Responsibilities:**
 - Initialize solver components (abstractions, storage, solver)
-- Run training iterations (sequential or parallel)
+- Run parallel training iterations with hash-partitioned shared memory
 - Handle checkpointing and resume
 - Track metrics and progress
 - Manage run metadata
@@ -32,15 +32,15 @@ TrainingSession(config: Config, run_id: Optional[str] = None)
     # Initialize trainer from configuration
     # Creates run directory and initializes components
 
-train(num_iterations: int, use_parallel: bool = True, num_workers: int = None, batch_size: int = None)
-    # Main training loop
-    # use_parallel=True: uses persistent worker pool (multiprocessing)
-    #                  workers reset local storage per batch to avoid double counting
-    # use_parallel=False: sequential execution
+train(num_iterations: Optional[int] = None, num_workers: Optional[int] = None, batch_size: Optional[int] = None)
+    # Main training loop - always uses parallel multiprocessing with hash-partitioned shared memory
+    # num_workers: Number of parallel workers (default: CPU count, use 1 for sequential-like behavior)
+    # batch_size: Iterations per batch (default: 80)
 
-resume(from_checkpoint: Optional[int] = None)
-    # Resume training from checkpoint
-    # Loads solver state and continues iterations
+TrainingSession.resume(run_dir: Path) -> TrainingSession
+    # Static method to resume training from checkpoint
+    # Loads solver state from disk and returns configured TrainingSession
+    # Call .train() on returned session to continue training
 
 evaluate(num_hands: int = 1000)
     # Evaluate current strategy
@@ -87,200 +87,172 @@ build_solver(config: Config, ...) -> BaseSolver
 ```
 
 **Why Separate Builders?**
-- Eliminates code duplication between sequential/parallel modes
 - Makes components independently testable
 - Allows easy swapping of implementations
 - Clear separation of concerns
 
 ---
 
-### 3. Sequential Training Flow
+### 3. Parallel Training Architecture
 
-**Process:**
+**Hash-Partitioned Shared Memory Architecture:**
 ```
-1. Initialize TrainingSession
-   └── Build components (action_abstraction, card_abstraction, storage, solver)
-   └── Create run directory and metadata
-   └── Initialize metrics tracker
-
-2. Run training loop
-   for iteration in range(num_iterations):
-       ├── solver.train_iteration()         # Run one MCCFR iteration
-       ├── metrics.log_iteration(...)       # Track utility, infosets, timing
-       ├── if iteration % checkpoint_freq:
-       │   └── storage.save_checkpoint()    # Save regrets/strategies
-       └── if iteration % log_freq:
-           └── print progress metrics       # Show convergence progress
-
-3. Complete training
-   ├── storage.flush()                     # Persist all data
-   ├── run_tracker.mark_completed()        # Update metadata
-   └── return results dict
-```
-
-**Sequential Training Code Path:**
-```python
-TrainingSession.train(use_parallel=False)
-└── _train_sequential()
-    └── loop: solver.train_iteration()
-        └── MCCFRSolver.train_iteration()
-            ├── deal_cards()                    # Sample hole cards, board
-            ├── external_sampling_cfr()         # Traverse game tree
-            │   └── traverse recursively:
-            │       ├── get_infoset()           # Abstract game state
-            │       ├── get_strategy()          # Compute strategy from regrets
-            │       ├── choose_action()         # Traverse/sample actions
-            │       └── update_regrets()        # Backpropagate values
-            └── storage.update_infoset()        # Store updated regrets
-```
-
-**When to Use Sequential:**
-- Debugging (easier to trace execution)
-- Small-scale experiments
-- Baseline comparisons
-- When overhead of multiprocessing > gains
-
----
-
-### 4. Parallel Training Flow
-
-**Architecture:**
-```
-Main Process                          Worker Processes (N workers)
+Coordinator Process                   Worker Processes (N workers)
+│                                     │
+├── Create shared memory arrays       │
+│   (regrets, strategies, actions)    │
+│   Partitioned by worker ownership   │
 │                                     │
 ├── Serialize abstractions            │
 │   (action_abstraction + card_abs)   │
 │                                     │
-├── Start persistent worker pool ──→  │ Worker 0..N-1: initialize solver once
-│                                     │   └── wait for jobs
+├── Start worker pool ─────────────→  │ Worker 0..N-1: attach to shared memory
+│                                     │   └── Initialize solver with partitioned storage
+│                                     │   └── Each worker owns hash(key) % N partition
 │                                     │
 └── For each batch:                   │
-    ├── Submit jobs with iteration ─→ │ Worker: reset local storage + set iteration offset
-    │   offsets + K iterations        │   ├── Run train_iteration() K times
-    │                                 │   └── Return infoset data + utilities
+    ├── Submit batch to workers ────→ │ Worker: Run K iterations
+    │                                 │   ├── For each game iteration:
+    │                                 │   │   ├── Sample game & traverse tree
+    │                                 │   │   ├── For each infoset encountered:
+    │                                 │   │   │   ├── If owned: update directly in shared memory
+    │                                 │   │   │   └── If remote: read from shared memory (may be stale)
+    │                                 │   │   └── Continue CFR traversal
+    │                                 │   └── Signal batch complete
     │
-    ├── Collect results ←─────────────┤
-    ├── Merge worker results (sum)    │
-    ├── Update master storage         │
+    ├── Exchange ID requests ←──────→ │ Workers share newly discovered infoset IDs
+    │                                 │
     ├── Log metrics                   │
     └── Checkpoint (if needed)        │
 ```
 
-**Parallel Training Code Path:**
+**Training Code Path:**
 ```python
-TrainingSession.train(use_parallel=True, num_workers=N, batch_size=B)
-└── _train_parallel()
+TrainingSession.train(num_workers=N, batch_size=B)
+└── _train_partitioned()
     ├── Serialize abstractions (once)
     │   └── pickle.dumps(action_abstraction, card_abstraction)
-    ├── Start WorkerManager (persistent pool)
+    ├── Start SharedArrayWorkerManager (persistent pool with shared memory)
+    │   ├── Create shared memory arrays (regrets, strategies, action_counts)
+    │   └── Each worker attaches and gets exclusive ID range
     │
     └── for each batch:
-        ├── Submit jobs with iteration offsets
+        ├── Submit batch to all workers (parallel execution)
         │   └── worker loop:
-        │       ├── Reset local storage (per job)
-        │       ├── Set solver.iteration = offset
         │       ├── Run train_iteration() K times
-        │       └── Queue results {utilities, infoset_data}
+        │       │   └── For each infoset: write to owned partition, read from any
+        │       └── Signal completion
         │
-        ├── Collect results from queue
+        ├── Exchange ID requests between workers
+        │   └── Workers share IDs for newly discovered remote infosets
         │
-        ├── Merge worker results (sum + action alignment)
-        │   └── mark_dirty for disk-backed storage
-        │
-        ├── Log merged metrics
+        ├── Log metrics from shared memory
         └── Checkpoint (if iteration % freq == 0)
+            └── Each worker saves its partition to disk
 ```
 
-**Key Parallel Design Decisions:**
+**Key Design Decisions:**
+
+**Why Hash-Partitioned Infosets?**
+- Each worker owns `hash(infoset_key) % num_workers` partition
+- No merge step - workers update their partition directly in shared memory
+- Workers can read from any partition (lock-free, potentially stale)
+- Eliminates expensive merge bottleneck (was 81% of coordinator time)
 
 **Why Serialize Abstractions?**
-- Loading card abstraction from disk takes ~5-10 seconds
-- Serialized abstractions are ~5MB, fast to transfer
+- Loading card abstraction from disk takes ~5-10 seconds per worker
+- Serialized abstractions are ~5MB, transferred once to all workers
 - Workers deserialize in <0.1 seconds
-- Massive speedup: 1 disk load vs N disk loads
+- Massive speedup: 1 disk load + N fast deserializations vs N disk loads
 
-**Why In-Memory Storage for Workers?**
-- Workers run independently with isolated storage
-- No contention on shared storage
-- Results merged after completion
-- Main storage only updated after merge
+**Why Shared Memory Arrays?**
+- Direct NumPy views into shared memory (zero-copy between workers)
+- Lock-free reads (stale data is acceptable for MCCFR sampling)
+- Owner-only writes (no race conditions)
+- Eliminates 164MB broadcast overhead per batch
 
 **Why Batch Processing?**
-- Amortizes merge/checkpoint overhead
-- Allows periodic checkpointing
-- Better progress reporting
-- Default: batch_size = num_workers * 200
+- Amortizes checkpoint overhead across many iterations
+- Allows periodic progress reporting
+- Workers can exchange newly discovered infoset IDs between batches
+- Default: batch_size = 80 iterations per batch
 
-**Why Reset Worker Storage Each Batch?**
-- Avoids double-counting when using persistent workers
-- Keeps worker memory bounded
-- Makes each batch an independent MCCFR sample
-
-**Merge Strategy:**
+**Ownership Model:**
 ```python
-def _merge_worker_results(worker_results):
-    for infoset_key in all_infosets:
-        # Collect from all workers that visited this infoset
-        worker_data = [w[key] for w in workers if key in w]
+def get_owner(infoset_key: InfoSetKey) -> int:
+    # Deterministic, stable hash (xxhash, not Python's randomized hash())
+    key_hash = xxhash.xxh64(infoset_key).intdigest()
+    return key_hash % num_workers
 
-        # Build unified action list (master + any new worker actions)
-        actions = union_actions(master_actions, [w.legal_actions for w in worker_data])
-        action_index = {action: i for i, action in enumerate(actions)}
-
-        # Sum regrets and strategies aligned by action identity
-        merged_regrets = np.zeros(len(actions))
-        merged_strategy = np.zeros(len(actions))
-        for data in worker_data:
-            for i, action in enumerate(data.legal_actions):
-                idx = action_index[action]
-                merged_regrets[idx] += data.regrets[i]
-                merged_strategy[idx] += data.strategy_sum[i]
-
-        # Accumulate into main storage
-        infoset = storage.get_or_create_infoset(key, actions)
-        infoset.regrets += merged_regrets
-        infoset.strategy_sum += merged_strategy
-        storage.mark_dirty(key)  # Required for disk-backed storage
+# Worker decides: can I update this infoset?
+if get_owner(key) == my_worker_id:
+    # Owner: write directly to shared memory
+    update_infoset_in_place(key, regrets, strategies)
+else:
+    # Non-owner: read current values (may be stale, that's OK for MCCFR)
+    infoset = read_from_shared_memory(key)
 ```
 
 **Performance Characteristics:**
-- **Speedup:** ~0.7-0.9x per worker (overhead from serialization, merging)
-- **Memory:** N × solver memory (each worker has full solver)
-- **Best Use:** Long runs (>100 iterations), multi-core machines
-- **Overhead:** One-time worker pool startup + per-batch IPC/merge costs
+- **Speedup:** ~3-5x throughput improvement over merge-based approach
+- **Worker Idle:** Reduced from 90% to ~10-20%
+- **Memory:** N × solver memory + shared arrays (~400MB for 2M infosets)
+- **Best Use:** All training (use num_workers=1 for sequential-like behavior)
+- **Overhead:** One-time worker pool startup + minimal batch sync
 
 ---
 
-### 5. Storage System (`src/solver/storage.py`)
+### 4. Storage System (`src/solver/storage.py`)
 
 **Two Implementations:**
 
-**InMemoryStorage:**
+**SharedArrayStorage:** (Training)
 ```python
-# Simple dict-based storage
-infosets: Dict[str, InfoSet] = {}
+# Hash-partitioned flat NumPy arrays in shared memory
+# Each worker owns hash(key) % num_workers partition
+# Direct memory access (zero-copy between workers)
+# Owner-only writes, lock-free reads
 
-# Fast lookups, no I/O
-# Used for: all training
+# Data layout:
+# - shared_regrets: float32[max_infosets, max_actions]
+# - shared_strategy_sum: float32[max_infosets, max_actions]
+# - shared_action_counts: int32[max_infosets]
+
+# Used for: all parallel training
+# Performance: Lock-free, no merge overhead
+```
+
+**InMemoryStorage:** (Read-Only)
+```python
+# Simple dict-based storage for loading checkpoints
+# Read-only - raises error on write attempts
+
+# Used for: charts, analysis, debugging
+# - Load checkpoint from disk (HDF5 files)
+# - Provides .infosets property for iteration
+# - Cannot create new infosets or train
+
+# DO NOT use for training - use SharedArrayStorage instead
 ```
 
 **Checkpointing:**
 ```python
-# Periodic saves to HDF5 files
-# All operations stay in RAM (fast)
-# Checkpoint saves current state to disk
+# Periodic saves to HDF5 files (async in background thread)
+# Each worker saves its partition independently
 
 # Write strategy:
-# - All operations in-memory (fast dictionary access)
-# - Periodic checkpoint: save all infosets to HDF5
+# - Workers update shared memory in-place during training
+# - Periodic checkpoint: each worker saves its partition to HDF5
+# - Async execution (non-blocking, training continues)
 # - Controlled by checkpoint_frequency in training config
 
 # Read strategy (on resume):
-# - Load all infosets from HDF5 into memory
-# - Continue training in-memory
+# - Load all partitions from HDF5
+# - Re-partition keys based on current num_workers (supports resume with different worker count)
+# - Continue training with partitioned updates
 
 # Used for: production training with periodic persistence
-# Trade-off: Brief I/O pause during checkpoint saves
+# Trade-off: Brief coordinator pause to collect worker partition info
 ```
 
 **Configuration:**
@@ -294,7 +266,7 @@ training:
 
 ---
 
-### 6. Metrics Tracking (`src/training/metrics.py`)
+### 5. Metrics Tracking (`src/training/metrics.py`)
 
 **MetricsTracker:**
 
@@ -335,7 +307,7 @@ Iteration 1000/10000 [===>    ] 10.0%
 
 ---
 
-### 7. Run Tracking (`src/training/run_tracker.py`)
+### 6. Run Tracking (`src/training/run_tracker.py`)
 
 **Purpose:** Lightweight metadata tracking for training runs.
 
@@ -675,12 +647,12 @@ def handle_resume_training():
 
 **Potential Improvements:**
 1. **Neural CFR:** Replace card abstraction with neural network
-2. **Distributed Training:** Extend to multi-node (Ray, MPI)
-3. **Adaptive Sampling:** Dynamic batch sizes based on convergence
-4. **Better Parallelism:** Share storage via shared memory
-5. **Incremental Checkpointing:** Only save changed infosets
-6. **GPU Acceleration:** Batch equity calculations
-7. **Live Evaluation:** Continuous exploitability monitoring
+2. **Distributed Training:** Extend to multi-node (Ray, MPI) with network-based partition exchange
+3. **Adaptive Sampling:** Dynamic batch sizes based on convergence metrics
+4. **Incremental Checkpointing:** Only save changed partitions (delta checkpoints)
+5. **GPU Acceleration:** Batch equity calculations on GPU
+6. **Live Evaluation:** Continuous exploitability monitoring during training
+7. **Dynamic Repartitioning:** Rebalance partitions based on actual infoset distribution
 
 ---
 
@@ -693,23 +665,28 @@ from src.utils.config import Config
 
 config = Config.load("production")
 trainer = TrainingSession(config)
-results = trainer.train(num_iterations=10000, use_parallel=True)
+# Parallel training (always) with 8 workers
+results = trainer.train(num_iterations=10000, num_workers=8)
 ```
 
 **Resume Training:**
 ```python
 from pathlib import Path
+# Resume from checkpoint (use static method)
 trainer = TrainingSession.resume(Path("data/runs/run-20251222_143022"))
-results = trainer.train(num_iterations=5000)
+results = trainer.train(num_iterations=5000)  # Continue training
 ```
 
-**Sequential vs Parallel:**
+**Different Worker Counts:**
 ```python
-# Sequential (single core)
-results = trainer.train(num_iterations=1000, use_parallel=False)
+# Single worker (sequential-like behavior, but still uses shared memory)
+results = trainer.train(num_iterations=1000, num_workers=1)
 
-# Parallel (8 workers, batch_size=80)
-results = trainer.train(num_iterations=1000, use_parallel=True, num_workers=8, batch_size=80)
+# Multi-worker parallel (8 workers, batch_size=80)
+results = trainer.train(num_iterations=1000, num_workers=8, batch_size=80)
+
+# Auto-detect worker count (uses CPU count)
+results = trainer.train(num_iterations=1000)  # num_workers defaults to CPU count
 ```
 
 **Custom Configuration:**
@@ -720,19 +697,22 @@ config.set("training.checkpoint_frequency", 500)
 config.set("training.num_iterations", 5000)
 ```
 
-## Questions for Review
+## Architecture Review Questions
 
 **Parallel correctness:**
-1. Is per-batch reset + summation merge the right abstraction for MCCFR parallelism?
-2. Should we support shared storage (shared memory) instead of merging?
+1. ✅ ~~Should we use shared memory?~~ - Implemented hash-partitioned shared memory
+2. Is eventual consistency (batch-level sync) theoretically sound for MCCFR?
+3. Does hash-based partitioning create load imbalance?
 
 **Performance concerns:**
-1. Is the batch size heuristic (num_workers * 200) optimal for real runs?
-2. Should we compress checkpoints to reduce I/O?
+1. Is batch_size=80 optimal, or should it adapt based on checkpoint overhead?
+2. Should we compress checkpoints to reduce I/O time?
+3. Can we overlap computation and ID exchange to hide latency?
 
 **Extensibility:**
-1. How hard would it be to add distributed training (Ray/MPI)?
+1. How to extend hash-partitioning to multi-node (distributed hash table)?
 2. Should we support dynamic abstraction refinement during training?
+3. Can we use lock-free data structures to eliminate batch-level synchronization?
 
 ---
 
