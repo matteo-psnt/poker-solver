@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import eval7
 import numpy as np
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.bucketing.base import BucketingStrategy
 from src.game.actions import Action, ActionType
 from src.game.rules import GameRules
@@ -93,8 +93,8 @@ class HeadToHeadEvaluator:
     def __init__(
         self,
         rules: GameRules,
-        action_abstraction: BettingActions,
-        card_abstraction: BucketingStrategy,
+        action_model: ActionModel | None = None,
+        card_abstraction: BucketingStrategy | None = None,
         starting_stack: int = 200,
     ):
         """
@@ -102,12 +102,16 @@ class HeadToHeadEvaluator:
 
         Args:
             rules: Game rules
-            action_abstraction: Action abstraction
+            action_model: Action model
             card_abstraction: Card abstraction
             starting_stack: Starting stack size in chips
         """
+        if action_model is None:
+            raise ValueError("action_model is required")
+        if card_abstraction is None:
+            raise ValueError("card_abstraction is required")
         self.rules = rules
-        self.action_abstraction = action_abstraction
+        self.action_model = action_model
         self.card_abstraction = card_abstraction
         self.starting_stack = starting_stack
 
@@ -272,12 +276,22 @@ class HeadToHeadEvaluator:
 
         if infoset is None:
             # No strategy for this infoset, use random legal action
-            legal_actions = self.action_abstraction.get_legal_actions(state)
+            legal_actions = self.action_model.get_legal_actions(state)
             return legal_actions[np.random.choice(len(legal_actions))]
 
-        # Get average strategy (Nash equilibrium approximation, automatically normalized to float64)
-        strategy = infoset.get_filtered_strategy(use_average=True)
-        legal_actions = infoset.legal_actions
+        # Filter stored actions to those legal in the concrete state.
+        valid_indices: list[int] = []
+        legal_actions: list[Action] = []
+        for i, action in enumerate(infoset.legal_actions):
+            if self.rules.is_action_valid(state, action):
+                valid_indices.append(i)
+                legal_actions.append(action)
+
+        if not legal_actions:
+            legal_actions = self.action_model.get_legal_actions(state)
+            return legal_actions[np.random.choice(len(legal_actions))]
+
+        strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=True)
 
         # Sample action according to strategy
         action_idx = int(np.random.choice(len(legal_actions), p=strategy))

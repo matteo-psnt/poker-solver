@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.bucketing.config import PrecomputeConfig
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.shared_array import SharedArrayStorage
@@ -13,26 +13,26 @@ from src.utils.config import Config
 from tests.test_helpers import DummyCardAbstraction
 
 
-class TestBuildActionAbstraction:
-    """Tests for build_action_abstraction."""
+class TestBuildActionModel:
+    """Tests for build_action_model."""
 
     def test_build_default(self):
-        """Test building action abstraction with default config."""
+        """Test building action model with default config."""
         config = Config.default()
-        action_abs = components.build_action_abstraction(config)
+        action_model = components.build_action_model(config)
 
-        assert isinstance(action_abs, BettingActions)
-        assert len(action_abs.preflop_raises) > 0
-        assert action_abs.big_blind == 2
+        assert isinstance(action_model, ActionModel)
+        assert action_model.get_preflop_open_sizes_bb()
+        assert action_model.big_blind == 2
 
     def test_build_with_custom_big_blind(self):
         """Test building with custom big blind."""
         config = Config.default().merge({"game": {"big_blind": 10}})
 
-        action_abs = components.build_action_abstraction(config)
+        action_model = components.build_action_model(config)
 
-        assert isinstance(action_abs, BettingActions)
-        assert action_abs.big_blind == 10
+        assert isinstance(action_model, ActionModel)
+        assert action_model.big_blind == 10
 
 
 class TestBuildCardAbstraction:
@@ -168,16 +168,16 @@ class TestBuildSolver:
         """Test building solver with basic components."""
         config = Config.default()
 
-        action_abs = components.build_action_abstraction(config)
+        action_model = components.build_action_model(config)
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
-        solver = components.build_solver(config, action_abs, card_abs, storage)
+        solver = components.build_solver(config, action_model, card_abs, storage)
 
         assert isinstance(solver, MCCFRSolver)
-        assert solver.action_abstraction == action_abs
+        assert solver.action_model == action_model
         assert solver.card_abstraction == card_abs
         assert solver.storage == storage
         assert solver.iteration == 0
@@ -186,13 +186,13 @@ class TestBuildSolver:
         """Test that solver uses configured seed."""
         config = Config.default().merge({"system": {"seed": 42}})
 
-        action_abs = components.build_action_abstraction(config)
+        action_model = components.build_action_model(config)
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
-        solver = components.build_solver(config, action_abs, card_abs, storage)
+        solver = components.build_solver(config, action_model, card_abs, storage)
 
         assert isinstance(solver, MCCFRSolver)
         # Solver should be initialized successfully
@@ -203,13 +203,13 @@ class TestBuildSolver:
             {"game": {"starting_stack": 500, "small_blind": 5, "big_blind": 10}}
         )
 
-        action_abs = components.build_action_abstraction(config)
+        action_model = components.build_action_model(config)
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
-        solver = components.build_solver(config, action_abs, card_abs, storage)
+        solver = components.build_solver(config, action_model, card_abs, storage)
 
         assert isinstance(solver, MCCFRSolver)
         # Solver should be created with the custom game config
@@ -223,20 +223,20 @@ class TestComponentIntegration:
         config = Config.default().merge({"storage": {"checkpoint_enabled": True}})
 
         # Build all components
-        action_abs = components.build_action_abstraction(config)
+        action_model = components.build_action_model(config)
         storage = components.build_storage(config, run_dir=tmp_path)
 
         # Use dummy abstraction since we don't have real data
         card_abs = DummyCardAbstraction()
 
-        solver = components.build_solver(config, action_abs, card_abs, storage)
+        solver = components.build_solver(config, action_model, card_abs, storage)
 
         # Verify everything is connected
-        assert isinstance(action_abs, BettingActions)
+        assert isinstance(action_model, ActionModel)
         assert isinstance(storage, SharedArrayStorage)
         assert isinstance(solver, MCCFRSolver)
         assert solver.storage == storage
-        assert solver.action_abstraction == action_abs
+        assert solver.action_model == action_model
 
     def test_build_with_checkpointing_creates_directory(self, tmp_path):
         """Test that storage with checkpointing properly initializes."""

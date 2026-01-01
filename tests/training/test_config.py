@@ -153,6 +153,23 @@ training:
         with pytest.raises(FileNotFoundError):
             load_config("/nonexistent/path.yaml")
 
+    def test_load_legacy_action_abstraction_raises(self):
+        """Strict schema should reject removed action_abstraction key."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(
+                """
+action_abstraction:
+  preflop_raises: [2.5, 3.5]
+"""
+            )
+            yaml_path = Path(f.name)
+
+        try:
+            with pytest.raises(ValueError, match="action_abstraction"):
+                load_config(yaml_path)
+        finally:
+            yaml_path.unlink()
+
 
 class TestTypeSafety:
     """Test that types are enforced."""

@@ -52,7 +52,7 @@ evaluate(num_hands: int = 1000)
 TrainingSession
 ├── config: Config                        # Training configuration
 ├── solver: MCCFRSolver                   # MCCFR solver instance
-├── action_abstraction: BettingActions    # Action space abstraction
+├── action_model: ActionModel             # Action space model
 ├── card_abstraction: BucketingStrategy   # Card bucketing strategy
 ├── storage: Storage                      # Regret/strategy storage
 ├── metrics: MetricsTracker               # Training metrics
@@ -68,7 +68,7 @@ TrainingSession
 **Key Functions:**
 
 ```python
-build_action_abstraction(config: Config) -> BettingActions
+build_action_model(config: Config) -> ActionModel
     # Creates betting action abstraction from config
     # Defines available bet/raise sizes per street
 
@@ -104,7 +104,7 @@ Coordinator Process                   Worker Processes (N workers)
 │   Partitioned by worker ownership   │
 │                                     │
 ├── Serialize abstractions            │
-│   (action_abstraction + card_abs)   │
+│   (action_model + card_abs)         │
 │                                     │
 ├── Start worker pool ─────────────→  │ Worker 0..N-1: attach to shared memory
 │                                     │   └── Initialize solver with partitioned storage
@@ -131,7 +131,7 @@ Coordinator Process                   Worker Processes (N workers)
 TrainingSession.train(num_workers=N, batch_size=B)
 └── _train_partitioned()
     ├── Serialize abstractions (once)
-    │   └── pickle.dumps(action_abstraction, card_abstraction)
+    │   └── pickle.dumps(action_model, card_abstraction)
     ├── Start SharedArrayWorkerManager (persistent pool with shared memory)
     │   ├── Create shared memory arrays (regrets, strategies, action_counts)
     │   └── Each worker attaches and gets exclusive ID range
@@ -440,11 +440,25 @@ training:
   runs_dir: "data/runs"
   parallel_result_timeout_seconds: null  # null = wait indefinitely for workers
 
-action_abstraction:
-  preflop_raises: [2.5, 3.0, 4.0, "allin"]
-  flop_bets: [0.33, 0.5, 0.75, 1.0, "allin"]
-  turn_bets: [0.5, 0.75, 1.0, "allin"]
-  river_bets: [0.5, 0.75, 1.0, "allin"]
+action_model:
+  preflop_templates:
+    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
+  postflop_templates:
+    first_aggressive: [0.33, 0.66, 1.25]
+    facing_bet: ["min_raise", "pot_raise", "jam"]
+    after_one_raise: ["pot_raise", "jam"]
+    after_two_raises: ["jam"]
+  jam_spr_threshold: 2.0
+  off_tree_mapping: "probabilistic"
+
+resolver:
+  enabled: true
+  time_budget_ms: 300
+  max_depth: 2
+  max_raises_per_street: 4
+  leaf_value_mode: "blueprint_rollout"
+  range_update_mode: "bayes_light"
+  policy_blend_alpha: 0.35
 
 card_abstraction:
   config: "default"  # References precomputed abstraction

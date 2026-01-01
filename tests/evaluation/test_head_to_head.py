@@ -1,6 +1,6 @@
 """Tests for head-to-head evaluator."""
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.evaluation.head_to_head import (
     HeadToHeadEvaluator,
     MatchResult,
@@ -74,12 +74,12 @@ class TestHeadToHeadEvaluator:
 
     def test_create_evaluator(self):
         rules = GameRules()
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
-            action_abstraction=action_abs,
+            action_model=action_abs,
             card_abstraction=card_abs,
             starting_stack=200,
         )
@@ -90,7 +90,7 @@ class TestHeadToHeadEvaluator:
     def test_play_match(self):
         """Test playing a match between two solvers."""
         rules = GameRules()
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
 
         # Create two solvers
@@ -112,7 +112,7 @@ class TestHeadToHeadEvaluator:
         # Create evaluator
         evaluator = HeadToHeadEvaluator(
             rules=rules,
-            action_abstraction=action_abs,
+            action_model=action_abs,
             card_abstraction=card_abs,
             starting_stack=200,
         )
@@ -134,7 +134,7 @@ class TestHeadToHeadEvaluator:
     def test_play_match_alternating_button(self):
         """Test that button alternates correctly."""
         rules = GameRules()
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
 
         storage1 = SharedArrayStorage(
@@ -153,7 +153,7 @@ class TestHeadToHeadEvaluator:
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
-            action_abstraction=action_abs,
+            action_model=action_abs,
             card_abstraction=card_abs,
             starting_stack=200,
         )
@@ -172,7 +172,7 @@ class TestHeadToHeadEvaluator:
     def test_play_self_play_match(self):
         """Test self-play (same solver vs itself)."""
         rules = GameRules()
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
 
         storage = SharedArrayStorage(
@@ -186,7 +186,7 @@ class TestHeadToHeadEvaluator:
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
-            action_abstraction=action_abs,
+            action_model=action_abs,
             card_abstraction=card_abs,
             starting_stack=200,
         )
@@ -210,7 +210,7 @@ class TestHeadToHeadEvaluator:
     def test_match_payoffs_opposite_signs(self):
         """Test that payoffs have opposite signs (zero-sum game)."""
         rules = GameRules()
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
 
         storage1 = SharedArrayStorage(
@@ -228,7 +228,7 @@ class TestHeadToHeadEvaluator:
 
         evaluator = HeadToHeadEvaluator(
             rules=rules,
-            action_abstraction=action_abs,
+            action_model=action_abs,
             card_abstraction=card_abs,
             starting_stack=200,
         )

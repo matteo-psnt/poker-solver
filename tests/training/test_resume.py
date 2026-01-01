@@ -51,13 +51,17 @@ def test_config(temp_run_dir):
             "small_blind": 1,
             "big_blind": 2,
         },
-        "action_abstraction": {
-            "preflop_raises": [2.0],  # 2bb open
-            "postflop": {
-                "flop": [1.0],
-                "turn": [1.0],
-                "river": [1.0],
+        "action_model": {
+            "preflop_templates": {
+                "sb_first_in": ["fold", "call", 2.0],
             },
+            "postflop_templates": {
+                "first_aggressive": [1.0],
+            },
+            "jam_spr_threshold": 2.0,
+        },
+        "resolver": {
+            "max_raises_per_street": 2,
         },
         "card_abstraction": {
             "config": None,
@@ -136,7 +140,7 @@ def test_resume_no_checkpoint(temp_run_dir):
     # Create run directory but no checkpoint files
     temp_run_dir.mkdir(parents=True, exist_ok=True)
     config_obj = Config.default()
-    action_config_hash = components.build_action_abstraction(config_obj).get_config_hash()
+    action_config_hash = components.build_action_model(config_obj).get_config_hash()
     (temp_run_dir / ".run.json").write_text(
         json.dumps(
             {

@@ -9,8 +9,9 @@ import random
 import eval7
 import numpy as np
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.bucketing.base import BucketingStrategy
+from src.game.actions import Action
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
 from src.solver.infoset_encoder import encode_infoset_key
@@ -38,21 +39,27 @@ class MCCFRSolver:
 
     def __init__(
         self,
-        action_abstraction: BettingActions,
-        card_abstraction: BucketingStrategy,
-        storage: Storage,
+        action_model: ActionModel | None = None,
+        card_abstraction: BucketingStrategy | None = None,
+        storage: Storage | None = None,
         config: Config | None = None,
     ):
         """
         Initialize MCCFR solver.
 
         Args:
-            action_abstraction: Action abstraction
+            action_model: Action model
             card_abstraction: Card abstraction
             storage: Storage backend
             config: Config object (defaults to Config.default() if not provided)
         """
-        self.action_abstraction = action_abstraction
+        if action_model is None:
+            raise ValueError("action_model is required")
+        if card_abstraction is None:
+            raise ValueError("card_abstraction is required")
+        if storage is None:
+            raise ValueError("storage is required")
+        self.action_model = action_model
         self.card_abstraction = card_abstraction
         self.storage = storage
         self.config = config if config is not None else Config.default()
@@ -230,7 +237,7 @@ class MCCFRSolver:
 
         # Get infoset
         infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
-        legal_actions = self.action_abstraction.get_legal_actions(state)
+        legal_actions = self.action_model.get_legal_actions(state)
 
         if not legal_actions:
             # No legal actions (shouldn't happen)
@@ -400,7 +407,7 @@ class MCCFRSolver:
 
         # Get infoset
         infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
-        legal_actions = self.action_abstraction.get_legal_actions(state)
+        legal_actions = self.action_model.get_legal_actions(state)
 
         if not legal_actions:
             raise ValueError(f"No legal actions at state: {state}")
@@ -616,6 +623,64 @@ class MCCFRSolver:
             to_call=0,
             last_aggressor=state.last_aggressor,
         )
+
+    def sample_action_from_strategy(self, state: GameState, *, use_average: bool = True) -> Action:
+        """
+        Sample an action from the blueprint strategy at the current infoset.
+
+        Falls back to uniform random over legal actions for unseen infosets.
+        """
+        legal_actions = self.action_model.get_legal_actions(state)
+        if not legal_actions:
+            raise ValueError(f"No legal actions at state: {state}")
+
+        infoset_key = encode_infoset_key(state, state.current_player, self.card_abstraction)
+        infoset = self.storage.get_infoset(infoset_key)
+        if infoset is None:
+            return legal_actions[np.random.choice(len(legal_actions))]
+
+        legal_set = set(legal_actions)
+        valid_indices = [i for i, action in enumerate(infoset.legal_actions) if action in legal_set]
+        if not valid_indices:
+            return legal_actions[np.random.choice(len(legal_actions))]
+
+        filtered_actions = [infoset.legal_actions[i] for i in valid_indices]
+        strategy = infoset.get_filtered_strategy(
+            valid_indices=valid_indices, use_average=use_average
+        )
+        action_idx = int(np.random.choice(len(filtered_actions), p=strategy))
+        return filtered_actions[action_idx]
+
+    def act(
+        self,
+        state: GameState,
+        *,
+        use_resolver: bool | None = None,
+        time_budget_ms: int | None = None,
+        use_average: bool = True,
+    ) -> Action:
+        """
+        Choose an action from blueprint strategy or runtime subgame resolver.
+        """
+        if use_resolver is None:
+            use_resolver = self.config.resolver.enabled
+
+        if use_resolver:
+            # Lazy import to avoid circular dependency when training imports solver.
+            from src.search.resolver import HUResolver
+
+            resolver = getattr(self, "_resolver", None)
+            if resolver is None:
+                resolver = HUResolver(
+                    blueprint=self,
+                    action_model=self.action_model,
+                    rules=self.rules,
+                    config=self.config.resolver,
+                )
+                self._resolver = resolver
+            return resolver.act(state, time_budget_ms=time_budget_ms)
+
+        return self.sample_action_from_strategy(state, use_average=use_average)
 
     def __str__(self) -> str:
         return (

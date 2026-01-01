@@ -68,11 +68,11 @@ def train_partitioned(
     training_start_time = time.time()
     start_iteration = session.solver.iteration
 
-    serialized_action_abstraction = pickle.dumps(session.solver.action_abstraction)
+    serialized_action_model = pickle.dumps(session.solver.action_model)
     serialized_card_abstraction = pickle.dumps(session.solver.card_abstraction)
 
     if verbose:
-        abstraction_size = len(serialized_action_abstraction) + len(serialized_card_abstraction)
+        abstraction_size = len(serialized_action_model) + len(serialized_card_abstraction)
         print(f"   Serialized abstractions: {abstraction_size:,} bytes")
 
     pool_start_time = time.time()
@@ -80,7 +80,7 @@ def train_partitioned(
     with SharedArrayWorkerManager(
         num_workers=num_workers,
         config=session.config,
-        serialized_action_abstraction=serialized_action_abstraction,
+        serialized_action_model=serialized_action_model,
         serialized_card_abstraction=serialized_card_abstraction,
         session_id=session.run_dir.name,
         base_seed=session.config.system.seed

@@ -40,9 +40,9 @@ class TrainingSession:
         self._pending_checkpoint: concurrent.futures.Future[float] | None = None
 
         try:
-            self.action_abstraction = components.build_action_abstraction(config)
+            self.action_model = components.build_action_model(config)
             self.card_abstraction = components.build_card_abstraction(config)
-            action_config_hash = self.action_abstraction.get_config_hash()
+            action_config_hash = self.action_model.get_config_hash()
 
             if self.run_tracker is None:
                 self.run_tracker = RunTracker(
@@ -61,7 +61,7 @@ class TrainingSession:
                 run_metadata=self.run_tracker.metadata,
             )
             self.solver = components.build_solver(
-                config, self.action_abstraction, self.card_abstraction, self.storage
+                config, self.action_model, self.card_abstraction, self.storage
             )
 
             self.metrics = MetricsTracker()

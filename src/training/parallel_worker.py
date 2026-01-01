@@ -41,7 +41,7 @@ def _worker_loop(
     num_workers: int,
     session_id: str,
     config: "Config",
-    serialized_action_abstraction: bytes,
+    serialized_action_model: bytes,
     serialized_card_abstraction: bytes,
     base_seed: int,
     job_queue: mp.Queue,
@@ -69,7 +69,7 @@ def _worker_loop(
         num_workers: Total number of workers
         session_id: Unique session ID for shared memory namespace
         config: Configuration object
-        serialized_action_abstraction: Pickled BettingActions
+        serialized_action_model: Pickled ActionModel
         serialized_card_abstraction: Pickled BucketingStrategy
         base_seed: Base random seed
         job_queue: Queue to receive jobs from coordinator
@@ -92,7 +92,7 @@ def _worker_loop(
         )
 
         # Deserialize abstractions
-        action_abstraction = pickle.loads(serialized_action_abstraction)
+        action_model = pickle.loads(serialized_action_model)
         card_abstraction = pickle.loads(serialized_card_abstraction)
 
         # Create storage (attach to existing shared memory)
@@ -117,7 +117,7 @@ def _worker_loop(
 
         # Create solver with shared array storage
         solver = MCCFRSolver(
-            action_abstraction=action_abstraction,
+            action_model=action_model,
             card_abstraction=card_abstraction,
             storage=storage,
             config=worker_config,

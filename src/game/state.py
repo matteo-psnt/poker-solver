@@ -283,13 +283,11 @@ class GameState:
         """Check if current player can raise (facing a bet with chips left)."""
         return self.to_call > 0 and self.stacks[self.current_player] > self.to_call
 
-    def legal_actions(
-        self, action_abstraction=None, rules: GameRules | None = None
-    ) -> list[Action]:
+    def legal_actions(self, action_model=None, rules: GameRules | None = None) -> list[Action]:
         """Get legal actions for current player using the provided rules engine."""
         if rules is None:
             raise ValueError("rules is required for GameState.legal_actions()")
-        return rules.get_legal_actions(self, action_abstraction)
+        return rules.get_legal_actions(self, action_model)
 
     def apply_action(self, action: Action, rules: GameRules | None = None) -> GameState:
         """Apply an action using the provided rules engine and return the next state."""

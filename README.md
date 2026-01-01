@@ -13,7 +13,8 @@ This solver uses **Monte Carlo Counterfactual Regret Minimization (MCCFR)** with
 
 - **Advanced CFR Variants**: CFR+ provides ~100x faster convergence than vanilla CFR, with Linear CFR adding an additional 2-3x speedup
 - **Suit Isomorphism Card Abstraction**: Reduces state space by 12-19x while preserving strategic relevance (flush draws, suit coordination)
-- **Configurable Action Abstraction**: Flexible bet sizing with street-specific sizing sets
+- **Node-Template Action Model**: Context-aware preflop/postflop sizing with SPR-gated jam logic
+- **Realtime Subgame Resolver**: Runtime local re-solving with configurable depth, rollout leaves, and conservative blueprint blending
 - **Parallel Training**: Multi-core support with lock-free shared memory for efficient scaling
 - **Comprehensive Evaluation**: Rollout-based exploitability estimation with confidence intervals
 - **Production-Ready Checkpointing**: Efficient Zarr-based storage with resume capability
@@ -85,14 +86,27 @@ game:
   small_blind: 1
   big_blind: 2
 
-action_abstraction:
-  preflop_raises: [2.5, 3.5, 5.0]
-  postflop:
-    flop: [0.33, 0.66, 1.25]    # 1/3 pot, 2/3 pot, overbet
-    turn: [0.50, 1.0, 1.5]
-    river: [0.50, 1.0, 2.0]
-  all_in_spr_threshold: 2.0
+action_model:
+  preflop_templates:
+    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
+    bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
+    sb_vs_3bet: ["fold", "call", "2.3x_last", "jam"]
+  postflop_templates:
+    first_aggressive: [0.33, 0.66, 1.25]
+    facing_bet: ["min_raise", "pot_raise", "jam"]
+    after_one_raise: ["pot_raise", "jam"]
+    after_two_raises: ["jam"]
+  jam_spr_threshold: 2.0
+  off_tree_mapping: "probabilistic"
+
+resolver:
+  enabled: true
+  time_budget_ms: 300
+  max_depth: 2
   max_raises_per_street: 5
+  leaf_value_mode: "blueprint_rollout"
+  range_update_mode: "bayes_light"
+  policy_blend_alpha: 0.35
 
 solver:
   cfr_plus: true         # 100x faster convergence
@@ -103,6 +117,17 @@ training:
   num_iterations: 1000000  # 1M iterations
   checkpoint_frequency: 100000
 ```
+
+### Runtime Resolver (Realtime Search)
+
+`MCCFRSolver.act()` can use a realtime HU resolver instead of sampling directly from the blueprint.
+
+- Builds a depth-limited local lookahead tree from the current state
+- Estimates leaf values via blueprint rollouts
+- Computes a local strategy and blends it with blueprint policy (`policy_blend_alpha`)
+- Uses range updates (`range_update_mode`) and off-tree translation (`off_tree_mapping`) to improve robustness
+
+Training still learns the blueprint policy; realtime resolving is used at decision time.
 
 Card abstraction configs live in `config/abstraction/`:
 

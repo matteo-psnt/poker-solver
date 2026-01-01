@@ -53,8 +53,8 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
 
 
 def _merge_config(base: Any, overrides: dict[str, Any]) -> Any:
-    """Backward-compatible wrapper around dataclass config merging."""
-    return merge_dataclass_config(base, overrides)
+    """Strict schema merge."""
+    return merge_dataclass_config(base, overrides, strict=True)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

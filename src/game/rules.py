@@ -158,13 +158,13 @@ class GameRules:
 
         return False
 
-    def get_legal_actions(self, state: GameState, action_abstraction=None) -> list[Action]:
+    def get_legal_actions(self, state: GameState, action_model=None) -> list[Action]:
         """
         Get all legal actions for the current player.
 
         Args:
             state: Current game state
-            action_abstraction: Optional action abstraction to discretize actions
+            action_model: Optional action model to discretize actions
 
         Returns:
             List of legal actions
@@ -189,8 +189,8 @@ class GameRules:
 
         # Can bet if no current bet
         if state.can_bet():
-            if action_abstraction:
-                bet_sizes = action_abstraction.get_bet_sizes(state)
+            if action_model:
+                bet_sizes = action_model.get_bet_sizes(state)
                 for size in bet_sizes:
                     if size < current_stack:
                         actions.append(bet(size))
@@ -203,8 +203,8 @@ class GameRules:
 
         # Can raise if facing a bet
         if state.can_raise():
-            if action_abstraction:
-                raise_sizes = action_abstraction.get_raise_sizes(state)
+            if action_model:
+                raise_sizes = action_model.get_raise_sizes(state)
                 for size in raise_sizes:
                     total_needed = state.to_call + size
                     if total_needed < current_stack:

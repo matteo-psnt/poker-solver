@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import Action, ActionType
 from src.game.rules import GameRules
@@ -14,7 +14,7 @@ from src.game.state import Card, Street
 class ChartDataSource(Protocol):
     """Minimum interface needed to generate preflop chart data."""
 
-    action_abstraction: BettingActions
+    action_model: ActionModel
     rules: GameRules
     starting_stack: int
     storage: Any  # Storage backend with get_infoset method
@@ -33,11 +33,11 @@ SITUATION_OPTIONS = [
 
 def build_chart_metadata(
     run_id: str,
-    action_abstraction: BettingActions,
+    action_model: ActionModel,
 ) -> dict[str, Any]:
     situations: list[dict[str, Any]] = [{"id": "first_to_act", "label": "First to act"}]
 
-    for raise_bb in action_abstraction.preflop_raises:
+    for raise_bb in action_model.get_preflop_open_sizes_bb():
         situations.append(
             {
                 "id": f"facing_raise_{raise_bb}",
@@ -72,7 +72,7 @@ def build_preflop_chart_data(
         raise_bb = float(size_text)
         situation_label = f"Facing raise to {_format_bb_size(raise_bb)}"
         betting_sequence = _generate_betting_sequence_for_raise(
-            action_abstraction=source.action_abstraction,
+            action_model=source.action_model,
             rules=source.rules,
             starting_stack=source.starting_stack,
             raise_bb=raise_bb,
@@ -142,7 +142,7 @@ def _format_bb_size(size_bb: float) -> str:
 
 def _infer_to_call(
     legal_actions: list[Action],
-    action_abstraction: BettingActions,
+    action_model: ActionModel,
     rules: GameRules,
 ) -> int:
     if any(action.type == ActionType.BET for action in legal_actions):
@@ -152,7 +152,7 @@ def _infer_to_call(
     if not raise_actions:
         return 0
 
-    total_bets = [int(bb * rules.big_blind) for bb in action_abstraction.preflop_raises]
+    total_bets = [int(bb * rules.big_blind) for bb in action_model.get_preflop_open_sizes_bb()]
     common_to_calls: set[int] | None = None
 
     for action in raise_actions:
@@ -174,10 +174,10 @@ def _infer_to_call(
 def _build_action_breakdown(
     legal_actions: list[Action],
     strategy: list[float],
-    action_abstraction: BettingActions,
+    action_model: ActionModel,
     rules: GameRules,
 ) -> list[dict]:
-    to_call = _infer_to_call(legal_actions, action_abstraction, rules)
+    to_call = _infer_to_call(legal_actions, action_model, rules)
     breakdown: list[dict] = []
 
     for action, prob in zip(legal_actions, strategy):
@@ -218,7 +218,7 @@ def _build_action_breakdown(
 
 
 def _generate_betting_sequence_for_raise(
-    action_abstraction: BettingActions,
+    action_model: ActionModel,
     rules: GameRules,
     starting_stack: int,
     raise_bb: float,
@@ -234,7 +234,7 @@ def _generate_betting_sequence_for_raise(
     )
 
     total_bet = int(raise_bb * rules.big_blind)
-    legal_actions = action_abstraction.get_legal_actions(state)
+    legal_actions = action_model.get_legal_actions(state)
     raise_action = next(
         (
             action
@@ -286,7 +286,7 @@ def _get_hand_strategy(
         "actions": _build_action_breakdown(
             infoset.legal_actions,
             strategy,
-            source.action_abstraction,
+            source.action_model,
             source.rules,
         )
     }

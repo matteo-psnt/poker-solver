@@ -92,7 +92,7 @@ def edit_config(ctx: CliContext, config: Config) -> Config:
         elif "Solver Settings" in category:
             config = _edit_solver_settings(ctx, config)
         elif "Action Model" in category:
-            config = _edit_action_abstraction(ctx, config)
+            config = _edit_action_model(ctx, config)
         elif "Card Abstraction" in category:
             config = _edit_card_abstraction(ctx, config)
         elif "Storage Settings" in category:
@@ -250,7 +250,7 @@ def _edit_solver_settings(ctx: CliContext, config: Config) -> Config:
     )
 
 
-def _edit_action_abstraction(ctx: CliContext, config: Config) -> Config:
+def _edit_action_model(ctx: CliContext, config: Config) -> Config:
     """Edit action model and resolver settings."""
     print("Action Model & Resolver")
     print("-" * 40)
@@ -264,7 +264,7 @@ def _edit_action_abstraction(ctx: CliContext, config: Config) -> Config:
     jam_spr_cutoff = prompts.prompt_float(
         ctx,
         "Jam SPR cutoff for 'jam_low_spr' templates:",
-        default=config.action_model.all_in_spr_threshold,
+        default=config.action_model.jam_spr_threshold,
         min_value=0.0,
     )
 
@@ -278,18 +278,12 @@ def _edit_action_abstraction(ctx: CliContext, config: Config) -> Config:
     if None in (max_raises, jam_spr_cutoff):
         return config
 
-    existing_buckets = list(config.action_model.spr_buckets)
-    if len(existing_buckets) < 2:
-        existing_buckets = [jam_spr_cutoff, max(jam_spr_cutoff, 6.0)]
-    else:
-        existing_buckets[0] = jam_spr_cutoff
-
     merge_dict = {
         "resolver": {
             "max_raises_per_street": max_raises,
         },
         "action_model": {
-            "spr_buckets": existing_buckets,
+            "jam_spr_threshold": jam_spr_cutoff,
         },
     }
 
@@ -339,8 +333,9 @@ def _edit_action_abstraction(ctx: CliContext, config: Config) -> Config:
             ]
             preflop_templates["sb_first_in"] = passive + preflop_raises
         if flop_bets and turn_bets and river_bets:
-            # Keep one shared aggressive template for simplicity in the editor.
             postflop_templates["first_aggressive"] = flop_bets
+            postflop_templates["first_aggressive_turn"] = turn_bets
+            postflop_templates["first_aggressive_river"] = river_bets
 
         merge_dict["action_model"]["preflop_templates"] = preflop_templates
         merge_dict["action_model"]["postflop_templates"] = postflop_templates
