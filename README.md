@@ -110,13 +110,14 @@ resolver:
   time_budget_ms: 300
   max_depth: 2
   max_raises_per_street: 5
-  leaf_value_mode: "blueprint_rollout"
-  range_update_mode: "bayes_light"
+  leaf_rollouts: 8
+  leaf_use_average_strategy: true
   policy_blend_alpha: 0.35
+  min_strategy_prob: 1.0e-6
 
 solver:
   cfr_plus: true         # 100x faster convergence
-  linear_cfr: true       # Additional 2-3x speedup
+  iteration_weighting: "linear"  # "none" | "linear" | "dcfr"
   sampling_method: "external"  # or "outcome"
 
 training:
@@ -131,7 +132,8 @@ training:
 - Builds a depth-limited local lookahead tree from the current state
 - Estimates leaf values via blueprint rollouts
 - Computes a local strategy and blends it with blueprint policy (`policy_blend_alpha`)
-- Uses range updates (`range_update_mode`) and off-tree translation (`off_tree_mapping`) to improve robustness
+- Applies a minimum strategy floor (`min_strategy_prob`) before normalization
+- Uses off-tree translation (`off_tree_mapping`) to improve robustness
 
 Training still learns the blueprint policy; realtime resolving is used at decision time.
 

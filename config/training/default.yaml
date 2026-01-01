@@ -2,7 +2,7 @@
 # Heads-Up No-Limit Hold'em Monte Carlo CFR Solver
 #
 # This file shows ALL configurable options with explanations.
-# All values are COMMENTED OUT to use Python defaults from src/utils/config.py
+# All values are COMMENTED OUT to use Python defaults from src/shared/config.py
 # Uncomment and modify only what you need to change.
 
 # ===== Game Configuration =====
@@ -33,7 +33,11 @@
 #   # enabled: true
 #   # time_budget_ms: 300
 #   # max_depth: 2
-#   # max_raises_per_street: 4
+#   # max_raises_per_street: 2
+#   # leaf_rollouts: 8
+#   # leaf_use_average_strategy: true
+#   # policy_blend_alpha: 0.35
+#   # min_strategy_prob: 1.0e-6
 
 # ===== Card Abstraction =====
 # card_abstraction:
@@ -67,12 +71,12 @@
 #   # initial_capacity: 2000000        # Initial infosets capacity (default: 2_000_000, grows automatically)
 #   # max_actions: 10                  # Max actions per infoset (default: 10)
 #
-#   # Zarr checkpoint compression (used since 2026-01-18)
-#   # zarr_compression_level: 3        # ZStd level (default: 3)
+#   # Zarr checkpoint compression
+#   # zarr_compression_level: 1        # ZStd level (default: 1)
 #   #   - Level 1: Fastest I/O, larger files (~270MB for 2M infosets)
 #   #   - Level 3: Balanced (5.6x faster than old NPZ, 163MB for 2M infosets)
 #   #   - Level 5: Smaller files, slower writes (161MB for 2M infosets)
-#   # zarr_chunk_size: 10000           # Infosets per chunk (default: 10_000)
+#   # zarr_chunk_size: 50000           # Infosets per chunk (default: 50_000)
 #   #   - Larger chunks (50K-100K): Fewer files, faster loading
 #   #   - Smaller chunks (10K): Better for partial reads
 

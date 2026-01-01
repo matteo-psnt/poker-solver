@@ -88,3 +88,14 @@ class TestPrecomputeConfig:
         assert (config_dir / "quick_test.yaml").exists()
         assert (config_dir / "default.yaml").exists()
         assert (config_dir / "production.yaml").exists()
+
+    def test_all_abstraction_profiles_load(self):
+        """All abstraction YAML profiles should parse and set config_name from filename."""
+        config_dir = Path(__file__).resolve().parents[3] / "config" / "abstraction"
+        profile_names = sorted(path.stem for path in config_dir.glob("*.yaml"))
+
+        assert profile_names, "No abstraction config files found"
+
+        for profile_name in profile_names:
+            config = PrecomputeConfig.from_yaml(profile_name)
+            assert config.config_name == profile_name
