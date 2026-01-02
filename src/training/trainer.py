@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional, Union
 
 from tqdm import tqdm
 
+from src.solver.storage import CHECKPOINT_REQUIRED_FILES, get_missing_checkpoint_files
 from src.training import components
 from src.training.metrics import MetricsTracker
 from src.training.parallel import SharedArrayWorkerManager
@@ -130,13 +131,11 @@ class TrainingSession:
             raise FileNotFoundError(f"No checkpoint found in {run_path}")
 
         # Verify checkpoint artifacts exist
-        required_files = ["regrets.h5", "strategies.h5", "key_mapping.pkl"]
-        missing_files = [f for f in required_files if not (run_path / f).exists()]
-
+        missing_files = get_missing_checkpoint_files(run_path)
         if missing_files:
             raise ValueError(
                 f"Checkpoint is incomplete. Missing files: {missing_files}\n"
-                f"Required: {required_files}"
+                f"Required: {list(CHECKPOINT_REQUIRED_FILES)}"
             )
 
         # Reconstruct config from metadata
@@ -169,8 +168,8 @@ class TrainingSession:
         """
         Find the latest checkpoint iteration in run directory.
 
-        Looks for checkpoint artifacts and returns the highest iteration number.
-        Currently uses the iteration count from metadata.
+        Looks for checkpoint artifacts and returns the most recent checkpoint iteration.
+        Uses the iteration count from metadata (only advanced on checkpoint).
 
         Args:
             run_dir: Path to run directory
@@ -302,7 +301,29 @@ class TrainingSession:
         print(f"   Batch size: {batch_size}")
         print(f"   Max infosets: {max_infosets:,}")
         print(f"   Max actions: {max_actions}")
-        print("   Mode: Live shared memory arrays (no serialization)")
+        print("   Mode: Live shared memory arrays")
+
+    def _save_checkpoint(
+        self,
+        worker_manager,
+        completed_iterations: int,
+        total_infosets: int,
+        training_start_time: float,
+        verbose: bool,
+    ) -> None:
+        """Save a checkpoint and update run metadata."""
+        if not self.config.storage.checkpoint_enabled or completed_iterations == 0:
+            return
+
+        worker_manager.checkpoint(completed_iterations)
+        elapsed = time.time() - training_start_time
+        self.run_tracker.update(
+            iterations=completed_iterations,
+            runtime_seconds=elapsed,
+            num_infosets=total_infosets,
+        )
+        if verbose:
+            print(f"[Coordinator] Checkpoint saved at iteration {completed_iterations}")
 
     def _run_training_loop(
         self,
@@ -311,17 +332,19 @@ class TrainingSession:
         num_workers: int,
         batch_size: int,
         checkpoint_freq: int,
+        checkpoint_enabled: bool,
         verbose: bool,
         training_start_time: float,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, bool]:
         """
         Execute the main training loop with batching and checkpointing.
 
         Returns:
-            Tuple of (completed_iterations, total_infosets)
+            Tuple of (completed_iterations, total_infosets, interrupted)
         """
         completed_iterations = 0
         total_infosets = 0
+        interrupted = False
 
         # Progress tracking
         num_batches = (num_iterations + batch_size - 1) // batch_size
@@ -359,6 +382,8 @@ class TrainingSession:
                 batch_utilities = batch_result["utilities"]
                 completed_iterations += len(batch_utilities)
                 total_infosets = batch_result.get("num_infosets", 0)
+                if batch_result.get("interrupted"):
+                    interrupted = True
 
                 # Exchange IDs and apply updates between batches
                 # (owner-to-requester, not global broadcast)
@@ -383,22 +408,47 @@ class TrainingSession:
                     )
 
                 # Checkpoint if needed
-                if completed_iterations % checkpoint_freq < batch_size:
-                    elapsed = time.time() - training_start_time
-                    self.run_tracker.update(
-                        iterations=completed_iterations,
-                        runtime_seconds=elapsed,
-                        num_infosets=total_infosets,
+                if checkpoint_enabled and completed_iterations % checkpoint_freq < batch_size:
+                    self._save_checkpoint(
+                        worker_manager=worker_manager,
+                        completed_iterations=completed_iterations,
+                        total_infosets=total_infosets,
+                        training_start_time=training_start_time,
+                        verbose=verbose,
                     )
-                    worker_manager.checkpoint(completed_iterations)
+
+                if interrupted:
                     if verbose:
-                        print(f"[Coordinator] Checkpoint saved at iteration {completed_iterations}")
+                        if checkpoint_enabled and completed_iterations > 0:
+                            print("\n⚠️  Interrupt received, saving checkpoint...", flush=True)
+                        else:
+                            print("\n⚠️  Interrupt received, stopping after batch...", flush=True)
+                    if checkpoint_enabled and completed_iterations > 0:
+                        self._save_checkpoint(
+                            worker_manager=worker_manager,
+                            completed_iterations=completed_iterations,
+                            total_infosets=total_infosets,
+                            training_start_time=training_start_time,
+                            verbose=verbose,
+                        )
+                    break
 
         except KeyboardInterrupt:
+            interrupted = True
             if verbose:
-                print("\n⚠️  Training interrupted by user")
+                print("\n⚠️  Training interrupted by user", flush=True)
+            if checkpoint_enabled and completed_iterations > 0:
+                if verbose:
+                    print("[Coordinator] Saving checkpoint...", flush=True)
+                self._save_checkpoint(
+                    worker_manager=worker_manager,
+                    completed_iterations=completed_iterations,
+                    total_infosets=total_infosets,
+                    training_start_time=training_start_time,
+                    verbose=verbose,
+                )
 
-        return completed_iterations, total_infosets
+        return completed_iterations, total_infosets, interrupted
 
     def _finalize_training(
         self,
@@ -406,17 +456,26 @@ class TrainingSession:
         total_infosets: int,
         elapsed_time: float,
         verbose: bool,
+        interrupted: bool,
+        checkpoint_enabled: bool,
     ) -> None:
         """Update trackers and print final training summary."""
-        self.run_tracker.update(
-            iterations=completed_iterations,
-            runtime_seconds=elapsed_time,
-            num_infosets=total_infosets,
-        )
-        self.run_tracker.mark_completed()
+        if interrupted:
+            self.run_tracker.mark_interrupted()
+            if verbose:
+                print("\n🟡 Training interrupted")
+        else:
+            if not checkpoint_enabled:
+                self.run_tracker.update(
+                    iterations=completed_iterations,
+                    runtime_seconds=elapsed_time,
+                    num_infosets=total_infosets,
+                )
+            self.run_tracker.mark_completed()
+            if verbose:
+                print("\n✅ Shared Array Training complete!")
 
         if verbose:
-            print("\n✅ Shared Array Training complete!")
             print(f"   Iterations: {completed_iterations}")
             print(f"   Infosets: {total_infosets:,}")
             print(f"   Time: {elapsed_time:.1f}s")
@@ -498,25 +557,35 @@ class TrainingSession:
                 print(f"   Worker pool ready ({pool_init_time:.2f}s)\n")
 
             # Run training loop
+            interrupted = False
             try:
-                completed_iterations, total_infosets = self._run_training_loop(
+                completed_iterations, total_infosets, interrupted = self._run_training_loop(
                     worker_manager=worker_manager,
                     num_iterations=num_iterations,
                     num_workers=num_workers,
                     batch_size=batch_size_val,
                     checkpoint_freq=checkpoint_freq,
+                    checkpoint_enabled=checkpoint_enabled,
                     verbose=verbose,
                     training_start_time=training_start_time,
                 )
             finally:
                 elapsed_time = time.time() - training_start_time
-                self._finalize_training(completed_iterations, total_infosets, elapsed_time, verbose)
+                self._finalize_training(
+                    completed_iterations,
+                    total_infosets,
+                    elapsed_time,
+                    verbose,
+                    interrupted,
+                    checkpoint_enabled,
+                )
 
         return {
             "total_iterations": completed_iterations,
             "final_infosets": total_infosets,
             "avg_utility": self.metrics.get_avg_utility(),
             "elapsed_time": elapsed_time,
+            "interrupted": interrupted,
         }
 
     def train(

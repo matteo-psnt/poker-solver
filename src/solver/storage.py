@@ -28,6 +28,18 @@ if TYPE_CHECKING:
 # Setup logger
 logger = logging.getLogger(__name__)
 
+CHECKPOINT_REQUIRED_FILES = (
+    "regrets.h5",
+    "strategies.h5",
+    "key_mapping.pkl",
+    "action_signatures.pkl",
+)
+
+
+def get_missing_checkpoint_files(checkpoint_dir: Path) -> list[str]:
+    """Return list of missing checkpoint files in the given directory."""
+    return [name for name in CHECKPOINT_REQUIRED_FILES if not (checkpoint_dir / name).exists()]
+
 
 def _reconstruct_action(action_type_name: str, amount: int) -> Action:
     """
@@ -268,12 +280,16 @@ class InMemoryStorage(Storage):
         """Load infosets from disk checkpoint."""
         if not self.checkpoint_dir:
             return
+        missing_files = get_missing_checkpoint_files(self.checkpoint_dir)
+        if missing_files:
+            raise ValueError(
+                f"Checkpoint is incomplete. Missing files: {missing_files}\n"
+                f"Required: {list(CHECKPOINT_REQUIRED_FILES)}"
+            )
+
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
         regrets_file = self.checkpoint_dir / "regrets.h5"
         strategies_file = self.checkpoint_dir / "strategies.h5"
-
-        if not all(f.exists() for f in [key_mapping_file, regrets_file, strategies_file]):
-            return
 
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
@@ -292,19 +308,11 @@ class InMemoryStorage(Storage):
             else:
                 raise ValueError("Invalid checkpoint format: missing key mappings")
 
-        # Load action signatures if available (new checkpoint format)
+        # Load action signatures
         action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
-        saved_action_sigs = {}
-
-        if action_sigs_file.exists():
-            with open(action_sigs_file, "rb") as f:
-                saved_action_sigs = pickle.load(f)
-            logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
-        else:
-            raise ValueError(
-                f"Checkpoint missing action_signatures.pkl at {action_sigs_file}. "
-                "Cannot reconstruct legal actions."
-            )
+        with open(action_sigs_file, "rb") as f:
+            saved_action_sigs = pickle.load(f)
+        logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
 
         with (
             h5py.File(regrets_file, "r") as regrets_h5,
@@ -1281,12 +1289,13 @@ class SharedArrayStorage(Storage):
         if not self.checkpoint_dir:
             return False
 
+        missing_files = get_missing_checkpoint_files(self.checkpoint_dir)
+        if missing_files:
+            return False
+
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
         regrets_file = self.checkpoint_dir / "regrets.h5"
         strategies_file = self.checkpoint_dir / "strategies.h5"
-
-        if not all(f.exists() for f in [key_mapping_file, regrets_file, strategies_file]):
-            return False
 
         # Load saved checkpoint data
         with open(key_mapping_file, "rb") as f:
@@ -1308,27 +1317,18 @@ class SharedArrayStorage(Storage):
         with h5py.File(strategies_file, "r") as h5_f:
             saved_strategies = h5_f["strategies"][:]
 
-        # Load action signatures (with backward compatibility for old checkpoints)
+        # Load action signatures
         action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
-        saved_action_sigs = {}
+        with open(action_sigs_file, "rb") as f:
+            saved_action_sigs = pickle.load(f)
+        logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
 
-        if action_sigs_file.exists():
-            # New checkpoint format with action signatures
-            with open(action_sigs_file, "rb") as f:
-                saved_action_sigs = pickle.load(f)
-            logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
-
-            # Validate alignment (fail fast if counts/signatures diverge)
-            _validate_action_signatures(
-                saved_action_counts,
-                saved_action_sigs,
-                "SharedArrayStorage.load_checkpoint",
-            )
-        else:
-            raise ValueError(
-                f"Checkpoint missing action_signatures.pkl at {action_sigs_file}. "
-                "Cannot reconstruct legal actions."
-            )
+        # Validate alignment (fail fast if counts/signatures diverge)
+        _validate_action_signatures(
+            saved_action_counts,
+            saved_action_sigs,
+            "SharedArrayStorage.load_checkpoint",
+        )
 
         # Re-partition keys based on current worker configuration
         # Each key is assigned to a worker using hash-based partitioning

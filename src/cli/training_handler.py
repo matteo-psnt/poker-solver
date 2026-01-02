@@ -85,7 +85,11 @@ def handle_train(
 
     results = trainer.train(num_workers=num_workers)
 
-    print("\n[OK] Training completed!")
+    if results.get("interrupted"):
+        print("\n[OK] Training interrupted; checkpoint saved.")
+    else:
+        print("\n[OK] Training completed!")
+
     print(f"   Total iterations: {results.get('iterations', results.get('total_iterations'))}")
     print(f"   Final infosets: {results.get('num_infosets', results.get('final_infosets'))}")
     print(
@@ -121,7 +125,11 @@ def handle_resume(config: Config, run_id: str, latest_iter: int) -> TrainingSess
 
     results = trainer.train()
 
-    print("\n[OK] Training completed!")
+    if results.get("interrupted"):
+        print("\n[OK] Training interrupted; checkpoint saved.")
+    else:
+        print("\n[OK] Training completed!")
+
     print(f"   Total iterations: {results['total_iterations']}")
     print(f"   Final infosets: {results['final_infosets']}")
 

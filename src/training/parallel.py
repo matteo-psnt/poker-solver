@@ -14,6 +14,7 @@ import multiprocessing as mp
 import pickle
 import queue
 import random
+import signal
 import sys
 import time
 import traceback
@@ -94,6 +95,9 @@ def _worker_loop(
         checkpoint_dir: Optional checkpoint directory
     """
     try:
+        # Let the coordinator handle Ctrl+C; workers should exit via shutdown.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
         print(
             f"[Worker {worker_id}] Initializing (attaching to shared memory)...",
             file=sys.stderr,
@@ -897,6 +901,7 @@ class SharedArrayWorkerManager:
                         f"[Coordinator] Worker {result['worker_id']} error: {result['error']}",
                         flush=True,
                     )
+                    received += 1
                 elif result.get("type") == "iterations_done":
                     results.append(result)
                     all_utilities.extend(result.get("utilities", []))
@@ -909,14 +914,13 @@ class SharedArrayWorkerManager:
                             f"{result['iter_time']:.1f}s",
                             flush=True,
                         )
+                    received += 1
                 else:
                     if verbose:
                         print(
                             f"[Coordinator] Ignoring unexpected result: {result}",
                             flush=True,
                         )
-
-                received += 1
 
             except queue.Empty:
                 raise RuntimeError(
