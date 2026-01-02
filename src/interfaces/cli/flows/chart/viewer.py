@@ -22,7 +22,7 @@ def view_preflop_chart(ctx: CliContext) -> None:
     selected_run = prompts.select(
         ctx,
         "Select run to visualize:",
-        choices=runs + ["Cancel"],
+        choices=[*runs, "Cancel"],
     )
 
     if selected_run == "Cancel" or selected_run is None:

@@ -470,7 +470,7 @@ class InfoSet:
         )
 
     def __repr__(self) -> str:
-        return f"InfoSet(key={repr(self.key)}, num_actions={self.num_actions})"
+        return f"InfoSet(key={self.key!r}, num_actions={self.num_actions})"
 
 
 def create_infoset_key(

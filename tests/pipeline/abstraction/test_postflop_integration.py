@@ -66,7 +66,7 @@ class TestClusteringIntegration:
 
     def test_precomputation_creates_clusters(self, precomputed_abstraction):
         """Test that precomputation creates cluster-based storage."""
-        abstraction, precomputer = precomputed_abstraction
+        abstraction, _precomputer = precomputed_abstraction
 
         # Check board_clusterer was created
         assert abstraction._board_clusterer is not None

@@ -53,7 +53,7 @@ def evaluate_solver(ctx: CliContext) -> None:
     selected_run = prompts.select(
         ctx,
         "Select run to evaluate:",
-        choices=runs + ["Cancel"],
+        choices=[*runs, "Cancel"],
     )
 
     if selected_run is None or selected_run == "Cancel":
@@ -167,7 +167,7 @@ def view_runs(ctx: CliContext) -> None:
     selected = prompts.select(
         ctx,
         "Select run to view details:",
-        choices=runs + ["Back"],
+        choices=[*runs, "Back"],
     )
 
     if selected is None or selected == "Back":
@@ -210,7 +210,7 @@ def resume_training(ctx: CliContext) -> None:
     selected = prompts.select(
         ctx,
         "Select run to view:",
-        choices=runs + ["Cancel"],
+        choices=[*runs, "Cancel"],
     )
 
     if selected is None or selected == "Cancel":

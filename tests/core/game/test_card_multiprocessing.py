@@ -202,7 +202,7 @@ class TestCardMultiprocessing:
         assert num_cards_2 == 5
         assert not has_conflict_2
 
-        num_cards_3, has_conflict_3 = results[2]
+        _num_cards_3, has_conflict_3 = results[2]
         # 72o = (7h, 2d), board = (7h, 2d, Ac) - 7h appears in both!
         assert has_conflict_3
 

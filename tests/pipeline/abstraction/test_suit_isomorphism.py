@@ -267,7 +267,7 @@ class TestEdgeCases:
     def test_paired_board(self):
         """Test board with paired cards."""
         board = (Card.new("Ts"), Card.new("Th"), Card.new("8s"))
-        canonical, mapping = canonicalize_board(board)
+        canonical, _mapping = canonicalize_board(board)
 
         # Two tens with different suits
         assert canonical[0].rank_idx == canonical[1].rank_idx  # Same rank
@@ -276,7 +276,7 @@ class TestEdgeCases:
     def test_turn_card(self):
         """Test 4-card board."""
         board = (Card.new("Ts"), Card.new("9h"), Card.new("8s"), Card.new("2d"))
-        canonical, mapping = canonicalize_board(board)
+        canonical, _mapping = canonicalize_board(board)
 
         assert len(canonical) == 4
         assert canonical[3].suit_label == 2  # Third unique suit
@@ -284,7 +284,7 @@ class TestEdgeCases:
     def test_river_card(self):
         """Test 5-card board."""
         board = (Card.new("Ts"), Card.new("9h"), Card.new("8s"), Card.new("2d"), Card.new("7c"))
-        canonical, mapping = canonicalize_board(board)
+        canonical, _mapping = canonicalize_board(board)
 
         assert len(canonical) == 5
         assert canonical[4].suit_label == 3  # Fourth unique suit

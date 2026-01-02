@@ -396,7 +396,7 @@ class PostflopPrecomputer:
         }
 
         for street in [Street.FLOP, Street.TURN, Street.RIVER]:
-            if street in self._equities and self._equities[street]:
+            if self._equities.get(street):
                 num_clusters = len(self._equities[street])
                 num_combos = sum(len(h) for h in self._equities[street].values())
                 statistics[street.name] = {
