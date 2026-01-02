@@ -566,3 +566,177 @@ class TestSharedArrayStorage:
 
         finally:
             storage.cleanup()
+
+    def test_capacity_monitoring(self):
+        """Test capacity usage monitoring."""
+        import uuid
+
+        from src.solver.storage import SharedArrayStorage
+
+        session_id = f"test_{uuid.uuid4().hex[:8]}"
+
+        storage = SharedArrayStorage(
+            num_workers=2,
+            worker_id=0,
+            session_id=session_id,
+            max_infosets=100,  # Small for testing
+            max_actions=5,
+            is_coordinator=True,
+        )
+
+        try:
+            # Initially, usage should be 0
+            assert storage.get_capacity_usage() == 0.0
+            assert not storage.needs_resize()
+
+            # Create some infosets owned by worker 0
+            created = 0
+            for i in range(100):
+                key = InfoSetKey(
+                    player_position=0,
+                    street=Street.FLOP,
+                    betting_sequence=f"b{i}",
+                    preflop_hand=None,
+                    postflop_bucket=i,
+                    spr_bucket=1,
+                )
+                if storage.get_owner(key) == 0:
+                    storage.get_or_create_infoset(key, [fold(), call()])
+                    created += 1
+                    if created >= 20:  # Create enough to test threshold
+                        break
+
+            # Check capacity usage
+            usage = storage.get_capacity_usage()
+            assert 0 < usage <= 1.0
+
+            # Check resize stats
+            stats = storage.get_resize_stats()
+            assert "capacity_usage" in stats
+            assert "max_infosets" in stats
+            assert stats["used"] == created
+
+        finally:
+            storage.cleanup()
+
+    def test_resize_extends_id_range(self):
+        """Test that resize extends ID range correctly."""
+        import uuid
+
+        from src.solver.storage import SharedArrayStorage
+
+        session_id = f"test_{uuid.uuid4().hex[:8]}"
+
+        storage = SharedArrayStorage(
+            num_workers=2,
+            worker_id=0,
+            session_id=session_id,
+            max_infosets=100,
+            max_actions=5,
+            is_coordinator=True,
+        )
+
+        try:
+            # Record initial state
+            initial_range_start = storage.id_range_start
+            initial_range_end = storage.id_range_end
+            initial_max = storage.max_infosets
+
+            # Create an infoset to have some data
+            key = InfoSetKey(
+                player_position=0,
+                street=Street.FLOP,
+                betting_sequence="b10",
+                preflop_hand=None,
+                postflop_bucket=1,
+                spr_bucket=1,
+            )
+            # Find a key owned by worker 0
+            for i in range(50):
+                key = InfoSetKey(
+                    player_position=0,
+                    street=Street.FLOP,
+                    betting_sequence=f"b{i}",
+                    preflop_hand=None,
+                    postflop_bucket=i,
+                    spr_bucket=1,
+                )
+                if storage.get_owner(key) == 0:
+                    break
+
+            infoset = storage.get_or_create_infoset(key, [fold(), call()])
+            infoset.regrets[:] = [1.0, 2.0]
+
+            infoset_id = storage._owned_keys[key]
+            next_id_before = storage.next_local_id
+
+            # Resize to 2x capacity
+            new_max = initial_max * 2
+            storage.resize(new_max)
+
+            # Verify resize worked
+            assert storage.max_infosets == new_max
+            assert storage.id_range_start == initial_range_start  # Start stays same
+            assert storage.id_range_end > initial_range_end  # End extended
+            assert storage.next_local_id == next_id_before  # next_id preserved
+
+            # Verify data was preserved
+            assert np.allclose(storage.shared_regrets[infoset_id, :2], [1.0, 2.0])
+
+            # Verify we can still access the infoset
+            retrieved = storage.get_infoset(key)
+            assert retrieved is not None
+            assert np.allclose(retrieved.regrets, [1.0, 2.0])
+
+        finally:
+            storage.cleanup()
+
+    def test_resize_preserves_data(self):
+        """Test that resize preserves all existing infoset data."""
+        import uuid
+
+        from src.solver.storage import SharedArrayStorage
+
+        session_id = f"test_{uuid.uuid4().hex[:8]}"
+
+        storage = SharedArrayStorage(
+            num_workers=2,
+            worker_id=0,
+            session_id=session_id,
+            max_infosets=100,
+            max_actions=5,
+            is_coordinator=True,
+        )
+
+        try:
+            # Create multiple infosets with different values
+            keys_and_values = []
+            for i in range(20):
+                key = InfoSetKey(
+                    player_position=0,
+                    street=Street.FLOP,
+                    betting_sequence=f"b{i}",
+                    preflop_hand=None,
+                    postflop_bucket=i,
+                    spr_bucket=1,
+                )
+                if storage.get_owner(key) == 0:
+                    infoset = storage.get_or_create_infoset(key, [fold(), call()])
+                    values = [float(i), float(i * 2)]
+                    infoset.regrets[:] = values
+                    infoset.strategy_sum[:] = [float(i * 3), float(i * 4)]
+                    keys_and_values.append((key, values))
+                    if len(keys_and_values) >= 5:
+                        break
+
+            # Resize
+            storage.resize(200)
+
+            # Verify all data preserved
+            for key, values in keys_and_values:
+                retrieved = storage.get_infoset(key)
+                assert retrieved is not None
+                assert np.allclose(retrieved.regrets, values)
+
+        finally:
+            storage.cleanup()

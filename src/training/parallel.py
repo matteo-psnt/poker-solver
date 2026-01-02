@@ -22,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
+from src.bucketing.utils.infoset import InfoSetKey
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage import SharedArrayStorage
 from src.utils.config import Config
@@ -44,6 +45,7 @@ class JobType(Enum):
     EXCHANGE_IDS = "exchange_ids"  # Batched ID request/response between workers
     APPLY_UPDATES = "apply_updates"  # Apply cross-partition updates
     COLLECT_KEYS = "collect_keys"  # Collect owned keys for checkpointing
+    RESIZE_STORAGE = "resize_storage"  # Trigger storage resize (stop-the-world)
     SHUTDOWN = "shutdown"
 
 
@@ -170,9 +172,11 @@ def _worker_loop(
                 pending_requests = storage.get_pending_id_requests()
                 for owner_id, keys in pending_requests.items():
                     if keys and owner_id != worker_id:
+                        # Snapshot keys so the multiprocessing pickler doesn't see mutations.
+                        keys_snapshot = tuple(keys)
                         try:
                             id_request_queues[owner_id].put(
-                                {"requester": worker_id, "keys": keys}, timeout=5.0
+                                {"requester": worker_id, "keys": keys_snapshot}, timeout=5.0
                             )
                         except queue.Full:
                             pass
@@ -218,6 +222,17 @@ def _worker_loop(
                 owned_keys = dict(storage._owned_keys)
                 legal_actions_cache = dict(storage._legal_actions_cache)
 
+                # Defensive: ensure this worker hasn't assigned duplicate IDs
+                ids = list(owned_keys.values())
+                if len(set(ids)) != len(ids):
+                    from collections import Counter
+
+                    dup_ids = [i for i, c in Counter(ids).items() if c > 1]
+                    raise RuntimeError(
+                        f"Worker {worker_id} has duplicate infoset IDs in owned_keys; "
+                        f"examples: {dup_ids[:5]}"
+                    )
+
                 result_queue.put(
                     {
                         "worker_id": worker_id,
@@ -227,6 +242,40 @@ def _worker_loop(
                         "id_range_start": storage.id_range_start,
                         "id_range_end": storage.id_range_end,
                         "next_local_id": storage.next_local_id,
+                    }
+                )
+
+            elif job_type == JobType.RESIZE_STORAGE:
+                # Stop-the-world storage resize
+                # Coordinator has already resized; workers need to reattach
+                new_session_id = job["new_session_id"]
+                new_max_infosets = job["new_max_infosets"]
+
+                print(
+                    f"[Worker {worker_id}] Reattaching after resize "
+                    f"(new_max={new_max_infosets:,}, session={new_session_id})",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+                # Preserve owned keys and next_local_id before reattach
+                preserved_keys = dict(storage._owned_keys)
+                preserved_next_id = storage.next_local_id
+
+                # Reattach to new shared memory
+                storage.reattach_after_resize(
+                    new_session_id=new_session_id,
+                    new_max_infosets=new_max_infosets,
+                    preserved_keys=preserved_keys,
+                    preserved_next_id=preserved_next_id,
+                )
+
+                result_queue.put(
+                    {
+                        "worker_id": worker_id,
+                        "type": "resize_ack",
+                        "new_max_infosets": new_max_infosets,
+                        "new_id_range": (storage.id_range_start, storage.id_range_end),
                     }
                 )
 
@@ -426,21 +475,11 @@ def _send_updates_to_owners(
     }
 
     for infoset_id, (regret_delta, strategy_delta) in updates.items():
-        # Determine owner by ID range
-        for owner_id in range(num_workers):
-            if storage.id_range_start <= infoset_id < storage.id_range_end:
-                # This is our ID range - we own it (shouldn't happen)
-                continue
-            # Check if infoset_id is in owner_id's range
-            # Since we don't have other workers' ranges, use the formula
-            usable_slots = storage.max_infosets - 1
-            slots_per_worker = usable_slots // num_workers
-            owner_start = 1 + owner_id * slots_per_worker
-            owner_end = 1 + (owner_id + 1) * slots_per_worker
-            if owner_start <= infoset_id < owner_end:
-                if owner_id != sender_id:
-                    updates_by_owner[owner_id][infoset_id] = (regret_delta, strategy_delta)
-                break
+        owner_id = storage.get_owner_by_id(infoset_id)
+        if owner_id is None:
+            continue
+        if owner_id != sender_id:
+            updates_by_owner[owner_id][infoset_id] = (regret_delta, strategy_delta)
 
     # Send to each owner's queue
     for owner_id, owner_updates in updates_by_owner.items():
@@ -654,6 +693,136 @@ class SharedArrayWorkerManager:
 
         return {"acks": acks}
 
+    def check_and_resize_if_needed(
+        self,
+        total_infosets: int = 0,
+        timeout: float = 120.0,
+        verbose: bool = True,
+    ) -> bool:
+        """
+        Check if storage needs resizing and perform resize if necessary.
+
+        This is a stop-the-world operation:
+        1. Check if total infosets approaching capacity (85%)
+        2. If yes, coordinator resizes storage (2x growth)
+        3. Workers reattach to new shared memory
+
+        Args:
+            total_infosets: Total infosets across all workers (from batch results)
+            timeout: Max wait time for worker responses
+            verbose: Print progress messages
+
+        Returns:
+            True if resize was performed, False otherwise
+        """
+        # Calculate usage based on total infosets vs max capacity
+        # Don't use coordinator's internal stats as they get corrupted after key collection
+        current_max = self.max_infosets
+        usage = total_infosets / current_max if current_max > 0 else 0
+
+        if usage < self.storage.CAPACITY_THRESHOLD:
+            return False
+
+        new_max = int(current_max * self.storage.GROWTH_FACTOR)
+
+        if verbose:
+            print(
+                f"[Coordinator] Storage resize triggered: "
+                f"{usage:.1%} capacity used ({total_infosets:,}/{current_max:,}), "
+                f"growing to {new_max:,}",
+                flush=True,
+            )
+
+        return self.resize_storage(new_max, timeout=timeout, verbose=verbose)
+
+    def resize_storage(
+        self,
+        new_max_infosets: int,
+        timeout: float = 120.0,
+        verbose: bool = True,
+    ) -> bool:
+        """
+        Resize storage to new capacity (stop-the-world operation).
+
+        1. Coordinator creates new larger shared memory
+        2. Copies existing data to new arrays
+        3. Notifies workers to reattach
+        4. Waits for all workers to confirm
+
+        Args:
+            new_max_infosets: New maximum number of infosets
+            timeout: Max wait time for worker responses
+            verbose: Print progress messages
+
+        Returns:
+            True if resize was successful
+        """
+        resize_start = time.time()
+
+        if verbose:
+            print(
+                f"[Coordinator] Resizing storage: {self.storage.max_infosets:,} -> {new_max_infosets:,}",
+                flush=True,
+            )
+
+        # Step 1: Coordinator resizes (creates new shared memory, copies data)
+        self.storage.resize(new_max_infosets)
+        new_session_id = self.storage.session_id
+
+        # Update our tracking of max_infosets
+        self.max_infosets = new_max_infosets
+
+        if verbose:
+            print(
+                f"[Coordinator] New shared memory created (session={new_session_id}), "
+                f"notifying workers...",
+                flush=True,
+            )
+
+        # Step 2: Tell all workers to reattach
+        # Include old_max_infosets so workers can calculate additional slots
+        # old_max_infosets = self.storage.max_infosets  # This is now new_max after resize
+        # Actually we need to pass the old value, which we can compute from the difference
+        # Since we just did 2x, old = new / 2
+        for _ in range(self.num_workers):
+            self.job_queue.put(
+                {
+                    "type": JobType.RESIZE_STORAGE.value,
+                    "new_session_id": new_session_id,
+                    "new_max_infosets": new_max_infosets,
+                }
+            )
+
+        # Step 3: Wait for all workers to confirm
+        acks = []
+        for _ in range(self.num_workers):
+            try:
+                result = self.result_queue.get(timeout=timeout)
+                if result.get("type") == "resize_ack":
+                    acks.append(result)
+                    if verbose:
+                        worker_id = result["worker_id"]
+                        new_range = result["new_id_range"]
+                        print(
+                            f"[Coordinator] Worker {worker_id} reattached (range={new_range})",
+                            flush=True,
+                        )
+            except queue.Empty:
+                raise RuntimeError(
+                    f"Timeout waiting for resize acks ({len(acks)}/{self.num_workers} received)"
+                )
+
+        resize_time = time.time() - resize_start
+
+        if verbose:
+            print(
+                f"[Coordinator] Resize complete in {resize_time:.1f}s, "
+                f"new capacity: {new_max_infosets:,} infosets",
+                flush=True,
+            )
+
+        return True
+
     def run_batch(
         self,
         iterations_per_worker: List[int],
@@ -661,6 +830,7 @@ class SharedArrayWorkerManager:
         start_iteration: int = 0,
         timeout: float = 600.0,
         verbose: bool = True,
+        auto_resize: bool = True,
     ) -> Dict:
         """
         Run a batch of iterations across all workers.
@@ -678,9 +848,10 @@ class SharedArrayWorkerManager:
             start_iteration: Global iteration offset
             timeout: Max wait time
             verbose: Print progress
+            auto_resize: If True, check capacity and resize after batch if needed
 
         Returns:
-            Dict with batch results and utilities
+            Dict with batch results and utilities (includes 'resized': bool)
         """
         batch_start = time.time()
 
@@ -713,8 +884,10 @@ class SharedArrayWorkerManager:
         results = []
         errors = []
         total_owned = 0
+        interrupted = False
 
-        for _ in range(active_workers):
+        received = 0
+        while received < active_workers:
             try:
                 result = self.result_queue.get(timeout=timeout)
 
@@ -736,11 +909,26 @@ class SharedArrayWorkerManager:
                             f"{result['iter_time']:.1f}s",
                             flush=True,
                         )
+                else:
+                    if verbose:
+                        print(
+                            f"[Coordinator] Ignoring unexpected result: {result}",
+                            flush=True,
+                        )
+
+                received += 1
 
             except queue.Empty:
                 raise RuntimeError(
                     f"Timeout waiting for workers ({len(results)}/{active_workers} received)"
                 )
+            except KeyboardInterrupt:
+                interrupted = True
+                if verbose:
+                    print(
+                        "\n⚠️  Interrupt received; waiting for current batch to finish...",
+                        flush=True,
+                    )
 
         batch_time = time.time() - batch_start
         total_iters = sum(iterations_per_worker)
@@ -767,12 +955,24 @@ class SharedArrayWorkerManager:
                 f"{len(errors)} worker(s) failed during batch {batch_id}:\n{error_details}"
             )
 
+        # Check if resize is needed after batch
+        resized = False
+        if auto_resize:
+            resized = self.check_and_resize_if_needed(
+                total_infosets=total_owned,
+                timeout=timeout,
+                verbose=verbose,
+            )
+
         return {
             "utilities": all_utilities,
             "batch_time": batch_time,
             "total_iterations": total_iters,
             "worker_results": results,
             "num_infosets": total_owned,
+            "resized": resized,
+            "max_infosets": self.max_infosets,
+            "interrupted": interrupted,
         }
 
     def collect_keys(self, timeout: float = 60.0) -> Dict:
@@ -797,6 +997,8 @@ class SharedArrayWorkerManager:
         # Collect responses
         all_owned_keys: Dict = {}
         all_legal_actions: Dict = {}
+        worker_ranges: Dict[int, tuple[int, int]] = {}
+        id_owners: Dict[int, tuple[int, "InfoSetKey"]] = {}
 
         responses_received = 0
         while responses_received < self.num_workers:
@@ -805,15 +1007,40 @@ class SharedArrayWorkerManager:
                 if result.get("type") == "keys_collected":
                     owned_keys = result["owned_keys"]
                     legal_actions = result["legal_actions_cache"]
+                    worker_id = result["worker_id"]
+                    worker_ranges[worker_id] = (
+                        result["id_range_start"],
+                        result["id_range_end"],
+                    )
 
                     # Merge into coordinator's mappings
-                    all_owned_keys.update(owned_keys)
+                    for key, infoset_id in owned_keys.items():
+                        if infoset_id in id_owners:
+                            prev_worker, prev_key = id_owners[infoset_id]
+                            raise RuntimeError(
+                                f"Duplicate infoset_id {infoset_id} across workers "
+                                f"(prev worker {prev_worker}, key {prev_key} vs "
+                                f"worker {worker_id}, key {key}). "
+                                "ID ranges likely overlapping or num_workers changed."
+                            )
+                        id_owners[infoset_id] = (worker_id, key)
+                        all_owned_keys[key] = infoset_id
                     all_legal_actions.update(legal_actions)
                     responses_received += 1
                 # Ignore other message types that might be in the queue
             except queue.Empty:
                 raise RuntimeError(
                     f"Timeout waiting for key collection ({responses_received}/{self.num_workers} received)"
+                )
+
+        # Validate worker ID ranges don't overlap (defensive)
+        ranges = sorted(worker_ranges.items(), key=lambda kv: kv[1][0])
+        for (wid_a, (start_a, end_a)), (wid_b, (start_b, end_b)) in zip(ranges, ranges[1:]):
+            if start_b < end_a:
+                raise RuntimeError(
+                    f"Worker ID ranges overlap: worker {wid_a} [{start_a},{end_a}) "
+                    f"and worker {wid_b} [{start_b},{end_b}). "
+                    "This will corrupt checkpoints; ensure consistent num_workers/max_infosets."
                 )
 
         return {
@@ -827,6 +1054,9 @@ class SharedArrayWorkerManager:
 
         Collects keys from all workers first, then saves the complete state.
         """
+        if self.config.training.verbose:
+            print(f"[Coordinator] Starting checkpoint at iter={iteration}...", flush=True)
+
         # Collect keys from all workers
         collected = self.collect_keys()
 
@@ -839,8 +1069,18 @@ class SharedArrayWorkerManager:
             max_id = max(self.storage._owned_keys.values())
             self.storage.next_local_id = max_id + 1
 
+        if self.config.training.verbose:
+            print(
+                f"[Coordinator] Checkpointing {len(self.storage._owned_keys):,} infosets "
+                f"(max_id={self.storage.next_local_id})...",
+                flush=True,
+            )
+
         # Now checkpoint with complete key mappings
         self.storage.checkpoint(iteration)
+
+        if self.config.training.verbose:
+            print(f"[Coordinator] Checkpoint complete at iter={iteration}", flush=True)
 
     def get_storage(self) -> "SharedArrayStorage":
         """Get coordinator's storage instance (for accessing results)."""
