@@ -207,16 +207,11 @@ class MCCFRSolver(BaseSolver):
             valid_actions = legal_actions
             valid_indices = list(range(len(legal_actions)))
 
-        # Filter strategy/regrets to only valid actions
-        full_strategy = infoset.get_strategy()
-        strategy = full_strategy[valid_indices]
-
-        # Renormalize strategy
-        strategy_sum = np.sum(strategy)
-        if strategy_sum > 0:
-            strategy = strategy / strategy_sum
-        else:
-            strategy = np.ones(len(valid_actions)) / len(valid_actions)
+        # Get strategy filtered to valid actions (automatically normalized)
+        strategy = infoset.get_filtered_strategy(
+            valid_indices=valid_indices,
+            use_average=False,  # Use current strategy (regret matching) for training
+        )
 
         # Use valid actions for this traversal
         legal_actions = valid_actions
@@ -351,16 +346,11 @@ class MCCFRSolver(BaseSolver):
             valid_actions = legal_actions
             valid_indices = list(range(len(legal_actions)))
 
-        # Filter strategy/regrets to only valid actions
-        full_strategy = infoset.get_strategy()
-        strategy = full_strategy[valid_indices]
-
-        # Renormalize strategy
-        strategy_sum = np.sum(strategy)
-        if strategy_sum > 0:
-            strategy = strategy / strategy_sum
-        else:
-            strategy = np.ones(len(valid_actions)) / len(valid_actions)
+        # Get strategy filtered to valid actions (automatically normalized)
+        strategy = infoset.get_filtered_strategy(
+            valid_indices=valid_indices,
+            use_average=False,  # Use current strategy (regret matching) for training
+        )
 
         legal_actions = valid_actions
 

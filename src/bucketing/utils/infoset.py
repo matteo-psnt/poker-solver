@@ -167,6 +167,94 @@ class InfoSet:
         # Use Numba-optimized average strategy computation (or fallback)
         return average_strategy(self.strategy_sum)
 
+    def get_filtered_strategy(
+        self, valid_indices: Optional[List[int]] = None, use_average: bool = True
+    ) -> np.ndarray:
+        """
+        Get strategy filtered to valid actions and normalized.
+
+        This method replaces the manual filter-normalize pattern that was
+        duplicated across mccfr.py, exploitability.py, and head_to_head.py.
+
+        Args:
+            valid_indices: Indices of valid actions to filter to. If None, returns full strategy.
+            use_average: If True, use average strategy. If False, use current strategy.
+
+        Returns:
+            Normalized probability distribution over valid actions (float64, sums to 1.0)
+
+        Examples:
+            # Get full average strategy
+            strategy = infoset.get_filtered_strategy()
+
+            # Get current strategy for specific actions
+            strategy = infoset.get_filtered_strategy(valid_indices=[0, 2, 3], use_average=False)
+        """
+        # Get base strategy (already normalized)
+        if use_average:
+            full_strategy = average_strategy(self.strategy_sum)
+        else:
+            full_strategy = regret_matching(self.regrets)
+
+        # Convert to float64 for consistency
+        full_strategy = full_strategy.astype(np.float64)
+
+        # Filter if needed
+        if valid_indices is not None:
+            strategy = full_strategy[valid_indices]
+            total = np.sum(strategy)
+            if total > 0:
+                return strategy / total
+            else:
+                # Fallback to uniform over valid actions
+                return np.ones(len(valid_indices), dtype=np.float64) / len(valid_indices)
+
+        return full_strategy
+
+    def get_strategy_safe(
+        self, legal_actions: List[Action], use_average: bool = True
+    ) -> tuple[np.ndarray, List[int]]:
+        """
+        Get strategy for given legal actions with validation and remapping.
+
+        This method handles the case where the legal actions at query time
+        may differ from the legal actions stored in the infoset. It finds
+        the overlap and returns a strategy over the provided legal actions.
+
+        Args:
+            legal_actions: List of legal actions to get strategy for
+            use_average: If True, use average strategy. If False, use current strategy.
+
+        Returns:
+            Tuple of (normalized_strategy, valid_indices):
+            - normalized_strategy: Probability distribution over legal_actions (float64)
+            - valid_indices: Indices in legal_actions that matched stored actions
+
+        Examples:
+            # Get strategy for specific legal actions
+            strategy, valid_idx = infoset.get_strategy_safe(
+                legal_actions=[fold(), call(), raise_(100)],
+                use_average=True
+            )
+        """
+        # Find valid indices by matching actions
+        # We compare actions for equality (fold == fold, raise_(100) == raise_(100))
+        valid_indices = [
+            i
+            for i, stored_action in enumerate(self.legal_actions)
+            if stored_action in legal_actions
+        ]
+
+        if not valid_indices:
+            # No overlap - return uniform over all legal actions
+            uniform = np.ones(len(legal_actions), dtype=np.float64) / len(legal_actions)
+            return uniform, list(range(len(legal_actions)))
+
+        # Get filtered and normalized strategy
+        strategy = self.get_filtered_strategy(valid_indices, use_average)
+
+        return strategy, valid_indices
+
     def get_average_utility(self) -> float:
         """
         Compute average utility (expected value) at this infoset.

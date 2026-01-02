@@ -275,12 +275,9 @@ class HeadToHeadEvaluator:
             legal_actions = self.action_abstraction.get_legal_actions(state)
             return legal_actions[np.random.choice(len(legal_actions))]
 
-        # Get average strategy (Nash equilibrium approximation)
-        strategy = infoset.get_average_strategy()
+        # Get average strategy (Nash equilibrium approximation, automatically normalized to float64)
+        strategy = infoset.get_filtered_strategy(use_average=True)
         legal_actions = infoset.legal_actions
-
-        # Normalize strategy to ensure it sums to exactly 1.0 (fix floating point errors)
-        strategy = strategy / strategy.sum()
 
         # Sample action according to strategy
         action_idx = int(np.random.choice(len(legal_actions), p=strategy))
