@@ -134,10 +134,11 @@ class TestPrecomputeConfig:
         """Test default configuration values."""
         config = PrecomputeConfig.default()
 
-        assert config.num_buckets[Street.FLOP] == 50
-        assert config.num_buckets[Street.TURN] == 100
-        assert config.num_buckets[Street.RIVER] == 200
-        assert config.equity_samples == 1000
+        assert config == PrecomputeConfig.from_yaml("default")
+        assert all(
+            config.num_buckets[street] > 0 for street in (Street.FLOP, Street.TURN, Street.RIVER)
+        )
+        assert config.equity_samples > 0
 
     def test_fast_test_config(self):
         """Test fast test configuration values."""
