@@ -52,6 +52,11 @@ dmypy.json
 *.log
 logs/
 
+# Node / Frontend
+node_modules/
+dist/
+build/
+
 # uv
 .python-version-backup
 .ruff_cache/
