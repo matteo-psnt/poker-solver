@@ -63,7 +63,7 @@ class PrecomputeConfig(StrictFrozenModel):
         return self.buckets.as_street_dict()
 
     @classmethod
-    def from_yaml(cls, config_name: str) -> "PrecomputeConfig":
+    def from_yaml(cls, config_name: str) -> PrecomputeConfig:
         """Load precompute config from ``config/abstraction/<name>.yaml``."""
         repo_root = Path(__file__).resolve().parents[3]
         config_path = repo_root / "config" / "abstraction" / f"{config_name}.yaml"
@@ -72,7 +72,7 @@ class PrecomputeConfig(StrictFrozenModel):
         return cls.model_validate(yaml_data)
 
     @classmethod
-    def default(cls) -> "PrecomputeConfig":
+    def default(cls) -> PrecomputeConfig:
         """Return defaults-only config."""
         return cls()
 

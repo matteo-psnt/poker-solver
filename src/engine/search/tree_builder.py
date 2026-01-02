@@ -18,7 +18,7 @@ class LocalTreeNode:
     depth: int
     action_from_parent: Action | None = None
     actions: list[Action] = field(default_factory=list)
-    children: list["LocalTreeNode"] = field(default_factory=list)
+    children: list[LocalTreeNode] = field(default_factory=list)
     is_leaf: bool = False
 
 

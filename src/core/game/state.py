@@ -37,7 +37,7 @@ class Street(Enum):
     def is_postflop(self) -> bool:
         return self != Street.PREFLOP
 
-    def next_street(self) -> "Street | None":
+    def next_street(self) -> Street | None:
         """Get the next street, or None if this is the river."""
         match self:
             case Street.PREFLOP:
@@ -89,7 +89,7 @@ class Card:
         return self._card.suit
 
     @classmethod
-    def new(cls, card_str: str) -> "Card":
+    def new(cls, card_str: str) -> Card:
         """
         Create a card from string representation (e.g., 'As', 'Kh', '2d').
 
@@ -108,11 +108,11 @@ class Card:
 
     @classmethod
     @lru_cache(maxsize=52)
-    def _new_cached(cls, card_str: str) -> "Card":
+    def _new_cached(cls, card_str: str) -> Card:
         return cls(eval7.Card(card_str))
 
     @classmethod
-    def get_full_deck(cls) -> list["Card"]:
+    def get_full_deck(cls) -> list[Card]:
         """
         Get a full 52-card deck.
 
@@ -126,7 +126,7 @@ class Card:
 
     @classmethod
     @lru_cache(maxsize=1)
-    def _full_deck_cached(cls) -> tuple["Card", ...]:
+    def _full_deck_cached(cls) -> tuple[Card, ...]:
         deck = eval7.Deck()
         return tuple(cls(card) for card in deck.cards)
 
@@ -167,7 +167,7 @@ class Card:
             self._hash = hash(self._card)
         return self._hash
 
-    def __lt__(self, other: "Card") -> bool:
+    def __lt__(self, other: Card) -> bool:
         """Compare cards for sorting (by rank)."""
         return self._card < other._card
 

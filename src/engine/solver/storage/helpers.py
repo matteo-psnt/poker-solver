@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +23,7 @@ class CheckpointPaths:
     action_signatures: Path
 
     @classmethod
-    def from_dir(cls, checkpoint_dir: Path) -> "CheckpointPaths":
+    def from_dir(cls, checkpoint_dir: Path) -> CheckpointPaths:
         return cls(
             base=checkpoint_dir,
             checkpoint_zarr=checkpoint_dir / CHECKPOINT_ZARR_DIR,

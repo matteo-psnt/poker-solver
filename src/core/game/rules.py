@@ -5,6 +5,8 @@ This module implements the betting rules, pot calculations, and state transition
 that govern how the game progresses.
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
 
 from src.core.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
@@ -13,7 +15,7 @@ from src.core.game.state import Card, GameState, Street
 
 
 @lru_cache(maxsize=4)
-def get_rules(small_blind: int = 1, big_blind: int = 2) -> "GameRules":
+def get_rules(small_blind: int = 1, big_blind: int = 2) -> GameRules:
     """
     Get a cached GameRules instance.
 

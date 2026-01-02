@@ -1,5 +1,7 @@
 """Training session class for MCCFR solver orchestration."""
 
+from __future__ import annotations
+
 import concurrent.futures
 import multiprocessing as mp
 from datetime import datetime
@@ -77,7 +79,7 @@ class TrainingSession:
             raise
 
     @classmethod
-    def resume(cls, run_dir: str | Path, checkpoint_id: int | None = None) -> "TrainingSession":
+    def resume(cls, run_dir: str | Path, checkpoint_id: int | None = None) -> TrainingSession:
         """Resume training from a checkpoint in an existing run directory."""
         run_path = Path(run_dir)
         if not run_path.exists():
