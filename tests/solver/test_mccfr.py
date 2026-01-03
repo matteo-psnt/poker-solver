@@ -6,7 +6,7 @@ from src.actions.betting_actions import BettingActions
 from src.bucketing.utils.infoset import InfoSetKey
 from src.game.state import Card, GameState, Street
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import SharedArrayStorage
+from src.solver.storage.shared_array import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
@@ -116,7 +116,7 @@ class TestMCCFRSolver:
         # (not all may be updated due to alternating player traversal)
         assert storage.num_infosets() > 0
         updated_infosets = sum(
-            1 for infoset in storage.infosets.values() if infoset.strategy_sum.sum() > 0
+            1 for infoset in storage.iter_infosets() if infoset.strategy_sum.sum() > 0
         )
         assert updated_infosets > 0, "At least some infosets should have updated strategy_sum"
 

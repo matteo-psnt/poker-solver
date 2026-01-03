@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional, Union
 
 from tqdm import tqdm
 
-from src.solver.storage import CHECKPOINT_REQUIRED_FILES, get_missing_checkpoint_files
+from src.solver.storage.helpers import CHECKPOINT_REQUIRED_FILES, get_missing_checkpoint_files
 from src.training import components
 from src.training.metrics import MetricsTracker
 from src.training.parallel import SharedArrayWorkerManager

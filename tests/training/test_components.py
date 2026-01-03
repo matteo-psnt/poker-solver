@@ -5,7 +5,7 @@ import pytest
 from src.actions.betting_actions import BettingActions
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import SharedArrayStorage
+from src.solver.storage.shared_array import SharedArrayStorage
 from src.training import components
 from src.utils.config import Config
 from tests.test_helpers import DummyCardAbstraction

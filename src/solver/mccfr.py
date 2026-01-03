@@ -16,7 +16,7 @@ from src.game.actions import ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
 from src.solver.base import BaseSolver
-from src.solver.storage import Storage
+from src.solver.storage.base import Storage
 from src.utils.config import Config
 
 

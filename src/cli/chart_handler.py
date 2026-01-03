@@ -11,7 +11,7 @@ from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.cli.chart_server import ChartServer
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import InMemoryStorage
+from src.solver.storage.in_memory import InMemoryStorage
 from src.training.run_tracker import RunTracker
 from src.utils.config import Config
 

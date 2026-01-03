@@ -1,371 +1,24 @@
-"""
-Storage systems for CFR information sets.
-
-Provides in-memory storage with optional disk checkpointing
-for efficient MCCFR training at scale.
-
-Includes SharedArrayStorage for parallel MCCFR training using
-flat NumPy arrays backed directly by shared memory.
-"""
-
 import pickle
 import time
-from abc import ABC, abstractmethod
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import xxhash
 
 from src.bucketing.utils.infoset import InfoSet, InfoSetKey
-from src.game.actions import Action, ActionType, fold
+from src.game.actions import Action, fold
+from src.solver.storage.base import Storage
+from src.solver.storage.helpers import (
+    _reconstruct_action,
+    _validate_action_signatures,
+    get_missing_checkpoint_files,
+)
 
 if TYPE_CHECKING:
     from multiprocessing.shared_memory import SharedMemory
     from multiprocessing.synchronize import Event as EventType
-
-CHECKPOINT_REQUIRED_FILES = (
-    "regrets.npy",
-    "strategies.npy",
-    "action_counts.npy",
-    "reach_counts.npy",
-    "cumulative_utility.npy",
-    "key_mapping.pkl",
-    "action_signatures.pkl",
-)
-
-
-def get_missing_checkpoint_files(checkpoint_dir: Path) -> list[str]:
-    """Return list of missing checkpoint files in the given directory."""
-    return [name for name in CHECKPOINT_REQUIRED_FILES if not (checkpoint_dir / name).exists()]
-
-
-def _reconstruct_action(action_type_name: str, amount: int) -> Action:
-    """
-    Reconstruct Action object from serialized signature.
-
-    Args:
-        action_type_name: Name of ActionType enum (e.g., "FOLD", "CALL", "RAISE")
-        amount: Action amount
-
-    Returns:
-        Reconstructed Action object
-
-    Raises:
-        ValueError: If action_type_name is invalid
-    """
-    try:
-        action_type = ActionType[action_type_name]
-    except KeyError:
-        raise ValueError(f"Invalid action type name: {action_type_name}")
-
-    return Action(type=action_type, amount=amount)
-
-
-def _validate_action_signatures(
-    action_counts: np.ndarray, action_sigs: dict[int, list[tuple[str, int]]], context: str
-) -> None:
-    """
-    Ensure action signatures align with stored action counts and IDs are unique.
-
-    Raises:
-        ValueError with context if mismatches are detected.
-    """
-    # ID uniqueness check
-    ids = list(action_sigs.keys())
-    unique = len(set(ids))
-    if unique != len(ids):
-        raise ValueError(
-            f"{context}: duplicate infoset IDs in action_signatures "
-            f"({len(ids) - unique} duplicates)"
-        )
-
-    # Length alignment check
-    mismatches: list[tuple[int, int, int | None, str]] = []
-    for infoset_id, sigs in action_sigs.items():
-        if infoset_id >= len(action_counts):
-            mismatches.append((infoset_id, len(sigs), None, "id_out_of_range"))
-            continue
-        n_actions = int(action_counts[infoset_id])
-        if len(sigs) != n_actions:
-            mismatches.append((infoset_id, len(sigs), n_actions, "len_mismatch"))
-
-    if mismatches:
-        # Show a concise preview in the exception message
-        preview = "; ".join(
-            f"id {mid}: sig_len {slen} vs count {cnt}" for mid, slen, cnt, _ in mismatches[:5]
-        )
-        raise ValueError(
-            f"{context}: {len(mismatches)} action signature/count mismatches. Examples: {preview}"
-        )
-
-
-class Storage(ABC):
-    """Abstract base class for infoset storage."""
-
-    checkpoint_dir: Optional[Path] = None
-
-    @abstractmethod
-    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: List[Action]) -> InfoSet:
-        """Get existing infoset or create new one."""
-        pass
-
-    @abstractmethod
-    def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
-        """Get existing infoset or None if not found."""
-        pass
-
-    @abstractmethod
-    def num_infosets(self) -> int:
-        """Get total number of stored infosets."""
-        pass
-
-    def is_owned(self, key: InfoSetKey) -> bool:
-        """
-        Check if this storage instance owns the given infoset key.
-
-        For non-partitioned storage, all keys are "owned" (returns True).
-        For partitioned storage, only keys mapping to this worker's partition are owned.
-        """
-        return True
-
-    @abstractmethod
-    def checkpoint(self, iteration: int):
-        """Save a checkpoint at given iteration."""
-        pass
-
-
-class InMemoryStorage(Storage):
-    """
-    Read-only storage for loading checkpoints (charts, analysis, debugging).
-
-    This is a lightweight storage class for tools that need to load and examine
-    solver strategies without modifying them. For training, use SharedArrayStorage.
-
-    NOT FOR TRAINING - use SharedArrayStorage for all training operations.
-    """
-
-    def __init__(self, checkpoint_dir: Optional[Path] = None):
-        """
-        Initialize read-only storage from checkpoint.
-
-        Args:
-            checkpoint_dir: Directory containing checkpoint files to load
-        """
-        self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
-
-        self._infosets_by_id: Dict[int, InfoSet] = {}
-        self.key_to_id: Dict[InfoSetKey, int] = {}
-        self.id_to_key: Dict[int, InfoSetKey] = {}
-        self.next_id = 0
-
-        if self.checkpoint_dir and self.checkpoint_dir.exists():
-            self._load_from_checkpoint()
-
-    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: List[Action]) -> InfoSet:
-        """Get existing infoset (read-only - does not create new ones)."""
-        infoset_id = self.key_to_id.get(key)
-        if infoset_id is not None:
-            return self._infosets_by_id[infoset_id]
-
-        # For read-only storage, return None or raise error
-        raise ValueError(
-            f"InMemoryStorage is read-only. Cannot create infoset for key {key}. "
-            "Use SharedArrayStorage for training."
-        )
-
-    def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
-        """Get existing infoset or None."""
-        infoset_id = self.key_to_id.get(key)
-        if infoset_id is None:
-            return None
-        return self._infosets_by_id.get(infoset_id)
-
-    def get_strategy(
-        self,
-        key: InfoSetKey,
-        legal_actions: Optional[List[Action]] = None,
-        fallback: Literal["uniform", "error", "none"] = "uniform",
-        use_average: bool = True,
-    ) -> Optional[np.ndarray]:
-        """
-        Unified strategy retrieval with consistent fallback behavior.
-
-        This method provides a single, consistent interface for retrieving strategies
-        across the codebase, replacing ad-hoc patterns in mccfr.py, exploitability.py,
-        head_to_head.py, and chart_handler.py.
-
-        Args:
-            key: InfoSetKey identifier for the infoset
-            legal_actions: If provided, filter and remap strategy to these actions.
-                          If None, return full strategy over all stored actions.
-            fallback: How to handle missing infosets:
-                     - "uniform": Return uniform distribution over legal_actions (default)
-                     - "error": Raise ValueError
-                     - "none": Return None
-            use_average: If True, use average strategy (converged Nash).
-                        If False, use current strategy (regret matching).
-
-        Returns:
-            Normalized float64 strategy array summing to 1.0, or None if fallback="none"
-            and infoset not found.
-
-        Raises:
-            ValueError: If fallback="error" and infoset not found
-
-        Examples:
-            # Get average strategy for all actions
-            strategy = storage.get_strategy(key)
-
-            # Get current strategy for specific legal actions
-            strategy = storage.get_strategy(
-                key, legal_actions=[fold(), call()], use_average=False
-            )
-
-            # Strict mode: return None if missing
-            strategy = storage.get_strategy(key, fallback="none")
-            if strategy is None:
-                # Handle missing infoset
-                pass
-        """
-        infoset = self.get_infoset(key)
-
-        if infoset is None:
-            # Handle missing infoset based on fallback mode
-            if fallback == "error":
-                raise ValueError(f"Infoset not found: {key}")
-            elif fallback == "none":
-                return None
-            else:  # fallback == "uniform"
-                if legal_actions is None:
-                    return None
-                return np.ones(len(legal_actions), dtype=np.float64) / len(legal_actions)
-
-        # Infoset found - get strategy
-        if legal_actions is not None:
-            # Filter to specific legal actions
-            strategy, _ = infoset.get_strategy_safe(legal_actions, use_average)
-            return strategy
-
-        # Return full strategy over all stored actions
-        return infoset.get_filtered_strategy(use_average=use_average)
-
-    def num_infosets(self) -> int:
-        """Get total number of stored infosets."""
-        return len(self._infosets_by_id)
-
-    @property
-    def infosets(self) -> Dict[InfoSetKey, InfoSet]:
-        """Get all infosets as a dict keyed by InfoSetKey."""
-        return {
-            self.id_to_key[infoset_id]: infoset
-            for infoset_id, infoset in self._infosets_by_id.items()
-        }
-
-    def checkpoint(self, iteration: int):
-        """Read-only storage cannot checkpoint."""
-        raise NotImplementedError(
-            "InMemoryStorage is read-only. Use SharedArrayStorage for training."
-        )
-
-    def clear(self):
-        """Clear all infosets."""
-        self._infosets_by_id.clear()
-        self.key_to_id.clear()
-        self.id_to_key.clear()
-        self.next_id = 0
-
-    def _load_from_checkpoint(self):
-        """Load infosets from disk checkpoint."""
-        if not self.checkpoint_dir:
-            return
-        missing_files = get_missing_checkpoint_files(self.checkpoint_dir)
-        if missing_files:
-            raise ValueError(
-                f"Checkpoint is incomplete. Missing files: {missing_files}\n"
-                f"Required: {list(CHECKPOINT_REQUIRED_FILES)}"
-            )
-
-        key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
-        regrets_file = self.checkpoint_dir / "regrets.npy"
-        strategies_file = self.checkpoint_dir / "strategies.npy"
-        action_counts_file = self.checkpoint_dir / "action_counts.npy"
-        reach_counts_file = self.checkpoint_dir / "reach_counts.npy"
-        cumulative_utility_file = self.checkpoint_dir / "cumulative_utility.npy"
-
-        with open(key_mapping_file, "rb") as f:
-            mapping_data = pickle.load(f)
-
-            # Support both old InMemoryStorage format and new SharedArrayStorage format
-            if "key_to_id" in mapping_data:
-                # Old InMemoryStorage format
-                self.key_to_id = mapping_data["key_to_id"]
-                self.id_to_key = mapping_data["id_to_key"]
-                self.next_id = mapping_data["next_id"]
-            elif "owned_keys" in mapping_data:
-                # SharedArrayStorage format (from parallel training)
-                self.key_to_id = mapping_data["owned_keys"]
-                self.id_to_key = {v: k for k, v in self.key_to_id.items()}
-                self.next_id = mapping_data.get("max_id", len(self.key_to_id))
-            else:
-                raise ValueError("Invalid checkpoint format: missing key mappings")
-
-        # Load action signatures
-        action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
-        with open(action_sigs_file, "rb") as f:
-            saved_action_sigs = pickle.load(f)
-        print(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
-
-        all_regrets = np.load(regrets_file, mmap_mode="r")
-        action_counts = np.load(action_counts_file, mmap_mode="r")
-        all_strategies = np.load(strategies_file, mmap_mode="r")
-        reach_counts = np.load(reach_counts_file, mmap_mode="r")
-        cumulative_utilities = np.load(cumulative_utility_file, mmap_mode="r")
-
-        # Validate alignment before constructing infosets
-        _validate_action_signatures(
-            action_counts, saved_action_sigs, "InMemoryStorage checkpoint load"
-        )
-
-        for infoset_id, key in self.id_to_key.items():
-            n_actions = action_counts[infoset_id]
-            regrets = all_regrets[infoset_id, :n_actions].copy()
-            strategies = all_strategies[infoset_id, :n_actions].copy()
-
-            # Reconstruct legal actions from signatures if available
-            if infoset_id in saved_action_sigs:
-                action_sigs = saved_action_sigs[infoset_id]
-                legal_actions = [
-                    _reconstruct_action(action_type_name, amount)
-                    for action_type_name, amount in action_sigs
-                ]
-            else:
-                raise ValueError(
-                    f"Missing action signatures for infoset ID {infoset_id} in checkpoint. "
-                    "Cannot reconstruct legal actions."
-                )
-
-            infoset = InfoSet(key, legal_actions)
-            infoset.regrets = regrets
-            infoset.strategy_sum = strategies
-            infoset.sync_stats_to_storage(
-                reach_counts[infoset_id],
-                cumulative_utilities[infoset_id],
-            )
-
-            self._infosets_by_id[infoset_id] = infoset
-
-        print(f"Loaded {len(self._infosets_by_id)} infosets from checkpoint")
-
-    def __str__(self) -> str:
-        checkpoint_info = f", checkpoint_dir={self.checkpoint_dir}" if self.checkpoint_dir else ""
-        return f"InMemoryStorage(num_infosets={self.num_infosets()}{checkpoint_info})"
-
-
-# =============================================================================
-# Shared Array Storage - Live shared memory with flat NumPy arrays
-# =============================================================================
 
 
 class SharedArrayStorage(Storage):
@@ -385,7 +38,7 @@ class SharedArrayStorage(Storage):
 
     DATA LAYOUT:
     - shared_regrets: float32[max_infosets, max_actions] - live data
-    - shared_strategy_sum: float32[max_infosets, max_actions] - live data
+    - shared_strategy_sum: float64[max_infosets, max_actions] - live data
     - shared_action_counts: int32[max_infosets] - number of actions per infoset
 
     CONSISTENCY:
@@ -702,11 +355,11 @@ class SharedArrayStorage(Storage):
         self._cleanup_stale_shm()
 
         # Calculate sizes
-        regrets_size = self.max_infosets * self.max_actions * 4  # float32
-        strategy_size = self.max_infosets * self.max_actions * 4  # float32
-        actions_size = self.max_infosets * 4  # int32
-        reach_size = self.max_infosets * 8  # int64
-        utility_size = self.max_infosets * 8  # float64
+        regrets_size = self.max_infosets * self.max_actions * np.dtype(np.float32).itemsize
+        strategy_size = self.max_infosets * self.max_actions * np.dtype(np.float64).itemsize
+        actions_size = self.max_infosets * np.dtype(np.int32).itemsize
+        reach_size = self.max_infosets * np.dtype(np.int64).itemsize
+        utility_size = self.max_infosets * np.dtype(np.float64).itemsize
 
         # Create shared memory segments
         self._shm_regrets = shared_memory.SharedMemory(
@@ -817,7 +470,7 @@ class SharedArrayStorage(Storage):
         )
         self.shared_strategy_sum = np.ndarray(
             (self.max_infosets, self.max_actions),
-            dtype=np.float32,
+            dtype=np.float64,
             buffer=self._shm_strategy.buf,
         )
         self.shared_action_counts = np.ndarray(
@@ -1236,6 +889,14 @@ class SharedArrayStorage(Storage):
         extra_used = sum(alloc["next"] - alloc["start"] for alloc in self._extra_allocations)
         return base_used + extra_used
 
+    def iter_infosets(self):
+        for key, infoset_id in self._owned_keys.items():
+            legal_actions = self._legal_actions_cache.get(infoset_id)
+            if legal_actions is None:
+                num_actions = self.shared_action_counts[infoset_id]
+                legal_actions = [fold() for _ in range(num_actions)]
+            yield self._create_infoset_view(infoset_id, key, legal_actions)
+
     def num_owned_infosets(self) -> int:
         """Get number of infosets owned by this worker."""
         return len(self._owned_keys)
@@ -1457,12 +1118,10 @@ class SharedArrayStorage(Storage):
 
         return {
             "num_infosets": len(mapping_data.get("owned_keys", {})),
-            "max_infosets": mapping_data.get("max_infosets"),  # May be None for old checkpoints
+            "max_infosets": mapping_data.get("max_infosets"),
             "num_workers": mapping_data.get("num_workers"),
             "max_id": mapping_data.get("max_id"),
-            "action_config_hash": mapping_data.get(
-                "action_config_hash"
-            ),  # May be None for old checkpoints
+            "action_config_hash": mapping_data.get("action_config_hash"),
         }
 
     def load_checkpoint(self) -> bool:
@@ -1504,7 +1163,6 @@ class SharedArrayStorage(Storage):
                     f"current ({self.max_infosets:,})"
                 )
 
-            # Validate action config hash if both are available
             if saved_config_hash and self.action_config_hash:
                 if saved_config_hash != self.action_config_hash:
                     print(
@@ -1514,16 +1172,6 @@ class SharedArrayStorage(Storage):
                         "  Strategies may be INVALID if action abstraction changed.\n"
                         "  Consider starting fresh training or using the original config."
                     )
-            elif saved_config_hash and not self.action_config_hash:
-                print(
-                    f"Checkpoint has config hash ({saved_config_hash}) but current "
-                    f"storage was not initialized with one. Skipping validation."
-                )
-            elif not saved_config_hash and self.action_config_hash:
-                print(
-                    f"Checkpoint does not have config hash (old format). "
-                    f"Current config hash: {self.action_config_hash}"
-                )
 
         saved_regrets = np.load(regrets_file, mmap_mode="r")
         saved_action_counts = np.load(action_counts_file, mmap_mode="r")
@@ -1631,39 +1279,3 @@ class SharedArrayStorage(Storage):
             f"owned={self.num_owned_infosets()}, "
             f"id_range=[{self.id_range_start}, {self.id_range_end}))"
         )
-
-    # =========================================================================
-    # Properties for backward compatibility
-    # =========================================================================
-
-    @property
-    def owned_partition(self) -> Dict[InfoSetKey, InfoSet]:
-        """Get owned infosets as dict (for backward compatibility)."""
-        result = {}
-        for key, infoset_id in self._owned_keys.items():
-            legal_actions = self._legal_actions_cache.get(infoset_id, [])
-            if not legal_actions:
-                num_actions = self.shared_action_counts[infoset_id]
-                legal_actions = [fold() for _ in range(num_actions)]
-            result[key] = self._create_infoset_view(infoset_id, key, legal_actions)
-        return result
-
-    @property
-    def infosets(self) -> Dict[InfoSetKey, InfoSet]:
-        """Get all known infosets as dict (owned + remote)."""
-        result = {}
-        # Owned keys
-        for key, infoset_id in self._owned_keys.items():
-            legal_actions = self._legal_actions_cache.get(infoset_id, [])
-            if not legal_actions:
-                num_actions = self.shared_action_counts[infoset_id]
-                legal_actions = [fold() for _ in range(num_actions)]
-            result[key] = self._create_infoset_view(infoset_id, key, legal_actions)
-        # Remote keys
-        for key, infoset_id in self._remote_keys.items():
-            legal_actions = self._legal_actions_cache.get(infoset_id, [])
-            if not legal_actions:
-                num_actions = self.shared_action_counts[infoset_id]
-                legal_actions = [fold() for _ in range(num_actions)]
-            result[key] = self._create_infoset_view(infoset_id, key, legal_actions)
-        return result

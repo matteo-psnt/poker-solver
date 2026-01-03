@@ -15,7 +15,8 @@ from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage import SharedArrayStorage, Storage
+from src.solver.storage.base import Storage
+from src.solver.storage.shared_array import SharedArrayStorage
 from src.utils.config import Config
 
 
