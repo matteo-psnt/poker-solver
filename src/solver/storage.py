@@ -13,7 +13,7 @@ import pickle
 from abc import ABC, abstractmethod
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set, Tuple
 
 import h5py
 import numpy as np
@@ -416,6 +416,7 @@ class SharedArrayStorage(Storage):
         max_actions: int = 10,
         is_coordinator: bool = False,
         checkpoint_dir: Optional[Path] = None,
+        action_config_hash: Optional[str] = None,
     ):
         """
         Initialize shared array storage.
@@ -428,6 +429,9 @@ class SharedArrayStorage(Storage):
             max_actions: Maximum actions per infoset (pre-allocated)
             is_coordinator: If True, creates shared memory. If False, attaches.
             checkpoint_dir: Optional directory for checkpoints
+            action_config_hash: Optional hash of action abstraction config.
+                               Used to detect config changes when loading checkpoints.
+                               Generate with BettingActions.get_config_hash().
         """
         self.num_workers = num_workers
         self.worker_id = worker_id
@@ -436,6 +440,7 @@ class SharedArrayStorage(Storage):
         self.max_actions = max_actions
         self.is_coordinator = is_coordinator
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
+        self.action_config_hash = action_config_hash
         self.base_max_infosets = max_infosets
         self.base_slots_per_worker = (max_infosets - 1) // num_workers
         self._extra_regions: list[tuple[int, int, int, int]] = []
@@ -555,6 +560,92 @@ class SharedArrayStorage(Storage):
         if self.id_range_start <= infoset_id < self.id_range_end:
             return True
         return any(alloc["start"] <= infoset_id < alloc["end"] for alloc in self._extra_allocations)
+
+    def verify_ownership_invariants(self) -> Dict[str, Any]:
+        """
+        Verify ownership invariants for debugging and testing.
+
+        This method checks that:
+        1. All owned keys map to IDs within valid ranges
+        2. No ID is assigned to multiple keys
+        3. All allocated IDs have corresponding action counts > 0
+        4. ID ranges don't overlap
+
+        Returns:
+            Dict with verification results:
+            - 'valid': bool - True if all invariants hold
+            - 'errors': List[str] - List of error messages
+            - 'stats': Dict - Statistics about ownership
+
+        Note: This is a debugging tool and should not be called in hot paths.
+        """
+        errors = []
+        stats = {
+            "owned_keys": len(self._owned_keys),
+            "remote_keys": len(self._remote_keys),
+            "base_range_used": max(
+                0, min(self.next_local_id, self.id_range_end) - self.id_range_start
+            ),
+            "base_range_size": self.id_range_end - self.id_range_start,
+            "extra_allocations": len(self._extra_allocations),
+        }
+
+        # Check 1: All owned keys map to IDs we actually own
+        for key, infoset_id in self._owned_keys.items():
+            if not self.is_owned_by_id(infoset_id):
+                errors.append(f"Owned key {key} maps to ID {infoset_id} which is not in our ranges")
+
+        # Check 2: No duplicate IDs (each ID maps to at most one key)
+        id_to_keys: Dict[int, List[InfoSetKey]] = {}
+        for key, infoset_id in self._owned_keys.items():
+            if infoset_id not in id_to_keys:
+                id_to_keys[infoset_id] = []
+            id_to_keys[infoset_id].append(key)
+
+        for infoset_id, keys in id_to_keys.items():
+            if len(keys) > 1:
+                errors.append(f"ID {infoset_id} is assigned to multiple keys: {keys[:3]}...")
+
+        # Check 3: All used IDs in base range have action counts
+        for infoset_id in range(self.id_range_start, self.next_local_id):
+            if self.shared_action_counts[infoset_id] == 0:
+                # Check if this ID is actually used (has a key)
+                if infoset_id in id_to_keys:
+                    errors.append(f"ID {infoset_id} has key but action_count=0")
+
+        # Check 4: Extra allocation ranges don't overlap with base or each other
+        all_ranges = [(self.id_range_start, self.id_range_end, "base")]
+        for i, alloc in enumerate(self._extra_allocations):
+            all_ranges.append((alloc["start"], alloc["end"], f"extra_{i}"))
+
+        for i, (start1, end1, name1) in enumerate(all_ranges):
+            for j, (start2, end2, name2) in enumerate(all_ranges):
+                if i >= j:
+                    continue
+                # Check for overlap
+                if start1 < end2 and start2 < end1:
+                    errors.append(
+                        f"Range overlap: {name1}=[{start1},{end1}) and {name2}=[{start2},{end2})"
+                    )
+
+        # Check 5: next_local_id is within valid range
+        if self.next_local_id < self.id_range_start:
+            errors.append(
+                f"next_local_id ({self.next_local_id}) < id_range_start ({self.id_range_start})"
+            )
+        if self.next_local_id > self.id_range_end:
+            # This could be valid if we've exhausted base range and have extra allocations
+            if not self._extra_allocations:
+                errors.append(
+                    f"next_local_id ({self.next_local_id}) > id_range_end ({self.id_range_end}) "
+                    f"but no extra allocations"
+                )
+
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "stats": stats,
+        }
 
     def get_owner_by_id(self, infoset_id: int) -> Optional[int]:
         """
@@ -1196,6 +1287,7 @@ class SharedArrayStorage(Storage):
                     "num_workers": self.num_workers,
                     "max_id": max_id,
                     "max_infosets": self.max_infosets,  # Persist resized capacity
+                    "action_config_hash": self.action_config_hash,  # For config validation
                 },
                 f,
             )
@@ -1273,6 +1365,9 @@ class SharedArrayStorage(Storage):
             "max_infosets": mapping_data.get("max_infosets"),  # May be None for old checkpoints
             "num_workers": mapping_data.get("num_workers"),
             "max_id": mapping_data.get("max_id"),
+            "action_config_hash": mapping_data.get(
+                "action_config_hash"
+            ),  # May be None for old checkpoints
         }
 
     def load_checkpoint(self) -> bool:
@@ -1302,12 +1397,34 @@ class SharedArrayStorage(Storage):
             mapping_data = pickle.load(f)
             saved_owned_keys = mapping_data["owned_keys"]
             saved_max_infosets = mapping_data.get("max_infosets")
+            saved_config_hash = mapping_data.get("action_config_hash")
 
             # Log if checkpoint was from a resized storage
             if saved_max_infosets and saved_max_infosets != self.max_infosets:
                 logger.info(
                     f"Checkpoint max_infosets ({saved_max_infosets:,}) differs from "
                     f"current ({self.max_infosets:,})"
+                )
+
+            # Validate action config hash if both are available
+            if saved_config_hash and self.action_config_hash:
+                if saved_config_hash != self.action_config_hash:
+                    logger.warning(
+                        f"ACTION CONFIG MISMATCH DETECTED!\n"
+                        f"  Checkpoint config hash: {saved_config_hash}\n"
+                        f"  Current config hash:    {self.action_config_hash}\n"
+                        f"  Strategies may be INVALID if action abstraction changed.\n"
+                        f"  Consider starting fresh training or using the original config."
+                    )
+            elif saved_config_hash and not self.action_config_hash:
+                logger.info(
+                    f"Checkpoint has config hash ({saved_config_hash}) but current "
+                    f"storage was not initialized with one. Skipping validation."
+                )
+            elif not saved_config_hash and self.action_config_hash:
+                logger.info(
+                    f"Checkpoint does not have config hash (old format). "
+                    f"Current config hash: {self.action_config_hash}"
                 )
 
         with h5py.File(regrets_file, "r") as h5_f:

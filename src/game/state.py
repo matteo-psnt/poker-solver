@@ -437,10 +437,20 @@ class GameState:
                 current_pot += current_to_call
                 current_to_call = 0  # Betting is now even
             elif action.type == ActionType.ALL_IN:
-                # ALL_IN: adds amount to pot
+                # ALL_IN: Player commits their entire remaining stack.
+                # The amount field is the TOTAL stack being committed (not relative to to_call).
+                #
+                # For pot calculation: all chips go into pot
                 current_pot += action.amount
-                # to_call depends on whether this was a call or raise all-in
-                # For normalization purposes, we track the excess over previous to_call
+                #
+                # For to_call calculation:
+                # - If amount > current_to_call: This is an all-in raise
+                #   The excess (amount - current_to_call) becomes the new to_call
+                # - If amount <= current_to_call: This is an all-in call (possibly for less)
+                #   to_call becomes 0 (betting closed, goes to showdown)
+                #
+                # Note: "All-in for less" means player can't cover the full call.
+                # The uncalled portion is returned to the bettor at showdown.
                 if action.amount > current_to_call:
                     current_to_call = action.amount - current_to_call
                 else:
