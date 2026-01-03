@@ -1,5 +1,6 @@
 """Preflop chart generation for CLI."""
 
+import json
 import subprocess
 import webbrowser
 from pathlib import Path
@@ -51,6 +52,8 @@ def handle_view_preflop_chart(
 
     print(f"\nLoading solver from {selected_run}...")
     run_dir = runs_dir / selected_run
+    run_config = _load_run_config(run_dir)
+    config = Config.from_dict(run_config) if run_config else Config.default()
     # Use read-only InMemoryStorage for viewing charts
     storage = InMemoryStorage(checkpoint_dir=run_dir)
 
@@ -63,7 +66,10 @@ def handle_view_preflop_chart(
 
     # For viewing charts, we don't need the full solver - just the storage
     # But MCCFRSolver requires action/card abstraction, so provide minimal instances
-    action_abs = BettingActions()
+    action_abs = BettingActions(
+        run_config.get("action_abstraction") if isinstance(run_config, dict) else None,
+        big_blind=config.game.big_blind,
+    )
 
     # Card abstraction not actually used for viewing stored strategies
     # Create a dummy implementation since MCCFRSolver requires it
@@ -80,7 +86,7 @@ def handle_view_preflop_chart(
         action_abstraction=action_abs,
         card_abstraction=DummyCardAbstraction(),
         storage=storage,
-        config=Config.default().merge({"system": {"seed": 42}}),
+        config=config.merge({"system": {"seed": 42}}),
     )
 
     print("\nStarting chart viewer...")
@@ -146,3 +152,18 @@ def _ensure_ui_build(base_dir: Path, custom_style) -> bool:
         print(f"\n[ERROR] UI build failed (exit code {exc.returncode}).")
 
     return False
+
+
+def _load_run_config(run_dir: Path) -> dict:
+    metadata_path = run_dir / ".run.json"
+    if not metadata_path.exists():
+        return {}
+
+    try:
+        with open(metadata_path) as handle:
+            metadata = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    config = metadata.get("config")
+    return config if isinstance(config, dict) else {}

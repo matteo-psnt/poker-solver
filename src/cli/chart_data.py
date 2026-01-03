@@ -22,11 +22,25 @@ SITUATION_OPTIONS = [
 ]
 
 
-def build_chart_metadata(run_id: str) -> dict:
+def build_chart_metadata(
+    run_id: str,
+    action_abstraction: BettingActions,
+) -> dict:
+    situations = [{"id": "first_to_act", "label": "First to act"}]
+
+    for raise_bb in action_abstraction.preflop_raises:
+        situations.append(
+            {
+                "id": f"facing_raise_{raise_bb}",
+                "label": f"Facing raise to {_format_bb_size(raise_bb)}",
+                "raiseBb": raise_bb,
+            }
+        )
+
     return {
         "runId": run_id,
         "positions": POSITION_OPTIONS,
-        "situations": SITUATION_OPTIONS,
+        "situations": situations,
         "defaultPosition": 0,
         "defaultSituation": "first_to_act",
     }
@@ -39,16 +53,21 @@ def build_preflop_chart_data(
     run_id: str,
 ) -> dict:
     ranks = "AKQJT98765432"
-    situation_label = next(
-        (item["label"] for item in SITUATION_OPTIONS if item["id"] == situation_id),
-        "First to act",
-    )
-    betting_sequence = _generate_betting_sequence_for_situation(
-        action_abstraction=solver.action_abstraction,
-        rules=solver.rules,
-        situation=situation_label,
-        starting_stack=200,
-    )
+    situation_label = "First to act"
+    betting_sequence = ""
+    if situation_id == "first_to_act":
+        situation_label = "First to act"
+        betting_sequence = ""
+    elif situation_id.startswith("facing_raise_"):
+        size_text = situation_id.replace("facing_raise_", "")
+        raise_bb = float(size_text)
+        situation_label = f"Facing raise to {_format_bb_size(raise_bb)}"
+        betting_sequence = _generate_betting_sequence_for_raise(
+            action_abstraction=solver.action_abstraction,
+            rules=solver.rules,
+            starting_stack=solver.config.game.starting_stack,
+            raise_bb=raise_bb,
+        )
 
     grid = []
     action_meta: dict[str, dict] = {}
@@ -220,6 +239,40 @@ def _generate_betting_sequence_for_situation(
     return new_state._normalize_betting_sequence()
 
 
+def _generate_betting_sequence_for_raise(
+    action_abstraction: BettingActions,
+    rules: GameRules,
+    starting_stack: int,
+    raise_bb: float,
+) -> str:
+    dummy_hole_cards = (
+        (Card.new("As"), Card.new("Kd")),
+        (Card.new("Qc"), Card.new("Jh")),
+    )
+    state = rules.create_initial_state(
+        starting_stack=starting_stack,
+        hole_cards=dummy_hole_cards,
+        button=0,
+    )
+
+    total_bet = int(raise_bb * rules.big_blind)
+    legal_actions = action_abstraction.get_legal_actions(state)
+    raise_action = next(
+        (
+            action
+            for action in legal_actions
+            if action.type == ActionType.RAISE and (action.amount + state.to_call) == total_bet
+        ),
+        None,
+    )
+
+    if raise_action is None:
+        return ""
+
+    new_state = state.apply_action(raise_action, rules)
+    return new_state._normalize_betting_sequence()
+
+
 def _get_hand_strategy(
     solver: MCCFRSolver,
     rank1: str,
@@ -245,6 +298,8 @@ def _get_hand_strategy(
     infoset = solver.storage.get_infoset(key)
 
     if infoset is None:
+        return None
+    if float(infoset.strategy_sum.sum()) == 0.0:
         return None
 
     strategy = infoset.get_filtered_strategy(use_average=True)

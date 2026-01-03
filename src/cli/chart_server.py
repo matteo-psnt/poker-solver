@@ -54,7 +54,7 @@ class ChartServer:
         self._thread = None
 
     def get_metadata(self) -> dict:
-        return build_chart_metadata(self.run_id)
+        return build_chart_metadata(self.run_id, self.solver.action_abstraction)
 
     def get_chart(self, position: int, situation_id: str) -> dict:
         key = (position, situation_id)
