@@ -29,6 +29,8 @@ CHECKPOINT_REQUIRED_FILES = (
     "regrets.npy",
     "strategies.npy",
     "action_counts.npy",
+    "reach_counts.npy",
+    "cumulative_utility.npy",
     "key_mapping.pkl",
     "action_signatures.pkl",
 )
@@ -289,6 +291,8 @@ class InMemoryStorage(Storage):
         regrets_file = self.checkpoint_dir / "regrets.npy"
         strategies_file = self.checkpoint_dir / "strategies.npy"
         action_counts_file = self.checkpoint_dir / "action_counts.npy"
+        reach_counts_file = self.checkpoint_dir / "reach_counts.npy"
+        cumulative_utility_file = self.checkpoint_dir / "cumulative_utility.npy"
 
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
@@ -316,6 +320,8 @@ class InMemoryStorage(Storage):
         all_regrets = np.load(regrets_file, mmap_mode="r")
         action_counts = np.load(action_counts_file, mmap_mode="r")
         all_strategies = np.load(strategies_file, mmap_mode="r")
+        reach_counts = np.load(reach_counts_file, mmap_mode="r")
+        cumulative_utilities = np.load(cumulative_utility_file, mmap_mode="r")
 
         # Validate alignment before constructing infosets
         _validate_action_signatures(
@@ -343,6 +349,10 @@ class InMemoryStorage(Storage):
             infoset = InfoSet(key, legal_actions)
             infoset.regrets = regrets
             infoset.strategy_sum = strategies
+            infoset.sync_stats_to_storage(
+                reach_counts[infoset_id],
+                cumulative_utilities[infoset_id],
+            )
 
             self._infosets_by_id[infoset_id] = infoset
 
@@ -394,6 +404,8 @@ class SharedArrayStorage(Storage):
     SHM_REGRETS = "sas_reg"
     SHM_STRATEGY = "sas_str"
     SHM_ACTIONS = "sas_act"
+    SHM_REACH = "sas_reach"
+    SHM_UTILITY = "sas_util"
 
     # Reserved ID for unknown infosets (non-owners reading undiscovered keys)
     UNKNOWN_ID = 0
@@ -481,22 +493,21 @@ class SharedArrayStorage(Storage):
         self._shm_regrets: Optional["SharedMemory"] = None
         self._shm_strategy: Optional["SharedMemory"] = None
         self._shm_actions: Optional["SharedMemory"] = None
+        self._shm_reach: Optional["SharedMemory"] = None
+        self._shm_utility: Optional["SharedMemory"] = None
 
         # NumPy views into shared memory (the live data)
         self.shared_regrets: Optional[np.ndarray] = None
         self.shared_strategy_sum: Optional[np.ndarray] = None
         self.shared_action_counts: Optional[np.ndarray] = None
+        self.shared_reach_counts: Optional[np.ndarray] = None
+        self.shared_cumulative_utility: Optional[np.ndarray] = None
 
         # Initialize shared memory
         if is_coordinator:
             self._create_shared_memory()
         else:
             self._attach_shared_memory()
-
-        print(
-            f"SharedArrayStorage initialized: worker={worker_id}, "
-            f"coordinator={is_coordinator}, id_range=[{self.id_range_start}, {self.id_range_end})"
-        )
 
         # Load checkpoint if available
         if checkpoint_dir:
@@ -694,6 +705,8 @@ class SharedArrayStorage(Storage):
         regrets_size = self.max_infosets * self.max_actions * 4  # float32
         strategy_size = self.max_infosets * self.max_actions * 4  # float32
         actions_size = self.max_infosets * 4  # int32
+        reach_size = self.max_infosets * 8  # int64
+        utility_size = self.max_infosets * 8  # float64
 
         # Create shared memory segments
         self._shm_regrets = shared_memory.SharedMemory(
@@ -711,6 +724,16 @@ class SharedArrayStorage(Storage):
             size=actions_size,
             name=self._get_shm_name(self.SHM_ACTIONS),
         )
+        self._shm_reach = shared_memory.SharedMemory(
+            create=True,
+            size=reach_size,
+            name=self._get_shm_name(self.SHM_REACH),
+        )
+        self._shm_utility = shared_memory.SharedMemory(
+            create=True,
+            size=utility_size,
+            name=self._get_shm_name(self.SHM_UTILITY),
+        )
 
         # Create NumPy views
         self._create_numpy_views()
@@ -719,6 +742,8 @@ class SharedArrayStorage(Storage):
         self.shared_regrets.fill(0)
         self.shared_strategy_sum.fill(0)
         self.shared_action_counts.fill(0)
+        self.shared_reach_counts.fill(0)
+        self.shared_cumulative_utility.fill(0)
 
         print(
             "Coordinator created shared memory: "
@@ -762,6 +787,12 @@ class SharedArrayStorage(Storage):
                 self._shm_actions = shared_memory.SharedMemory(
                     name=self._get_shm_name(self.SHM_ACTIONS)
                 )
+                self._shm_reach = shared_memory.SharedMemory(
+                    name=self._get_shm_name(self.SHM_REACH)
+                )
+                self._shm_utility = shared_memory.SharedMemory(
+                    name=self._get_shm_name(self.SHM_UTILITY)
+                )
 
                 self._create_numpy_views()
                 print(f"Worker {self.worker_id} attached to shared memory")
@@ -794,6 +825,16 @@ class SharedArrayStorage(Storage):
             dtype=np.int32,
             buffer=self._shm_actions.buf,
         )
+        self.shared_reach_counts = np.ndarray(
+            (self.max_infosets,),
+            dtype=np.int64,
+            buffer=self._shm_reach.buf,
+        )
+        self.shared_cumulative_utility = np.ndarray(
+            (self.max_infosets,),
+            dtype=np.float64,
+            buffer=self._shm_utility.buf,
+        )
 
     def _cleanup_stale_shm(self):
         """Clean up stale shared memory from previous runs."""
@@ -801,6 +842,8 @@ class SharedArrayStorage(Storage):
             self._get_shm_name(self.SHM_REGRETS),
             self._get_shm_name(self.SHM_STRATEGY),
             self._get_shm_name(self.SHM_ACTIONS),
+            self._get_shm_name(self.SHM_REACH),
+            self._get_shm_name(self.SHM_UTILITY),
         ]
 
         for name in shm_names:
@@ -978,6 +1021,8 @@ class SharedArrayStorage(Storage):
         old_regrets = self.shared_regrets
         old_strategy = self.shared_strategy_sum
         old_action_counts = self.shared_action_counts
+        old_reach_counts = self.shared_reach_counts
+        old_cumulative_utility = self.shared_cumulative_utility
 
         print(
             f"Resizing storage: {old_max_infosets:,} -> {new_max_infosets:,} infosets "
@@ -988,6 +1033,8 @@ class SharedArrayStorage(Storage):
         old_shm_regrets = self._shm_regrets
         old_shm_strategy = self._shm_strategy
         old_shm_actions = self._shm_actions
+        old_shm_reach = self._shm_reach
+        old_shm_utility = self._shm_utility
 
         # Update max_infosets before creating new shared memory
         old_max_infosets = self.max_infosets
@@ -1007,6 +1054,8 @@ class SharedArrayStorage(Storage):
         self.shared_regrets[:old_max_infosets, :] = old_regrets[:, :]
         self.shared_strategy_sum[:old_max_infosets, :] = old_strategy[:, :]
         self.shared_action_counts[:old_max_infosets] = old_action_counts[:]
+        self.shared_reach_counts[:old_max_infosets] = old_reach_counts[:]
+        self.shared_cumulative_utility[:old_max_infosets] = old_cumulative_utility[:]
 
         # Append a new extra region for allocations to avoid overlapping ranges.
         self._add_extra_region(old_max_infosets, new_max_infosets)
@@ -1019,6 +1068,10 @@ class SharedArrayStorage(Storage):
             old_shm_strategy.unlink()
             old_shm_actions.close()
             old_shm_actions.unlink()
+            old_shm_reach.close()
+            old_shm_reach.unlink()
+            old_shm_utility.close()
+            old_shm_utility.unlink()
         except Exception as e:
             print(f"Warning: Error cleaning up old shared memory: {e}")
 
@@ -1055,6 +1108,10 @@ class SharedArrayStorage(Storage):
             self._shm_strategy.close()
         if self._shm_actions:
             self._shm_actions.close()
+        if self._shm_reach:
+            self._shm_reach.close()
+        if self._shm_utility:
+            self._shm_utility.close()
 
         old_max_infosets = self.max_infosets
 
@@ -1109,14 +1166,26 @@ class SharedArrayStorage(Storage):
         # CRITICAL SAFETY: Make UNKNOWN_ID views read-only to prevent
         # accidental writes corrupting the placeholder region.
         # Any attempt to write will raise ValueError.
+        read_only_stats = False
         if infoset_id == self.UNKNOWN_ID:
             regrets_view = regrets_view.copy()  # Copy to avoid modifying shared flag
             regrets_view.setflags(write=False)
             strategy_view = strategy_view.copy()
             strategy_view.setflags(write=False)
+            read_only_stats = True
 
         infoset.regrets = regrets_view
         infoset.strategy_sum = strategy_view
+        infoset.attach_stats_views(
+            self.shared_reach_counts,
+            self.shared_cumulative_utility,
+            infoset_id,
+            read_only=read_only_stats,
+        )
+        infoset.sync_stats_to_storage(
+            self.shared_reach_counts[infoset_id],
+            self.shared_cumulative_utility[infoset_id],
+        )
 
         return infoset
 
@@ -1317,6 +1386,8 @@ class SharedArrayStorage(Storage):
         regrets_file = self.checkpoint_dir / "regrets.npy"
         strategies_file = self.checkpoint_dir / "strategies.npy"
         action_counts_file = self.checkpoint_dir / "action_counts.npy"
+        reach_counts_file = self.checkpoint_dir / "reach_counts.npy"
+        cumulative_utility_file = self.checkpoint_dir / "cumulative_utility.npy"
 
         regrets_mm = np.lib.format.open_memmap(
             regrets_file,
@@ -1337,6 +1408,8 @@ class SharedArrayStorage(Storage):
         del strategies_mm
 
         np.save(action_counts_file, self.shared_action_counts[:max_id])
+        np.save(reach_counts_file, self.shared_reach_counts[:max_id])
+        np.save(cumulative_utility_file, self.shared_cumulative_utility[:max_id])
 
         # Save action signatures (action type and amount for each infoset)
         # This allows reconstructing actual Action objects on load
@@ -1414,6 +1487,8 @@ class SharedArrayStorage(Storage):
         regrets_file = self.checkpoint_dir / "regrets.npy"
         strategies_file = self.checkpoint_dir / "strategies.npy"
         action_counts_file = self.checkpoint_dir / "action_counts.npy"
+        reach_counts_file = self.checkpoint_dir / "reach_counts.npy"
+        cumulative_utility_file = self.checkpoint_dir / "cumulative_utility.npy"
 
         # Load saved checkpoint data
         with open(key_mapping_file, "rb") as f:
@@ -1453,6 +1528,8 @@ class SharedArrayStorage(Storage):
         saved_regrets = np.load(regrets_file, mmap_mode="r")
         saved_action_counts = np.load(action_counts_file, mmap_mode="r")
         saved_strategies = np.load(strategies_file, mmap_mode="r")
+        saved_reach_counts = np.load(reach_counts_file, mmap_mode="r")
+        saved_cumulative_utility = np.load(cumulative_utility_file, mmap_mode="r")
 
         # Load action signatures
         action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
@@ -1487,6 +1564,8 @@ class SharedArrayStorage(Storage):
             self.shared_action_counts[new_id] = n_actions
             self.shared_regrets[new_id, :n_actions] = saved_regrets[old_id, :n_actions]
             self.shared_strategy_sum[new_id, :n_actions] = saved_strategies[old_id, :n_actions]
+            self.shared_reach_counts[new_id] = saved_reach_counts[old_id]
+            self.shared_cumulative_utility[new_id] = saved_cumulative_utility[old_id]
 
             # Reconstruct legal actions from signatures
             if old_id not in saved_action_sigs:
@@ -1520,6 +1599,8 @@ class SharedArrayStorage(Storage):
             self._shm_regrets,
             self._shm_strategy,
             self._shm_actions,
+            self._shm_reach,
+            self._shm_utility,
         ]
 
         for shm in handles:
@@ -1534,6 +1615,8 @@ class SharedArrayStorage(Storage):
         self._shm_regrets = None
         self._shm_strategy = None
         self._shm_actions = None
+        self._shm_reach = None
+        self._shm_utility = None
 
         print(f"Worker {self.worker_id} cleaned up shared memory")
 

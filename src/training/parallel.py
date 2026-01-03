@@ -356,6 +356,8 @@ def _worker_loop(
                         flush=True,
                     )
 
+                    fallback_stats = card_abstraction.get_fallback_stats()
+
                     result_queue.put(
                         {
                             "worker_id": worker_id,
@@ -364,6 +366,7 @@ def _worker_loop(
                             "utilities": utilities,
                             "num_owned_infosets": storage.num_owned_infosets(),
                             "iter_time": iter_time,
+                            "fallback_stats": fallback_stats,
                         }
                     )
 
@@ -605,6 +608,7 @@ class SharedArrayWorkerManager:
 
         # Worker processes
         self.processes: List[mp.Process] = []
+        self._fallback_stats_by_worker: Dict[int, Dict[str, float]] = {}
 
         # Start workers
         self._start_workers()
@@ -915,6 +919,9 @@ class SharedArrayWorkerManager:
                     results.append(result)
                     all_utilities.extend(result.get("utilities", []))
                     total_owned += result.get("num_owned_infosets", 0)
+                    fallback_stats = result.get("fallback_stats")
+                    if isinstance(fallback_stats, dict):
+                        self._fallback_stats_by_worker[result["worker_id"]] = fallback_stats
 
                     if verbose:
                         print(
@@ -977,6 +984,18 @@ class SharedArrayWorkerManager:
                 verbose=verbose,
             )
 
+        total_lookups = sum(
+            stats.get("total_lookups", 0) for stats in self._fallback_stats_by_worker.values()
+        )
+        fallback_count = sum(
+            stats.get("fallback_count", 0) for stats in self._fallback_stats_by_worker.values()
+        )
+        fallback_stats = {
+            "total_lookups": total_lookups,
+            "fallback_count": fallback_count,
+            "fallback_rate": (fallback_count / total_lookups) if total_lookups > 0 else 0.0,
+        }
+
         return {
             "utilities": all_utilities,
             "batch_time": batch_time,
@@ -986,6 +1005,7 @@ class SharedArrayWorkerManager:
             "resized": resized,
             "max_infosets": self.max_infosets,
             "interrupted": interrupted,
+            "fallback_stats": fallback_stats,
         }
 
     def collect_keys(self, timeout: float = 60.0) -> Dict:
