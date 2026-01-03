@@ -16,7 +16,6 @@ from multiprocessing import shared_memory
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set, Tuple
 
-import h5py
 import numpy as np
 import xxhash
 
@@ -31,8 +30,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_REQUIRED_FILES = (
-    "regrets.h5",
-    "strategies.h5",
+    "regrets.npy",
+    "strategies.npy",
+    "action_counts.npy",
     "key_mapping.pkl",
     "action_signatures.pkl",
 )
@@ -290,8 +290,9 @@ class InMemoryStorage(Storage):
             )
 
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
-        regrets_file = self.checkpoint_dir / "regrets.h5"
-        strategies_file = self.checkpoint_dir / "strategies.h5"
+        regrets_file = self.checkpoint_dir / "regrets.npy"
+        strategies_file = self.checkpoint_dir / "strategies.npy"
+        action_counts_file = self.checkpoint_dir / "action_counts.npy"
 
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
@@ -316,42 +317,38 @@ class InMemoryStorage(Storage):
             saved_action_sigs = pickle.load(f)
         logger.info(f"Loaded {len(saved_action_sigs)} action signatures from checkpoint")
 
-        with (
-            h5py.File(regrets_file, "r") as regrets_h5,
-            h5py.File(strategies_file, "r") as strategies_h5,
-        ):
-            all_regrets = regrets_h5["regrets"][:]
-            action_counts = regrets_h5["action_counts"][:]
-            all_strategies = strategies_h5["strategies"][:]
+        all_regrets = np.load(regrets_file, mmap_mode="r")
+        action_counts = np.load(action_counts_file, mmap_mode="r")
+        all_strategies = np.load(strategies_file, mmap_mode="r")
 
-            # Validate alignment before constructing infosets
-            _validate_action_signatures(
-                action_counts, saved_action_sigs, "InMemoryStorage checkpoint load"
-            )
+        # Validate alignment before constructing infosets
+        _validate_action_signatures(
+            action_counts, saved_action_sigs, "InMemoryStorage checkpoint load"
+        )
 
-            for infoset_id, key in self.id_to_key.items():
-                n_actions = action_counts[infoset_id]
-                regrets = all_regrets[infoset_id, :n_actions].copy()
-                strategies = all_strategies[infoset_id, :n_actions].copy()
+        for infoset_id, key in self.id_to_key.items():
+            n_actions = action_counts[infoset_id]
+            regrets = all_regrets[infoset_id, :n_actions].copy()
+            strategies = all_strategies[infoset_id, :n_actions].copy()
 
-                # Reconstruct legal actions from signatures if available
-                if infoset_id in saved_action_sigs:
-                    action_sigs = saved_action_sigs[infoset_id]
-                    legal_actions = [
-                        _reconstruct_action(action_type_name, amount)
-                        for action_type_name, amount in action_sigs
-                    ]
-                else:
-                    raise ValueError(
-                        f"Missing action signatures for infoset ID {infoset_id} in checkpoint. "
-                        "Cannot reconstruct legal actions."
-                    )
+            # Reconstruct legal actions from signatures if available
+            if infoset_id in saved_action_sigs:
+                action_sigs = saved_action_sigs[infoset_id]
+                legal_actions = [
+                    _reconstruct_action(action_type_name, amount)
+                    for action_type_name, amount in action_sigs
+                ]
+            else:
+                raise ValueError(
+                    f"Missing action signatures for infoset ID {infoset_id} in checkpoint. "
+                    "Cannot reconstruct legal actions."
+                )
 
-                infoset = InfoSet(key, legal_actions)
-                infoset.regrets = regrets
-                infoset.strategy_sum = strategies
+            infoset = InfoSet(key, legal_actions)
+            infoset.regrets = regrets
+            infoset.strategy_sum = strategies
 
-                self._infosets_by_id[infoset_id] = infoset
+            self._infosets_by_id[infoset_id] = infoset
 
         logger.info(f"Loaded {len(self._infosets_by_id)} infosets from checkpoint")
 
@@ -1322,28 +1319,29 @@ class SharedArrayStorage(Storage):
             )
 
         # Save shared arrays (all used rows up to max_id)
-        regrets_file = self.checkpoint_dir / "regrets.h5"
-        strategies_file = self.checkpoint_dir / "strategies.h5"
+        regrets_file = self.checkpoint_dir / "regrets.npy"
+        strategies_file = self.checkpoint_dir / "strategies.npy"
+        action_counts_file = self.checkpoint_dir / "action_counts.npy"
 
-        with h5py.File(regrets_file, "w") as f:
-            f.create_dataset(
-                "regrets",
-                data=self.shared_regrets[:max_id],
-                compression="gzip",
-                compression_opts=4,
-            )
-            f.create_dataset(
-                "action_counts",
-                data=self.shared_action_counts[:max_id],
-            )
+        regrets_mm = np.lib.format.open_memmap(
+            regrets_file,
+            mode="w+",
+            dtype=self.shared_regrets.dtype,
+            shape=(max_id, self.shared_regrets.shape[1]),
+        )
+        regrets_mm[:] = self.shared_regrets[:max_id, :]
+        del regrets_mm
 
-        with h5py.File(strategies_file, "w") as f:
-            f.create_dataset(
-                "strategies",
-                data=self.shared_strategy_sum[:max_id],
-                compression="gzip",
-                compression_opts=4,
-            )
+        strategies_mm = np.lib.format.open_memmap(
+            strategies_file,
+            mode="w+",
+            dtype=self.shared_strategy_sum.dtype,
+            shape=(max_id, self.shared_strategy_sum.shape[1]),
+        )
+        strategies_mm[:] = self.shared_strategy_sum[:max_id, :]
+        del strategies_mm
+
+        np.save(action_counts_file, self.shared_action_counts[:max_id])
 
         # Save action signatures (action type and amount for each infoset)
         # This allows reconstructing actual Action objects on load
@@ -1418,8 +1416,9 @@ class SharedArrayStorage(Storage):
             return False
 
         key_mapping_file = self.checkpoint_dir / "key_mapping.pkl"
-        regrets_file = self.checkpoint_dir / "regrets.h5"
-        strategies_file = self.checkpoint_dir / "strategies.h5"
+        regrets_file = self.checkpoint_dir / "regrets.npy"
+        strategies_file = self.checkpoint_dir / "strategies.npy"
+        action_counts_file = self.checkpoint_dir / "action_counts.npy"
 
         # Load saved checkpoint data
         with open(key_mapping_file, "rb") as f:
@@ -1456,12 +1455,9 @@ class SharedArrayStorage(Storage):
                     f"Current config hash: {self.action_config_hash}"
                 )
 
-        with h5py.File(regrets_file, "r") as h5_f:
-            saved_regrets = h5_f["regrets"][:]
-            saved_action_counts = h5_f["action_counts"][:]
-
-        with h5py.File(strategies_file, "r") as h5_f:
-            saved_strategies = h5_f["strategies"][:]
+        saved_regrets = np.load(regrets_file, mmap_mode="r")
+        saved_action_counts = np.load(action_counts_file, mmap_mode="r")
+        saved_strategies = np.load(strategies_file, mmap_mode="r")
 
         # Load action signatures
         action_sigs_file = self.checkpoint_dir / "action_signatures.pkl"
