@@ -70,12 +70,13 @@ class BaseSolver(ABC):
             Training statistics
         """
         start_iteration = self.iteration
+        log_frequency = max(1, self.config.training.log_frequency)
 
         for i in range(num_iterations):
             utility = self.train_iteration()
             self.total_utility += utility
 
-            if verbose and (i + 1) % 1000 == 0:
+            if verbose and (i + 1) % log_frequency == 0:
                 avg_utility = self.total_utility / (i + 1)
                 print(f"Iteration {self.iteration}: avg utility = {avg_utility:.6f}")
 

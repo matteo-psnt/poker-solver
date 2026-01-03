@@ -309,7 +309,6 @@ class TrainingSession:
         completed_iterations: int,
         total_infosets: int,
         training_start_time: float,
-        verbose: bool,
     ) -> None:
         """Save a checkpoint and update run metadata."""
         if not self.config.storage.checkpoint_enabled or completed_iterations == 0:
@@ -322,8 +321,7 @@ class TrainingSession:
             runtime_seconds=elapsed,
             num_infosets=total_infosets,
         )
-        if verbose:
-            print(f"[Coordinator] Checkpoint saved at iteration {completed_iterations}")
+        print(f"[Coordinator] Checkpoint saved at iteration {completed_iterations}")
 
     def _run_training_loop(
         self,
@@ -414,22 +412,19 @@ class TrainingSession:
                         completed_iterations=completed_iterations,
                         total_infosets=total_infosets,
                         training_start_time=training_start_time,
-                        verbose=verbose,
                     )
 
                 if interrupted:
-                    if verbose:
-                        if checkpoint_enabled and completed_iterations > 0:
-                            print("\n⚠️  Interrupt received, saving checkpoint...", flush=True)
-                        else:
-                            print("\n⚠️  Interrupt received, stopping after batch...", flush=True)
+                    if checkpoint_enabled and completed_iterations > 0:
+                        print("\n⚠️  Interrupt received, saving checkpoint...", flush=True)
+                    else:
+                        print("\n⚠️  Interrupt received, stopping after batch...", flush=True)
                     if checkpoint_enabled and completed_iterations > 0:
                         self._save_checkpoint(
                             worker_manager=worker_manager,
                             completed_iterations=completed_iterations,
                             total_infosets=total_infosets,
                             training_start_time=training_start_time,
-                            verbose=verbose,
                         )
                     break
 
@@ -445,7 +440,6 @@ class TrainingSession:
                     completed_iterations=completed_iterations,
                     total_infosets=total_infosets,
                     training_start_time=training_start_time,
-                    verbose=verbose,
                 )
 
         return completed_iterations, total_infosets, interrupted

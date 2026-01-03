@@ -12,7 +12,6 @@ The result is a sparse lookup table:
 """
 
 import json
-import logging
 import multiprocessing as mp
 import pickle
 import time
@@ -44,8 +43,6 @@ from src.bucketing.postflop.suit_isomorphism import (
 )
 from src.bucketing.utils import EquityCalculator
 from src.game.state import Card, Street
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -204,19 +201,19 @@ class PostflopPrecomputer:
             street: Which street to precompute
             progress_callback: Optional callback(current, total) for progress
         """
-        logger.info(f"Starting precomputation for {street.name}")
+        print(f"Starting precomputation for {street.name}")
 
         # Step 1: Enumerate all canonical boards
-        logger.info("Step 1: Enumerating canonical boards...")
+        print("Step 1: Enumerating canonical boards...")
         enumerator = CanonicalBoardEnumerator(street)
         enumerator.enumerate()
 
         board_infos = list(enumerator.iterate())
         total_boards = len(board_infos)
-        logger.info(f"Found {total_boards} canonical boards for {street.name}")
+        print(f"Found {total_boards} canonical boards for {street.name}")
 
         # Step 2: Cluster boards by texture
-        logger.info(f"Step 2: Clustering boards into {self.num_board_clusters[street]} clusters...")
+        print(f"Step 2: Clustering boards into {self.num_board_clusters[street]} clusters...")
         canonical_boards = [info.canonical_board for info in board_infos]
         representative_boards = [info.representative for info in board_infos]
 
@@ -228,10 +225,10 @@ class PostflopPrecomputer:
         )
 
         clusters = self.board_clusterer.get_all_clusters(street)
-        logger.info(f"Created {len(clusters)} clusters")
+        print(f"Created {len(clusters)} clusters")
 
         # Step 3: Compute equities only for representative boards
-        logger.info(
+        print(
             f"Step 3: Computing equities for representatives ({self.config.representatives_per_cluster} per cluster)..."
         )
 
@@ -256,7 +253,7 @@ class PostflopPrecomputer:
                 )
 
         total_work = len(work_items)
-        logger.info(
+        print(
             f"Computing equity for {total_work} representative boards (vs {total_boards} without clustering)"
         )
 
@@ -283,7 +280,7 @@ class PostflopPrecomputer:
                     progress_callback(len(all_equities) // 500, total_work)
 
         # Step 4: Organize equities by cluster (aggregate across representatives)
-        logger.info("Step 4: Aggregating equities by cluster...")
+        print("Step 4: Aggregating equities by cluster...")
 
         # Aggregate: for each (cluster_id, hand_id), average equity across representatives
         cluster_hand_equities: Dict[int, Dict[int, List[float]]] = {}
@@ -308,10 +305,10 @@ class PostflopPrecomputer:
                 self._equities[street][cluster_id][hand_id] = float(np.mean(equity_list))
 
         # Step 5: Cluster into buckets using K-means
-        logger.info(f"Step 5: Clustering into {self.num_buckets[street]} buckets...")
+        print(f"Step 5: Clustering into {self.num_buckets[street]} buckets...")
         self._cluster_street(street)
 
-        logger.info(f"Completed precomputation for {street.name}")
+        print(f"Completed precomputation for {street.name}")
 
     def _cluster_street(self, street: Street) -> None:
         """
@@ -329,7 +326,7 @@ class PostflopPrecomputer:
                 all_data.append((cluster_id, hand_id, equity))
 
         if not all_data:
-            logger.warning(f"No data to cluster for {street.name}")
+            print(f"Warning: No data to cluster for {street.name}")
             return
 
         # Extract just the equity values for clustering
@@ -358,9 +355,7 @@ class PostflopPrecomputer:
 
         self.abstraction.set_num_buckets(street, len(set(labels)))
 
-        logger.info(
-            f"Clustered {len(all_data)} combos into {len(set(labels))} buckets for {street.name}"
-        )
+        print(f"Clustered {len(all_data)} combos into {len(set(labels))} buckets for {street.name}")
 
     def precompute_all(
         self,
@@ -424,7 +419,7 @@ class PostflopPrecomputer:
         with open(path / "metadata.json", "w") as f:
             json.dump(metadata, f, indent=2)
 
-        logger.info(f"Saved abstraction to {path}")
+        print(f"Saved abstraction to {path}")
 
     @classmethod
     def load(cls, path: Path) -> PostflopBucketer:
