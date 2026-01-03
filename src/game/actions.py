@@ -7,12 +7,7 @@ and provides data structures for representing player actions.
 
 from dataclasses import dataclass
 from enum import Enum, auto
-
-# Module-level cache for action normalization (performance optimization)
-# Maps (ActionType.value, amount, pot) -> normalized string
-# Limited size to prevent unbounded growth
-_NORMALIZE_CACHE: dict = {}
-_NORMALIZE_CACHE_MAX_SIZE = 10000
+from functools import lru_cache
 
 
 class ActionType(Enum):
@@ -125,31 +120,19 @@ class Action:
         elif self.type == ActionType.ALL_IN:
             return "a"
 
-        # For amount-based actions, use module-level cache
-        # Key is (action_type_value, amount, pot) tuple
-        # Use type.value instead of type enum for faster hashing
-        cache_key = (self.type.value, self.amount, pot)
+        # For amount-based actions, use LRU cache
+        return self._normalize_amount_action(self.type.value, self.amount, pot)
 
-        global _NORMALIZE_CACHE
-        if cache_key in _NORMALIZE_CACHE:
-            return _NORMALIZE_CACHE[cache_key]
-
-        # Clear cache if it gets too large (prevent unbounded growth)
-        if len(_NORMALIZE_CACHE) >= _NORMALIZE_CACHE_MAX_SIZE:
-            _NORMALIZE_CACHE.clear()
-
-        # Compute normalized form
-        if self.type == ActionType.BET:
-            pot_frac = self.amount / pot if pot > 0 else 0
-            result = f"b{pot_frac:.2f}"
-        elif self.type == ActionType.RAISE:
-            pot_frac = self.amount / pot if pot > 0 else 0
-            result = f"r{pot_frac:.2f}"
-        else:
-            raise ValueError(f"Unknown action type: {self.type}")
-
-        _NORMALIZE_CACHE[cache_key] = result
-        return result
+    @staticmethod
+    @lru_cache(maxsize=10000)
+    def _normalize_amount_action(action_type_value: int, amount: int, pot: int) -> str:
+        """Normalize amount-based actions using a bounded LRU cache."""
+        pot_frac = amount / pot if pot > 0 else 0
+        if action_type_value == ActionType.BET.value:
+            return f"b{pot_frac:.2f}"
+        if action_type_value == ActionType.RAISE.value:
+            return f"r{pot_frac:.2f}"
+        raise ValueError(f"Unknown action type value: {action_type_value}")
 
     def __str__(self) -> str:
         """Human-readable string representation."""
