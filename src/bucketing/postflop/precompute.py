@@ -22,10 +22,10 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-import yaml
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
+from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop.board_clustering import BoardClusterer
 from src.bucketing.postflop.board_enumeration import (
     CanonicalBoardEnumerator,
@@ -46,98 +46,6 @@ from src.bucketing.utils import EquityCalculator
 from src.game.state import Card, Street
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PrecomputeConfig:
-    """Configuration for precomputation."""
-
-    # Board clustering (public-state abstraction)
-    num_board_clusters: Dict[Street, int]
-
-    # Representatives per cluster (for equity computation)
-    representatives_per_cluster: int
-
-    # Number of buckets per street (hand abstraction)
-    num_buckets: Dict[Street, int]
-
-    # Number of Monte Carlo samples for equity calculation
-    equity_samples: int = 1000
-
-    # Number of parallel workers (None = CPU count)
-    num_workers: Optional[int] = None
-
-    # Random seed for reproducibility
-    seed: int = 42
-
-    # K-means settings
-    kmeans_max_iter: int = 300
-    kmeans_n_init: int = 10
-
-    # Config name (for matching during training)
-    config_name: Optional[str] = None
-
-    @classmethod
-    def from_yaml(cls, config_name: str) -> "PrecomputeConfig":
-        """Load configuration from YAML file.
-
-        Args:
-            config_name: Name of config file (without .yaml extension)
-                        e.g., 'fast_test', 'default', 'production'
-
-        Returns:
-            PrecomputeConfig instance
-        """
-        config_path = (
-            Path(__file__).parent.parent.parent.parent
-            / "config"
-            / "abstraction"
-            / f"{config_name}.yaml"
-        )
-
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-        with open(config_path) as f:
-            data = yaml.safe_load(f)
-
-        # Parse board clusters
-        board_clusters_data = data.get("board_clusters", {})
-        num_board_clusters = {
-            Street.FLOP: board_clusters_data.get("flop"),
-            Street.TURN: board_clusters_data.get("turn"),
-            Street.RIVER: board_clusters_data.get("river"),
-        }
-
-        # Parse buckets
-        buckets_data = data.get("buckets", {})
-        num_buckets = {
-            Street.FLOP: buckets_data.get("flop"),
-            Street.TURN: buckets_data.get("turn"),
-            Street.RIVER: buckets_data.get("river"),
-        }
-
-        return cls(
-            num_board_clusters=num_board_clusters,
-            representatives_per_cluster=data.get("representatives_per_cluster", 1),
-            num_buckets=num_buckets,
-            equity_samples=data.get("equity_samples", 1000),
-            num_workers=data.get("num_workers"),
-            seed=data.get("seed", 42),
-            kmeans_max_iter=data.get("kmeans_max_iter", 300),
-            kmeans_n_init=data.get("kmeans_n_init", 10),
-            config_name=config_name,
-        )
-
-    @classmethod
-    def default(cls) -> "PrecomputeConfig":
-        """Load the default configuration."""
-        return cls.from_yaml("default")
-
-    @classmethod
-    def fast_test(cls) -> "PrecomputeConfig":
-        """Load the fast_test configuration for quick testing."""
-        return cls.from_yaml("fast_test")
 
 
 @dataclass
@@ -257,8 +165,12 @@ class PostflopPrecomputer:
         """
         self.config = config
 
+        # Get Street dicts from config properties
+        self.num_board_clusters = config.num_board_clusters
+        self.num_buckets = config.num_buckets
+
         # Initialize board clusterer
-        self.board_clusterer = BoardClusterer(config.num_board_clusters)
+        self.board_clusterer = BoardClusterer(self.num_board_clusters)
 
         # Storage for computed equities: street -> cluster_id -> hand_id -> equity
         self._equities: Dict[Street, Dict[int, Dict[int, float]]] = {
@@ -304,9 +216,7 @@ class PostflopPrecomputer:
         logger.info(f"Found {total_boards} canonical boards for {street.name}")
 
         # Step 2: Cluster boards by texture
-        logger.info(
-            f"Step 2: Clustering boards into {self.config.num_board_clusters[street]} clusters..."
-        )
+        logger.info(f"Step 2: Clustering boards into {self.num_board_clusters[street]} clusters...")
         canonical_boards = [info.canonical_board for info in board_infos]
         representative_boards = [info.representative for info in board_infos]
 
@@ -398,7 +308,7 @@ class PostflopPrecomputer:
                 self._equities[street][cluster_id][hand_id] = float(np.mean(equity_list))
 
         # Step 5: Cluster into buckets using K-means
-        logger.info(f"Step 5: Clustering into {self.config.num_buckets[street]} buckets...")
+        logger.info(f"Step 5: Clustering into {self.num_buckets[street]} buckets...")
         self._cluster_street(street)
 
         logger.info(f"Completed precomputation for {street.name}")
@@ -410,7 +320,7 @@ class PostflopPrecomputer:
         Uses global clustering across all clusters for consistency.
         Now operates on (cluster_id, hand_id) pairs instead of (board_id, hand_id).
         """
-        num_buckets = self.config.num_buckets[street]
+        num_buckets = self.num_buckets[street]
 
         # Collect all equity values with their (cluster_id, hand_id) keys
         all_data = []
@@ -492,11 +402,9 @@ class PostflopPrecomputer:
         metadata = {
             "config": {
                 "config_name": self.config.config_name,
-                "num_board_clusters": {
-                    s.name: n for s, n in self.config.num_board_clusters.items()
-                },
+                "num_board_clusters": {s.name: n for s, n in self.num_board_clusters.items()},
                 "representatives_per_cluster": self.config.representatives_per_cluster,
-                "num_buckets": {s.name: n for s, n in self.config.num_buckets.items()},
+                "num_buckets": {s.name: n for s, n in self.num_buckets.items()},
                 "equity_samples": self.config.equity_samples,
                 "seed": self.config.seed,
             },

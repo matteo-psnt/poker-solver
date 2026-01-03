@@ -11,6 +11,7 @@ Key concepts:
 - This eliminates duplicate states and ensures deterministic bucket mapping
 """
 
+from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop.board_enumeration import (
     CanonicalBoardEnumerator,
     CanonicalBoardInfo,
@@ -20,10 +21,7 @@ from src.bucketing.postflop.hand_bucketing import (
     PostflopBucketer,
     get_all_canonical_hands,
 )
-from src.bucketing.postflop.precompute import (
-    PostflopPrecomputer,
-    PrecomputeConfig,
-)
+from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.bucketing.postflop.suit_isomorphism import (
     CanonicalCard,
     SuitMapping,

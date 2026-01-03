@@ -130,19 +130,9 @@ class TestEquityComputation:
 class TestPrecomputeConfig:
     """Tests for precompute configuration."""
 
-    def test_default_config(self):
-        """Test default configuration values."""
-        config = PrecomputeConfig.default()
-
-        assert config == PrecomputeConfig.from_yaml("default")
-        assert all(
-            config.num_buckets[street] > 0 for street in (Street.FLOP, Street.TURN, Street.RIVER)
-        )
-        assert config.equity_samples > 0
-
     def test_fast_test_config(self):
         """Test fast test configuration values."""
-        config = PrecomputeConfig.fast_test()
+        config = PrecomputeConfig.from_yaml("fast_test")
 
         assert config.num_buckets[Street.FLOP] == 10
         assert config.equity_samples == 100
@@ -153,7 +143,7 @@ class TestComboPrecomputer:
 
     def test_precomputer_creation(self):
         """Test that precomputer can be created."""
-        config = PrecomputeConfig.fast_test()
+        config = PrecomputeConfig.from_yaml("fast_test")
         precomputer = PostflopPrecomputer(config)
 
         assert precomputer.abstraction is not None
@@ -162,7 +152,7 @@ class TestComboPrecomputer:
     @pytest.mark.skip(reason="Full precomputation is too slow for unit tests")
     def test_full_precomputation(self):
         """Test full precomputation (skipped by default)."""
-        config = PrecomputeConfig.fast_test()
+        config = PrecomputeConfig.from_yaml("fast_test")
         precomputer = PostflopPrecomputer(config)
 
         abstraction = precomputer.precompute_all(streets=[Street.FLOP])

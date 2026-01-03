@@ -11,10 +11,8 @@ from pathlib import Path
 import questionary
 from questionary import Choice
 
-from src.bucketing.postflop import (
-    PostflopPrecomputer,
-    PrecomputeConfig,
-)
+from src.bucketing.config import PrecomputeConfig
+from src.bucketing.postflop import PostflopPrecomputer
 from src.game.state import Card, Street
 
 
@@ -81,6 +79,7 @@ def _get_config_choice() -> tuple:
     config_name = choice.replace(".yaml", "")
 
     try:
+        # Use PrecomputeConfig.from_yaml() which uses shared merge logic
         config = PrecomputeConfig.from_yaml(config_name)
         return config_name, config
     except Exception as e:
@@ -237,9 +236,6 @@ def handle_combo_precompute() -> None:
 
     # Step 4: Select streets
     streets = [Street.FLOP, Street.TURN, Street.RIVER]
-    if streets is None:
-        print("Cancelled.")
-        return
 
     # Step 5: Confirm
     print("\n" + "=" * 60)

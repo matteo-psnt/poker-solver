@@ -199,7 +199,7 @@ class TestPrecomputeConfigYAML:
         """Test that built-in configs have bucket settings."""
         # Test using class methods
         configs = [
-            PrecomputeConfig.fast_test(),
+            PrecomputeConfig.from_yaml("fast_test"),
             PrecomputeConfig.default(),
         ]
 
@@ -217,7 +217,7 @@ class TestPrecomputeConfigYAML:
     def test_config_consistency(self):
         """Test that configs are internally consistent."""
         configs = [
-            PrecomputeConfig.fast_test(),
+            PrecomputeConfig.from_yaml("fast_test"),
             PrecomputeConfig.default(),
         ]
 

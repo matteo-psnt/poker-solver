@@ -64,18 +64,22 @@ class TestPrecomputeConfig:
         assert config.representatives_per_cluster == data["representatives_per_cluster"]
         assert config.equity_samples == data["equity_samples"]
 
-    def test_default_classmethod(self):
-        """Test default() classmethod loads default.yaml."""
-        assert PrecomputeConfig.default() == PrecomputeConfig.from_yaml("default")
-
-    def test_fast_test_classmethod(self):
-        """Test fast_test() classmethod loads fast_test.yaml."""
-        assert PrecomputeConfig.fast_test() == PrecomputeConfig.from_yaml("fast_test")
-
     def test_invalid_config_name(self):
         """Test loading non-existent config raises error."""
         with pytest.raises(FileNotFoundError):
             PrecomputeConfig.from_yaml("nonexistent_config")
+
+    def test_config_name_auto_set(self):
+        """Test that config_name is automatically set from filename."""
+        # Config name should be auto-set, not read from YAML
+        production = PrecomputeConfig.from_yaml("production")
+        assert production.config_name == "production"
+
+        fast_test = PrecomputeConfig.from_yaml("fast_test")
+        assert fast_test.config_name == "fast_test"
+
+        default = PrecomputeConfig.from_yaml("default")
+        assert default.config_name == "default"
 
     def test_config_files_exist(self):
         """Test that all expected config files exist."""
