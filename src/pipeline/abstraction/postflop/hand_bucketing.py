@@ -292,23 +292,6 @@ def generate_all_cards() -> list[Card]:
     return cards
 
 
-def generate_all_combos() -> list[tuple[Card, Card]]:
-    """
-    Generate all 1326 unique 2-card combinations.
-
-    Returns:
-        List of (card1, card2) tuples where card1 < card2
-    """
-    cards = generate_all_cards()
-    combos = []
-
-    for i, c1 in enumerate(cards):
-        for c2 in cards[i + 1 :]:
-            combos.append((c1, c2))
-
-    return combos
-
-
 def get_all_canonical_hands(
     board: tuple[Card, ...], exclude_board_cards: bool = True
 ) -> Iterator[CanonicalHand]:
@@ -351,15 +334,6 @@ def get_all_canonical_hands(
             seen_canonical.add(canonical_key)
 
             yield CanonicalHand(hand=canonical_hand, board=canonical_board)
-
-
-def count_canonical_hands_for_board(board: tuple[Card, ...]) -> int:
-    """
-    Count unique canonical combos for a board.
-
-    Useful for estimating storage requirements.
-    """
-    return sum(1 for _ in get_all_canonical_hands(board))
 
 
 def get_representative_hand(

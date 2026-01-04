@@ -417,14 +417,10 @@ class InfoSet:
             self.pruned[:] = False
             return
 
-        # Update pruning based on regrets
-        for i in range(self.num_actions):
-            if self.regrets[i] < -pruning_threshold:
-                # Prune actions with deeply negative regret
-                self.pruned[i] = True
-            elif self.regrets[i] > 0:
-                # Re-activate if regret becomes positive
-                self.pruned[i] = False
+        # Prune actions with deeply negative regret
+        self.pruned |= self.regrets < -pruning_threshold
+        # Re-activate actions with positive regret
+        self.pruned &= ~(self.regrets > 0)
 
         # Safety: ensure at least one action is not pruned
         if np.all(self.pruned):

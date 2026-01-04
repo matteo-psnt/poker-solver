@@ -129,12 +129,10 @@ class HandEvaluator:
         rank1 = self.evaluate(hole_cards1, board)
         rank2 = self.evaluate(hole_cards2, board)
 
-        if rank1 < rank2:  # Lower rank = better
-            return -1
-        elif rank1 > rank2:
-            return 1
-        else:
+        # Lower rank = better hand
+        if rank1 == rank2:
             return 0
+        return -1 if rank1 < rank2 else 1
 
     def hand_is_better(
         self,

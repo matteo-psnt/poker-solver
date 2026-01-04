@@ -28,11 +28,6 @@ POSITION_OPTIONS = [
     {"id": 1, "label": "Big Blind (BB)"},
 ]
 
-SITUATION_OPTIONS = [
-    {"id": "first_to_act", "label": "First to act"},
-    {"id": "facing_raise", "label": "Facing raise"},
-]
-
 
 def build_chart_metadata(
     run_id: str,

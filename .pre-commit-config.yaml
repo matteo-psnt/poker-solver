@@ -52,4 +52,4 @@ repos:
         entry: uv run vulture
         language: system
         pass_filenames: false
-        args: [src, --min-confidence, "90"]
+        args: [src, --min-confidence, "70"]

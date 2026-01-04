@@ -9,11 +9,6 @@ def header(title: str, width: int = BANNER_WIDTH) -> None:
     print("=" * width)
 
 
-def subheader(title: str, width: int = BANNER_WIDTH) -> None:
-    print("\n" + title)
-    print("-" * width)
-
-
 def pause(prompt: str = "\nPress Enter to continue...") -> None:
     input(prompt)
 

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
-
 from src.engine.search.tree_builder import LocalTreeNode
 
 
@@ -73,12 +71,3 @@ def _rollout_with_blueprint(
         traversing_player=traversing_player,
         use_average_strategy=use_average_strategy,
     )
-
-
-def expected_value_vector(values: dict[int, float], size: int) -> np.ndarray:
-    """Convert sparse leaf value mapping to dense vector."""
-    out = np.zeros(size, dtype=np.float64)
-    for idx, value in values.items():
-        if 0 <= idx < size:
-            out[idx] = value
-    return out

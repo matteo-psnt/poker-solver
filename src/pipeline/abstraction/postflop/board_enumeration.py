@@ -20,7 +20,6 @@ from itertools import combinations
 
 from src.core.game.state import Card, Street
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
-    RANKS,
     CanonicalCard,
     canonicalize_board,
     get_canonical_board_id,
@@ -167,58 +166,3 @@ EXPECTED_CANONICAL_COUNTS = {
     Street.TURN: 16432,
     Street.RIVER: 134459,
 }
-
-
-def validate_canonical_count(street: Street) -> bool:
-    """
-    Validate that enumeration produces expected number of canonical boards.
-
-    Returns:
-        True if count matches expected
-    """
-    enumerator = CanonicalBoardEnumerator(street)
-    enumerator.enumerate()
-    actual = enumerator.count()
-    expected = EXPECTED_CANONICAL_COUNTS.get(street, -1)
-
-    if actual != expected:
-        print(f"Warning: {street.name} has {actual} canonical boards, expected {expected}")
-        return False
-    return True
-
-
-def get_canonical_board_representative(
-    canonical_board: tuple[CanonicalCard, ...],
-) -> tuple[Card, ...]:
-    """
-    Convert a canonical board back to a concrete board.
-
-    Uses spades first, then hearts, diamonds, clubs for canonical suit labels.
-
-    Args:
-        canonical_board: Tuple of CanonicalCard objects
-
-    Returns:
-        Tuple of Card objects
-    """
-    suit_map = ["s", "h", "d", "c"]  # canonical 0,1,2,3 -> real suits
-
-    cards = []
-    for cc in canonical_board:
-        rank_char = RANKS[cc.rank_idx]
-        suit_char = suit_map[cc.suit_label]
-        cards.append(Card.new(f"{rank_char}{suit_char}"))
-
-    return tuple(cards)
-
-
-def count_hands_without_conflicts(board: tuple[Card, ...]) -> int:
-    """
-    Count how many 2-card hands don't share cards with the board.
-
-    For any board: 50 choose 2 = 1225 valid hands
-    """
-    total_cards = 52
-    board_cards = len(board)
-    remaining = total_cards - board_cards
-    return remaining * (remaining - 1) // 2

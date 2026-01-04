@@ -30,15 +30,6 @@ _NUM_COMBOS = len(_ALL_COMBOS)
 _EPS = 1e-12
 
 
-def uniform_ranges(num_combos: int = _NUM_COMBOS) -> PlayerRanges:
-    """Create normalized uniform ranges for both players."""
-    p0 = np.ones(num_combos, dtype=np.float64)
-    p1 = np.ones(num_combos, dtype=np.float64)
-    p0 /= p0.sum()
-    p1 /= p1.sum()
-    return PlayerRanges(p0=p0, p1=p1)
-
-
 def infer_ranges(state: GameState, blueprint) -> PlayerRanges:
     """
     Infer ranges from blueprint and action history.

@@ -9,11 +9,6 @@ class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
 
 
-class ChartQuery(BaseModel):
-    position: int = Field(default=0, ge=0, le=1)
-    situation: str = Field(default="first_to_act", min_length=1)
-
-
 class MetaResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
