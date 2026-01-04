@@ -34,11 +34,6 @@ if TYPE_CHECKING:
 import numpy as np
 
 
-def _log(prefix: str, message: str, flush: bool = True):
-    """Helper for consistent logging output in parallel training."""
-    print(f"[{prefix}] {message}", flush=flush)
-
-
 class JobType(Enum):
     """Job types for parallel training."""
 
@@ -302,13 +297,6 @@ def _worker_loop(
                 random.seed(batch_seed)
                 np.random.seed(batch_seed)
 
-                # Run iterations
-                print(
-                    f"[Worker {worker_id}] Running {num_iterations} iterations...",
-                    file=sys.stderr,
-                    flush=True,
-                )
-
                 utilities = []
                 iter_start = time.time()
 
@@ -328,16 +316,6 @@ def _worker_loop(
                         util = solver.train_iteration()
                         utilities.append(util)
 
-                        if (i + 1) % 100 == 0:
-                            elapsed = time.time() - iter_start
-                            rate = (i + 1) / elapsed
-                            print(
-                                f"[Worker {worker_id}] Progress: {i + 1}/{num_iterations} "
-                                f"({rate:.1f} iter/s)",
-                                file=sys.stderr,
-                                flush=True,
-                            )
-
                     iter_time = time.time() - iter_start
 
                     # Send pending cross-partition updates to owners
@@ -348,15 +326,12 @@ def _worker_loop(
                         )
                         storage.clear_pending_updates()
 
-                    print(
-                        f"[Worker {worker_id}] Completed {num_iterations} iterations "
-                        f"in {iter_time:.1f}s ({num_iterations / iter_time:.1f} iter/s), "
-                        f"owns {storage.num_owned_infosets()} infosets",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-
-                    fallback_stats = card_abstraction.get_fallback_stats()
+                    fallback_stats = None
+                    if hasattr(card_abstraction, "get_fallback_stats"):
+                        try:
+                            fallback_stats = card_abstraction.get_fallback_stats()
+                        except Exception:
+                            fallback_stats = None
 
                     result_queue.put(
                         {
@@ -579,7 +554,10 @@ class SharedArrayWorkerManager:
         self.ready_event = mp.Event()
 
         # Create coordinator storage (creates shared memory)
-        _log("Coordinator", f"Creating shared memory (session={self.session_id})...")
+        print(
+            f"[Master] Creating shared memory (session={self.session_id})...",
+            flush=True,
+        )
         self.storage = SharedArrayStorage(
             num_workers=num_workers,
             worker_id=0,  # Coordinator uses worker_id 0 for ownership checks
@@ -591,10 +569,7 @@ class SharedArrayWorkerManager:
             ready_event=self.ready_event,  # Coordinator signals when memory is ready
         )
         total_mb = max_infosets * max_actions * 4 * 2 // 1024 // 1024
-        print(
-            f"[Coordinator] Shared memory created: {total_mb}MB total",
-            flush=True,
-        )
+        print(f"[Master] Shared memory created: {total_mb}MB total", flush=True)
 
         # Communication queues
         self.job_queue: mp.Queue = mp.Queue()
@@ -616,7 +591,7 @@ class SharedArrayWorkerManager:
 
     def _start_workers(self):
         """Start all worker processes."""
-        _log("Coordinator", f"Starting {self.num_workers} workers...")
+        print(f"[Master] Starting {self.num_workers} workers...", flush=True)
 
         for worker_id in range(self.num_workers):
             p = mp.Process(
@@ -645,7 +620,7 @@ class SharedArrayWorkerManager:
 
         # Workers will wait for ready_event before attaching to shared memory
         # No need for arbitrary sleep - synchronization is handled by the event
-        _log("Coordinator", f"All {self.num_workers} workers started")
+        print(f"[Master] All {self.num_workers} workers started", flush=True)
 
     def exchange_ids(self, timeout: float = 60.0, verbose: bool = True) -> Dict:
         """
@@ -657,9 +632,6 @@ class SharedArrayWorkerManager:
         Returns:
             Dict with exchange stats
         """
-        if verbose:
-            print("[Coordinator] Exchanging IDs between workers...")
-
         # Tell all workers to exchange IDs
         for _ in range(self.num_workers):
             self.job_queue.put({"type": JobType.EXCHANGE_IDS.value})
@@ -677,10 +649,7 @@ class SharedArrayWorkerManager:
                 raise RuntimeError("Timeout waiting for ID exchange acks")
 
         if verbose:
-            print(
-                f"[Coordinator] ID exchange complete, {total_owned} total owned infosets",
-                flush=True,
-            )
+            print("[Master] ID exchange complete", flush=True)
 
         return {"total_owned": total_owned, "acks": acks}
 
@@ -691,9 +660,6 @@ class SharedArrayWorkerManager:
         Returns:
             Dict with apply stats
         """
-        if verbose:
-            print("[Coordinator] Applying pending updates...")
-
         for _ in range(self.num_workers):
             self.job_queue.put({"type": JobType.APPLY_UPDATES.value})
 
@@ -707,7 +673,7 @@ class SharedArrayWorkerManager:
                 raise RuntimeError("Timeout waiting for apply updates acks")
 
         if verbose:
-            print("[Coordinator] Pending updates applied")
+            print("[Master] Pending updates applied", flush=True)
 
         return {"acks": acks}
 
@@ -740,7 +706,7 @@ class SharedArrayWorkerManager:
 
         if verbose:
             print(
-                f"[Coordinator] Storage resize triggered: "
+                "[Master] Storage resize triggered: "
                 f"worker at {max_worker_capacity:.1%} capacity, "
                 f"growing {self.max_infosets:,} -> {new_max:,}",
                 flush=True,
@@ -774,7 +740,7 @@ class SharedArrayWorkerManager:
 
         if verbose:
             print(
-                f"[Coordinator] Resizing storage: {self.storage.max_infosets:,} -> {new_max_infosets:,}",
+                f"[Master] Resizing storage: {self.storage.max_infosets:,} -> {new_max_infosets:,}",
                 flush=True,
             )
 
@@ -787,8 +753,8 @@ class SharedArrayWorkerManager:
 
         if verbose:
             print(
-                f"[Coordinator] New shared memory created (session={new_session_id}), "
-                f"notifying workers...",
+                f"[Master] New shared memory created (session={new_session_id}), "
+                "notifying workers...",
                 flush=True,
             )
 
@@ -817,7 +783,7 @@ class SharedArrayWorkerManager:
                         worker_id = result["worker_id"]
                         new_range = result["new_id_range"]
                         print(
-                            f"[Coordinator] Worker {worker_id} reattached (range={new_range})",
+                            f"[Master] Worker {worker_id} reattached (range={new_range})",
                             flush=True,
                         )
             except queue.Empty:
@@ -829,7 +795,7 @@ class SharedArrayWorkerManager:
 
         if verbose:
             print(
-                f"[Coordinator] Resize complete in {resize_time:.1f}s, "
+                f"[Master] Resize complete in {resize_time:.1f}s, "
                 f"new capacity: {new_max_infosets:,} infosets",
                 flush=True,
             )
@@ -868,14 +834,6 @@ class SharedArrayWorkerManager:
         """
         batch_start = time.time()
 
-        if verbose:
-            total_iters = sum(iterations_per_worker)
-            print(
-                f"[Coordinator] Running batch {batch_id}: {total_iters} total iterations "
-                f"across {self.num_workers} workers",
-                flush=True,
-            )
-
         # Submit jobs
         iteration_offset = start_iteration
         active_workers = 0
@@ -908,7 +866,7 @@ class SharedArrayWorkerManager:
                 if "error" in result:
                     errors.append(result)
                     print(
-                        f"[Coordinator] Worker {result['worker_id']} error: {result['error']}",
+                        f"[Master] Worker {result['worker_id']} error: {result['error']}",
                         flush=True,
                     )
                     received += 1
@@ -922,21 +880,10 @@ class SharedArrayWorkerManager:
                     if isinstance(fallback_stats, dict):
                         self._fallback_stats_by_worker[result["worker_id"]] = fallback_stats
 
-                    if verbose:
-                        print(
-                            f"[Coordinator] Worker {result['worker_id']} done: "
-                            f"{result['num_owned_infosets']} owned infosets, "
-                            f"{worker_capacity:.1%} capacity, "
-                            f"{result['iter_time']:.1f}s",
-                            flush=True,
-                        )
                     received += 1
                 else:
                     if verbose:
-                        print(
-                            f"[Coordinator] Ignoring unexpected result: {result}",
-                            flush=True,
-                        )
+                        print(f"[Master] Ignoring unexpected result: {result}", flush=True)
 
             except queue.Empty:
                 raise RuntimeError(
@@ -946,7 +893,7 @@ class SharedArrayWorkerManager:
                 interrupted = True
                 if verbose:
                     print(
-                        "\n⚠️  Interrupt received; waiting for current batch to finish...",
+                        "⚠️  Interrupt received; waiting for current batch to finish...",
                         flush=True,
                     )
 
@@ -955,9 +902,8 @@ class SharedArrayWorkerManager:
 
         if verbose:
             print(
-                f"[Coordinator] Batch {batch_id} complete in {batch_time:.1f}s "
-                f"({total_iters / batch_time:.1f} iter/s), "
-                f"{total_owned} total owned infosets",
+                f"[Master] Batch {batch_id} complete in {batch_time:.1f}s "
+                f"({total_iters / batch_time:.1f} iter/s)",
                 flush=True,
             )
 
@@ -1088,9 +1034,6 @@ class SharedArrayWorkerManager:
 
         Collects keys from all workers first, then saves the complete state.
         """
-        if self.config.training.verbose:
-            print(f"[Coordinator] Starting checkpoint at iter={iteration}...", flush=True)
-
         # Collect keys from all workers
         collected = self.collect_keys()
 
@@ -1105,7 +1048,8 @@ class SharedArrayWorkerManager:
 
         if self.config.training.verbose:
             print(
-                f"[Coordinator] Checkpointing {len(self.storage._owned_keys):,} infosets "
+                f"[Master] Checkpointing iter={iteration}: "
+                f"{len(self.storage._owned_keys):,} infosets "
                 f"(max_id={self.storage.next_local_id})...",
                 flush=True,
             )
@@ -1113,16 +1057,13 @@ class SharedArrayWorkerManager:
         # Now checkpoint with complete key mappings
         self.storage.checkpoint(iteration)
 
-        if self.config.training.verbose:
-            print(f"[Coordinator] Checkpoint complete at iter={iteration}", flush=True)
-
     def get_storage(self) -> "SharedArrayStorage":
         """Get coordinator's storage instance (for accessing results)."""
         return self.storage
 
     def shutdown(self):
         """Shutdown all workers cleanly."""
-        print("[Coordinator] Shutting down workers...")
+        print("[Master] Shutting down workers...", flush=True)
 
         # Send shutdown to all workers
         for _ in range(self.num_workers):
@@ -1132,7 +1073,7 @@ class SharedArrayWorkerManager:
         for p in self.processes:
             p.join(timeout=10)
             if p.is_alive():
-                _log("Coordinator", f"Force terminating worker {p.pid}")
+                print(f"[Master] Force terminating worker {p.pid}", flush=True)
                 p.terminate()
 
         self.processes.clear()
@@ -1140,7 +1081,7 @@ class SharedArrayWorkerManager:
         # Cleanup shared memory (coordinator unlinks)
         self.storage.cleanup()
 
-        print("[Coordinator] All workers shut down")
+        print("[Master] All workers shut down", flush=True)
 
     def __enter__(self):
         return self

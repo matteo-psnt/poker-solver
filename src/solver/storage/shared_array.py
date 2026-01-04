@@ -159,12 +159,11 @@ class SharedArrayStorage(Storage):
         # Initialize shared memory
         if is_coordinator:
             self._create_shared_memory()
+            # Load checkpoint if available (only coordinator loads)
+            if checkpoint_dir:
+                self.load_checkpoint()
         else:
             self._attach_shared_memory()
-
-        # Load checkpoint if available
-        if checkpoint_dir:
-            self.load_checkpoint()
 
     # =========================================================================
     # Stable Hashing (replaces Python hash())
@@ -448,7 +447,6 @@ class SharedArrayStorage(Storage):
                 )
 
                 self._create_numpy_views()
-                print(f"Worker {self.worker_id} attached to shared memory")
                 return
 
             except FileNotFoundError:
@@ -1116,11 +1114,6 @@ class SharedArrayStorage(Storage):
             np.lib.format.open_memmap(action_counts_file, mode="r"),
             action_sigs,
             f"SharedArrayStorage.checkpoint(iter={iteration})",
-        )
-
-        print(
-            f"Checkpoint saved: {num_keys} infosets at iteration {iteration}, "
-            f"{len(action_sigs)} action signatures"
         )
 
     @staticmethod
