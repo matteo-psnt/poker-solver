@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional, Union
 from tqdm import tqdm
 
 from src.solver.storage.helpers import CHECKPOINT_REQUIRED_FILES, get_missing_checkpoint_files
+from src.solver.storage.shared_array import SharedArrayStorage
 from src.training import components
 from src.training.metrics import MetricsTracker
 from src.training.parallel import SharedArrayWorkerManager
@@ -278,11 +279,24 @@ class TrainingSession:
         if batch_size is None:
             batch_size = self.config.training.iterations_per_worker * num_workers
 
+        # Use max_infosets from checkpoint if it's larger (handles resume after resize)
+        max_infosets = self.config.storage.max_infosets
+        if self.run_dir and self.run_dir.exists():
+            checkpoint_info = SharedArrayStorage.get_checkpoint_info(self.run_dir)
+            if checkpoint_info and checkpoint_info.get("max_infosets"):
+                checkpoint_max = checkpoint_info["max_infosets"]
+                if checkpoint_max > max_infosets:
+                    print(
+                        f"[Resume] Using checkpoint max_infosets={checkpoint_max:,} "
+                        f"(config had {max_infosets:,})"
+                    )
+                    max_infosets = checkpoint_max
+
         return {
             "batch_size": batch_size,
             "checkpoint_freq": self.config.training.checkpoint_frequency,
             "verbose": self.config.training.verbose,
-            "max_infosets": self.config.storage.max_infosets,
+            "max_infosets": max_infosets,
             "max_actions": self.config.storage.max_actions,
             "checkpoint_enabled": self.config.storage.checkpoint_enabled,
         }
@@ -315,6 +329,7 @@ class TrainingSession:
         if not self.config.storage.checkpoint_enabled or completed_iterations == 0:
             return
 
+        checkpoint_start = time.time()
         worker_manager.checkpoint(completed_iterations)
         elapsed = time.time() - training_start_time
         self.run_tracker.update(
@@ -322,7 +337,11 @@ class TrainingSession:
             runtime_seconds=elapsed,
             num_infosets=total_infosets,
         )
-        print(f"[Coordinator] Checkpoint saved at iteration {completed_iterations}")
+        checkpoint_time = time.time() - checkpoint_start
+        print(
+            f"[Coordinator] Checkpoint saved at iteration {completed_iterations} "
+            f"in {checkpoint_time:.2f}s"
+        )
 
     def _run_training_loop(
         self,
@@ -381,6 +400,7 @@ class TrainingSession:
                 batch_utilities = batch_result["utilities"]
                 completed_iterations += len(batch_utilities)
                 total_infosets = batch_result.get("num_infosets", 0)
+                max_worker_capacity = batch_result.get("max_worker_capacity", 0.0)
                 if "fallback_stats" in batch_result:
                     self._fallback_stats = batch_result["fallback_stats"]
                 if batch_result.get("interrupted"):
@@ -405,7 +425,8 @@ class TrainingSession:
                 if verbose and isinstance(batch_iterator, tqdm):
                     compact_summary = self.metrics.get_compact_summary()
                     batch_iterator.set_postfix_str(
-                        f"iter={completed_iterations} infosets={total_infosets} | {compact_summary}"
+                        f"iter={completed_iterations} infosets={total_infosets} "
+                        f"cap={max_worker_capacity:.0%} | {compact_summary}"
                     )
 
                 # Checkpoint if needed
@@ -418,32 +439,23 @@ class TrainingSession:
                     )
 
                 if interrupted:
-                    if checkpoint_enabled and completed_iterations > 0:
-                        print("\n⚠️  Interrupt received, saving checkpoint...", flush=True)
-                    else:
-                        print("\n⚠️  Interrupt received, stopping after batch...", flush=True)
-                    if checkpoint_enabled and completed_iterations > 0:
-                        self._save_checkpoint(
-                            worker_manager=worker_manager,
-                            completed_iterations=completed_iterations,
-                            total_infosets=total_infosets,
-                            training_start_time=training_start_time,
-                        )
                     break
 
         except KeyboardInterrupt:
             interrupted = True
             if verbose:
                 print("\n⚠️  Training interrupted by user", flush=True)
-            if checkpoint_enabled and completed_iterations > 0:
-                if verbose:
-                    print("[Coordinator] Saving checkpoint...", flush=True)
-                self._save_checkpoint(
-                    worker_manager=worker_manager,
-                    completed_iterations=completed_iterations,
-                    total_infosets=total_infosets,
-                    training_start_time=training_start_time,
-                )
+
+        # Save checkpoint on interrupt if we haven't just saved
+        if interrupted and checkpoint_enabled and completed_iterations > 0:
+            if verbose:
+                print("[Coordinator] Saving checkpoint...", flush=True)
+            self._save_checkpoint(
+                worker_manager=worker_manager,
+                completed_iterations=completed_iterations,
+                total_infosets=total_infosets,
+                training_start_time=training_start_time,
+            )
 
         return completed_iterations, total_infosets, interrupted
 
@@ -552,7 +564,7 @@ class TrainingSession:
             serialized_action_abstraction=serialized_action_abstraction,
             serialized_card_abstraction=serialized_card_abstraction,
             session_id=self.run_dir.name,
-            base_seed=self.config.system.seed,
+            base_seed=self.config.system.seed or 42,
             max_infosets=max_infosets,
             max_actions=max_actions,
             checkpoint_dir=str(self.run_dir) if checkpoint_enabled else None,

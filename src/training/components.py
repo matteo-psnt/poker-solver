@@ -156,11 +156,20 @@ def build_storage(config: Config, run_dir: Optional[Path] = None) -> Storage:
     # Using run_dir.name as session_id to avoid conflicts between runs
     session_id = run_dir.name if run_dir else "default"
 
+    # Use max_infosets from checkpoint if it's larger (handles resume after resize)
+    max_infosets = config.storage.max_infosets
+    if run_dir and run_dir.exists():
+        checkpoint_info = SharedArrayStorage.get_checkpoint_info(run_dir)
+        if checkpoint_info and checkpoint_info.get("max_infosets"):
+            checkpoint_max = checkpoint_info["max_infosets"]
+            if checkpoint_max > max_infosets:
+                max_infosets = checkpoint_max
+
     return SharedArrayStorage(
         num_workers=1,
         worker_id=0,
         session_id=session_id,
-        max_infosets=config.storage.max_infosets,
+        max_infosets=max_infosets,
         max_actions=config.storage.max_actions,
         is_coordinator=True,
         checkpoint_dir=run_dir if checkpoint_enabled else None,
