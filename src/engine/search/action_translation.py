@@ -6,6 +6,7 @@ import numpy as np
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
+from src.core.game.rules import GameRules
 from src.core.game.state import GameState
 
 
@@ -13,6 +14,7 @@ def translate_action_distribution(
     state: GameState,
     observed_action: Action,
     action_model: ActionModel,
+    rules: GameRules,
 ) -> list[tuple[Action, float]]:
     """
     Map an observed action to a distribution over legal abstract actions.
@@ -21,7 +23,7 @@ def translate_action_distribution(
     - probabilistic: pseudo-harmonic interpolation between adjacent sizes
       for off-tree aggressive actions
     """
-    legal_actions = action_model.get_legal_actions(state)
+    legal_actions = rules.get_legal_actions(state, action_model=action_model)
     if not legal_actions:
         return [(observed_action, 1.0)]
 
@@ -78,11 +80,12 @@ def translate_off_tree_action(
     state: GameState,
     observed_action: Action,
     action_model: ActionModel,
+    rules: GameRules,
     *,
     rng: np.random.Generator | None = None,
 ) -> Action:
     """Translate an observed action to one legal abstract action."""
-    dist = translate_action_distribution(state, observed_action, action_model)
+    dist = translate_action_distribution(state, observed_action, action_model, rules)
     if len(dist) == 1:
         return dist[0][0]
     if rng is None:

@@ -11,7 +11,8 @@ import json
 
 import xxhash
 
-from src.core.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
+from src.core.game.actions import Action, ActionType
+from src.core.game.rules import GameRules
 from src.core.game.state import GameState
 from src.shared.config import Config
 
@@ -30,6 +31,10 @@ class ActionModel:
         if not isinstance(config, Config):
             raise TypeError("config must be a Config")
         self.config = config
+        self._rules = GameRules(
+            small_blind=config.game.small_blind,
+            big_blind=config.game.big_blind,
+        )
 
     def get_preflop_open_sizes_bb(self) -> list[float]:
         """Return configured SB first-in non-all-in open sizes in BB units."""
@@ -76,47 +81,12 @@ class ActionModel:
         tokens = self.config.action_model.postflop_templates[template_key]
         return self._postflop_raise_sizes_from_tokens(state, tokens)
 
-    def get_legal_actions(self, state: GameState) -> list[Action]:
-        """Get all legal actions according to the current abstraction model."""
-        if state.is_terminal:
-            return []
-
-        actions: list[Action] = []
-        stack = state.stacks[state.current_player]
-
-        if state.to_call > 0:
-            actions.append(fold())
-            if state.to_call >= stack:
-                actions.append(all_in(stack))
-            else:
-                actions.append(call())
-        else:
-            actions.append(check())
-
-        if state.to_call == 0:
-            for size in self.get_bet_sizes(state):
-                if size >= stack:
-                    if not any(a.type == ActionType.ALL_IN for a in actions):
-                        actions.append(all_in(stack))
-                else:
-                    actions.append(bet(size))
-        else:
-            for size in self.get_raise_sizes(state):
-                total_needed = state.to_call + size
-                if total_needed >= stack:
-                    if not any(a.type == ActionType.ALL_IN for a in actions):
-                        actions.append(all_in(stack))
-                else:
-                    actions.append(raises(size))
-
-        return actions
-
     def discretize_action(self, state: GameState, action: Action) -> Action:
         """Map a raw action to the nearest legal abstract action."""
         if action.type in (ActionType.FOLD, ActionType.CHECK, ActionType.CALL):
             return action
 
-        legal_actions = self.get_legal_actions(state)
+        legal_actions = self._rules.get_legal_actions(state, action_model=self)
         if not legal_actions:
             return action
 
