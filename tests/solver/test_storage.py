@@ -26,7 +26,7 @@ class TestSharedArrayStorage:
             num_workers=num_workers,
             worker_id=0,
             session_id=session_id,
-            max_infosets=10000,
+            initial_capacity=10000,
             max_actions=10,
             is_coordinator=True,
         )
@@ -89,7 +89,7 @@ class TestSharedArrayStorage:
             num_workers=4,
             worker_id=0,
             session_id=session_id,
-            max_infosets=10000,
+            initial_capacity=10000,
             max_actions=10,
             is_coordinator=True,
         )
@@ -143,7 +143,7 @@ class TestSharedArrayStorage:
             num_workers=4,
             worker_id=0,
             session_id=session_id,
-            max_infosets=10000,
+            initial_capacity=10000,
             max_actions=10,
             is_coordinator=True,
         )
@@ -192,7 +192,7 @@ class TestSharedArrayStorage:
             num_workers=4,
             worker_id=0,
             session_id=session_id,
-            max_infosets=10000,
+            initial_capacity=10000,
             max_actions=10,
             is_coordinator=True,
         )
@@ -233,7 +233,7 @@ class TestSharedArrayStorage:
             num_workers=num_workers,
             worker_id=0,
             session_id=session_id,
-            max_infosets=max_infosets,
+            initial_capacity=max_infosets,
             max_actions=10,
             is_coordinator=True,
         )
@@ -274,7 +274,7 @@ class TestSharedArrayStorage:
             num_workers=8,
             worker_id=0,
             session_id=session_id,
-            max_infosets=10000,
+            initial_capacity=10000,
             max_actions=10,
             is_coordinator=True,
         )
@@ -329,7 +329,7 @@ class TestSharedArrayStorage:
             num_workers=num_workers,
             worker_id=0,
             session_id=session_id,
-            max_infosets=max_infosets,
+            initial_capacity=max_infosets,
             max_actions=10,
             is_coordinator=True,
         )
@@ -374,7 +374,7 @@ class TestSharedArrayStorage:
             num_workers=4,
             worker_id=0,
             session_id=session_id,
-            max_infosets=10000,
+            initial_capacity=10000,
             max_actions=10,
             is_coordinator=True,
         )
@@ -428,7 +428,7 @@ class TestSharedArrayStorage:
             num_workers=4,
             worker_id=0,
             session_id=session_id,
-            max_infosets=10000,
+            initial_capacity=10000,
             max_actions=10,
             is_coordinator=True,
         )
@@ -470,7 +470,7 @@ class TestSharedArrayStorage:
             num_workers=4,
             worker_id=0,
             session_id=session_id,
-            max_infosets=10,  # Only 10 total slots
+            initial_capacity=10,  # Only 10 total slots
             max_actions=5,
             is_coordinator=True,
         )
@@ -524,7 +524,7 @@ class TestSharedArrayStorage:
             num_workers=2,
             worker_id=0,
             session_id=session_id,
-            max_infosets=1000,
+            initial_capacity=1000,
             max_actions=3,  # Small max_actions
             is_coordinator=True,
         )
@@ -579,7 +579,7 @@ class TestSharedArrayStorage:
             num_workers=2,
             worker_id=0,
             session_id=session_id,
-            max_infosets=100,  # Small for testing
+            initial_capacity=100,  # Small for testing
             max_actions=5,
             is_coordinator=True,
         )
@@ -613,7 +613,7 @@ class TestSharedArrayStorage:
             # Check resize stats
             stats = storage.get_resize_stats()
             assert "capacity_usage" in stats
-            assert "max_infosets" in stats
+            assert "initial_capacity" in stats
             assert stats["used"] == created
 
         finally:
@@ -631,7 +631,7 @@ class TestSharedArrayStorage:
             num_workers=2,
             worker_id=0,
             session_id=session_id,
-            max_infosets=100,
+            initial_capacity=100,
             max_actions=5,
             is_coordinator=True,
         )
@@ -640,7 +640,7 @@ class TestSharedArrayStorage:
             # Record initial state
             initial_range_start = storage.id_range_start
             initial_range_end = storage.id_range_end
-            initial_max = storage.max_infosets
+            initial_max = storage.capacity
 
             # Create an infoset to have some data
             key = InfoSetKey(
@@ -675,7 +675,7 @@ class TestSharedArrayStorage:
             storage.resize(new_max)
 
             # Verify resize worked
-            assert storage.max_infosets == new_max
+            assert storage.capacity == new_max
             assert storage.id_range_start == initial_range_start  # Start stays same
             assert storage.id_range_end == initial_range_end  # Base range unchanged
             assert storage._extra_allocations  # Extra capacity allocated
@@ -705,7 +705,7 @@ class TestSharedArrayStorage:
             num_workers=2,
             worker_id=0,
             session_id=session_id,
-            max_infosets=100,
+            initial_capacity=100,
             max_actions=5,
             is_coordinator=True,
         )

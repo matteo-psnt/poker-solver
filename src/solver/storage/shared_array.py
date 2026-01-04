@@ -37,9 +37,9 @@ class SharedArrayStorage(Storage):
     - No shared counter, no races
 
     DATA LAYOUT:
-    - shared_regrets: float32[max_infosets, max_actions] - live data
-    - shared_strategy_sum: float64[max_infosets, max_actions] - live data
-    - shared_action_counts: int32[max_infosets] - number of actions per infoset
+    - shared_regrets: float32[initial_capacity, max_actions] - live data
+    - shared_strategy_sum: float64[initial_capacity, max_actions] - live data
+    - shared_action_counts: int32[initial_capacity] - number of actions per infoset
 
     CONSISTENCY:
     - Reads are lock-free and may be stale (acceptable for MCCFR)
@@ -72,7 +72,7 @@ class SharedArrayStorage(Storage):
         num_workers: int,
         worker_id: int,
         session_id: str,
-        max_infosets: int = 2_000_000,
+        initial_capacity: int = 2_000_000,
         max_actions: int = 10,
         is_coordinator: bool = False,
         checkpoint_dir: Optional[Path] = None,
@@ -86,7 +86,7 @@ class SharedArrayStorage(Storage):
             num_workers: Total number of workers (for partition ownership)
             worker_id: This worker's ID (0 to num_workers-1)
             session_id: Unique session ID for shared memory namespace
-            max_infosets: Maximum number of infosets (pre-allocated)
+            initial_capacity: Infoset capacity (grows automatically via resize)
             max_actions: Maximum actions per infoset (pre-allocated)
             is_coordinator: If True, creates shared memory. If False, attaches.
             checkpoint_dir: Optional directory for checkpoints
@@ -102,14 +102,14 @@ class SharedArrayStorage(Storage):
         self.num_workers = num_workers
         self.worker_id = worker_id
         self.session_id = session_id[:8]  # Truncate for macOS shm name limit
-        self.max_infosets = max_infosets
+        self.capacity = initial_capacity  # Current capacity (grows via resize)
         self.max_actions = max_actions
         self.is_coordinator = is_coordinator
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
         self.action_config_hash = action_config_hash
         self.ready_event = ready_event
-        self.base_max_infosets = max_infosets
-        self.base_slots_per_worker = (max_infosets - 1) // num_workers
+        self.base_capacity = initial_capacity  # Original base capacity
+        self.base_slots_per_worker = (initial_capacity - 1) // num_workers
         self._extra_regions: list[tuple[int, int, int, int]] = []
         self._extra_allocations: list[dict[str, int]] = []
 
@@ -117,7 +117,7 @@ class SharedArrayStorage(Storage):
         # Per-worker ID allocation (race-free)
         # ID 0 is reserved for "unknown" region, so usable range starts at 1
         # =====================================================================
-        usable_slots = max_infosets - 1  # Reserve slot 0
+        usable_slots = initial_capacity - 1  # Reserve slot 0
         slots_per_worker = usable_slots // num_workers
         self.id_range_start = 1 + worker_id * slots_per_worker
         self.id_range_end = 1 + (worker_id + 1) * slots_per_worker
@@ -354,11 +354,11 @@ class SharedArrayStorage(Storage):
         self._cleanup_stale_shm()
 
         # Calculate sizes
-        regrets_size = self.max_infosets * self.max_actions * np.dtype(np.float32).itemsize
-        strategy_size = self.max_infosets * self.max_actions * np.dtype(np.float64).itemsize
-        actions_size = self.max_infosets * np.dtype(np.int32).itemsize
-        reach_size = self.max_infosets * np.dtype(np.int64).itemsize
-        utility_size = self.max_infosets * np.dtype(np.float64).itemsize
+        regrets_size = self.capacity * self.max_actions * np.dtype(np.float32).itemsize
+        strategy_size = self.capacity * self.max_actions * np.dtype(np.float64).itemsize
+        actions_size = self.capacity * np.dtype(np.int32).itemsize
+        reach_size = self.capacity * np.dtype(np.int64).itemsize
+        utility_size = self.capacity * np.dtype(np.float64).itemsize
 
         # Create shared memory segments
         self._shm_regrets = shared_memory.SharedMemory(
@@ -398,7 +398,7 @@ class SharedArrayStorage(Storage):
         self.shared_cumulative_utility.fill(0)
 
         print(
-            "Coordinator created shared memory: "
+            "Master created shared memory: "
             f"regrets={regrets_size // 1024 // 1024}MB, "
             f"strategy={strategy_size // 1024 // 1024}MB"
         )
@@ -406,7 +406,7 @@ class SharedArrayStorage(Storage):
         # Signal workers that shared memory is ready
         if self.ready_event is not None:
             self.ready_event.set()
-            print("DEBUG: Coordinator signaled ready_event")
+            print("DEBUG: Master signaled ready_event")
 
     def _attach_shared_memory(self):
         """
@@ -462,27 +462,27 @@ class SharedArrayStorage(Storage):
     def _create_numpy_views(self):
         """Create NumPy array views into shared memory."""
         self.shared_regrets = np.ndarray(
-            (self.max_infosets, self.max_actions),
+            (self.capacity, self.max_actions),
             dtype=np.float32,
             buffer=self._shm_regrets.buf,
         )
         self.shared_strategy_sum = np.ndarray(
-            (self.max_infosets, self.max_actions),
+            (self.capacity, self.max_actions),
             dtype=np.float64,
             buffer=self._shm_strategy.buf,
         )
         self.shared_action_counts = np.ndarray(
-            (self.max_infosets,),
+            (self.capacity,),
             dtype=np.int32,
             buffer=self._shm_actions.buf,
         )
         self.shared_reach_counts = np.ndarray(
-            (self.max_infosets,),
+            (self.capacity,),
             dtype=np.int64,
             buffer=self._shm_reach.buf,
         )
         self.shared_cumulative_utility = np.ndarray(
-            (self.max_infosets,),
+            (self.capacity,),
             dtype=np.float64,
             buffer=self._shm_utility.buf,
         )
@@ -641,10 +641,10 @@ class SharedArrayStorage(Storage):
             "extra_size": extra_size,
             "used": used + extra_used,
             "capacity_usage": self.get_capacity_usage(),  # type: ignore
-            "max_infosets": self.max_infosets,
+            "initial_capacity": self.capacity,
         }
 
-    def resize(self, new_max_infosets: int) -> None:
+    def resize(self, new_capacity: int) -> None:
         """
         Resize storage to new capacity (coordinator only).
 
@@ -655,7 +655,7 @@ class SharedArrayStorage(Storage):
         4. Clean up old shared memory
 
         Args:
-            new_max_infosets: New maximum number of infosets
+            new_capacity: New infoset capacity
 
         Raises:
             RuntimeError: If called by non-coordinator or new size is smaller
@@ -663,12 +663,12 @@ class SharedArrayStorage(Storage):
         if not self.is_coordinator:
             raise RuntimeError("Only coordinator can resize storage")
 
-        if new_max_infosets <= self.max_infosets:
+        if new_capacity <= self.capacity:
             raise RuntimeError(
-                f"New size {new_max_infosets} must be larger than current {self.max_infosets}"
+                f"New size {new_capacity} must be larger than current {self.capacity}"
             )
 
-        old_max_infosets = self.max_infosets
+        old_capacity = self.capacity
         old_regrets = self.shared_regrets
         old_strategy = self.shared_strategy_sum
         old_action_counts = self.shared_action_counts
@@ -676,8 +676,8 @@ class SharedArrayStorage(Storage):
         old_cumulative_utility = self.shared_cumulative_utility
 
         print(
-            f"Resizing storage: {old_max_infosets:,} -> {new_max_infosets:,} infosets "
-            f"(growth factor: {new_max_infosets / old_max_infosets:.1f}x)"
+            f"Resizing storage: {old_capacity:,} -> {new_capacity:,} infosets "
+            f"(growth factor: {new_capacity / old_capacity:.1f}x)"
         )
 
         # Store old shared memory handles for cleanup
@@ -687,9 +687,9 @@ class SharedArrayStorage(Storage):
         old_shm_reach = self._shm_reach
         old_shm_utility = self._shm_utility
 
-        # Update max_infosets before creating new shared memory
-        old_max_infosets = self.max_infosets
-        self.max_infosets = new_max_infosets
+        # Update initial_capacity before creating new shared memory
+        old_capacity = self.capacity
+        self.capacity = new_capacity
 
         # Create new session_id for resized shared memory
         # Append a counter to ensure unique names
@@ -701,15 +701,15 @@ class SharedArrayStorage(Storage):
         self._create_shared_memory()
 
         # Copy existing data to new arrays
-        # Note: Only copy up to old_max_infosets rows
-        self.shared_regrets[:old_max_infosets, :] = old_regrets[:, :]
-        self.shared_strategy_sum[:old_max_infosets, :] = old_strategy[:, :]
-        self.shared_action_counts[:old_max_infosets] = old_action_counts[:]
-        self.shared_reach_counts[:old_max_infosets] = old_reach_counts[:]
-        self.shared_cumulative_utility[:old_max_infosets] = old_cumulative_utility[:]
+        # Note: Only copy up to old_capacity rows
+        self.shared_regrets[:old_capacity, :] = old_regrets[:, :]
+        self.shared_strategy_sum[:old_capacity, :] = old_strategy[:, :]
+        self.shared_action_counts[:old_capacity] = old_action_counts[:]
+        self.shared_reach_counts[:old_capacity] = old_reach_counts[:]
+        self.shared_cumulative_utility[:old_capacity] = old_cumulative_utility[:]
 
         # Append a new extra region for allocations to avoid overlapping ranges.
-        self._add_extra_region(old_max_infosets, new_max_infosets)
+        self._add_extra_region(old_capacity, new_capacity)
 
         # Clean up old shared memory
         try:
@@ -726,14 +726,12 @@ class SharedArrayStorage(Storage):
         except Exception as e:
             print(f"Warning: Error cleaning up old shared memory: {e}")
 
-        print(
-            f"Resize complete: new capacity {new_max_infosets:,}, new session_id={self.session_id}"
-        )
+        print(f"Resize complete: new capacity {new_capacity:,}, new session_id={self.session_id}")
 
     def reattach_after_resize(
         self,
         new_session_id: str,
-        new_max_infosets: int,
+        new_capacity: int,
         preserved_keys: Dict["InfoSetKey", int],
         preserved_next_id: int,
     ) -> None:
@@ -748,7 +746,7 @@ class SharedArrayStorage(Storage):
 
         Args:
             new_session_id: New session ID for shared memory names
-            new_max_infosets: New maximum infosets capacity
+            new_capacity: New maximum infosets capacity
             preserved_keys: Worker's owned keys to preserve
             preserved_next_id: Worker's next_local_id to restore (absolute position)
         """
@@ -764,11 +762,11 @@ class SharedArrayStorage(Storage):
         if self._shm_utility:
             self._shm_utility.close()
 
-        old_max_infosets = self.max_infosets
+        old_capacity = self.capacity
 
         # Update session and capacity
         self.session_id = new_session_id
-        self.max_infosets = new_max_infosets
+        self.capacity = new_capacity
 
         # next_local_id stays at same absolute position - data is not moved
         self.next_local_id = preserved_next_id
@@ -780,11 +778,11 @@ class SharedArrayStorage(Storage):
         self._attach_shared_memory()
 
         # Append a new extra region for allocations
-        self._add_extra_region(old_max_infosets, new_max_infosets)
+        self._add_extra_region(old_capacity, new_capacity)
 
         print(
             f"Worker {self.worker_id} reattached after resize: "
-            f"session={new_session_id}, max_infosets={new_max_infosets:,}, "
+            f"session={new_session_id}, initial_capacity={new_capacity:,}, "
             f"id_range=[{self.id_range_start}, {self.id_range_end}), "
             f"next_id={self.next_local_id}"
         )
@@ -1034,7 +1032,7 @@ class SharedArrayStorage(Storage):
                     "owned_keys": dense_ids,
                     "num_workers": self.num_workers,
                     "max_id": max_id,
-                    "max_infosets": self.max_infosets,  # Persist resized capacity
+                    "capacity": self.capacity,  # Persist current capacity
                     "action_config_hash": self.action_config_hash,  # For config validation
                     "id_mode": "dense",
                 },
@@ -1121,7 +1119,7 @@ class SharedArrayStorage(Storage):
         """
         Get information about a checkpoint without loading it.
 
-        Useful for determining max_infosets before creating storage.
+        Useful for determining initial_capacity before creating storage.
 
         Args:
             checkpoint_dir: Directory containing checkpoint files
@@ -1138,7 +1136,7 @@ class SharedArrayStorage(Storage):
 
         return {
             "num_infosets": len(mapping_data.get("owned_keys", {})),
-            "max_infosets": mapping_data.get("max_infosets"),
+            "capacity": mapping_data.get("capacity"),
             "num_workers": mapping_data.get("num_workers"),
             "max_id": mapping_data.get("max_id"),
             "action_config_hash": mapping_data.get("action_config_hash"),
@@ -1173,14 +1171,14 @@ class SharedArrayStorage(Storage):
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
             saved_owned_keys = mapping_data["owned_keys"]
-            saved_max_infosets = mapping_data.get("max_infosets")
+            saved_capacity = mapping_data.get("capacity")
             saved_config_hash = mapping_data.get("action_config_hash")
 
             # Log if checkpoint was from a resized storage
-            if saved_max_infosets and saved_max_infosets != self.max_infosets:
+            if saved_capacity and saved_capacity != self.capacity:
                 print(
-                    f"Checkpoint max_infosets ({saved_max_infosets:,}) differs from "
-                    f"current ({self.max_infosets:,})"
+                    f"Checkpoint capacity ({saved_capacity:,}) differs from "
+                    f"current ({self.capacity:,})"
                 )
 
             if saved_config_hash and self.action_config_hash:

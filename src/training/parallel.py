@@ -58,7 +58,7 @@ def _worker_loop(
     update_queues: List[mp.Queue],  # One queue per worker for cross-partition updates
     id_request_queues: List[mp.Queue],  # One queue per worker for ID requests
     id_response_queues: List[mp.Queue],  # One queue per worker for ID responses
-    max_infosets: int,
+    initial_capacity: int,
     max_actions: int,
     checkpoint_dir: str | None = None,
     ready_event=None,  # Optional[mp.Event]
@@ -86,7 +86,7 @@ def _worker_loop(
         update_queues: Per-worker queues for cross-partition updates
         id_request_queues: Per-worker queues for ID requests
         id_response_queues: Per-worker queues for ID responses
-        max_infosets: Maximum infosets in shared arrays
+        initial_capacity: Initial capacity for infoset storage
         max_actions: Maximum actions per infoset
         checkpoint_dir: Optional checkpoint directory
     """
@@ -110,7 +110,7 @@ def _worker_loop(
             num_workers=num_workers,
             worker_id=worker_id,
             session_id=session_id,
-            max_infosets=max_infosets,
+            initial_capacity=initial_capacity,
             max_actions=max_actions,
             is_coordinator=False,  # Worker attaches, doesn't create
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
@@ -251,11 +251,11 @@ def _worker_loop(
                 # Stop-the-world storage resize
                 # Coordinator has already resized; workers need to reattach
                 new_session_id = job["new_session_id"]
-                new_max_infosets = job["new_max_infosets"]
+                new_capacity = job["new_capacity"]
 
                 print(
                     f"[Worker {worker_id}] Reattaching after resize "
-                    f"(new_max={new_max_infosets:,}, session={new_session_id})",
+                    f"(new_max={new_capacity:,}, session={new_session_id})",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -267,7 +267,7 @@ def _worker_loop(
                 # Reattach to new shared memory
                 storage.reattach_after_resize(
                     new_session_id=new_session_id,
-                    new_max_infosets=new_max_infosets,
+                    new_capacity=new_capacity,
                     preserved_keys=preserved_keys,
                     preserved_next_id=preserved_next_id,
                 )
@@ -276,7 +276,7 @@ def _worker_loop(
                     {
                         "worker_id": worker_id,
                         "type": "resize_ack",
-                        "new_max_infosets": new_max_infosets,
+                        "new_capacity": new_capacity,
                         "new_id_range": (storage.id_range_start, storage.id_range_end),
                     }
                 )
@@ -520,7 +520,7 @@ class SharedArrayWorkerManager:
         serialized_card_abstraction: bytes,
         session_id: str | None = None,
         base_seed: int = 42,
-        max_infosets: int = 2_000_000,
+        initial_capacity: int = 2_000_000,
         max_actions: int = 10,
         checkpoint_dir: str | None = None,
     ):
@@ -534,7 +534,7 @@ class SharedArrayWorkerManager:
             serialized_card_abstraction: Pickled BucketingStrategy
             session_id: Unique session ID (auto-generated if None)
             base_seed: Base random seed
-            max_infosets: Maximum infosets in shared arrays
+            initial_capacity: Initial capacity for infoset storage
             max_actions: Maximum actions per infoset
             checkpoint_dir: Optional checkpoint directory
         """
@@ -545,7 +545,7 @@ class SharedArrayWorkerManager:
         self.serialized_card_abstraction = serialized_card_abstraction
         self.session_id = session_id or str(uuid.uuid4())[:8]
         self.base_seed = base_seed
-        self.max_infosets = max_infosets
+        self.capacity = initial_capacity  # Current capacity (grows via resize)
         self.max_actions = max_actions
         self.checkpoint_dir = checkpoint_dir
 
@@ -562,13 +562,13 @@ class SharedArrayWorkerManager:
             num_workers=num_workers,
             worker_id=0,  # Coordinator uses worker_id 0 for ownership checks
             session_id=self.session_id,
-            max_infosets=max_infosets,
+            initial_capacity=initial_capacity,
             max_actions=max_actions,
             is_coordinator=True,  # Create shared memory
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
             ready_event=self.ready_event,  # Coordinator signals when memory is ready
         )
-        total_mb = max_infosets * max_actions * 4 * 2 // 1024 // 1024
+        total_mb = initial_capacity * max_actions * 4 * 2 // 1024 // 1024
         print(f"[Master] Shared memory created: {total_mb}MB total", flush=True)
 
         # Communication queues
@@ -609,7 +609,7 @@ class SharedArrayWorkerManager:
                     self.update_queues,
                     self.id_request_queues,
                     self.id_response_queues,
-                    self.max_infosets,
+                    self.capacity,
                     self.max_actions,
                     self.checkpoint_dir,
                     self.ready_event,  # Workers wait on this before attaching
@@ -702,13 +702,13 @@ class SharedArrayWorkerManager:
         if max_worker_capacity < self.storage.CAPACITY_THRESHOLD:
             return False
 
-        new_max = int(self.max_infosets * self.storage.GROWTH_FACTOR)
+        new_max = int(self.capacity * self.storage.GROWTH_FACTOR)
 
         if verbose:
             print(
                 "[Master] Storage resize triggered: "
                 f"worker at {max_worker_capacity:.1%} capacity, "
-                f"growing {self.max_infosets:,} -> {new_max:,}",
+                f"growing {self.capacity:,} -> {new_max:,}",
                 flush=True,
             )
 
@@ -716,7 +716,7 @@ class SharedArrayWorkerManager:
 
     def resize_storage(
         self,
-        new_max_infosets: int,
+        new_capacity: int,
         timeout: float = 120.0,
         verbose: bool = True,
     ) -> bool:
@@ -729,7 +729,7 @@ class SharedArrayWorkerManager:
         4. Waits for all workers to confirm
 
         Args:
-            new_max_infosets: New maximum number of infosets
+            new_capacity: New capacity for infoset storage
             timeout: Max wait time for worker responses
             verbose: Print progress messages
 
@@ -740,16 +740,16 @@ class SharedArrayWorkerManager:
 
         if verbose:
             print(
-                f"[Master] Resizing storage: {self.storage.max_infosets:,} -> {new_max_infosets:,}",
+                f"[Master] Resizing storage: {self.storage.capacity:,} -> {new_capacity:,}",
                 flush=True,
             )
 
         # Step 1: Coordinator resizes (creates new shared memory, copies data)
-        self.storage.resize(new_max_infosets)
+        self.storage.resize(new_capacity)
         new_session_id = self.storage.session_id
 
-        # Update our tracking of max_infosets
-        self.max_infosets = new_max_infosets
+        # Update our tracking of initial_capacity
+        self.capacity = new_capacity
 
         if verbose:
             print(
@@ -759,8 +759,8 @@ class SharedArrayWorkerManager:
             )
 
         # Step 2: Tell all workers to reattach
-        # Include old_max_infosets so workers can calculate additional slots
-        # old_max_infosets = self.storage.max_infosets  # This is now new_max after resize
+        # Include old_capacity so workers can calculate additional slots
+        # old_capacity = self.storage.capacity  # This is now new_capacity after resize
         # Actually we need to pass the old value, which we can compute from the difference
         # Since we just did 2x, old = new / 2
         for _ in range(self.num_workers):
@@ -768,7 +768,7 @@ class SharedArrayWorkerManager:
                 {
                     "type": JobType.RESIZE_STORAGE.value,
                     "new_session_id": new_session_id,
-                    "new_max_infosets": new_max_infosets,
+                    "new_capacity": new_capacity,
                 }
             )
 
@@ -796,7 +796,7 @@ class SharedArrayWorkerManager:
         if verbose:
             print(
                 f"[Master] Resize complete in {resize_time:.1f}s, "
-                f"new capacity: {new_max_infosets:,} infosets",
+                f"new capacity: {new_capacity:,} infosets",
                 flush=True,
             )
 
@@ -950,7 +950,7 @@ class SharedArrayWorkerManager:
             "num_infosets": total_owned,
             "max_worker_capacity": max_worker_capacity,
             "resized": resized,
-            "max_infosets": self.max_infosets,
+            "capacity": self.capacity,
             "interrupted": interrupted,
             "fallback_stats": fallback_stats,
         }
@@ -1020,7 +1020,7 @@ class SharedArrayWorkerManager:
                 raise RuntimeError(
                     f"Worker ID ranges overlap: worker {wid_a} [{start_a},{end_a}) "
                     f"and worker {wid_b} [{start_b},{end_b}). "
-                    "This will corrupt checkpoints; ensure consistent num_workers/max_infosets."
+                    "This will corrupt checkpoints; ensure consistent num_workers/initial_capacity."
                 )
 
         return {
