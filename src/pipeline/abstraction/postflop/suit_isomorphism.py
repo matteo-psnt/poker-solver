@@ -363,7 +363,7 @@ def count_canonical_boards(street_cards: int) -> int:
         raise ValueError(f"Invalid street_cards: {street_cards}")
 
 
-def count_canonical_hands_given_board(board_suit_count: int) -> int:
+def count_canonical_hands_given_board(_board_suit_count: int) -> int:
     """
     Count canonical hands given a board with a certain number of distinct suits.
 

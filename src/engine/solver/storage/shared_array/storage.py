@@ -172,7 +172,7 @@ class SharedArrayStorage(Storage):
     def __enter__(self) -> SharedArrayStorage:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, _exc_type, _exc, _tb) -> bool:
         self.cleanup()
         return False
 
