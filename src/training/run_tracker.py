@@ -4,11 +4,12 @@ Simple training run tracking.
 Just saves basic metadata per run - no complex registry or manifests.
 """
 
-import json
 import shutil
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
+
+from src.training.run_metadata import RunMetadata
+from src.utils.config import Config
 
 
 class RunTracker:
@@ -26,7 +27,7 @@ class RunTracker:
         self,
         run_dir: Path,
         config_name: str = "default",
-        config: Optional[Dict[str, Any]] = None,
+        config: Optional["Config"] = None,
     ):
         """
         Initialize run tracker.
@@ -34,7 +35,7 @@ class RunTracker:
         Args:
             run_dir: Directory for this run
             config_name: Name of config used
-            config: Full configuration dict
+            config: Configuration object
         """
         self.run_dir = Path(run_dir)
         self.run_id = self.run_dir.name
@@ -44,23 +45,17 @@ class RunTracker:
         # Load existing or prepare new metadata
         if self.metadata_file.exists():
             # Loading existing run
-            with open(self.metadata_file) as f:
-                self.metadata = json.load(f)
+            self.metadata = RunMetadata.load(self.metadata_file)
             self._initialized = True
         else:
             # New run
-            self.metadata = {
-                "run_id": self.run_id,
-                "config_name": config_name,
-                "started_at": datetime.now().isoformat(),
-                "resumed_at": None,
-                "completed_at": None,
-                "status": "running",
-                "iterations": 0,
-                "runtime_seconds": 0.0,
-                "num_infosets": 0,
-                "config": config or {},
-            }
+            if config is None:
+                raise ValueError("config is required to create a new run tracker")
+            self.metadata = RunMetadata.new(self.run_id, config_name, config)
+
+    @property
+    def metadata_path(self) -> Path:
+        return self.metadata_file
 
     def initialize(self):
         """Create run directory and initial metadata file.
@@ -78,32 +73,33 @@ class RunTracker:
         iterations: int,
         runtime_seconds: float,
         num_infosets: int,
+        storage_capacity: int,
     ):
         """Update training progress."""
         self.initialize()  # Ensure directory exists
-        self.metadata["iterations"] = iterations
-        self.metadata["runtime_seconds"] = runtime_seconds
-        self.metadata["num_infosets"] = num_infosets
+        self.metadata.update_progress(
+            iterations=iterations,
+            runtime_seconds=runtime_seconds,
+            num_infosets=num_infosets,
+            storage_capacity=storage_capacity,
+        )
         self._save()
 
     def mark_resumed(self):
         """Mark run as resumed (called when loading from checkpoint)."""
-        self.metadata["resumed_at"] = datetime.now().isoformat()
-        self.metadata["status"] = "running"
+        self.metadata.mark_resumed()
         self._save()
 
     def mark_completed(self):
         """Mark run as completed."""
         self.initialize()  # Ensure directory exists
-        self.metadata["status"] = "completed"
-        self.metadata["completed_at"] = datetime.now().isoformat()
+        self.metadata.mark_completed()
         self._save()
 
     def mark_interrupted(self):
         """Mark run as interrupted by user."""
         self.initialize()  # Ensure directory exists
-        self.metadata["status"] = "interrupted"
-        self.metadata["completed_at"] = datetime.now().isoformat()
+        self.metadata.mark_interrupted()
         self._save()
 
     def mark_failed(self, cleanup_if_empty: bool = True):
@@ -112,17 +108,16 @@ class RunTracker:
         Args:
             cleanup_if_empty: If True, deletes the run directory if no iterations completed
         """
-        if cleanup_if_empty and self.metadata.get("iterations", 0) == 0 and not self._initialized:
+        if cleanup_if_empty and self.metadata.iterations == 0 and not self._initialized:
             # Failed before any training - don't create directory at all
             return
 
         self.initialize()  # Ensure directory exists
-        self.metadata["status"] = "failed"
-        self.metadata["completed_at"] = datetime.now().isoformat()
+        self.metadata.mark_failed()
         self._save()
 
         # Optionally cleanup failed runs with no progress
-        if cleanup_if_empty and self.metadata.get("iterations", 0) == 0:
+        if cleanup_if_empty and self.metadata.iterations == 0:
             if self.run_dir.exists():
                 shutil.rmtree(self.run_dir)
 
@@ -131,14 +126,16 @@ class RunTracker:
         if not self._initialized:
             # Don't save until initialize() is called
             return
-        with open(self.metadata_file, "w") as f:
-            json.dump(self.metadata, f, indent=2)
+        self.metadata.save(self.metadata_file)
 
     @classmethod
     def load(cls, run_dir: Path) -> "RunTracker":
         """Load existing run tracker."""
-        tracker = cls(run_dir)
-        return tracker
+        run_path = Path(run_dir)
+        metadata_path = run_path / ".run.json"
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Run metadata not found: {metadata_path}")
+        return cls(run_path)
 
     @staticmethod
     def list_runs(base_dir: Path) -> list[str]:

@@ -8,7 +8,6 @@ Training uses parallel multiprocessing with hash-partitioned shared memory.
 """
 
 import concurrent.futures
-import json
 import multiprocessing as mp
 import pickle
 import time
@@ -18,8 +17,9 @@ from typing import Any, Dict, Optional, Union
 
 from tqdm import tqdm
 
+from src.evaluation.exploitability import compute_exploitability
+from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.helpers import CHECKPOINT_REQUIRED_FILES, get_missing_checkpoint_files
-from src.solver.storage.shared_array import SharedArrayStorage
 from src.training import components
 from src.training.metrics import MetricsTracker
 from src.training.parallel import SharedArrayWorkerManager
@@ -37,7 +37,12 @@ class TrainingSession:
     Training uses parallel multiprocessing with hash-partitioned shared memory.
     """
 
-    def __init__(self, config: Config, run_id: Optional[str] = None):
+    def __init__(
+        self,
+        config: Config,
+        run_id: Optional[str] = None,
+        run_tracker: Optional[RunTracker] = None,
+    ):
         """
         Initialize trainer from configuration.
 
@@ -47,21 +52,26 @@ class TrainingSession:
         """
         self.config = config
         self._fallback_stats: Optional[Dict[str, float]] = None
+        self._last_capacity: Optional[int] = None
 
         # Determine run directory
-        runs_base_dir = Path(self.config.training.runs_dir)
-        if run_id is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            run_id = f"run-{timestamp}"
+        if run_tracker is not None:
+            self.run_tracker = run_tracker
+            self.run_dir = run_tracker.run_dir
+        else:
+            runs_base_dir = Path(self.config.training.runs_dir)
+            if run_id is None:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                run_id = f"run-{timestamp}"
 
-        self.run_dir = runs_base_dir / run_id
+            self.run_dir = runs_base_dir / run_id
 
-        # Initialize run tracker
-        self.run_tracker = RunTracker(
-            run_dir=self.run_dir,
-            config_name=self.config.system.config_name,
-            config=config.to_dict(),
-        )
+            # Initialize run tracker
+            self.run_tracker = RunTracker(
+                run_dir=self.run_dir,
+                config_name=self.config.system.config_name,
+                config=config,
+            )
 
         # Build components using shared builders
         # These may fail and we don't want directories created if they do
@@ -73,7 +83,11 @@ class TrainingSession:
 
             # Storage needs the directory to exist
             self.run_dir.mkdir(parents=True, exist_ok=True)
-            self.storage = components.build_storage(config, run_dir=self.run_dir)
+            self.storage = components.build_storage(
+                config,
+                run_dir=self.run_dir,
+                run_metadata=self.run_tracker.metadata,
+            )
             self.solver = components.build_solver(
                 config, self.action_abstraction, self.card_abstraction, self.storage
             )
@@ -117,17 +131,14 @@ class TrainingSession:
             raise FileNotFoundError(f"Run directory not found: {run_path}")
 
         # Load run metadata
-        metadata_file = run_path / ".run.json"
-        if not metadata_file.exists():
-            raise FileNotFoundError(f"Run metadata not found: {metadata_file}")
-
-        with open(metadata_file) as f:
-            metadata = json.load(f)
+        run_tracker = RunTracker.load(run_path)
+        metadata = run_tracker.metadata
 
         # Find checkpoint to load
-        checkpoint_iter = (
-            checkpoint_id if checkpoint_id is not None else cls._find_latest_checkpoint(run_path)
-        )
+        if checkpoint_id is not None:
+            checkpoint_iter = checkpoint_id
+        else:
+            checkpoint_iter = metadata.iterations if metadata.iterations > 0 else None
 
         if checkpoint_iter is None:
             raise FileNotFoundError(f"No checkpoint found in {run_path}")
@@ -141,10 +152,12 @@ class TrainingSession:
             )
 
         # Reconstruct config from metadata
-        config = Config.from_dict(metadata.get("config", {}))
+        if metadata.config is None:
+            raise ValueError(f"Missing config in run metadata: {run_tracker.metadata_path}")
+        config = metadata.config
 
         # Create a new session instance with the same run_id
-        session = cls(config, run_id=run_path.name)
+        session = cls(config, run_id=run_path.name, run_tracker=run_tracker)
 
         # The storage should already have loaded the checkpoint data in its __init__
         # via _load_metadata(), but we need to verify it worked
@@ -163,34 +176,6 @@ class TrainingSession:
         print(f"✅ Resumed from checkpoint at iteration {checkpoint_iter}")
 
         return session
-
-    @staticmethod
-    def _find_latest_checkpoint(run_dir: Path) -> Optional[int]:
-        """
-        Find the latest checkpoint iteration in run directory.
-
-        Looks for checkpoint artifacts and returns the most recent checkpoint iteration.
-        Uses the iteration count from metadata (only advanced on checkpoint).
-
-        Args:
-            run_dir: Path to run directory
-
-        Returns:
-            Latest checkpoint iteration number, or None if no checkpoint found
-        """
-        metadata_file = run_dir / ".run.json"
-        if not metadata_file.exists():
-            return None
-
-        try:
-            with open(metadata_file) as f:
-                metadata = json.load(f)
-
-            iterations = metadata.get("iterations", 0)
-            return iterations if iterations > 0 else None
-        except Exception:
-            return None
-            raise
 
     def _async_checkpoint(
         self,
@@ -250,6 +235,7 @@ class TrainingSession:
             iterations=iteration,
             runtime_seconds=elapsed_time,
             num_infosets=total_infosets,
+            storage_capacity=worker_manager.capacity,
         )
         checkpoint_time = time.time() - start
         if self.verbose:
@@ -298,19 +284,16 @@ class TrainingSession:
         if batch_size is None:
             batch_size = self.config.training.iterations_per_worker * num_workers
 
-        # Determine initial capacity: use checkpoint's capacity if resuming, else config
+        # Determine initial capacity: use run metadata if resuming, else config
         initial_capacity = self.config.storage.initial_capacity
-        if self.run_dir and self.run_dir.exists():
-            checkpoint_info = SharedArrayStorage.get_checkpoint_info(self.run_dir)
-            if checkpoint_info and checkpoint_info.get("capacity"):
-                checkpoint_capacity = checkpoint_info["capacity"]
-                # When resuming, always use checkpoint's capacity (it may have grown)
-                if checkpoint_capacity != initial_capacity:
-                    print(
-                        f"[Resume] Using checkpoint capacity {checkpoint_capacity:,} "
-                        f"(config initial_capacity={initial_capacity:,})"
-                    )
-                initial_capacity = checkpoint_capacity
+        stored_capacity = self.run_tracker.metadata.storage_capacity
+        if stored_capacity:
+            if stored_capacity != initial_capacity:
+                print(
+                    f"[Resume] Using stored capacity {stored_capacity:,} "
+                    f"(config initial_capacity={initial_capacity:,})"
+                )
+            initial_capacity = stored_capacity
 
         return {
             "batch_size": batch_size,
@@ -348,6 +331,7 @@ class TrainingSession:
         checkpoint_enabled: bool,
         verbose: bool,
         training_start_time: float,
+        start_iteration: int,
     ) -> tuple[int, int, bool]:
         """
         Execute the main training loop with batching and checkpointing.
@@ -387,7 +371,7 @@ class TrainingSession:
                 batch_result = worker_manager.run_batch(
                     iterations_per_worker=iterations_per_worker,
                     batch_id=batch_idx,
-                    start_iteration=completed_iterations,
+                    start_iteration=start_iteration + completed_iterations,
                     verbose=verbose,
                 )
 
@@ -395,6 +379,7 @@ class TrainingSession:
                 completed_iterations += len(batch_utilities)
                 total_infosets = batch_result.get("num_infosets", 0)
                 max_worker_capacity = batch_result.get("max_worker_capacity", 0.0)
+                self._last_capacity = batch_result.get("capacity", self._last_capacity)
                 if "fallback_stats" in batch_result:
                     self._fallback_stats = batch_result["fallback_stats"]
                 if batch_result.get("interrupted"):
@@ -407,7 +392,7 @@ class TrainingSession:
                     worker_manager.apply_pending_updates(verbose=verbose)
 
                 for i, util in enumerate(batch_utilities):
-                    iter_num = completed_iterations - len(batch_utilities) + i + 1
+                    iter_num = start_iteration + completed_iterations - len(batch_utilities) + i + 1
                     self.metrics.log_iteration(
                         iteration=iter_num,
                         utility=util,
@@ -419,7 +404,7 @@ class TrainingSession:
                 if verbose and isinstance(batch_iterator, tqdm):
                     compact_summary = self.metrics.get_compact_summary()
                     batch_iterator.set_postfix_str(
-                        f"iter={completed_iterations} infosets={total_infosets} "
+                        f"iter={start_iteration + completed_iterations} infosets={total_infosets} "
                         f"cap={max_worker_capacity:.0%} | {compact_summary}"
                     )
 
@@ -427,7 +412,7 @@ class TrainingSession:
                 if checkpoint_enabled and completed_iterations % checkpoint_freq < batch_size:
                     self._async_checkpoint(
                         worker_manager=worker_manager,
-                        iteration=completed_iterations,
+                        iteration=start_iteration + completed_iterations,
                         total_infosets=total_infosets,
                         training_start_time=training_start_time,
                     )
@@ -444,7 +429,7 @@ class TrainingSession:
                 print("[Master] Saving checkpoint...", flush=True)
             self._async_checkpoint(
                 worker_manager=worker_manager,
-                iteration=completed_iterations,
+                iteration=start_iteration + completed_iterations,
                 total_infosets=total_infosets,
                 training_start_time=training_start_time,
             )
@@ -459,29 +444,37 @@ class TrainingSession:
         verbose: bool,
         interrupted: bool,
         checkpoint_enabled: bool,
+        start_iteration: int,
     ) -> None:
         """Update trackers and print final training summary."""
+        total_iterations = start_iteration + completed_iterations
+        storage_capacity = (
+            self._last_capacity
+            if self._last_capacity is not None
+            else self.config.storage.initial_capacity
+        )
         if interrupted:
             self.run_tracker.mark_interrupted()
             if verbose:
                 print("🟡 Training interrupted")
         else:
-            if not checkpoint_enabled:
-                self.run_tracker.update(
-                    iterations=completed_iterations,
-                    runtime_seconds=elapsed_time,
-                    num_infosets=total_infosets,
-                )
             self.run_tracker.mark_completed()
             if verbose:
                 print("✅ Shared Array Training complete!")
 
+        self.run_tracker.update(
+            iterations=total_iterations,
+            runtime_seconds=elapsed_time,
+            num_infosets=total_infosets,
+            storage_capacity=storage_capacity,
+        )
+
         if verbose:
-            print(f"   Iterations: {completed_iterations}")
+            print(f"   Iterations: {total_iterations}")
             print(f"   Infosets: {total_infosets:,}")
             print(f"   Time: {elapsed_time:.1f}s")
-            if completed_iterations > 0:
-                print(f"   Speed: {completed_iterations / elapsed_time:.2f} iter/s")
+            if total_iterations > 0:
+                print(f"   Speed: {total_iterations / elapsed_time:.2f} iter/s")
         if self._fallback_stats:
             total_lookups = int(self._fallback_stats.get("total_lookups", 0))
             fallback_count = int(self._fallback_stats.get("fallback_count", 0))
@@ -535,8 +528,10 @@ class TrainingSession:
             )
 
         training_start_time = time.time()
+        start_iteration = self.solver.iteration
         completed_iterations = 0
         total_infosets = 0
+        self._last_capacity = initial_capacity
 
         # Serialize abstractions
         serialized_action_abstraction = pickle.dumps(self.solver.action_abstraction)
@@ -577,10 +572,12 @@ class TrainingSession:
                     checkpoint_enabled=checkpoint_enabled,
                     verbose=verbose,
                     training_start_time=training_start_time,
+                    start_iteration=start_iteration,
                 )
             finally:
                 self._wait_for_checkpoint()
                 elapsed_time = time.time() - training_start_time
+                self.solver.iteration = start_iteration + completed_iterations
                 self._finalize_training(
                     completed_iterations,
                     total_infosets,
@@ -588,6 +585,7 @@ class TrainingSession:
                     verbose,
                     interrupted,
                     checkpoint_enabled,
+                    start_iteration,
                 )
 
         return {
@@ -651,8 +649,6 @@ class TrainingSession:
         Returns:
             Evaluation metrics including exploitability estimates
         """
-        from src.evaluation.exploitability import compute_exploitability
-        from src.solver.mccfr import MCCFRSolver
 
         # Cast to MCCFRSolver for type checking
         if not isinstance(self.solver, MCCFRSolver):

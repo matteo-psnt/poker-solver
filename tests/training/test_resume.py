@@ -5,6 +5,7 @@ Verifies that resuming from checkpoints correctly restores solver state,
 storage mappings, and iteration counters.
 """
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -124,7 +125,10 @@ def test_resume_no_checkpoint(temp_run_dir):
     """Test that resume fails if no checkpoint exists."""
     # Create run directory but no checkpoint files
     temp_run_dir.mkdir(parents=True, exist_ok=True)
-    (temp_run_dir / ".run.json").write_text('{"run_id": "test", "iterations": 0}')
+    config = Config.default().to_dict()
+    (temp_run_dir / ".run.json").write_text(
+        json.dumps({"run_id": "test", "iterations": 0, "config": config})
+    )
 
     with pytest.raises(FileNotFoundError, match="No checkpoint found"):
         TrainingSession.resume(temp_run_dir)
@@ -155,9 +159,9 @@ def test_resume_metadata_tracking(test_config, temp_run_dir):
 
     # Check metadata was updated
     metadata = session2.run_tracker.metadata
-    assert metadata["resumed_at"] is not None, "resumed_at should be set"
-    assert metadata["started_at"] is not None, "started_at should still be set"
-    assert metadata["status"] == "running", "Status should be 'running' after resume"
+    assert metadata.resumed_at is not None, "resumed_at should be set"
+    assert metadata.started_at is not None, "started_at should still be set"
+    assert metadata.status == "running", "Status should be 'running' after resume"
 
 
 if __name__ == "__main__":

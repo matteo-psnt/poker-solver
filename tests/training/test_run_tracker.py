@@ -3,6 +3,7 @@
 import json
 
 from src.training.run_tracker import RunTracker
+from src.utils.config import Config
 
 
 class TestRunTracker:
@@ -11,7 +12,7 @@ class TestRunTracker:
     def test_create_new_tracker(self, tmp_path):
         """Test creating a new run tracker."""
         run_dir = tmp_path / "run-test"
-        config = {"game": {"starting_stack": 200}}
+        config = Config.default()
 
         tracker = RunTracker(
             run_dir=run_dir,
@@ -20,9 +21,9 @@ class TestRunTracker:
         )
 
         assert tracker.run_id == "run-test"
-        assert tracker.metadata["config_name"] == "test"
-        assert tracker.metadata["status"] == "running"
-        assert tracker.metadata["iterations"] == 0
+        assert tracker.metadata.config_name == "test"
+        assert tracker.metadata.status == "running"
+        assert tracker.metadata.iterations == 0
 
         # File should NOT exist yet (delayed creation)
         metadata_file = run_dir / ".run.json"
@@ -45,7 +46,7 @@ class TestRunTracker:
             "iterations": 100,
             "runtime_seconds": 10.5,
             "num_infosets": 1000,
-            "config": {},
+            "config": Config.default().to_dict(),
         }
 
         metadata_file = run_dir / ".run.json"
@@ -56,55 +57,56 @@ class TestRunTracker:
         tracker = RunTracker.load(run_dir)
 
         assert tracker.run_id == "run-existing"
-        assert tracker.metadata["status"] == "completed"
-        assert tracker.metadata["iterations"] == 100
+        assert tracker.metadata.status == "completed"
+        assert tracker.metadata.iterations == 100
 
     def test_update_progress(self, tmp_path):
         """Test updating training progress."""
         run_dir = tmp_path / "run-update"
-        tracker = RunTracker(run_dir=run_dir, config_name="test")
+        tracker = RunTracker(run_dir=run_dir, config_name="test", config=Config.default())
 
         tracker.update(
             iterations=50,
             runtime_seconds=5.0,
             num_infosets=500,
+            storage_capacity=2000,
         )
 
-        assert tracker.metadata["iterations"] == 50
-        assert tracker.metadata["runtime_seconds"] == 5.0
-        assert tracker.metadata["num_infosets"] == 500
+        assert tracker.metadata.iterations == 50
+        assert tracker.metadata.runtime_seconds == 5.0
+        assert tracker.metadata.num_infosets == 500
 
         # Verify persistence
         tracker2 = RunTracker.load(run_dir)
-        assert tracker2.metadata["iterations"] == 50
+        assert tracker2.metadata.iterations == 50
 
     def test_mark_completed(self, tmp_path):
         """Test marking run as completed."""
         run_dir = tmp_path / "run-complete"
-        tracker = RunTracker(run_dir=run_dir, config_name="test")
+        tracker = RunTracker(run_dir=run_dir, config_name="test", config=Config.default())
 
         tracker.mark_completed()
 
-        assert tracker.metadata["status"] == "completed"
-        assert tracker.metadata["completed_at"] is not None
+        assert tracker.metadata.status == "completed"
+        assert tracker.metadata.completed_at is not None
 
     def test_mark_failed(self, tmp_path):
         """Test marking run as failed."""
         run_dir = tmp_path / "run-failed"
-        tracker = RunTracker(run_dir=run_dir, config_name="test")
+        tracker = RunTracker(run_dir=run_dir, config_name="test", config=Config.default())
 
         # Mark as failed with no iterations - should NOT create directory
         tracker.mark_failed(cleanup_if_empty=True)
         assert not run_dir.exists()
 
         # Create a new tracker and do some work
-        tracker2 = RunTracker(run_dir=run_dir, config_name="test")
-        tracker2.update(iterations=5, runtime_seconds=1.0, num_infosets=100)
+        tracker2 = RunTracker(run_dir=run_dir, config_name="test", config=Config.default())
+        tracker2.update(iterations=5, runtime_seconds=1.0, num_infosets=100, storage_capacity=2000)
 
         # Now mark as failed - should keep directory since iterations > 0
         tracker2.mark_failed(cleanup_if_empty=True)
-        assert tracker2.metadata["status"] == "failed"
-        assert tracker2.metadata["completed_at"] is not None
+        assert tracker2.metadata.status == "failed"
+        assert tracker2.metadata.completed_at is not None
         assert run_dir.exists()  # Should still exist since iterations > 0
 
     def test_list_runs(self, tmp_path):

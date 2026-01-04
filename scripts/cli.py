@@ -36,7 +36,6 @@ from src.training.components import (
 )
 from src.training.run_tracker import RunTracker
 from src.training.trainer import TrainingSession
-from src.utils.config import Config
 
 # Custom style
 custom_style = Style(
@@ -161,12 +160,7 @@ class SolverCLI:
         tracker = RunTracker.load(run_dir)
         meta = tracker.metadata
 
-        if not meta.get("config"):
-            print("\n[ERROR] No config found for this run")
-            input("Press Enter to continue...")
-            return
-
-        config = Config.from_dict(meta["config"])
+        config = meta.config
 
         num_samples_text = questionary.text(
             "Num samples:",
@@ -271,21 +265,21 @@ class SolverCLI:
 
         print(f"\nRun: {selected}")
         print("-" * 60)
-        print(f"Status: {meta.get('status', 'unknown')}")
-        print(f"Started: {meta.get('started_at', 'N/A')}")
-        if meta.get("completed_at"):
-            print(f"Completed: {meta['completed_at']}")
+        print(f"Status: {meta.status or 'unknown'}")
+        print(f"Started: {meta.started_at or 'N/A'}")
+        if meta.completed_at:
+            print(f"Completed: {meta.completed_at}")
 
         print("\nStatistics:")
-        print(f"  Iterations: {meta.get('iterations', 0)}")
-        runtime = meta.get("runtime_seconds", 0)
+        print(f"  Iterations: {meta.iterations}")
+        runtime = meta.runtime_seconds
         print(f"  Runtime: {runtime:.2f}s ({runtime / 60:.1f}m)")
-        if runtime > 0 and meta.get("iterations", 0) > 0:
-            print(f"  Speed: {meta['iterations'] / runtime:.2f} it/s")
-        print(f"  Infosets: {meta.get('num_infosets', 0):,}")
+        if runtime > 0 and meta.iterations > 0:
+            print(f"  Speed: {meta.iterations / runtime:.2f} it/s")
+        print(f"  Infosets: {meta.num_infosets:,}")
 
         # Show config
-        print(f"\nConfig: {meta.get('config_name', 'unknown')}")
+        print(f"\nConfig: {meta.config_name or 'unknown'}")
 
         input("\nPress Enter to continue...")
 
@@ -314,18 +308,10 @@ class SolverCLI:
         tracker = RunTracker.load(run_dir)
         meta = tracker.metadata
 
-        if not meta.get("config"):
-            print("\n[ERROR] No config found for this run")
-            input("Press Enter to continue...")
-            return
-
-        config_dict = meta["config"]
-        config = Config.from_dict(config_dict)
-
-        latest_iter = meta.get("iterations", 0)
+        latest_iter = meta.iterations
         if latest_iter > 0:
             print(f"\nLatest checkpoint: iteration {latest_iter}")
-            print(f"Infosets: {meta.get('num_infosets', 0):,}")
+            print(f"Infosets: {meta.num_infosets:,}")
 
         add_iters = questionary.text(
             "Additional iterations to run:",
@@ -336,11 +322,19 @@ class SolverCLI:
         if add_iters is None:
             return
 
-        total_iters = latest_iter + int(add_iters)
-        config = config.merge({"training": {"num_iterations": total_iters}})
+        try:
+            additional_iters = int(add_iters)
+            if additional_iters < 1:
+                print("[ERROR] Additional iterations must be at least 1")
+                input("Press Enter to continue...")
+                return
+        except ValueError:
+            print("[ERROR] Invalid number")
+            input("Press Enter to continue...")
+            return
 
         try:
-            self.current_trainer = handle_resume(config, selected, latest_iter)
+            self.current_trainer = handle_resume(run_dir, latest_iter, additional_iters)
         finally:
             self.current_trainer = None
 

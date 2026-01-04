@@ -567,6 +567,7 @@ class SharedArrayWorkerManager:
             is_coordinator=True,  # Create shared memory
             checkpoint_dir=Path(checkpoint_dir) if checkpoint_dir else None,
             ready_event=self.ready_event,  # Coordinator signals when memory is ready
+            load_checkpoint_on_init=False,
         )
         total_mb = initial_capacity * max_actions * 4 * 2 // 1024 // 1024
         print(f"[Master] Shared memory created: {total_mb}MB total", flush=True)

@@ -313,13 +313,13 @@ Iteration 1000/10000 [===>    ] 10.0%
 
 **RunTracker:**
 ```python
-RunTracker(run_dir: Path, config_name: str, config: dict)
+RunTracker(run_dir: Path, config_name: str, config: Config)
     # Initialize tracker for a run
 
 initialize()
     # Create run directory and .run.json file
 
-update(iterations, runtime_seconds, num_infosets)
+update(iterations, runtime_seconds, num_infosets, storage_capacity)
     # Update progress metadata
 
 mark_completed()

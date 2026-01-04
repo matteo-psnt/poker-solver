@@ -1,3 +1,4 @@
+import math
 import pickle
 import time
 from multiprocessing import shared_memory
@@ -78,6 +79,7 @@ class SharedArrayStorage(Storage):
         checkpoint_dir: Optional[Path] = None,
         action_config_hash: Optional[str] = None,
         ready_event: Optional["EventType"] = None,
+        load_checkpoint_on_init: bool = True,
     ):
         """
         Initialize shared array storage.
@@ -98,6 +100,7 @@ class SharedArrayStorage(Storage):
                         - Coordinator sets it after creating shared memory
                         - Workers wait for it before attempting to attach
                         This eliminates race conditions during parallel startup.
+            load_checkpoint_on_init: If True, load checkpoint data during initialization.
         """
         self.num_workers = num_workers
         self.worker_id = worker_id
@@ -159,11 +162,12 @@ class SharedArrayStorage(Storage):
         # Initialize shared memory
         if is_coordinator:
             self._create_shared_memory()
-            # Load checkpoint if available (only coordinator loads)
-            if checkpoint_dir:
-                self.load_checkpoint()
         else:
             self._attach_shared_memory()
+
+        # Load checkpoint if available (each worker loads its owned keys)
+        if checkpoint_dir and load_checkpoint_on_init:
+            self.load_checkpoint()
 
     # =========================================================================
     # Stable Hashing (replaces Python hash())
@@ -1134,11 +1138,31 @@ class SharedArrayStorage(Storage):
         with open(key_mapping_file, "rb") as f:
             mapping_data = pickle.load(f)
 
+        num_infosets = len(mapping_data.get("owned_keys", {}))
+        max_id = mapping_data.get("max_id")
+        if max_id is None:
+            max_id = num_infosets
+
+        capacity = mapping_data.get("capacity")
+        if capacity is None or capacity <= 0:
+            # Older checkpoints may not persist capacity; infer with headroom.
+            min_capacity = max_id + 1  # Reserve slot 0.
+            if max_id > 0:
+                threshold_capacity = (
+                    int(math.ceil(max_id / SharedArrayStorage.CAPACITY_THRESHOLD)) + 1
+                )
+            else:
+                threshold_capacity = 1
+            capacity = max(min_capacity, threshold_capacity)
+        elif capacity < max_id + 1:
+            # Defensive: ensure capacity can hold all stored infosets.
+            capacity = max_id + 1
+
         return {
-            "num_infosets": len(mapping_data.get("owned_keys", {})),
-            "capacity": mapping_data.get("capacity"),
+            "num_infosets": num_infosets,
+            "capacity": capacity,
             "num_workers": mapping_data.get("num_workers"),
-            "max_id": mapping_data.get("max_id"),
+            "max_id": max_id,
             "action_config_hash": mapping_data.get("action_config_hash"),
         }
 
