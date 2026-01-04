@@ -4,15 +4,17 @@ import hashlib
 import json
 import multiprocessing as mp
 import random
-import subprocess
 from collections import Counter, defaultdict
 from pathlib import Path
 
-import questionary
 from questionary import Choice
 
 from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop import PostflopPrecomputer
+from src.bucketing.postflop.hand_bucketing import PostflopBucketer
+from src.cli.ui import prompts
+from src.cli.ui.context import CliContext
+from src.cli.ui.menu import MenuItem, run_menu
 from src.game.state import Card, Street
 
 
@@ -39,9 +41,9 @@ def _get_config_name_from_metadata(metadata: dict) -> str:
     return metadata.get("config_name", "unknown")
 
 
-def _list_available_configs() -> list:
+def _list_available_configs(ctx: CliContext) -> list:
     """List all available abstraction config files."""
-    config_dir = Path(__file__).parent.parent.parent / "config" / "abstraction"
+    config_dir = ctx.base_dir / "config" / "abstraction"
     configs = []
 
     if config_dir.exists():
@@ -52,13 +54,31 @@ def _list_available_configs() -> list:
     return configs
 
 
-def _get_config_choice() -> tuple:
+def combo_menu(ctx: CliContext) -> None:
+    """Show combo abstraction tools submenu."""
+    items = [
+        MenuItem("Precompute Abstraction", handle_combo_precompute),
+        MenuItem("View Abstraction Info", handle_combo_info),
+        MenuItem("Test Bucket Lookup", handle_combo_test_lookup),
+        MenuItem("Analyze Bucketing Patterns", handle_combo_analyze_bucketing),
+        MenuItem("Analyze Coverage (Fallback Rate)", handle_combo_coverage),
+    ]
+
+    run_menu(ctx, "Combo Abstraction Tools:", items, exit_label="Back")
+
+
+def combo_abstraction_menu(ctx: CliContext) -> None:
+    """Backward-compatible alias for the combo menu."""
+    combo_menu(ctx)
+
+
+def _get_config_choice(ctx: CliContext) -> tuple:
     """Prompt user for configuration choice.
 
     Returns:
         (config_name, PrecomputeConfig) or (None, None) if cancelled
     """
-    available_configs = _list_available_configs()
+    available_configs = _list_available_configs(ctx)
 
     if not available_configs:
         print("\nNo configuration files found in config/abstraction/")
@@ -68,10 +88,11 @@ def _get_config_choice() -> tuple:
     # Show available configs
     choices = [f"{name}.yaml" for name in available_configs]
 
-    choice = questionary.select(
+    choice = prompts.select(
+        ctx,
         "Select abstraction configuration:",
         choices=choices,
-    ).ask()
+    )
 
     if choice is None:
         return None, None
@@ -169,7 +190,7 @@ def _estimate_time(config: PrecomputeConfig) -> None:
     print()
 
 
-def _get_output_path(config_name: str, config: PrecomputeConfig) -> Path:
+def _get_output_path(base_dir: Path, config_name: str, config: PrecomputeConfig) -> Path:
     """Generate deterministic output path based on config.
 
     Args:
@@ -179,7 +200,7 @@ def _get_output_path(config_name: str, config: PrecomputeConfig) -> Path:
     Returns:
         Path for saving abstraction
     """
-    base_path = Path("data") / "combo_abstraction"
+    base_path = base_dir / "data" / "combo_abstraction"
 
     # Create deterministic hash from config parameters
     config_str = f"{config.num_board_clusters}{config.representatives_per_cluster}{config.num_buckets}{config.equity_samples}{config.seed}"
@@ -195,7 +216,7 @@ def _get_output_path(config_name: str, config: PrecomputeConfig) -> Path:
     return base_path / dirname
 
 
-def handle_combo_precompute() -> None:
+def handle_combo_precompute(ctx: CliContext) -> None:
     """Handle combo-level abstraction precomputation.
 
     This is the CLI entry point for generating correct, combo-level
@@ -209,22 +230,23 @@ def handle_combo_precompute() -> None:
     print()
 
     # Step 1: Get configuration from YAML
-    config_name, config = _get_config_choice()
+    config_name, config = _get_config_choice(ctx)
     if config is None:
         print("Cancelled.")
         return
 
     # Step 2: Check if abstraction already exists
-    output_path = _get_output_path(config_name, config)
+    output_path = _get_output_path(ctx.base_dir, config_name, config)
 
     if output_path.exists() and (output_path / "combo_abstraction.pkl").exists():
         print(f"\n[!] Abstraction already exists: {output_path}")
         print("\nThis configuration has already been precomputed.")
 
-        overwrite = questionary.confirm(
+        overwrite = prompts.confirm(
+            ctx,
             "Do you want to recompute anyway (this will overwrite)?",
             default=False,
-        ).ask()
+        )
 
         if not overwrite:
             print("\nSkipping recomputation. Using existing abstraction.")
@@ -259,10 +281,11 @@ def handle_combo_precompute() -> None:
     print(f"Output: {output_path}")
     print("=" * 60)
 
-    confirm = questionary.confirm(
+    confirm = prompts.confirm(
+        ctx,
         "Start precomputation?",
         default=False,
-    ).ask()
+    )
 
     if not confirm:
         print("Cancelled.")
@@ -298,7 +321,7 @@ def handle_combo_precompute() -> None:
         raise
 
 
-def handle_combo_info() -> None:
+def handle_combo_info(ctx: CliContext) -> None:
     """
     Show detailed information about existing combo abstractions.
     """
@@ -308,7 +331,7 @@ def handle_combo_info() -> None:
     print("=" * 60)
 
     # Look for existing abstractions
-    base_path = Path("data/combo_abstraction")
+    base_path = ctx.base_dir / "data" / "combo_abstraction"
 
     if not base_path.exists():
         print("\nNo combo abstractions found.")
@@ -369,16 +392,17 @@ def handle_combo_info() -> None:
 
     # Interactive selection for detailed view
     if len(abstractions) > 0:
-        view_details = questionary.confirm(
+        view_details = prompts.confirm(
+            ctx,
             "View detailed info for a specific abstraction?",
             default=False,
-        ).ask()
+        )
 
         if view_details:
-            _show_detailed_info(abstractions)
+            _show_detailed_info(ctx, abstractions)
 
 
-def _show_detailed_info(abstractions: list) -> None:
+def _show_detailed_info(ctx: CliContext, abstractions: list) -> None:
     """
     Show detailed info for a selected abstraction including bucket distribution.
     """
@@ -390,10 +414,11 @@ def _show_detailed_info(abstractions: list) -> None:
 
     choices.append("Back")
 
-    choice = questionary.select(
+    choice = prompts.select(
+        ctx,
         "Select abstraction for detailed view:",
         choices=choices,
-    ).ask()
+    )
 
     if choice is None or choice == "Back":
         return
@@ -452,14 +477,14 @@ def _show_detailed_info(abstractions: list) -> None:
             break
 
 
-def _select_abstraction() -> tuple:
+def _select_abstraction(ctx: CliContext) -> tuple:
     """
     Prompt user to select an existing abstraction.
 
     Returns:
         (path, metadata) or (None, None) if cancelled or none found
     """
-    base_path = Path("data/combo_abstraction")
+    base_path = ctx.base_dir / "data" / "combo_abstraction"
 
     if not base_path.exists():
         print("\nNo combo abstractions found.")
@@ -486,10 +511,11 @@ def _select_abstraction() -> tuple:
 
     choices.append("Cancel")
 
-    choice = questionary.select(
+    choice = prompts.select(
+        ctx,
         "Select abstraction to examine:",
         choices=choices,
-    ).ask()
+    )
 
     if choice is None or choice == "Cancel":
         return None, None
@@ -503,7 +529,7 @@ def _select_abstraction() -> tuple:
     return None, None
 
 
-def handle_combo_test_lookup() -> None:
+def handle_combo_test_lookup(ctx: CliContext) -> None:
     """
     Interactively test bucket lookups for specific hands/boards.
     """
@@ -513,14 +539,14 @@ def handle_combo_test_lookup() -> None:
     print("=" * 60)
 
     # Select abstraction
-    abstraction_path, metadata = _select_abstraction()
+    abstraction_path, metadata = _select_abstraction(ctx)
     if abstraction_path is None:
         return
 
     print(f"\nLoading abstraction from {abstraction_path.name}...")
 
     try:
-        abstraction = PostflopPrecomputer.load(abstraction_path)
+        abstraction: PostflopBucketer = PostflopPrecomputer.load(abstraction_path)
         print("✓ Loaded successfully")
     except Exception as e:
         print(f"✗ Failed to load: {e}")
@@ -531,10 +557,11 @@ def handle_combo_test_lookup() -> None:
         print("\n" + "-" * 60)
 
         # Get street
-        street_choice = questionary.select(
+        street_choice = prompts.select(
+            ctx,
             "Select street:",
             choices=["FLOP", "TURN", "RIVER", "Back"],
-        ).ask()
+        )
 
         if street_choice is None or street_choice == "Back":
             break
@@ -543,10 +570,11 @@ def handle_combo_test_lookup() -> None:
 
         # Get hole cards
         print("\nEnter hole cards (e.g., AsKh):")
-        hole_input = questionary.text(
+        hole_input = prompts.text(
+            ctx,
             "Hole cards:",
             default="AsKh",
-        ).ask()
+        )
 
         if hole_input is None:
             continue
@@ -560,10 +588,11 @@ def handle_combo_test_lookup() -> None:
             board_example = "QsJhTc9d2h"
 
         print(f"\nEnter board (e.g., {board_example}):")
-        board_input = questionary.text(
+        board_input = prompts.text(
+            ctx,
             "Board:",
             default=board_example,
-        ).ask()
+        )
 
         if board_input is None:
             continue
@@ -583,10 +612,11 @@ def handle_combo_test_lookup() -> None:
             print(f"  (out of {abstraction.num_buckets(street)} buckets on {street.name})")
 
             # Test isomorphic board
-            iso_board_input = questionary.text(
+            iso_board_input = prompts.text(
+                ctx,
                 "\nOptional: Enter isomorphic board to verify same bucket:",
                 default="",
-            ).ask()
+            )
 
             if iso_board_input:
                 expected_board_cards = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}[street]
@@ -637,7 +667,7 @@ def _parse_cards(card_str: str, expected: int) -> list:
     return cards
 
 
-def handle_combo_validate() -> None:
+def handle_combo_validate(ctx: CliContext) -> None:
     """
     Run comprehensive validation tests on an abstraction.
     """
@@ -647,7 +677,7 @@ def handle_combo_validate() -> None:
     print("=" * 60)
 
     # Select abstraction
-    abstraction_path, metadata = _select_abstraction()
+    abstraction_path, metadata = _select_abstraction(ctx)
     if abstraction_path is None:
         return
 
@@ -660,40 +690,72 @@ def handle_combo_validate() -> None:
     print("  - Bucket distribution")
     print()
 
-    confirm = questionary.confirm(
+    confirm = prompts.confirm(
+        ctx,
         "Run validation?",
         default=True,
-    ).ask()
+    )
 
     if not confirm:
         return
 
-    # Run validation script
-    script_path = Path(__file__).parent.parent.parent / "scripts" / "validate_abstraction.py"
-
-    if not script_path.exists():
-        print(f"\n✗ Validation script not found: {script_path}")
+    try:
+        abstraction = PostflopPrecomputer.load(abstraction_path)
+    except Exception as e:
+        print(f"\n✗ Error loading abstraction: {e}")
         return
 
-    try:
-        # Run with uv
-        result = subprocess.run(
-            ["uv", "run", "python", str(script_path)],
-            cwd=script_path.parent.parent,
-            capture_output=False,
-            text=True,
-        )
-
-        if result.returncode == 0:
-            print("\n✓ Validation complete!")
-        else:
-            print(f"\n✗ Validation failed with exit code {result.returncode}")
-
-    except Exception as e:
-        print(f"\n✗ Error running validation: {e}")
+    _run_basic_validation(abstraction)
 
 
-def handle_combo_coverage() -> None:
+def _run_basic_validation(abstraction: PostflopBucketer, num_samples: int = 100) -> None:
+    """Run quick sanity checks for an abstraction."""
+    print("\nRunning basic validation...")
+    print("  - Load abstraction")
+    print("  - Random bucket lookups")
+    print("  - Bucket range checks")
+
+    ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
+    suits = ["h", "d", "c", "s"]
+    all_cards = [r + s for r in ranks for s in suits]
+
+    total_checks = 0
+    failures = 0
+
+    for street in [Street.FLOP, Street.TURN, Street.RIVER]:
+        num_buckets = abstraction.num_buckets(street)
+        if num_buckets <= 0:
+            print(f"\n✗ Invalid bucket count on {street.name}: {num_buckets}")
+            failures += 1
+            continue
+
+        expected_board_cards = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}[street]
+        for _ in range(num_samples):
+            total_checks += 1
+            try:
+                sampled = random.sample(all_cards, 2 + expected_board_cards)
+                hole_str = sampled[:2]
+                board_str = sampled[2:]
+
+                hole_cards = tuple([Card.new(c) for c in hole_str])
+                board_cards = tuple([Card.new(c) for c in board_str])
+
+                hole_cards_pair: tuple[Card, Card] = (hole_cards[0], hole_cards[1])
+                bucket = abstraction.get_bucket(hole_cards_pair, board_cards, street)
+                if bucket < 0 or bucket >= num_buckets:
+                    raise ValueError(f"Bucket {bucket} out of range (0..{num_buckets - 1})")
+            except Exception as exc:
+                failures += 1
+                if failures == 1:
+                    print(f"\n  [DEBUG] First error on {street.name}: {exc}")
+
+    if failures == 0:
+        print(f"\n✓ Validation complete! ({total_checks} checks)")
+    else:
+        print(f"\n✗ Validation failed with {failures} error(s) out of {total_checks} checks")
+
+
+def handle_combo_coverage(ctx: CliContext) -> None:
     """
     Analyze abstraction coverage - how often lookups need fallback.
     """
@@ -703,7 +765,7 @@ def handle_combo_coverage() -> None:
     print("=" * 60)
 
     # Select abstraction
-    abstraction_path, metadata = _select_abstraction()
+    abstraction_path, metadata = _select_abstraction(ctx)
     if abstraction_path is None:
         return
 
@@ -717,14 +779,15 @@ def handle_combo_coverage() -> None:
         return
 
     # Select streets to analyze
-    street_choices = questionary.checkbox(
+    street_choices = prompts.checkbox(
+        ctx,
         "Select streets to analyze:",
         choices=[
             Choice("FLOP", checked=True),
             Choice("TURN", checked=True),
             Choice("RIVER", checked=True),
         ],
-    ).ask()
+    )
 
     if not street_choices:
         return
@@ -732,15 +795,15 @@ def handle_combo_coverage() -> None:
     streets = [Street[s] for s in street_choices]
 
     # Get number of samples
-    num_samples_input = questionary.text(
+    num_samples = prompts.prompt_int(
+        ctx,
         "Number of random samples per street:",
-        default="1000",
-    ).ask()
+        default=1000,
+        min_value=1,
+    )
 
-    if num_samples_input is None:
+    if num_samples is None:
         return
-
-    num_samples = int(num_samples_input)
 
     print("\n" + "=" * 60)
     print("COVERAGE ANALYSIS")
@@ -834,7 +897,7 @@ def handle_combo_coverage() -> None:
     print()
 
 
-def handle_combo_analyze_bucketing() -> None:
+def handle_combo_analyze_bucketing(ctx: CliContext) -> None:
     """
     Analyze bucketing patterns by testing various hand scenarios.
     """
@@ -844,7 +907,7 @@ def handle_combo_analyze_bucketing() -> None:
     print("=" * 60)
 
     # Select abstraction
-    abstraction_path, metadata = _select_abstraction()
+    abstraction_path, metadata = _select_abstraction(ctx)
     if abstraction_path is None:
         return
 
@@ -858,10 +921,11 @@ def handle_combo_analyze_bucketing() -> None:
         return
 
     # Select street
-    street_choice = questionary.select(
+    street_choice = prompts.select(
+        ctx,
         "Select street to analyze:",
         choices=["FLOP", "TURN", "RIVER", "Cancel"],
-    ).ask()
+    )
 
     if street_choice is None or street_choice == "Cancel":
         return
@@ -869,7 +933,8 @@ def handle_combo_analyze_bucketing() -> None:
     street = Street[street_choice]
 
     # Select analysis type
-    analysis_type = questionary.select(
+    analysis_type = prompts.select(
+        ctx,
         "Select analysis type:",
         choices=[
             "Premium vs Weak Hands (predefined scenarios)",
@@ -877,7 +942,7 @@ def handle_combo_analyze_bucketing() -> None:
             "Hand Strength Correlation (various equities)",
             "Back",
         ],
-    ).ask()
+    )
 
     if analysis_type is None or "Back" in analysis_type:
         return

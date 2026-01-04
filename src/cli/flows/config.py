@@ -1,71 +1,68 @@
 """Configuration handling for CLI."""
 
-from pathlib import Path
 from typing import Optional
 
-import questionary
-
+from src.cli.ui import prompts, ui
+from src.cli.ui.context import CliContext
 from src.utils.config import Config
 from src.utils.config_loader import load_config
 
 
-def select_config(config_dir: Path, custom_style) -> Optional[Config]:
+def select_config(ctx: CliContext) -> Optional[Config]:
     """
     Select and optionally edit a config file.
 
     Args:
-        config_dir: Base config directory (e.g., "config/")
-        custom_style: Questionary style
+        ctx: CLI context
 
     Returns:
         Loaded Config object or None if cancelled
     """
-    training_config_dir = config_dir / "training"
+    training_config_dir = ctx.config_dir / "training"
     config_files = sorted(training_config_dir.glob("*.yaml"))
 
     if not config_files:
-        print(f"[ERROR] No config files found in {training_config_dir}/")
+        ui.error(f"No config files found in {training_config_dir}/")
         return None
 
     choices = [f.stem for f in config_files] + ["Cancel"]
 
-    selected = questionary.select(
+    selected = prompts.select(
+        ctx,
         "Select configuration:",
         choices=choices,
-        style=custom_style,
-    ).ask()
+    )
 
-    if selected == "Cancel" or selected is None:
+    if selected is None or selected == "Cancel":
         return None
 
     config_path = training_config_dir / f"{selected}.yaml"
     config = load_config(config_path)
 
-    edit = questionary.confirm(
+    edit = prompts.confirm(
+        ctx,
         "Edit configuration before running?",
         default=False,
-        style=custom_style,
-    ).ask()
+    )
 
     if edit:
-        config = edit_config(config, custom_style)
+        config = edit_config(ctx, config)
 
     return config
 
 
-def edit_config(config: Config, custom_style) -> Config:
+def edit_config(ctx: CliContext, config: Config) -> Config:
     """
     Interactive config editor with multiple categories.
 
     Args:
+        ctx: CLI context
         config: Config to edit
-        custom_style: Questionary style
 
     Returns:
         Modified config
     """
-    print("\nEdit Configuration")
-    print("=" * 60)
+    ui.header("Edit Configuration")
 
     choices = [
         "Training Parameters (iterations, checkpoints, etc.)",
@@ -78,122 +75,130 @@ def edit_config(config: Config, custom_style) -> Config:
     ]
 
     while True:
-        category = questionary.select(
+        category = prompts.select(
+            ctx,
             "What would you like to edit?",
             choices=choices,
-            style=custom_style,
-        ).ask()
+        )
 
         if category == "Done" or category is None:
             break
 
         print()
         if "Training Parameters" in category:
-            config = _edit_training_params(config, custom_style)
+            config = _edit_training_params(ctx, config)
         elif "Game Settings" in category:
-            config = _edit_game_settings(config, custom_style)
+            config = _edit_game_settings(ctx, config)
         elif "Solver Settings" in category:
-            config = _edit_solver_settings(config, custom_style)
+            config = _edit_solver_settings(ctx, config)
         elif "Action Abstraction" in category:
-            config = _edit_action_abstraction(config, custom_style)
+            config = _edit_action_abstraction(ctx, config)
         elif "Card Abstraction" in category:
-            config = _edit_card_abstraction(config, custom_style)
+            config = _edit_card_abstraction(ctx, config)
         elif "System Settings" in category:
-            config = _edit_system_settings(config, custom_style)
+            config = _edit_system_settings(ctx, config)
 
         print()
 
     return config
 
 
-def _edit_training_params(config: Config, custom_style) -> Config:
+def _edit_training_params(ctx: CliContext, config: Config) -> Config:
     """Edit training parameters."""
     print("Training Parameters")
     print("-" * 40)
 
-    iterations = questionary.text(
+    iterations = prompts.prompt_int(
+        ctx,
         "Number of iterations:",
-        default=str(config.training.num_iterations),
-        style=custom_style,
-    ).ask()
-
-    checkpoint_freq = questionary.text(
+        default=config.training.num_iterations,
+        min_value=1,
+    )
+    checkpoint_freq = prompts.prompt_int(
+        ctx,
         "Checkpoint frequency (save every N iterations):",
-        default=str(config.training.checkpoint_frequency),
-        style=custom_style,
-    ).ask()
-
-    log_freq = questionary.text(
+        default=config.training.checkpoint_frequency,
+        min_value=1,
+    )
+    log_freq = prompts.prompt_int(
+        ctx,
         "Log frequency (print progress every N iterations):",
-        default=str(config.training.log_frequency),
-        style=custom_style,
-    ).ask()
-
-    iterations_per_worker = questionary.text(
+        default=config.training.log_frequency,
+        min_value=1,
+    )
+    iterations_per_worker = prompts.prompt_int(
+        ctx,
         "Iterations per worker (batch size multiplier for parallel training):",
-        default=str(config.training.iterations_per_worker),
-        style=custom_style,
-    ).ask()
-
-    verbose = questionary.confirm(
+        default=config.training.iterations_per_worker,
+        min_value=1,
+    )
+    verbose = prompts.confirm(
+        ctx,
         "Verbose output?",
         default=config.training.verbose,
-        style=custom_style,
-    ).ask()
+    )
+
+    if None in (iterations, checkpoint_freq, log_freq, iterations_per_worker, verbose):
+        return config
 
     return config.merge(
         {
             "training": {
-                "num_iterations": int(iterations),
-                "checkpoint_frequency": int(checkpoint_freq),
-                "log_frequency": int(log_freq),
-                "iterations_per_worker": int(iterations_per_worker),
+                "num_iterations": iterations,
+                "checkpoint_frequency": checkpoint_freq,
+                "log_frequency": log_freq,
+                "iterations_per_worker": iterations_per_worker,
                 "verbose": verbose,
             }
         }
     )
 
 
-def _edit_game_settings(config: Config, custom_style) -> Config:
+def _edit_game_settings(ctx: CliContext, config: Config) -> Config:
     """Edit game settings."""
     print("Game Settings")
     print("-" * 40)
 
-    stack = questionary.text(
+    stack = prompts.prompt_int(
+        ctx,
         "Starting stack (BB units):",
-        default=str(config.game.starting_stack),
-        style=custom_style,
-    ).ask()
-
-    small_blind = questionary.text(
+        default=config.game.starting_stack,
+        min_value=1,
+    )
+    small_blind = prompts.prompt_int(
+        ctx,
         "Small blind:",
-        default=str(config.game.small_blind),
-        style=custom_style,
-    ).ask()
-
-    big_blind = questionary.text(
+        default=config.game.small_blind,
+        min_value=1,
+    )
+    big_blind = prompts.prompt_int(
+        ctx,
         "Big blind:",
-        default=str(config.game.big_blind),
-        style=custom_style,
-    ).ask()
+        default=config.game.big_blind,
+        min_value=1,
+    )
+
+    if None in (stack, small_blind, big_blind):
+        return config
 
     return config.merge(
         {
             "game": {
-                "starting_stack": int(stack),
-                "small_blind": int(small_blind),
-                "big_blind": int(big_blind),
+                "starting_stack": stack,
+                "small_blind": small_blind,
+                "big_blind": big_blind,
             }
         }
     )
 
 
-def _edit_solver_settings(config: Config, custom_style) -> Config:
+def _edit_solver_settings(ctx: CliContext, config: Config) -> Config:
     """Edit solver settings."""
     print("Solver Settings")
     print("-" * 40)
 
-    sampling = questionary.select(
+    sampling = prompts.select(
+        ctx,
         "Sampling method:",
         choices=[
             "external (lower variance, slower)",
@@ -202,20 +207,20 @@ def _edit_solver_settings(config: Config, custom_style) -> Config:
         default="outcome (higher variance, faster)"
         if config.solver.sampling_method == "outcome"
         else "external (lower variance, slower)",
-        style=custom_style,
-    ).ask()
-
-    cfr_plus = questionary.confirm(
+    )
+    cfr_plus = prompts.confirm(
+        ctx,
         "Use CFR+? (100x faster convergence)",
         default=config.solver.cfr_plus,
-        style=custom_style,
-    ).ask()
-
-    linear_cfr = questionary.confirm(
+    )
+    linear_cfr = prompts.confirm(
+        ctx,
         "Use Linear CFR? (2-3x additional speedup)",
         default=config.solver.linear_cfr,
-        style=custom_style,
-    ).ask()
+    )
+
+    if None in (sampling, cfr_plus, linear_cfr):
+        return config
 
     sampling_method = "outcome" if "outcome" in sampling else "external"
 
@@ -230,53 +235,60 @@ def _edit_solver_settings(config: Config, custom_style) -> Config:
     )
 
 
-def _edit_action_abstraction(config: Config, custom_style) -> Config:
+def _edit_action_abstraction(ctx: CliContext, config: Config) -> Config:
     """Edit action abstraction settings."""
     print("Action Abstraction")
     print("-" * 40)
 
-    max_raises = questionary.text(
+    max_raises = prompts.prompt_int(
+        ctx,
         "Max raises per street (prevents infinite trees):",
-        default=str(config.action_abstraction.max_raises_per_street),
-        style=custom_style,
-    ).ask()
-
-    spr_threshold = questionary.text(
+        default=config.action_abstraction.max_raises_per_street,
+        min_value=1,
+    )
+    spr_threshold = prompts.prompt_float(
+        ctx,
         "All-in SPR threshold (allow all-in when SPR < threshold):",
-        default=str(config.action_abstraction.all_in_spr_threshold),
-        style=custom_style,
-    ).ask()
+        default=config.action_abstraction.all_in_spr_threshold,
+        min_value=0.0,
+    )
+
+    if None in (max_raises, spr_threshold):
+        return config
 
     return config.merge(
         {
             "action_abstraction": {
-                "max_raises_per_street": int(max_raises),
-                "all_in_spr_threshold": float(spr_threshold),
+                "max_raises_per_street": max_raises,
+                "all_in_spr_threshold": spr_threshold,
             }
         }
     )
 
 
-def _edit_card_abstraction(config: Config, custom_style) -> Config:
+def _edit_card_abstraction(ctx: CliContext, config: Config) -> Config:
     """Edit card abstraction settings."""
     print("Card Abstraction")
     print("-" * 40)
 
     default_config = config.card_abstraction.config or "default_plus"
 
-    config_name = questionary.select(
+    config_name = prompts.select(
+        ctx,
         "Combo abstraction config:",
         choices=["fast_test", "default", "default_plus", "production"],
         default=default_config
         if default_config in ["fast_test", "default", "default_plus", "production"]
         else "default_plus",
-        style=custom_style,
-    ).ask()
+    )
+
+    if config_name is None:
+        return config
 
     config = config.merge({"card_abstraction": {"config": config_name}})
 
     # Check if abstraction exists
-    base_path = Path("data/combo_abstraction")
+    base_path = ctx.base_dir / "data" / "combo_abstraction"
 
     abstraction_found = False
     if base_path.exists():
@@ -286,49 +298,60 @@ def _edit_card_abstraction(config: Config, custom_style) -> Config:
                 break
 
     if not abstraction_found:
-        print("\n[!] Warning: No combo abstraction found.")
-        precompute = questionary.confirm(
+        ui.warn("Warning: No combo abstraction found.")
+        precompute = prompts.confirm(
+            ctx,
             "Would you like to precompute combo abstraction now?",
             default=True,
-            style=custom_style,
-        ).ask()
+        )
 
         if precompute:
-            from src.cli.combo_handler import handle_combo_precompute
+            from src.cli.flows.combo import handle_combo_precompute
 
-            handle_combo_precompute()
+            handle_combo_precompute(ctx)
 
     return config
 
 
-def _edit_system_settings(config: Config, custom_style) -> Config:
+def _edit_system_settings(ctx: CliContext, config: Config) -> Config:
     """Edit system settings."""
     print("System Settings")
     print("-" * 40)
 
-    seed = questionary.text(
+    def _validate_seed(value: str) -> bool | str:
+        if not value.strip():
+            return True
+        if value.isdigit():
+            return True
+        return "Enter a whole number"
+
+    seed_text = prompts.text(
+        ctx,
         "Random seed (leave blank for random):",
         default=str(config.system.seed) if config.system.seed is not None else "",
-        style=custom_style,
-    ).ask()
-
-    log_level = questionary.select(
+        validate=_validate_seed,
+    )
+    log_level = prompts.select(
+        ctx,
         "Log level:",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default=config.system.log_level,
-        style=custom_style,
-    ).ask()
-
-    checkpoint_enabled = questionary.confirm(
+    )
+    checkpoint_enabled = prompts.confirm(
+        ctx,
         "Enable checkpointing?",
         default=config.storage.checkpoint_enabled,
-        style=custom_style,
-    ).ask()
+    )
+
+    if seed_text is None or log_level is None or checkpoint_enabled is None:
+        return config
+
+    seed = int(seed_text) if seed_text.strip() else None
 
     return config.merge(
         {
             "system": {
-                "seed": int(seed) if seed.strip() else None,
+                "seed": seed,
                 "log_level": log_level,
             },
             "storage": {
