@@ -63,7 +63,7 @@ class RunMetadata:
         action_config_hash = data.get("action_config_hash")
         if not isinstance(action_config_hash, str) or not action_config_hash:
             raise ValueError("Run metadata missing required action_config_hash")
-        config = Config.from_dict(config_dict)
+        config = Config.from_persisted_dict(config_dict)
         return cls(
             run_id=data.get("run_id", ""),
             config_name=data.get("config_name", "default"),
