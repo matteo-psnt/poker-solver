@@ -470,6 +470,7 @@ class _HUNLLocalBestResponse:
             is_terminal=state.is_terminal,
             to_call=state.to_call,
             last_aggressor=state.last_aggressor,
+            blind_to_call=state.blind_to_call,
         )
 
     # -- Equity ------------------------------------------------------------
