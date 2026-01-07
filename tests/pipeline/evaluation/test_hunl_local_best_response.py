@@ -27,16 +27,34 @@ from src.pipeline.evaluation.hunl_local_best_response import (
 from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
-def _build_solver(iterations: int, *, starting_stack: int = 2000) -> MCCFRSolver:
-    """A minimally trained (deliberately weak) blueprint."""
+def _build_solver(
+    iterations: int, *, starting_stack: int = 2000, session_id: str = "lbr-test"
+) -> MCCFRSolver:
+    """A minimally trained (deliberately weak) blueprint.
+
+    Training is seeded (config seed=42) so repeated builds are strategy-identical;
+    ``session_id`` only names the backing shared memory (unique per process avoids
+    collisions when rebuilt inside parallel workers).
+    """
     config = make_test_config(seed=42, small_blind=50, big_blind=100, starting_stack=starting_stack)
     storage = SharedArrayStorage(
-        num_workers=1, worker_id=0, session_id="lbr-test", is_coordinator=True
+        num_workers=1, worker_id=0, session_id=session_id, is_coordinator=True
     )
     solver = MCCFRSolver(ActionModel(config), DummyCardAbstraction(), storage, config=config)
     for _ in range(iterations):
         solver.train_iteration()
     return solver
+
+
+def _rebuild_parallel_test_blueprint() -> MCCFRSolver:
+    """Picklable factory: rebuild the deterministic test blueprint inside a worker.
+
+    Must match the serial blueprint's params exactly (same seed/stack/iterations) so
+    the strategies are identical; a unique session_id avoids shared-memory collisions.
+    """
+    import os
+
+    return _build_solver(4, starting_stack=400, session_id=f"lbr-par-{os.getpid()}")
 
 
 def _engine(solver: MCCFRSolver, **cfg) -> _HUNLLocalBestResponse:
@@ -211,3 +229,24 @@ class TestExploitability:
         second = compute_lbr_exploitability(solver, cfg)
         assert first.exploitability_mbb == second.exploitability_mbb
         assert first.lbr_utility_p0 == second.lbr_utility_p0
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_parallel_matches_serial_bitwise(self):
+        """num_workers must not change the result: per-hand seeding + ordered
+        aggregation make parallel bitwise-identical to serial. Failure here means a
+        global RNG isn't reseeded per-hand or aggregation order leaked."""
+        solver = _build_solver(4, starting_stack=400, session_id="lbr-par-serial")
+        serial = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=16, equity_runouts=2, seed=123, num_workers=1)
+        )
+        parallel = compute_lbr_exploitability(
+            solver,
+            LBRConfig(num_hands=16, equity_runouts=2, seed=123, num_workers=4),
+            blueprint_factory=_rebuild_parallel_test_blueprint,
+        )
+        assert serial.exploitability_mbb == parallel.exploitability_mbb
+        assert serial.lbr_utility_p0 == parallel.lbr_utility_p0
+        assert serial.lbr_utility_p1 == parallel.lbr_utility_p1
+        assert serial.std_error_mbb == parallel.std_error_mbb
+        assert serial.num_hands == parallel.num_hands == 16

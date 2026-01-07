@@ -268,7 +268,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services,
         "compute_lbr_exploitability",
-        lambda solver, cfg: seen.update(cfg=cfg) or lbr_result,
+        lambda solver, cfg, **kw: seen.update(cfg=cfg) or lbr_result,
     )
 
     output = services.evaluate_run_lbr(
