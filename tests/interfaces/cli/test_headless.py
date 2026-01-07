@@ -7,7 +7,11 @@ import numpy as np
 import pytest
 
 from src.interfaces.cli import headless
-from src.pipeline.training.services import ROLLOUT_ESTIMATOR_LABEL, TrainingOutput
+from src.pipeline.training.services import (
+    LBR_ESTIMATOR_LABEL,
+    ROLLOUT_ESTIMATOR_LABEL,
+    TrainingOutput,
+)
 
 
 def test_json_default_coerces_numpy_scalar():
@@ -83,19 +87,49 @@ def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
     assert (tmp_path / "run-xyz" / "train_result.json").exists()
 
 
-def test_main_evaluate_tags_estimator(monkeypatch, tmp_path, capsys):
-    """Evaluate output should carry the honest rollout-estimator label."""
+def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
+    """Evaluate defaults to LBR and carries the LBR estimator label."""
     run_dir = tmp_path / "run-xyz"
     run_dir.mkdir()
 
     fake_out = SimpleNamespace(
         infosets=42, results={"exploitability_mbb": 1.0, "std_error_mbb": 0.1}
     )
-    monkeypatch.setattr(headless.services, "evaluate_run", lambda **kw: fake_out)
+    monkeypatch.setattr(headless.services, "evaluate_run_lbr", lambda **kw: fake_out)
 
     rc = headless.main(["evaluate", "--run", "run-xyz", "--runs-dir", str(tmp_path), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert payload["estimator"] == ROLLOUT_ESTIMATOR_LABEL
+    assert payload["method"] == "lbr"
+    assert payload["estimator"] == LBR_ESTIMATOR_LABEL
     assert payload["infosets"] == 42
+
+
+def test_main_evaluate_rollout_opt_in(monkeypatch, tmp_path, capsys):
+    """--method rollout uses the legacy estimator and its label."""
+    run_dir = tmp_path / "run-xyz"
+    run_dir.mkdir()
+
+    fake_out = SimpleNamespace(
+        infosets=7, results={"exploitability_mbb": 9.0, "std_error_mbb": 0.5}
+    )
+    monkeypatch.setattr(headless.services, "evaluate_run_rollout", lambda **kw: fake_out)
+
+    rc = headless.main(
+        [
+            "evaluate",
+            "--run",
+            "run-xyz",
+            "--runs-dir",
+            str(tmp_path),
+            "--method",
+            "rollout",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["method"] == "rollout"
+    assert payload["estimator"] == ROLLOUT_ESTIMATOR_LABEL

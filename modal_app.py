@@ -85,31 +85,53 @@ def train(
     return dataclasses.asdict(out)
 
 
-@app.function(image=image, volumes={DATA_MOUNT: data_volume}, cpu=2, timeout=1800)
+# LBR is single-threaded, so evaluate does not benefit from many cores; the long
+# timeout covers the minutes-scale default (num_hands=2000 ~ 10+ min).
+@app.function(
+    image=image,
+    volumes={DATA_MOUNT: data_volume},
+    cpu=2,
+    memory=DEFAULT_MEMORY_MB,
+    timeout=3600,
+)
 def evaluate(
     run_id: str,
+    method: str = "lbr",
+    num_hands: int = 2000,
+    equity_runouts: int = 24,
     num_samples: int = 500,
     num_rollouts: int = 50,
     use_average_strategy: bool = True,
     seed: int | None = None,
 ) -> dict[str, Any]:
-    """Evaluate a run stored on the Volume and return its (rollout-estimator) metrics."""
+    """Evaluate a run stored on the Volume (Local Best Response by default)."""
     from src.pipeline.training import services
-    from src.pipeline.training.services import ROLLOUT_ESTIMATOR_LABEL
+    from src.pipeline.training.services import LBR_ESTIMATOR_LABEL, ROLLOUT_ESTIMATOR_LABEL
 
     # Pick up runs committed by earlier train() calls in other containers.
     data_volume.reload()
     run_dir = Path("data/runs") / run_id
-    out = services.evaluate_run(
-        run_dir=run_dir,
-        num_samples=num_samples,
-        num_rollouts=num_rollouts,
-        use_average_strategy=use_average_strategy,
-        seed=seed,
-    )
+    if method == "rollout":
+        out = services.evaluate_run_rollout(
+            run_dir=run_dir,
+            num_samples=num_samples,
+            num_rollouts=num_rollouts,
+            use_average_strategy=use_average_strategy,
+            seed=seed,
+        )
+        estimator = ROLLOUT_ESTIMATOR_LABEL
+    else:  # "lbr" (default, trustworthy)
+        out = services.evaluate_run_lbr(
+            run_dir=run_dir,
+            num_hands=num_hands,
+            equity_runouts=equity_runouts,
+            seed=seed,
+        )
+        estimator = LBR_ESTIMATOR_LABEL
     return {
         "run_id": run_id,
-        "estimator": ROLLOUT_ESTIMATOR_LABEL,
+        "method": method,
+        "estimator": estimator,
         "infosets": out.infosets,
         "results": out.results,
     }
@@ -213,8 +235,8 @@ def main(
         print(f"  {key}: {value}")
 
     run_id = train_result["run_id"]
-    print(f"\nEvaluating run {run_id} in a fresh container...")
-    eval_result = evaluate.remote(run_id=run_id, num_samples=100, num_rollouts=20, seed=1)
+    print(f"\nEvaluating run {run_id} in a fresh container (LBR, small sample)...")
+    eval_result = evaluate.remote(run_id=run_id, num_hands=100, seed=1)
     results = eval_result["results"]
     print("REMOTE EVALUATION RESULT:")
     print(f"  estimator:      {eval_result['estimator']}")

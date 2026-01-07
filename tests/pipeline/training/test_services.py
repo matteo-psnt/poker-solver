@@ -202,8 +202,8 @@ def test_start_training_uses_create_and_run(monkeypatch):
     assert seen["kwargs"] == {"num_workers": 6}
 
 
-def test_evaluate_run_returns_output(monkeypatch, tmp_path):
-    """evaluate_run should build solver, compute exploitability, and return output."""
+def test_evaluate_run_rollout_returns_output(monkeypatch, tmp_path):
+    """evaluate_run_rollout should build solver, compute exploitability, and return output."""
     config = MagicMock(name="config")
     metadata = SimpleNamespace(config=config)
     storage = MagicMock(name="storage")
@@ -233,7 +233,7 @@ def test_evaluate_run_returns_output(monkeypatch, tmp_path):
         lambda solver, **kwargs: expected_results,
     )
 
-    output = services.evaluate_run(
+    output = services.evaluate_run_rollout(
         run_dir=tmp_path / "run-1",
         num_samples=50,
         num_rollouts=7,
@@ -243,3 +243,45 @@ def test_evaluate_run_returns_output(monkeypatch, tmp_path):
 
     assert output.infosets == 1234
     assert output.results == expected_results
+
+
+def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
+    """evaluate_run_lbr should run LBR and map LBRResult into the results dict."""
+    metadata = SimpleNamespace(config=MagicMock(name="config"))
+    storage = MagicMock(name="storage")
+    storage.num_infosets.return_value = 4321
+    lbr_result = SimpleNamespace(
+        exploitability_mbb=42.0,
+        exploitability_bb=0.042,
+        std_error_mbb=1.5,
+        confidence_95_mbb=(39.0, 45.0),
+        lbr_utility_p0=0.02,
+        lbr_utility_p1=0.03,
+        num_hands=2000,
+    )
+    seen = {}
+
+    monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(
+        services, "build_evaluation_solver", lambda cfg, checkpoint_dir: (object(), storage)
+    )
+    monkeypatch.setattr(
+        services,
+        "compute_lbr_exploitability",
+        lambda solver, cfg: seen.update(cfg=cfg) or lbr_result,
+    )
+
+    output = services.evaluate_run_lbr(
+        run_dir=tmp_path / "run-1", num_hands=2000, equity_runouts=8, seed=7
+    )
+
+    assert output.infosets == 4321
+    assert output.results["exploitability_mbb"] == 42.0
+    assert output.results["confidence_95_mbb"] == (39.0, 45.0)
+    assert output.results["lbr_utility_p0"] == 0.02
+    assert output.results["num_hands"] == 2000
+    # LBRConfig constructed from the call args, with the rigorous off-tree default.
+    assert seen["cfg"].num_hands == 2000
+    assert seen["cfg"].equity_runouts == 8
+    assert seen["cfg"].seed == 7
+    assert seen["cfg"].include_off_tree is False
