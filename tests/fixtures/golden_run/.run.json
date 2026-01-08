@@ -1,0 +1,123 @@
+{
+  "run_id": "run-20260712_100601",
+  "config_name": "quick_test",
+  "started_at": "2026-07-12T10:06:01.219712",
+  "resumed_at": null,
+  "completed_at": "2026-07-12T10:06:04.317217",
+  "status": "completed",
+  "iterations": 1000,
+  "runtime_seconds": 2.851776123046875,
+  "num_infosets": 6000,
+  "storage_capacity": 1000000,
+  "action_config_hash": "5417962a73efaf71",
+  "representation_version": 1,
+  "config": {
+    "training": {
+      "num_iterations": 3600,
+      "checkpoint_frequency": 1000,
+      "iterations_per_worker": 100,
+      "verbose": true,
+      "runs_dir": "data/runs"
+    },
+    "storage": {
+      "initial_capacity": 1000000,
+      "max_actions": 10,
+      "checkpoint_enabled": true,
+      "zarr_compression_level": 1,
+      "zarr_chunk_size": 50000
+    },
+    "system": {
+      "seed": 7,
+      "config_name": "quick_test",
+      "log_level": "INFO"
+    },
+    "game": {
+      "starting_stack": 200,
+      "small_blind": 1,
+      "big_blind": 2
+    },
+    "action_model": {
+      "version": 1,
+      "preflop_templates": {
+        "sb_first_in": [
+          "fold",
+          "call",
+          2.5,
+          3.5,
+          5.0
+        ],
+        "bb_vs_limp": [
+          "check",
+          4.0
+        ],
+        "bb_vs_open": [
+          "fold",
+          "call"
+        ],
+        "sb_vs_3bet": [
+          "fold",
+          "call"
+        ],
+        "bb_vs_4bet": [
+          "fold",
+          "call",
+          "jam"
+        ],
+        "sb_vs_5bet": [
+          "fold",
+          "call"
+        ]
+      },
+      "postflop_templates": {
+        "first_aggressive": [
+          0.33,
+          0.66,
+          1.25
+        ],
+        "facing_bet": [
+          "min_raise",
+          "jam"
+        ],
+        "after_one_raise": [
+          "pot_raise",
+          "jam"
+        ],
+        "after_two_raises": [
+          "jam"
+        ]
+      },
+      "jam_spr_threshold": 2.0,
+      "raise_count_rules": {
+        "facing_1": "facing_bet",
+        "facing_2": "after_one_raise",
+        "facing_3_plus": "after_two_raises"
+      },
+      "off_tree_mapping": "probabilistic"
+    },
+    "resolver": {
+      "enabled": true,
+      "time_budget_ms": 300,
+      "max_depth": 2,
+      "max_raises_per_street": 1,
+      "leaf_rollouts": 8,
+      "leaf_use_average_strategy": true,
+      "policy_blend_alpha": 0.35,
+      "min_strategy_prob": 1e-06
+    },
+    "solver": {
+      "sampling_method": "external",
+      "cfr_plus": true,
+      "iteration_weighting": "none",
+      "dcfr_alpha": 1.5,
+      "dcfr_beta": 0.0,
+      "dcfr_gamma": 2.0,
+      "enable_pruning": false,
+      "pruning_threshold": 300.0,
+      "prune_start_iteration": 100,
+      "prune_reactivate_frequency": 100
+    },
+    "card_abstraction": {
+      "config": "quick_test"
+    }
+  }
+}

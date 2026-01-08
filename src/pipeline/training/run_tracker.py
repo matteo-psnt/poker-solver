@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.pipeline.training.versioning import REPRESENTATION_VERSION
 from src.shared.config import Config
 
 
@@ -30,6 +31,9 @@ class RunMetadata:
     storage_capacity: int
     action_config_hash: str
     config: Config
+    # Representation/format version this run was produced under. Pre-versioning
+    # (legacy) runs have no field and load as 0.
+    representation_version: int = REPRESENTATION_VERSION
 
     @classmethod
     def new(
@@ -77,6 +81,8 @@ class RunMetadata:
             storage_capacity=int(data.get("storage_capacity", 0)),
             action_config_hash=action_config_hash,
             config=config,
+            # Missing on pre-versioning runs → 0 (legacy), NOT the current default.
+            representation_version=int(data.get("representation_version", 0)),
         )
 
     @classmethod
@@ -103,6 +109,7 @@ class RunMetadata:
             "num_infosets": self.num_infosets,
             "storage_capacity": self.storage_capacity,
             "action_config_hash": self.action_config_hash,
+            "representation_version": self.representation_version,
             "config": config_dict,
         }
 
