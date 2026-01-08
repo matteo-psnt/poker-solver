@@ -1,7 +1,7 @@
 """Modal app: run headless MCCFR training/evaluation in the cloud.
 
-Phase 1.2 walking skeleton. The container mirrors the local repository layout so
-the existing CWD/``__file__``-relative config and data resolution works unchanged:
+The container mirrors the local repository layout so the existing
+CWD/``__file__``-relative config and data resolution works unchanged:
 
   * ``/root/src`` and ``/root/config`` are mounted from the local tree.
   * The ``poker-data`` Volume is mounted at ``/root/data`` and holds both the
@@ -285,7 +285,7 @@ def run_train(
     eval_hands: int = 2000,
     eval_cpu: int = 16,
 ) -> None:
-    """Train a real run and evaluate it with LBR — the improvement-loop primitive.
+    """Train a named config and evaluate the result with LBR.
 
     ``iterations=0`` uses the config's own count (production = 1M). Training runs at
     the ~32-core sweet spot; LBR eval uses fewer workers (each rebuilds the blueprint).

@@ -2,8 +2,8 @@
 
 Unlike the questionary menu in :mod:`src.interfaces.cli.app`, every operation here
 is fully specified by CLI flags and emits a machine-readable summary. This is the
-surface used by scripts, the agent-driven improvement loop, and cloud (Modal)
-execution — where an interactive prompt is not an option.
+surface used by scripts and cloud (Modal) execution — where an interactive prompt is
+not an option.
 
 Cloud callers should prefer importing :func:`src.pipeline.training.services.train`
 directly (it returns a ``TrainingOutput`` object); this module is the local /

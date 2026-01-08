@@ -6,9 +6,8 @@ an old run forward into a new directory (functional — the original is never mu
 and atomic: it plans the whole path first so a barrier/gap fails before any copy, and
 rolls back the destination on any failure).
 
-The full "when is a break worth a migration vs a barrier" policy is a per-change call
-made at authoring time; this module just enforces that a run at any version is either
-current, migratable, or explicitly barriered — never silently unloadable.
+This enforces that a run at any version is either current, migratable, or explicitly
+barriered — never silently unloadable.
 """
 
 from __future__ import annotations
