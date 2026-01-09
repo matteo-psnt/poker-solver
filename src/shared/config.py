@@ -63,6 +63,10 @@ class StorageConfig(StrictFrozenModel):
     initial_capacity: PositiveInt = Field(default=2_000_000)
     max_actions: PositiveInt = Field(default=10)
     checkpoint_enabled: bool = Field(default=True)
+    # Cap on the fraction of wall-clock spent checkpointing. Back-pressure defers a
+    # checkpoint until (1-f)/f times the previous checkpoint's cost has elapsed, so
+    # checkpointing self-limits to ~f of compute at any scale (0.1 = at most ~10%).
+    max_checkpoint_overhead: Annotated[float, Field(gt=0.0, lt=1.0)] = Field(default=0.1)
     zarr_compression_level: Annotated[int, Field(ge=1, le=9)] = Field(default=1)
     zarr_chunk_size: PositiveInt = Field(default=50_000)
 

@@ -41,12 +41,14 @@ def async_checkpoint(
         if session.verbose:
             print("[Master] Previous checkpoint still running; skipping", flush=True)
         return
-    # Back-pressure: never spend more than ~half the wall-clock on checkpointing. If the
-    # last checkpoint was costly (e.g. millions of infosets), wait at least that long of
-    # training before starting another. Self-adapts to checkpoint cost at any scale.
+    # Back-pressure: cap checkpointing at ~`max_checkpoint_overhead` of wall-clock. If
+    # the last checkpoint cost T seconds, require (1-f)/f * T seconds of training since
+    # it finished before starting another (f=0.1 → wait 9*T → ~10% overhead). Self-adapts
+    # to checkpoint cost at any scale.
     if session.last_checkpoint_seconds > 0.0:
-        since_last = time.time() - session.last_checkpoint_end_time
-        if since_last < session.last_checkpoint_seconds:
+        frac = session.config.storage.max_checkpoint_overhead
+        min_gap = session.last_checkpoint_seconds * (1.0 - frac) / frac
+        if time.time() - session.last_checkpoint_end_time < min_gap:
             if session.verbose:
                 print("[Master] Deferring checkpoint (back-pressure)", flush=True)
             return
