@@ -1,12 +1,12 @@
 """Precompute execution flow for combo abstraction CLI."""
 
 import multiprocessing as mp
-from pathlib import Path
 
 from src.core.game.state import Street
 from src.interfaces.cli.ui import prompts
 from src.interfaces.cli.ui.context import CliContext
 from src.pipeline.abstraction.config import PrecomputeConfig
+from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 
@@ -59,7 +59,6 @@ TIME_PER_ITEM_BASELINE = {
 }
 TIME_BASELINE_WORKERS = 12
 TIME_BASELINE_SAMPLES = 1000
-OUTPUT_HASH_LENGTH = 8
 
 
 def _estimate_time(config: PrecomputeConfig) -> None:
@@ -117,27 +116,6 @@ def _estimate_time(config: PrecomputeConfig) -> None:
     print()
 
 
-def _output_config_hash(config: PrecomputeConfig) -> str:
-    """Return the normalized short hash used in output directory names."""
-    return config.get_config_hash()[:OUTPUT_HASH_LENGTH]
-
-
-def _get_output_path(base_dir: Path, config: PrecomputeConfig) -> Path:
-    """Generate deterministic output path based on config."""
-    base_path = base_dir / "data" / "combo_abstraction"
-    config_hash = _output_config_hash(config)
-
-    dirname = (
-        f"buckets-F{config.num_buckets[Street.FLOP]}T{config.num_buckets[Street.TURN]}"
-        f"R{config.num_buckets[Street.RIVER]}-"
-        f"C{config.num_board_clusters[Street.FLOP]}C{config.num_board_clusters[Street.TURN]}"
-        f"C{config.num_board_clusters[Street.RIVER]}-"
-        f"s{config.equity_samples}-{config_hash}"
-    )
-
-    return base_path / dirname
-
-
 def handle_combo_precompute(ctx: CliContext) -> None:
     """Handle combo-level abstraction precomputation."""
     print()
@@ -152,7 +130,7 @@ def handle_combo_precompute(ctx: CliContext) -> None:
         return
     config_name = config.config_name or "unknown"
 
-    output_path = _get_output_path(ctx.base_dir, config)
+    output_path = abstraction_output_path(ctx.base_dir, config)
 
     if output_path.exists() and (output_path / "combo_abstraction.pkl").exists():
         print(f"\n[!] Abstraction already exists: {output_path}")

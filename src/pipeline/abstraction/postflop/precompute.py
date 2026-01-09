@@ -385,4 +385,11 @@ class PostflopPrecomputer:
         path = Path(path)
 
         with open(path / "combo_abstraction.pkl", "rb") as f:
-            return pickle.load(f)
+            try:
+                return pickle.load(f)
+            except (ModuleNotFoundError, AttributeError) as exc:
+                raise RuntimeError(
+                    f"Stale abstraction at {path}: it was pickled against an older "
+                    f"code layout ({exc}). Regenerate it via 'Precompute Combo "
+                    f"Abstraction' from the CLI."
+                ) from exc
