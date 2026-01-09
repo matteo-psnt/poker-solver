@@ -25,7 +25,7 @@ card_abstraction:
 
 training:
   num_iterations: 1000000
-  checkpoint_frequency: 100000
+  checkpoint_frequency: 500000
   iterations_per_worker: 5000
 
 storage:

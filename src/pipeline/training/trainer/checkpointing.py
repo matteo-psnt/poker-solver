@@ -20,9 +20,11 @@ def checkpoint_frequency(session: TrainingSession) -> int:
 
 
 def should_checkpoint(session: TrainingSession, iteration: int, batch_size: int) -> bool:
+    # Interval since the last checkpoint, NOT ``iteration % freq < batch_size`` — the
+    # latter fires every batch once batch_size >= freq, which thrashed large runs.
     if not checkpoint_enabled(session) or iteration == 0:
         return False
-    return iteration % checkpoint_frequency(session) < batch_size
+    return iteration - session.last_checkpoint_iteration >= checkpoint_frequency(session)
 
 
 def async_checkpoint(
@@ -39,7 +41,17 @@ def async_checkpoint(
         if session.verbose:
             print("[Master] Previous checkpoint still running; skipping", flush=True)
         return
+    # Back-pressure: never spend more than ~half the wall-clock on checkpointing. If the
+    # last checkpoint was costly (e.g. millions of infosets), wait at least that long of
+    # training before starting another. Self-adapts to checkpoint cost at any scale.
+    if session.last_checkpoint_seconds > 0.0:
+        since_last = time.time() - session.last_checkpoint_end_time
+        if since_last < session.last_checkpoint_seconds:
+            if session.verbose:
+                print("[Master] Deferring checkpoint (back-pressure)", flush=True)
+            return
 
+    session.last_checkpoint_iteration = iteration
     session.pending_checkpoint = session.checkpoint_executor.submit(
         checkpoint_with_timing,
         session,
@@ -49,6 +61,34 @@ def async_checkpoint(
         storage_capacity,
         training_start_time,
     )
+
+
+def ensure_final_checkpoint(
+    session: TrainingSession,
+    worker_manager: SharedArrayWorkerManager,
+    iteration: int,
+    total_infosets: int,
+    storage_capacity: int,
+    training_start_time: float,
+) -> None:
+    """Guarantee the final state is checkpointed (blocking), on normal *and* interrupted
+    exit — unless the exact iteration was already checkpointed."""
+    if not checkpoint_enabled(session) or session.checkpoint_executor is None or iteration <= 0:
+        return
+    wait_for_checkpoint(session)
+    if session.last_checkpoint_iteration >= iteration:
+        return
+    session.last_checkpoint_iteration = iteration
+    session.pending_checkpoint = session.checkpoint_executor.submit(
+        checkpoint_with_timing,
+        session,
+        worker_manager,
+        iteration,
+        total_infosets,
+        storage_capacity,
+        training_start_time,
+    )
+    wait_for_checkpoint(session)
 
 
 def wait_for_checkpoint(session: TrainingSession) -> None:
@@ -93,6 +133,8 @@ def checkpoint_with_timing(
         )
 
     checkpoint_time = time.time() - start
+    session.last_checkpoint_seconds = checkpoint_time
+    session.last_checkpoint_end_time = time.time()
     if session.verbose:
         print(
             f"[Master] Checkpoint saved at iter={iteration} in {checkpoint_time:.2f}s",

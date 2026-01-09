@@ -121,6 +121,10 @@ def train_partitioned(
             verbose=verbose,
         )
 
+        # Anchor the checkpoint interval at the starting iteration so a resume does not
+        # immediately re-checkpoint the state it just loaded.
+        session.last_checkpoint_iteration = start_iteration
+
         try:
             for batch_idx in batch_iterator:
                 batch_coordinator.run_batch(batch_idx, batch_iterator, loop_state)
@@ -136,10 +140,14 @@ def train_partitioned(
         fallback_stats = loop_state.fallback_stats
         last_capacity = loop_state.last_capacity
 
-        if interrupted and checkpointing.checkpoint_enabled(session) and completed_iterations > 0:
+        elapsed_time = time.time() - training_start_time
+        # Let any in-flight checkpoint finish, then guarantee the final state is saved
+        # (on normal completion, not just interrupts) — deduped if already checkpointed.
+        checkpointing.wait_for_checkpoint(session)
+        if completed_iterations > 0:
             if verbose:
-                print("[Master] Saving checkpoint...", flush=True)
-            checkpointing.async_checkpoint(
+                print("[Master] Saving final checkpoint...", flush=True)
+            checkpointing.ensure_final_checkpoint(
                 session=session,
                 worker_manager=worker_manager,
                 iteration=start_iteration + completed_iterations,
@@ -147,10 +155,6 @@ def train_partitioned(
                 storage_capacity=last_capacity or 0,
                 training_start_time=training_start_time,
             )
-            checkpointing.wait_for_checkpoint(session)
-
-        elapsed_time = time.time() - training_start_time
-        checkpointing.wait_for_checkpoint(session)
 
         session.solver.iteration = start_iteration + completed_iterations
 
