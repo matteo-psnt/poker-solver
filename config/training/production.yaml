@@ -1,10 +1,11 @@
 # Production Training Configuration for HUNLHE Solver
-# Optimized for GTO strategies with CFR+.
+# Uses Discounted CFR (DCFR) for faster convergence than Linear/vanilla CFR.
 #
-# Convergence targets:
-# - 10M iterations:  ~50-100 mbb/g exploitability
-# - 100M iterations: ~10-20 mbb/g exploitability
-# - 1B iterations:   ~1-5 mbb/g exploitability
+# (Convergence targets removed: earlier per-iteration mbb/g estimates came from the
+# legacy rollout estimator and are not trustworthy; use LBR after training instead.)
+
+solver:
+  iteration_weighting: dcfr
 
 action_model:
   preflop_templates:
