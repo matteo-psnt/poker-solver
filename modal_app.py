@@ -282,19 +282,30 @@ def run_train(
     cpu: int = 32,
     iterations: int = 0,
     seed: int = 42,
+    capacity: int = 0,
+    memory: int = 24576,
+    timeout: int = 10800,
     eval_hands: int = 2000,
-    eval_cpu: int = 16,
+    eval_cpu: int = 6,
+    eval_memory: int = 32768,
 ) -> None:
     """Train a named config and evaluate the result with LBR.
 
-    ``iterations=0`` uses the config's own count (production = 1M). Training runs at
-    the ~32-core sweet spot; LBR eval uses fewer workers (each rebuilds the blueprint).
+    ``iterations=0`` uses the config's own count. For large/long runs:
+      --capacity above the expected final infoset count (avoids mid-run storage
+        resize, which doubles capacity and briefly holds old+new arrays);
+      --memory to cover arrays + the coordinator's key dict + workers;
+      --timeout above the projected wall-clock (train's own default is only 1h);
+      low --eval-cpu with high --eval-memory (each LBR worker rebuilds the full
+        blueprint, so eval RAM ~= workers * blueprint size).
     """
-    train_result = train.with_options(cpu=cpu, memory=16384).remote(
+    overrides = {"storage__initial_capacity": capacity} if capacity > 0 else None
+    train_result = train.with_options(cpu=cpu, memory=memory, timeout=timeout).remote(
         config_name=config,
         num_workers=cpu,
         num_iterations=iterations or None,
         seed=seed,
+        config_overrides=overrides,
     )
     print("TRAINING RESULT:")
     for key, value in train_result.items():
@@ -302,7 +313,7 @@ def run_train(
 
     run_id = train_result["run_id"]
     print(f"\nEvaluating {run_id} with LBR ({eval_hands} hands, {eval_cpu} workers)...")
-    eval_result = evaluate.with_options(cpu=eval_cpu, memory=16384).remote(
+    eval_result = evaluate.with_options(cpu=eval_cpu, memory=eval_memory, timeout=timeout).remote(
         run_id=run_id, num_hands=eval_hands, num_workers=eval_cpu, seed=1
     )
     results = eval_result["results"]
