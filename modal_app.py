@@ -134,6 +134,7 @@ def evaluate(
     num_rollouts: int = 50,
     use_average_strategy: bool = True,
     seed: int | None = None,
+    allin_runouts: int = 50,
 ) -> dict[str, Any]:
     """Evaluate a run stored on the Volume (Local Best Response by default)."""
     from src.pipeline.training import services
@@ -158,6 +159,7 @@ def evaluate(
             equity_runouts=equity_runouts,
             seed=seed,
             num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
+            allin_runouts=allin_runouts,
         )
         estimator = LBR_ESTIMATOR_LABEL
     return {
@@ -325,6 +327,20 @@ def run_train(
     print(f"  infosets: {eval_result['infosets']:,}")
 
 
+def _print_variance_decomposition(results: dict[str, Any]) -> None:
+    """Print the terminal-type variance decomposition of an LBR eval, if present."""
+    decomposition = results.get("variance_decomposition")
+    if not decomposition:
+        return
+    print("  variance by terminal type (within-group share of total):")
+    for label, group in decomposition["groups"].items():
+        print(
+            f"    {label:>9}: {group['variance_share']:>5.1%} of variance "
+            f"({group['n']} deals, {group['share_of_samples']:.1%})"
+        )
+    print(f"    (between-group: {decomposition['between_group_share']:.1%})")
+
+
 @app.local_entrypoint()
 def run_eval(
     run_id: str,
@@ -345,6 +361,68 @@ def run_eval(
         f"(± {results['std_error_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
     )
     print(f"  infosets: {eval_result['infosets']:,}")
+    print(f"  base_seed: {results['base_seed']} (reuse for paired run_compare)")
+    _print_variance_decomposition(results)
+
+
+@app.local_entrypoint()
+def run_compare(
+    run_a: str,
+    run_b: str,
+    hands: int = 2000,
+    cpu: int = 6,
+    memory: int = 32768,
+    seed: int = 1,
+    timeout: int = 10800,
+) -> None:
+    """Paired LBR comparison of two Volume runs under common random numbers.
+
+    Both evals run with the same seed, so hand ``i`` sees the identical deal in
+    both; the confidence interval is computed on the per-hand *differences*, which
+    cancels the shared deal luck and resolves far smaller gaps than comparing two
+    independent CIs. Positive ``diff`` means ``run_b`` is less exploitable (better).
+    """
+    from src.pipeline.evaluation.statistics import compare_paired_samples
+
+    fn = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout)
+    call_a = fn.spawn(run_id=run_a, num_hands=hands, num_workers=cpu, seed=seed)
+    call_b = fn.spawn(run_id=run_b, num_hands=hands, num_workers=cpu, seed=seed)
+    result_a, result_b = call_a.get(), call_b.get()
+
+    results_a, results_b = result_a["results"], result_b["results"]
+    if results_a["base_seed"] != results_b["base_seed"]:
+        raise RuntimeError(
+            f"base_seed mismatch ({results_a['base_seed']} vs {results_b['base_seed']}): "
+            "the evals are not paired."
+        )
+
+    def _mbb_samples(results: dict[str, Any]) -> list[float]:
+        factor = 1000.0 / results["big_blind"]
+        return [(r["u0"] + r["u1"]) / 2.0 * factor for r in results["hand_records"]]
+
+    comparison = compare_paired_samples(_mbb_samples(results_a), _mbb_samples(results_b))
+
+    for name, result in ((run_a, result_a), (run_b, result_b)):
+        results = result["results"]
+        print(f"\n{name} ({result['infosets']:,} infosets):")
+        print(f"  {results['exploitability_mbb']:.1f} mbb/g (± {results['std_error_mbb']:.1f})")
+        _print_variance_decomposition(results)
+
+    print(f"\nPAIRED DIFFERENCE (A - B, {comparison['n']} common deals):")
+    print(
+        f"  {comparison['mean_diff']:.1f} mbb/g (± {comparison['se_diff']:.1f}; "
+        f"95% CI [{comparison['ci_lower']:.1f}, {comparison['ci_upper']:.1f}])"
+    )
+    print(f"  p-value: {comparison['p_value']:.4f} | correlation: {comparison['correlation']:.3f}")
+    print(
+        f"  pairing gain: SE {comparison['se_diff']:.1f} vs {comparison['se_unpaired']:.1f} "
+        f"unpaired ({comparison['se_unpaired'] / max(comparison['se_diff'], 1e-12):.1f}x tighter)"
+    )
+    if comparison["is_significant"]:
+        better = run_b if comparison["mean_diff"] > 0 else run_a
+        print(f"  VERDICT: {better} is significantly less exploitable (95% level).")
+    else:
+        print("  VERDICT: no significant difference at the 95% level.")
 
 
 @app.local_entrypoint()

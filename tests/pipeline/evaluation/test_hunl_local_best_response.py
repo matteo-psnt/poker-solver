@@ -14,7 +14,7 @@ import pytest
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType, call, check, fold
-from src.core.game.state import Card
+from src.core.game.state import Card, GameState, Street
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.evaluation.hunl_local_best_response import (
@@ -24,6 +24,7 @@ from src.pipeline.evaluation.hunl_local_best_response import (
     _HUNLLocalBestResponse,
     compute_lbr_exploitability,
 )
+from src.pipeline.evaluation.statistics import compare_paired_samples
 from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
@@ -107,6 +108,30 @@ class TestEquity:
         assert engine._equity((Card.new("Ks"), Card.new("Kd")), board, weights) == 1.0
 
 
+def _bet_call_to_river(engine, state):
+    """Drive a small-bet / call line, guaranteeing a river showdown.
+
+    Every street ends in a CALL (a clean street boundary), so the terminal
+    has a full (deterministic) 5-card board — no runout sampling — which lets
+    us assert exact analytic values. (A pure check/check line would trigger a
+    latent rules bug where a second consecutive check-check street fails to
+    advance.)
+    """
+    s = state
+    while not s.is_terminal:
+        if engine.blueprint.is_chance_node(s):
+            s = engine.blueprint.sample_chance_outcome(s)
+            continue
+        if s.to_call > 0:
+            move = call()
+        else:
+            legal = engine.rules.get_legal_actions(s, action_model=engine.action_model)
+            bets = [a for a in legal if a.type == ActionType.BET]
+            move = min(bets, key=lambda a: a.amount)  # smallest bet keeps it non-all-in
+        s = s.apply_action(move, engine.rules)
+    return s
+
+
 class TestTerminalValue:
     """`_terminal_value` integrates out the opponent hand analytically."""
 
@@ -115,27 +140,7 @@ class TestTerminalValue:
         return _engine(_build_solver(5))
 
     def _bet_call_to_river(self, engine, state):
-        """Drive a small-bet / call line, guaranteeing a river showdown.
-
-        Every street ends in a CALL (a clean street boundary), so the terminal
-        has a full (deterministic) 5-card board — no ``deal_remaining_cards`` —
-        which lets us assert exact analytic values. (A pure check/check line
-        would trigger a latent rules bug where a second consecutive check-check
-        street fails to advance.)
-        """
-        s = state
-        while not s.is_terminal:
-            if engine.blueprint.is_chance_node(s):
-                s = engine.blueprint.sample_chance_outcome(s)
-                continue
-            if s.to_call > 0:
-                move = call()
-            else:
-                legal = engine.rules.get_legal_actions(s, action_model=engine.action_model)
-                bets = [a for a in legal if a.type == ActionType.BET]
-                move = min(bets, key=lambda a: a.amount)  # smallest bet keeps it non-all-in
-            s = s.apply_action(move, engine.rules)
-        return s
+        return _bet_call_to_river(engine, state)
 
     def _reference_showdown_value(self, engine, terminal, lbr_player, opp, belief):
         """Belief-weighted mean of per-combo payoffs over the surviving range."""
@@ -186,6 +191,145 @@ class TestTerminalValue:
         assert engine._terminal_value(terminal, 0, 1, belief) == float(
             terminal.get_payoff(0, engine.rules)
         )
+
+
+class TestAllInRunoutAveraging:
+    """Early all-in terminals average the analytic value over board runouts."""
+
+    @pytest.fixture(scope="class")
+    def engine(self):
+        return _engine(_build_solver(5))
+
+    @staticmethod
+    def _strip_river(terminal) -> GameState:
+        """Rewind a river terminal to a 4-card 'all-in' terminal (same pot/stacks)."""
+        return GameState(
+            street=Street.TURN,
+            pot=terminal.pot,
+            stacks=terminal.stacks,
+            board=terminal.board[:4],
+            hole_cards=terminal.hole_cards,
+            betting_history=terminal.betting_history,
+            button_position=terminal.button_position,
+            current_player=terminal.current_player,
+            is_terminal=True,
+            to_call=0,
+            last_aggressor=terminal.last_aggressor,
+            blind_to_call=terminal.blind_to_call,
+        )
+
+    @pytest.mark.timeout(30)
+    def test_one_missing_card_is_enumerated_exactly(self, engine):
+        """With one card missing the value is the exact mean over all river cards."""
+        rng = np.random.default_rng(5)
+        terminal = _bet_call_to_river(engine, _deal_initial_state(engine, 2000, 0, rng))
+        allin_state = self._strip_river(terminal)
+
+        # Narrow belief on three disjoint combos: at most one drops per river card,
+        # so the reference never hits the empty-range fallback.
+        combo_indices = []
+        known = engine._known_mask(allin_state, opp=1)
+        used = known
+        for idx in range(len(ALL_COMBOS)):
+            if not (engine._masks[idx] & used):
+                combo_indices.append(idx)
+                used |= int(engine._masks[idx])
+            if len(combo_indices) == 3:
+                break
+        belief = np.zeros(len(ALL_COMBOS))
+        belief[combo_indices] = 1.0 / 3.0
+
+        # Independent reference: enumerate rivers, weight surviving combos.
+        values = []
+        for card in Card.get_full_deck():
+            if card.mask & known:
+                continue
+            river_state = engine._with_runout(allin_state, (card,))
+            acc, total = 0.0, 0.0
+            for idx in combo_indices:
+                if engine._masks[idx] & card.mask:
+                    continue
+                payoff = engine._with_opponent_hole(river_state, 1, ALL_COMBOS[idx]).get_payoff(
+                    0, engine.rules
+                )
+                acc += belief[idx] * float(payoff)
+                total += belief[idx]
+            values.append(acc / total)
+        expected = float(np.mean(values))
+
+        got = engine._terminal_value(allin_state, 0, 1, belief)
+        assert got == pytest.approx(expected)
+
+    def test_preflop_allin_beats_dominated_point_mass(self):
+        """AA all-in preflop vs a 72o point mass must show a clearly positive value."""
+        engine = _engine(_build_solver(0), allin_runouts=50)
+        hole_cards = (
+            (Card.new("As"), Card.new("Ah")),
+            (Card.new("Kd"), Card.new("Kc")),  # dealt hand is a fiction; belief overrides it
+        )
+        allin_state = GameState(
+            street=Street.PREFLOP,
+            pot=800,
+            stacks=(0, 0),
+            board=(),
+            hole_cards=hole_cards,
+            betting_history=(Action(ActionType.ALL_IN, 400), call()),
+            button_position=0,
+            current_player=1,
+            is_terminal=True,
+            to_call=0,
+            last_aggressor=0,
+            blind_to_call=100,
+        )
+        belief = np.zeros(len(ALL_COMBOS))
+        belief[_combo_index("7c", "2d")] = 1.0
+
+        value = engine._terminal_value(allin_state, 0, 1, belief)
+        # AA vs 72o has ~88% equity: EV ~ 0.88*800 - 400 ~ +300 chips. Runout noise
+        # is averaged over 50 boards, so the estimate is safely above +100.
+        assert value > 100.0
+
+        # Deterministic under the engine RNG seed (fresh engine, same seed).
+        engine2 = _engine(_build_solver(0), allin_runouts=50)
+        assert engine2._terminal_value(allin_state, 0, 1, belief) == value
+
+
+class TestPerHandRecords:
+    """Per-hand outcomes + base seed enable paired CRN comparisons offline."""
+
+    def test_records_match_aggregate_and_seed(self):
+        solver = _build_solver(3, starting_stack=400)
+        result = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=6, equity_runouts=2, seed=21)
+        )
+        assert result.base_seed == 21
+        assert len(result.hand_outcomes) == 6
+        for outcome_p0, outcome_p1 in result.hand_outcomes:
+            assert outcome_p0.terminal in {"fold", "showdown", "allin"}
+            assert outcome_p1.terminal in {"fold", "showdown", "allin"}
+            assert outcome_p0.pot > 0 and outcome_p1.pot > 0
+        # The aggregate is exactly the mean of the recorded per-hand samples.
+        samples = [(o0.value + o1.value) / 2.0 for o0, o1 in result.hand_outcomes]
+        big_blind = solver.config.game.big_blind
+        assert result.exploitability_mbb == pytest.approx(
+            float(np.mean(samples)) / big_blind * 1000.0
+        )
+
+    def test_same_seed_yields_identical_records_and_null_paired_diff(self):
+        """CRN foundation: same seed => hand-for-hand identical deals/outcomes."""
+        solver = _build_solver(3, starting_stack=400)
+        cfg = LBRConfig(num_hands=6, equity_runouts=2, seed=99)
+        first = compute_lbr_exploitability(solver, cfg)
+        second = compute_lbr_exploitability(solver, cfg)
+        assert first.hand_outcomes == second.hand_outcomes
+
+        samples_a = [(o0.value + o1.value) / 2.0 for o0, o1 in first.hand_outcomes]
+        samples_b = [(o0.value + o1.value) / 2.0 for o0, o1 in second.hand_outcomes]
+        comparison = compare_paired_samples(samples_a, samples_b)
+        assert comparison["mean_diff"] == 0.0
+        assert comparison["se_diff"] == 0.0
+        assert comparison["p_value"] == 1.0
+        assert not comparison["is_significant"]
 
 
 class TestActionMapping:

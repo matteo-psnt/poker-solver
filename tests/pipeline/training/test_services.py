@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.pipeline.evaluation.hunl_local_best_response import HandOutcome
 from src.pipeline.training import services
 from src.pipeline.training.services import TrainingOutput
 from src.shared.config_loader import load_training_config
@@ -300,8 +301,19 @@ def test_evaluate_run_rollout_returns_output(monkeypatch, tmp_path):
 def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     """evaluate_run_lbr should run LBR and map LBRResult into the results dict."""
     metadata = SimpleNamespace(config=MagicMock(name="config"))
+    metadata.config.game.big_blind = 100
     storage = MagicMock(name="storage")
     storage.num_infosets.return_value = 4321
+    hand_outcomes = [
+        (
+            HandOutcome(value=150.0, terminal="showdown", pot=400),
+            HandOutcome(value=-50.0, terminal="fold", pot=200),
+        ),
+        (
+            HandOutcome(value=800.0, terminal="allin", pot=4000),
+            HandOutcome(value=100.0, terminal="showdown", pot=600),
+        ),
+    ]
     lbr_result = SimpleNamespace(
         exploitability_mbb=42.0,
         exploitability_bb=0.042,
@@ -310,6 +322,8 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
         lbr_utility_p0=0.02,
         lbr_utility_p1=0.03,
         num_hands=2000,
+        base_seed=7,
+        hand_outcomes=hand_outcomes,
     )
     seen = {}
 
@@ -332,8 +346,34 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     assert output.results["confidence_95_mbb"] == (39.0, 45.0)
     assert output.results["lbr_utility_p0"] == 0.02
     assert output.results["num_hands"] == 2000
+    # Per-hand records + base seed travel with the aggregate for paired comparisons.
+    assert output.results["base_seed"] == 7
+    assert output.results["big_blind"] == 100
+    assert output.results["hand_records"] == [
+        {
+            "u0": 150.0,
+            "u1": -50.0,
+            "terminal_p0": "showdown",
+            "terminal_p1": "fold",
+            "pot_p0": 400,
+            "pot_p1": 200,
+        },
+        {
+            "u0": 800.0,
+            "u1": 100.0,
+            "terminal_p0": "allin",
+            "terminal_p1": "showdown",
+            "pot_p0": 4000,
+            "pot_p1": 600,
+        },
+    ]
+    # Deal-level groups take the higher-variance terminal: showdown+fold -> showdown,
+    # allin+showdown -> allin.
+    decomposition = output.results["variance_decomposition"]
+    assert set(decomposition["groups"]) == {"showdown", "allin"}
     # LBRConfig constructed from the call args, with the rigorous off-tree default.
     assert seen["cfg"].num_hands == 2000
     assert seen["cfg"].equity_runouts == 8
     assert seen["cfg"].seed == 7
     assert seen["cfg"].include_off_tree is False
+    assert seen["cfg"].allin_runouts == 50
