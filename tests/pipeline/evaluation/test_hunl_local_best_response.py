@@ -294,6 +294,57 @@ class TestAllInRunoutAveraging:
         assert engine2._terminal_value(allin_state, 0, 1, belief) == value
 
 
+class TestTerminalBranching:
+    """Opponent decisions whose every action ends the hand are integrated out."""
+
+    @pytest.fixture(scope="class")
+    def engine(self):
+        return _engine(_build_solver(3), allin_runouts=5)
+
+    def _jam_faced_node(self, engine):
+        """A preflop node where the opponent faces an all-in (all responses terminal)."""
+        state = _deal_initial_state(engine, 400, 0, np.random.default_rng(2))
+        lbr = state.current_player
+        legal = engine.rules.get_legal_actions(state, action_model=engine.action_model)
+        jam = next(a for a in legal if a.type == ActionType.ALL_IN)
+        return state, jam, state.apply_action(jam, engine.rules), lbr
+
+    def test_jam_value_is_probability_weighted_branch_mixture(self, engine):
+        state, jam, faced, lbr = self._jam_faced_node(engine)
+        opp = 1 - lbr
+        belief = engine._initial_belief(state, opp)
+        legal, vecs = engine._opp_action_matrix(faced, opp, state, jam)
+
+        engine.rng = np.random.default_rng(0)
+        outcome = engine._branch_terminal_decision(faced, lbr, opp, legal, vecs, belief)
+        assert outcome is not None
+        assert outcome.terminal == "allin"  # the call branch dominates fold in severity
+
+        # Reference mixture with an identically-seeded RNG (runout sampling must align).
+        engine.rng = np.random.default_rng(0)
+        probs = np.array([float(np.dot(belief, vecs[action])) for action in legal])
+        expected = 0.0
+        for weight, action in zip(probs / probs.sum(), legal):
+            if weight <= 0.0:
+                continue
+            posterior = belief * vecs[action]
+            branch_belief = posterior / posterior.sum()
+            next_state = faced.apply_action(action, engine.rules)
+            expected += weight * engine._terminal_value(next_state, lbr, opp, branch_belief)
+        assert outcome.value == pytest.approx(expected)
+
+    def test_no_branching_when_an_action_continues_the_hand(self, engine):
+        # At the first preflop decision a call continues the hand, so the node
+        # must fall through to the sampling path.
+        state = _deal_initial_state(engine, 400, 0, np.random.default_rng(4))
+        player = state.current_player
+        legal, vecs = engine._opp_action_matrix(state, player, None, None)
+        belief = engine._initial_belief(state, 1 - player)
+        assert (
+            engine._branch_terminal_decision(state, 1 - player, player, legal, vecs, belief) is None
+        )
+
+
 class TestPerHandRecords:
     """Per-hand outcomes + base seed enable paired CRN comparisons offline."""
 
