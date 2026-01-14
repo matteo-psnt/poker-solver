@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import multiprocessing as mp
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,10 @@ class TrainingSession:
             runs_base_dir = Path(self.config.training.runs_dir)
             if run_id is None:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                run_id = f"run-{timestamp}"
+                # Random suffix: second-resolution timestamps collide when runs
+                # start simultaneously (e.g. parallel cloud containers writing to
+                # a shared volume), silently interleaving their checkpoints.
+                run_id = f"run-{timestamp}-{uuid.uuid4().hex[:6]}"
             self.run_dir = runs_base_dir / run_id
 
         self.checkpoint_executor: concurrent.futures.ThreadPoolExecutor | None = None
