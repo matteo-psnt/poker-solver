@@ -13,7 +13,14 @@ from src.core.game.rules import GameRules
 from src.core.game.state import GameState
 from src.engine.search.fast_cfr import solve_root_strategy
 from src.engine.search.leaf_values import LeafValueConfig, estimate_leaf_values
-from src.engine.search.range_inference import PlayerRanges, infer_ranges, update_ranges
+from src.engine.search.range_inference import (
+    ALL_COMBOS,
+    COMBO_MASKS,
+    PlayerRanges,
+    infer_ranges,
+    replace_actor_hole_cards,
+    update_ranges,
+)
 from src.engine.search.tree_builder import LocalTreeNode, build_local_tree
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.shared.config import ResolverConfig
@@ -63,9 +70,18 @@ class HUResolver:
             return self.blueprint.sample_action_from_strategy(state, use_average=True)
 
     def solve(self, state: GameState, *, time_budget_ms: int | None = None) -> ResolveResult:
-        """Run local resolve and return root strategy and sampled action."""
+        """Run local resolve and return root strategy and sampled action.
+
+        All valuation is range-honest: the opponent's dealt cards in ``state``
+        are never consulted — leaf rollouts resample the opponent's hand from
+        the tracked posterior range, and opponent decision nodes inside the tree
+        use the range-aggregate blueprint distribution.
+        """
         budget = int(time_budget_ms or self.config.time_budget_ms)
         self._ranges = infer_ranges(state, self.blueprint) if self._ranges is None else self._ranges
+
+        hero = state.current_player
+        opponent_range = self._ranges.p1 if hero == 0 else self._ranges.p0
 
         tree = build_local_tree(
             state,
@@ -82,7 +98,8 @@ class HUResolver:
         leaf_values = estimate_leaf_values(
             leaves,
             blueprint=self.blueprint,
-            traversing_player=state.current_player,
+            traversing_player=hero,
+            opponent_range=opponent_range,
             config=LeafValueConfig(
                 num_rollouts=self.config.leaf_rollouts,
                 use_average_strategy=self.config.leaf_use_average_strategy,
@@ -96,6 +113,8 @@ class HUResolver:
                     child,
                     leaf_value_by_node_id=leaf_value_by_node_id,
                     use_average=self.config.leaf_use_average_strategy,
+                    traversing_player=hero,
+                    opponent_range=opponent_range,
                 )
                 for child in tree.root.children
             ],
@@ -133,6 +152,8 @@ class HUResolver:
         *,
         leaf_value_by_node_id: dict[int, float],
         use_average: bool,
+        traversing_player: int,
+        opponent_range: np.ndarray,
     ) -> float:
         if node.is_leaf or not node.children:
             return float(leaf_value_by_node_id.get(id(node), 0.0))
@@ -143,13 +164,75 @@ class HUResolver:
                     child,
                     leaf_value_by_node_id=leaf_value_by_node_id,
                     use_average=use_average,
+                    traversing_player=traversing_player,
+                    opponent_range=opponent_range,
                 )
                 for child in node.children
             ],
             dtype=np.float64,
         )
-        strategy = self._blueprint_strategy(node.state, node.actions, use_average=use_average)
+        if node.state.current_player == traversing_player:
+            # Hero's own future node: hero knows its cards, direct lookup is honest.
+            strategy = self._blueprint_strategy(node.state, node.actions, use_average=use_average)
+        else:
+            strategy = self._range_aggregate_strategy(
+                node.state,
+                node.actions,
+                use_average=use_average,
+                traversing_player=traversing_player,
+                opponent_range=opponent_range,
+            )
         return float(np.dot(strategy, child_values))
+
+    def _range_aggregate_strategy(
+        self,
+        state: GameState,
+        actions: list[Action],
+        *,
+        use_average: bool,
+        traversing_player: int,
+        opponent_range: np.ndarray,
+    ) -> np.ndarray:
+        """Opponent action distribution aggregated over its posterior range.
+
+        The opponent's dealt cards are hidden information; predicting its play
+        from the true-hand infoset would be clairvoyant. Instead, aggregate the
+        blueprint distribution over every combo the hero cannot exclude, weighted
+        by the posterior range: ``P(a) = Σ_c w(c) · σ(a | c)``. Combos sharing a
+        bucket share an infoset, so the lookup is cached per bucket.
+        """
+        if not actions:
+            return np.array([], dtype=np.float64)
+
+        opponent = state.current_player
+        known = 0
+        for card in state.hole_cards[traversing_player]:
+            known |= card.mask
+        for card in state.board:
+            known |= card.mask
+
+        weights = np.where((COMBO_MASKS & known) == 0, np.maximum(opponent_range, 0.0), 0.0)
+        if weights.sum() <= 1e-12:
+            weights = np.where((COMBO_MASKS & known) == 0, 1.0, 0.0)
+
+        aggregate = np.zeros(len(actions), dtype=np.float64)
+        cache: dict[object, np.ndarray] = {}
+        total = 0.0
+        for idx in np.nonzero(weights)[0]:
+            hypo_state = replace_actor_hole_cards(state, actor=opponent, combo=ALL_COMBOS[idx])
+            key = encode_infoset_key(hypo_state, opponent, self.blueprint.card_abstraction)
+            dist = cache.get(key)
+            if dist is None:
+                dist = self._blueprint_strategy(hypo_state, actions, use_average=use_average)
+                cache[key] = dist
+            weight = float(weights[idx])
+            aggregate += weight * dist
+            total += weight
+
+        if total <= 1e-12:
+            return np.full(len(actions), 1.0 / len(actions), dtype=np.float64)
+        aggregate /= aggregate.sum()
+        return aggregate
 
     def _blueprint_strategy(
         self,

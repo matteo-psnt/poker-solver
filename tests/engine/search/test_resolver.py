@@ -89,6 +89,64 @@ def test_resolver_uses_depth_cutoff_leaves(monkeypatch):
     assert observed["leaf_count"] > 0
 
 
+@pytest.mark.timeout(60)
+def test_resolver_is_not_clairvoyant():
+    """solve() must be invariant to the opponent's dealt hole cards.
+
+    The resolver may only condition on public state + hero's own cards + the
+    tracked range. Same hero hand, same board, same RNG seed, two different
+    dealt opponent hands => identical action values. Fails if leaf rollouts or
+    internal-node strategy lookups peek at the dealt hand.
+    """
+    from src.engine.search.range_inference import replace_actor_hole_cards
+
+    state, rules = _make_initial_state()
+    config = make_test_config(seed=42)
+    action_model = ActionModel(config)
+    from src.engine.solver.storage.shared_array import SharedArrayStorage
+
+    storage = SharedArrayStorage(
+        num_workers=1, worker_id=0, session_id="resolver-clair", is_coordinator=True
+    )
+    solver = MCCFRSolver(
+        action_model=action_model,
+        card_abstraction=DummyCardAbstraction(),
+        storage=storage,
+        config=config,
+    )
+    for _ in range(10):  # trained strategies give the internal-node path real bite
+        solver.train_iteration()
+
+    hero = state.current_player
+    opponent = 1 - hero
+    state_alt = replace_actor_hole_cards(
+        state, actor=opponent, combo=(Card.new("2c"), Card.new("7d"))
+    )
+    assert state.hole_cards[hero] == state_alt.hole_cards[hero]
+    assert state.hole_cards[opponent] != state_alt.hole_cards[opponent]
+
+    def _solve(target_state):
+        import random as py_random
+
+        resolver = HUResolver(
+            blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+        )
+        # Seed BOTH streams: leaf sampling uses np.random, the blueprint's board
+        # dealing inside rollouts uses the global `random` module.
+        py_random.seed(123)
+        np.random.seed(123)
+        return resolver.solve(target_state, time_budget_ms=25)
+
+    result = _solve(state)
+    result_alt = _solve(state_alt)
+
+    # Action values are the clairvoyance carrier: rollout payoffs and opponent
+    # response predictions both feed them. (The final root strategy also depends
+    # on wall-clock iteration counts, so it is not asserted bitwise.)
+    np.testing.assert_allclose(result.action_values, result_alt.action_values)
+    np.testing.assert_allclose(result.blueprint_strategy, result_alt.blueprint_strategy)
+
+
 @pytest.mark.parametrize("field", ["resolver.leaf_value_mode", "resolver.range_update_mode"])
 def test_resolver_unknown_field_rejected(field):
     # Removed fields — ResolverConfig uses extra="forbid".

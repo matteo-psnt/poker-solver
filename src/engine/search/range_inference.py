@@ -35,6 +35,9 @@ _EPS = 1e-12
 ALL_COMBOS: list[tuple[Card, Card]] = _ALL_COMBOS
 NUM_COMBOS: int = _NUM_COMBOS
 
+# Per-combo card bitmasks in ALL_COMBOS order, for fast dead-card filtering.
+COMBO_MASKS: np.ndarray = np.array([c1.mask | c2.mask for c1, c2 in _ALL_COMBOS], dtype=np.int64)
+
 
 def infer_ranges(state: GameState, blueprint) -> PlayerRanges:
     """
@@ -101,7 +104,7 @@ def _action_likelihood_vector(
         if combo[0].mask in board_masks or combo[1].mask in board_masks:
             continue
 
-        hypo_state = _replace_actor_hole_cards(state, actor=actor, combo=combo)
+        hypo_state = replace_actor_hole_cards(state, actor=actor, combo=combo)
         infoset_key = encode_infoset_key(hypo_state, actor, blueprint.card_abstraction)
         cached = cache.get(infoset_key)
         if cached is not None:
@@ -163,12 +166,18 @@ def _action_likelihood_vector(
     return likelihood
 
 
-def _replace_actor_hole_cards(
+def replace_actor_hole_cards(
     state: GameState,
     *,
     actor: int,
     combo: tuple[Card, Card],
 ) -> GameState:
+    """Copy of ``state`` with ``actor``'s hole cards swapped for ``combo``.
+
+    Validation is skipped: the source state is valid by construction, and
+    mid-transition states (e.g. a street advanced but its board not yet dealt)
+    would fail the board-size check if re-validated.
+    """
     hole_cards = list(state.hole_cards)
     hole_cards[actor] = combo
     return GameState(
@@ -184,6 +193,7 @@ def _replace_actor_hole_cards(
         to_call=state.to_call,
         last_aggressor=state.last_aggressor,
         blind_to_call=state.blind_to_call,
+        _skip_validation=True,
     )
 
 
