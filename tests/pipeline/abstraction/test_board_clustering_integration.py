@@ -82,7 +82,7 @@ class TestBoardClusteringIntegration:
             buckets=StreetBucketConfig(flop=5, turn=5, river=5),
             board_clusters=StreetBucketConfig(flop=5, turn=5, river=5),
             representatives_per_cluster=1,
-            equity_samples=10,
+            flop_runouts=10,
             num_workers=1,
         )
         precomputer = PostflopPrecomputer(config)
@@ -97,7 +97,7 @@ class TestBoardClusteringIntegration:
             buckets=StreetBucketConfig(flop=5, turn=5, river=5),
             board_clusters=StreetBucketConfig(flop=5, turn=5, river=5),
             representatives_per_cluster=1,
-            equity_samples=10,  # Very few samples for speed
+            flop_runouts=10,  # Very few runouts for speed
             num_workers=1,
             seed=42,
         )
@@ -116,7 +116,7 @@ class TestBoardClusteringIntegration:
             buckets=StreetBucketConfig(flop=3, turn=3, river=3),
             board_clusters=StreetBucketConfig(flop=3, turn=3, river=3),
             representatives_per_cluster=1,
-            equity_samples=10,
+            flop_runouts=10,
             num_workers=1,
             seed=42,
         )

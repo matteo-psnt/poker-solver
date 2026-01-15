@@ -18,7 +18,9 @@ buckets:
   river: 30
 
 # Equity calculation settings
-equity_samples: 100  # Monte Carlo samples per (board, hand) pair
+# Flop runout cap for the exact range-vs-range engine (null = all 1,176
+# runouts). Turn and river equities are always exact.
+flop_runouts: 200
 
 # Clustering algorithm settings
 kmeans_max_iter: 100

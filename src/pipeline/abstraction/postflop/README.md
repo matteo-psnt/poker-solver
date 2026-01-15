@@ -35,8 +35,8 @@ However, A♠K♠ on T♠9♠8♣ is **different** from A♥K♥ on T♠9♠8♣
 │  └──────────────┘    └──────────────┘    └──────────────┘       │
 │        │                   │                    │               │
 │        ▼                   ▼                    ▼               │
-│  1,755 flops         50-400 clusters     Monte Carlo            │
-│  16,432 turns        per street          equity samples         │
+│  1,755 flops         50-400 clusters     Exact range-vs-range   │
+│  16,432 turns        per street          equity engine          │
 │  ~135k rivers                                                   │
 │                                                                 │
 │                           ┌──────────────┐                      │
@@ -179,7 +179,7 @@ buckets:
   turn: 100
   river: 200
 
-equity_samples: 1000
+flop_runouts: null  # null = exact (all 1,176 runouts); turn/river always exact
 representatives_per_cluster: 1
 representative_selection: closest  # closest | diverse | random
 ```
@@ -225,12 +225,14 @@ print(f"This hand is in bucket {bucket}")
 
 ### 1. Board Clustering BEFORE Equity Calculation
 
-We cluster boards by texture features (not equity), then only compute equity for representative boards. This is critical for tractability:
+We cluster boards by texture features (not equity), then only compute equity for representative boards.
 
-| Approach | Computation |
-|----------|-------------|
-| Naive | 1,755 boards × 1,081 hands × 1,000 samples = 1.9B equity calcs |
-| With clustering (50 clusters, 1 rep) | 50 × 1,081 × 1,000 = 54M equity calcs (35x reduction) |
+Equity itself comes from the exact range-vs-range engine
+(`src/pipeline/abstraction/utils/equity.py`): one pass per representative
+board covers every hole-card combo at once (each combo evaluated once per
+runout, win/tie counts derived by sorted-strength counting with blocker
+corrections). A full exact flop table (all 1,176 runouts) takes ~1s per
+board; turn (~45ms) and river (~5ms) are always exact.
 
 ### 2. Fallback Mechanism
 
@@ -259,7 +261,7 @@ config/abstraction/
 └── README.md
 
 data/combo_abstraction/
-├── buckets-F50T100R200-C50C100C200-s1000-{hash}/
+├── buckets-F50T100R200-C50C100C200-rexact-{hash}/
 │   ├── combo_abstraction.pkl  # Pickled PostflopBucketer
 │   └── metadata.json          # Config and statistics
 └── ...
@@ -269,11 +271,11 @@ data/combo_abstraction/
 
 ### Precomputation Time
 
-| Config | Board Clusters | Equity Samples | Time Estimate |
-|--------|---------------|----------------|---------------|
-| quick_test | 10/20/30 | 100 | ~5 minutes |
-| default | 50/100/200 | 1,000 | ~20 minutes |
-| production | 100/200/400 | 2,000 | ~2 hours |
+| Config | Board Clusters | Flop Runouts | Time Estimate |
+|--------|---------------|--------------|---------------|
+| quick_test | 10/20/30 | 200 | ~1 minute |
+| default | 50/100/200 | exact | ~5 minutes |
+| production | 100/200/400 | exact | ~10 minutes |
 
 ### Runtime Lookup
 

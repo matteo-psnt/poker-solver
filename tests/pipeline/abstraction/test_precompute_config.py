@@ -32,7 +32,7 @@ class TestPrecomputeConfig:
         assert config.num_buckets[Street.RIVER] == data["buckets"]["river"]
 
         assert config.representatives_per_cluster == data["representatives_per_cluster"]
-        assert config.equity_samples == data["equity_samples"]
+        assert config.flop_runouts == data["flop_runouts"]
         assert config.seed == data["seed"]
 
     def test_load_default(self):
@@ -62,7 +62,7 @@ class TestPrecomputeConfig:
         assert config.num_buckets[Street.RIVER] == data["buckets"]["river"]
 
         assert config.representatives_per_cluster == data["representatives_per_cluster"]
-        assert config.equity_samples == data["equity_samples"]
+        assert config.flop_runouts == data["flop_runouts"]
 
     def test_invalid_config_name(self):
         """Test loading non-existent config raises error."""

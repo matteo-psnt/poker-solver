@@ -25,11 +25,12 @@ def abstraction_output_path(base_dir: Path, config: PrecomputeConfig) -> Path:
     Mirrors ``data/combo_abstraction/<name>`` so the resolver (which scans that
     directory relative to the working directory) finds the result.
     """
+    runouts_tag = "exact" if config.flop_runouts is None else str(config.flop_runouts)
     dirname = (
         f"buckets-F{config.num_buckets[Street.FLOP]}T{config.num_buckets[Street.TURN]}"
         f"R{config.num_buckets[Street.RIVER]}-"
         f"C{config.num_board_clusters[Street.FLOP]}C{config.num_board_clusters[Street.TURN]}"
         f"C{config.num_board_clusters[Street.RIVER]}-"
-        f"s{config.equity_samples}-{output_config_hash(config)}"
+        f"r{runouts_tag}-{output_config_hash(config)}"
     )
     return base_dir / "data" / "combo_abstraction" / dirname
