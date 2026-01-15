@@ -125,7 +125,7 @@ def test_precompute_abstraction_skips_when_present(monkeypatch, tmp_path):
     """A complete abstraction on disk is reused (no rebuild) unless overwrite=True."""
     out = tmp_path / "data" / "combo_abstraction" / "buckets-x"
     out.mkdir(parents=True)
-    (out / "combo_abstraction.pkl").write_text("stub")
+    (out / "metadata.json").write_text("{}")
 
     monkeypatch.setattr(services.PrecomputeConfig, "from_yaml", lambda name: SimpleNamespace())
     monkeypatch.setattr(services, "abstraction_output_path", lambda base, cfg: out)

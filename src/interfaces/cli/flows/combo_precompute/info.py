@@ -58,26 +58,23 @@ def handle_combo_info(ctx: CliContext) -> None:
                 "exact" if parsed_config.flop_runouts is None else str(parsed_config.flop_runouts)
             )
             print(f"   Flop runouts: {flop_runouts}")
-            print(f"   Representatives per cluster: {parsed_config.representatives_per_cluster}")
-            print(f"   Representative selection: {parsed_config.representative_selection}")
 
-        if "statistics" in metadata:
+        if "streets" in metadata:
             print("\n   Street statistics:")
             for street in ["FLOP", "TURN", "RIVER"]:
-                if street in metadata["statistics"]:
-                    stats = metadata["statistics"][street]
-                    num_clusters = stats.get("num_clusters", "?")
-                    num_combos = stats.get("num_combos", "?")
-                    num_buckets = stats.get("num_buckets", "?")
+                if street in metadata["streets"]:
+                    stats = metadata["streets"][street]
+                    quality = stats.get("quality", {})
                     print(
-                        f"     {street:6s}: {num_buckets:3} buckets, "
-                        f"{num_clusters:3} clusters, {num_combos:6,} combos"
+                        f"     {street:6s}: {stats.get('num_buckets', '?'):3} buckets, "
+                        f"{stats.get('num_boards', '?'):>7,} boards, "
+                        f"{quality.get('combo_count', 0):>12,} combos, "
+                        f"var expl {quality.get('variance_explained', 0.0):.4f}"
                     )
 
-        pkl_file = path / "combo_abstraction.pkl"
-        if pkl_file.exists():
-            size_mb = pkl_file.stat().st_size / (1024 * 1024)
-            print(f"\n   File size: {size_mb:.1f} MB")
+        size_mb = sum(f.stat().st_size for f in path.glob("*.npy")) / (1024 * 1024)
+        if size_mb > 0:
+            print(f"\n   Array size: {size_mb:.1f} MB")
 
         print()
 
@@ -144,8 +141,8 @@ def _show_detailed_info(ctx: CliContext, abstractions: list) -> None:
                 print("\n  Histogram (bucket → count):")
                 for bucket_id in sorted(bucket_counts.keys()):
                     count = bucket_counts[bucket_id]
-                    bar = "█" * (count // 50)
-                    print(f"    {bucket_id:3d}: {bar} {count}")
+                    bar = "█" * max(1, round(40 * count / max_count))
+                    print(f"    {bucket_id:3d}: {bar} {count:,}")
 
         except Exception as exc:
             print(f"\n✗ Error loading abstraction: {exc}")

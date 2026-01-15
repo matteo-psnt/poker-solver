@@ -153,6 +153,20 @@ class TestCanonicalizeHand:
         assert hand[0].suit_label == 0  # A_0
         assert hand[1].suit_label == 1  # K_1
 
+    def test_hole_card_order_is_irrelevant(self):
+        """(A♦, K♥) and (K♥, A♦) must canonicalize identically.
+
+        Both suits are new to the mapping, so label assignment must follow a
+        canonical card order rather than the caller's argument order.
+        """
+        board = (Card.new("Ts"), Card.new("9s"), Card.new("8s"))
+        _, mapping = canonicalize_board(board)
+
+        hand_forward = canonicalize_hand((Card.new("Ad"), Card.new("Kh")), mapping)
+        hand_reversed = canonicalize_hand((Card.new("Kh"), Card.new("Ad")), mapping)
+
+        assert hand_forward == hand_reversed
+
     def test_isomorphic_hands_same_canonical(self):
         """Test that isomorphic (hand, board) pairs produce same canonical form."""
         # Two boards that are isomorphic

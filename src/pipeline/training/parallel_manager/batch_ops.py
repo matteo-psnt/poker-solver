@@ -24,7 +24,6 @@ class BatchResult(TypedDict):
     resized: bool
     capacity: int
     interrupted: bool
-    fallback_stats: dict[str, int | float]
 
 
 def run_batch(
@@ -84,12 +83,6 @@ def run_batch(
                 total_owned += cast(int, result.get("num_owned_infosets", 0))
                 worker_capacity = float(cast(float | int, result.get("capacity_usage", 0.0)))
                 max_worker_capacity = max(max_worker_capacity, worker_capacity)
-                fallback_stats = result.get("fallback_stats")
-                if isinstance(fallback_stats, dict):
-                    worker_id = cast(int, result["worker_id"])
-                    manager.fallback_stats_by_worker[worker_id] = cast(
-                        dict[str, int | float], fallback_stats
-                    )
                 received += 1
             else:
                 if verbose:
@@ -137,18 +130,6 @@ def run_batch(
             verbose=verbose,
         )
 
-    total_lookups = sum(
-        stats.get("total_lookups", 0) for stats in manager.fallback_stats_by_worker.values()
-    )
-    fallback_count = sum(
-        stats.get("fallback_count", 0) for stats in manager.fallback_stats_by_worker.values()
-    )
-    fallback_stats = {
-        "total_lookups": total_lookups,
-        "fallback_count": fallback_count,
-        "fallback_rate": (fallback_count / total_lookups) if total_lookups > 0 else 0.0,
-    }
-
     return {
         "utilities": all_utilities,
         "batch_time": batch_time,
@@ -159,5 +140,4 @@ def run_batch(
         "resized": resized,
         "capacity": manager.capacity,
         "interrupted": interrupted,
-        "fallback_stats": fallback_stats,
     }

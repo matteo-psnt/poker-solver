@@ -36,7 +36,7 @@ def build_card_abstraction(
         abstractions_dir: Optional directory containing precomputed abstractions
 
     Returns:
-        BucketingStrategy instance (PostflopBucketer)
+        BucketingStrategy instance (DenseBucketer)
 
     Raises:
         ValueError: If config is invalid

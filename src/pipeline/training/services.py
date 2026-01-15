@@ -198,7 +198,7 @@ def precompute_abstraction(
     if num_workers is not None:
         config = config.model_copy(update={"num_workers": num_workers})
     out = abstraction_output_path(base_dir or Path.cwd(), config)
-    if not overwrite and (out / "combo_abstraction.pkl").exists():
+    if not overwrite and (out / "metadata.json").exists():
         return out
     precomputer = PostflopPrecomputer(config)
     precomputer.precompute_all(streets=[Street.FLOP, Street.TURN, Street.RIVER])

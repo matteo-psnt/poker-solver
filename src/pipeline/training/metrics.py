@@ -57,7 +57,6 @@ class MetricsTracker:
         self.zero_regret_pct_window: deque[float] = deque(maxlen=window_size)
         self.avg_entropy_window: deque[float] = deque(maxlen=window_size)
         self.uniform_strategy_pct_window: deque[float] = deque(maxlen=window_size)
-        self.fallback_rate_window: deque[float] = deque(maxlen=window_size)
 
     def log_iteration(
         self,
@@ -65,7 +64,6 @@ class MetricsTracker:
         utility: float,
         num_infosets: int,
         infoset_sampler: Callable | None = None,
-        fallback_rate: float | None = None,
     ):
         """
         Log metrics for a training iteration.
@@ -75,7 +73,6 @@ class MetricsTracker:
             utility: Player 0 utility for this iteration
             num_infosets: Total number of infosets discovered
             infoset_sampler: Optional callable that returns sampled infosets for quality metrics
-            fallback_rate: Optional fallback rate from abstraction lookups
         """
         current_time = time.time()
         iter_time = current_time - self.last_log_time
@@ -98,10 +95,6 @@ class MetricsTracker:
                 self.zero_regret_pct_window.append(quality_metrics["zero_regret_pct"])
                 self.avg_entropy_window.append(quality_metrics["avg_entropy"])
                 self.uniform_strategy_pct_window.append(quality_metrics["uniform_strategy_pct"])
-
-        # Track fallback rate if provided
-        if fallback_rate is not None:
-            self.fallback_rate_window.append(fallback_rate)
 
         self.last_log_time = current_time
 
@@ -299,12 +292,6 @@ class MetricsTracker:
             return 0.0
         return float(np.mean(list(self.uniform_strategy_pct_window)))
 
-    def get_fallback_rate(self) -> float:
-        """Get average fallback rate over window."""
-        if not self.fallback_rate_window:
-            return 0.0
-        return float(np.mean(list(self.fallback_rate_window)))
-
     def get_summary(self) -> dict[str, float | int]:
         """
         Get summary of all metrics.
@@ -332,9 +319,6 @@ class MetricsTracker:
                     "uniform_strategy_pct": self.get_uniform_strategy_pct(),
                 }
             )
-
-        if self.fallback_rate_window:
-            summary["fallback_rate"] = self.get_fallback_rate()
 
         return summary
 
@@ -365,9 +349,6 @@ class MetricsTracker:
                 f"uniform={summary['uniform_strategy_pct']:.1f}%"
             )
 
-        if "fallback_rate" in summary:
-            print(f"  Fallback rate: {summary['fallback_rate']:.2%}")
-
         print(f"{'=' * 80}\n")
 
     def get_compact_summary(self) -> str:
@@ -389,9 +370,6 @@ class MetricsTracker:
                     f"H={summary['avg_entropy']:.2f}",
                 ]
             )
-
-        if "fallback_rate" in summary and summary["fallback_rate"] > 0:
-            parts.append(f"FB={summary['fallback_rate']:.1%}")
 
         return " | ".join(parts)
 

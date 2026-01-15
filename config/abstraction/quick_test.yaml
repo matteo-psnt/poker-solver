@@ -1,15 +1,7 @@
 # Fast Test Abstraction Configuration
 # For rapid testing and development
-# Estimated precomputation time: ~5 minutes
-
-# Board clustering (public-state abstraction)
-board_clusters:
-  flop: 10    # 10 clusters × 1 rep × ~450 hands = ~4.5k equity computations
-  turn: 20    # 20 clusters × 1 rep × ~450 hands = ~9k equity computations
-  river: 30   # 30 clusters × 1 rep × ~450 hands = ~13.5k equity computations
-
-# Representatives per cluster (for equity computation)
-representatives_per_cluster: 2
+# Full coverage: every canonical board on every street is precomputed exactly.
+# Estimated precomputation time: ~3-5 minutes
 
 # Equity buckets per street
 buckets:
@@ -22,7 +14,7 @@ buckets:
 # runouts). Turn and river equities are always exact.
 flop_runouts: 200
 
-# Clustering algorithm settings
+# Clustering algorithm settings (weighted 1D k-means over equities)
 kmeans_max_iter: 100
 kmeans_n_init: 5
 

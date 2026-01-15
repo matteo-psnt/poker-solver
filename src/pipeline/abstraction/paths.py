@@ -29,8 +29,6 @@ def abstraction_output_path(base_dir: Path, config: PrecomputeConfig) -> Path:
     dirname = (
         f"buckets-F{config.num_buckets[Street.FLOP]}T{config.num_buckets[Street.TURN]}"
         f"R{config.num_buckets[Street.RIVER]}-"
-        f"C{config.num_board_clusters[Street.FLOP]}C{config.num_board_clusters[Street.TURN]}"
-        f"C{config.num_board_clusters[Street.RIVER]}-"
         f"r{runouts_tag}-{output_config_hash(config)}"
     )
     return base_dir / "data" / "combo_abstraction" / dirname

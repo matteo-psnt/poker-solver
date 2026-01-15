@@ -50,7 +50,6 @@ def print_final_summary(
     total_infosets: int,
     elapsed_time: float,
     interrupted: bool,
-    fallback_stats: dict[str, float] | None = None,
 ) -> None:
     if not session.verbose:
         return
@@ -65,13 +64,3 @@ def print_final_summary(
 
     if total_iterations > 0:
         print(f"   Speed: {total_iterations / elapsed_time:.2f} iter/s")
-
-    if fallback_stats:
-        total_lookups = int(fallback_stats.get("total_lookups", 0))
-        fallback_count = int(fallback_stats.get("fallback_count", 0))
-        if total_lookups > 0:
-            fallback_rate = fallback_stats.get("fallback_rate", 0.0) * 100
-            print(
-                f"   Abstraction fallbacks: {fallback_count:,}/{total_lookups:,} "
-                f"({fallback_rate:.2f}%)"
-            )

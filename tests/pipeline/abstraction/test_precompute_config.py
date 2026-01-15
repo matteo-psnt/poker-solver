@@ -23,15 +23,10 @@ class TestPrecomputeConfig:
         config = PrecomputeConfig.from_yaml("quick_test")
         data = _load_yaml_config("quick_test")
 
-        assert config.num_board_clusters[Street.FLOP] == data["board_clusters"]["flop"]
-        assert config.num_board_clusters[Street.TURN] == data["board_clusters"]["turn"]
-        assert config.num_board_clusters[Street.RIVER] == data["board_clusters"]["river"]
-
         assert config.num_buckets[Street.FLOP] == data["buckets"]["flop"]
         assert config.num_buckets[Street.TURN] == data["buckets"]["turn"]
         assert config.num_buckets[Street.RIVER] == data["buckets"]["river"]
 
-        assert config.representatives_per_cluster == data["representatives_per_cluster"]
         assert config.flop_runouts == data["flop_runouts"]
         assert config.seed == data["seed"]
 
@@ -39,10 +34,6 @@ class TestPrecomputeConfig:
         """Test loading default config."""
         config = PrecomputeConfig.from_yaml("default")
         data = _load_yaml_config("default")
-
-        assert config.num_board_clusters[Street.FLOP] == data["board_clusters"]["flop"]
-        assert config.num_board_clusters[Street.TURN] == data["board_clusters"]["turn"]
-        assert config.num_board_clusters[Street.RIVER] == data["board_clusters"]["river"]
 
         assert config.num_buckets[Street.FLOP] == data["buckets"]["flop"]
         assert config.num_buckets[Street.TURN] == data["buckets"]["turn"]
@@ -53,15 +44,10 @@ class TestPrecomputeConfig:
         config = PrecomputeConfig.from_yaml("production")
         data = _load_yaml_config("production")
 
-        assert config.num_board_clusters[Street.FLOP] == data["board_clusters"]["flop"]
-        assert config.num_board_clusters[Street.TURN] == data["board_clusters"]["turn"]
-        assert config.num_board_clusters[Street.RIVER] == data["board_clusters"]["river"]
-
         assert config.num_buckets[Street.FLOP] == data["buckets"]["flop"]
         assert config.num_buckets[Street.TURN] == data["buckets"]["turn"]
         assert config.num_buckets[Street.RIVER] == data["buckets"]["river"]
 
-        assert config.representatives_per_cluster == data["representatives_per_cluster"]
         assert config.flop_runouts == data["flop_runouts"]
 
     def test_invalid_config_name(self):
