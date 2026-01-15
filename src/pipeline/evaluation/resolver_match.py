@@ -22,15 +22,13 @@ used here.
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 
 import numpy as np
-from scipy import stats as scipy_stats
 
-from src.core.game.actions import ActionType
 from src.core.game.state import Card, GameState, Street
 from src.engine.search.resolver import HUResolver
+from src.pipeline.evaluation.statistics import summarize_samples
 
 _DECK: list[Card] = Card.get_full_deck()
 
@@ -100,19 +98,12 @@ def play_resolver_match(
 
         pair_samples_mbb.append(pair_net / (2.0 * big_blind) * 1000.0)
 
-    samples = np.asarray(pair_samples_mbb, dtype=np.float64)
-    mean = float(samples.mean())
-    se = float(samples.std(ddof=1) / np.sqrt(len(samples))) if len(samples) >= 2 else 0.0
-    if se > 0:
-        p_value = float(scipy_stats.ttest_1samp(samples, 0.0).pvalue)
-    else:
-        p_value = 1.0 if mean == 0.0 else 0.0
-
+    summary = summarize_samples(pair_samples_mbb)
     return ResolverMatchResult(
-        resolver_mbb_per_hand=mean,
-        se_mbb=se,
-        confidence_95_mbb=(mean - 1.96 * se, mean + 1.96 * se),
-        p_value=p_value,
+        resolver_mbb_per_hand=summary["mean"],
+        se_mbb=summary["se"],
+        confidence_95_mbb=(summary["ci_lower"], summary["ci_upper"]),
+        p_value=summary["p_value"],
         num_deals=num_deals,
         num_hands=2 * num_deals,
         resolver_decisions=decisions,
@@ -146,26 +137,21 @@ def _play_game(
     )
 
     decisions = 0
-    fallbacks = 0
     while not state.is_terminal:
         if solver.is_chance_node(state):
             state = _deal_from_stack(state, board_stack)
             continue
         if state.current_player == resolver_seat:
             decisions += 1
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always", RuntimeWarning)
-                action = resolver.act(state, time_budget_ms=time_budget_ms)
-            fallbacks += sum(issubclass(w.category, RuntimeWarning) for w in caught)
+            action = resolver.act(state, time_budget_ms=time_budget_ms)
         else:
             action = solver.sample_action_from_strategy(state, use_average=True)
         state = state.apply_action(action, rules)
 
-    is_showdown = bool(state.betting_history) and state.betting_history[-1].type != ActionType.FOLD
-    if is_showdown and len(state.board) < 5:
+    if not state.ended_by_fold and len(state.board) < 5:
         state = _complete_board(state, board_stack)
 
-    return float(state.get_payoff(resolver_seat, rules)), decisions, fallbacks
+    return float(state.get_payoff(resolver_seat, rules)), decisions, resolver.fallback_count
 
 
 def _deal_from_stack(state: GameState, board_stack: list[Card]) -> GameState:
@@ -181,35 +167,19 @@ def _deal_from_stack(state: GameState, board_stack: list[Card]) -> GameState:
     else:
         return state
 
-    return GameState(
-        street=state.street,
-        pot=state.pot,
-        stacks=state.stacks,
+    return state.replace(
         board=tuple(new_board),
-        hole_cards=state.hole_cards,
-        betting_history=state.betting_history,
-        button_position=state.button_position,
-        current_player=1 - state.button_position,
-        is_terminal=False,
+        current_player=1 - state.button_position,  # out of position acts first postflop
         to_call=0,
         last_aggressor=None,
-        blind_to_call=state.blind_to_call,
     )
 
 
 def _complete_board(state: GameState, board_stack: list[Card]) -> GameState:
     """Complete an all-in board from the same fixed deck positions."""
-    return GameState(
+    return state.replace(
         street=Street.RIVER,
-        pot=state.pot,
-        stacks=state.stacks,
         board=tuple(board_stack[:5]),
-        hole_cards=state.hole_cards,
-        betting_history=state.betting_history,
-        button_position=state.button_position,
-        current_player=state.current_player,
         is_terminal=True,
         to_call=0,
-        last_aggressor=state.last_aggressor,
-        blind_to_call=state.blind_to_call,
     )

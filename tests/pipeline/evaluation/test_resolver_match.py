@@ -5,26 +5,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.core.actions.action_model import ActionModel
-from src.core.game.state import Street
+from src.core.game.actions import call
+from src.core.game.state import Card, Street
 from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.evaluation.resolver_match import (
     _deal_from_stack,
     play_resolver_match,
 )
-from tests.test_helpers import DummyCardAbstraction, make_test_config
+from tests.test_helpers import build_trained_test_solver
 
 
 def _build_solver(iterations: int) -> MCCFRSolver:
-    config = make_test_config(seed=42, small_blind=50, big_blind=100, starting_stack=400)
-    storage = SharedArrayStorage(
-        num_workers=1, worker_id=0, session_id="resolver-match", is_coordinator=True
-    )
-    solver = MCCFRSolver(ActionModel(config), DummyCardAbstraction(), storage, config=config)
-    for _ in range(iterations):
-        solver.train_iteration()
-    return solver
+    return build_trained_test_solver(iterations, session_id="resolver-match")
 
 
 class TestDuplicateDealing:
@@ -34,12 +26,8 @@ class TestDuplicateDealing:
         solver = _build_solver(0)
         state = solver.deal_initial_state()
         # A preflop call closes the street in this engine, leaving the flop chance node.
-        from src.core.game.actions import call
-
         state = state.apply_action(call(), solver.rules)
         assert solver.is_chance_node(state)
-
-        from src.core.game.state import Card
 
         deck = Card.get_full_deck()
         known = {c.mask for hand in state.hole_cards for c in hand}

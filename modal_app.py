@@ -424,11 +424,9 @@ def run_compare(
             "the evals are not paired."
         )
 
-    def _mbb_samples(results: dict[str, Any]) -> list[float]:
-        factor = 1000.0 / results["big_blind"]
-        return [(r["u0"] + r["u1"]) / 2.0 * factor for r in results["hand_records"]]
-
-    comparison = compare_paired_samples(_mbb_samples(results_a), _mbb_samples(results_b))
+    comparison = compare_paired_samples(
+        results_a["pair_samples_mbb"], results_b["pair_samples_mbb"]
+    )
 
     for name, result in ((run_a, result_a), (run_b, result_b)):
         results = result["results"]

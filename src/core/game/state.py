@@ -7,6 +7,7 @@ complete game state dataclass that tracks all information needed for a poker han
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import lru_cache
@@ -314,6 +315,23 @@ class GameState:
         if rules is None:
             raise ValueError("rules is required for GameState.get_payoff()")
         return rules.get_payoff(self, player)
+
+    def replace(self, *, validate: bool = True, **changes) -> GameState:
+        """Copy of this state with ``changes`` applied (the one sanctioned way to
+        derive a modified state — never enumerate all fields by hand).
+
+        ``validate=False`` is the explicit escape hatch for mid-transition states
+        that legitimately violate invariants (e.g. a street advanced before its
+        board is dealt fails the board-size check).
+        """
+        if not validate:
+            changes["_skip_validation"] = True
+        return dataclasses.replace(self, **changes)
+
+    @property
+    def ended_by_fold(self) -> bool:
+        """True when the hand ended on a fold (the alternative terminal is showdown)."""
+        return bool(self.betting_history) and self.betting_history[-1].type == ActionType.FOLD
 
     def normalized_betting_sequence(self) -> str:
         """Return canonical betting-sequence encoding used in infoset keys."""

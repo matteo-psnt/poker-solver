@@ -73,7 +73,12 @@ from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 from src.engine.search.action_translation import translate_action_distribution
-from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS
+from src.engine.search.range_inference import (
+    ALL_COMBOS,
+    COMBO_MASKS,
+    NUM_COMBOS,
+    replace_actor_hole_cards,
+)
 from src.engine.solver.infoset_encoder import encode_infoset_key
 
 _EPS = 1e-12
@@ -130,8 +135,15 @@ class HandOutcome:
     pot: int
 
 
-# Severity order for attributing a branched terminal to its dominant type.
-_TERMINAL_SEVERITY = {"fold": 0, "showdown": 1, "allin": 2}
+# Severity order for attributing a deal (or branched terminal) to its dominant
+# kind: an all-in dominates the payoff spread, a fold contributes almost none.
+# Single source of truth — variance decomposition grouping uses it too.
+TERMINAL_SEVERITY = {"fold": 0, "showdown": 1, "allin": 2}
+
+
+def dominant_terminal(*kinds: str) -> str:
+    """Highest-variance terminal type among ``kinds`` (allin > showdown > fold)."""
+    return max(kinds, key=TERMINAL_SEVERITY.__getitem__)
 
 
 @dataclass
@@ -173,7 +185,6 @@ class _HUNLLocalBestResponse:
         self.card_abstraction = blueprint.card_abstraction
         self.storage = blueprint.storage
         self.evaluator = get_evaluator()
-        self._masks = np.array([c1.mask | c2.mask for c1, c2 in ALL_COMBOS], dtype=np.int64)
 
     # -- Realized play -----------------------------------------------------
 
@@ -239,9 +250,17 @@ class _HUNLLocalBestResponse:
         """
         if not legal:
             return None
-        next_states = [state.apply_action(action, self.rules) for action in legal]
-        if not all(s.is_terminal for s in next_states):
+        # BET/RAISE always reopen the betting, so such menus can never be
+        # all-terminal — skip without paying any apply_action. (ALL_IN cannot be
+        # pre-filtered: calling a jam is itself encoded as ALL_IN and IS terminal.)
+        if any(action.type in (ActionType.BET, ActionType.RAISE) for action in legal):
             return None
+        next_states = []
+        for action in legal:
+            next_state = state.apply_action(action, self.rules)
+            if not next_state.is_terminal:
+                return None
+            next_states.append(next_state)
 
         probs = np.array([float(np.dot(belief, vecs[action])) for action in legal])
         total = probs.sum()
@@ -258,7 +277,7 @@ class _HUNLLocalBestResponse:
             branch_belief = posterior / mass if mass > _EPS else belief
             value += weight * self._terminal_value(next_state, lbr_player, opp, branch_belief)
             kind = self._terminal_kind(next_state)
-            if _TERMINAL_SEVERITY[kind] >= _TERMINAL_SEVERITY[terminal]:
+            if TERMINAL_SEVERITY[kind] >= TERMINAL_SEVERITY[terminal]:
                 terminal, pot = kind, next_state.pot
         return HandOutcome(value=value, terminal=terminal, pot=pot)
 
@@ -273,7 +292,7 @@ class _HUNLLocalBestResponse:
     def _initial_belief(self, state: GameState, opp: int) -> np.ndarray:
         """Uniform opponent range vector masked by the LBR player's known cards."""
         known = self._known_mask(state, opp)
-        weights = np.where((self._masks & known) == 0, 1.0, 0.0)
+        weights = np.where((COMBO_MASKS & known) == 0, 1.0, 0.0)
         total = weights.sum()
         if total <= _EPS:
             return np.full(NUM_COMBOS, 1.0 / NUM_COMBOS)
@@ -309,17 +328,35 @@ class _HUNLLocalBestResponse:
     def _showdown_value(
         self, state: GameState, lbr_player: int, opp: int, belief: np.ndarray
     ) -> float:
-        """Belief-weighted payoff over the surviving range on a complete board."""
+        """Belief-weighted payoff over the surviving range on a complete board.
+
+        Payoffs are pot arithmetic on hand-rank comparisons (win: pot - invested,
+        tie: pot/2 - invested, lose: -invested — exactly ``get_payoff``'s showdown
+        cases), so no per-combo GameState construction is needed.
+        """
         known = self._known_mask(state, opp)
-        weights = np.where((self._masks & known) == 0, belief, 0.0)
+        weights = np.where((COMBO_MASKS & known) == 0, belief, 0.0)
         total = weights.sum()
         if total <= _EPS:
             return float(state.get_payoff(lbr_player, self.rules))
 
+        pot = float(state.pot)
+        invested = self.rules.invested_chips(state)[lbr_player]
+        win_payoff = pot - invested
+        tie_payoff = pot / 2.0 - invested
+        lose_payoff = -invested
+        lbr_rank = self.evaluator.evaluate(state.hole_cards[lbr_player], state.board)
+
         ev = 0.0
         for idx in np.nonzero(weights)[0]:
-            opp_state = self._with_opponent_hole(state, opp, ALL_COMBOS[idx])
-            ev += float(weights[idx]) * float(opp_state.get_payoff(lbr_player, self.rules))
+            opp_rank = self.evaluator.evaluate(ALL_COMBOS[idx], state.board)
+            if lbr_rank < opp_rank:
+                payoff = win_payoff
+            elif lbr_rank == opp_rank:
+                payoff = tie_payoff
+            else:
+                payoff = lose_payoff
+            ev += float(weights[idx]) * payoff
         return ev / float(total)
 
     def _allin_showdown_value(
@@ -353,21 +390,15 @@ class _HUNLLocalBestResponse:
             total += self._showdown_value(runout_state, lbr_player, opp, belief)
         return total / len(runouts)
 
-    def _with_runout(self, state: GameState, extra: tuple[Card, ...]) -> GameState:
+    @staticmethod
+    def _with_runout(state: GameState, extra: tuple[Card, ...]) -> GameState:
         """Terminal copy of ``state`` with the board completed by ``extra``."""
-        return GameState(
+        return state.replace(
             street=Street.RIVER,
-            pot=state.pot,
-            stacks=state.stacks,
             board=state.board + extra,
-            hole_cards=state.hole_cards,
-            betting_history=state.betting_history,
-            button_position=state.button_position,
-            current_player=state.current_player,
             is_terminal=True,
             to_call=0,
-            last_aggressor=state.last_aggressor,
-            blind_to_call=state.blind_to_call,
+            validate=False,
         )
 
     # -- LBR action choice -------------------------------------------------
@@ -571,9 +602,9 @@ class _HUNLLocalBestResponse:
         known = self._known_mask(state, opp)
         cache: dict[object, dict[Action, float]] = {}
         for idx in range(NUM_COMBOS):
-            if self._masks[idx] & known:
+            if COMBO_MASKS[idx] & known:
                 continue
-            opp_state = self._with_opponent_hole(state, opp, ALL_COMBOS[idx])
+            opp_state = replace_actor_hole_cards(state, actor=opp, combo=ALL_COMBOS[idx])
             key = encode_infoset_key(opp_state, opp, self.card_abstraction)
             dist = cache.get(key)
             if dist is None:
@@ -610,26 +641,6 @@ class _HUNLLocalBestResponse:
                 fold_probs += vecs[candidate]
         return fold_probs
 
-    def _with_opponent_hole(
-        self, state: GameState, opp: int, combo: tuple[Card, Card]
-    ) -> GameState:
-        holes = list(state.hole_cards)
-        holes[opp] = combo
-        return GameState(
-            street=state.street,
-            pot=state.pot,
-            stacks=state.stacks,
-            board=state.board,
-            hole_cards=(holes[0], holes[1]),
-            betting_history=state.betting_history,
-            button_position=state.button_position,
-            current_player=state.current_player,
-            is_terminal=state.is_terminal,
-            to_call=state.to_call,
-            last_aggressor=state.last_aggressor,
-            blind_to_call=state.blind_to_call,
-        )
-
     # -- Equity ------------------------------------------------------------
 
     def _equity(
@@ -645,7 +656,7 @@ class _HUNLLocalBestResponse:
             known |= card.mask
         for card in board:
             known |= card.mask
-        active = np.where((opp_weights > _EPS) & ((self._masks & known) == 0))[0]
+        active = np.where((opp_weights > _EPS) & ((COMBO_MASKS & known) == 0))[0]
         if active.size == 0:
             return 0.5
 
@@ -673,7 +684,7 @@ class _HUNLLocalBestResponse:
         acc = 0.0
         weight = 0.0
         for idx in active:
-            if self._masks[idx] & board_mask:
+            if COMBO_MASKS[idx] & board_mask:
                 continue
             w = opp_weights[idx]
             opp_rank = self.evaluator.evaluate(ALL_COMBOS[idx], board)
@@ -710,9 +721,7 @@ class _HUNLLocalBestResponse:
 
     @staticmethod
     def _is_showdown(state: GameState) -> bool:
-        if not state.betting_history:
-            return False
-        return state.betting_history[-1].type != ActionType.FOLD
+        return bool(state.betting_history) and not state.ended_by_fold
 
 
 def compute_lbr_exploitability(

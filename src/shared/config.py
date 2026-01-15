@@ -266,11 +266,11 @@ class ResolverConfig(StrictFrozenModel):
     # Board runouts sampled for range-vs-range leaf valuation in the subgame CFR
     # (exact single board when the root is already on the river).
     leaf_rollouts: PositiveInt = Field(default=8)
-    leaf_use_average_strategy: bool = Field(default=True)
     policy_blend_alpha: Annotated[float, Field(ge=0.0, le=1.0)] = Field(default=0.35)
     min_strategy_prob: NonNegFloat = Field(default=1e-6)
-    # Fixed CFR iteration count (overrides the wall-clock budget). Primarily for
-    # deterministic tests; None means budget-driven.
+    # Fixed CFR iteration count. None means budget-driven (wall clock). Setting it
+    # makes resolves machine/load-independent — a determinism knob for
+    # reproducible experiments and tests.
     max_iterations: PositiveInt | None = Field(default=None)
 
 

@@ -75,6 +75,47 @@ def compute_win_rate_confidence_interval(
     return p, lower, upper
 
 
+def summarize_samples(
+    samples: Sequence[float],
+    confidence_level: float = 0.95,
+) -> dict:
+    """One-sample summary: mean, SE, t-based CI, and t-test p-value against zero.
+
+    The single home for the degenerate zero-variance convention (p = 1 when the
+    mean is exactly 0, else 0) — callers must not re-implement it.
+
+    Raises:
+        ValueError: If fewer than two samples are given.
+    """
+    n = len(samples)
+    if n < 2:
+        raise ValueError("summarize_samples requires at least 2 samples.")
+
+    values = np.asarray(samples, dtype=np.float64)
+    mean = float(values.mean())
+    se = float(stats.sem(values))
+    t_value = float(stats.t.ppf((1 + confidence_level) / 2, n - 1))
+    margin = t_value * se
+
+    if se > 0:
+        t_stat, p_value = stats.ttest_1samp(values, 0.0)
+        t_stat, p_value = float(t_stat), float(p_value)
+    else:
+        t_stat = 0.0
+        p_value = 1.0 if mean == 0.0 else 0.0
+
+    return {
+        "n": n,
+        "mean": mean,
+        "se": se,
+        "ci_lower": mean - margin,
+        "ci_upper": mean + margin,
+        "t_statistic": t_stat,
+        "p_value": p_value,
+        "is_significant": bool(p_value < 1 - confidence_level),
+    }
+
+
 def compare_paired_samples(
     samples_a: Sequence[float],
     samples_b: Sequence[float],
@@ -108,20 +149,8 @@ def compare_paired_samples(
 
     a = np.asarray(samples_a, dtype=np.float64)
     b = np.asarray(samples_b, dtype=np.float64)
-    diffs = a - b
-
-    mean_diff = float(diffs.mean())
-    se_diff = float(stats.sem(diffs))
-    t_value = float(stats.t.ppf((1 + confidence_level) / 2, n - 1))
-    margin = t_value * se_diff
-
-    if se_diff > 0:
-        t_stat, p_value = stats.ttest_rel(a, b)
-        t_stat, p_value = float(t_stat), float(p_value)
-    else:
-        # Identical difference on every sample: no within-pair noise at all.
-        t_stat = 0.0
-        p_value = 1.0 if mean_diff == 0.0 else 0.0
+    # A paired test IS the one-sample test on the per-index differences.
+    diff_summary = summarize_samples(a - b, confidence_level)
 
     if float(a.std(ddof=1)) > 0 and float(b.std(ddof=1)) > 0:
         correlation = float(stats.pearsonr(a, b)[0])
@@ -133,13 +162,13 @@ def compare_paired_samples(
         "n": n,
         "mean_a": float(a.mean()),
         "mean_b": float(b.mean()),
-        "mean_diff": mean_diff,
-        "se_diff": se_diff,
-        "ci_lower": mean_diff - margin,
-        "ci_upper": mean_diff + margin,
-        "t_statistic": t_stat,
-        "p_value": p_value,
-        "is_significant": bool(p_value < 1 - confidence_level),
+        "mean_diff": diff_summary["mean"],
+        "se_diff": diff_summary["se"],
+        "ci_lower": diff_summary["ci_lower"],
+        "ci_upper": diff_summary["ci_upper"],
+        "t_statistic": diff_summary["t_statistic"],
+        "p_value": diff_summary["p_value"],
+        "is_significant": diff_summary["is_significant"],
         "correlation": correlation,
         "se_unpaired": se_unpaired,
     }
@@ -291,98 +320,3 @@ def estimate_required_sample_size(
     required_n = (z * std_dev / target_margin_of_error) ** 2
 
     return max(30, int(np.ceil(required_n)))  # Minimum 30 samples
-
-
-class MatchStatisticsAnalyzer:
-    """
-    Analyzes statistics from head-to-head matches.
-
-    Provides confidence intervals, significance tests, and variance analysis.
-    """
-
-    def __init__(self, confidence_level: float = 0.95):
-        """
-        Initialize analyzer.
-
-        Args:
-            confidence_level: Confidence level for intervals (default: 0.95)
-        """
-        self.confidence_level = confidence_level
-
-    def analyze_payoffs(
-        self,
-        payoffs: list[int],
-        big_blind: int = 2,
-    ) -> dict:
-        """
-        Analyze payoff distribution.
-
-        Args:
-            payoffs: List of payoffs
-            big_blind: Big blind size for normalization
-
-        Returns:
-            Dictionary of statistics
-        """
-        if not payoffs:
-            return {
-                "mean": 0.0,
-                "ci_lower": 0.0,
-                "ci_upper": 0.0,
-                "std_dev": 0.0,
-                "variance": 0.0,
-                "bb_per_hand": 0.0,
-            }
-
-        # Convert to bb/hand
-        bb_payoffs = [p / big_blind for p in payoffs]
-
-        mean, ci_lower, ci_upper = compute_confidence_interval(bb_payoffs, self.confidence_level)
-        variance, std_dev = compute_variance(bb_payoffs)
-
-        return {
-            "mean": mean,
-            "ci_lower": ci_lower,
-            "ci_upper": ci_upper,
-            "std_dev": std_dev,
-            "variance": variance,
-            "bb_per_hand": mean,
-        }
-
-    def compare_strategies(
-        self,
-        payoffs1: list[int],
-        payoffs2: list[int],
-    ) -> dict:
-        """
-        Compare two strategies statistically.
-
-        Args:
-            payoffs1: Payoffs for first strategy
-            payoffs2: Payoffs for second strategy
-
-        Returns:
-            Dictionary of comparison statistics
-        """
-        if not payoffs1 or not payoffs2:
-            return {
-                "t_statistic": 0.0,
-                "p_value": 1.0,
-                "is_significant": False,
-                "mean_difference": 0.0,
-            }
-
-        t_stat, p_value, is_sig = t_test_difference(payoffs1, payoffs2, self.confidence_level)
-
-        mean_diff = np.mean(payoffs1) - np.mean(payoffs2)
-
-        return {
-            "t_statistic": t_stat,
-            "p_value": p_value,
-            "is_significant": is_sig,
-            "mean_difference": mean_diff,
-        }
-
-    def __str__(self) -> str:
-        """String representation."""
-        return f"MatchStatisticsAnalyzer(confidence={self.confidence_level})"

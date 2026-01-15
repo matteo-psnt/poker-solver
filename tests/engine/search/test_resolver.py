@@ -1,5 +1,7 @@
 """Tests for HU runtime resolver."""
 
+import random as py_random
+
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -7,9 +9,12 @@ from pydantic import ValidationError
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Card
+from src.engine.search import resolver as resolver_module
+from src.engine.search.range_inference import replace_actor_hole_cards
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.in_memory import InMemoryStorage
+from src.engine.solver.storage.shared_array import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
@@ -62,8 +67,6 @@ def test_solver_act_with_resolver_enabled():
 def test_resolver_solves_subgame_with_per_combo_strategy(monkeypatch):
     """solve() routes through the range-vs-range subgame CFR and picks the
     hero-combo row of the average root strategy."""
-    from src.engine.search import resolver as resolver_module
-
     state, rules = _make_initial_state()
     config = make_test_config(seed=42, **{"resolver.max_depth": 2})
     action_model = ActionModel(config)
@@ -94,8 +97,8 @@ def test_resolver_solves_subgame_with_per_combo_strategy(monkeypatch):
     result = resolver.solve(state, time_budget_ms=25)
     solution = observed["solution"]
     assert solution.iterations >= 8
-    assert len(result.root_actions) == len(solution.root_actions)
-    # The played resolver strategy is the hero-combo row (renormalized).
+    assert solution.root_strategy.shape[1] == len(result.root_actions)
+    # The played resolver strategy is the hero-combo row of the average strategy.
     assert result.strategy.shape == (len(result.root_actions),)
     assert result.action_values.shape == (len(result.root_actions),)
 
@@ -106,18 +109,14 @@ def test_resolver_is_not_clairvoyant():
 
     The resolver may only condition on public state + hero's own cards + the
     tracked range. Same hero hand, same board, same RNG seed, two different
-    dealt opponent hands => identical action values. Fails if leaf rollouts or
-    internal-node strategy lookups peek at the dealt hand.
+    dealt opponent hands => identical action values. Fails if the solve
+    conditions on anything but public state + ranges.
     """
-    from src.engine.search.range_inference import replace_actor_hole_cards
-
     state, rules = _make_initial_state()
     # Fixed iteration count: budget-driven iterations vary with wall clock and
     # would break bitwise comparison.
     config = make_test_config(seed=42, **{"resolver.max_iterations": 20})
     action_model = ActionModel(config)
-    from src.engine.solver.storage.shared_array import SharedArrayStorage
-
     storage = SharedArrayStorage(
         num_workers=1, worker_id=0, session_id="resolver-clair", is_coordinator=True
     )
@@ -139,8 +138,6 @@ def test_resolver_is_not_clairvoyant():
     assert state.hole_cards[opponent] != state_alt.hole_cards[opponent]
 
     def _solve(target_state):
-        import random as py_random
-
         resolver = HUResolver(
             blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
         )
