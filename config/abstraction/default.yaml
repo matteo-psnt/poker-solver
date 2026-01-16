@@ -13,6 +13,10 @@ buckets:
 # runouts). Turn and river equities are always exact.
 flop_runouts: null
 
+# Bins of the equity-realization histogram used as the flop/turn bucketing
+# feature (potential-aware). The river buckets on scalar equity.
+equity_histogram_bins: 8
+
 # Clustering algorithm settings (weighted 1D k-means over equities)
 kmeans_max_iter: 300
 kmeans_n_init: 10

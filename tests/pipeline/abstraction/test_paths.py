@@ -13,7 +13,7 @@ def test_output_path_matches_resolver_dirname():
 
     assert out.parent == Path("/repo/data/combo_abstraction")
     # Encodes buckets, flop runouts, and the short config hash.
-    assert out.name == "buckets-F10T20R30-r200-a2866e85"
+    assert out.name == "buckets-F10T20R30-r200-ae5a7e66"
 
 
 def test_output_config_hash_is_short_prefix():
