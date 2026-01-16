@@ -91,14 +91,40 @@ class DenseBucketer(BucketingStrategy):
         board_ids_by_street: dict[Street, np.ndarray],
         buckets_by_street: dict[Street, np.ndarray],
         hand_id_to_col: np.ndarray,
+        source_path: Path | None = None,
     ):
         self._num_buckets = dict(num_buckets_by_street)
         self._board_ids = dict(board_ids_by_street)
         self._buckets = dict(buckets_by_street)
         self._hand_id_to_col = hand_id_to_col
+        self._source_path = source_path
         self._sentinels = {
             street: np.iinfo(matrix.dtype).max for street, matrix in self._buckets.items()
         }
+        self._cached_postflop_bucket = lru_cache(maxsize=_LOOKUP_CACHE_SIZE)(self._postflop_bucket)
+
+    def __getstate__(self) -> dict:
+        """
+        Pickle support (training workers receive the abstraction by pickle).
+
+        A bucketer loaded from disk serializes as just its path — each worker
+        re-mmaps the same artifact files instead of receiving a copy of the
+        matrices. In-memory bucketers (precompute results, tests) serialize
+        their arrays directly.
+        """
+        if self._source_path is not None:
+            return {"_source_path": self._source_path}
+        state = dict(self.__dict__)
+        state.pop("_cached_postflop_bucket")  # lru_cache wrapper is not picklable
+        state["_buckets"] = {street: np.asarray(matrix) for street, matrix in self._buckets.items()}
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        if set(state) == {"_source_path"}:
+            loaded = DenseBucketer.load(state["_source_path"])
+            self.__dict__.update(loaded.__dict__)
+            return
+        self.__dict__.update(state)
         self._cached_postflop_bucket = lru_cache(maxsize=_LOOKUP_CACHE_SIZE)(self._postflop_bucket)
 
     @classmethod
@@ -135,7 +161,7 @@ class DenseBucketer(BucketingStrategy):
             buckets[street] = np.load(path / buckets_file, mmap_mode="r")
 
         hand_id_to_col = np.load(path / HAND_COLUMN_FILENAME)
-        return cls(num_buckets, board_ids, buckets, hand_id_to_col)
+        return cls(num_buckets, board_ids, buckets, hand_id_to_col, source_path=path)
 
     def save_arrays(self, path: Path) -> None:
         """Write the per-street arrays (metadata is written by the precomputer)."""
