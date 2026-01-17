@@ -313,7 +313,7 @@ Iteration 1000/10000 [===>    ] 10.0%
 
 **RunTracker:**
 ```python
-RunTracker(run_dir: Path, config_name: str, config: Config)
+RunTracker(run_dir: Path, config_name: str, config: Config, action_config_hash: str)
     # Initialize tracker for a run
 
 initialize()
@@ -342,7 +342,10 @@ list_runs(runs_dir: Path) -> List[str]
   "iterations": 5000,
   "runtime_seconds": 3842.5,
   "num_infosets": 125403,
+  "storage_capacity": 2000000,
+  "action_config_hash": "abc123",
   "started_at": "2025-12-22T14:30:22",
+  "resumed_at": null,
   "completed_at": null,
   "config": { /* full config dict */ }
 }
@@ -476,26 +479,22 @@ system:
 ```
 data/runs/run-20251222_143022/
 ├── .run.json                    # Run metadata
-├── checkpoints/
-│   ├── checkpoint_1000.h5       # Iteration 1000 state
-│   ├── checkpoint_2000.h5       # Iteration 2000 state
-│   └── checkpoint_final.h5      # Final state
-└── logs/
-    └── training.log             # Detailed logs (if enabled)
+├── action_counts.npy
+├── action_signatures.pkl
+├── cumulative_utility.npy
+├── key_mapping.pkl
+├── reach_counts.npy
+├── regrets.npy
+└── strategies.npy
 ```
 
-**Checkpoint Contents (HDF5):**
-```python
-checkpoint.h5:
-    /infosets/
-        {infoset_key}/
-            regrets: [N actions]
-            strategy_sum: [N actions]
-            legal_actions: [action_ids]
-    /metadata/
-        iteration: int
-        timestamp: str
-        num_infosets: int
+**Checkpoint Tracking (`.run.json`):**
+```json
+{
+  "iterations": 500000,
+  "num_infosets": 1234,
+  "storage_capacity": 2000000
+}
 ```
 
 **Resume Training:**
@@ -567,34 +566,31 @@ assert trainer.storage.num_infosets() == 0
 **Training Commands:**
 ```bash
 # Interactive CLI
-$ uv run python -m scripts.cli
-> Training Tools
-> Start New Training
+$ uv run python -m src.cli
+> Train Solver
   - Select config: production.yaml
   - Select card abstraction
   - Confirm and start
 
 # View runs
-> Training Tools
-> View Training Runs
+> View Past Runs
   - Lists all runs with status
   - Shows iterations, time, infosets
 
 # Resume training
-> Training Tools
 > Resume Training
   - Select run to resume
   - Specify additional iterations
 ```
 
-**CLI Implementation (`src/cli/training_handler.py`):**
+**CLI Implementation (`src/cli/flows/training.py`):**
 ```python
-def handle_start_training():
-    config = select_config()
+def train_solver():
+    config = select_config(ctx)
     trainer = TrainingSession(config)
-    trainer.train(num_iterations=config.get("training.num_iterations"))
+    trainer.train(num_workers=8)
 
-def handle_resume_training():
+def resume_training():
     run_dir = select_run()
     trainer = TrainingSession.resume(run_dir)
     trainer.train(num_iterations=ask_additional_iterations())

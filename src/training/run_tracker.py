@@ -20,6 +20,7 @@ class RunTracker:
     - run_id, config_name
     - start/end times, status
     - iterations, runtime, infosets
+    - action_config_hash
     - config (inline)
     """
 
@@ -28,6 +29,7 @@ class RunTracker:
         run_dir: Path,
         config_name: str = "default",
         config: Optional["Config"] = None,
+        action_config_hash: Optional[str] = None,
     ):
         """
         Initialize run tracker.
@@ -51,7 +53,11 @@ class RunTracker:
             # New run
             if config is None:
                 raise ValueError("config is required to create a new run tracker")
-            self.metadata = RunMetadata.new(self.run_id, config_name, config)
+            if not action_config_hash:
+                raise ValueError("action_config_hash is required to create a new run tracker")
+            self.metadata = RunMetadata.new(
+                self.run_id, config_name, config, action_config_hash=action_config_hash
+            )
 
     @property
     def metadata_path(self) -> Path:
@@ -120,6 +126,16 @@ class RunTracker:
         if cleanup_if_empty and self.metadata.iterations == 0:
             if self.run_dir.exists():
                 shutil.rmtree(self.run_dir)
+
+    def verify_action_config_hash(self, actual_hash: str) -> None:
+        """Ensure action abstraction hash matches run metadata."""
+        if self.metadata.action_config_hash != actual_hash:
+            raise ValueError(
+                "Action abstraction hash does not match run metadata: "
+                f"{self.metadata_path}\n"
+                f"  expected: {self.metadata.action_config_hash}\n"
+                f"  actual:   {actual_hash}"
+            )
 
     def _save(self):
         """Save metadata to disk."""

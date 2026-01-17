@@ -164,8 +164,8 @@ def build_storage(
 
     # Determine initial capacity: use run metadata if resuming, else config
     initial_capacity = config.storage.initial_capacity
-    if run_metadata and run_metadata.storage_capacity:
-        initial_capacity = run_metadata.storage_capacity
+    if run_metadata:
+        initial_capacity = run_metadata.resolve_initial_capacity(initial_capacity)
 
     return SharedArrayStorage(
         num_workers=1,

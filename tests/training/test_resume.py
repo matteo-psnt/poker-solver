@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from src.training import components
 from src.training.trainer import TrainingSession
 from src.utils.config import Config
 
@@ -125,9 +126,17 @@ def test_resume_no_checkpoint(temp_run_dir):
     """Test that resume fails if no checkpoint exists."""
     # Create run directory but no checkpoint files
     temp_run_dir.mkdir(parents=True, exist_ok=True)
-    config = Config.default().to_dict()
+    config_obj = Config.default()
+    action_config_hash = components.build_action_abstraction(config_obj).get_config_hash()
     (temp_run_dir / ".run.json").write_text(
-        json.dumps({"run_id": "test", "iterations": 0, "config": config})
+        json.dumps(
+            {
+                "run_id": "test",
+                "iterations": 0,
+                "action_config_hash": action_config_hash,
+                "config": config_obj.to_dict(),
+            }
+        )
     )
 
     with pytest.raises(FileNotFoundError, match="No checkpoint found"):
