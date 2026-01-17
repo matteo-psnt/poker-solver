@@ -298,9 +298,103 @@ def test_evaluate_run_rollout_returns_output(monkeypatch, tmp_path):
     assert output.results == expected_results
 
 
+def test_evaluate_run_lbr_refuses_run_without_recorded_abstraction(monkeypatch, tmp_path):
+    """A run with no recorded abstraction hash must not be evaluated by name.
+
+    Name-only resolution silently rebuckets the checkpoint under whatever abstraction
+    the name now points at, producing plausible but invalid numbers.
+    """
+    metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash=None)
+    metadata.config.game.big_blind = 100
+    monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
+
+    with pytest.raises(ValueError, match="does not record which card abstraction"):
+        services.evaluate_run_lbr(run_dir=tmp_path / "run-legacy", num_hands=1)
+
+
+def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
+    """The run's own recorded hash pins the abstraction without the caller passing it."""
+    metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash="recorded99")
+    metadata.config.game.big_blind = 100
+    storage = MagicMock(name="storage")
+    storage.num_infosets.return_value = 1
+    seen = {}
+
+    monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(
+        services,
+        "build_evaluation_solver",
+        lambda cfg, checkpoint_dir, abstraction_hash=None: seen.update(
+            abstraction_hash=abstraction_hash
+        )
+        or (object(), storage),
+    )
+    monkeypatch.setattr(
+        services,
+        "compute_lbr_exploitability",
+        lambda solver, cfg, **kw: SimpleNamespace(
+            exploitability_mbb=1.0,
+            exploitability_bb=0.001,
+            std_error_mbb=0.1,
+            confidence_95_mbb=(0.9, 1.1),
+            lbr_utility_p0=0.0,
+            lbr_utility_p1=0.0,
+            num_hands=1,
+            base_seed=1,
+            hand_outcomes=[],
+        ),
+    )
+
+    services.evaluate_run_lbr(run_dir=tmp_path / "run-1", num_hands=1)
+
+    assert seen["abstraction_hash"] == "recorded99"
+
+
+def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
+    """A run must be evaluated under the abstraction it was trained against.
+
+    Resolving by config name alone lets a recomputed abstraction silently rebucket an
+    existing checkpoint (same bucket counts => in-range ids => no error, wrong strategy).
+    """
+    metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash="rec1")
+    metadata.config.game.big_blind = 100
+    storage = MagicMock(name="storage")
+    storage.num_infosets.return_value = 1
+    seen = {}
+
+    monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(
+        services,
+        "build_evaluation_solver",
+        lambda cfg, checkpoint_dir, abstraction_hash=None: seen.update(
+            abstraction_hash=abstraction_hash
+        )
+        or (object(), storage),
+    )
+    monkeypatch.setattr(
+        services,
+        "compute_lbr_exploitability",
+        lambda solver, cfg, **kw: SimpleNamespace(
+            exploitability_mbb=1.0,
+            exploitability_bb=0.001,
+            std_error_mbb=0.1,
+            confidence_95_mbb=(0.9, 1.1),
+            lbr_utility_p0=0.0,
+            lbr_utility_p1=0.0,
+            num_hands=1,
+            base_seed=1,
+            hand_outcomes=[],
+        ),
+    )
+
+    services.evaluate_run_lbr(run_dir=tmp_path / "run-1", num_hands=1, abstraction_hash="abc123")
+
+    assert seen["abstraction_hash"] == "abc123"
+
+
 def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     """evaluate_run_lbr should run LBR and map LBRResult into the results dict."""
-    metadata = SimpleNamespace(config=MagicMock(name="config"))
+    metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash="rec1")
     metadata.config.game.big_blind = 100
     storage = MagicMock(name="storage")
     storage.num_infosets.return_value = 4321
@@ -329,7 +423,12 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
 
     monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
-        services, "build_evaluation_solver", lambda cfg, checkpoint_dir: (object(), storage)
+        services,
+        "build_evaluation_solver",
+        lambda cfg, checkpoint_dir, abstraction_hash=None: seen.update(
+            abstraction_hash=abstraction_hash
+        )
+        or (object(), storage),
     )
     monkeypatch.setattr(
         services,

@@ -25,6 +25,7 @@ from src.shared.config import Config
 def build_card_abstraction(
     config: Config,
     abstractions_dir: Path | None = None,
+    abstraction_hash: str | None = None,
 ) -> BucketingStrategy:
     """
     Build card abstraction from config.
@@ -34,6 +35,9 @@ def build_card_abstraction(
     Args:
         config: Configuration object
         abstractions_dir: Optional directory containing precomputed abstractions
+        abstraction_hash: Optional exact abstraction config hash to pin resolution to.
+            Required to faithfully evaluate a checkpoint whose abstraction has since
+            been recomputed under the same config name.
 
     Returns:
         BucketingStrategy instance (DenseBucketer)
@@ -46,7 +50,25 @@ def build_card_abstraction(
         abstractions_dir=abstractions_dir,
         loader=PostflopPrecomputer.load,
     )
-    return resolver.load(abstraction_config=config.card_abstraction.config)
+    return resolver.load(
+        abstraction_config=config.card_abstraction.config,
+        abstraction_hash=abstraction_hash,
+    )
+
+
+def resolve_card_abstraction_hash(
+    config: Config,
+    abstractions_dir: Path | None = None,
+) -> str | None:
+    """Config hash of the abstraction ``config`` currently resolves to.
+
+    Recorded on a run so evaluation can pin the exact abstraction it trained against.
+    """
+    resolver = ComboAbstractionResolver(
+        abstractions_dir=abstractions_dir,
+        loader=PostflopPrecomputer.load,
+    )
+    return resolver.resolved_hash(abstraction_config=config.card_abstraction.config)
 
 
 def build_storage(
@@ -139,13 +161,19 @@ def build_evaluation_solver(
     *,
     checkpoint_dir: Path,
     abstractions_dir: Path | None = None,
+    abstraction_hash: str | None = None,
 ) -> tuple[MCCFRSolver, InMemoryStorage]:
-    """Build solver and storage for read-only checkpoint evaluation."""
+    """Build solver and storage for read-only checkpoint evaluation.
+
+    ``abstraction_hash`` pins the card abstraction to the one the checkpoint was
+    trained against; without it the config name resolves against current code.
+    """
     storage = InMemoryStorage(checkpoint_dir=checkpoint_dir)
     action_model = ActionModel(config)
     card_abstraction = build_card_abstraction(
         config,
         abstractions_dir=abstractions_dir,
+        abstraction_hash=abstraction_hash,
     )
     solver = build_solver(config, action_model, card_abstraction, storage)
     return solver, storage

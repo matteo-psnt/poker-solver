@@ -41,15 +41,41 @@ class ComboAbstractionResolver:
         self.abstractions_dir = abstractions_dir or Path("data/combo_abstraction")
         self._loader = loader or PostflopPrecomputer.load
 
-    def load(self, *, abstraction_config: str) -> BucketingStrategy:
-        """Load abstraction by config name."""
-        resolved_path = self._resolve_config_path(abstraction_config)
+    def load(
+        self, *, abstraction_config: str, abstraction_hash: str | None = None
+    ) -> BucketingStrategy:
+        """Load abstraction by config name, optionally pinned to an exact config hash.
+
+        A config name is a mutable pointer: recomputing an abstraction under changed
+        parameters reuses the name but produces different buckets. ``abstraction_hash``
+        pins resolution to the exact abstraction a checkpoint was trained against, so
+        evaluating that checkpoint cannot silently bucket hands under a newer
+        abstraction whose bucket ids mean something else.
+        """
+        resolved_path = self._resolve_config_path(abstraction_config, abstraction_hash)
         return self._loader(resolved_path)
 
-    def _resolve_config_path(self, config_name: str) -> Path:
-        # Validate config file early so users get actionable errors.
-        expected_config = PrecomputeConfig.from_yaml(config_name)
-        expected_hash = expected_config.get_config_hash()
+    def resolved_hash(
+        self, *, abstraction_config: str, abstraction_hash: str | None = None
+    ) -> str | None:
+        """Config hash of the abstraction this name currently resolves to.
+
+        Recorded on a run at training time so the run can later be evaluated under the
+        exact abstraction it was trained against, rather than whatever the (mutable)
+        config name happens to point at by then.
+        """
+        resolved_path = self._resolve_config_path(abstraction_config, abstraction_hash)
+        metadata = _read_metadata(resolved_path) or {}
+        config_hash = metadata.get("config_hash")
+        return config_hash if isinstance(config_hash, str) else None
+
+    def _resolve_config_path(self, config_name: str, abstraction_hash: str | None = None) -> Path:
+        if abstraction_hash is not None:
+            expected_hash = abstraction_hash
+        else:
+            # Validate config file early so users get actionable errors.
+            expected_config = PrecomputeConfig.from_yaml(config_name)
+            expected_hash = expected_config.get_config_hash()
 
         if not self.abstractions_dir.exists():
             raise FileNotFoundError(
@@ -77,6 +103,17 @@ class ComboAbstractionResolver:
                 f"with matching hash {expected_hash}:\n"
                 f"  {options}\n"
                 "Delete duplicate abstraction directories to disambiguate."
+            )
+
+        if abstraction_hash is not None:
+            options = ", ".join(sorted(str(candidate.path) for candidate in matching))
+            raise FileNotFoundError(
+                f"No combo abstraction for config '{config_name}' with pinned hash "
+                f"{expected_hash}.\n"
+                f"  Available: {options}\n"
+                "The abstraction this checkpoint was trained against is unavailable, so it "
+                "cannot be evaluated faithfully. Recompute that abstraction or evaluate a "
+                "run trained against an available one."
             )
 
         if len(matching) == 1:
