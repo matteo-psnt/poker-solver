@@ -75,8 +75,8 @@ class PrecomputeConfig:
                 value = kwargs.pop(field.name)
             elif field.default is not MISSING:
                 value = field.default
-            elif field.default_factory is not MISSING:  # type: ignore
-                value = field.default_factory()  # type: ignore
+            elif field.default_factory is not MISSING:
+                value = field.default_factory()
             else:
                 raise TypeError(f"Missing required argument: {field.name}")
             object.__setattr__(self, field.name, value)

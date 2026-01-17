@@ -124,8 +124,8 @@ def compute_variance(values: List[float]) -> Tuple[float, float]:
 
 
 def compute_percentiles(
-    values: List[float],
-    percentiles: List[int] = [25, 50, 75],
+    values: Sequence[float],
+    percentiles: Sequence[int] = (25, 50, 75),
 ) -> List[float]:
     """
     Compute percentiles of sample.

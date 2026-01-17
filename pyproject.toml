@@ -60,30 +60,13 @@ addopts = "-v"
 timeout = 5
 timeout_func_only = true
 
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = false
-warn_unused_configs = true
-disallow_untyped_defs = false
-check_untyped_defs = true
-
-# Ignore missing stubs for third-party libraries
-[[tool.mypy.overrides]]
-module = [
-    "numba.*",
-    "treys.*",
-    "h5py.*",
-    "sklearn.*",
-]
-ignore_missing_imports = true
-
 [dependency-groups]
 # Development, testing, and code quality tools
 dev = [
     "pytest>=9.0.2",
     "pytest-cov>=4.1.0",
     "ruff>=0.14.9",
-    "mypy>=1.19.1",
+    "ty",
     "pre-commit>=4.5.1",
     "types-pyyaml>=6.0.12.20250915",
     "types-tqdm>=4.67.0.20250809",

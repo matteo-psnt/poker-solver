@@ -330,7 +330,7 @@ class TestGameState:
             is_terminal=False,
         )
         with pytest.raises(AttributeError):
-            state.pot = 200
+            setattr(state, "pot", 200)
 
     def test_state_str(self):
         state = GameState(

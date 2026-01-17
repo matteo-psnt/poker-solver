@@ -149,11 +149,11 @@ class SharedArrayStorage(Storage):
         self._shm_utility: Optional["SharedMemory"] = None
 
         # NumPy views into shared memory (the live data)
-        self.shared_regrets: Optional[np.ndarray] = None
-        self.shared_strategy_sum: Optional[np.ndarray] = None
-        self.shared_action_counts: Optional[np.ndarray] = None
-        self.shared_reach_counts: Optional[np.ndarray] = None
-        self.shared_cumulative_utility: Optional[np.ndarray] = None
+        self.shared_regrets = np.empty((0, self.max_actions), dtype=np.float32)
+        self.shared_strategy_sum = np.empty((0, self.max_actions), dtype=np.float64)
+        self.shared_action_counts = np.empty((0,), dtype=np.int32)
+        self.shared_reach_counts = np.empty((0,), dtype=np.int64)
+        self.shared_cumulative_utility = np.empty((0,), dtype=np.float64)
 
         # Initialize shared memory
         if is_coordinator:
@@ -374,6 +374,15 @@ class SharedArrayStorage(Storage):
 
     def _create_numpy_views(self):
         """Create NumPy array views into shared memory."""
+        if (
+            self._shm_regrets is None
+            or self._shm_strategy is None
+            or self._shm_actions is None
+            or self._shm_reach is None
+            or self._shm_utility is None
+        ):
+            raise RuntimeError("Shared memory buffers are not initialized")
+
         self.shared_regrets = np.ndarray(
             (self.capacity, self.max_actions),
             dtype=np.float32,
@@ -534,7 +543,7 @@ class SharedArrayStorage(Storage):
         """
         return self.get_capacity_usage() >= self.CAPACITY_THRESHOLD
 
-    def get_resize_stats(self) -> Dict[str, int]:
+    def get_resize_stats(self) -> Dict[str, int | float]:
         """
         Get statistics for resize decision.
 
@@ -553,7 +562,7 @@ class SharedArrayStorage(Storage):
             "range_size": range_size,
             "extra_size": extra_size,
             "used": used + extra_used,
-            "capacity_usage": self.get_capacity_usage(),  # type: ignore
+            "capacity_usage": self.get_capacity_usage(),
             "initial_capacity": self.capacity,
         }
 
@@ -626,16 +635,17 @@ class SharedArrayStorage(Storage):
 
         # Clean up old shared memory
         try:
-            old_shm_regrets.close()
-            old_shm_regrets.unlink()
-            old_shm_strategy.close()
-            old_shm_strategy.unlink()
-            old_shm_actions.close()
-            old_shm_actions.unlink()
-            old_shm_reach.close()
-            old_shm_reach.unlink()
-            old_shm_utility.close()
-            old_shm_utility.unlink()
+            for shm in (
+                old_shm_regrets,
+                old_shm_strategy,
+                old_shm_actions,
+                old_shm_reach,
+                old_shm_utility,
+            ):
+                if shm is None:
+                    continue
+                shm.close()
+                shm.unlink()
         except Exception as e:
             print(f"Warning: Error cleaning up old shared memory: {e}")
 

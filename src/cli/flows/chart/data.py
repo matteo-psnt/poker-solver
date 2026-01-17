@@ -106,13 +106,13 @@ def build_preflop_chart_data(
                 }
                 actions.append({"id": action_id, "pct": round(action["prob"] * 100, 1)})
 
-            row.append({"hand": hand, "actions": actions})  # type: ignore[dict-item]
+            row.append({"hand": hand, "actions": actions})
 
         grid.append(row)
 
     ordered_actions = _order_action_meta(action_meta)
 
-    return {  # type: ignore[dict-item]
+    return {
         "runId": run_id,
         "position": position,
         "situation": situation_id,
@@ -302,7 +302,7 @@ def _get_hand_strategy(
     if float(infoset.strategy_sum.sum()) == 0.0:
         return None
 
-    strategy = infoset.get_filtered_strategy(use_average=True)
+    strategy = [float(prob) for prob in infoset.get_filtered_strategy(use_average=True)]
 
     return {
         "actions": _build_action_breakdown(
