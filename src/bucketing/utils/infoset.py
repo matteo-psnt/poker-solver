@@ -6,7 +6,6 @@ to a player given their information (hole cards, board, betting history).
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 import numpy as np
 
@@ -41,8 +40,8 @@ class InfoSetKey:
     betting_sequence: str  # Normalized betting history (e.g., "f", "c", "b0.75-c")
 
     # Hybrid hand representation
-    preflop_hand: Optional[str]  # "AKs", "72o", etc. (None if postflop)
-    postflop_bucket: Optional[int]  # 0-49/99/199 (None if preflop)
+    preflop_hand: str | None  # "AKs", "72o", etc. (None if postflop)
+    postflop_bucket: int | None  # 0-49/99/199 (None if preflop)
 
     spr_bucket: int  # Stack-to-pot ratio bucket (0=shallow, 1=medium, 2=deep)
 
@@ -120,7 +119,7 @@ class InfoSet:
     - Cumulative strategy (for computing average strategy)
     """
 
-    def __init__(self, key: InfoSetKey, legal_actions: List[Action]):
+    def __init__(self, key: InfoSetKey, legal_actions: list[Action]):
         """
         Initialize information set.
 
@@ -139,9 +138,9 @@ class InfoSet:
         # Statistics tracking
         self.reach_count = 0  # Number of times this infoset was reached
         self.cumulative_utility = 0.0  # Sum of node utilities (for average)
-        self._reach_counts_view: Optional[np.ndarray] = None
-        self._cumulative_utility_view: Optional[np.ndarray] = None
-        self._stats_index: Optional[int] = None
+        self._reach_counts_view: np.ndarray | None = None
+        self._cumulative_utility_view: np.ndarray | None = None
+        self._stats_index: int | None = None
         self._stats_read_only = False
 
     def sync_stats_to_storage(
@@ -212,7 +211,7 @@ class InfoSet:
         return average_strategy(self.strategy_sum)
 
     def get_filtered_strategy(
-        self, valid_indices: Optional[List[int]] = None, use_average: bool = True
+        self, valid_indices: list[int] | None = None, use_average: bool = True
     ) -> np.ndarray:
         """
         Get strategy filtered to valid actions and normalized.
@@ -256,8 +255,8 @@ class InfoSet:
         return full_strategy
 
     def get_strategy_safe(
-        self, legal_actions: List[Action], use_average: bool = True
-    ) -> tuple[np.ndarray, List[int]]:
+        self, legal_actions: list[Action], use_average: bool = True
+    ) -> tuple[np.ndarray, list[int]]:
         """
         Get strategy for given legal actions with validation and remapping.
 
@@ -430,8 +429,8 @@ def create_infoset_key(
     street: Street,
     betting_sequence: str,
     spr_bucket: int,
-    preflop_hand: Optional[str] = None,
-    postflop_bucket: Optional[int] = None,
+    preflop_hand: str | None = None,
+    postflop_bucket: int | None = None,
 ) -> InfoSetKey:
     """
     Convenience function to create an InfoSetKey with hybrid representation.

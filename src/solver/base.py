@@ -5,7 +5,6 @@ Defines the interface that all CFR variants must implement.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
 
 import numpy as np
 
@@ -28,7 +27,7 @@ class BaseSolver(ABC):
         action_abstraction: BettingActions,
         card_abstraction: BucketingStrategy,
         storage: Storage,
-        config: Optional[Config] = None,
+        config: Config | None = None,
     ):
         """
         Initialize solver.
@@ -58,7 +57,7 @@ class BaseSolver(ABC):
         """
         pass
 
-    def train(self, num_iterations: int, verbose: bool = True) -> Dict:
+    def train(self, num_iterations: int, verbose: bool = True) -> dict:
         """
         Run multiple training iterations.
 

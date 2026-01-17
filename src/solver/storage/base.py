@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional
 
 from src.bucketing.utils.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action
@@ -9,7 +9,7 @@ from src.game.actions import Action
 class Storage(ABC):
     """Abstract base class for infoset storage."""
 
-    checkpoint_dir: Optional[Path] = None
+    checkpoint_dir: Path | None = None
 
     @abstractmethod
     def get_or_create_infoset(self, key: InfoSetKey, legal_actions: list[Action]) -> InfoSet:
@@ -17,7 +17,7 @@ class Storage(ABC):
         pass
 
     @abstractmethod
-    def get_infoset(self, key: InfoSetKey) -> Optional[InfoSet]:
+    def get_infoset(self, key: InfoSetKey) -> InfoSet | None:
         """Get existing infoset or None if not found."""
         pass
 

@@ -21,7 +21,6 @@ Example:
 
 from dataclasses import dataclass
 from itertools import permutations
-from typing import Dict, Optional, Tuple
 
 from treys import Card as TreysCard
 
@@ -65,14 +64,14 @@ class SuitMapping:
         next_label: Next canonical label to assign for unseen suits
     """
 
-    mapping: Dict[str, int]
+    mapping: dict[str, int]
     next_label: int
 
-    def __init__(self, mapping: Optional[Dict[str, int]] = None, next_label: int = 0):
+    def __init__(self, mapping: dict[str, int] | None = None, next_label: int = 0):
         object.__setattr__(self, "mapping", dict(mapping) if mapping else {})
         object.__setattr__(self, "next_label", next_label)
 
-    def get_or_assign(self, suit: str) -> Tuple["SuitMapping", int]:
+    def get_or_assign(self, suit: str) -> tuple["SuitMapping", int]:
         """
         Get canonical label for a suit, assigning a new one if needed.
 
@@ -114,7 +113,7 @@ class CanonicalCard:
             return self.rank_idx < other.rank_idx
         return self.suit_label < other.suit_label
 
-    def to_tuple(self) -> Tuple[int, int]:
+    def to_tuple(self) -> tuple[int, int]:
         return (self.rank_idx, self.suit_label)
 
     def __repr__(self) -> str:
@@ -137,8 +136,8 @@ def get_card_rank_idx(card: Card) -> int:
 
 
 def canonicalize_board(
-    board: Tuple[Card, ...], initial_mapping: Optional[SuitMapping] = None
-) -> Tuple[Tuple[CanonicalCard, ...], SuitMapping]:
+    board: tuple[Card, ...], initial_mapping: SuitMapping | None = None
+) -> tuple[tuple[CanonicalCard, ...], SuitMapping]:
     """
     Canonicalize a board under suit isomorphism.
 
@@ -178,8 +177,8 @@ def canonicalize_board(
     present_suits = list(dict.fromkeys(suit for _, suit in sorted_cards))
 
     # Try all possible suit relabelings and find the lexicographically smallest
-    best_canonical: Optional[Tuple[CanonicalCard, ...]] = None
-    best_mapping: Optional[Dict[str, int]] = None
+    best_canonical: tuple[CanonicalCard, ...] | None = None
+    best_mapping: dict[str, int] | None = None
 
     # Only need to try permutations of length equal to number of distinct suits
     for perm in permutations(range(len(present_suits))):
@@ -204,8 +203,8 @@ def canonicalize_board(
 
 
 def _canonicalize_board_with_mapping(
-    board: Tuple[Card, ...], mapping: SuitMapping
-) -> Tuple[Tuple[CanonicalCard, ...], SuitMapping]:
+    board: tuple[Card, ...], mapping: SuitMapping
+) -> tuple[tuple[CanonicalCard, ...], SuitMapping]:
     """
     Canonicalize board with a pre-existing suit mapping.
 
@@ -226,8 +225,8 @@ def _canonicalize_board_with_mapping(
 
 
 def canonicalize_hand(
-    hole_cards: Tuple[Card, Card], suit_mapping: SuitMapping
-) -> Tuple[CanonicalCard, CanonicalCard]:
+    hole_cards: tuple[Card, Card], suit_mapping: SuitMapping
+) -> tuple[CanonicalCard, CanonicalCard]:
     """
     Canonicalize a hand relative to an existing suit mapping.
 
@@ -265,7 +264,7 @@ def canonicalize_hand(
     return (canonical_cards[0], canonical_cards[1])
 
 
-def get_canonical_board_id(canonical_board: Tuple[CanonicalCard, ...]) -> int:
+def get_canonical_board_id(canonical_board: tuple[CanonicalCard, ...]) -> int:
     """
     Compute a unique integer ID for a canonical board.
 
@@ -286,7 +285,7 @@ def get_canonical_board_id(canonical_board: Tuple[CanonicalCard, ...]) -> int:
     return result
 
 
-def get_canonical_hand_id(canonical_hand: Tuple[CanonicalCard, CanonicalCard]) -> int:
+def get_canonical_hand_id(canonical_hand: tuple[CanonicalCard, CanonicalCard]) -> int:
     """
     Compute a unique integer ID for a canonical hand.
 
@@ -306,7 +305,7 @@ def get_canonical_hand_id(canonical_hand: Tuple[CanonicalCard, CanonicalCard]) -
     return idx1 * 52 + idx2
 
 
-def board_to_canonical_tuple(board: Tuple[Card, ...]) -> Tuple[Tuple[int, int], ...]:
+def board_to_canonical_tuple(board: tuple[Card, ...]) -> tuple[tuple[int, int], ...]:
     """
     Convert board to a hashable canonical tuple representation.
 
@@ -317,8 +316,8 @@ def board_to_canonical_tuple(board: Tuple[Card, ...]) -> Tuple[Tuple[int, int], 
 
 
 def hand_relative_to_board(
-    hole_cards: Tuple[Card, Card], board: Tuple[Card, ...]
-) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    hole_cards: tuple[Card, Card], board: tuple[Card, ...]
+) -> tuple[tuple[int, int], tuple[int, int]]:
     """
     Get canonical hand representation relative to a board.
 

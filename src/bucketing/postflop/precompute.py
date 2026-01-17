@@ -15,10 +15,10 @@ import json
 import multiprocessing as mp
 import pickle
 import time
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.cluster import KMeans
@@ -53,17 +53,17 @@ class ComboEquity:
     equity: float
 
     # For debugging/verification
-    representative_board: Tuple[Card, ...]
-    representative_hand: Tuple[Card, Card]
+    representative_board: tuple[Card, ...]
+    representative_hand: tuple[Card, Card]
 
 
 def compute_equity_for_combo(
-    canonical_board: Tuple[CanonicalCard, ...],
-    canonical_hand: Tuple[CanonicalCard, CanonicalCard],
-    representative_board: Tuple[Card, ...],
+    canonical_board: tuple[CanonicalCard, ...],
+    canonical_hand: tuple[CanonicalCard, CanonicalCard],
+    representative_board: tuple[Card, ...],
     equity_samples: int,
     seed: int,
-) -> Tuple[int, int, float]:
+) -> tuple[int, int, float]:
     """
     Compute equity for a single combo. Designed for parallel execution.
 
@@ -103,7 +103,7 @@ def compute_equity_for_combo(
     )
 
 
-def _worker_compute_board_equities(args) -> List[Tuple[int, int, float]]:
+def _worker_compute_board_equities(args) -> list[tuple[int, int, float]]:
     """
     Worker function to compute equities for all combos on a single board.
 
@@ -127,7 +127,7 @@ def _worker_compute_board_equities(args) -> List[Tuple[int, int, float]]:
     return results
 
 
-def _worker_compute_cluster_equities(args) -> List[Tuple[int, int, int, float]]:
+def _worker_compute_cluster_equities(args) -> list[tuple[int, int, int, float]]:
     """Worker that computes equities for representative boards and tags them with cluster_id."""
     board_info, cluster_id, equity_samples, seed = args
     results = []
@@ -170,7 +170,7 @@ class PostflopPrecomputer:
         self.board_clusterer = BoardClusterer(self.num_board_clusters)
 
         # Storage for computed equities: street -> cluster_id -> hand_id -> equity
-        self._equities: Dict[Street, Dict[int, Dict[int, float]]] = {
+        self._equities: dict[Street, dict[int, dict[int, float]]] = {
             Street.FLOP: {},
             Street.TURN: {},
             Street.RIVER: {},
@@ -185,7 +185,7 @@ class PostflopPrecomputer:
     def precompute_street(
         self,
         street: Street,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         """
         Precompute abstraction for a single street using board clustering.
@@ -258,8 +258,8 @@ class PostflopPrecomputer:
         )
 
         # Process in parallel
-        all_equities: List[
-            Tuple[int, int, int, float]
+        all_equities: list[
+            tuple[int, int, int, float]
         ] = []  # (cluster_id, board_id, hand_id, equity)
 
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -283,7 +283,7 @@ class PostflopPrecomputer:
         print("Step 4: Aggregating equities by cluster...")
 
         # Aggregate: for each (cluster_id, hand_id), average equity across representatives
-        cluster_hand_equities: Dict[int, Dict[int, List[float]]] = {}
+        cluster_hand_equities: dict[int, dict[int, list[float]]] = {}
 
         for cluster_id, board_id, hand_id, equity in all_equities:
             if equity < 0:
@@ -359,7 +359,7 @@ class PostflopPrecomputer:
 
     def precompute_all(
         self,
-        streets: Optional[List[Street]] = None,
+        streets: list[Street] | None = None,
     ) -> PostflopBucketer:
         """
         Precompute abstraction for all streets.
@@ -441,7 +441,7 @@ class PostflopPrecomputer:
 def estimate_precompute_time(
     config: PrecomputeConfig,
     sample_size: int = 100,
-) -> Dict[Street, float]:
+) -> dict[Street, float]:
     """
     Estimate precomputation time by running a small sample.
 

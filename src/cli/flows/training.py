@@ -2,7 +2,7 @@
 
 import multiprocessing as mp
 from pathlib import Path
-from typing import Optional, Tuple, cast
+from typing import cast
 
 from src.cli.flows.config import select_config
 from src.cli.ui import prompts, ui
@@ -136,7 +136,7 @@ def evaluate_solver(ctx: CliContext) -> None:
     print("-" * 60)
     print(f"Exploitability: {results['exploitability_mbb']:.2f} mbb/g")
     print(f"Std Error:      {results['std_error_mbb']:.2f} mbb/g")
-    confidence_interval = cast(Tuple[float, float], results["confidence_95_mbb"])
+    confidence_interval = cast(tuple[float, float], results["confidence_95_mbb"])
     ci_lower, ci_upper = confidence_interval[0], confidence_interval[1]
     print(f"95% CI:         [{ci_lower:.2f}, {ci_upper:.2f}] mbb/g")
     print(f"BR Utility P0:  {results['player_0_br_utility']:.4f}")
@@ -237,7 +237,7 @@ def resume_training(ctx: CliContext) -> None:
     ui.pause()
 
 
-def _prompt_num_workers(ctx: CliContext) -> Optional[int]:
+def _prompt_num_workers(ctx: CliContext) -> int | None:
     default_workers = mp.cpu_count()
 
     return prompts.prompt_int(

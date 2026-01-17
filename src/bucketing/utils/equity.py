@@ -5,7 +5,6 @@ Computes hand equity via random rollouts to the river.
 """
 
 import random
-from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -20,7 +19,7 @@ class EquityCalculator:
     Computes equity by sampling random opponent hands and board runouts.
     """
 
-    def __init__(self, num_samples: int = 1000, seed: Optional[int] = None):
+    def __init__(self, num_samples: int = 1000, seed: int | None = None):
         """
         Initialize equity calculator.
 
@@ -42,7 +41,7 @@ class EquityCalculator:
         self._full_deck_card_ints = {c.card_int for c in self.full_deck}
 
     def calculate_equity(
-        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
+        self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
     ) -> float:
         """
         Calculate equity (win %) for a hand.
@@ -84,8 +83,8 @@ class EquityCalculator:
 
     def calculate_equity_distribution(
         self,
-        hole_cards: Tuple[Card, Card],
-        board: Tuple[Card, ...],
+        hole_cards: tuple[Card, Card],
+        board: tuple[Card, ...],
         street: Street,
         num_buckets: int = 10,
     ) -> np.ndarray:
@@ -138,8 +137,8 @@ class EquityCalculator:
         return histogram / self.num_samples
 
     def _sample_runout(
-        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
-    ) -> Tuple[Tuple[Card, Card], Tuple[Card, ...]]:
+        self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
+    ) -> tuple[tuple[Card, Card], tuple[Card, ...]]:
         """
         Sample opponent hand and complete board to river.
 
@@ -169,7 +168,7 @@ class EquityCalculator:
         sampled_cards = random.sample(available, total_cards_needed)
 
         # Split into opponent hand and board cards
-        opp_hand: Tuple[Card, Card] = (sampled_cards[0], sampled_cards[1])
+        opp_hand: tuple[Card, Card] = (sampled_cards[0], sampled_cards[1])
 
         if cards_needed_board > 0:
             new_board_cards = tuple(sampled_cards[2:])
@@ -181,9 +180,9 @@ class EquityCalculator:
 
     def _evaluate_showdown(
         self,
-        hand1: Tuple[Card, Card],
-        hand2: Tuple[Card, Card],
-        board: Tuple[Card, ...],
+        hand1: tuple[Card, Card],
+        hand2: tuple[Card, Card],
+        board: tuple[Card, ...],
     ) -> int:
         """
         Evaluate showdown between two hands.
@@ -200,8 +199,8 @@ class EquityCalculator:
 
     def batch_calculate_equity(
         self,
-        hands: List[Tuple[Card, Card]],
-        board: Tuple[Card, ...],
+        hands: list[tuple[Card, Card]],
+        board: tuple[Card, ...],
         street: Street,
     ) -> np.ndarray:
         """

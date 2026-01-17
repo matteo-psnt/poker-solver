@@ -28,11 +28,11 @@ The training system orchestrates Monte Carlo Counterfactual Regret Minimization 
 
 **Key Methods:**
 ```python
-TrainingSession(config: Config, run_id: Optional[str] = None)
+TrainingSession(config: Config, run_id: str | None = None)
     # Initialize trainer from configuration
     # Creates run directory and initializes components
 
-train(num_iterations: Optional[int] = None, num_workers: Optional[int] = None, batch_size: Optional[int] = None)
+train(num_iterations: int | None = None, num_workers: int | None = None, batch_size: int | None = None)
     # Main training loop - always uses parallel multiprocessing with hash-partitioned shared memory
     # num_workers: Number of parallel workers (default: CPU count, use 1 for sequential-like behavior)
     # batch_size: Iterations per batch (default: 80)
@@ -329,7 +329,7 @@ mark_failed(cleanup_if_empty: bool = True)
     # Mark run as failed, optionally cleanup
 
 @staticmethod
-list_runs(runs_dir: Path) -> List[str]
+list_runs(runs_dir: Path) -> list[str]
     # List all runs in directory
 ```
 

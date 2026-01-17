@@ -6,7 +6,7 @@ Uses the same pattern as main Config - defaults in dataclass, YAML contains only
 
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.game.state import Street
 
@@ -32,7 +32,7 @@ class PrecomputeConfig:
     equity_samples: int = 1000
 
     # Parallel workers (None = CPU count)
-    num_workers: Optional[int] = None
+    num_workers: int | None = None
 
     # Random seed for reproducibility
     seed: int = 42
@@ -42,7 +42,7 @@ class PrecomputeConfig:
     kmeans_n_init: int = 10
 
     # Config name (for matching during training)
-    config_name: Optional[str] = None
+    config_name: str | None = None
 
     def __init__(self, **kwargs: Any):
         """
@@ -86,16 +86,16 @@ class PrecomputeConfig:
             raise TypeError(f"Unexpected keyword arguments: {list(kwargs.keys())}")
 
     @property
-    def num_board_clusters(self) -> Dict[Street, int]:
+    def num_board_clusters(self) -> dict[Street, int]:
         """Get board clusters as Street dict."""
         return self.to_street_dict("board_clusters")
 
     @property
-    def num_buckets(self) -> Dict[Street, int]:
+    def num_buckets(self) -> dict[Street, int]:
         """Get buckets as Street dict."""
         return self.to_street_dict("buckets")
 
-    def to_street_dict(self, field_prefix: str) -> Dict[Street, int]:
+    def to_street_dict(self, field_prefix: str) -> dict[Street, int]:
         """
         Helper to convert flop/turn/river fields to Street dict.
 

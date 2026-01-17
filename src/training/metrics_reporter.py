@@ -5,8 +5,6 @@ Handles high-level metrics formatting, progress display, and training headers.
 Wraps MetricsTracker with presentation logic.
 """
 
-from typing import Dict, List, Optional
-
 from tqdm import tqdm
 
 from src.training.metrics import MetricsTracker
@@ -76,7 +74,7 @@ class MetricsReporter:
 
     def log_batch_utilities(
         self,
-        utilities: List[float],
+        utilities: list[float],
         start_iteration: int,
         total_infosets: int,
     ) -> None:
@@ -128,7 +126,7 @@ class MetricsReporter:
         total_infosets: int,
         elapsed_time: float,
         interrupted: bool,
-        fallback_stats: Optional[Dict[str, float]] = None,
+        fallback_stats: dict[str, float] | None = None,
     ) -> None:
         """
         Print final training summary.

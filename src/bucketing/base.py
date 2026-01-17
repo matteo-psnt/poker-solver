@@ -9,7 +9,6 @@ equity-based card abstraction using K-means clustering.
 """
 
 from abc import ABC, abstractmethod
-from typing import Tuple
 
 from src.game.state import Card, Street
 
@@ -23,7 +22,7 @@ class BucketingStrategy(ABC):
 
     @abstractmethod
     def get_bucket(
-        self, hole_cards: Tuple[Card, Card], board: Tuple[Card, ...], street: Street
+        self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
     ) -> int:
         """
         Get the bucket for a hand.

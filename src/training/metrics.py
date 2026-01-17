@@ -7,7 +7,7 @@ timing, convergence indicators, solver-quality metrics, etc.
 
 import time
 from collections import deque
-from typing import Callable, Deque, Dict, List, Optional
+from collections.abc import Callable
 
 import numpy as np
 
@@ -41,31 +41,31 @@ class MetricsTracker:
         self.window_start_iteration = 0
 
         # Utility tracking
-        self.utilities: List[float] = []
-        self.utility_window: Deque[float] = deque(maxlen=window_size)
+        self.utilities: list[float] = []
+        self.utility_window: deque[float] = deque(maxlen=window_size)
 
         # Infoset tracking
-        self.infoset_counts: List[int] = []
-        self.infoset_window: Deque[int] = deque(maxlen=window_size)
+        self.infoset_counts: list[int] = []
+        self.infoset_window: deque[int] = deque(maxlen=window_size)
 
         # Timing tracking (kept for compatibility)
-        self.iteration_times: Deque[float] = deque(maxlen=window_size)
+        self.iteration_times: deque[float] = deque(maxlen=window_size)
 
         # Solver-quality metrics (CFR health indicators)
-        self.mean_pos_regret_window: Deque[float] = deque(maxlen=window_size)
-        self.max_pos_regret_window: Deque[float] = deque(maxlen=window_size)
-        self.zero_regret_pct_window: Deque[float] = deque(maxlen=window_size)
-        self.avg_entropy_window: Deque[float] = deque(maxlen=window_size)
-        self.uniform_strategy_pct_window: Deque[float] = deque(maxlen=window_size)
-        self.fallback_rate_window: Deque[float] = deque(maxlen=window_size)
+        self.mean_pos_regret_window: deque[float] = deque(maxlen=window_size)
+        self.max_pos_regret_window: deque[float] = deque(maxlen=window_size)
+        self.zero_regret_pct_window: deque[float] = deque(maxlen=window_size)
+        self.avg_entropy_window: deque[float] = deque(maxlen=window_size)
+        self.uniform_strategy_pct_window: deque[float] = deque(maxlen=window_size)
+        self.fallback_rate_window: deque[float] = deque(maxlen=window_size)
 
     def log_iteration(
         self,
         iteration: int,
         utility: float,
         num_infosets: int,
-        infoset_sampler: Optional[Callable] = None,
-        fallback_rate: Optional[float] = None,
+        infoset_sampler: Callable | None = None,
+        fallback_rate: float | None = None,
     ):
         """
         Log metrics for a training iteration.
@@ -105,7 +105,7 @@ class MetricsTracker:
 
         self.last_log_time = current_time
 
-    def _compute_quality_metrics(self, infosets) -> Dict[str, float]:
+    def _compute_quality_metrics(self, infosets) -> dict[str, float]:
         """
         Compute solver-quality metrics from sampled infosets.
 
@@ -305,7 +305,7 @@ class MetricsTracker:
             return 0.0
         return float(np.mean(list(self.fallback_rate_window)))
 
-    def get_summary(self) -> Dict[str, float]:
+    def get_summary(self) -> dict[str, float | int]:
         """
         Get summary of all metrics.
 

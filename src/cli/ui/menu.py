@@ -1,8 +1,8 @@
 """Menu wiring for the CLI."""
 
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from questionary import Choice
 
