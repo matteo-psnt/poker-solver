@@ -181,7 +181,12 @@ def _worker_loop(
                                 {"requester": worker_id, "keys": keys_snapshot}, timeout=5.0
                             )
                         except queue.Full:
-                            pass
+                            print(
+                                f"[Worker {worker_id}] Warning: ID request queue for worker "
+                                f"{owner_id} is full; dropping {len(keys_snapshot)} keys",
+                                file=sys.stderr,
+                                flush=True,
+                            )
                 storage.clear_pending_id_requests()
 
                 # Process any incoming requests/responses
@@ -421,7 +426,12 @@ def _process_id_requests(
                     response_queues[requester].put(responses, timeout=1.0)
                     count += len(responses)
                 except queue.Full:
-                    pass
+                    print(
+                        f"[Worker {worker_id}] Warning: ID response queue for worker "
+                        f"{requester} is full; dropping {len(responses)} ids",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
         except queue.Empty:
             break

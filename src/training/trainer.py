@@ -291,7 +291,7 @@ class TrainingSession:
             serialized_action_abstraction=serialized_action_abstraction,
             serialized_card_abstraction=serialized_card_abstraction,
             session_id=self.run_dir.name,
-            base_seed=self.config.system.seed or 42,
+            base_seed=self.config.system.seed if self.config.system.seed is not None else 42,
             initial_capacity=initial_capacity,
             max_actions=max_actions,
             checkpoint_dir=str(self.run_dir) if checkpoint_enabled else None,
