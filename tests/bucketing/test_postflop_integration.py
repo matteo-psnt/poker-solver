@@ -21,6 +21,8 @@ from src.bucketing.postflop.precompute import PostflopPrecomputer, PrecomputeCon
 from src.game.rules import Street
 from src.game.state import Card
 
+pytestmark = pytest.mark.slow
+
 
 class TestClusteringIntegration:
     """Test complete clustering pipeline."""

@@ -13,6 +13,7 @@ from src.solver.storage.shared_array import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction, make_test_config
 
 
+@pytest.mark.slow
 class TestOutcomeSampling:
     """Test outcome sampling mode."""
 
