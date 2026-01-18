@@ -359,8 +359,12 @@ class MCCFRSolver(BaseSolver):
         if self._is_chance_node(next_state):
             next_state = self._sample_chance_outcome(next_state)
 
+        # Update reach probability for sampled action (outcome sampling importance weights)
+        new_reach_probs = reach_probs.copy()
+        new_reach_probs[current_player] *= strategy[action_idx]
+
         # Recursively compute utility for sampled action
-        sampled_utility = self._cfr_outcome_sampling(next_state, traversing_player, reach_probs)
+        sampled_utility = self._cfr_outcome_sampling(next_state, traversing_player, new_reach_probs)
 
         # Update regrets only for traversing player AND only if we own the infoset
         if current_player == traversing_player and self.storage.is_owned(infoset_key):
@@ -369,9 +373,9 @@ class MCCFRSolver(BaseSolver):
             opponent = 1 - current_player
 
             # Compute baseline: expected value under current strategy
-            # Weighted baseline: baseline = u * σ(a) for faster practical convergence
-            # This updates both sampled and unsampled actions, providing smoother learning
-            baseline = sampled_utility * strategy[action_idx]
+            # Use sampled utility as baseline (unbiased estimator per Lanctot 2009)
+            # This provides variance reduction while maintaining unbiased regret estimates
+            baseline = sampled_utility
 
             # For each action, compute regret using the unbiased estimator
             for i in range(len(legal_actions)):
@@ -409,8 +413,9 @@ class MCCFRSolver(BaseSolver):
                     weight *= self.iteration
                 infoset.strategy_sum[original_idx] += weight
 
-                infoset.increment_reach_count()
-                infoset.add_cumulative_utility(sampled_utility)
+            # Update statistics once per infoset update (not per action)
+            infoset.increment_reach_count()
+            infoset.add_cumulative_utility(sampled_utility)
 
         return sampled_utility
 

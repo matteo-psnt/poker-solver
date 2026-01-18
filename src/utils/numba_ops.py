@@ -17,13 +17,13 @@ def regret_matching(regrets):
     This is the core operation in CFR, called millions of times.
 
     Args:
-        regrets: NumPy array of regrets for each action
+        regrets: NumPy array of regrets for each action (float64)
 
     Returns:
         Probability distribution over actions (sums to 1, always float64)
     """
     # Get positive regrets only (ensure float64)
-    positive_regrets = np.maximum(regrets, 0.0).astype(np.float64)
+    positive_regrets = np.maximum(regrets, 0.0)
     sum_positive = np.sum(positive_regrets)
     num_actions = len(regrets)
 
