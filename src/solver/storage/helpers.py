@@ -1,26 +1,18 @@
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 
 from src.game.actions import Action, ActionType
 
-REGRETS_FILE = "regrets.npy"
-STRATEGIES_FILE = "strategies.npy"
-ACTION_COUNTS_FILE = "action_counts.npy"
-REACH_COUNTS_FILE = "reach_counts.npy"
-CUMULATIVE_UTILITY_FILE = "cumulative_utility.npy"
+# Checkpoint file names
+CHECKPOINT_NPZ_FILE = "checkpoint.npz"
 KEY_MAPPING_FILE = "key_mapping.pkl"
 ACTION_SIGNATURES_FILE = "action_signatures.pkl"
 
 CHECKPOINT_REQUIRED_FILES = (
-    REGRETS_FILE,
-    STRATEGIES_FILE,
-    ACTION_COUNTS_FILE,
-    REACH_COUNTS_FILE,
-    CUMULATIVE_UTILITY_FILE,
+    CHECKPOINT_NPZ_FILE,
     KEY_MAPPING_FILE,
     ACTION_SIGNATURES_FILE,
 )
@@ -29,11 +21,7 @@ CHECKPOINT_REQUIRED_FILES = (
 @dataclass(frozen=True)
 class CheckpointPaths:
     base: Path
-    regrets: Path
-    strategies: Path
-    action_counts: Path
-    reach_counts: Path
-    cumulative_utility: Path
+    checkpoint_npz: Path
     key_mapping: Path
     action_signatures: Path
 
@@ -41,17 +29,14 @@ class CheckpointPaths:
     def from_dir(cls, checkpoint_dir: Path) -> "CheckpointPaths":
         return cls(
             base=checkpoint_dir,
-            regrets=checkpoint_dir / REGRETS_FILE,
-            strategies=checkpoint_dir / STRATEGIES_FILE,
-            action_counts=checkpoint_dir / ACTION_COUNTS_FILE,
-            reach_counts=checkpoint_dir / REACH_COUNTS_FILE,
-            cumulative_utility=checkpoint_dir / CUMULATIVE_UTILITY_FILE,
+            checkpoint_npz=checkpoint_dir / CHECKPOINT_NPZ_FILE,
             key_mapping=checkpoint_dir / KEY_MAPPING_FILE,
             action_signatures=checkpoint_dir / ACTION_SIGNATURES_FILE,
         )
 
 
 def get_missing_checkpoint_files(checkpoint_dir: Path) -> list[str]:
+    """Check for missing checkpoint files."""
     return [name for name in CHECKPOINT_REQUIRED_FILES if not (checkpoint_dir / name).exists()]
 
 
@@ -71,18 +56,15 @@ def load_action_signatures(paths: CheckpointPaths) -> dict[int, list[tuple[str, 
     return action_sigs
 
 
-MmapMode = Literal["r+", "r", "w+", "c"]
-
-
-def load_checkpoint_arrays(
-    paths: CheckpointPaths, mmap_mode: MmapMode | None = "r"
-) -> dict[str, np.ndarray]:
+def load_checkpoint_arrays(paths: CheckpointPaths) -> dict[str, np.ndarray]:
+    """Load checkpoint arrays from compressed NPZ file."""
+    npz_data = np.load(paths.checkpoint_npz)
     return {
-        "regrets": np.load(paths.regrets, mmap_mode=mmap_mode),
-        "strategies": np.load(paths.strategies, mmap_mode=mmap_mode),
-        "action_counts": np.load(paths.action_counts, mmap_mode=mmap_mode),
-        "reach_counts": np.load(paths.reach_counts, mmap_mode=mmap_mode),
-        "cumulative_utility": np.load(paths.cumulative_utility, mmap_mode=mmap_mode),
+        "regrets": npz_data["regrets"],
+        "strategies": npz_data["strategies"],
+        "action_counts": npz_data["action_counts"],
+        "reach_counts": npz_data["reach_counts"],
+        "cumulative_utility": npz_data["cumulative_utility"],
     }
 
 
@@ -207,13 +189,11 @@ class CheckpointData:
         return self.mapping_data["owned_keys"]
 
 
-def load_checkpoint_data(
-    checkpoint_dir: Path, *, context: str, mmap_mode: MmapMode | None = "r"
-) -> CheckpointData:
+def load_checkpoint_data(checkpoint_dir: Path, *, context: str) -> CheckpointData:
     paths = CheckpointPaths.from_dir(checkpoint_dir)
     mapping_data = load_key_mapping(paths)
     _, max_id = _validate_checkpoint_mapping(mapping_data, context)
-    arrays = load_checkpoint_arrays(paths, mmap_mode=mmap_mode)
+    arrays = load_checkpoint_arrays(paths)
     max_actions = _validate_checkpoint_arrays(arrays, max_id, context)
     action_sigs = load_action_signatures(paths)
     _validate_action_signatures(arrays["action_counts"], action_sigs, context)

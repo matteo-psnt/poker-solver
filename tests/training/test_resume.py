@@ -149,8 +149,9 @@ def test_resume_incomplete_checkpoint(test_config, temp_run_dir):
     session = TrainingSession(test_config, run_id=temp_run_dir.name)
     session.train(num_iterations=1, num_workers=1)
 
-    # Delete one of the checkpoint files to make it incomplete
-    (temp_run_dir / "regrets.npy").unlink()
+    # Delete checkpoint.npz to make it incomplete
+    checkpoint_file = temp_run_dir / "checkpoint.npz"
+    checkpoint_file.unlink()
 
     # Should fail with clear error message
     with pytest.raises(ValueError, match="Checkpoint is incomplete"):
