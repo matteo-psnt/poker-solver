@@ -1,5 +1,6 @@
 import pickle
 import time
+import uuid
 from multiprocessing import shared_memory
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -635,8 +636,6 @@ class SharedArrayStorage(Storage):
 
         # Create new session_id for resized shared memory
         # Append a counter to ensure unique names
-        import uuid
-
         self.session_id = uuid.uuid4().hex[:8]
 
         # Create new shared memory segments

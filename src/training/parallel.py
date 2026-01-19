@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any
 
 from src.bucketing.utils.infoset import InfoSetKey
 from src.solver.mccfr import MCCFRSolver
-from src.solver.storage.shared_array import SharedArrayStorage
 from src.utils.config import Config
 
 if TYPE_CHECKING:

@@ -12,6 +12,7 @@ from pathlib import Path
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
 from src.bucketing.config import PrecomputeConfig
+from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.base import Storage
@@ -67,8 +68,6 @@ def build_card_abstraction(
                 f"Combo abstraction file not found: {path_obj}\n"
                 "Please run 'Precompute Combo Abstraction' from the CLI first."
             )
-        from src.bucketing.postflop.precompute import PostflopPrecomputer
-
         return PostflopPrecomputer.load(path_obj)
 
     elif abstraction_config:
@@ -129,9 +128,6 @@ def build_card_abstraction(
                 f"The saved abstraction was computed with different parameters.\n"
                 f"Please re-run 'Precompute Combo Abstraction' with the current config."
             )
-
-        from src.bucketing.postflop.precompute import PostflopPrecomputer
-
         return PostflopPrecomputer.load(most_recent)
 
     else:
