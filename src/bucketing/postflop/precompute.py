@@ -41,7 +41,7 @@ from src.bucketing.postflop.suit_isomorphism import (
     get_canonical_board_id,
     get_canonical_hand_id,
 )
-from src.bucketing.utils import EquityCalculator
+from src.bucketing.utils.equity import EquityCalculator
 from src.game.state import Card, Street
 
 

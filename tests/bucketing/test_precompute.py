@@ -2,16 +2,14 @@
 
 import pytest
 
-from src.bucketing.postflop import (
-    CanonicalBoardEnumerator,
-    PostflopPrecomputer,
-    PrecomputeConfig,
-    canonicalize_board,
-    get_all_canonical_hands,
-)
+from src.bucketing.config import PrecomputeConfig
+from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.bucketing.postflop.hand_bucketing import get_all_canonical_hands
 from src.bucketing.postflop.precompute import (
+    PostflopPrecomputer,
     compute_equity_for_combo,
 )
+from src.bucketing.postflop.suit_isomorphism import canonicalize_board
 from src.game.state import Card, Street
 
 

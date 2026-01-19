@@ -29,6 +29,7 @@ from src.bucketing.postflop.suit_isomorphism import (
     get_canonical_board_id,
     get_canonical_hand_id,
 )
+from src.bucketing.preflop.hand_classes import PreflopHandClasses
 from src.game.state import Card, Street
 
 if TYPE_CHECKING:
@@ -163,8 +164,6 @@ class PostflopBucketer(BucketingStrategy):
         """
         # Handle preflop separately (uses 169 hand classes)
         if street == Street.PREFLOP:
-            from src.bucketing.preflop.hand_classes import PreflopHandClasses
-
             mapper = PreflopHandClasses()
             hand_index = mapper.get_hand_index(hole_cards)
             # For now, each hand class is its own bucket
@@ -177,9 +176,12 @@ class PostflopBucketer(BucketingStrategy):
         if self._board_clusterer is None:
             raise ValueError("Board clusterer not initialized. Load precomputed abstraction first.")
 
-        # Predict cluster using the ACTUAL board cards (not canonical form)
-        # BoardClusterer.predict() handles canonicalization via feature extraction
-        cluster_id = self._board_clusterer.predict(board, street)
+        # Prefer fast lookup via canonical board ID; fall back to model prediction
+        cluster_id = self._board_clusterer.get_cluster(combo.board_id, street)
+        if cluster_id is None:
+            # Predict cluster using the ACTUAL board cards (not canonical form)
+            # BoardClusterer.predict() handles canonicalization via feature extraction
+            cluster_id = self._board_clusterer.predict(board, street)
 
         # Lookup bucket from (cluster_id, hand_id)
         street_buckets = self._buckets.get(street, {})

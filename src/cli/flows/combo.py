@@ -10,8 +10,8 @@ from pathlib import Path
 from questionary import Choice
 
 from src.bucketing.config import PrecomputeConfig
-from src.bucketing.postflop import PostflopPrecomputer
 from src.bucketing.postflop.hand_bucketing import PostflopBucketer
+from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.cli.ui import prompts
 from src.cli.ui.context import CliContext
 from src.cli.ui.menu import MenuItem, run_menu

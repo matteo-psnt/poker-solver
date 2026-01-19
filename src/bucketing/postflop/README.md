@@ -193,7 +193,8 @@ uv run poker-solver
 # Select "Combo Abstraction Tools" -> "Precompute Abstraction"
 
 # Or directly
-from src.bucketing.postflop.precompute import PostflopPrecomputer, PrecomputeConfig
+from src.bucketing.config import PrecomputeConfig
+from src.bucketing.postflop.precompute import PostflopPrecomputer
 
 config = PrecomputeConfig.from_yaml("default")
 precomputer = PostflopPrecomputer(config)

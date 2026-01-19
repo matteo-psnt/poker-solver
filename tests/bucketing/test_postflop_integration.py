@@ -15,9 +15,10 @@ from pathlib import Path
 
 import pytest
 
+from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.bucketing.postflop.hand_bucketing import PostflopBucketer
-from src.bucketing.postflop.precompute import PostflopPrecomputer, PrecomputeConfig
+from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.game.rules import Street
 from src.game.state import Card
 

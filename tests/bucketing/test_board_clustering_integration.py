@@ -2,9 +2,10 @@
 
 import pytest
 
-from src.bucketing.postflop import PostflopPrecomputer, PrecomputeConfig
+from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop.board_clustering import BoardClusterer
 from src.bucketing.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.game.state import Street
 
 pytestmark = pytest.mark.slow

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.bucketing.postflop import PrecomputeConfig
+from src.bucketing.config import PrecomputeConfig
 from src.game.state import Street
 
 
