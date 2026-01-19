@@ -61,7 +61,6 @@ def test_config(temp_run_dir):
             "runs_dir": str(temp_run_dir.parent),
             "num_iterations": 50,
             "checkpoint_frequency": 100,  # Checkpoint at end only
-            "log_frequency": 10,
             "verbose": False,
         },
     }

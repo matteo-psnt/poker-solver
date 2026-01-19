@@ -81,7 +81,7 @@ build_storage(config: Config, run_dir: Path) -> Storage
     # Creates in-memory storage with optional disk checkpointing
     # Optionally saves periodic checkpoints to disk for persistence
 
-build_solver(config: Config, ...) -> BaseSolver
+build_solver(config: Config, ...) -> MCCFRSolver
     # Creates MCCFR solver with all components
     # Configures CFR+, sampling method, game parameters
 ```
@@ -436,7 +436,6 @@ def get_strategy(regrets):
 training:
   num_iterations: 100000
   checkpoint_frequency: 1000
-  log_frequency: 100
   verbose: true
   runs_dir: "data/runs"
   parallel_result_timeout_seconds: null  # null = wait indefinitely for workers

@@ -95,7 +95,7 @@ class TrainingSession:
             )
 
             # Initialize metrics tracker
-            self.metrics = MetricsTracker(window_size=self.config.training.log_frequency)
+            self.metrics = MetricsTracker()
 
             # Initialize checkpoint manager
             self.checkpoint_manager = CheckpointManager(

@@ -52,7 +52,6 @@
 # training:
 #   # num_iterations: 100000           # Total iterations (default: 100_000)
 #   # checkpoint_frequency: 50000      # Save every N iterations (default: 50_000)
-#   # log_frequency: 1000              # Print progress every N iterations (default: 1_000)
 #   # iterations_per_worker: 1000      # Batch size multiplier for parallel (default: 1_000)
 #   # verbose: true                    # Show verbose output (default: true)
 #   # runs_dir: "data/runs"            # Output directory (default: "data/runs")

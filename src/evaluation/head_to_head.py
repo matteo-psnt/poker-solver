@@ -15,7 +15,7 @@ from src.bucketing.base import BucketingStrategy
 from src.game.actions import Action, ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
-from src.solver.base import BaseSolver
+from src.solver.mccfr import MCCFRSolver
 
 
 @dataclass
@@ -112,8 +112,8 @@ class HeadToHeadEvaluator:
 
     def play_match(
         self,
-        solver0: BaseSolver,
-        solver1: BaseSolver,
+        solver0: MCCFRSolver,
+        solver1: MCCFRSolver,
         num_hands: int,
         alternate_button: bool = True,
         seed: int | None = None,
@@ -188,8 +188,8 @@ class HeadToHeadEvaluator:
 
     def _play_hand(
         self,
-        solver0: BaseSolver,
-        solver1: BaseSolver,
+        solver0: MCCFRSolver,
+        solver1: MCCFRSolver,
         button: int,
         hand_num: int,
     ) -> MatchResult:
@@ -250,7 +250,7 @@ class HeadToHeadEvaluator:
 
     def _get_solver_action(
         self,
-        solver: BaseSolver,
+        solver: MCCFRSolver,
         state: GameState,
         player: int,
     ) -> Action:

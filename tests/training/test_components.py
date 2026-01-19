@@ -3,7 +3,6 @@
 import pytest
 
 from src.actions.betting_actions import BettingActions
-from src.solver.base import BaseSolver
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.shared_array import SharedArrayStorage
 from src.training import components
@@ -145,7 +144,7 @@ class TestBuildSolver:
 
         solver = components.build_solver(config, action_abs, card_abs, storage)
 
-        assert isinstance(solver, BaseSolver)
+        assert isinstance(solver, MCCFRSolver)
         # Solver should be created with the custom game config
 
 
