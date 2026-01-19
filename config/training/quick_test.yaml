@@ -24,7 +24,7 @@ solver:
 
 card_abstraction:
   # Combo-level abstraction (fast test settings)
-  config: fast_test
+  config: quick_test
 
 storage:
   checkpoint_enabled: true  # Save periodic checkpoints to disk

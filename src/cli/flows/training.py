@@ -114,11 +114,26 @@ def evaluate_solver(ctx: CliContext) -> None:
     print("\nLoading solver...")
     storage = InMemoryStorage(checkpoint_dir=run_dir)
     action_abstraction = build_action_abstraction(config)
-    card_abstraction = build_card_abstraction(
-        config,
-        prompt_user=False,
-        auto_compute=False,
-    )
+
+    try:
+        card_abstraction = build_card_abstraction(
+            config,
+            prompt_user=False,
+            auto_compute=False,
+        )
+    except FileNotFoundError as e:
+        ui.error(str(e))
+        print(
+            "\nThe combo abstraction used by this run is missing. "
+            "It may have been deleted or moved."
+        )
+        ui.pause()
+        return
+    except ValueError as e:
+        ui.error(str(e))
+        ui.pause()
+        return
+
     solver = build_solver(config, action_abstraction, card_abstraction, storage)
 
     print(f"  Loaded {storage.num_infosets():,} infosets")
@@ -249,28 +264,88 @@ def _prompt_num_workers(ctx: CliContext) -> int | None:
 
 
 def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
-    abstraction_path = config.card_abstraction.abstraction_path
-    abstraction_config = config.card_abstraction.config
+    """
+    Ensure combo abstraction exists for the given config.
 
-    if abstraction_path:
-        if not Path(abstraction_path).exists():
-            ui.error(f"Combo abstraction file not found: {abstraction_path}")
-            print("   Please precompute combo abstraction first (from main menu)")
-            return False
-    elif abstraction_config:
-        base_path = ctx.base_dir / "data" / "combo_abstraction"
-        abstraction_found = False
-        if base_path.exists():
-            for path in base_path.iterdir():
-                if path.is_dir() and (path / "combo_abstraction.pkl").exists():
-                    abstraction_found = True
-                    break
-        if not abstraction_found:
-            ui.error("No combo abstraction found.")
-            print("   Please precompute combo abstraction first (from main menu)")
+    If the abstraction is missing, prompts the user to run precomputation.
+
+    Returns:
+        True if abstraction exists or was successfully created, False otherwise
+    """
+    from src.cli.flows.combo import handle_combo_precompute
+
+    # Try to build the card abstraction
+    try:
+        build_card_abstraction(config, prompt_user=False, auto_compute=False)
+        return True
+    except FileNotFoundError as e:
+        # Abstraction not found - prompt user to run precomputation
+        ui.error(str(e))
+        print()
+
+        run_precompute = prompts.confirm(
+            ctx,
+            "Would you like to run precomputation now?",
+            default=True,
+        )
+
+        if not run_precompute:
+            print("\nTraining cancelled. Please run precomputation from the main menu first.")
             return False
 
-    return True
+        # Run precomputation
+        print("\n" + "=" * 60)
+        print("RUNNING PRECOMPUTATION")
+        print("=" * 60)
+        handle_combo_precompute(ctx)
+
+        # Verify it was successful
+        try:
+            build_card_abstraction(config, prompt_user=False, auto_compute=False)
+            print("\n✓ Precomputation completed successfully!")
+            print("Continuing with training setup...\n")
+            return True
+        except FileNotFoundError:
+            ui.error("\nPrecomputation did not complete successfully.")
+            print("Training cancelled.")
+            return False
+    except ValueError as e:
+        # Config hash mismatch or other config error
+        ui.error(str(e))
+        print()
+
+        # Check if this is a hash mismatch that can be fixed by recomputing
+        if "hash mismatch" in str(e).lower():
+            run_precompute = prompts.confirm(
+                ctx,
+                "Would you like to recompute the abstraction now?",
+                default=True,
+            )
+
+            if not run_precompute:
+                print("\nTraining cancelled.")
+                return False
+
+            # Run precomputation
+            print("\n" + "=" * 60)
+            print("RUNNING PRECOMPUTATION")
+            print("=" * 60)
+            from src.cli.flows.combo import handle_combo_precompute
+
+            handle_combo_precompute(ctx)
+
+            # Verify it was successful
+            try:
+                build_card_abstraction(config, prompt_user=False, auto_compute=False)
+                print("\n✓ Precomputation completed successfully!")
+                print("Continuing with training setup...\n")
+                return True
+            except (FileNotFoundError, ValueError):
+                ui.error("\nPrecomputation did not complete successfully.")
+                print("Training cancelled.")
+                return False
+
+        return False
 
 
 def _start_training(config: Config, num_workers: int) -> TrainingSession:

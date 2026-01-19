@@ -29,7 +29,10 @@ class PrecomputeConfig:
     buckets_river: int = 200
 
     # Representatives per cluster (for equity computation)
-    representatives_per_cluster: int = 1
+    representatives_per_cluster: int = 3
+
+    # Representative selection strategy: closest | diverse | random
+    representative_selection: str = "closest"
 
     # Monte Carlo samples for equity calculation
     equity_samples: int = 1000
@@ -184,6 +187,7 @@ class PrecomputeConfig:
             "buckets_turn": self.buckets_turn,
             "buckets_river": self.buckets_river,
             "representatives_per_cluster": self.representatives_per_cluster,
+            "representative_selection": self.representative_selection,
             "equity_samples": self.equity_samples,
         }
 

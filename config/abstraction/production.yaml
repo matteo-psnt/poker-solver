@@ -9,7 +9,7 @@ board_clusters:
   river: 400  # 400 clusters × 2 reps × ~450 hands = ~360k equity computations
 
 # Representatives per cluster (for equity computation)
-representatives_per_cluster: 2
+representatives_per_cluster: 3
 
 # Equity buckets per street
 buckets:

@@ -17,7 +17,7 @@ class TestHandEvaluator:
         """Test creating evaluator."""
         evaluator = HandEvaluator()
         assert evaluator is not None
-        assert evaluator.evaluator is not None
+        assert evaluator._card_cache is not None
 
     def test_evaluate_high_card(self):
         """Test evaluating a high card hand."""

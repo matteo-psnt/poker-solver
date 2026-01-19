@@ -222,6 +222,8 @@ class PostflopPrecomputer:
             representative_boards=representative_boards,
             street=street,
             representatives_per_cluster=self.config.representatives_per_cluster,
+            representative_selection=self.config.representative_selection,
+            selection_seed=self.config.seed,
         )
 
         clusters = self.board_clusterer.get_all_clusters(street)
@@ -400,6 +402,7 @@ class PostflopPrecomputer:
                 "config_hash": self.config.get_config_hash(),
                 "num_board_clusters": {s.name: n for s, n in self.num_board_clusters.items()},
                 "representatives_per_cluster": self.config.representatives_per_cluster,
+                "representative_selection": self.config.representative_selection,
                 "num_buckets": {s.name: n for s, n in self.num_buckets.items()},
                 "equity_samples": self.config.equity_samples,
                 "seed": self.config.seed,

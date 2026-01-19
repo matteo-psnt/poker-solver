@@ -308,6 +308,30 @@ wheels = [
 ]
 
 [[package]]
+name = "eval7"
+version = "0.1.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "future" },
+    { name = "pyparsing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3a/70/7d11bfc2b97ebfde6ca2adee6c8101e20ff4a12797fc308010f36a13cf1c/eval7-0.1.10.tar.gz", hash = "sha256:4549e9523e1ed7d87ab382eb88a5598f6975dd5a51831ad2589ef9484782ea73", size = 249284, upload-time = "2023-12-22T17:57:42.76Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/96/ab39b4aabd24d4ddd034b154134432081266842a77de0060b53c9bc13831/eval7-0.1.10-cp310-cp310-macosx_11_0_x86_64.whl", hash = "sha256:56fae9072ddec269f72cc338a1c3dea25bb2a4160eb8f297f037d62f1dfe7387", size = 113478, upload-time = "2024-01-06T15:33:58.466Z" },
+    { url = "https://files.pythonhosted.org/packages/29/10/ee1883ccb9ee81146398456953dc159ef1daacb31c9bd8f70733cfd43b39/eval7-0.1.10-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9d1ee0922d5c22e17f9183c5783e2912e5433a8a3bab10886683bb143b2650ae", size = 591584, upload-time = "2024-01-06T15:34:00.072Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/7a/4585fe6274acff95113e474eea01178c762c17120fd9adb91e8ce36c3304/eval7-0.1.10-cp310-cp310-win32.whl", hash = "sha256:489fc41c432b40a0d0bac78b7e1463147c5f8b46bab458b4f160ad9b6eb46188", size = 100764, upload-time = "2024-01-06T15:34:02.331Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/51/0988a554f7c735e171de7ff4b02697e6317b9660793da879c8099d92aa28/eval7-0.1.10-cp310-cp310-win_amd64.whl", hash = "sha256:61d420fcb027db895345ab99e4e8d66b1179a3365393e0da3b2a2f858a2b5329", size = 110485, upload-time = "2024-01-06T15:34:04.195Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/83/e86816d94eeedfbfbab895a4561f0e12ed23b936375b473e64f50682eac8/eval7-0.1.10-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:6bbefa27002365d5abd75117e4cd52d9b3bae9aec4f8ae3a6675e391c3d3abfb", size = 217166, upload-time = "2024-01-06T15:34:06.456Z" },
+    { url = "https://files.pythonhosted.org/packages/89/c2/1334b8fd22ed7369508a762e507dfab7397a99a69283a5c459b09c0f04f7/eval7-0.1.10-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5ae6d277f34dc4dfe110e3583c4a0e7d299df2de6a73caca2026a3d35f809370", size = 644499, upload-time = "2024-01-06T15:34:08.065Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/22/c784d0c103412e7d56d7f64d87e6b8299e1711460eb68670d8b58c89f558/eval7-0.1.10-cp311-cp311-win32.whl", hash = "sha256:008c2685c2de166288830745dee2d92d9362a685e178945a9f5ba4d518388cc0", size = 99762, upload-time = "2024-01-06T15:34:09.645Z" },
+    { url = "https://files.pythonhosted.org/packages/79/7c/feac4c9be531c660d042dcf629397d869a0ca7bc5c33e7f89986f28616de/eval7-0.1.10-cp311-cp311-win_amd64.whl", hash = "sha256:23f4e187a25df0a1ccb26450ce99b96f016e950b29c4ba8623ef2f09a7506c94", size = 110712, upload-time = "2024-01-06T15:34:11.508Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/36/0b25aad9d451d607efdf484d696d1f988393edb64d72278c0f48161773a8/eval7-0.1.10-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:f00ec6a1dff3f9bb9744e1a8f5d765eab99c1cd7805ab77f7e10e163ae5f079b", size = 219020, upload-time = "2024-01-06T15:34:13.521Z" },
+    { url = "https://files.pythonhosted.org/packages/56/67/3850bf77785517db04f159e89f3b4f4d3b850346339d5adb523fb3b74c02/eval7-0.1.10-cp312-cp312-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6d5ca4d30ebc49fd83e8a5e5a8d59c9ec2334a7ce1c9d347b3a0f26b97039d90", size = 675333, upload-time = "2024-01-06T15:34:15.202Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/41/6e8c2de61b4176b2486d53ee4c9009229c6c28744c18abec9771081d13e0/eval7-0.1.10-cp312-cp312-win32.whl", hash = "sha256:436ef766ac4b8ba0d32c9866171d1d97e04417a5d148dd560dd36ff85ac9cfbd", size = 100204, upload-time = "2024-01-06T15:34:17.059Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/79/884c070c30318182bf7d1e76d52ec50978715d2e881d2ac5a9b3f83451bd/eval7-0.1.10-cp312-cp312-win_amd64.whl", hash = "sha256:f181dcbe37b1d24ce3694df62f9e3cefdd714539fcaf3885cd0f108a8809fe16", size = 110932, upload-time = "2024-01-06T15:34:18.495Z" },
+]
+
+[[package]]
 name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -392,6 +416,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b4/40/cc11f378b561a67bea850ab50063366a0d1dd3f6d0a30ce0f874b0ad5664/fonttools-4.61.1-cp314-cp314t-win32.whl", hash = "sha256:aed04cabe26f30c1647ef0e8fbb207516fd40fe9472e9439695f5c6998e60ac5", size = 2335377, upload-time = "2025-12-12T17:31:16.49Z" },
     { url = "https://files.pythonhosted.org/packages/e4/ff/c9a2b66b39f8628531ea58b320d66d951267c98c6a38684daa8f50fb02f8/fonttools-4.61.1-cp314-cp314t-win_amd64.whl", hash = "sha256:2180f14c141d2f0f3da43f3a81bc8aa4684860f6b0e6f9e165a4831f24e6a23b", size = 2400613, upload-time = "2025-12-12T17:31:18.769Z" },
     { url = "https://files.pythonhosted.org/packages/c7/4e/ce75a57ff3aebf6fc1f4e9d508b8e5810618a33d900ad6c19eb30b290b97/fonttools-4.61.1-py3-none-any.whl", hash = "sha256:17d2bf5d541add43822bcf0c43d7d847b160c9bb01d15d5007d84e2217aaa371", size = 1148996, upload-time = "2025-12-12T17:31:21.03Z" },
+]
+
+[[package]]
+name = "future"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a7/b2/4140c69c6a66432916b26158687e821ba631a4c9273c474343badf84d3ba/future-1.0.0.tar.gz", hash = "sha256:bd2968309307861edae1458a4f8a4f3598c03be43b97521076aebf5d94c07b05", size = 1228490, upload-time = "2024-02-21T11:52:38.461Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/71/ae30dadffc90b9006d77af76b393cb9dfbfc9629f339fc1574a1c52e6806/future-1.0.0-py3-none-any.whl", hash = "sha256:929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216", size = 491326, upload-time = "2024-02-21T11:52:35.956Z" },
 ]
 
 [[package]]
@@ -1029,6 +1062,7 @@ name = "poker-solver"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "eval7" },
     { name = "numba" },
     { name = "numcodecs" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1065,6 +1099,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "eval7", specifier = ">=0.1.10" },
     { name = "matplotlib", marker = "extra == 'optimization'", specifier = ">=3.7.0" },
     { name = "numba", specifier = ">=0.63.1" },
     { name = "numcodecs", specifier = "<0.16" },

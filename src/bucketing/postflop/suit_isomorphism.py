@@ -187,7 +187,9 @@ def canonicalize_board(
 
         # Apply mapping to get canonical cards
         canonical = tuple(
-            CanonicalCard(rank_idx, suit_to_label[suit]) for rank_idx, suit in sorted_cards
+            sorted(
+                (CanonicalCard(rank_idx, suit_to_label[suit]) for rank_idx, suit in sorted_cards)
+            )
         )
 
         # Compare lexicographically
@@ -221,7 +223,7 @@ def _canonicalize_board_with_mapping(
         current_mapping, suit_label = current_mapping.get_or_assign(suit)
         canonical_cards.append(CanonicalCard(rank_idx, suit_label))
 
-    return tuple(canonical_cards), current_mapping
+    return tuple(sorted(canonical_cards)), current_mapping
 
 
 def canonicalize_hand(

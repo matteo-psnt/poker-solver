@@ -22,8 +22,8 @@ class TestCanonicalBoardEnumerator:
         enum.enumerate()
         boards = list(enum.iterate())
 
-        # We verified earlier that 1911 is correct
-        assert len(boards) == 1911
+        # We verified earlier that 1755 is correct
+        assert len(boards) == 1755
 
     def test_all_boards_have_correct_length(self):
         """Test that all flop boards have 3 cards."""
