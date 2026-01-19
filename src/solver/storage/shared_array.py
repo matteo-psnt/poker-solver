@@ -469,10 +469,18 @@ class SharedArrayStorage(Storage):
                 # Known key - return view
                 infoset_id = self._owned_keys[key]
             else:
+                # Validate action count doesn't exceed max_actions
+                num_actions = len(legal_actions)
+                if num_actions > self.max_actions:
+                    raise ValueError(
+                        f"Infoset has {num_actions} actions, exceeding max_actions={self.max_actions}. "
+                        f"Increase max_actions in storage config or reduce action abstraction complexity."
+                    )
+
                 # New key - allocate ID from our exclusive range
                 infoset_id = self._allocate_id()
                 self._owned_keys[key] = infoset_id
-                self.shared_action_counts[infoset_id] = len(legal_actions)
+                self.shared_action_counts[infoset_id] = num_actions
                 self._legal_actions_cache[infoset_id] = legal_actions
 
             return self._create_infoset_view(infoset_id, key, legal_actions)

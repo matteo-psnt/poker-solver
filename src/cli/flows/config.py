@@ -68,6 +68,7 @@ def edit_config(ctx: CliContext, config: Config) -> Config:
         "Solver Settings (CFR+, Linear CFR, sampling)",
         "Action Abstraction (bet sizes, raise cap)",
         "Card Abstraction",
+        "Storage Settings (capacity, compression)",
         "System Settings (seed, logging)",
         "Done",
     ]
@@ -93,6 +94,8 @@ def edit_config(ctx: CliContext, config: Config) -> Config:
             config = _edit_action_abstraction(ctx, config)
         elif "Card Abstraction" in category:
             config = _edit_card_abstraction(ctx, config)
+        elif "Storage Settings" in category:
+            config = _edit_storage_settings(ctx, config)
         elif "System Settings" in category:
             config = _edit_system_settings(ctx, config)
 
@@ -136,7 +139,13 @@ def _edit_training_params(ctx: CliContext, config: Config) -> Config:
         default=config.training.verbose,
     )
 
-    if None in (iterations, checkpoint_freq, log_freq, iterations_per_worker, verbose):
+    runs_dir = prompts.text(
+        ctx,
+        "Output directory for training runs:",
+        default=config.training.runs_dir,
+    )
+
+    if None in (iterations, checkpoint_freq, log_freq, iterations_per_worker, verbose, runs_dir):
         return config
 
     return config.merge(
@@ -147,6 +156,7 @@ def _edit_training_params(ctx: CliContext, config: Config) -> Config:
                 "log_frequency": log_freq,
                 "iterations_per_worker": iterations_per_worker,
                 "verbose": verbose,
+                "runs_dir": runs_dir,
             }
         }
     )
@@ -251,14 +261,133 @@ def _edit_action_abstraction(ctx: CliContext, config: Config) -> Config:
         min_value=0.0,
     )
 
+    # Ask if user wants to customize bet sizes
+    customize_bets = prompts.confirm(
+        ctx,
+        "Customize bet sizes? (Advanced)",
+        default=False,
+    )
+
     if None in (max_raises, spr_threshold):
+        return config
+
+    merge_dict = {
+        "action_abstraction": {
+            "max_raises_per_street": max_raises,
+            "all_in_spr_threshold": spr_threshold,
+        }
+    }
+
+    if customize_bets:
+        ui.info("\nPreflop Raise Sizes (BB units):")
+        preflop_raises = _edit_list_of_floats(
+            ctx,
+            "Enter raise sizes separated by commas",
+            default=config.action_abstraction.preflop_raises,
+        )
+
+        ui.info("\nPostflop Bet Sizes (pot fractions):")
+        flop_bets = _edit_list_of_floats(
+            ctx,
+            "Flop bet sizes (e.g. 0.33, 0.66, 1.25):",
+            default=config.action_abstraction.postflop["flop"],
+        )
+        turn_bets = _edit_list_of_floats(
+            ctx,
+            "Turn bet sizes (e.g. 0.50, 1.0, 1.5):",
+            default=config.action_abstraction.postflop["turn"],
+        )
+        river_bets = _edit_list_of_floats(
+            ctx,
+            "River bet sizes (e.g. 0.50, 1.0, 2.0):",
+            default=config.action_abstraction.postflop["river"],
+        )
+
+        if preflop_raises:
+            merge_dict["action_abstraction"]["preflop_raises"] = preflop_raises
+        if flop_bets and turn_bets and river_bets:
+            merge_dict["action_abstraction"]["postflop"] = {
+                "flop": flop_bets,
+                "turn": turn_bets,
+                "river": river_bets,
+            }
+
+    return config.merge(merge_dict)
+
+
+def _edit_list_of_floats(ctx: CliContext, prompt: str, default: list[float]) -> list[float] | None:
+    """Helper to edit a list of floats."""
+    default_str = ", ".join(str(x) for x in default)
+
+    def validate(value: str) -> bool | str:
+        try:
+            parts = [float(x.strip()) for x in value.split(",")]
+            if len(parts) == 0:
+                return "Need at least one value"
+            if any(x <= 0 for x in parts):
+                return "All values must be positive"
+            return True
+        except ValueError:
+            return "Invalid number format"
+
+    result = prompts.text(ctx, prompt, default=default_str, validate=validate)
+    if result is None:
+        return None
+
+    try:
+        return [float(x.strip()) for x in result.split(",")]
+    except ValueError:
+        return None
+
+
+def _edit_storage_settings(ctx: CliContext, config: Config) -> Config:
+    """Edit storage settings."""
+    print("Storage Settings")
+    print("-" * 40)
+
+    ui.info("These settings affect memory usage and checkpoint performance.")
+
+    initial_capacity = prompts.prompt_int(
+        ctx,
+        "Initial infoset capacity (grows automatically):",
+        default=config.storage.initial_capacity,
+        min_value=10_000,
+    )
+
+    max_actions = prompts.prompt_int(
+        ctx,
+        "Max actions per infoset:",
+        default=config.storage.max_actions,
+        min_value=2,
+    )
+
+    zarr_compression = prompts.prompt_int(
+        ctx,
+        "Zarr compression level (1=fastest, 3=balanced, 9=smallest, 1-9):",
+        default=config.storage.zarr_compression_level,
+        min_value=1,
+    )
+    if zarr_compression is not None and zarr_compression > 9:
+        print("⚠️  Warning: Compression level > 9 is unusual. Using 9.")
+        zarr_compression = 9
+
+    zarr_chunk = prompts.prompt_int(
+        ctx,
+        "Zarr chunk size (infosets per chunk, 10K-100K typical):",
+        default=config.storage.zarr_chunk_size,
+        min_value=1_000,
+    )
+
+    if None in (initial_capacity, max_actions, zarr_compression, zarr_chunk):
         return config
 
     return config.merge(
         {
-            "action_abstraction": {
-                "max_raises_per_street": max_raises,
-                "all_in_spr_threshold": spr_threshold,
+            "storage": {
+                "initial_capacity": initial_capacity,
+                "max_actions": max_actions,
+                "zarr_compression_level": zarr_compression,
+                "zarr_chunk_size": zarr_chunk,
             }
         }
     )

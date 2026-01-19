@@ -21,7 +21,7 @@ action_abstraction:
   # Production-grade betting sizes based on solver research
   preflop_raises: [2.5, 3.5, 5.0]  # Min-raise, standard, larger sizing
 
-  postflop_bets:
+  postflop:
     flop: [0.33, 0.66, 1.25]  # Range bet, standard bet, overbet
     turn: [0.50, 1.0, 1.5]    # Half pot, pot, large overbet
     river: [0.50, 1.0, 2.0]   # Thin value, pot, polarized overbet
@@ -33,13 +33,8 @@ action_abstraction:
 card_abstraction:
   config: production
 
-# ===== SPR Bucketing =====
-spr_buckets:
-  thresholds: [4, 13]  # [shallow/medium, medium/deep]
-
 # ===== Solver Configuration =====
 solver:
-  type: "mccfr"
   sampling_method: "external"  # Options: "external" (default, lower variance), "outcome" (faster, higher variance)
   # CFR+ provides ~100x faster convergence than vanilla CFR
   cfr_plus: true

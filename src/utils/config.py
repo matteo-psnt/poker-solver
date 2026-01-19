@@ -18,13 +18,6 @@ class CardAbstractionConfig:
 
 
 @dataclass(frozen=True)
-class SprBucketsConfig:
-    """SPR bucketing configuration with defaults."""
-
-    thresholds: list[float] = field(default_factory=lambda: [4.0, 13.0])
-
-
-@dataclass(frozen=True)
 class TrainingConfig:
     """Training configuration with defaults."""
 
@@ -71,13 +64,20 @@ class ActionAbstractionConfig:
 
     max_raises_per_street: int = 4
     all_in_spr_threshold: float = 2.0
+    preflop_raises: list[float] = field(default_factory=lambda: [2.5, 3.5, 5.0])
+    postflop: dict[str, list[float]] = field(
+        default_factory=lambda: {
+            "flop": [0.33, 0.66, 1.25],
+            "turn": [0.50, 1.0, 1.5],
+            "river": [0.50, 1.0, 2.0],
+        }
+    )
 
 
 @dataclass(frozen=True)
 class SolverConfig:
     """Solver configuration with defaults."""
 
-    type: str = "mccfr"
     sampling_method: str = "external"
     cfr_plus: bool = True
     linear_cfr: bool = True
@@ -98,7 +98,6 @@ class Config:
     action_abstraction: ActionAbstractionConfig = ActionAbstractionConfig()
     solver: SolverConfig = SolverConfig()
     card_abstraction: CardAbstractionConfig = CardAbstractionConfig()
-    spr_buckets: SprBucketsConfig = SprBucketsConfig()
 
     def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary (for serialization, logging, etc.)."""

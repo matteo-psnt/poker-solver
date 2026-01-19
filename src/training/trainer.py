@@ -9,6 +9,7 @@ Training uses parallel multiprocessing with hash-partitioned shared memory.
 
 import multiprocessing as mp
 import pickle
+import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -288,7 +289,9 @@ class TrainingSession:
             serialized_action_abstraction=serialized_action_abstraction,
             serialized_card_abstraction=serialized_card_abstraction,
             session_id=self.run_dir.name,
-            base_seed=self.config.system.seed if self.config.system.seed is not None else 42,
+            base_seed=self.config.system.seed
+            if self.config.system.seed is not None
+            else random.randint(0, 2**31 - 1),
             initial_capacity=initial_capacity,
             max_actions=max_actions,
             checkpoint_dir=str(self.run_dir) if checkpoint_enabled else None,

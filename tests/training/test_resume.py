@@ -52,12 +52,10 @@ def test_config(temp_run_dir):
             "config": "fast_test",  # Uses a small precomputed abstraction
         },
         "storage": {
-            "backend": "disk",  # Must use disk storage for resume
-            "cache_size": 1000,
-            "flush_frequency": 10000,  # Flush very rarely to avoid performance issues in tests
+            # Storage config uses defaults - checkpoint enabled, zarr format
         },
         "solver": {
-            "type": "mccfr",
+            # Solver config uses defaults - CFR+, linear averaging
         },
         "training": {
             "runs_dir": str(temp_run_dir.parent),
