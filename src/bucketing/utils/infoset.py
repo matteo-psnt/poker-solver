@@ -7,7 +7,7 @@ to a player given their information (hole cards, board, betting history).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from src.game.state import Street
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class InfoSetKey:
     """
     Hashable identifier for an information set.
@@ -49,6 +49,7 @@ class InfoSetKey:
     postflop_bucket: int | None  # 0-49/99/199 (None if preflop)
 
     spr_bucket: int  # Stack-to-pot ratio bucket (0=shallow, 1=medium, 2=deep)
+    _hash: int = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         """Validate that exactly one of preflop_hand or postflop_bucket is set."""
@@ -63,22 +64,30 @@ class InfoSetKey:
             if self.preflop_hand is not None:
                 raise ValueError(f"preflop_hand must be None for {self.street.name} street")
 
+        object.__setattr__(
+            self,
+            "_hash",
+            hash(
+                (
+                    self.player_position,
+                    self.street,
+                    self.betting_sequence,
+                    self.preflop_hand,
+                    self.postflop_bucket,
+                    self.spr_bucket,
+                )
+            ),
+        )
+
     def __hash__(self) -> int:
         """Hash for dictionary storage."""
-        return hash(
-            (
-                self.player_position,
-                self.street,
-                self.betting_sequence,
-                self.preflop_hand,
-                self.postflop_bucket,
-                self.spr_bucket,
-            )
-        )
+        return self._hash
 
     def __eq__(self, other) -> bool:
         """Equality comparison."""
         if not isinstance(other, InfoSetKey):
+            return False
+        if self._hash != other._hash:
             return False
         return (
             self.player_position == other.player_position
@@ -238,26 +247,21 @@ class InfoSet:
             # Get current strategy for specific actions
             strategy = infoset.get_filtered_strategy(valid_indices=[0, 2, 3], use_average=False)
         """
-        # Get base strategy (already normalized)
+        # Fast path: no filtering requested
+        if valid_indices is None:
+            if use_average:
+                return average_strategy(self.strategy_sum)
+            return regret_matching(self.regrets)
+
+        if len(valid_indices) == self.num_actions:
+            if use_average:
+                return average_strategy(self.strategy_sum)
+            return regret_matching(self.regrets)
+
+        # Compute strategy only for valid actions to avoid full-array work.
         if use_average:
-            full_strategy = average_strategy(self.strategy_sum)
-        else:
-            full_strategy = regret_matching(self.regrets)
-
-        # Convert to float64 for consistency
-        full_strategy = full_strategy.astype(np.float64)
-
-        # Filter if needed
-        if valid_indices is not None:
-            strategy = full_strategy[valid_indices]
-            total = np.sum(strategy)
-            if total > 0:
-                return strategy / total
-            else:
-                # Fallback to uniform over valid actions
-                return np.ones(len(valid_indices), dtype=np.float64) / len(valid_indices)
-
-        return full_strategy
+            return average_strategy(self.strategy_sum[valid_indices])
+        return regret_matching(self.regrets[valid_indices])
 
     def get_strategy_safe(
         self, legal_actions: list[Action], use_average: bool = True

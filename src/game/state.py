@@ -5,7 +5,7 @@ This module defines the core game state, including cards, streets, and the
 complete game state dataclass that tracks all information needed for a poker hand.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import lru_cache
 
@@ -21,6 +21,8 @@ from src.game.actions import Action, ActionType
 # Deep: SPR >= 13 (complex postflop play)
 SPR_SHALLOW_THRESHOLD = 4.0
 SPR_DEEP_THRESHOLD = 13.0
+
+_PREFLOP_HAND_CLASSES = PreflopHandClasses()
 
 
 class Street(Enum):
@@ -191,6 +193,9 @@ class GameState:
     last_aggressor: int | None = None
     street_start_pot: int = 0  # Pot at start of current betting round (for normalization)
     _skip_validation: bool = False
+    _cached_betting_sequence: str | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self):
         """Validate game state consistency."""
@@ -342,8 +347,7 @@ class GameState:
         # Hybrid representation: preflop uses hand strings, postflop uses buckets
         if self.street == Street.PREFLOP:
             # Get canonical hand string (e.g., "AKs", "72o", "TT")
-            hand_mapper = PreflopHandClasses()
-            preflop_hand = hand_mapper.get_hand_string(self.hole_cards[player])
+            preflop_hand = _PREFLOP_HAND_CLASSES.get_hand_string(self.hole_cards[player])
 
             return InfoSetKey(
                 player_position=player,
@@ -401,7 +405,11 @@ class GameState:
         We reconstruct forward from street_start_pot through the betting history,
         tracking both pot and to_call to correctly handle all action types.
         """
+        if self._cached_betting_sequence is not None:
+            return self._cached_betting_sequence
+
         if not self.betting_history:
+            object.__setattr__(self, "_cached_betting_sequence", "")
             return ""
 
         # Reconstruct pot sizes by walking forward from street_start_pot
@@ -456,7 +464,9 @@ class GameState:
         for action, pot_before in zip(self.betting_history, pot_at_action):
             normalized.append(action.normalize(pot_before))
 
-        return "-".join(normalized)
+        sequence = "-".join(normalized)
+        object.__setattr__(self, "_cached_betting_sequence", sequence)
+        return sequence
 
     def __str__(self) -> str:
         """Human-readable string representation."""
