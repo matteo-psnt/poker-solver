@@ -126,12 +126,7 @@ class CheckpointManager:
                     flush=True,
                 )
             try:
-                elapsed = self._pending_checkpoint.result()
-                if self._verbose:
-                    print(
-                        f"[Master] Background checkpoint completed ({elapsed:.2f}s)",
-                        flush=True,
-                    )
+                self._pending_checkpoint.result()
             except Exception as e:
                 # Store exception and print warning
                 self._checkpoint_failed = e

@@ -60,6 +60,10 @@ storage:
   checkpoint_enabled: true  # Save periodic checkpoints to disk (recommended)
   initial_capacity: 4000000  # Start with 4M infosets for production (grows automatically)
 
+  # Zarr checkpoint configuration
+  zarr_compression_level: 3  # Optimal: 5.6x faster than old format with reasonable file size
+  zarr_chunk_size: 10000  # Good balance between compression and access speed
+
 # ===== System Configuration =====
 system:
   seed: null  # Random seed for diversity

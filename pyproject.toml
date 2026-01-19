@@ -18,6 +18,8 @@ dependencies = [
     "numba>=0.63.1",
     "xxhash>=3.6.0",
     "questionary>=2.1.1",
+    "zarr<3",
+    "numcodecs<0.16",
 ]
 
 [project.scripts]

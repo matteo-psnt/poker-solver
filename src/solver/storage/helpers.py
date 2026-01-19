@@ -3,16 +3,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import zarr
 
 from src.game.actions import Action, ActionType
 
 # Checkpoint file names
-CHECKPOINT_NPZ_FILE = "checkpoint.npz"
+CHECKPOINT_ZARR_FILE = "checkpoint.zarr.zip"
 KEY_MAPPING_FILE = "key_mapping.pkl"
 ACTION_SIGNATURES_FILE = "action_signatures.pkl"
 
 CHECKPOINT_REQUIRED_FILES = (
-    CHECKPOINT_NPZ_FILE,
+    CHECKPOINT_ZARR_FILE,
     KEY_MAPPING_FILE,
     ACTION_SIGNATURES_FILE,
 )
@@ -21,7 +22,7 @@ CHECKPOINT_REQUIRED_FILES = (
 @dataclass(frozen=True)
 class CheckpointPaths:
     base: Path
-    checkpoint_npz: Path
+    checkpoint_zarr: Path
     key_mapping: Path
     action_signatures: Path
 
@@ -29,7 +30,7 @@ class CheckpointPaths:
     def from_dir(cls, checkpoint_dir: Path) -> "CheckpointPaths":
         return cls(
             base=checkpoint_dir,
-            checkpoint_npz=checkpoint_dir / CHECKPOINT_NPZ_FILE,
+            checkpoint_zarr=checkpoint_dir / CHECKPOINT_ZARR_FILE,
             key_mapping=checkpoint_dir / KEY_MAPPING_FILE,
             action_signatures=checkpoint_dir / ACTION_SIGNATURES_FILE,
         )
@@ -37,7 +38,7 @@ class CheckpointPaths:
 
 def get_missing_checkpoint_files(checkpoint_dir: Path) -> list[str]:
     """Check for missing checkpoint files."""
-    return [name for name in CHECKPOINT_REQUIRED_FILES if not (checkpoint_dir / name).exists()]
+    return [f for f in CHECKPOINT_REQUIRED_FILES if not (checkpoint_dir / f).exists()]
 
 
 def load_key_mapping(paths: CheckpointPaths) -> dict:
@@ -56,16 +57,24 @@ def load_action_signatures(paths: CheckpointPaths) -> dict[int, list[tuple[str, 
     return action_sigs
 
 
-def load_checkpoint_arrays(paths: CheckpointPaths) -> dict[str, np.ndarray]:
-    """Load checkpoint arrays from compressed NPZ file."""
-    npz_data = np.load(paths.checkpoint_npz)
-    return {
-        "regrets": npz_data["regrets"],
-        "strategies": npz_data["strategies"],
-        "action_counts": npz_data["action_counts"],
-        "reach_counts": npz_data["reach_counts"],
-        "cumulative_utility": npz_data["cumulative_utility"],
-    }
+def load_checkpoint_arrays(checkpoint_dir: Path) -> dict[str, np.ndarray]:
+    """Load checkpoint arrays from Zarr format."""
+    zarr_path = checkpoint_dir / CHECKPOINT_ZARR_FILE
+    if not zarr_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {zarr_path}")
+
+    store = zarr.ZipStore(zarr_path, mode="r")
+    try:
+        root = zarr.open(store, mode="r")
+        return {
+            "regrets": root["regrets"][:],
+            "strategies": root["strategies"][:],
+            "action_counts": root["action_counts"][:],
+            "reach_counts": root["reach_counts"][:],
+            "cumulative_utility": root["cumulative_utility"][:],
+        }
+    finally:
+        store.close()
 
 
 def _validate_checkpoint_mapping(mapping_data: dict, context: str) -> tuple[int, int]:
@@ -193,7 +202,7 @@ def load_checkpoint_data(checkpoint_dir: Path, *, context: str) -> CheckpointDat
     paths = CheckpointPaths.from_dir(checkpoint_dir)
     mapping_data = load_key_mapping(paths)
     _, max_id = _validate_checkpoint_mapping(mapping_data, context)
-    arrays = load_checkpoint_arrays(paths)
+    arrays = load_checkpoint_arrays(checkpoint_dir)
     max_actions = _validate_checkpoint_arrays(arrays, max_id, context)
     action_sigs = load_action_signatures(paths)
     _validate_action_signatures(arrays["action_counts"], action_sigs, context)
