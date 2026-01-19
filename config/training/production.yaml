@@ -61,8 +61,8 @@ storage:
   initial_capacity: 4000000  # Start with 4M infosets for production (grows automatically)
 
   # Zarr checkpoint configuration
-  zarr_compression_level: 3  # Optimal: 5.6x faster than old format with reasonable file size
-  zarr_chunk_size: 10000  # Good balance between compression and access speed
+  zarr_compression_level: 1  # Fastest I/O for production training
+  zarr_chunk_size: 50000  # Larger chunks for faster loading
 
 # ===== System Configuration =====
 system:

@@ -6,7 +6,6 @@ from src.bucketing.utils.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action
 from src.solver.storage.base import Storage
 from src.solver.storage.helpers import (
-    CHECKPOINT_REQUIRED_FILES,
     build_legal_actions,
     get_missing_checkpoint_files,
     load_checkpoint_data,
@@ -76,10 +75,7 @@ class InMemoryStorage(Storage):
             return
         missing_files = get_missing_checkpoint_files(self.checkpoint_dir)
         if missing_files:
-            raise ValueError(
-                f"Checkpoint is incomplete. Missing files: {missing_files}\n"
-                f"Required: {list(CHECKPOINT_REQUIRED_FILES)}"
-            )
+            raise ValueError(f"Checkpoint is incomplete. Missing files: {missing_files}")
 
         data = load_checkpoint_data(self.checkpoint_dir, context="InMemoryStorage checkpoint load")
         self.key_to_id = data.owned_keys

@@ -8,15 +8,9 @@ import zarr
 from src.game.actions import Action, ActionType
 
 # Checkpoint file names
-CHECKPOINT_ZARR_FILE = "checkpoint.zarr.zip"
+CHECKPOINT_ZARR_DIR = "checkpoint.zarr"
 KEY_MAPPING_FILE = "key_mapping.pkl"
 ACTION_SIGNATURES_FILE = "action_signatures.pkl"
-
-CHECKPOINT_REQUIRED_FILES = (
-    CHECKPOINT_ZARR_FILE,
-    KEY_MAPPING_FILE,
-    ACTION_SIGNATURES_FILE,
-)
 
 
 @dataclass(frozen=True)
@@ -30,7 +24,7 @@ class CheckpointPaths:
     def from_dir(cls, checkpoint_dir: Path) -> "CheckpointPaths":
         return cls(
             base=checkpoint_dir,
-            checkpoint_zarr=checkpoint_dir / CHECKPOINT_ZARR_FILE,
+            checkpoint_zarr=checkpoint_dir / CHECKPOINT_ZARR_DIR,
             key_mapping=checkpoint_dir / KEY_MAPPING_FILE,
             action_signatures=checkpoint_dir / ACTION_SIGNATURES_FILE,
         )
@@ -38,7 +32,14 @@ class CheckpointPaths:
 
 def get_missing_checkpoint_files(checkpoint_dir: Path) -> list[str]:
     """Check for missing checkpoint files."""
-    return [f for f in CHECKPOINT_REQUIRED_FILES if not (checkpoint_dir / f).exists()]
+    missing = []
+    if not (checkpoint_dir / CHECKPOINT_ZARR_DIR).exists():
+        missing.append(CHECKPOINT_ZARR_DIR)
+    if not (checkpoint_dir / KEY_MAPPING_FILE).exists():
+        missing.append(KEY_MAPPING_FILE)
+    if not (checkpoint_dir / ACTION_SIGNATURES_FILE).exists():
+        missing.append(ACTION_SIGNATURES_FILE)
+    return missing
 
 
 def load_key_mapping(paths: CheckpointPaths) -> dict:
@@ -58,23 +59,22 @@ def load_action_signatures(paths: CheckpointPaths) -> dict[int, list[tuple[str, 
 
 
 def load_checkpoint_arrays(checkpoint_dir: Path) -> dict[str, np.ndarray]:
-    """Load checkpoint arrays from Zarr format."""
-    zarr_path = checkpoint_dir / CHECKPOINT_ZARR_FILE
+    """Load checkpoint arrays from Zarr format (directory store for performance)."""
+    zarr_path = checkpoint_dir / CHECKPOINT_ZARR_DIR
     if not zarr_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {zarr_path}")
 
-    store = zarr.ZipStore(zarr_path, mode="r")
-    try:
-        root = zarr.open(store, mode="r")
-        return {
-            "regrets": root["regrets"][:],
-            "strategies": root["strategies"][:],
-            "action_counts": root["action_counts"][:],
-            "reach_counts": root["reach_counts"][:],
-            "cumulative_utility": root["cumulative_utility"][:],
-        }
-    finally:
-        store.close()
+    store = zarr.DirectoryStore(zarr_path)
+    root = zarr.open(store, mode="r")
+
+    # Load arrays ([:] triggers decompression)
+    return {
+        "regrets": root["regrets"][:],
+        "strategies": root["strategies"][:],
+        "action_counts": root["action_counts"][:],
+        "reach_counts": root["reach_counts"][:],
+        "cumulative_utility": root["cumulative_utility"][:],
+    }
 
 
 def _validate_checkpoint_mapping(mapping_data: dict, context: str) -> tuple[int, int]:

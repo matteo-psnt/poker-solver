@@ -1,6 +1,5 @@
 import pickle
 import time
-import warnings
 from multiprocessing import shared_memory
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -979,64 +978,60 @@ class SharedArrayStorage(Storage):
         reach_counts_dense = self.shared_reach_counts[old_ids].copy()
         cumulative_utility_dense = self.shared_cumulative_utility[old_ids].copy()
 
-        # Suppress harmless Zarr/zipfile warning about duplicate .zattrs entries
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="Duplicate name")
-            store = zarr.ZipStore(paths.checkpoint_zarr, mode="w")
-            root = zarr.open(store, mode="w")
+        # Use DirectoryStore for fast parallel I/O
+        store = zarr.DirectoryStore(paths.checkpoint_zarr)
+        root = zarr.open(store, mode="w")
 
-            compressor = numcodecs.Blosc(
-                cname="zstd",
-                clevel=self.zarr_compression_level,
-                shuffle=numcodecs.Blosc.BITSHUFFLE,
-            )
+        compressor = numcodecs.Blosc(
+            cname="zstd",
+            clevel=self.zarr_compression_level,
+            shuffle=numcodecs.Blosc.BITSHUFFLE,
+        )
 
-            chunk_size = self.zarr_chunk_size
+        chunk_size = self.zarr_chunk_size
 
-            root.create_dataset(
-                "regrets",
-                data=regrets_dense,
-                chunks=(chunk_size, self.max_actions),
-                compressor=compressor,
-                dtype=np.float64,
-            )
-            root.create_dataset(
-                "strategies",
-                data=strategies_dense,
-                chunks=(chunk_size, self.max_actions),
-                compressor=compressor,
-                dtype=np.float64,
-            )
-            root.create_dataset(
-                "action_counts",
-                data=action_counts_dense,
-                chunks=(chunk_size,),
-                compressor=compressor,
-                dtype=np.int32,
-            )
-            root.create_dataset(
-                "reach_counts",
-                data=reach_counts_dense,
-                chunks=(chunk_size,),
-                compressor=compressor,
-                dtype=np.int64,
-            )
-            root.create_dataset(
-                "cumulative_utility",
-                data=cumulative_utility_dense,
-                chunks=(chunk_size,),
-                compressor=compressor,
-                dtype=np.float64,
-            )
+        root.create_dataset(
+            "regrets",
+            data=regrets_dense,
+            chunks=(chunk_size, self.max_actions),
+            compressor=compressor,
+            dtype=np.float64,
+        )
+        root.create_dataset(
+            "strategies",
+            data=strategies_dense,
+            chunks=(chunk_size, self.max_actions),
+            compressor=compressor,
+            dtype=np.float64,
+        )
+        root.create_dataset(
+            "action_counts",
+            data=action_counts_dense,
+            chunks=(chunk_size,),
+            compressor=compressor,
+            dtype=np.int32,
+        )
+        root.create_dataset(
+            "reach_counts",
+            data=reach_counts_dense,
+            chunks=(chunk_size,),
+            compressor=compressor,
+            dtype=np.int64,
+        )
+        root.create_dataset(
+            "cumulative_utility",
+            data=cumulative_utility_dense,
+            chunks=(chunk_size,),
+            compressor=compressor,
+            dtype=np.float64,
+        )
 
-            # Store metadata
-            root.attrs["iteration"] = iteration
-            root.attrs["num_infosets"] = len(items)
-            root.attrs["max_actions"] = self.max_actions
-            root.attrs["timestamp"] = time.time()
-            root.attrs["format_version"] = "1.0"
-
-            store.close()
+        # Store metadata
+        root.attrs["iteration"] = iteration
+        root.attrs["num_infosets"] = len(items)
+        root.attrs["max_actions"] = self.max_actions
+        root.attrs["timestamp"] = time.time()
+        root.attrs["format_version"] = "1.0"
 
         # Save action signatures
         action_sigs = {}
@@ -1133,15 +1128,13 @@ class SharedArrayStorage(Storage):
         self.shared_reach_counts[new_ids_array] = my_reach_counts
         self.shared_cumulative_utility[new_ids_array] = my_utility
 
-        # Copy variable-length arrays (regrets/strategies)
-        # Still need a loop, but much smaller and more cache-friendly
-        for idx, (new_id, old_id) in enumerate(zip(new_ids, my_old_ids)):
-            n_actions = my_action_counts[idx]
-            if n_actions > 0:
-                self.shared_regrets[new_id, :n_actions] = my_regrets[idx, :n_actions]
-                self.shared_strategy_sum[new_id, :n_actions] = my_strategies[idx, :n_actions]
+        # Bulk copy regrets/strategies (full width, mask handled by action_counts)
+        # This is faster than element-by-element even if we copy some zeros
+        self.shared_regrets[new_ids_array, :] = my_regrets
+        self.shared_strategy_sum[new_ids_array, :] = my_strategies
 
-            # Reconstruct legal actions
+        # Reconstruct legal actions
+        for idx, (new_id, old_id) in enumerate(zip(new_ids, my_old_ids)):
             legal_actions = build_legal_actions(
                 saved_action_sigs, old_id, "SharedArrayStorage.load_checkpoint"
             )
