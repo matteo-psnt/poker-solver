@@ -120,7 +120,6 @@ def _get_config_choice(ctx: CliContext) -> tuple:
 #     RIVER: 1200 items, 16:13 (973s) → 0.81s/item @ 2000 samples → 0.41s/item @ 1000 samples
 #
 # Pattern: time scales linearly with equity_samples, inversely with workers
-# 7eval is ~4x faster than the old treys-based evaluator
 TIME_PER_ITEM_BASELINE = {
     Street.FLOP: 0.37,  # seconds per item at 1000 samples, 12 workers
     Street.TURN: 0.39,

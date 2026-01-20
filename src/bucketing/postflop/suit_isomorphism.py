@@ -22,22 +22,20 @@ Example:
 from dataclasses import dataclass
 from itertools import permutations
 
-from treys import Card as TreysCard
-
 from src.game.state import Card
 
 # Suit constants
 SUITS = ["s", "h", "d", "c"]  # spades, hearts, diamonds, clubs
-# Treys uses power-of-2 encoding: s=1, h=2, d=4, c=8
-TREYS_SUIT_INT_TO_CHAR = {1: "s", 2: "h", 4: "d", 8: "c"}
+# eval7 uses sequential encoding: c=0, d=1, h=2, s=3
+EVAL7_SUIT_TO_CHAR = {0: "c", 1: "d", 2: "h", 3: "s"}
 SUIT_TO_IDX = {"s": 0, "h": 1, "d": 2, "c": 3}
 CANONICAL_SUITS = [0, 1, 2, 3]  # Canonical suit labels
 
 # Rank ordering (A high)
 RANKS = "AKQJT98765432"
 RANK_TO_IDX = {r: i for i, r in enumerate(RANKS)}
-# Treys rank encoding: 0=2, 1=3, ..., 12=A
-TREYS_RANK_TO_OUR_IDX = {
+# eval7 rank encoding: 0=2, 1=3, ..., 12=A
+EVAL7_RANK_TO_OUR_IDX = {
     0: 12,
     1: 11,
     2: 10,
@@ -123,16 +121,14 @@ class CanonicalCard:
 
 def get_card_suit(card: Card) -> str:
     """Extract suit character from a Card."""
-    # Use treys' get_suit_int which returns power of 2 (1,2,4,8)
-    suit_int = TreysCard.get_suit_int(card.card_int)
-    return TREYS_SUIT_INT_TO_CHAR[suit_int]
+    # eval7 suit attribute returns 0-3 (c=0, d=1, h=2, s=3)
+    return EVAL7_SUIT_TO_CHAR[card._card.suit]
 
 
 def get_card_rank_idx(card: Card) -> int:
     """Extract rank index from a Card (0=A, 1=K, ..., 12=2)."""
-    # Treys: get_rank_int returns 0=2, 1=3, ..., 12=A
-    treys_rank = TreysCard.get_rank_int(card.card_int)
-    return TREYS_RANK_TO_OUR_IDX[treys_rank]
+    # eval7 rank encoding: 0=2, 1=3, ..., 12=A
+    return EVAL7_RANK_TO_OUR_IDX[card._card.rank]
 
 
 def canonicalize_board(

@@ -37,8 +37,8 @@ class EquityCalculator:
         # Cache the full deck for performance (huge speedup!)
         self.full_deck = Card.get_full_deck()
 
-        # Pre-compute card_int set for faster filtering
-        self._full_deck_card_ints = {c.card_int for c in self.full_deck}
+        # Pre-compute card mask set for faster filtering
+        self._full_deck_card_masks = {c.mask for c in self.full_deck}
 
     def calculate_equity(
         self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
@@ -152,13 +152,13 @@ class EquityCalculator:
         Returns:
             (opponent_hand, completed_board)
         """
-        # Create set of used card_ints for fast lookup
-        used_card_ints = {c.card_int for c in hole_cards}
-        used_card_ints.update(c.card_int for c in board)
+        # Create set of used card masks for fast lookup
+        used_card_masks = {c.mask for c in hole_cards}
+        used_card_masks.update(c.mask for c in board)
 
-        # Filter deck once using card_int (faster than Card equality)
-        # Use list comp with direct card_int check (avoids set lookups in tight loop)
-        available = [c for c in self.full_deck if c.card_int not in used_card_ints]
+        # Filter deck once using card mask (faster than Card equality)
+        # Use list comp with direct card mask check (avoids set lookups in tight loop)
+        available = [c for c in self.full_deck if c.mask not in used_card_masks]
 
         # Calculate total cards needed (opponent + remaining board)
         cards_needed_board = 5 - len(board)

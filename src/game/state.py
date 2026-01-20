@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import lru_cache
 
-from treys import Card as TreysCard
+import eval7
 
 from src.bucketing.preflop.hand_classes import PreflopHandClasses
 from src.bucketing.utils.infoset import InfoSetKey
@@ -56,24 +56,29 @@ class Street(Enum):
 
 class Card:
     """
-    Card representation using the treys library.
+    Card representation using the eval7 library.
 
-    This wraps treys.Card to provide a cleaner interface while maintaining
+    This wraps eval7.Card to provide a cleaner interface while maintaining
     compatibility with the fast hand evaluation.
 
     Note: Card objects are cached for performance. Creating the same card
     multiple times returns the same object.
     """
 
-    def __init__(self, card_int: int):
+    def __init__(self, eval7_card: eval7.Card):
         """
-        Initialize from treys card integer.
+        Initialize from eval7.Card object.
 
         Args:
-            card_int: Integer representation from treys (use Card.new() to create)
+            eval7_card: eval7.Card instance (use Card.new() to create)
         """
-        self.card_int = card_int
+        self._card = eval7_card
         self._hash: int | None = None  # Cache hash value for performance
+
+    @property
+    def mask(self) -> int:
+        """Get the unique integer identifier for this card (eval7's mask)."""
+        return self._card.mask
 
     @classmethod
     def new(cls, card_str: str) -> "Card":
@@ -96,7 +101,7 @@ class Card:
     @classmethod
     @lru_cache(maxsize=52)
     def _new_cached(cls, card_str: str) -> "Card":
-        return cls(TreysCard.new(card_str))
+        return cls(eval7.Card(card_str))
 
     @classmethod
     def get_full_deck(cls) -> list["Card"]:
@@ -114,47 +119,55 @@ class Card:
     @classmethod
     @lru_cache(maxsize=1)
     def _full_deck_cached(cls) -> tuple["Card", ...]:
-        ranks = "23456789TJQKA"
-        suits = "shdc"
-        return tuple(cls.new(f"{rank}{suit}") for rank in ranks for suit in suits)
+        deck = eval7.Deck()
+        return tuple(cls(card) for card in deck.cards)
 
     def __str__(self) -> str:
         """String representation (e.g., '[ A ♠ ]')."""
-        return TreysCard.int_to_pretty_str(self.card_int)
+        # Create pretty format manually since eval7 doesn't have int_to_pretty_str
+        rank_char = str(self._card)[0]
+        suit_char = str(self._card)[1]
+        suit_symbols = {"s": "♠", "h": "♥", "d": "♦", "c": "♣"}
+        return f"[ {rank_char} {suit_symbols.get(suit_char, suit_char)} ]"
 
     def __repr__(self) -> str:
         """Compact representation (e.g., 'As')."""
-        return TreysCard.int_to_str(self.card_int)
+        return str(self._card)
 
     def __eq__(self, other: object) -> bool:
         """
-        Equality comparison based on card integer.
+        Equality comparison based on card mask.
 
         Optimized with fast type() check for common case.
         """
         # Fast path: direct type check (most common case)
         if type(other) is Card:
-            return self.card_int == other.card_int
+            return self._card == other._card
 
         # Slow path: handle subclasses
         if not isinstance(other, Card):
             return False
-        return self.card_int == other.card_int
+        return self._card == other._card
 
     def __hash__(self) -> int:
         """
-        Hash based on card integer for use in sets/dicts.
+        Hash based on card mask for use in sets/dicts.
 
         Hash is cached for performance (called millions of times).
         """
         if not hasattr(self, "_hash") or self._hash is None:
-            self._hash = hash(self.card_int)
+            self._hash = hash(self._card)
         return self._hash
 
     def __lt__(self, other: "Card") -> bool:
         """Compare cards for sorting (by rank)."""
-        # In treys, lower values = better ranks
-        return self.card_int < other.card_int
+        return self._card < other._card
+
+    def __reduce__(self):
+        """Support pickling by storing the string representation."""
+        # Return a tuple (callable, args) to reconstruct the object
+        # Use the string representation to recreate the card
+        return (self.__class__.new, (str(self._card),))
 
 
 @dataclass(frozen=True)

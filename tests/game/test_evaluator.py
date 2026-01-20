@@ -17,7 +17,6 @@ class TestHandEvaluator:
         """Test creating evaluator."""
         evaluator = HandEvaluator()
         assert evaluator is not None
-        assert evaluator._card_cache is not None
 
     def test_evaluate_high_card(self):
         """Test evaluating a high card hand."""
@@ -38,8 +37,10 @@ class TestHandEvaluator:
         board = (Card.new("2c"), Card.new("7d"), Card.new("9h"))
 
         rank = evaluator.evaluate(hole_cards, board)
-        # Pair should be better than high card
-        assert 100 < rank < 7000
+        # Pair should be better (lower rank) than high card but not as good as flush
+        # With eval7, ranks are in the millions range
+        high_card = evaluator.evaluate((Card.new("As"), Card.new("Kh")), board)
+        assert rank < high_card  # Pair is better than high card
 
     def test_evaluate_flush(self):
         """Test evaluating a flush."""
@@ -49,8 +50,9 @@ class TestHandEvaluator:
         board = (Card.new("2h"), Card.new("7h"), Card.new("9h"))
 
         rank = evaluator.evaluate(hole_cards, board)
-        # Flush should be strong (low rank number)
-        assert rank < 2000
+        # Flush should be strong (lower rank than pair or high card)
+        pair_rank = evaluator.evaluate((Card.new("Ac"), Card.new("Ah")), board)
+        assert rank < pair_rank  # Flush is better than pair
 
     def test_evaluate_board_too_small(self):
         """Test error when board has < 3 cards."""
@@ -164,9 +166,10 @@ class TestHandEvaluator:
         rank = evaluator.evaluate(hole_cards, board)
         rank_str = evaluator.rank_to_string(rank)
 
-        # Should include rank number in string
-        assert str(rank) in rank_str
+        # Should include hand type and rank number in string
+        assert "Pair" in rank_str
         assert "(" in rank_str and ")" in rank_str
+        assert "rank" in rank_str
 
     def test_get_evaluator_singleton(self):
         """Test that get_evaluator returns same instance."""
