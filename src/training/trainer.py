@@ -7,6 +7,7 @@ checkpointing, metrics tracking, and progress reporting.
 Training uses parallel multiprocessing with hash-partitioned shared memory.
 """
 
+import concurrent.futures
 import multiprocessing as mp
 import pickle
 import random
@@ -15,14 +16,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from src.evaluation.exploitability import compute_exploitability
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.helpers import get_missing_checkpoint_files
 from src.training import components
-from src.training.checkpoint_manager import CheckpointManager
 from src.training.metrics import MetricsTracker
-from src.training.metrics_reporter import MetricsReporter
-from src.training.orchestrator import TrainingOrchestrator
 from src.training.parallel import SharedArrayWorkerManager
 from src.training.run_tracker import RunTracker
 from src.utils.config import Config
@@ -64,6 +64,9 @@ class TrainingSession:
                 run_id = f"run-{timestamp}"
             self.run_dir = runs_base_dir / run_id
 
+        self._checkpoint_executor: concurrent.futures.ThreadPoolExecutor | None = None
+        self._pending_checkpoint: concurrent.futures.Future[float] | None = None
+
         # Build components using shared builders
         # These may fail and we don't want directories created if they do
         try:
@@ -97,26 +100,11 @@ class TrainingSession:
             # Initialize metrics tracker
             self.metrics = MetricsTracker()
 
-            # Initialize checkpoint manager
-            self.checkpoint_manager = CheckpointManager(
-                config=self.config,
-                run_tracker=self.run_tracker,
-                verbose=self.verbose,
-            )
-
-            # Initialize metrics reporter
-            self.metrics_reporter = MetricsReporter(
-                metrics=self.metrics,
-                verbose=self.verbose,
-            )
-
-            # Initialize training orchestrator
-            self.orchestrator = TrainingOrchestrator(
-                config=self.config,
-                checkpoint_manager=self.checkpoint_manager,
-                metrics_reporter=self.metrics_reporter,
-                verbose=self.verbose,
-            )
+            # Initialize checkpoint executor (used for async checkpoints)
+            if self.config.storage.checkpoint_enabled:
+                self._checkpoint_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="checkpoint"
+                )
         except Exception:
             # Don't create run metadata if initialization fails
             if self.run_tracker is not None:
@@ -194,13 +182,159 @@ class TrainingSession:
 
     def __del__(self):
         """Cleanup on deletion."""
-        if hasattr(self, "checkpoint_manager"):
-            self.checkpoint_manager.shutdown()
+        self._shutdown_checkpoint_executor()
 
     @property
     def verbose(self) -> bool:
         """Get verbose setting from config."""
         return self.config.training.verbose
+
+    def _checkpoint_enabled(self) -> bool:
+        return self.config.storage.checkpoint_enabled
+
+    def _checkpoint_frequency(self) -> int:
+        return self.config.training.checkpoint_frequency
+
+    def _should_checkpoint(self, iteration: int, batch_size: int) -> bool:
+        if not self._checkpoint_enabled() or iteration == 0:
+            return False
+        return iteration % self._checkpoint_frequency() < batch_size
+
+    def _async_checkpoint(
+        self,
+        worker_manager: SharedArrayWorkerManager,
+        iteration: int,
+        total_infosets: int,
+        storage_capacity: int,
+        training_start_time: float,
+    ) -> None:
+        if not self._checkpoint_enabled() or self._checkpoint_executor is None:
+            return
+        if self._pending_checkpoint is not None and not self._pending_checkpoint.done():
+            if self.verbose:
+                print("[Master] Previous checkpoint still running; skipping", flush=True)
+            return
+
+        self._pending_checkpoint = self._checkpoint_executor.submit(
+            self._checkpoint_with_timing,
+            worker_manager,
+            iteration,
+            total_infosets,
+            storage_capacity,
+            training_start_time,
+        )
+
+    def _wait_for_checkpoint(self) -> None:
+        if self._pending_checkpoint is None:
+            return
+        if self.verbose:
+            print("[Master] Waiting for background checkpoint to complete...", flush=True)
+        try:
+            self._pending_checkpoint.result()
+        except Exception as exc:
+            print(f"[Master] ERROR: Background checkpoint failed: {exc}", flush=True)
+            raise
+        finally:
+            self._pending_checkpoint = None
+
+    def _shutdown_checkpoint_executor(self) -> None:
+        if self._checkpoint_executor is None:
+            return
+        self._wait_for_checkpoint()
+        self._checkpoint_executor.shutdown(wait=True)
+
+    def _checkpoint_with_timing(
+        self,
+        worker_manager: SharedArrayWorkerManager,
+        iteration: int,
+        total_infosets: int,
+        storage_capacity: int,
+        training_start_time: float,
+    ) -> float:
+        start = time.time()
+        worker_manager.checkpoint(iteration)
+
+        elapsed_time = time.time() - training_start_time
+        if self.run_tracker is not None:
+            self.run_tracker.update(
+                iterations=iteration,
+                runtime_seconds=elapsed_time,
+                num_infosets=total_infosets,
+                storage_capacity=storage_capacity,
+            )
+
+        checkpoint_time = time.time() - start
+        if self.verbose:
+            print(
+                f"[Master] Checkpoint saved at iter={iteration} in {checkpoint_time:.2f}s",
+                flush=True,
+            )
+        return checkpoint_time
+
+    def _print_training_header(
+        self,
+        num_workers: int,
+        num_iterations: int,
+        batch_size: int,
+        initial_capacity: int,
+        max_actions: int,
+    ) -> None:
+        if not self.verbose:
+            return
+        print("\n🚀 Shared Array Parallel Training")
+        print(f"   Workers: {num_workers}")
+        print(f"   Iterations: {num_iterations}")
+        print(f"   Batch size: {batch_size}")
+        print(f"   Initial capacity: {initial_capacity:,}")
+        print(f"   Max actions: {max_actions}")
+        print("   Mode: Live shared memory arrays")
+
+    def _update_progress_bar(
+        self,
+        progress_bar: tqdm,
+        iteration: int,
+        total_infosets: int,
+        capacity_usage: float,
+    ) -> None:
+        if not self.verbose or not isinstance(progress_bar, tqdm):
+            return
+        compact_summary = self.metrics.get_compact_summary()
+        progress_bar.set_postfix_str(
+            f"iter={iteration} infosets={total_infosets} "
+            f"cap={capacity_usage:.0%} | {compact_summary}"
+        )
+
+    def _print_final_summary(
+        self,
+        total_iterations: int,
+        total_infosets: int,
+        elapsed_time: float,
+        interrupted: bool,
+        fallback_stats: dict[str, float] | None = None,
+    ) -> None:
+        if not self.verbose:
+            return
+        if interrupted:
+            print("🟡 Training interrupted")
+        else:
+            print("✅ Shared Array Training complete!")
+
+        print(f"   Iterations: {total_iterations}")
+        print(f"   Infosets: {total_infosets:,}")
+        print(f"   Time: {elapsed_time:.1f}s")
+
+        if total_iterations > 0:
+            print(f"   Speed: {total_iterations / elapsed_time:.2f} iter/s")
+
+        if fallback_stats:
+            total_lookups = int(fallback_stats.get("total_lookups", 0))
+            fallback_count = int(fallback_stats.get("fallback_count", 0))
+            if total_lookups > 0:
+                fallback_rate = fallback_stats.get("fallback_rate", 0.0) * 100
+                print(
+                    f"   Abstraction fallbacks: {fallback_count:,}/{total_lookups:,} "
+                    f"({fallback_rate:.2f}%)"
+                )
 
     def _get_training_config(self, num_workers: int, batch_size: int | None) -> dict[str, Any]:
         """Parse training configuration with defaults."""
@@ -220,7 +354,6 @@ class TrainingSession:
 
         return {
             "batch_size": batch_size,
-            "checkpoint_freq": self.config.training.checkpoint_frequency,
             "verbose": self.config.training.verbose,
             "initial_capacity": initial_capacity,
             "max_actions": self.config.storage.max_actions,
@@ -264,10 +397,9 @@ class TrainingSession:
         self.run_tracker.initialize()
 
         # Display header
-        if verbose:
-            self.metrics_reporter.print_training_header(
-                num_workers, num_iterations, batch_size_val, initial_capacity, max_actions
-            )
+        self._print_training_header(
+            num_workers, num_iterations, batch_size_val, initial_capacity, max_actions
+        )
 
         training_start_time = time.time()
         start_iteration = self.solver.iteration
@@ -301,51 +433,161 @@ class TrainingSession:
             if verbose:
                 print(f"   Worker pool ready ({pool_init_time:.2f}s)\n")
 
-            # Run training loop via orchestrator
-            results = self.orchestrator.run_training(
-                worker_manager=worker_manager,
-                num_iterations=num_iterations,
-                num_workers=num_workers,
-                batch_size=batch_size_val,
-                start_iteration=start_iteration,
-                training_start_time=training_start_time,
+            # Run training loop
+            num_batches = (num_iterations + batch_size_val - 1) // batch_size_val
+            batch_iterator = tqdm(
+                range(num_batches),
+                desc="Training batches",
+                unit="batch",
+                disable=not verbose,
             )
 
+            completed_iterations = 0
+            total_infosets = 0
+            interrupted = False
+            fallback_stats: dict[str, float] | None = None
+            last_capacity: int | None = None
+
+            try:
+                for batch_idx in batch_iterator:
+                    # Wait for any pending checkpoint
+                    self._wait_for_checkpoint()
+
+                    # Determine iterations for this batch
+                    remaining = num_iterations - completed_iterations
+                    current_batch_size = min(batch_size_val, remaining)
+
+                    # Split work among workers
+                    iters_per_worker_base = current_batch_size // num_workers
+                    extra_iters = current_batch_size % num_workers
+                    iterations_per_worker = [
+                        iters_per_worker_base + (1 if i < extra_iters else 0)
+                        for i in range(num_workers)
+                    ]
+
+                    # Run batch (data flows directly through shared arrays)
+                    batch_result = worker_manager.run_batch(
+                        iterations_per_worker=iterations_per_worker,
+                        batch_id=batch_idx,
+                        start_iteration=start_iteration + completed_iterations,
+                        verbose=verbose,
+                    )
+
+                    # Update state
+                    batch_utilities = batch_result["utilities"]
+                    completed_iterations += len(batch_utilities)
+                    total_infosets = batch_result.get("num_infosets", 0)
+                    max_worker_capacity = batch_result.get("max_worker_capacity", 0.0)
+                    last_capacity = batch_result.get("capacity", last_capacity)
+
+                    if "fallback_stats" in batch_result:
+                        fallback_stats = batch_result["fallback_stats"]
+
+                    if batch_result.get("interrupted"):
+                        interrupted = True
+
+                    # Exchange IDs and apply updates between batches
+                    # (owner-to-requester, not global broadcast)
+                    if batch_idx < num_batches - 1:
+                        inter_batch_timeout = max(60.0, batch_result["batch_time"] * 2.0)
+                        worker_manager.exchange_ids(
+                            timeout=inter_batch_timeout,
+                            verbose=verbose,
+                        )
+                        worker_manager.apply_pending_updates(
+                            timeout=inter_batch_timeout,
+                            verbose=verbose,
+                        )
+
+                    # Log metrics for each iteration in batch
+                    for i, util in enumerate(batch_utilities):
+                        iter_num = (
+                            start_iteration + completed_iterations - len(batch_utilities) + i + 1
+                        )
+                        self.metrics.log_iteration(
+                            iteration=iter_num,
+                            utility=util,
+                            num_infosets=total_infosets,
+                            infoset_sampler=None,
+                        )
+
+                    # Update progress bar
+                    self._update_progress_bar(
+                        batch_iterator,
+                        start_iteration + completed_iterations,
+                        total_infosets,
+                        max_worker_capacity,
+                    )
+
+                    # Checkpoint if needed
+                    if self._should_checkpoint(
+                        start_iteration + completed_iterations, batch_size_val
+                    ):
+                        self._async_checkpoint(
+                            worker_manager=worker_manager,
+                            iteration=start_iteration + completed_iterations,
+                            total_infosets=total_infosets,
+                            storage_capacity=last_capacity or 0,
+                            training_start_time=training_start_time,
+                        )
+
+                    if interrupted:
+                        break
+
+            except KeyboardInterrupt:
+                interrupted = True
+
+            # Save checkpoint on interrupt if we haven't just saved
+            if interrupted and self._checkpoint_enabled() and completed_iterations > 0:
+                if verbose:
+                    print("[Master] Saving checkpoint...", flush=True)
+                self._async_checkpoint(
+                    worker_manager=worker_manager,
+                    iteration=start_iteration + completed_iterations,
+                    total_infosets=total_infosets,
+                    storage_capacity=last_capacity or 0,
+                    training_start_time=training_start_time,
+                )
+                # Wait for checkpoint to complete before returning
+                self._wait_for_checkpoint()
+
+            elapsed_time = time.time() - training_start_time
+
             # Wait for any pending checkpoint
-            self.checkpoint_manager.wait_for_checkpoint()
+            self._wait_for_checkpoint()
 
             # Update solver iteration
-            self.solver.iteration = start_iteration + results["total_iterations"]
+            self.solver.iteration = start_iteration + completed_iterations
 
             # Update run tracker
-            storage_capacity = results.get("last_capacity", initial_capacity)
-            if results["interrupted"]:
+            storage_capacity = last_capacity or initial_capacity
+            if interrupted:
                 self.run_tracker.mark_interrupted()
             else:
                 self.run_tracker.mark_completed()
 
             self.run_tracker.update(
                 iterations=self.solver.iteration,
-                runtime_seconds=results["elapsed_time"],
-                num_infosets=results["final_infosets"],
+                runtime_seconds=elapsed_time,
+                num_infosets=total_infosets,
                 storage_capacity=storage_capacity,
             )
 
             # Print final summary
-            self.metrics_reporter.print_final_summary(
+            self._print_final_summary(
                 self.solver.iteration,
-                results["final_infosets"],
-                results["elapsed_time"],
-                results["interrupted"],
-                results.get("fallback_stats"),
+                total_infosets,
+                elapsed_time,
+                interrupted,
+                fallback_stats,
             )
 
         return {
-            "total_iterations": results["total_iterations"],
-            "final_infosets": results["final_infosets"],
+            "total_iterations": completed_iterations,
+            "final_infosets": total_infosets,
             "avg_utility": self.metrics.get_avg_utility(),
-            "elapsed_time": results["elapsed_time"],
-            "interrupted": results["interrupted"],
+            "elapsed_time": elapsed_time,
+            "interrupted": interrupted,
         }
 
     def train(

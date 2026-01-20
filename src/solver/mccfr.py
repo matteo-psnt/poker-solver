@@ -58,7 +58,6 @@ class MCCFRSolver:
 
         # Training state
         self.iteration = 0
-        self.total_utility = 0.0
 
         # Extract config values from typed Config object
         cfg = self.config

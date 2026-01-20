@@ -16,7 +16,7 @@ from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.base import Storage
 from src.solver.storage.shared_array import SharedArrayStorage
-from src.training.run_metadata import RunMetadata
+from src.training.run_tracker import RunMetadata
 from src.utils.config import Config
 
 

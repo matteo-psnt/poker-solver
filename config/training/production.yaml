@@ -46,7 +46,7 @@ training:
   # Start with 1M iterations, increase if exploitability is too high
   num_iterations: 1000000  # 1M iterations
   checkpoint_frequency: 100000  # Checkpoint every 100k iterations
-  iterations_per_worker: 200
+  iterations_per_worker: 5000
   verbose: true
 
 # ===== Storage Configuration =====
