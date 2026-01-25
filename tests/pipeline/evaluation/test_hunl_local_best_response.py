@@ -29,7 +29,9 @@ from src.pipeline.evaluation.hunl_local_best_response import (
     _HUNLLocalBestResponse,
     compute_lbr_exploitability,
 )
+from src.pipeline.evaluation.opponent_model import BlueprintOpponent, known_mask
 from src.pipeline.evaluation.statistics import compare_paired_samples
+from src.shared.config import ResolverConfig
 from tests.test_helpers import build_trained_test_solver
 
 
@@ -132,7 +134,7 @@ class TestTerminalValue:
 
     def _reference_showdown_value(self, engine, terminal, lbr_player, opp, belief):
         """Belief-weighted mean of per-combo payoffs over the surviving range."""
-        known = engine._known_mask(terminal, opp)
+        known = known_mask(terminal, opp)
         weights = np.where((COMBO_MASKS & known) == 0, belief, 0.0)
         total = weights.sum()
         acc = 0.0
@@ -149,7 +151,7 @@ class TestTerminalValue:
         for _ in range(3):
             terminal = self._bet_call_to_river(engine, _deal_initial_state(engine, 2000, 0, rng))
             assert engine._is_showdown(terminal) and len(terminal.board) == 5
-            known = engine._known_mask(terminal, opp=1)
+            known = known_mask(terminal, actor=1)
             idx = next(i for i in range(len(ALL_COMBOS)) if not (COMBO_MASKS[i] & known))
             belief = np.zeros(len(ALL_COMBOS))
             belief[idx] = 1.0
@@ -218,7 +220,7 @@ class TestAllInRunoutAveraging:
         # Narrow belief on three disjoint combos: at most one drops per river card,
         # so the reference never hits the empty-range fallback.
         combo_indices = []
-        known = engine._known_mask(allin_state, opp=1)
+        known = known_mask(allin_state, actor=1)
         used = known
         for idx in range(len(ALL_COMBOS)):
             if not (COMBO_MASKS[idx] & used):
@@ -303,7 +305,7 @@ class TestTerminalBranching:
         state, jam, faced, lbr = self._jam_faced_node(engine)
         opp = 1 - lbr
         belief = engine._initial_belief(state, opp)
-        legal, vecs = engine._opp_action_matrix(faced, opp, state, jam)
+        legal, vecs = engine._blueprint_model.action_matrix(faced, opp, state, jam)
 
         engine.rng = np.random.default_rng(0)
         outcome = engine._branch_terminal_decision(faced, lbr, opp, legal, vecs, belief)
@@ -328,7 +330,7 @@ class TestTerminalBranching:
         # must fall through to the sampling path.
         state = _deal_initial_state(engine, 400, 0, np.random.default_rng(4))
         player = state.current_player
-        legal, vecs = engine._opp_action_matrix(state, player, None, None)
+        legal, vecs = engine._blueprint_model.action_matrix(state, player, None, None)
         belief = engine._initial_belief(state, 1 - player)
         assert (
             engine._branch_terminal_decision(state, 1 - player, player, legal, vecs, belief) is None
@@ -382,14 +384,14 @@ class TestActionMapping:
         # state satisfies the signature.
         state = _deal_initial_state(engine, 400, 0, np.random.default_rng(0))
         legal = [fold(), call(), Action(ActionType.RAISE, 300)]
-        assert engine._map_to_real(state, fold(), legal) == [(fold(), 1.0)]
-        assert engine._map_to_real(state, call(), legal) == [(call(), 1.0)]
+        assert engine._blueprint_model._map_to_real(state, fold(), legal) == [(fold(), 1.0)]
+        assert engine._blueprint_model._map_to_real(state, call(), legal) == [(call(), 1.0)]
 
     def test_check_maps_to_itself_when_legal(self):
         engine = _engine(_build_solver(0))
         state = _deal_initial_state(engine, 400, 0, np.random.default_rng(0))
         legal = [check(), Action(ActionType.BET, 200)]
-        assert engine._map_to_real(state, check(), legal) == [(check(), 1.0)]
+        assert engine._blueprint_model._map_to_real(state, check(), legal) == [(check(), 1.0)]
 
 
 class TestExploitability:
@@ -435,3 +437,121 @@ class TestExploitability:
         assert serial.lbr_utility_p1 == parallel.lbr_utility_p1
         assert serial.std_error_mbb == parallel.std_error_mbb
         assert serial.num_hands == parallel.num_hands == 16
+
+
+class TestDeployedOpponent:
+    """opponent="deployed" measures blueprint+resolver on the realized path."""
+
+    @staticmethod
+    def _resolver_config(
+        *,
+        max_iterations: int | None = 2,
+        leaf_rollouts: int = 2,
+        policy_blend_alpha: float = 0.0,
+        min_strategy_prob: float = 0.0,
+    ) -> ResolverConfig:
+        return ResolverConfig(
+            max_iterations=max_iterations,
+            leaf_rollouts=leaf_rollouts,
+            policy_blend_alpha=policy_blend_alpha,
+            min_strategy_prob=min_strategy_prob,
+        )
+
+    @pytest.mark.timeout(120)
+    def test_alpha_zero_matches_blueprint_bitwise(self, monkeypatch):
+        """With blend alpha 0 (and no floor) the deployed opponent collapses to the
+        pure blueprint, so the WHOLE deployed pipeline — solve, matrix, sampling,
+        belief updates — must reproduce the blueprint eval exactly. Validates all
+        plumbing while trusting zero new math.
+
+        The two paths complete blueprint MISSES differently by design — the LBR
+        blueprint model translation-completes, deployment blends against uniform
+        (resolver semantics) — so translation is pinned OFF for both arms here to
+        hold the completion fixed; it has its own coverage in TestActionMapping."""
+        monkeypatch.setattr(
+            BlueprintOpponent,
+            "_translated_distribution",
+            lambda self, *args, **kwargs: {},
+        )
+        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-a0")
+        blueprint_result = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=10, equity_runouts=2, seed=99)
+        )
+        deployed_result = compute_lbr_exploitability(
+            solver,
+            LBRConfig(
+                num_hands=10,
+                equity_runouts=2,
+                seed=99,
+                opponent="deployed",
+                resolver=self._resolver_config(policy_blend_alpha=0.0),
+            ),
+        )
+        assert deployed_result.exploitability_mbb == blueprint_result.exploitability_mbb
+        assert deployed_result.lbr_utility_p0 == blueprint_result.lbr_utility_p0
+        assert deployed_result.lbr_utility_p1 == blueprint_result.lbr_utility_p1
+
+    @pytest.mark.timeout(120)
+    def test_pure_resolver_changes_play(self):
+        """alpha=1 (pure resolver) must actually change the measured number — the
+        guard against the deployed path silently short-circuiting to blueprint."""
+        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-a1")
+        blueprint_result = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=10, equity_runouts=2, seed=99)
+        )
+        deployed_result = compute_lbr_exploitability(
+            solver,
+            LBRConfig(
+                num_hands=10,
+                equity_runouts=2,
+                seed=99,
+                opponent="deployed",
+                resolver=self._resolver_config(policy_blend_alpha=1.0, max_iterations=4),
+            ),
+        )
+        assert deployed_result.exploitability_mbb != blueprint_result.exploitability_mbb
+
+    @pytest.mark.timeout(120)
+    def test_deployed_deterministic_under_fixed_seed(self):
+        """Pinned iterations + per-hand reseeding keep the deployed eval exactly
+        reproducible (the resolver's runout sampling uses global np.random)."""
+        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-det")
+        cfg = LBRConfig(
+            num_hands=8,
+            equity_runouts=2,
+            seed=7,
+            opponent="deployed",
+            resolver=self._resolver_config(policy_blend_alpha=0.5, min_strategy_prob=1e-6),
+        )
+        first = compute_lbr_exploitability(solver, cfg)
+        second = compute_lbr_exploitability(solver, cfg)
+        assert first.exploitability_mbb == second.exploitability_mbb
+        assert first.lbr_utility_p0 == second.lbr_utility_p0
+
+    def test_deployed_requires_resolver_config(self):
+        solver = _build_solver(1, starting_stack=400, session_id="lbr-deployed-noresolver")
+        with pytest.raises(ValueError, match=r"requires LBRConfig\.resolver"):
+            compute_lbr_exploitability(
+                solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, opponent="deployed")
+            )
+
+    def test_deployed_requires_pinned_iterations(self):
+        solver = _build_solver(1, starting_stack=400, session_id="lbr-deployed-noiters")
+        with pytest.raises(ValueError, match="max_iterations"):
+            compute_lbr_exploitability(
+                solver,
+                LBRConfig(
+                    num_hands=2,
+                    equity_runouts=2,
+                    seed=1,
+                    opponent="deployed",
+                    resolver=self._resolver_config(max_iterations=None),
+                ),
+            )
+
+    def test_unknown_opponent_rejected(self):
+        solver = _build_solver(1, starting_stack=400, session_id="lbr-deployed-unknown")
+        with pytest.raises(ValueError, match=r"Unknown LBRConfig\.opponent"):
+            compute_lbr_exploitability(
+                solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, opponent="resolver")
+            )

@@ -136,12 +136,17 @@ def evaluate(
     seed: int | None = None,
     allin_runouts: int = 50,
     abstraction_hash: str | None = None,
+    opponent: str = "blueprint",
+    resolver_iterations: int = 64,
 ) -> dict[str, Any]:
     """Evaluate a run stored on the Volume (Local Best Response by default).
 
     ``abstraction_hash`` pins the card abstraction to the exact one the checkpoint was
     trained against. Without it the run's config name resolves against current code, so
     a recomputed abstraction silently rebuckets hands and the numbers are meaningless.
+
+    ``opponent="deployed"`` measures blueprint+resolver (the system that actually
+    plays) with solves pinned to ``resolver_iterations`` CFR iterations.
     """
     from src.pipeline.training import services
     from src.pipeline.training.services import LBR_ESTIMATOR_LABEL, ROLLOUT_ESTIMATOR_LABEL
@@ -167,6 +172,8 @@ def evaluate(
             num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
             allin_runouts=allin_runouts,
             abstraction_hash=abstraction_hash,
+            opponent=opponent,
+            resolver_iterations=resolver_iterations,
         )
         estimator = LBR_ESTIMATOR_LABEL
     return {
@@ -384,18 +391,23 @@ def run_eval(
     memory: int = 32768,
     seed: int = 1,
     abstraction_hash: str = "",
+    opponent: str = "blueprint",
+    resolver_iterations: int = 64,
 ) -> None:
     """LBR-evaluate an existing Volume run. Fewer workers + more memory for large
     blueprints, since each parallel worker rebuilds the full blueprint.
 
     Pass --abstraction-hash to pin the card abstraction to the one the run was trained
-    against (see the abstraction's metadata.json ``config_hash``)."""
+    against (see the abstraction's metadata.json ``config_hash``). Pass
+    --opponent deployed to measure blueprint+resolver (the system that actually plays)."""
     eval_result = evaluate.with_options(cpu=cpu, memory=memory).remote(
         run_id=run_id,
         num_hands=hands,
         num_workers=cpu,
         seed=seed,
         abstraction_hash=abstraction_hash or None,
+        opponent=opponent,
+        resolver_iterations=resolver_iterations,
     )
     results = eval_result["results"]
     print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
@@ -461,6 +473,68 @@ def run_compare(
     )
     if comparison["is_significant"]:
         better = run_b if comparison["mean_diff"] > 0 else run_a
+        print(f"  VERDICT: {better} is significantly less exploitable (95% level).")
+    else:
+        print("  VERDICT: no significant difference at the 95% level.")
+
+
+@app.local_entrypoint()
+def run_deployed_gate(
+    run_id: str,
+    hands: int = 2000,
+    cpu: int = 6,
+    memory: int = 32768,
+    seed: int = 1,
+    resolver_iterations: int = 64,
+    timeout: int = 10800,
+) -> None:
+    """Paired LBR of ONE run under both opponent models: bare blueprint vs deployed
+    (blueprint + resolver), common random numbers.
+
+    Same seed => hand ``i`` sees the identical deal in both evals; the CI is on
+    per-hand differences. Positive ``diff`` means the DEPLOYED system is less
+    exploitable — the resolver's measured cut in real (LBR-boundable)
+    exploitability, the Plan C headline number.
+    """
+    from src.pipeline.evaluation.statistics import compare_paired_samples
+
+    fn = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout)
+    call_bare = fn.spawn(run_id=run_id, num_hands=hands, num_workers=cpu, seed=seed)
+    call_deployed = fn.spawn(
+        run_id=run_id,
+        num_hands=hands,
+        num_workers=cpu,
+        seed=seed,
+        opponent="deployed",
+        resolver_iterations=resolver_iterations,
+    )
+    result_bare, result_deployed = call_bare.get(), call_deployed.get()
+
+    results_bare = result_bare["results"]
+    results_deployed = result_deployed["results"]
+    if results_bare["base_seed"] != results_deployed["base_seed"]:
+        raise RuntimeError(
+            f"base_seed mismatch ({results_bare['base_seed']} vs "
+            f"{results_deployed['base_seed']}): the evals are not paired."
+        )
+
+    comparison = compare_paired_samples(
+        results_bare["pair_samples_mbb"], results_deployed["pair_samples_mbb"]
+    )
+
+    for name, results in (("bare blueprint", results_bare), ("deployed", results_deployed)):
+        print(f"\n{run_id} — {name}:")
+        print(f"  {results['exploitability_mbb']:.1f} mbb/g (± {results['std_error_mbb']:.1f})")
+        _print_variance_decomposition(results)
+
+    print(f"\nPAIRED DIFFERENCE (bare - deployed, {comparison['n']} common deals):")
+    print(
+        f"  {comparison['mean_diff']:.1f} mbb/g (± {comparison['se_diff']:.1f}; "
+        f"95% CI [{comparison['ci_lower']:.1f}, {comparison['ci_upper']:.1f}])"
+    )
+    print(f"  p-value: {comparison['p_value']:.4f} | correlation: {comparison['correlation']:.3f}")
+    if comparison["is_significant"]:
+        better = "DEPLOYED" if comparison["mean_diff"] > 0 else "BARE BLUEPRINT"
         print(f"  VERDICT: {better} is significantly less exploitable (95% level).")
     else:
         print("  VERDICT: no significant difference at the 95% level.")
