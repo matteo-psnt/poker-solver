@@ -97,8 +97,8 @@ DEFAULT_OFF_TREE_POT_FRACTIONS: tuple[float, ...] = (0.33, 0.5, 0.66, 0.75, 1.0,
 class LBRConfig:
     """Settings for the HUNL LBR evaluator."""
 
-    num_hands: int = 2000
-    equity_runouts: int = 24
+    num_hands: int = 1000
+    equity_runouts: int = 12
     off_tree_pot_fractions: tuple[float, ...] = DEFAULT_OFF_TREE_POT_FRACTIONS
     # Off-tree bet sizes are OFF by default: see the "Off-tree bets" note in the
     # module docstring — with the full-hand infoset encoding they leak into a
