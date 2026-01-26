@@ -19,9 +19,7 @@ from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.training.parallel_protocol import JobType
 from src.pipeline.training.parallel_sync import (
     _process_all_messages,
-    _process_incoming_updates,
     _send_pending_id_requests,
-    _send_updates_to_owners,
 )
 from src.shared.config import Config
 
@@ -47,7 +45,6 @@ def _worker_loop(
     base_seed: int,
     job_queue: mp.Queue,
     result_queue: mp.Queue,
-    update_queues: list[mp.Queue],  # One queue per worker for cross-partition updates
     id_request_queues: list[mp.Queue],  # One queue per worker for ID requests
     id_response_queues: list[mp.Queue],  # One queue per worker for ID responses
     initial_capacity: int,
@@ -77,7 +74,6 @@ def _worker_loop(
         base_seed: Base random seed
         job_queue: Queue to receive jobs from coordinator
         result_queue: Queue to return results to coordinator
-        update_queues: Per-worker queues for cross-partition updates
         id_request_queues: Per-worker queues for ID requests
         id_response_queues: Per-worker queues for ID responses
         initial_capacity: Initial capacity for infoset storage
@@ -138,7 +134,6 @@ def _worker_loop(
             # Process all pending messages and flush outbound ID requests
             _process_all_messages(
                 worker_id,
-                update_queues[worker_id],
                 id_request_queues[worker_id],
                 id_response_queues[worker_id],
                 id_response_queues,
@@ -172,7 +167,6 @@ def _worker_loop(
                 # Process any incoming requests/responses
                 _process_all_messages(
                     worker_id,
-                    update_queues[worker_id],
                     id_request_queues[worker_id],
                     id_response_queues[worker_id],
                     id_response_queues,
@@ -184,17 +178,6 @@ def _worker_loop(
                         "worker_id": worker_id,
                         "type": "exchange_ids_ack",
                         "num_owned": storage.num_owned_infosets(),
-                    }
-                )
-
-            elif job_type == JobType.APPLY_UPDATES:
-                # Process any pending incoming updates
-                _process_incoming_updates(update_queues[worker_id], storage)
-
-                result_queue.put(
-                    {
-                        "worker_id": worker_id,
-                        "type": "apply_updates_ack",
                     }
                 )
 
@@ -284,7 +267,6 @@ def _worker_loop(
                         if i % 50 == 0:
                             _process_all_messages(
                                 worker_id,
-                                update_queues[worker_id],
                                 id_request_queues[worker_id],
                                 id_response_queues[worker_id],
                                 id_response_queues,
@@ -296,14 +278,6 @@ def _worker_loop(
                         utilities.append(util)
 
                     iter_time = time.time() - iter_start
-
-                    # Send pending cross-partition updates to owners
-                    pending = storage.update_queue.snapshot()
-                    if pending:
-                        _send_updates_to_owners(
-                            worker_id, num_workers, pending, update_queues, storage
-                        )
-                        storage.update_queue.clear()
 
                     result_queue.put(
                         {

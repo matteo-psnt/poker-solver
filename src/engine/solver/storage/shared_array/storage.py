@@ -14,21 +14,12 @@ from src.engine.solver.storage.shared_array.checkpoint import (
     load_storage_checkpoint,
 )
 from src.engine.solver.storage.shared_array.ownership import (
-    is_owned_by_id as _is_owned_by_id,
-)
-from src.engine.solver.storage.shared_array.ownership import (
-    owner_for_id as _owner_for_id,
-)
-from src.engine.solver.storage.shared_array.ownership import (
     owner_for_key as _owner_for_key,
 )
 from src.engine.solver.storage.shared_array.ownership import (
     stable_hash as _stable_hash,
 )
-from src.engine.solver.storage.shared_array.types import (
-    PendingUpdateQueue,
-    SharedArrayMutableState,
-)
+from src.engine.solver.storage.shared_array.types import SharedArrayMutableState
 
 from . import infoset as infoset_ops
 from . import memory as memory_ops
@@ -75,8 +66,6 @@ class SharedArrayStorage(Storage):
     add_extra_region = resize_ops.add_extra_region
 
     respond_to_id_requests = sync_ops.respond_to_id_requests
-    buffer_update = sync_ops.buffer_update
-    apply_updates = sync_ops.apply_updates
 
     checkpoint = checkpoint_storage
     load_checkpoint = load_storage_checkpoint
@@ -117,7 +106,6 @@ class SharedArrayStorage(Storage):
             next_local_id=self.id_range_start,
             pending_id_requests={i: set() for i in range(num_workers)},
         )
-        self.update_queue = PendingUpdateQueue()
 
         self.shared_regrets = np.empty((0, self.max_actions), dtype=np.float64)
         self.shared_strategy_sum = np.empty((0, self.max_actions), dtype=np.float64)
@@ -140,26 +128,6 @@ class SharedArrayStorage(Storage):
     def get_owner(self, key: InfoSetKey) -> int:
         """Determine which worker owns this key."""
         return _owner_for_key(key, self.num_workers)
-
-    def is_owned_by_id(self, infoset_id: int) -> bool:
-        """Check if this worker owns the given infoset ID."""
-        return _is_owned_by_id(
-            infoset_id=infoset_id,
-            unknown_id=self.UNKNOWN_ID,
-            id_range_start=self.id_range_start,
-            id_range_end=self.id_range_end,
-            extra_allocations=self.state.extra_allocations,
-        )
-
-    def get_owner_by_id(self, infoset_id: int) -> int | None:
-        """Determine owner worker for a given infoset ID."""
-        return _owner_for_id(
-            infoset_id,
-            unknown_id=self.UNKNOWN_ID,
-            base_slots_per_worker=self.base_slots_per_worker,
-            num_workers=self.num_workers,
-            extra_regions=self.state.extra_regions,
-        )
 
     def close(self) -> None:
         """Explicitly close shared-memory handles."""
