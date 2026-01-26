@@ -141,10 +141,6 @@ class SharedArrayStorage(Storage):
         """Determine which worker owns this key."""
         return _owner_for_key(key, self.num_workers)
 
-    def is_owned(self, key: InfoSetKey) -> bool:
-        """Check if this worker owns the given infoset key."""
-        return self.get_owner(key) == self.worker_id
-
     def is_owned_by_id(self, infoset_id: int) -> bool:
         """Check if this worker owns the given infoset ID."""
         return _is_owned_by_id(

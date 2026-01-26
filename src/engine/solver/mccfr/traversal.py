@@ -8,7 +8,7 @@ import numpy as np
 
 from src.core.game.actions import Action
 from src.core.game.state import GameState
-from src.engine.solver.infoset import InfoSet, InfoSetKey
+from src.engine.solver.infoset import InfoSet
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.shared.numba_ops import compute_dcfr_strategy_weight
 
@@ -28,7 +28,7 @@ def _infoset_context(
     self: MCCFRSolver,
     state: GameState,
     current_player: int,
-) -> tuple[InfoSetKey, InfoSet, list[Action], list[int], np.ndarray]:
+) -> tuple[InfoSet, list[Action], list[int], np.ndarray]:
     """Build infoset, filter valid actions, and compute strategy over valid actions."""
     infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
     legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
@@ -50,7 +50,7 @@ def _infoset_context(
         valid_indices = list(range(len(legal_actions)))
 
     strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=False)
-    return infoset_key, infoset, valid_actions, valid_indices, strategy
+    return infoset, valid_actions, valid_indices, strategy
 
 
 def _update_average_strategy(
@@ -96,7 +96,7 @@ def cfr_external_sampling(
         return cfr_external_sampling(self, next_state, traversing_player, reach_probs)
 
     current_player = state.current_player
-    infoset_key, infoset, legal_actions, valid_indices, strategy = _infoset_context(
+    infoset, legal_actions, valid_indices, strategy = _infoset_context(
         self,
         state,
         current_player,
@@ -139,7 +139,10 @@ def cfr_external_sampling(
         else:
             node_utility = float(np.dot(strategy, action_utilities))
 
-        if self.storage.is_owned(infoset_key):
+        # Lock-free shared writes: every worker applies the full per-update
+        # CFR+/DCFR math directly to shared memory for every infoset it visits.
+        # Skipped only for placeholder views whose global ID is still unknown.
+        if infoset.writable:
             opponent = 1 - current_player
             for local_idx in range(len(legal_actions)):
                 original_idx = valid_indices[local_idx]
@@ -205,7 +208,7 @@ def cfr_outcome_sampling(
         return cfr_outcome_sampling(self, next_state, traversing_player, reach_probs)
 
     current_player = state.current_player
-    infoset_key, infoset, legal_actions, valid_indices, strategy = _infoset_context(
+    infoset, legal_actions, valid_indices, strategy = _infoset_context(
         self,
         state,
         current_player,
@@ -223,7 +226,7 @@ def cfr_outcome_sampling(
 
     sampled_utility = cfr_outcome_sampling(self, next_state, traversing_player, new_reach_probs)
 
-    if current_player == traversing_player and self.storage.is_owned(infoset_key):
+    if current_player == traversing_player and infoset.writable:
         opponent = 1 - current_player
         baseline = sampled_utility
 

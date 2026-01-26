@@ -31,15 +31,6 @@ class Storage(ABC):
         """Iterate over infosets owned by this storage."""
         pass
 
-    def is_owned(self, key: InfoSetKey) -> bool:
-        """
-        Check if this storage instance owns the given infoset key.
-
-        For non-partitioned storage, all keys are "owned" (returns True).
-        For partitioned storage, only keys mapping to this worker's partition are owned.
-        """
-        return True
-
     @abstractmethod
     def checkpoint(self, iteration: int):
         """Save a checkpoint at given iteration."""

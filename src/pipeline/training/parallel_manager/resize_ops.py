@@ -66,10 +66,11 @@ def resize_storage(
             flush=True,
         )
 
-    for _ in range(manager.num_workers):
+    for worker_id in range(manager.num_workers):
         manager.job_queue.put(
             {
                 "type": JobType.RESIZE_STORAGE.value,
+                "target_worker": worker_id,
                 "new_session_id": new_session_id,
                 "new_capacity": new_capacity,
             }

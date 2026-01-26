@@ -79,6 +79,7 @@ def create_infoset_view(
         strategy_view = strategy_view.copy()
         strategy_view.setflags(write=False)
         read_only_stats = True
+        infoset.writable = False
 
     infoset.regrets = regrets_view
     infoset.strategy_sum = strategy_view

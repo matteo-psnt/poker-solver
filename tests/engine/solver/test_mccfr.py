@@ -254,3 +254,39 @@ class TestMCCFRSolver:
         # Check custom stack size
         assert state.stacks[0] == 99  # 100 - 1 (SB)
         assert state.stacks[1] == 98  # 100 - 2 (BB)
+
+    def test_traversal_skips_unknown_remote_infosets(self):
+        """Partitioned traversal must skip placeholder infosets, not crash on them.
+
+        With num_workers=2 and no second worker running, every non-owned infoset
+        stays at UNKNOWN_ID (a read-only placeholder view). Traversal writes to
+        every writable infoset it visits and must silently skip the placeholders,
+        leaving the UNKNOWN_ID row untouched.
+        """
+        import uuid
+
+        action_abs = ActionModel(make_test_config())
+        card_abs = DummyCardAbstraction()
+        storage = SharedArrayStorage(
+            num_workers=2,
+            worker_id=0,
+            session_id=f"test_{uuid.uuid4().hex[:8]}",
+            initial_capacity=100_000,
+            is_coordinator=True,
+        )
+        try:
+            solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
+
+            for _ in range(20):
+                solver.train_iteration()
+
+            # Owned infosets received updates.
+            reach_total = int(storage.shared_reach_counts[1:].sum())
+            assert reach_total > 0, "owned infosets should accumulate updates"
+
+            # The UNKNOWN_ID placeholder row was never written.
+            assert not storage.shared_regrets[0].any()
+            assert not storage.shared_strategy_sum[0].any()
+            assert storage.shared_reach_counts[0] == 0
+        finally:
+            storage.cleanup()

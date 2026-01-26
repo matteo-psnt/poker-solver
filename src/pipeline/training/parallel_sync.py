@@ -13,6 +13,32 @@ if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array import SharedArrayStorage
 
 
+def _send_pending_id_requests(
+    worker_id: int,
+    id_request_queues: list[mp.Queue],
+    storage: SharedArrayStorage,
+) -> int:
+    """
+    Flush accumulated ID requests to their owning workers.
+
+    Keys stay pending when an owner's queue is full, so they are retried on the
+    next flush instead of being dropped.
+    """
+    sent = 0
+    for owner_id, keys in storage.state.pending_id_requests.items():
+        if not keys or owner_id == worker_id:
+            continue
+        # Snapshot keys so the multiprocessing pickler doesn't see mutations.
+        keys_snapshot = tuple(keys)
+        try:
+            id_request_queues[owner_id].put_nowait({"requester": worker_id, "keys": keys_snapshot})
+        except queue.Full:
+            continue
+        keys.clear()
+        sent += len(keys_snapshot)
+    return sent
+
+
 def _process_incoming_updates(update_queue: mp.Queue, storage: SharedArrayStorage) -> int:
     """
     Process incoming cross-partition updates from other workers.

@@ -20,6 +20,7 @@ from src.pipeline.training.parallel_protocol import JobType
 from src.pipeline.training.parallel_sync import (
     _process_all_messages,
     _process_incoming_updates,
+    _send_pending_id_requests,
     _send_updates_to_owners,
 )
 from src.shared.config import Config
@@ -59,10 +60,12 @@ def _worker_loop(
 
     OWNERSHIP MODEL:
     - Ownership determined by stable hash: owner(key) = xxhash(key) % num_workers
-    - Only owner creates key→ID mappings
-    - Only owner writes to infoset's arrays
-    - Non-owners get view into UNKNOWN_ID region (zeros = uniform strategy)
-    - Non-owners can request IDs from owners (batched, async)
+    - Only owner allocates IDs and creates key→ID mappings
+    - Every worker writes regret/strategy updates directly to shared memory
+      (lock-free, Hogwild-style) for every infoset whose global ID it knows
+    - Non-owners get a read-only view into the UNKNOWN_ID region until the ID
+      is learned (zeros = uniform strategy; updates are skipped)
+    - Non-owners request IDs from owners (batched, async)
 
     Args:
         worker_id: This worker's ID (0 to num_workers-1)
@@ -132,7 +135,7 @@ def _worker_loop(
         # Worker loop
         batch_count = 0
         while True:
-            # Process all pending messages
+            # Process all pending messages and flush outbound ID requests
             _process_all_messages(
                 worker_id,
                 update_queues[worker_id],
@@ -141,6 +144,7 @@ def _worker_loop(
                 id_response_queues,
                 storage,
             )
+            _send_pending_id_requests(worker_id, id_request_queues, storage)
 
             try:
                 job = job_queue.get(timeout=0.1)
@@ -149,29 +153,21 @@ def _worker_loop(
 
             job_type = JobType(job["type"])
 
+            # Targeted jobs share one queue; requeue those addressed to another
+            # worker. Without this, one worker can consume another's job — for
+            # RESIZE_STORAGE that leaves the starved worker attached to unlinked
+            # memory, for EXCHANGE_IDS its pending ID requests never flush, and
+            # for RUN_ITERATIONS the same (worker_id, batch_id) seed runs twice.
+            target_worker = job.get("target_worker")
+            if target_worker is not None and target_worker != worker_id:
+                job_queue.put(job)
+                continue
+
             if job_type == JobType.SHUTDOWN:
                 break
 
             elif job_type == JobType.EXCHANGE_IDS:
-                # Send pending ID requests to owners
-                pending_requests = storage.state.pending_id_requests
-                for owner_id, keys in pending_requests.items():
-                    if keys and owner_id != worker_id:
-                        # Snapshot keys so the multiprocessing pickler doesn't see mutations.
-                        keys_snapshot = tuple(keys)
-                        try:
-                            id_request_queues[owner_id].put(
-                                {"requester": worker_id, "keys": keys_snapshot}, timeout=5.0
-                            )
-                        except queue.Full:
-                            print(
-                                f"[Worker {worker_id}] Warning: ID request queue for worker "
-                                f"{owner_id} is full; dropping {len(keys_snapshot)} keys",
-                                file=sys.stderr,
-                                flush=True,
-                            )
-                for owner_id in storage.state.pending_id_requests:
-                    storage.state.pending_id_requests[owner_id].clear()
+                _send_pending_id_requests(worker_id, id_request_queues, storage)
 
                 # Process any incoming requests/responses
                 _process_all_messages(
@@ -204,12 +200,6 @@ def _worker_loop(
 
             elif job_type == JobType.COLLECT_KEYS:
                 # Collect owned keys for coordinator checkpointing
-                # If this job isn't for us, put it back on the queue
-                target_worker = job.get("target_worker")
-                if target_worker is not None and target_worker != worker_id:
-                    job_queue.put(job)  # Put it back for the right worker
-                    continue
-
                 owned_keys = dict(storage.state.owned_keys)
                 legal_actions_cache = dict(storage.state.legal_actions_cache)
 
@@ -288,7 +278,9 @@ def _worker_loop(
 
                 try:
                     for i in range(num_iterations):
-                        # Periodically process incoming messages
+                        # Periodically process incoming messages and flush
+                        # outbound ID requests, so remote infoset IDs propagate
+                        # within a batch instead of only at batch boundaries.
                         if i % 50 == 0:
                             _process_all_messages(
                                 worker_id,
@@ -298,6 +290,7 @@ def _worker_loop(
                                 id_response_queues,
                                 storage,
                             )
+                            _send_pending_id_requests(worker_id, id_request_queues, storage)
 
                         util = solver.train_iteration()
                         utilities.append(util)

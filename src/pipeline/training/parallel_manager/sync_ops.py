@@ -21,8 +21,8 @@ def exchange_ids(
 
     Workers send pending ID requests to owners and process responses.
     """
-    for _ in range(manager.num_workers):
-        manager.job_queue.put({"type": JobType.EXCHANGE_IDS.value})
+    for worker_id in range(manager.num_workers):
+        manager.job_queue.put({"type": JobType.EXCHANGE_IDS.value, "target_worker": worker_id})
 
     acks = []
     total_owned = 0
