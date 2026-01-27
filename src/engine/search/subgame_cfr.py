@@ -30,8 +30,8 @@ from src.core.game.evaluator import get_evaluator
 from src.core.game.state import Card, GameState
 from src.engine.search.range_inference import ALL_COMBOS, COMBO_CARDS, NUM_COMBOS, blocked_combos
 from src.engine.search.tree_builder import LocalTree, LocalTreeNode
+from src.shared.numeric import NORMALIZE_EPS
 
-_EPS = 1e-12
 _MIN_ITERATIONS = 8
 _DECK: list[Card] = Card.get_full_deck()
 _CARD_A = COMBO_CARDS[:, 0]
@@ -235,7 +235,9 @@ def solve_subgame(
     totals = avg.sum(axis=1, keepdims=True)
     uniform = np.full(avg.shape[1], 1.0 / avg.shape[1])
     return SubgameSolution(
-        root_strategy=np.where(totals > _EPS, avg / np.maximum(totals, _EPS), uniform),
+        root_strategy=np.where(
+            totals > NORMALIZE_EPS, avg / np.maximum(totals, NORMALIZE_EPS), uniform
+        ),
         root_values=root_values,
         iterations=iterations,
     )
@@ -372,7 +374,7 @@ def _regret_matching(regrets: np.ndarray) -> np.ndarray:
     # it is already nonnegative here.
     totals = regrets.sum(axis=1, keepdims=True)
     uniform = np.full(regrets.shape[1], 1.0 / regrets.shape[1])
-    return np.where(totals > _EPS, regrets / np.maximum(totals, _EPS), uniform)
+    return np.where(totals > NORMALIZE_EPS, regrets / np.maximum(totals, NORMALIZE_EPS), uniform)
 
 
 def _leaf_values(

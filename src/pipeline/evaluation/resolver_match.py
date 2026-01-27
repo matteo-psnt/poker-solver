@@ -29,6 +29,7 @@ import numpy as np
 from src.core.game.state import Card, GameState, Street
 from src.engine.search.resolver import HUResolver
 from src.pipeline.evaluation.statistics import summarize_samples
+from src.shared.units import pair_mean_mbb
 
 _DECK: list[Card] = Card.get_full_deck()
 
@@ -80,7 +81,7 @@ def play_resolver_match(
         board_stack = [_DECK[i] for i in order[4:9]]  # flop, flop, flop, turn, river
         button = deal % 2
 
-        pair_net = 0.0
+        seat_payoffs: list[float] = []
         for resolver_seat in (0, 1):
             payoff, game_decisions, game_fallbacks = _play_game(
                 solver,
@@ -92,11 +93,12 @@ def play_resolver_match(
                 resolver_seat=resolver_seat,
                 time_budget_ms=time_budget_ms,
             )
-            pair_net += payoff
+            seat_payoffs.append(payoff)
             decisions += game_decisions
             fallbacks += game_fallbacks
 
-        pair_samples_mbb.append(pair_net / (2.0 * big_blind) * 1000.0)
+        payoff_seat0, payoff_seat1 = seat_payoffs
+        pair_samples_mbb.append(pair_mean_mbb(payoff_seat0, payoff_seat1, big_blind))
 
     summary = summarize_samples(pair_samples_mbb)
     return ResolverMatchResult(
