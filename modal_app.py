@@ -137,7 +137,7 @@ def evaluate(
     allin_runouts: int = 50,
     abstraction_hash: str | None = None,
     opponent: str = "blueprint",
-    resolver_iterations: int = 32,
+    resolver_iterations: int = 64,
 ) -> dict[str, Any]:
     """Evaluate a run stored on the Volume (Local Best Response by default).
 
@@ -392,7 +392,7 @@ def run_eval(
     seed: int = 1,
     abstraction_hash: str = "",
     opponent: str = "blueprint",
-    resolver_iterations: int = 32,
+    resolver_iterations: int = 64,
 ) -> None:
     """LBR-evaluate an existing Volume run. Fewer workers + more memory for large
     blueprints, since each parallel worker rebuilds the full blueprint.
@@ -485,7 +485,7 @@ def run_deployed_gate(
     cpu: int = 6,
     memory: int = 32768,
     seed: int = 1,
-    resolver_iterations: int = 32,
+    resolver_iterations: int = 64,
     timeout: int = 10800,
 ) -> None:
     """Paired LBR of ONE run under both opponent models: bare blueprint vs deployed
