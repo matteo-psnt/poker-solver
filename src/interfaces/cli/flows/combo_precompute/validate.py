@@ -4,6 +4,7 @@ import random
 
 from src.core.game.state import Card, Street
 from src.interfaces.cli.flows.combo_precompute.common import (
+    ALL_CARDS,
     BOARD_CARDS_BY_STREET,
     _select_abstraction,
 )
@@ -20,9 +21,10 @@ def handle_combo_validate(ctx: CliContext) -> None:
     print("  VALIDATE COMBO ABSTRACTION")
     print("=" * 60)
 
-    abstraction_path, _metadata = _select_abstraction(ctx)
-    if abstraction_path is None:
+    entry = _select_abstraction(ctx)
+    if entry is None:
         return
+    abstraction_path = entry.path
 
     print(f"\nRunning validation on {abstraction_path.name}...")
     print("This will test:")
@@ -57,10 +59,6 @@ def _run_basic_validation(abstraction: DenseBucketer, num_samples: int = 100) ->
     print("  - Random bucket lookups")
     print("  - Bucket range checks")
 
-    ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
-    suits = ["h", "d", "c", "s"]
-    all_cards = [r + s for r in ranks for s in suits]
-
     total_checks = 0
     failures = 0
 
@@ -75,7 +73,7 @@ def _run_basic_validation(abstraction: DenseBucketer, num_samples: int = 100) ->
         for _ in range(num_samples):
             total_checks += 1
             try:
-                sampled = random.sample(all_cards, 2 + expected_board_cards)
+                sampled = random.sample(ALL_CARDS, 2 + expected_board_cards)
                 hole_str = sampled[:2]
                 board_str = sampled[2:]
 

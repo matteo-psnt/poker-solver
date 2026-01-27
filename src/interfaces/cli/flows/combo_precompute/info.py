@@ -1,7 +1,10 @@
 """Inspection/info flows for combo abstractions."""
 
+from questionary import Choice
+
 from src.core.game.state import Street
 from src.interfaces.cli.flows.combo_precompute.common import (
+    AbstractionEntry,
     _get_config_name_from_metadata,
     _list_existing_abstractions,
 )
@@ -42,7 +45,8 @@ def handle_combo_info(ctx: CliContext) -> None:
 
     print(f"\nFound {len(abstractions)} combo abstraction(s):\n")
 
-    for path, metadata in abstractions:
+    for entry in abstractions:
+        path, metadata = entry.path, entry.metadata
         print(f"📁 {path.name}")
         print("   " + "-" * 57)
 
@@ -87,27 +91,18 @@ def handle_combo_info(ctx: CliContext) -> None:
         _show_detailed_info(ctx, abstractions)
 
 
-def _show_detailed_info(ctx: CliContext, abstractions: list) -> None:
+def _show_detailed_info(ctx: CliContext, abstractions: list[AbstractionEntry]) -> None:
     """Show detailed info for a selected abstraction."""
-    choices = []
-    for path, metadata in abstractions:
-        config_name = _get_config_name_from_metadata(metadata)
-        choices.append(f"{path.name} ({config_name})")
+    choices: list[Choice] = [Choice(title=entry.label, value=entry) for entry in abstractions]
+    choices.append(Choice(title="Back", value=None))
 
-    choices.append("Back")
-
-    choice = prompts.select(
+    selected = prompts.select(
         ctx,
         "Select abstraction for detailed view:",
         choices=choices,
     )
-    if choice is None or choice == "Back":
-        return
-
-    for path, metadata in abstractions:
-        config_name = _get_config_name_from_metadata(metadata)
-        if f"{path.name} ({config_name})" != choice:
-            continue
+    if selected is not None:
+        path = selected.path
 
         print("\n" + "=" * 60)
         print(f"DETAILED INFO: {path.name}")
@@ -146,5 +141,3 @@ def _show_detailed_info(ctx: CliContext, abstractions: list) -> None:
 
         except Exception as exc:
             print(f"\n✗ Error loading abstraction: {exc}")
-
-        break

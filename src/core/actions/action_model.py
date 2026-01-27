@@ -14,6 +14,7 @@ import xxhash
 from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState
+from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, parse_multiplier_token
 from src.shared.config import Config
 
 
@@ -172,27 +173,20 @@ class ActionModel:
 
     def _parse_preflop_raise_token(self, token: str, *, to_call: int, stack: int) -> int | None:
         normalized = token.strip().lower()
-        if normalized in {"fold", "call", "check", "limp"}:
+        if normalized in PASSIVE_TOKENS:
             return None
-        if normalized in {"jam", "allin", "all_in"}:
+        if normalized in JAM_TOKENS:
             raise_amount = stack - to_call
             return raise_amount if raise_amount > 0 else None
-        if normalized.endswith("x_open"):
-            mult = float(normalized[: -len("x_open")])
-            total_bet = round(mult * max(1, to_call))
-            raise_amount = total_bet - to_call
-            if raise_amount > 0 and total_bet <= stack:
-                return raise_amount
-            return None
-        if normalized.endswith("x_last"):
-            mult = float(normalized[: -len("x_last")])
-            total_bet = round(mult * max(1, to_call))
-            raise_amount = total_bet - to_call
-            if raise_amount > 0 and total_bet <= stack:
-                return raise_amount
-            return None
 
-        raise ValueError(f"Unsupported preflop raise token: {token}")
+        mult = parse_multiplier_token(token)
+        if mult is None:
+            raise ValueError(f"Unsupported preflop raise token: {token}")
+        total_bet = round(mult * max(1, to_call))
+        raise_amount = total_bet - to_call
+        if raise_amount > 0 and total_bet <= stack:
+            return raise_amount
+        return None
 
     def _postflop_template_key(self, state: GameState, raises_this_street: int) -> str:
         templates = self.config.action_model.postflop_templates

@@ -9,6 +9,7 @@ from src.interfaces.cli.flows.config_menu import select_config
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
 from src.pipeline.training import services
+from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.pipeline.training.components import (
     build_card_abstraction,
 )
@@ -275,12 +276,9 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
 
         return _run_precompute_and_verify(ctx, config)
 
-    except ValueError as e:
+    except AbstractionHashMismatchError as e:
         ui.error(str(e))
         print()
-
-        if "hash mismatch" not in str(e).lower():
-            return False
 
         run_precompute = prompts.confirm(
             ctx,
@@ -293,6 +291,11 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
             return False
 
         return _run_precompute_and_verify(ctx, config)
+
+    except ValueError as e:
+        ui.error(str(e))
+        print()
+        return False
 
 
 def _start_training(config: Config, num_workers: int) -> None:

@@ -17,6 +17,7 @@ from src.pipeline.evaluation.hunl_local_best_response import (
 )
 from src.pipeline.evaluation.resolver_match import play_resolver_match
 from src.pipeline.evaluation.statistics import variance_decomposition
+from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.pipeline.training.components import (
     build_evaluation_solver,
     evaluate_solver_exploitability,
@@ -149,13 +150,11 @@ def train(
             f"Card abstraction '{config.card_abstraction.config}' for training config "
             f"'{config_name}' is missing. Precompute it before training. ({e})"
         ) from e
-    except ValueError as e:
-        if "hash" in str(e).lower():
-            raise ValueError(
-                f"Card abstraction '{config.card_abstraction.config}' for training config "
-                f"'{config_name}' is stale (config hash mismatch). Recompute it. ({e})"
-            ) from e
-        raise
+    except AbstractionHashMismatchError as e:
+        raise AbstractionHashMismatchError(
+            f"Card abstraction '{config.card_abstraction.config}' for training config "
+            f"'{config_name}' is stale (config hash mismatch). Recompute it. ({e})"
+        ) from e
 
     run_training(session, num_workers=num_workers, num_iterations=num_iterations)
 

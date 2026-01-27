@@ -15,7 +15,6 @@ import numpy as np
 from src.core.game.actions import Action
 from src.shared.numba_ops import (
     average_strategy,
-    compute_dcfr_strategy_weight,
     compute_dcfr_weight,
     regret_matching,
 )
@@ -370,45 +369,6 @@ class InfoSet:
             # Vanilla CFR: Allow negative regrets
             self.regrets[action_idx] += weighted_regret
 
-    def update_strategy(
-        self,
-        reach_prob: float,
-        node_utility: float = 0.0,
-        iteration: int = 1,
-        iteration_weighting: Literal["none", "linear", "dcfr"] = "none",
-        dcfr_gamma: float = 2.0,
-    ):
-        """
-        Update cumulative strategy (weighted by reach probability).
-
-        Supports multiple CFR variants:
-        - Vanilla/CFR+: Uniform weighting
-        - Linear CFR: Weight by iteration number
-        - DCFR: Weight by iteration with gamma exponent
-
-        Args:
-            reach_prob: Probability of reaching this infoset
-            node_utility: Expected utility at this node (optional)
-            iteration: Current iteration (for linear/DCFR weighting)
-            iteration_weighting: One of {'none', 'linear', 'dcfr'}.
-            dcfr_gamma: Strategy discount exponent (DCFR)
-        """
-        strategy = self.get_strategy()
-
-        # Apply weighting
-        weight = reach_prob
-        if iteration_weighting == "dcfr":
-            # DCFR: Apply gamma-weighted discounting
-            gamma_weight = compute_dcfr_strategy_weight(iteration, dcfr_gamma)
-            weight = reach_prob * gamma_weight
-        elif iteration_weighting == "linear":
-            # Linear weighting: multiply by iteration number
-            weight = reach_prob * iteration
-
-        self.strategy_sum += strategy * weight
-        self.reach_count += 1
-        self.cumulative_utility += node_utility
-
     def is_pruned(self, action_idx: int) -> bool:
         """
         Check if an action is currently pruned.
@@ -464,24 +424,6 @@ class InfoSet:
             best_idx = int(np.argmax(self.regrets))
             self.pruned[best_idx] = False
 
-    def reset_regrets(self):
-        """Reset all regrets to zero (for some CFR variants)."""
-        self.regrets = np.zeros(self.num_actions, dtype=np.float64)
-
-    def reset_strategy_sum(self):
-        """Reset strategy sum to zero (for some CFR variants)."""
-        self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)
-
-    def prune(self, threshold: float = 1e-9):
-        """
-        Prune very small regrets for memory efficiency.
-
-        Args:
-            threshold: Regrets below this (in absolute value) are set to 0
-        """
-        self.regrets[np.abs(self.regrets) < threshold] = 0
-        self.strategy_sum[self.strategy_sum < threshold] = 0
-
     def __str__(self) -> str:
         """Human-readable string representation."""
         strategy = self.get_strategy()
@@ -503,42 +445,3 @@ class InfoSet:
 
     def __repr__(self) -> str:
         return f"InfoSet(key={self.key!r}, num_actions={self.num_actions})"
-
-
-def create_infoset_key(
-    player: int,
-    street: Street,
-    betting_sequence: str,
-    spr_bucket: int,
-    preflop_hand: str | None = None,
-    postflop_bucket: int | None = None,
-) -> InfoSetKey:
-    """
-    Convenience function to create an InfoSetKey with hybrid representation.
-
-    Args:
-        player: Player position (0 or 1)
-        street: Current street
-        betting_sequence: Normalized betting history
-        spr_bucket: SPR bucket (0=shallow, 1=medium, 2=deep)
-        preflop_hand: Hand string for preflop (e.g., "AKs")
-        postflop_bucket: Bucket ID for postflop (e.g., 0-49)
-
-    Returns:
-        InfoSetKey instance
-
-    Examples:
-        # Preflop
-        create_infoset_key(0, Street.PREFLOP, "r2.5", 2, preflop_hand="AKs")
-
-        # Postflop
-        create_infoset_key(0, Street.FLOP, "c-b0.75", 1, postflop_bucket=15)
-    """
-    return InfoSetKey(
-        player_position=player,
-        street=street,
-        betting_sequence=betting_sequence,
-        preflop_hand=preflop_hand,
-        postflop_bucket=postflop_bucket,
-        spr_bucket=spr_bucket,
-    )

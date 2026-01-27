@@ -12,6 +12,14 @@ from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 
+class AbstractionHashMismatchError(ValueError):
+    """The saved abstraction was computed with different parameters (stale hash).
+
+    Recomputing the abstraction with the current config resolves it — callers
+    catch this type to offer that recovery instead of sniffing message text.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class _AbstractionCandidate:
     path: Path
@@ -119,7 +127,7 @@ class ComboAbstractionResolver:
         if len(matching) == 1:
             candidate = matching[0]
             if candidate.config_hash and candidate.config_hash != expected_hash:
-                raise ValueError(
+                raise AbstractionHashMismatchError(
                     f"Card abstraction config hash mismatch for '{config_name}':\n"
                     f"  Expected: {expected_hash}\n"
                     f"  Saved:    {candidate.config_hash}\n"

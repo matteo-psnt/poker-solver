@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import eval7
 
 if TYPE_CHECKING:
+    from src.core.actions.action_model import ActionModel
     from src.core.game.rules import GameRules
 
 from src.core.game.actions import Action, ActionType
@@ -298,7 +299,9 @@ class GameState:
         """Check if current player can raise (facing a bet with chips left)."""
         return self.to_call > 0 and self.stacks[self.current_player] > self.to_call
 
-    def legal_actions(self, action_model=None, rules: GameRules | None = None) -> list[Action]:
+    def legal_actions(
+        self, action_model: ActionModel | None = None, rules: GameRules | None = None
+    ) -> list[Action]:
         """Get legal actions for current player using the provided rules engine."""
         if rules is None:
             raise ValueError("rules is required for GameState.legal_actions()")
@@ -322,10 +325,11 @@ class GameState:
 
         ``validate=False`` is the explicit escape hatch for mid-transition states
         that legitimately violate invariants (e.g. a street advanced before its
-        board is dealt fails the board-size check).
+        board is dealt fails the board-size check). The flag is symmetric: the
+        derived state's ``_skip_validation`` is set from ``validate``, never
+        inherited from the source state.
         """
-        if not validate:
-            changes["_skip_validation"] = True
+        changes.setdefault("_skip_validation", not validate)
         return dataclasses.replace(self, **changes)
 
     @property

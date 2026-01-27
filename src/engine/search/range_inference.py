@@ -53,6 +53,14 @@ def combo_index_for(combo: tuple[Card, Card]) -> int:
     return _COMBO_INDEX_BY_MASK[int(combo[0].mask | combo[1].mask)]
 
 
+def blocked_combos(board: tuple[Card, ...]) -> np.ndarray:
+    """Boolean vector over ALL_COMBOS: True where a combo shares a card with ``board``."""
+    board_mask = 0
+    for card in board:
+        board_mask |= card.mask
+    return (COMBO_MASKS & board_mask) != 0
+
+
 def infer_ranges(state: GameState, blueprint) -> PlayerRanges:
     """
     Infer ranges from blueprint and action history.
@@ -62,8 +70,8 @@ def infer_ranges(state: GameState, blueprint) -> PlayerRanges:
     for the first resolver iteration and leaves room for richer Bayesian updates.
     """
     _ = blueprint
-    board_masks = {card.mask for card in state.board}
-    base = _masked_uniform(board_masks)
+    blocked = blocked_combos(state.board)
+    base = _masked_uniform(blocked)
     return PlayerRanges(p0=base.copy(), p1=base.copy())
 
 
@@ -81,24 +89,24 @@ def update_ranges(
     """
 
     actor = state.current_player
-    board_masks = {card.mask for card in state.board}
+    blocked = blocked_combos(state.board)
     likelihood = _action_likelihood_vector(
         state=state,
         actor=actor,
         observed_action=observed_action,
         blueprint=blueprint,
-        board_masks=board_masks,
+        blocked=blocked,
     )
 
-    p0 = _normalize_or_uniform(_mask_invalid_combos(ranges.p0, board_masks), board_masks)
-    p1 = _normalize_or_uniform(_mask_invalid_combos(ranges.p1, board_masks), board_masks)
+    p0 = _normalize_or_uniform(_mask_invalid_combos(ranges.p0, blocked), blocked)
+    p1 = _normalize_or_uniform(_mask_invalid_combos(ranges.p1, blocked), blocked)
 
     if actor == 0:
         posterior = p0 * likelihood
-        p0 = _normalize_or_uniform(posterior, board_masks)
+        p0 = _normalize_or_uniform(posterior, blocked)
     else:
         posterior = p1 * likelihood
-        p1 = _normalize_or_uniform(posterior, board_masks)
+        p1 = _normalize_or_uniform(posterior, blocked)
 
     return PlayerRanges(p0=p0, p1=p1)
 
@@ -109,13 +117,13 @@ def _action_likelihood_vector(
     actor: int,
     observed_action: Action,
     blueprint,
-    board_masks: set[int],
+    blocked: np.ndarray,
 ) -> np.ndarray:
     likelihood = np.full(_NUM_COMBOS, _EPS, dtype=np.float64)
     cache: dict = {}
 
     for idx, combo in enumerate(_ALL_COMBOS):
-        if combo[0].mask in board_masks or combo[1].mask in board_masks:
+        if blocked[idx]:
             continue
 
         hypo_state = replace_actor_hole_cards(state, actor=actor, combo=combo)
@@ -197,30 +205,24 @@ def replace_actor_hole_cards(
     return state.replace(hole_cards=(hole_cards[0], hole_cards[1]), validate=False)
 
 
-def _masked_uniform(board_masks: set[int]) -> np.ndarray:
-    weights = np.zeros(_NUM_COMBOS, dtype=np.float64)
-    for idx, combo in enumerate(_ALL_COMBOS):
-        if combo[0].mask in board_masks or combo[1].mask in board_masks:
-            continue
-        weights[idx] = 1.0
+def _masked_uniform(blocked: np.ndarray) -> np.ndarray:
+    weights = np.where(blocked, 0.0, 1.0)
     total = weights.sum()
     if total <= _EPS:
         return np.full(_NUM_COMBOS, 1.0 / _NUM_COMBOS, dtype=np.float64)
     return weights / total
 
 
-def _mask_invalid_combos(weights: np.ndarray, board_masks: set[int]) -> np.ndarray:
+def _mask_invalid_combos(weights: np.ndarray, blocked: np.ndarray) -> np.ndarray:
     if len(weights) != _NUM_COMBOS:
-        return _masked_uniform(board_masks)
+        return _masked_uniform(blocked)
     masked = np.array(weights, dtype=np.float64, copy=True)
-    for idx, combo in enumerate(_ALL_COMBOS):
-        if combo[0].mask in board_masks or combo[1].mask in board_masks:
-            masked[idx] = 0.0
+    masked[blocked] = 0.0
     return masked
 
 
-def _normalize_or_uniform(weights: np.ndarray, board_masks: set[int]) -> np.ndarray:
+def _normalize_or_uniform(weights: np.ndarray, blocked: np.ndarray) -> np.ndarray:
     total = float(weights.sum())
     if total <= _EPS:
-        return _masked_uniform(board_masks)
+        return _masked_uniform(blocked)
     return weights / total

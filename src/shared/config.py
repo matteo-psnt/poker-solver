@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, parse_multiplier_token
 from src.shared.dicts import deep_merge_dicts
 
 logger = logging.getLogger(__name__)
@@ -191,39 +192,18 @@ class ActionModelConfig(StrictFrozenModel):
                         f"{type(token).__name__}"
                     )
 
-                normalized = token.strip().lower()
-                if normalized in {"fold", "call", "check", "limp", "jam", "allin", "all_in"}:
+                if token.strip().lower() in PASSIVE_TOKENS | JAM_TOKENS:
                     continue
-                if normalized.endswith("x_open"):
-                    multiplier = normalized[: -len("x_open")]
-                    try:
-                        value = float(multiplier)
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
-                        ) from exc
-                    if value <= 0:
-                        raise ValueError(
-                            f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
-                        )
-                    continue
-                if normalized.endswith("x_last"):
-                    multiplier = normalized[: -len("x_last")]
-                    try:
-                        value = float(multiplier)
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
-                        ) from exc
-                    if value <= 0:
-                        raise ValueError(
-                            f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
-                        )
-                    continue
-
-                raise ValueError(
-                    f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
-                )
+                try:
+                    multiplier = parse_multiplier_token(token)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
+                    ) from exc
+                if multiplier is None or multiplier <= 0:
+                    raise ValueError(
+                        f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
+                    )
 
         for template_name, tokens in self.postflop_templates.items():
             if not tokens:
