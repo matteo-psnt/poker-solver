@@ -6,7 +6,7 @@ from src.core.game.actions import bet, call, fold
 from src.core.game.state import Street
 from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.in_memory import InMemoryStorage
-from src.engine.solver.storage.shared_array import SharedArrayStorage
+from tests.test_helpers import build_test_storage
 
 
 def _action_signature(actions):
@@ -15,7 +15,7 @@ def _action_signature(actions):
 
 def test_checkpoint_roundtrip_smoke(tmp_path):
     session_id = f"test_{uuid.uuid4().hex[:8]}"
-    storage = SharedArrayStorage(
+    storage = build_test_storage(
         num_workers=1,
         worker_id=0,
         session_id=session_id,

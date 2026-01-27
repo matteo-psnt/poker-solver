@@ -81,9 +81,18 @@ class SharedArrayStorage(Storage):
         checkpoint_dir: Path | None = None,
         ready_event: EventType | None = None,
         load_checkpoint_on_init: bool = True,
-        zarr_compression_level: int = 3,
-        zarr_chunk_size: int = 10_000,
+        *,
+        zarr_compression_level: int,
+        zarr_chunk_size: int,
     ):
+        """Storage over shared memory.
+
+        ``zarr_*`` are required rather than defaulted: they are owned by
+        ``StorageConfig`` and only ever passed through. A default here would be a
+        second source of truth that silently wins whenever a caller forgets to
+        forward the loaded config — which is exactly how single-worker training
+        came to ignore both knobs.
+        """
         self.num_workers = num_workers
         self.worker_id = worker_id
         self.session_id = session_id[:8]

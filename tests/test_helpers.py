@@ -6,7 +6,26 @@ from src.core.actions.action_model import ActionModel
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.abstraction.base import BucketingStrategy
-from src.shared.config import Config
+from src.shared.config import Config, StorageConfig
+
+
+def build_test_storage(session_id: str = "test", **overrides: Any) -> SharedArrayStorage:
+    """A SharedArrayStorage carrying the declared ``StorageConfig`` defaults.
+
+    The zarr knobs are required at the constructor, but tests that never tune
+    checkpointing shouldn't restate their values — that would just re-scatter the
+    literals ``StorageConfig`` exists to own. Take them from it instead.
+    """
+    defaults = StorageConfig()
+    overrides.setdefault("num_workers", 1)
+    overrides.setdefault("worker_id", 0)
+    overrides.setdefault("is_coordinator", True)
+    return SharedArrayStorage(
+        session_id=session_id,
+        zarr_compression_level=defaults.zarr_compression_level,
+        zarr_chunk_size=defaults.zarr_chunk_size,
+        **overrides,
+    )
 
 
 def build_trained_test_solver(
@@ -29,9 +48,7 @@ def build_trained_test_solver(
         starting_stack=starting_stack,
         **config_overrides,
     )
-    storage = SharedArrayStorage(
-        num_workers=1, worker_id=0, session_id=session_id, is_coordinator=True
-    )
+    storage = build_test_storage(session_id)
     solver = MCCFRSolver(ActionModel(config), DummyCardAbstraction(), storage, config=config)
     for _ in range(iterations):
         solver.train_iteration()

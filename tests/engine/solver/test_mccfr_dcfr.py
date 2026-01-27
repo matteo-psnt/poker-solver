@@ -9,8 +9,7 @@ from pydantic import ValidationError
 
 from src.core.actions.action_model import ActionModel
 from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.shared_array import SharedArrayStorage
-from tests.test_helpers import DummyCardAbstraction, make_test_config
+from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
 
 
 class TestDCFR:
@@ -21,7 +20,7 @@ class TestDCFR:
         """DCFR should complete training iterations without error."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
         )
 
@@ -45,7 +44,7 @@ class TestDCFR:
         """iteration_weighting='dcfr' should be reflected in solver config."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
         )
 
@@ -59,7 +58,7 @@ class TestDCFR:
         """iteration_weighting='linear' should be reflected in solver config."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_linear", is_coordinator=True
         )
 
@@ -73,7 +72,7 @@ class TestDCFR:
         """DCFR should converge (strategies should update)."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
         )
 
@@ -103,7 +102,7 @@ class TestPruning:
         """Pruning should complete training iterations without error."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_pruning", is_coordinator=True
         )
 
@@ -137,7 +136,7 @@ class TestPruning:
         """Pruning state should exist in infosets when pruning is enabled."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_pruning", is_coordinator=True
         )
 
@@ -166,7 +165,7 @@ class TestDCFRWithPruning:
         """DCFR and pruning should work together without errors."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_both", is_coordinator=True
         )
 
@@ -196,7 +195,7 @@ class TestDCFRWithPruning:
         """DCFR + pruning should produce valid strategies."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_both", is_coordinator=True
         )
 
