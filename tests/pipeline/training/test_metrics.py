@@ -19,7 +19,7 @@ class TestMetricsTracker:
 
         assert tracker.iteration == 0
         assert tracker.window_size == 10
-        assert len(tracker.utilities) == 0
+        assert len(tracker.utility_window) == 0
 
     def test_log_iteration(self):
         tracker = MetricsTracker()
@@ -27,8 +27,8 @@ class TestMetricsTracker:
         tracker.log_iteration(iteration=1, utility=10.0, num_infosets=100)
 
         assert tracker.iteration == 1
-        assert len(tracker.utilities) == 1
-        assert len(tracker.infoset_counts) == 1
+        assert len(tracker.utility_window) == 1
+        assert len(tracker.infoset_window) == 1
 
     def test_get_avg_utility(self):
         tracker = MetricsTracker(window_size=3)

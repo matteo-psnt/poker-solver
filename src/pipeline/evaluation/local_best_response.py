@@ -26,8 +26,6 @@ References:
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from src.pipeline.evaluation.best_response import on_policy_value
 from src.pipeline.evaluation.game_tree import (
     CHANCE,
@@ -36,6 +34,7 @@ from src.pipeline.evaluation.game_tree import (
     InfoKey,
     Policy,
     StateT,
+    collect_infoset_states,
 )
 
 
@@ -89,28 +88,7 @@ def local_best_response_value(
         return result
 
     # Group lbr decision states by information set with counterfactual reach.
-    infoset_states: dict[InfoKey, list[tuple[StateT, float]]] = defaultdict(list)
-
-    def collect(state: StateT, cf_reach: float) -> None:
-        if cf_reach == 0.0 or game.is_terminal(state):
-            return
-        player = game.current_player(state)
-        if player == CHANCE:
-            for action, prob in game.chance_outcomes(state):
-                collect(game.next_state(state, action), cf_reach * prob)
-            return
-        if player == lbr_player:
-            key = game.information_state_key(state, lbr_player)
-            infoset_states[key].append((state, cf_reach))
-            for action in game.legal_actions(state):
-                collect(game.next_state(state, action), cf_reach)
-            return
-        legal = game.legal_actions(state)
-        probs = policy(game.information_state_key(state, player), legal)
-        for action, prob in zip(legal, probs):
-            collect(game.next_state(state, action), cf_reach * prob)
-
-    collect(game.initial_state(), 1.0)
+    infoset_states = collect_infoset_states(game, lbr_player, policy)
 
     # Myopic action per information set: argmax over cf-weighted continuation value.
     lbr_action: dict[InfoKey, ActionT] = {}

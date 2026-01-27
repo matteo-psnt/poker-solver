@@ -8,6 +8,7 @@ import pytest
 
 from src.pipeline.evaluation.hunl_local_best_response import HandOutcome
 from src.pipeline.training import services
+from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.pipeline.training.services import TrainingOutput
 from src.shared.config_loader import load_training_config
 
@@ -96,15 +97,15 @@ def test_train_translates_missing_abstraction(monkeypatch):
 
 
 def test_train_translates_stale_abstraction(monkeypatch):
-    """A hash-mismatch ValueError should surface an actionable recompute message."""
+    """A hash mismatch should surface an actionable recompute message."""
     monkeypatch.setattr(services, "load_training_config", lambda name, **ov: _fake_config())
 
     def _raise(cfg):
-        raise ValueError("config hash mismatch")
+        raise AbstractionHashMismatchError("config hash mismatch")
 
     monkeypatch.setattr(services, "create_training_session", _raise)
 
-    with pytest.raises(ValueError, match="stale"):
+    with pytest.raises(AbstractionHashMismatchError, match="stale"):
         services.train("quick_test")
 
 

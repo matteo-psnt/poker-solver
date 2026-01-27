@@ -21,8 +21,6 @@ References:
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from src.pipeline.evaluation.game_tree import (
     CHANCE,
     ActionT,
@@ -30,6 +28,7 @@ from src.pipeline.evaluation.game_tree import (
     InfoKey,
     Policy,
     StateT,
+    collect_infoset_states,
 )
 
 
@@ -49,32 +48,9 @@ def best_response_value(
     Returns:
         The best-response expected utility to ``br_player`` at the root.
     """
-    # Phase 1: group every br_player decision state by its information set, along
-    # with the counterfactual reach probability (product of chance and opponent
-    # action probabilities on the path; br_player's own probabilities excluded).
-    infoset_states: dict[InfoKey, list[tuple[StateT, float]]] = defaultdict(list)
-
-    def collect(state: StateT, cf_reach: float) -> None:
-        if cf_reach == 0.0 or game.is_terminal(state):
-            return
-        player = game.current_player(state)
-        if player == CHANCE:
-            for action, prob in game.chance_outcomes(state):
-                collect(game.next_state(state, action), cf_reach * prob)
-            return
-        if player == br_player:
-            key = game.information_state_key(state, br_player)
-            infoset_states[key].append((state, cf_reach))
-            for action in game.legal_actions(state):
-                # Counterfactual: do not weight by br_player's own action prob.
-                collect(game.next_state(state, action), cf_reach)
-            return
-        legal = game.legal_actions(state)
-        probs = policy(game.information_state_key(state, player), legal)
-        for action, prob in zip(legal, probs):
-            collect(game.next_state(state, action), cf_reach * prob)
-
-    collect(game.initial_state(), 1.0)
+    # Phase 1: group every br_player decision state by its information set, with
+    # counterfactual reach (see :func:`collect_infoset_states`).
+    infoset_states = collect_infoset_states(game, br_player, policy)
 
     # Phase 2: value of a state under best play by br_player and fixed policy for
     # opponents. Memoized on state; the best action per information set is cached
