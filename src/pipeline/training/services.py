@@ -271,12 +271,17 @@ def evaluate_run_lbr(
     abstraction_hash: str | None = None,
     opponent: str = "blueprint",
     resolver_iterations: int = 64,
+    scorer: str = "myopic",
+    lookahead_depth: int = 2,
+    lookahead_top_k: int = 3,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
     LBR is a rigorous lower bound on true exploitability (LBR <= exact BR, validated
-    on Kuhn/Leduc). ``include_off_tree`` stays False by default: off-tree bet sizes
-    leak into a uniform-random opponent on later streets and bias the number.
+    on Kuhn/Leduc). ``include_off_tree`` arms the exploiter with off-tree bet/raise
+    sizes — rigorous via the shadow-state translation completion (see the LBR module
+    docs) but a *different* measured completion, so never mix on/off-tree numbers in
+    one comparison; it stays False only for baseline comparability.
     ``num_workers`` parallelizes over hands; the result is identical for any count.
 
     ``opponent`` selects the strategy under measurement: ``"blueprint"`` (the raw
@@ -285,6 +290,12 @@ def evaluate_run_lbr(
     CFR iterations instead of a wall-clock budget so the measured strategy is
     machine-independent and CRN pairing stays valid; remaining resolver settings
     (blend alpha, depth, leaf rollouts) come from the run's own config.
+
+    ``scorer`` selects HOW the exploiter picks its actions: ``"myopic"`` (classic
+    one-step arithmetic) or ``"lookahead"`` (depth-limited best response vs the
+    blueprint policy — a stronger exploiter, hence a tighter bound). Selection
+    only: either scorer yields a valid lower bound, but the two are different
+    exploiters, so never mix scorer settings within one comparison.
 
     The results dict carries per-hand records plus the base seed; evaluate two runs
     with the same explicit ``seed`` and feed the per-hand samples to
@@ -335,11 +346,18 @@ def evaluate_run_lbr(
             allin_runouts=allin_runouts,
             opponent=opponent,
             resolver=resolver_config,
+            scorer=scorer,
+            lookahead_depth=lookahead_depth,
+            lookahead_top_k=lookahead_top_k,
         ),
         blueprint_factory=factory,
     )
     results = _lbr_results_dict(result, big_blind=metadata.config.game.big_blind)
     results["opponent_model"] = opponent
+    results["scorer"] = scorer
+    if scorer == "lookahead":
+        results["lookahead_depth"] = lookahead_depth
+        results["lookahead_top_k"] = lookahead_top_k
     if resolver_config is not None:
         results["resolver_iterations"] = resolver_iterations
         results["resolver_blend_alpha"] = resolver_config.policy_blend_alpha

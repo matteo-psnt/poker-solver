@@ -16,35 +16,43 @@ lower bound.
 
 Off-tree bets (opt-in, ``include_off_tree``)
 --------------------------------------------
-LBR's menu can also include **off-tree bet sizes** the blueprint never trained
-on; a real opponent betting an unseen size is what exposes the action
-abstraction. This is **off by default** and here is why. Infoset keys encode the
-*full-hand* betting sequence (see
+LBR's menu can also include **off-tree bet and raise sizes** the blueprint never
+trained on; a real opponent using unseen sizes is what exposes the action
+abstraction. Infoset keys encode the *full-hand* betting sequence (see
 :func:`~src.core.game.state.GameState.normalized_betting_sequence` — history is
-cumulative across streets), and off-tree amounts normalize to unseen pot
-fractions (``b0.63``). The *immediate* response to an off-tree bet is handled
-correctly by translation, but the off-tree amount stays baked into the history,
-so on *later* streets the opponent's infoset misses and falls back to
-uniform-random play. That over-states the opponent's foolishness on multi-street
-off-tree lines, biasing the number on the very path that must stay exact. With
-``include_off_tree=False`` the LBR player uses only on-tree actions, the opponent
-never leaves the blueprint's tree, and the result is a fully rigorous lower
-bound — hence the default. Making off-tree rigorous requires carrying a parallel
-translated (abstract-game) state for opponent lookups; that is a separate
-milestone.
+cumulative across streets), so a naively-played off-tree amount would normalize
+to an unseen pot fraction (``b0.63``) and poison every later opponent lookup of
+the hand (miss → uniform-random play → invalid upward bias). To keep the number
+rigorous the evaluator carries a persistent on-tree **shadow state**
+(:mod:`~src.pipeline.evaluation.shadow_state`) alongside the real one: each
+off-tree exploiter size is committed to an on-tree proxy on the shadow (sampled
+once from the pseudo-harmonic translation weights), every opponent lookup keys
+off the shadow, and the opponent's shadow decision is realized in the real game
+by a pot-fraction-preserving map-back. The real state stays authoritative for
+chips, legality, terminality, and payoffs.
+
+Sizes with no structure-preserving shadow proxy are dropped from the menu,
+which only restricts the exploiter — the bound loosens but never breaks. With
+the shadow in place a uniform fallback can only mean a genuinely untrained
+infoset, exactly as in on-tree evals. ``include_off_tree=False`` (the default,
+kept for comparability with recorded baselines) restricts the menu to on-tree
+actions; the shadow then never diverges and the result is bitwise-identical to
+the pre-shadow evaluator.
 
 Opponent model / what this number means
 ----------------------------------------
 Exploitability is defined against a *complete* strategy, but training only
 defines the blueprint on-tree. This evaluator completes it with the standard
-**translation policy**: when the LBR player makes an off-tree bet, the blueprint
-responds as if the bet had been the nearest on-tree size (see
-:mod:`src.engine.search.action_translation`). The reported figure is therefore
-the *LBR exploitability of the blueprint strategy under translation*. The
-blueprint is normally deployed through the runtime resolver (``resolver.enabled``
-defaults to ``True``), whose off-tree response is a re-solve rather than a
-translation; the translation completion is a documented, cheap proxy for that
-deployed system and the two can differ in either direction.
+**translation policy** applied to the whole history via the carried shadow:
+the blueprint responds as if every off-tree size had been its committed
+on-tree proxy. Sampling the proxy makes the completion *behavioral* — a
+mixture over deterministic translations — which is still a well-defined
+strategy, so the realized value against it is a valid lower bound on that
+completed strategy's exploitability. The blueprint is normally deployed
+through the runtime resolver (``resolver.enabled`` defaults to ``True``),
+whose off-tree response is a re-solve rather than a translation; measure that
+system directly with ``opponent="deployed"``, where the resolver receives the
+real states natively and the shadow only feeds the exploiter's scorer.
 
 Correctness note: the myopic pot-arithmetic value is a *scoring function* used
 only to choose the LBR action. The returned mbb/g figure is the **realized**
@@ -73,12 +81,14 @@ from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 from src.engine.search.range_inference import ALL_COMBOS, COMBO_MASKS, NUM_COMBOS
+from src.pipeline.evaluation.lookahead_scorer import BlueprintDistMemo, LookaheadScorer
 from src.pipeline.evaluation.opponent_model import (
     BlueprintOpponent,
     OpponentModel,
     ResolvedOpponent,
     known_mask,
 )
+from src.pipeline.evaluation.shadow_state import MenuCandidate, ShadowTracker
 from src.shared.config import ResolverConfig
 from src.shared.numeric import NORMALIZE_EPS
 from src.shared.units import chips_to_bb, chips_to_mbb
@@ -100,10 +110,11 @@ class LBRConfig:
     num_hands: int = 1000
     equity_runouts: int = 12
     off_tree_pot_fractions: tuple[float, ...] = DEFAULT_OFF_TREE_POT_FRACTIONS
-    # Off-tree bet sizes are OFF by default: see the "Off-tree bets" note in the
-    # module docstring — with the full-hand infoset encoding they leak into a
-    # uniform-random opponent on later streets, so the leak-free on-tree menu is
-    # the trustworthy default. Enable only for exploratory action-abstraction probing.
+    # Add off-tree bet/raise sizes to the exploiter's menu. Rigorous: opponent
+    # lookups go through a persistent on-tree shadow state (see module docs), so
+    # off-tree amounts never leak into infoset keys. Off by default only for
+    # comparability with recorded baselines — it changes the measured completion,
+    # so never mix on/off numbers in one comparison.
     include_off_tree: bool = False
     seed: int | None = None
     # Parallel workers for hand evaluation. LBR is embarrassingly parallel over hands;
@@ -125,6 +136,17 @@ class LBRConfig:
     # clock budgets make the measured strategy machine-dependent). None with
     # opponent="deployed" raises at engine construction.
     resolver: ResolverConfig | None = None
+    # HOW the exploiter selects its actions. "myopic" is the classic one-step
+    # check/call-to-showdown arithmetic; "lookahead" scores candidates by a
+    # depth-limited best-response walk against the blueprint policy (see
+    # :mod:`lookahead_scorer`). Selection-only: any scorer keeps the bound valid.
+    scorer: str = "myopic"
+    # Opponent-response levels the lookahead expands (depth - 1 exploiter
+    # re-decisions; depth 1 ~= branch-resolved myopic). Ignored under "myopic".
+    lookahead_depth: int = 2
+    # Myopic prefilter width: lookahead-rescore only the top-k myopic candidates
+    # (the myopic argmax is always included). <= 0 rescores the whole menu.
+    lookahead_top_k: int = 3
 
 
 @dataclass(frozen=True)
@@ -195,9 +217,26 @@ class _HUNLLocalBestResponse:
         self.card_abstraction = blueprint.card_abstraction
         self.storage = blueprint.storage
         self.evaluator = get_evaluator()
+        # On-tree shadow state for rigorous off-tree play (see module docs).
+        self.shadow = ShadowTracker(self.rules, self.action_model)
+        if config.scorer not in ("myopic", "lookahead"):
+            raise ValueError(f"Unknown LBRConfig.scorer: {config.scorer!r}")
         # The scorer ALWAYS uses the blueprint model (selection-only, see module
         # docs); the realized path uses whichever strategy is under measurement.
-        self._blueprint_model = BlueprintOpponent(blueprint)
+        # The cross-call memo exists only under the lookahead scorer, keeping the
+        # myopic path byte-identical.
+        dist_memo = BlueprintDistMemo() if config.scorer == "lookahead" else None
+        self._blueprint_model = BlueprintOpponent(blueprint, dist_memo=dist_memo)
+        self._lookahead: LookaheadScorer | None = None
+        if config.scorer == "lookahead":
+            self._lookahead = LookaheadScorer(
+                blueprint_model=self._blueprint_model,
+                rules=self.rules,
+                action_model=self.action_model,
+                is_chance_node=blueprint.is_chance_node,
+                equity_fn=self._equity,
+                depth=config.lookahead_depth,
+            )
         self.opponent: OpponentModel
         if config.opponent == "blueprint":
             self.opponent = self._blueprint_model
@@ -230,30 +269,48 @@ class _HUNLLocalBestResponse:
         state = initial_state
         belief = self._initial_belief(initial_state, opp)
         self.opponent.reset(initial_state, opp)
-
-        prev_state: GameState | None = None
-        prev_lbr_action: Action | None = None
+        shadow = self.shadow
+        shadow.start(initial_state)
 
         while not state.is_terminal:
             if self.blueprint.is_chance_node(state):
                 state = self.blueprint.sample_chance_outcome(state)
-                prev_state, prev_lbr_action = None, None
+                shadow.mirror_chance(state)
                 continue
 
+            shadow.assert_sync(state)
             if state.current_player == lbr_player:
-                action = self._choose_lbr_action(state, lbr_player, belief)
-                prev_state, prev_lbr_action = state, action
+                action, shadow_action = self._choose_lbr_action(state, shadow, lbr_player, belief)
             else:
-                legal, vecs = self.opponent.action_matrix(state, opp, prev_state, prev_lbr_action)
+                if self.opponent.wants_translated_state:
+                    legal, vecs = self.opponent.action_matrix(shadow.state, opp)
+                    pairs = [(a, shadow.map_back(state, a)) for a in legal]
+                else:
+                    legal, vecs = self.opponent.action_matrix(state, opp)
+                    pairs = [(a, a) for a in legal]
                 branched = self._branch_terminal_decision(
-                    state, lbr_player, opp, legal, vecs, belief
+                    state, lbr_player, opp, pairs, vecs, belief
                 )
                 if branched is not None:
                     return branched
-                action, belief = self._sample_opponent(legal, vecs, belief)
+                choice, belief = self._sample_opponent(legal, vecs, belief)
+                shadow_action, action = pairs[choice]
+                if not self.opponent.wants_translated_state:
+                    # Deployed mode acts on the real state; mirror its realized
+                    # action back onto the shadow (or give up shadowing — the
+                    # shadow only feeds the scorer there, see ShadowTracker).
+                    mirrored = shadow.counterpart(state, action)
+                    if mirrored is None:
+                        shadow.mark_broken(state)
+                        shadow_action = action
+                    else:
+                        shadow_action = mirrored
 
             self.opponent.observe(state, action)
-            state = state.apply_action(action, self.rules)
+            next_state = state.apply_action(action, self.rules)
+            if not next_state.is_terminal:
+                shadow.commit(action, next_state, shadow_action)
+            state = next_state
 
         value = self._terminal_value(state, lbr_player, opp, belief)
         return HandOutcome(value=value, terminal=self._terminal_kind(state), pot=state.pot)
@@ -263,43 +320,47 @@ class _HUNLLocalBestResponse:
         state: GameState,
         lbr_player: int,
         opp: int,
-        legal: list[Action],
+        pairs: list[tuple[Action, Action]],
         vecs: dict[Action, np.ndarray],
         belief: np.ndarray,
     ) -> HandOutcome | None:
         """Integrate out an opponent decision whose every action ends the hand.
 
+        ``pairs`` holds ``(decision_action, real_action)`` per legal action of
+        the opponent's decision state (identical when the decision state is the
+        real state): probabilities and posteriors come from the decision action's
+        per-combo vector, terminality and values from applying the real action.
         Returns the probability-weighted mix of per-branch terminal values (each
         branch valued against its own Bayes-posterior range), or ``None`` when any
         action continues the hand — then the caller samples as usual. Replacing
         the sample with its exact conditional expectation is a Rao-Blackwellization:
         the estimator's expectation (and the LBR bound) is unchanged.
         """
-        if not legal:
+        if not pairs:
             return None
         # BET/RAISE always reopen the betting, so such menus can never be
         # all-terminal — skip without paying any apply_action. (ALL_IN cannot be
         # pre-filtered: calling a jam is itself encoded as ALL_IN and IS terminal.)
-        if any(action.type in (ActionType.BET, ActionType.RAISE) for action in legal):
+        if any(decision.type in (ActionType.BET, ActionType.RAISE) for decision, _ in pairs):
             return None
         next_states = []
-        for action in legal:
-            next_state = state.apply_action(action, self.rules)
+        for _, real_action in pairs:
+            next_state = state.apply_action(real_action, self.rules)
             if not next_state.is_terminal:
                 return None
             next_states.append(next_state)
 
-        probs = np.array([float(np.dot(belief, vecs[action])) for action in legal])
+        probs = np.array([float(np.dot(belief, vecs[decision])) for decision, _ in pairs])
         total = probs.sum()
         if total <= NORMALIZE_EPS:
             return None  # degenerate belief: let the caller's uniform fallback handle it
 
         value = 0.0
         terminal, pot = "fold", 0
-        for weight, action, next_state in zip(probs / total, legal, next_states):
+        for weight, (decision, _), next_state in zip(probs / total, pairs, next_states):
             if weight <= 0.0:
                 continue
-            posterior = belief * vecs[action]
+            posterior = belief * vecs[decision]
             mass = posterior.sum()
             branch_belief = posterior / mass if mass > NORMALIZE_EPS else belief
             value += weight * self._terminal_value(next_state, lbr_player, opp, branch_belief)
@@ -420,51 +481,110 @@ class _HUNLLocalBestResponse:
 
     # -- LBR action choice -------------------------------------------------
 
-    def _choose_lbr_action(self, state: GameState, lbr_player: int, belief: np.ndarray) -> Action:
+    def _choose_lbr_action(
+        self, state: GameState, shadow: ShadowTracker, lbr_player: int, belief: np.ndarray
+    ) -> tuple[Action, Action]:
+        """Pick the argmax menu candidate; return its (real, shadow) actions.
+
+        Under the lookahead scorer, the myopic scores act as a prefilter: only
+        the top ``lookahead_top_k`` candidates (which always include the myopic
+        argmax) are rescored by the lookahead walk. The committed shadow proxy
+        is sampled once, only for the chosen action.
+        """
         opp = 1 - lbr_player
         opp_weights = belief
         lbr_hand = state.hole_cards[lbr_player]
-        candidates = self._action_menu(state)
-        best_action = candidates[0]
+        candidates = self._action_menu(state, shadow)
+        myopic = [
+            self._score_action(state, shadow.state, opp, lbr_hand, opp_weights, candidate)
+            for candidate in candidates
+        ]
+        best = candidates[0]
         best_value = float("-inf")
-        for action in candidates:
-            value = self._score_action(state, lbr_player, opp, lbr_hand, opp_weights, action)
-            if value > best_value:
-                best_value = value
-                best_action = action
-        return best_action
+        if self._lookahead is None:
+            for candidate, value in zip(candidates, myopic):
+                if value > best_value:
+                    best_value = value
+                    best = candidate
+        else:
+            top_k = self.config.lookahead_top_k
+            k = len(candidates) if top_k <= 0 else min(top_k, len(candidates))
+            order = sorted(range(len(candidates)), key=lambda i: (-myopic[i], i))
+            for idx in order[:k]:
+                value = self._lookahead.score(
+                    state, shadow.state, opp, lbr_hand, opp_weights, candidates[idx]
+                )
+                if value > best_value:
+                    best_value = value
+                    best = candidates[idx]
+        dist = best.shadow_dist
+        if len(dist) == 1:
+            return best.real_action, dist[0][0]
+        weights = np.array([weight for _, weight in dist])
+        choice = int(self.rng.choice(len(dist), p=weights / weights.sum()))
+        return best.real_action, dist[choice][0]
 
-    def _action_menu(self, state: GameState) -> list[Action]:
-        """On-tree legal actions plus off-tree bet sizes when leading."""
+    def _action_menu(self, state: GameState, shadow: ShadowTracker) -> list[MenuCandidate]:
+        """The exploiter's menu: mirrored on-tree actions plus gated off-tree sizes.
+
+        Every candidate carries its shadow realization; candidates with no
+        structure-preserving shadow proxy are gated out (restricting the
+        exploiter only loosens the lower bound). Off-tree BETs are offered when
+        leading, off-tree RAISEs when facing a bet (which covers preflop, where
+        the first decision always faces the blind gap). Sizes that would be
+        de-facto jams (reaching the acting stack) or exceed what the opponent
+        can call are skipped — the on-tree ALL_IN already represents them.
+        """
         legal = list(self.rules.get_legal_actions(state, action_model=self.action_model))
-        if not self.config.include_off_tree or state.to_call > 0:
-            return legal
-
+        menu: list[MenuCandidate] = []
         seen = {(a.type, a.amount) for a in legal}
-        pot = state.pot
-        effective_stack = min(state.stacks)
-        for frac in self.config.off_tree_pot_fractions:
-            amount = round(frac * pot)
-            if amount <= 0 or amount > effective_stack:
+        for action in legal:
+            mirror = shadow.counterpart(state, action)
+            if mirror is None:
                 continue
-            action = Action(ActionType.BET, amount)
+            menu.append(MenuCandidate(action, ((mirror, 1.0),)))
+
+        if not self.config.include_off_tree or shadow.broken:
+            return menu
+
+        current_stack = state.stacks[state.current_player]
+        opp_stack = state.stacks[1 - state.current_player]
+        leading = state.to_call == 0
+        base = state.pot if leading else state.pot + state.to_call
+        action_type = ActionType.BET if leading else ActionType.RAISE
+        for frac in self.config.off_tree_pot_fractions:
+            amount = round(frac * base)
+            committed = amount if leading else state.to_call + amount
+            if amount <= 0 or committed >= current_stack or amount > opp_stack:
+                continue
+            action = Action(action_type, amount)
             if (action.type, action.amount) in seen:
                 continue
-            if self.rules.is_action_valid(state, action):
-                legal.append(action)
-                seen.add((action.type, action.amount))
-        return legal
+            if not self.rules.is_action_valid(state, action):
+                continue
+            dist = shadow.off_tree_dist(state, action)
+            if dist is None:
+                continue
+            seen.add((action.type, action.amount))
+            menu.append(MenuCandidate(action, dist))
+        return menu
 
     def _score_action(
         self,
         state: GameState,
-        lbr_player: int,
+        shadow_state: GameState,
         opp: int,
         lbr_hand: tuple[Card, Card],
         opp_weights: np.ndarray,
-        action: Action,
+        candidate: MenuCandidate,
     ) -> float:
-        """Myopic (check/call-to-showdown) value of ``action``; selection only."""
+        """Myopic (check/call-to-showdown) value of a candidate; selection only.
+
+        Chip arithmetic uses the real action on the real state; the opponent's
+        fold response is read on the shadow (where blueprint lookups are
+        defined). Approximations here loosen the bound, never invalidate it.
+        """
+        action = candidate.real_action
         pot = float(state.pot)
         if action.type == ActionType.FOLD:
             return 0.0
@@ -477,7 +597,7 @@ class _HUNLLocalBestResponse:
 
         # Aggressive action (bet/raise/all-in): fold equity + called equity.
         size = self._chips_committed(state, action)
-        fold_probs = self._opp_fold_probs(state, opp, action)
+        fold_probs = self._opp_fold_probs(shadow_state, opp, candidate.shadow_dist)
         fold_equity = float(np.dot(opp_weights, fold_probs))
         weight_sum = float(opp_weights.sum())
         fp = fold_equity / weight_sum if weight_sum > NORMALIZE_EPS else 0.0
@@ -499,33 +619,40 @@ class _HUNLLocalBestResponse:
 
     def _sample_opponent(
         self, legal: list[Action], vecs: dict[Action, np.ndarray], belief: np.ndarray
-    ) -> tuple[Action, np.ndarray]:
-        """Sample an opponent action from the range aggregate and Bayes-update."""
+    ) -> tuple[int, np.ndarray]:
+        """Sample an opponent action index from the range aggregate and Bayes-update."""
         aggregate = np.array([float(np.dot(belief, vecs[action])) for action in legal])
         total = aggregate.sum()
         if total <= NORMALIZE_EPS:
-            return legal[int(self.rng.integers(0, len(legal)))], belief
+            return int(self.rng.integers(0, len(legal))), belief
         aggregate /= total
         choice = int(self.rng.choice(len(legal), p=aggregate))
-        action = legal[choice]
-        posterior = belief * vecs[action]
+        posterior = belief * vecs[legal[choice]]
         mass = posterior.sum()
-        return action, (posterior / mass if mass > NORMALIZE_EPS else belief)
+        return choice, (posterior / mass if mass > NORMALIZE_EPS else belief)
 
-    def _opp_fold_probs(self, state: GameState, opp: int, action: Action) -> np.ndarray:
-        """Per-combo probability the opponent folds to ``action`` (scorer input).
+    def _opp_fold_probs(
+        self,
+        shadow_state: GameState,
+        opp: int,
+        shadow_dist: tuple[tuple[Action, float], ...],
+    ) -> np.ndarray:
+        """Per-combo probability the opponent folds to the candidate (scorer input).
 
-        Deliberately blueprint-backed even under opponent="deployed": this feeds
-        the exploiter's selection scorer only, where approximation loosens the
+        Mixes the blueprint's fold response over the candidate's shadow proxies
+        (the states blueprint lookups are defined on). Deliberately
+        blueprint-backed even under opponent="deployed": this feeds the
+        exploiter's selection scorer only, where approximation loosens the
         lower bound but never invalidates it — and resolver-backing it would
         multiply eval cost ~10x (one solve per candidate action per decision).
         """
-        resp_state = state.apply_action(action, self.rules)
-        legal, vecs = self._blueprint_model.action_matrix(resp_state, opp, state, action)
         fold_probs = np.zeros(NUM_COMBOS)
-        for candidate in legal:
-            if candidate.type == ActionType.FOLD:
-                fold_probs += vecs[candidate]
+        for proxy, weight in shadow_dist:
+            resp_state = shadow_state.apply_action(proxy, self.rules)
+            legal, vecs = self._blueprint_model.action_matrix(resp_state, opp)
+            for response in legal:
+                if response.type == ActionType.FOLD:
+                    fold_probs += weight * vecs[response]
         return fold_probs
 
     # -- Equity ------------------------------------------------------------

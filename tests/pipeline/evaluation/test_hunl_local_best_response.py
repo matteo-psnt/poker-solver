@@ -14,7 +14,7 @@ import os
 import numpy as np
 import pytest
 
-from src.core.game.actions import Action, ActionType, call, check, fold
+from src.core.game.actions import Action, ActionType, bet, call, fold
 from src.core.game.state import Card, GameState, Street
 from src.engine.search.range_inference import (
     ALL_COMBOS,
@@ -27,9 +27,10 @@ from src.pipeline.evaluation.hunl_local_best_response import (
     LBRConfig,
     _deal_initial_state,
     _HUNLLocalBestResponse,
+    _play_hand_pair,
     compute_lbr_exploitability,
 )
-from src.pipeline.evaluation.opponent_model import BlueprintOpponent, known_mask
+from src.pipeline.evaluation.opponent_model import known_mask
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.shared.config import ResolverConfig
 from tests.test_helpers import build_trained_test_solver
@@ -303,12 +304,14 @@ class TestTerminalBranching:
 
     def test_jam_value_is_probability_weighted_branch_mixture(self, engine):
         state, jam, faced, lbr = self._jam_faced_node(engine)
+        del jam
         opp = 1 - lbr
         belief = engine._initial_belief(state, opp)
-        legal, vecs = engine._blueprint_model.action_matrix(faced, opp, state, jam)
+        legal, vecs = engine._blueprint_model.action_matrix(faced, opp)
+        pairs = [(action, action) for action in legal]
 
         engine.rng = np.random.default_rng(0)
-        outcome = engine._branch_terminal_decision(faced, lbr, opp, legal, vecs, belief)
+        outcome = engine._branch_terminal_decision(faced, lbr, opp, pairs, vecs, belief)
         assert outcome is not None
         assert outcome.terminal == "allin"  # the call branch dominates fold in severity
 
@@ -330,10 +333,11 @@ class TestTerminalBranching:
         # must fall through to the sampling path.
         state = _deal_initial_state(engine, 400, 0, np.random.default_rng(4))
         player = state.current_player
-        legal, vecs = engine._blueprint_model.action_matrix(state, player, None, None)
+        legal, vecs = engine._blueprint_model.action_matrix(state, player)
+        pairs = [(action, action) for action in legal]
         belief = engine._initial_belief(state, 1 - player)
         assert (
-            engine._branch_terminal_decision(state, 1 - player, player, legal, vecs, belief) is None
+            engine._branch_terminal_decision(state, 1 - player, player, pairs, vecs, belief) is None
         )
 
 
@@ -375,23 +379,134 @@ class TestPerHandRecords:
         assert not comparison["is_significant"]
 
 
-class TestActionMapping:
-    """`_map_to_real` projects a proxy response onto the real legal menu."""
+def _constructed_flop_state(
+    pot: int,
+    stacks: tuple[int, int],
+    *,
+    to_call: int = 0,
+    history: tuple[Action, ...] = (call(),),
+    last_aggressor: int | None = None,
+) -> GameState:
+    """A directly-constructed flop node (cards disjoint by construction)."""
+    return GameState(
+        street=Street.FLOP,
+        pot=pot,
+        stacks=stacks,
+        board=(Card.new("2c"), Card.new("7d"), Card.new("9s")),
+        hole_cards=((Card.new("As"), Card.new("Kh")), (Card.new("Qd"), Card.new("Jc"))),
+        betting_history=history,
+        button_position=0,
+        current_player=0,
+        is_terminal=False,
+        to_call=to_call,
+        last_aggressor=last_aggressor,
+        blind_to_call=50,
+    )
 
-    def test_fold_and_call_carry_across(self):
-        engine = _engine(_build_solver(0))
-        # For actions already in the legal menu the state is unused; any valid
-        # state satisfies the signature.
-        state = _deal_initial_state(engine, 400, 0, np.random.default_rng(0))
-        legal = [fold(), call(), Action(ActionType.RAISE, 300)]
-        assert engine._blueprint_model._map_to_real(state, fold(), legal) == [(fold(), 1.0)]
-        assert engine._blueprint_model._map_to_real(state, call(), legal) == [(call(), 1.0)]
 
-    def test_check_maps_to_itself_when_legal(self):
-        engine = _engine(_build_solver(0))
-        state = _deal_initial_state(engine, 400, 0, np.random.default_rng(0))
-        legal = [check(), Action(ActionType.BET, 200)]
-        assert engine._blueprint_model._map_to_real(state, check(), legal) == [(check(), 1.0)]
+class TestMenuGating:
+    """The exploiter's menu: mirrored on-tree actions plus gated off-tree sizes."""
+
+    @pytest.fixture(scope="class")
+    def solver(self):
+        return _build_solver(0, session_id="lbr-menu")
+
+    def test_menu_matches_legal_when_off_tree_disabled(self, solver):
+        engine = _engine(solver)
+        state = _constructed_flop_state(200, (1000, 1000))
+        engine.shadow.start(state)
+        menu = engine._action_menu(state, engine.shadow)
+        legal = engine.rules.get_legal_actions(state, action_model=engine.action_model)
+        assert [candidate.real_action for candidate in menu] == legal
+        assert all(candidate.shadow_dist == ((candidate.real_action, 1.0),) for candidate in menu)
+
+    def test_off_tree_bets_offered_when_leading(self, solver):
+        engine = _engine(solver, include_off_tree=True)
+        state = _constructed_flop_state(200, (1000, 1000))
+        engine.shadow.start(state)
+        menu = engine._action_menu(state, engine.shadow)
+        legal = set(engine.rules.get_legal_actions(state, action_model=engine.action_model))
+        off_tree = [c for c in menu if c.real_action not in legal]
+        assert off_tree, "expected off-tree BET candidates on a first-in flop node"
+        shadow_legal = set(engine.rules.get_legal_actions(state, action_model=engine.action_model))
+        for candidate in off_tree:
+            assert candidate.real_action.type == ActionType.BET
+            for proxy, _weight in candidate.shadow_dist:
+                assert proxy.type == ActionType.BET
+                assert proxy in shadow_legal  # pre-divergence shadow == real state
+
+    def test_off_tree_raises_offered_facing_bet(self, solver):
+        engine = _engine(solver, include_off_tree=True)
+        state = _constructed_flop_state(
+            300, (900, 1000), to_call=100, history=(call(), bet(100)), last_aggressor=1
+        )
+        engine.shadow.start(state)
+        menu = engine._action_menu(state, engine.shadow)
+        legal = set(engine.rules.get_legal_actions(state, action_model=engine.action_model))
+        off_tree = [c for c in menu if c.real_action not in legal]
+        assert off_tree, "expected off-tree RAISE candidates when facing a bet"
+        assert all(c.real_action.type == ActionType.RAISE for c in off_tree)
+
+    def test_off_tree_size_dropped_when_no_shadow_proxy_exists(self, solver):
+        # With 60-chip stacks on a 200 pot every template bet converts to
+        # all-in, so no structure-preserving BET proxy exists and the off-tree
+        # size must be gated out of the menu entirely.
+        engine = _engine(solver, include_off_tree=True, off_tree_pot_fractions=(0.2,))
+        state = _constructed_flop_state(200, (60, 60))
+        engine.shadow.start(state)
+        menu = engine._action_menu(state, engine.shadow)
+        assert bet(40) not in [candidate.real_action for candidate in menu]
+
+    def test_off_tree_size_clamps_to_non_jam_proxy(self, solver):
+        # With 90-chip stacks only bet(66) stays a true BET; an 80-chip off-tree
+        # bet is offered with the clamped bet(66) proxy rather than gated.
+        engine = _engine(solver, include_off_tree=True, off_tree_pot_fractions=(0.4,))
+        state = _constructed_flop_state(200, (90, 90))
+        engine.shadow.start(state)
+        menu = engine._action_menu(state, engine.shadow)
+        candidate = next(c for c in menu if c.real_action == bet(80))
+        assert candidate.shadow_dist == ((bet(66), 1.0),)
+
+
+class TestShadowSync:
+    """Full off-tree hands keep the shadow structurally synced (always-on asserts)."""
+
+    @pytest.mark.timeout(60)
+    def test_shadow_survives_off_tree_hands_and_diverges(self):
+        solver = _build_solver(50, session_id="lbr-shadow-sync")
+        engine = _engine(solver, equity_runouts=2, include_off_tree=True, seed=5)
+        # play_hand runs assert_sync at every decision and commit() asserts
+        # shadow-legality + non-terminality — a structural break fails loudly.
+        for hand in range(16):
+            _play_hand_pair(engine, hand, 5, 2000)
+        # The run must actually exercise divergence, or the asserts prove nothing.
+        assert engine.shadow.divergence_count > 0
+
+
+class TestZeroLeak:
+    """Off-tree play must not inflate uniform fallbacks (no off-tree key leakage).
+
+    Statistical check on the observable; the load-bearing guarantee is
+    structural — commit() asserts every shadow action is on the abstract tree,
+    so shadow-keyed lookups can only miss on genuinely untrained infosets.
+    """
+
+    @pytest.mark.timeout(60)
+    def test_off_tree_does_not_increase_uniform_fallback_rate(self):
+        solver = _build_solver(50, session_id="lbr-zero-leak")
+
+        def fallback_rate(include_off_tree: bool) -> float:
+            engine = _engine(solver, equity_runouts=2, include_off_tree=include_off_tree, seed=5)
+            for hand in range(16):
+                _play_hand_pair(engine, hand, 5, 2000)
+            model = engine._blueprint_model
+            assert model.queries > 0
+            return model.uniform_fallbacks / model.queries
+
+        # Off-tree lines reach different (rarer) subtrees of this barely-trained
+        # blueprint, so rates aren't identical — but a key leak would fall back
+        # on ~every post-divergence street and blow the rate up.
+        assert fallback_rate(True) <= fallback_rate(False) + 0.02
 
 
 class TestExploitability:
@@ -416,6 +531,50 @@ class TestExploitability:
         second = compute_lbr_exploitability(solver, cfg)
         assert first.exploitability_mbb == second.exploitability_mbb
         assert first.lbr_utility_p0 == second.lbr_utility_p0
+
+    def test_include_off_tree_false_pinned_baseline(self):
+        """Bitwise anchor: the on-tree eval must not move under the shadow-state
+        refactor. Pinned on this platform against the pre-shadow implementation;
+        a change here means the include_off_tree=False path is no longer inert."""
+        solver = _build_solver(3, starting_stack=400)
+        result = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=8, equity_runouts=2, seed=99)
+        )
+        assert result.exploitability_mbb == 319.5319499341222
+        assert result.lbr_utility_p0 == 4.7565656565654315
+        assert result.lbr_utility_p1 == 59.149824330259015
+
+    @pytest.mark.timeout(30)
+    def test_off_tree_deterministic_under_fixed_seed(self):
+        solver = _build_solver(3, starting_stack=400)
+        cfg = LBRConfig(num_hands=8, equity_runouts=2, seed=99, include_off_tree=True)
+        first = compute_lbr_exploitability(solver, cfg)
+        second = compute_lbr_exploitability(solver, cfg)
+        assert first.hand_outcomes == second.hand_outcomes
+        assert first.exploitability_mbb == second.exploitability_mbb
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_off_tree_parallel_matches_serial_bitwise(self):
+        """Off-tree mode must keep the per-hand seeding discipline: the committed
+        proxy draws come from the per-hand engine RNG, so parallel == serial."""
+        solver = _build_solver(4, starting_stack=400, session_id="lbr-par-serial-ot")
+        serial = compute_lbr_exploitability(
+            solver,
+            LBRConfig(
+                num_hands=16, equity_runouts=2, seed=123, num_workers=1, include_off_tree=True
+            ),
+        )
+        parallel = compute_lbr_exploitability(
+            solver,
+            LBRConfig(
+                num_hands=16, equity_runouts=2, seed=123, num_workers=4, include_off_tree=True
+            ),
+            blueprint_factory=_rebuild_parallel_test_blueprint,
+        )
+        assert serial.exploitability_mbb == parallel.exploitability_mbb
+        assert serial.lbr_utility_p0 == parallel.lbr_utility_p0
+        assert serial.hand_outcomes == parallel.hand_outcomes
 
     @pytest.mark.slow
     @pytest.mark.timeout(120)
@@ -458,21 +617,12 @@ class TestDeployedOpponent:
         )
 
     @pytest.mark.timeout(120)
-    def test_alpha_zero_matches_blueprint_bitwise(self, monkeypatch):
+    def test_alpha_zero_matches_blueprint_bitwise(self):
         """With blend alpha 0 (and no floor) the deployed opponent collapses to the
         pure blueprint, so the WHOLE deployed pipeline — solve, matrix, sampling,
         belief updates — must reproduce the blueprint eval exactly. Validates all
-        plumbing while trusting zero new math.
-
-        The two paths complete blueprint MISSES differently by design — the LBR
-        blueprint model translation-completes, deployment blends against uniform
-        (resolver semantics) — so translation is pinned OFF for both arms here to
-        hold the completion fixed; it has its own coverage in TestActionMapping."""
-        monkeypatch.setattr(
-            BlueprintOpponent,
-            "_translated_distribution",
-            lambda self, *args, **kwargs: {},
-        )
+        plumbing while trusting zero new math. Both arms complete blueprint
+        misses with uniform natively, so the completions align by construction."""
         solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-a0")
         blueprint_result = compute_lbr_exploitability(
             solver, LBRConfig(num_hands=10, equity_runouts=2, seed=99)
@@ -555,3 +705,93 @@ class TestDeployedOpponent:
             compute_lbr_exploitability(
                 solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, opponent="resolver")
             )
+
+    @pytest.mark.timeout(120)
+    def test_deployed_off_tree_runs_and_is_deterministic(self):
+        """Deployed + off-tree: the resolver acts on real states while the shadow
+        feeds only the scorer, degrading via the broken-tracker path when an
+        opponent action has no structure-preserving mirror. Must run cleanly and
+        stay reproducible under a fixed seed."""
+        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-ot")
+        cfg = LBRConfig(
+            num_hands=6,
+            equity_runouts=2,
+            seed=7,
+            include_off_tree=True,
+            opponent="deployed",
+            resolver=self._resolver_config(policy_blend_alpha=0.5, min_strategy_prob=1e-6),
+        )
+        first = compute_lbr_exploitability(solver, cfg)
+        second = compute_lbr_exploitability(solver, cfg)
+        assert first.hand_outcomes == second.hand_outcomes
+        assert first.exploitability_mbb == second.exploitability_mbb
+
+
+class TestLookaheadScorerMode:
+    """scorer="lookahead" engine wiring: validation, determinism, effect."""
+
+    def test_unknown_scorer_rejected(self):
+        solver = _build_solver(1, starting_stack=400, session_id="lbr-scorer-unknown")
+        with pytest.raises(ValueError, match=r"Unknown LBRConfig\.scorer"):
+            compute_lbr_exploitability(
+                solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, scorer="resolver")
+            )
+
+    def test_depth_below_one_rejected(self):
+        solver = _build_solver(1, starting_stack=400, session_id="lbr-scorer-depth0")
+        with pytest.raises(ValueError, match="depth must be >= 1"):
+            compute_lbr_exploitability(
+                solver,
+                LBRConfig(
+                    num_hands=2, equity_runouts=2, seed=1, scorer="lookahead", lookahead_depth=0
+                ),
+            )
+
+    @pytest.mark.timeout(60)
+    def test_lookahead_changes_play(self):
+        """Guard against the lookahead path silently short-circuiting to myopic."""
+        solver = _build_solver(3, starting_stack=400, session_id="lbr-scorer-diff")
+        myopic = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=10, equity_runouts=2, seed=99)
+        )
+        lookahead = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=10, equity_runouts=2, seed=99, scorer="lookahead")
+        )
+        assert lookahead.exploitability_mbb != myopic.exploitability_mbb
+
+    @pytest.mark.timeout(60)
+    def test_lookahead_deterministic_under_fixed_seed(self):
+        solver = _build_solver(3, starting_stack=400, session_id="lbr-scorer-det")
+        cfg = LBRConfig(
+            num_hands=8, equity_runouts=2, seed=99, scorer="lookahead", include_off_tree=True
+        )
+        first = compute_lbr_exploitability(solver, cfg)
+        second = compute_lbr_exploitability(solver, cfg)
+        assert first.hand_outcomes == second.hand_outcomes
+        assert first.exploitability_mbb == second.exploitability_mbb
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_lookahead_parallel_matches_serial_bitwise(self):
+        """The memo is worker-local and value-inert; per-hand seeding must keep
+        parallel == serial under the lookahead scorer too."""
+        solver = _build_solver(4, starting_stack=400, session_id="lbr-scorer-par-serial")
+
+        def _cfg(num_workers: int) -> LBRConfig:
+            return LBRConfig(
+                num_hands=16,
+                equity_runouts=2,
+                seed=123,
+                scorer="lookahead",
+                include_off_tree=True,
+                num_workers=num_workers,
+            )
+
+        serial = compute_lbr_exploitability(solver, _cfg(num_workers=1))
+        parallel = compute_lbr_exploitability(
+            solver,
+            _cfg(num_workers=4),
+            blueprint_factory=_rebuild_parallel_test_blueprint,
+        )
+        assert serial.exploitability_mbb == parallel.exploitability_mbb
+        assert serial.hand_outcomes == parallel.hand_outcomes

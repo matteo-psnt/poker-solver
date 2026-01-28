@@ -80,10 +80,14 @@ def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
             run_dir=run_dir,
             num_hands=args.hands,
             equity_runouts=args.runouts,
+            include_off_tree=args.include_off_tree,
             seed=args.seed,
             num_workers=args.workers,
             opponent=args.opponent,
             resolver_iterations=args.resolver_iterations,
+            scorer=args.scorer,
+            lookahead_depth=args.lookahead_depth,
+            lookahead_top_k=args.lookahead_top_k,
         )
         estimator = LBR_ESTIMATOR_LABEL
     payload: dict[str, Any] = {
@@ -168,6 +172,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--runouts", type=int, default=12, help="[lbr] Equity runouts per node.")
     p_eval.add_argument("--workers", type=int, default=1, help="[lbr] Parallel workers over hands.")
     p_eval.add_argument(
+        "--include-off-tree",
+        action="store_true",
+        help="[lbr] Add off-tree bet/raise sizes to the exploiter's menu (rigorous via "
+        "shadow-state translation; changes the measured completion — re-baseline).",
+    )
+    p_eval.add_argument(
         "--opponent",
         choices=["blueprint", "deployed"],
         default="blueprint",
@@ -178,6 +188,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=64,
         help="[lbr] Pinned subgame-CFR iterations per deployed-opponent solve.",
+    )
+    p_eval.add_argument(
+        "--scorer",
+        choices=["myopic", "lookahead"],
+        default="myopic",
+        help="[lbr] Exploiter action selection: myopic one-step arithmetic, or a "
+        "depth-limited best-response lookahead vs the blueprint (stronger exploiter).",
+    )
+    p_eval.add_argument(
+        "--lookahead-depth",
+        type=int,
+        default=2,
+        help="[lbr] Opponent-response levels the lookahead scorer expands.",
+    )
+    p_eval.add_argument(
+        "--lookahead-top-k",
+        type=int,
+        default=3,
+        help="[lbr] Lookahead-rescore only the top-k myopic candidates (<=0: all).",
     )
     # Rollout options (--method rollout).
     p_eval.add_argument("--samples", type=int, default=500, help="[rollout] Number of samples.")

@@ -26,7 +26,6 @@ import numpy as np
 
 from src.core.game.actions import Action
 from src.core.game.state import GameState
-from src.engine.search.action_translation import translate_action_distribution
 from src.engine.search.range_inference import (
     ALL_COMBOS,
     COMBO_MASKS,
@@ -39,7 +38,6 @@ from src.engine.search.range_inference import (
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.shared.config import ResolverConfig
-from src.shared.numeric import NORMALIZE_EPS
 
 
 def known_mask(state: GameState, actor: int) -> int:
@@ -54,18 +52,23 @@ def known_mask(state: GameState, actor: int) -> int:
 
 
 class OpponentModel(Protocol):
-    """Per-combo action distributions for the strategy under measurement."""
+    """Per-combo action distributions for the strategy under measurement.
+
+    ``wants_translated_state`` selects which state the model's decisions are
+    defined on: ``True`` routes the LBR engine's on-tree shadow state to
+    ``action_matrix`` (translation-completed strategies, whose lookups must
+    never see an off-tree history), ``False`` routes the real state (the
+    deployed resolver re-solves reality directly).
+    """
+
+    wants_translated_state: bool
 
     def reset(self, initial_state: GameState, actor: int) -> None:
         """Start of a hand; ``actor`` is the seat this model plays."""
         ...
 
     def action_matrix(
-        self,
-        state: GameState,
-        actor: int,
-        prev_state: GameState | None,
-        prev_action: Action | None,
+        self, state: GameState, actor: int
     ) -> tuple[list[Action], dict[Action, np.ndarray]]:
         """Legal actions and, per action, P(action | combo) over ``ALL_COMBOS``."""
         ...
@@ -76,19 +79,31 @@ class OpponentModel(Protocol):
 
 
 class BlueprintOpponent:
-    """The frozen strategy table, completed off-tree by action translation.
+    """The frozen strategy table, queried only on on-tree states.
 
-    Stateless: distributions are pure functions of the public state. Logic moved
-    verbatim from the LBR engine; it must produce bit-identical results to the
-    pre-seam evaluator.
+    Stateless: distributions are pure functions of the public state. The LBR
+    engine guarantees every query stays inside the abstract tree by keying off
+    its carried shadow state (see :mod:`shadow_state`), so a uniform fallback
+    here means a genuinely untrained infoset — never an off-tree betting
+    sequence. ``queries``/``uniform_fallbacks`` count unique infoset keys per
+    node (the per-key cache dedupes identically in every eval arm, so rates
+    are comparable across runs).
     """
 
-    def __init__(self, blueprint):
+    wants_translated_state = True
+
+    def __init__(self, blueprint, dist_memo=None):
         self.blueprint = blueprint
         self.rules = blueprint.rules
         self.action_model = blueprint.action_model
         self.card_abstraction = blueprint.card_abstraction
         self.storage = blueprint.storage
+        self.queries: int = 0
+        self.uniform_fallbacks: int = 0
+        # Optional cross-call BlueprintDistMemo (lookahead scorer): pure cache,
+        # value-inert. None (the default) keeps this class's behavior and cost
+        # exactly as before — the myopic path never constructs one.
+        self.dist_memo = dist_memo
 
     def reset(self, initial_state: GameState, actor: int) -> None:
         del initial_state, actor
@@ -97,11 +112,7 @@ class BlueprintOpponent:
         del state, action
 
     def action_matrix(
-        self,
-        state: GameState,
-        actor: int,
-        prev_state: GameState | None,
-        prev_action: Action | None,
+        self, state: GameState, actor: int
     ) -> tuple[list[Action], dict[Action, np.ndarray]]:
         """Per-combo blueprint action probabilities at an opponent node.
 
@@ -125,7 +136,7 @@ class BlueprintOpponent:
             key = encode_infoset_key(opp_state, actor, self.card_abstraction)
             dist = cache.get(key)
             if dist is None:
-                dist = self._opponent_distribution(opp_state, actor, prev_state, prev_action)
+                dist = self._memoized_distribution(key, opp_state, actor)
                 cache[key] = dist
             for action, prob in dist.items():
                 vec = vecs.get(action)
@@ -133,35 +144,50 @@ class BlueprintOpponent:
                     vec[idx] += prob
         return legal, vecs
 
-    def _opponent_distribution(
-        self,
-        state: GameState,
-        opp: int,
-        prev_state: GameState | None,
-        prev_lbr_action: Action | None,
+    def _memoized_distribution(
+        self, infoset_key: object, state: GameState, opp: int
     ) -> dict[Action, float]:
+        """Cross-call memo wrapper around :meth:`_opponent_distribution`.
+
+        The memo key extends the infoset key with the exact public chip
+        configuration: two states can share an infoset key (same normalized
+        sequence / bucket / SPR bucket) with different chips, which changes the
+        legal menu and hence the distribution. Counters tick per logical query
+        on hits too, so fallback-rate diagnostics are memo-invariant.
+        """
+        if self.dist_memo is None:
+            return self._opponent_distribution(state, opp)
+        memo_key = self.dist_memo.key(infoset_key, state)
+        entry = self.dist_memo.get(memo_key)
+        if entry is not None:
+            dist, was_fallback = entry
+            self.queries += 1
+            if was_fallback:
+                self.uniform_fallbacks += 1
+            return dist
+        fallbacks_before = self.uniform_fallbacks
+        dist = self._opponent_distribution(state, opp)
+        if dist:  # the empty-legal {} case never ticks counters; keep it un-memoized
+            self.dist_memo.put(memo_key, dist, self.uniform_fallbacks > fallbacks_before)
+        return dist
+
+    def _opponent_distribution(self, state: GameState, opp: int) -> dict[Action, float]:
         """Blueprint response distribution over legal actions at ``state``.
 
-        On-tree nodes read the blueprint infoset directly. Off-tree nodes (the
-        LBR player made an off-tree bet) map the bet to the nearest on-tree size
-        and read the blueprint there, projecting the response back onto the real
-        legal actions — the translation completion described in the LBR module docs.
+        A direct infoset read; missing infosets fall back to uniform. The
+        engine's shadow keeps every query on-tree, so a miss can only mean the
+        infoset was never trained.
         """
         legal = list(self.rules.get_legal_actions(state, action_model=self.action_model))
         if not legal:
             return {}
 
+        self.queries += 1
         direct = self._infoset_distribution(state, opp, legal)
         if direct is not None:
             return direct
 
-        if prev_state is not None and prev_lbr_action is not None:
-            translated = self._translated_distribution(
-                state, opp, legal, prev_state, prev_lbr_action
-            )
-            if translated:
-                return translated
-
+        self.uniform_fallbacks += 1
         uniform = 1.0 / len(legal)
         return {action: uniform for action in legal}
 
@@ -190,46 +216,6 @@ class BlueprintOpponent:
             dist[action] = dist.get(action, 0.0) + float(prob)
         return dist
 
-    def _translated_distribution(
-        self,
-        state: GameState,
-        opp: int,
-        legal: list[Action],
-        prev_state: GameState,
-        prev_lbr_action: Action,
-    ) -> dict[Action, float]:
-        """Project the blueprint's on-tree response onto real legal actions."""
-        on_tree = translate_action_distribution(
-            prev_state, prev_lbr_action, self.action_model, self.rules
-        )
-        dist: dict[Action, float] = {}
-        for proxy_action, weight in on_tree:
-            proxy_state = prev_state.apply_action(proxy_action, self.rules)
-            proxy_legal = list(
-                self.rules.get_legal_actions(proxy_state, action_model=self.action_model)
-            )
-            proxy_dist = self._infoset_distribution(proxy_state, opp, proxy_legal)
-            if proxy_dist is None:
-                continue
-            for action, prob in proxy_dist.items():
-                for real_action, share in self._map_to_real(state, action, legal):
-                    dist[real_action] = dist.get(real_action, 0.0) + weight * prob * share
-
-        total = sum(dist.values())
-        if total <= NORMALIZE_EPS:
-            return {}
-        return {action: prob / total for action, prob in dist.items()}
-
-    def _map_to_real(
-        self, state: GameState, action: Action, legal: list[Action]
-    ) -> list[tuple[Action, float]]:
-        """Map a proxy-node response to the real legal actions at ``state``."""
-        if action in legal:
-            return [(action, 1.0)]
-        # Fold/check/call carry across states unchanged; only bet/raise sizes
-        # need re-discretizing to the real legal menu.
-        return translate_action_distribution(state, action, self.action_model, self.rules)
-
 
 class ResolvedOpponent:
     """The deployed system: blueprint + runtime subgame resolver.
@@ -249,7 +235,14 @@ class ResolvedOpponent:
     resolver errors; an eval that silently measured the blueprint at some nodes
     while reporting a deployed number would be lying, so here a resolver error
     kills the eval loudly instead.
+
+    Deliberately keeps the REAL state (``wants_translated_state = False``): the
+    resolver's off-tree response IS the re-solve of the actual state, and its
+    internal blueprint blend degrading toward uniform on off-tree histories is
+    exactly what deployment does — measuring that is the point.
     """
+
+    wants_translated_state = False
 
     def __init__(self, blueprint, resolver_config: ResolverConfig):
         if resolver_config.max_iterations is None:
@@ -276,15 +269,8 @@ class ResolvedOpponent:
         self._seat = actor
 
     def action_matrix(
-        self,
-        state: GameState,
-        actor: int,
-        prev_state: GameState | None,
-        prev_action: Action | None,
+        self, state: GameState, actor: int
     ) -> tuple[list[Action], dict[Action, np.ndarray]]:
-        # The resolver's off-tree response IS the re-solve of the actual state:
-        # no translation proxy is needed, so prev_state/prev_action are unused.
-        del prev_state, prev_action
         if self._ranges is None:
             self._ranges = infer_ranges(state, self.blueprint)
 

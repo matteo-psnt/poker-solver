@@ -74,26 +74,3 @@ def translate_action_distribution(
     lower_w /= total
     upper_w /= total
     return [(lower, lower_w), (upper, upper_w)]
-
-
-def translate_off_tree_action(
-    state: GameState,
-    observed_action: Action,
-    action_model: ActionModel,
-    rules: GameRules,
-    *,
-    rng: np.random.Generator | None = None,
-) -> Action:
-    """Translate an observed action to one legal abstract action."""
-    dist = translate_action_distribution(state, observed_action, action_model, rules)
-    if len(dist) == 1:
-        return dist[0][0]
-    if rng is None:
-        rng = np.random.default_rng()
-    probs = np.array([p for _, p in dist], dtype=np.float64)
-    probs_sum = probs.sum()
-    if probs_sum <= 0:
-        return dist[0][0]
-    probs /= probs_sum
-    idx = int(rng.choice(len(dist), p=probs))
-    return dist[idx][0]

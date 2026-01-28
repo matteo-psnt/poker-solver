@@ -129,6 +129,7 @@ def evaluate(
     method: str = "lbr",
     num_hands: int = 1000,
     equity_runouts: int = 12,
+    include_off_tree: bool = False,
     num_workers: int | None = None,
     num_samples: int = 500,
     num_rollouts: int = 50,
@@ -138,6 +139,9 @@ def evaluate(
     abstraction_hash: str | None = None,
     opponent: str = "blueprint",
     resolver_iterations: int = 64,
+    scorer: str = "myopic",
+    lookahead_depth: int = 2,
+    lookahead_top_k: int = 3,
 ) -> dict[str, Any]:
     """Evaluate a run stored on the Volume (Local Best Response by default).
 
@@ -168,12 +172,16 @@ def evaluate(
             run_dir=run_dir,
             num_hands=num_hands,
             equity_runouts=equity_runouts,
+            include_off_tree=include_off_tree,
             seed=seed,
             num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
             allin_runouts=allin_runouts,
             abstraction_hash=abstraction_hash,
             opponent=opponent,
             resolver_iterations=resolver_iterations,
+            scorer=scorer,
+            lookahead_depth=lookahead_depth,
+            lookahead_top_k=lookahead_top_k,
         )
         estimator = LBR_ESTIMATOR_LABEL
     return {
@@ -393,14 +401,22 @@ def run_eval(
     abstraction_hash: str = "",
     opponent: str = "blueprint",
     resolver_iterations: int = 64,
+    include_off_tree: bool = False,
+    scorer: str = "myopic",
+    lookahead_depth: int = 2,
+    lookahead_top_k: int = 3,
+    timeout: int = 10800,
 ) -> None:
     """LBR-evaluate an existing Volume run. Fewer workers + more memory for large
     blueprints, since each parallel worker rebuilds the full blueprint.
 
     Pass --abstraction-hash to pin the card abstraction to the one the run was trained
     against (see the abstraction's metadata.json ``config_hash``). Pass
-    --opponent deployed to measure blueprint+resolver (the system that actually plays)."""
-    eval_result = evaluate.with_options(cpu=cpu, memory=memory).remote(
+    --opponent deployed to measure blueprint+resolver (the system that actually plays).
+    Pass --include-off-tree to arm the exploiter with off-tree bet/raise sizes and
+    --scorer lookahead for the depth-limited best-response scorer (both produce a
+    stronger, still-rigorous exploiter; never mix settings within one comparison)."""
+    eval_result = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout).remote(
         run_id=run_id,
         num_hands=hands,
         num_workers=cpu,
@@ -408,6 +424,10 @@ def run_eval(
         abstraction_hash=abstraction_hash or None,
         opponent=opponent,
         resolver_iterations=resolver_iterations,
+        include_off_tree=include_off_tree,
+        scorer=scorer,
+        lookahead_depth=lookahead_depth,
+        lookahead_top_k=lookahead_top_k,
     )
     results = eval_result["results"]
     print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
@@ -429,6 +449,10 @@ def run_compare(
     memory: int = 32768,
     seed: int = 1,
     timeout: int = 10800,
+    include_off_tree: bool = False,
+    scorer: str = "myopic",
+    lookahead_depth: int = 2,
+    lookahead_top_k: int = 3,
 ) -> None:
     """Paired LBR comparison of two Volume runs under common random numbers.
 
@@ -440,8 +464,17 @@ def run_compare(
     from src.pipeline.evaluation.statistics import compare_paired_samples
 
     fn = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout)
-    call_a = fn.spawn(run_id=run_a, num_hands=hands, num_workers=cpu, seed=seed)
-    call_b = fn.spawn(run_id=run_b, num_hands=hands, num_workers=cpu, seed=seed)
+    shared = dict(
+        num_hands=hands,
+        num_workers=cpu,
+        seed=seed,
+        include_off_tree=include_off_tree,
+        scorer=scorer,
+        lookahead_depth=lookahead_depth,
+        lookahead_top_k=lookahead_top_k,
+    )
+    call_a = fn.spawn(run_id=run_a, **shared)
+    call_b = fn.spawn(run_id=run_b, **shared)
     result_a, result_b = call_a.get(), call_b.get()
 
     results_a, results_b = result_a["results"], result_b["results"]
@@ -487,6 +520,10 @@ def run_deployed_gate(
     seed: int = 1,
     resolver_iterations: int = 64,
     timeout: int = 10800,
+    include_off_tree: bool = False,
+    scorer: str = "myopic",
+    lookahead_depth: int = 2,
+    lookahead_top_k: int = 3,
 ) -> None:
     """Paired LBR of ONE run under both opponent models: bare blueprint vs deployed
     (blueprint + resolver), common random numbers.
@@ -499,14 +536,21 @@ def run_deployed_gate(
     from src.pipeline.evaluation.statistics import compare_paired_samples
 
     fn = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout)
-    call_bare = fn.spawn(run_id=run_id, num_hands=hands, num_workers=cpu, seed=seed)
-    call_deployed = fn.spawn(
+    shared = dict(
         run_id=run_id,
         num_hands=hands,
         num_workers=cpu,
         seed=seed,
+        include_off_tree=include_off_tree,
+        scorer=scorer,
+        lookahead_depth=lookahead_depth,
+        lookahead_top_k=lookahead_top_k,
+    )
+    call_bare = fn.spawn(**shared)
+    call_deployed = fn.spawn(
         opponent="deployed",
         resolver_iterations=resolver_iterations,
+        **shared,
     )
     result_bare, result_deployed = call_bare.get(), call_deployed.get()
 
