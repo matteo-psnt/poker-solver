@@ -1,0 +1,30 @@
+# Production XL: 2x the production bucket counts per street.
+# First rung of the bucket-count ladder now that the lookahead LBR evaluator
+# can rank abstractions (production 100/300/600 was capacity-limited relative
+# to the literature). A controlled 2x step, not 4x+, to keep the infoset-count
+# growth at 10M training iterations measurable before committing to bigger
+# artifacts; validate with a 1M-iteration run before any 10M run.
+# Full coverage: every canonical board on every street is precomputed exactly.
+
+# Equity buckets per street
+buckets:
+  flop: 200
+  turn: 600
+  river: 1200
+
+# Equity calculation settings
+# Flop runout cap for the exact range-vs-range engine (null = all 1,176
+# runouts). Turn and river equities are always exact.
+flop_runouts: null
+
+# Bins of the equity-realization histogram used as the flop/turn bucketing
+# feature (potential-aware). The river buckets on scalar equity.
+equity_histogram_bins: 8
+
+# Clustering algorithm settings (weighted 1D k-means over equities)
+kmeans_max_iter: 500
+kmeans_n_init: 20
+
+# System settings
+num_workers: null  # null = use all CPU cores
+seed: 42
