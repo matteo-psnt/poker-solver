@@ -10,11 +10,20 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Card
 from src.engine.search import resolver as resolver_module
-from src.engine.search.range_inference import combo_index_for, replace_actor_hole_cards
+from src.engine.search.range_inference import (
+    combo_index_for,
+    infer_ranges,
+    replace_actor_hole_cards,
+)
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.in_memory import InMemoryStorage
-from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
+from tests.test_helpers import (
+    DummyCardAbstraction,
+    build_test_storage,
+    make_test_config,
+    skew_preflop_infoset,
+)
 
 
 def _make_initial_state():
@@ -217,6 +226,69 @@ def test_strategy_matrix_rows_are_distributions_and_call_is_pure():
     actions_again, matrix_again = resolver.solve_strategy_matrix(state)
     assert actions_again == actions
     np.testing.assert_array_equal(matrix_again, matrix)
+
+
+@pytest.mark.timeout(60)
+def test_solve_does_not_mutate_ranges():
+    """observe() is the single range-update path: solve() must not write _ranges
+    (a driver observing the applied action would otherwise double-count it)."""
+    state, rules = _make_initial_state()
+    config = make_test_config(
+        seed=42, **{"resolver.max_iterations": 8, "resolver.leaf_rollouts": 2}
+    )
+    solver, action_model = _trained_solver(config, "resolver-solve-pure")
+    resolver = HUResolver(
+        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+    )
+    np.random.seed(7)
+    resolver.solve(state, time_budget_ms=50)
+    assert resolver._ranges is None
+
+
+@pytest.mark.timeout(60)
+def test_observe_replays_history_for_both_seats():
+    """History-replay range inference: observed actions Bayes-update the acting
+    player's slot — including the OPPONENT's actions, which previously never
+    reached range inference (the uniform-opponent-range limitation)."""
+    state, rules = _make_initial_state()
+    config = make_test_config(
+        seed=42, **{"resolver.max_iterations": 8, "resolver.leaf_rollouts": 2}
+    )
+    solver, action_model = _trained_solver(config, "resolver-observe")
+    resolver = HUResolver(
+        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+    )
+
+    baseline = infer_ranges(state, solver)
+    first_actor = state.current_player
+    legal = rules.get_legal_actions(state, action_model=action_model)
+    open_raise = next(a for a in legal if a.is_aggressive())
+    # Manufactured certainty: the blueprint opens AA with the observed raise
+    # (tiny trained blueprints are near-uniform — nothing for Bayes to grip).
+    aa = (Card.new("Ad"), Card.new("Ac"))
+    skew_preflop_infoset(solver, state, actor=first_actor, combo=aa, action=open_raise)
+
+    resolver.observe(state, open_raise)
+    after_first = resolver._ranges
+    assert after_first is not None
+    first_slot = after_first.p0 if first_actor == 0 else after_first.p1
+    first_base = baseline.p0 if first_actor == 0 else baseline.p1
+    assert not np.allclose(first_slot, first_base)
+    assert first_slot[combo_index_for(aa)] > first_base[combo_index_for(aa)]
+
+    # The responder's action must update the OTHER slot too.
+    faced = state.apply_action(open_raise, rules)
+    responder = faced.current_player
+    faced_legal = rules.get_legal_actions(faced, action_model=action_model)
+    response = next((a for a in faced_legal if a.is_aggressive()), faced_legal[0])
+    kk = (Card.new("Kd"), Card.new("Kc"))
+    skew_preflop_infoset(solver, faced, actor=responder, combo=kk, action=response)
+    resolver.observe(faced, response)
+    after_second = resolver._ranges
+    second_slot = after_second.p0 if responder == 0 else after_second.p1
+    second_base = baseline.p0 if responder == 0 else baseline.p1
+    assert not np.allclose(second_slot, second_base)
+    assert second_slot[combo_index_for(kk)] > second_base[combo_index_for(kk)]
 
 
 @pytest.mark.timeout(60)

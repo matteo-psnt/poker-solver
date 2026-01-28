@@ -221,11 +221,12 @@ class ResolvedOpponent:
     """The deployed system: blueprint + runtime subgame resolver.
 
     Faithful to deployment semantics (:class:`HUResolver` as driven by
-    ``resolver_match``): fresh ranges each hand; the model's own range is
-    Bayes-updated after each of its own actions using blueprint likelihoods;
-    the other player's observed actions are NOT incorporated (the known
-    uniform-opponent-range limitation of the deployed resolver — measuring it
-    is the point).
+    ``resolver_match``): fresh ranges each hand, then **history-replay range
+    inference** — every realized action from BOTH seats Bayes-updates the
+    acting player's range using blueprint likelihoods (translation-completed
+    for off-tree sizes), so the resolver's next solve sees ranges shaped by
+    the whole observed history instead of the uniform ranges that made the
+    deployed system measurably exploitable.
 
     Determinism: requires ``resolver_config.max_iterations`` — budget-driven
     solves vary with wall clock, which would break reproducibility and paired
@@ -264,8 +265,9 @@ class ResolvedOpponent:
         self.solve_count: int = 0
 
     def reset(self, initial_state: GameState, actor: int) -> None:
-        del initial_state
-        self._ranges = None
+        # Ranges start fresh per hand and must exist before the first observe()
+        # (which can precede the first action_matrix call).
+        self._ranges = infer_ranges(initial_state, self.blueprint)
         self._seat = actor
 
     def action_matrix(
@@ -291,7 +293,9 @@ class ResolvedOpponent:
         return actions, {action: matrix[:, i] for i, action in enumerate(actions)}
 
     def observe(self, state: GameState, action: Action) -> None:
-        """Mirror deployment's range bookkeeping: self-update on own actions only."""
-        if state.current_player != self._seat or self._ranges is None:
+        """History-replay range inference: every realized action (both seats)
+        Bayes-updates the acting player's range, mirroring deployment's
+        ``HUResolver.observe`` bookkeeping."""
+        if self._ranges is None:
             return
         self._ranges = update_ranges(state, self._ranges, action, self.blueprint)

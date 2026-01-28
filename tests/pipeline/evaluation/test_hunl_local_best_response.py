@@ -30,10 +30,10 @@ from src.pipeline.evaluation.hunl_local_best_response import (
     _play_hand_pair,
     compute_lbr_exploitability,
 )
-from src.pipeline.evaluation.opponent_model import known_mask
+from src.pipeline.evaluation.opponent_model import ResolvedOpponent, known_mask
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.shared.config import ResolverConfig
-from tests.test_helpers import build_trained_test_solver
+from tests.test_helpers import build_trained_test_solver, skew_preflop_infoset
 
 
 def _build_solver(
@@ -705,6 +705,30 @@ class TestDeployedOpponent:
             compute_lbr_exploitability(
                 solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, opponent="resolver")
             )
+
+    def test_resolved_opponent_incorporates_exploiter_actions(self):
+        """History-replay range inference: the EXPLOITER's observed actions must
+        Bayes-update the exploiter's slot in the deployed opponent's ranges
+        (they previously never reached range inference — the uniform-opponent
+        limitation that made the deployed system measurably exploitable)."""
+        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-histreplay")
+        model = ResolvedOpponent(solver, self._resolver_config())
+        engine = _engine(solver)
+        state = _deal_initial_state(engine, 400, 0, np.random.default_rng(3))
+        exploiter_seat = state.current_player  # SB acts first preflop
+        model.reset(state, actor=1 - exploiter_seat)
+        assert model._ranges is not None
+        before = model._ranges.p0.copy() if exploiter_seat == 0 else model._ranges.p1.copy()
+        legal = solver.rules.get_legal_actions(state, action_model=solver.action_model)
+        aggressive = next(a for a in legal if a.is_aggressive())
+        # Manufactured certainty: the blueprint plays AA aggressively (tiny
+        # trained blueprints are near-uniform — nothing for Bayes to grip).
+        aa = (Card.new("Ad"), Card.new("Ac"))
+        skew_preflop_infoset(solver, state, actor=exploiter_seat, combo=aa, action=aggressive)
+        model.observe(state, aggressive)
+        after = model._ranges.p0 if exploiter_seat == 0 else model._ranges.p1
+        assert not np.allclose(after, before)
+        assert after[combo_index_for(aa)] > before[combo_index_for(aa)]
 
     @pytest.mark.timeout(120)
     def test_deployed_off_tree_runs_and_is_deterministic(self):
