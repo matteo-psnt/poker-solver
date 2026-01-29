@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import queue
 import time
 from typing import TYPE_CHECKING, cast
 
 from src.pipeline.training.parallel_protocol import JobType
+
+from .gather import gather_worker_results
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -76,25 +77,20 @@ def resize_storage(
             }
         )
 
-    acks = []
-    for _ in range(manager.num_workers):
-        try:
-            raw_result = manager.result_queue.get(timeout=timeout)
-            if not isinstance(raw_result, dict):
-                continue
-            result = cast(dict[str, object], raw_result)
-            if result.get("type") == "resize_ack":
-                acks.append(result)
-                if verbose:
-                    worker_id = cast(int, result["worker_id"])
-                    new_range = cast(tuple[int, int], result["new_id_range"])
-                    print(
-                        f"[Master] Worker {worker_id} reattached (range={new_range})",
-                        flush=True,
-                    )
-        except queue.Empty:
-            raise RuntimeError(
-                f"Timeout waiting for resize acks ({len(acks)}/{manager.num_workers} received)"
+    acks, _ = gather_worker_results(
+        manager,
+        accept=lambda r: r.get("type") == "resize_ack",
+        expected=manager.num_workers,
+        timeout=timeout,
+        description="resize acks",
+    )
+    if verbose:
+        for result in acks:
+            worker_id = cast(int, result["worker_id"])
+            new_range = cast(tuple[int, int], result["new_id_range"])
+            print(
+                f"[Master] Worker {worker_id} reattached (range={new_range})",
+                flush=True,
             )
 
     resize_time = time.time() - resize_start
