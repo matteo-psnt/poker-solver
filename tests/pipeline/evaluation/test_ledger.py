@@ -1,11 +1,12 @@
 """Tests for the append-only evaluation ledger and its comparison guard."""
 
-from types import SimpleNamespace
+from dataclasses import replace
 
 import pytest
 
 from src.core.actions.action_model import ActionModel
 from src.pipeline.evaluation import ledger
+from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.config import Config
 
@@ -21,19 +22,10 @@ def _fake_metadata(run_id="run-x"):
     )
 
 
-def _lbr_args(**over):
-    base = dict(
-        scorer="myopic",
-        opponent="blueprint",
-        hands=100,
-        runouts=12,
-        include_off_tree=False,
-        resolver_iterations=64,
-        lookahead_depth=2,
-        lookahead_top_k=3,
-    )
-    base.update(over)
-    return SimpleNamespace(**base)
+def _lbr_config(**over):
+    # LBRConfig's own defaults (myopic/blueprint/on-tree, lookahead 2/3) are the
+    # baseline tier; tests override per-case.
+    return replace(LBRConfig(num_hands=100, equity_runouts=12), **over)
 
 
 def _results(base_seed=7, mbb=100.0, n=100):
@@ -48,7 +40,7 @@ def _results(base_seed=7, mbb=100.0, n=100):
 
 class TestKnobs:
     def test_lbr_knobs_take_seed_from_results(self):
-        knobs = ledger.build_lbr_knobs(_lbr_args(), _results(base_seed=42))
+        knobs = ledger.build_lbr_knobs(_lbr_config(), _results(base_seed=42))
         assert knobs["base_seed"] == 42
         assert knobs["scorer"] == "myopic"
         # deployed-only / lookahead-only knobs omitted for the blueprint+myopic tier
@@ -56,18 +48,21 @@ class TestKnobs:
         assert "lookahead_depth" not in knobs
 
     def test_lbr_knobs_include_tier_specific(self):
+        """Deployed/lookahead tiers pick up the resolver pin (from results — it is
+        resolved during the eval) and the lookahead knobs (from the config)."""
         knobs = ledger.build_lbr_knobs(
-            _lbr_args(opponent="deployed", scorer="lookahead"), _results()
+            _lbr_config(opponent="deployed", scorer="lookahead"),
+            _results() | {"resolver_iterations": 64},
         )
         assert knobs["resolver_iterations"] == 64
         assert knobs["lookahead_depth"] == 2
 
-    def test_params_and_args_builders_agree(self):
-        """The argparse wrapper and the explicit-params core must produce identical tiers
-        so a local eval and a Modal eval of the same run are pairable."""
-        results = _results(base_seed=42)
-        args = _lbr_args(opponent="deployed", scorer="lookahead")
-        from_args = ledger.build_lbr_knobs(args, results)
+    def test_config_and_params_builders_agree(self):
+        """The LBRConfig wrapper and the explicit-params core must produce identical
+        tiers so every transport records pairable rows."""
+        results = _results(base_seed=42) | {"resolver_iterations": 64}
+        config = _lbr_config(opponent="deployed", scorer="lookahead")
+        from_config = ledger.build_lbr_knobs(config, results)
         from_params = ledger.build_lbr_knobs_from_params(
             scorer="lookahead",
             opponent="deployed",
@@ -79,14 +74,7 @@ class TestKnobs:
             lookahead_depth=2,
             lookahead_top_k=3,
         )
-        assert from_args == from_params
-
-    def test_rollout_params_builder_matches_args(self):
-        results = {"base_seed": 3}
-        args = SimpleNamespace(samples=500, rollouts=50, current=False, seed=None)
-        assert ledger.build_rollout_knobs(args, results) == ledger.build_rollout_knobs_from_params(
-            samples=500, rollouts=50, use_current=False, base_seed=3
-        )
+        assert from_config == from_params
 
 
 class TestWriteAndAppend:
@@ -119,7 +107,7 @@ class TestWriteAndAppend:
 
     def test_build_record_shape_and_provenance(self, tmp_path):
         results = _results()
-        knobs = ledger.build_lbr_knobs(_lbr_args(), results)
+        knobs = ledger.build_lbr_knobs(_lbr_config(), results)
         payload_path = ledger.write_payload(tmp_path, {"results": results}, knobs)
         record = ledger.build_record(
             run_metadata=_fake_metadata("run-x"),
@@ -145,7 +133,7 @@ class TestRecordEvaluation:
         run_dir.mkdir()
         _fake_metadata("run-x").save(run_dir / ".run.json")
         results = _results(base_seed=7)
-        knobs = ledger.build_lbr_knobs(_lbr_args(), results)
+        knobs = ledger.build_lbr_knobs(_lbr_config(), results)
         payload = {"op": "evaluate", "infosets": 10, "results": results}
         led = tmp_path / "eval_ledger.jsonl"
 

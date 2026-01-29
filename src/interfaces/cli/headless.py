@@ -22,9 +22,10 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation import ledger as eval_ledger
+from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.training import services
-from src.pipeline.training.services import LBR_ESTIMATOR_LABEL, ROLLOUT_ESTIMATOR_LABEL
+from src.pipeline.training.services import RolloutParams
 
 
 def _json_default(obj: Any) -> Any:
@@ -67,71 +68,41 @@ def _cmd_train(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
+    """Argparse transport around :func:`services.evaluate_and_record`.
+
+    All dispatch, payload shaping, and ledger recording live in the orchestrator;
+    this function only maps flags onto the params objects. The orchestrator's
+    ledger warning prints to stdout, which under ``--json`` is redirected to
+    stderr — keeping the machine-readable payload clean.
+    """
     run_dir = _resolve_run_dir(args.run, args.runs_dir)
-    if args.method == "rollout":
-        out = services.evaluate_run_rollout(
-            run_dir=run_dir,
-            num_samples=args.samples,
-            num_rollouts=args.rollouts,
-            use_average_strategy=not args.current,
-            seed=args.seed,
-        )
-        estimator = ROLLOUT_ESTIMATOR_LABEL
-    else:  # "lbr" (default, trustworthy)
-        out = services.evaluate_run_lbr(
-            run_dir=run_dir,
+    payload = services.evaluate_and_record(
+        run_dir,
+        method=args.method,
+        lbr=LBRConfig(
             num_hands=args.hands,
             equity_runouts=args.runouts,
             include_off_tree=args.include_off_tree,
             seed=args.seed,
             num_workers=args.workers,
+            allin_runouts=args.allin_runouts,
             opponent=args.opponent,
-            resolver_iterations=args.resolver_iterations,
             scorer=args.scorer,
             lookahead_depth=args.lookahead_depth,
             lookahead_top_k=args.lookahead_top_k,
-        )
-        estimator = LBR_ESTIMATOR_LABEL
-    payload: dict[str, Any] = {
-        "op": "evaluate",
-        "run_id": run_dir.name,
-        "method": args.method,
-        "estimator": estimator,
-        "infosets": out.infosets,
-        "results": out.results,
-    }
+        ),
+        rollout=RolloutParams(
+            num_samples=args.samples,
+            num_rollouts=args.rollouts,
+            use_average_strategy=not args.current,
+            seed=args.seed,
+        ),
+        resolver_iterations=args.resolver_iterations,
+        abstraction_hash=args.abstraction_hash,
+        ledger_path=Path(args.ledger),
+    )
     _write_result(run_dir, payload)
-    _record_to_ledger(run_dir, args, payload, estimator)
     return payload
-
-
-def _record_to_ledger(
-    run_dir: Path, args: argparse.Namespace, payload: dict[str, Any], estimator: str
-) -> None:
-    """Persist the full eval payload (no clobber) and append a compact ledger row.
-
-    Best-effort: the ledger is a research convenience, so a recording failure warns
-    but never fails the evaluation itself. The warning prints to stdout, which under
-    ``--json`` is redirected to stderr — keeping the machine-readable payload clean.
-    """
-    ledger_path = Path(args.ledger)
-    try:
-        results = payload["results"]
-        if args.method == "rollout":
-            knobs = eval_ledger.build_rollout_knobs(args, results)
-        else:
-            knobs = eval_ledger.build_lbr_knobs(args, results)
-        result_path, _ = eval_ledger.record_evaluation(
-            run_dir=run_dir,
-            payload=payload,
-            method=args.method,
-            estimator=estimator,
-            knobs=knobs,
-            ledger_path=ledger_path,
-        )
-        print(f"  Ledger:        appended to {ledger_path} (payload: {result_path})")
-    except Exception as exc:
-        print(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
 
 
 def _cmd_ledger(args: argparse.Namespace) -> dict[str, Any]:
@@ -318,6 +289,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="[lbr] Add off-tree bet/raise sizes to the exploiter's menu (rigorous via "
         "shadow-state translation; changes the measured completion — re-baseline).",
+    )
+    p_eval.add_argument(
+        "--allin-runouts",
+        type=int,
+        default=50,
+        help="[lbr] Board runouts averaged at all-in showdown terminals "
+        "(variance reduction; same expectation).",
+    )
+    p_eval.add_argument(
+        "--abstraction-hash",
+        default=None,
+        help="Pin the card abstraction to this hash (see the abstraction's metadata.json "
+        "'config_hash'). Default: the hash recorded on the run.",
     )
     p_eval.add_argument(
         "--opponent",

@@ -1,7 +1,7 @@
 """Service-layer APIs for training and evaluation orchestration."""
 
 import functools
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +9,7 @@ from src.core.game.state import Street
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
+from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.hunl_local_best_response import (
     LBRConfig,
     LBRResult,
@@ -45,6 +46,16 @@ class EvaluationOutput:
 
     infosets: int
     results: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class RolloutParams:
+    """Settings for the legacy one-ply rollout estimator (diagnostic opt-in only)."""
+
+    num_samples: int = 500
+    num_rollouts: int = 50
+    use_average_strategy: bool = True
+    seed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -261,44 +272,29 @@ def _lbr_results_dict(result: LBRResult, big_blind: int) -> dict[str, Any]:
 
 def evaluate_run_lbr(
     run_dir: Path,
+    config: LBRConfig | None = None,
     *,
-    num_hands: int = 1000,
-    equity_runouts: int = 12,
-    include_off_tree: bool = False,
-    seed: int | None = None,
-    num_workers: int = 1,
-    allin_runouts: int = 50,
-    abstraction_hash: str | None = None,
-    opponent: str = "blueprint",
     resolver_iterations: int = 64,
-    scorer: str = "myopic",
-    lookahead_depth: int = 2,
-    lookahead_top_k: int = 3,
+    abstraction_hash: str | None = None,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
     LBR is a rigorous lower bound on true exploitability (LBR <= exact BR, validated
-    on Kuhn/Leduc). ``include_off_tree`` arms the exploiter with off-tree bet/raise
-    sizes — rigorous via the shadow-state translation completion (see the LBR module
-    docs) but a *different* measured completion, so never mix on/off-tree numbers in
-    one comparison; it stays False only for baseline comparability.
-    ``num_workers`` parallelizes over hands; the result is identical for any count.
+    on Kuhn/Leduc). Every eval knob — hand count, scorer, opponent model, off-tree
+    menu, parallelism — travels in ``config`` (:class:`LBRConfig`), so transports
+    construct one object instead of relisting knobs; see the LBRConfig field docs
+    for the semantics and comparison-tier rules of each knob.
 
-    ``opponent`` selects the strategy under measurement: ``"blueprint"`` (the raw
-    table) or ``"deployed"`` (blueprint + runtime subgame resolver — the system
-    that actually plays). Deployed solves are pinned to ``resolver_iterations``
-    CFR iterations instead of a wall-clock budget so the measured strategy is
-    machine-independent and CRN pairing stays valid; remaining resolver settings
-    (blend alpha, depth, leaf rollouts) come from the run's own config.
-
-    ``scorer`` selects HOW the exploiter picks its actions: ``"myopic"`` (classic
-    one-step arithmetic) or ``"lookahead"`` (depth-limited best response vs the
-    blueprint policy — a stronger exploiter, hence a tighter bound). Selection
-    only: either scorer yields a valid lower bound, but the two are different
-    exploiters, so never mix scorer settings within one comparison.
+    Only two knobs stay outside ``config`` because they are resolved against the
+    run itself: ``abstraction_hash`` (pin the card abstraction; defaults to the
+    run's recorded hash) and ``resolver_iterations``. For ``config.opponent ==
+    "deployed"`` the resolver settings come from the run's own config with
+    ``max_iterations`` pinned to ``resolver_iterations`` — iteration-pinned (not
+    wall-clock) so the measured strategy is machine-independent and CRN pairing
+    stays valid.
 
     The results dict carries per-hand records plus the base seed; evaluate two runs
-    with the same explicit ``seed`` and feed the per-hand samples to
+    with the same explicit ``config.seed`` and feed the per-hand samples to
     :func:`~src.pipeline.evaluation.statistics.compare_paired_samples` for a paired
     comparison that resolves far smaller gaps than two independent intervals.
 
@@ -306,6 +302,7 @@ def evaluate_run_lbr(
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
         ValueError: Invalid configuration or checkpoint state.
     """
+    config = config or LBRConfig()
     metadata = load_run_metadata(run_dir)
     effective_hash = abstraction_hash or metadata.card_abstraction_hash
     if effective_hash is None:
@@ -327,40 +324,26 @@ def evaluate_run_lbr(
     # args (config + checkpoint dir).
     factory = (
         functools.partial(_load_blueprint, metadata.config, run_dir, effective_hash)
-        if num_workers > 1
+        if config.num_workers > 1
         else None
     )
-    resolver_config = (
-        metadata.config.resolver.model_copy(update={"max_iterations": resolver_iterations})
-        if opponent == "deployed"
-        else None
-    )
-    result = compute_lbr_exploitability(
-        solver,
-        LBRConfig(
-            num_hands=num_hands,
-            equity_runouts=equity_runouts,
-            include_off_tree=include_off_tree,
-            seed=seed,
-            num_workers=num_workers,
-            allin_runouts=allin_runouts,
-            opponent=opponent,
-            resolver=resolver_config,
-            scorer=scorer,
-            lookahead_depth=lookahead_depth,
-            lookahead_top_k=lookahead_top_k,
-        ),
-        blueprint_factory=factory,
-    )
+    if config.opponent == "deployed":
+        config = replace(
+            config,
+            resolver=metadata.config.resolver.model_copy(
+                update={"max_iterations": resolver_iterations}
+            ),
+        )
+    result = compute_lbr_exploitability(solver, config, blueprint_factory=factory)
     results = _lbr_results_dict(result, big_blind=metadata.config.game.big_blind)
-    results["opponent_model"] = opponent
-    results["scorer"] = scorer
-    if scorer == "lookahead":
-        results["lookahead_depth"] = lookahead_depth
-        results["lookahead_top_k"] = lookahead_top_k
-    if resolver_config is not None:
-        results["resolver_iterations"] = resolver_iterations
-        results["resolver_blend_alpha"] = resolver_config.policy_blend_alpha
+    results["opponent_model"] = config.opponent
+    results["scorer"] = config.scorer
+    if config.scorer == "lookahead":
+        results["lookahead_depth"] = config.lookahead_depth
+        results["lookahead_top_k"] = config.lookahead_top_k
+    if config.resolver is not None:
+        results["resolver_iterations"] = config.resolver.max_iterations
+        results["resolver_blend_alpha"] = config.resolver.policy_blend_alpha
     return EvaluationOutput(infosets=storage.num_infosets(), results=results)
 
 
@@ -408,10 +391,7 @@ def evaluate_run_resolver_gate(
 
 def evaluate_run_rollout(
     run_dir: Path,
-    num_samples: int,
-    num_rollouts: int,
-    use_average_strategy: bool,
-    seed: int | None,
+    params: RolloutParams | None = None,
 ) -> EvaluationOutput:
     """Evaluate a run with the legacy one-ply rollout estimator (diagnostic opt-in only).
 
@@ -422,6 +402,7 @@ def evaluate_run_rollout(
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
         ValueError: Invalid configuration or checkpoint state.
     """
+    params = params or RolloutParams()
     metadata = load_run_metadata(run_dir)
     config = metadata.config
 
@@ -431,12 +412,77 @@ def evaluate_run_rollout(
     )
     results = evaluate_solver_exploitability(
         solver,
-        num_samples=num_samples,
-        use_average_strategy=use_average_strategy,
-        num_rollouts_per_infoset=num_rollouts,
-        seed=seed,
+        num_samples=params.num_samples,
+        use_average_strategy=params.use_average_strategy,
+        num_rollouts_per_infoset=params.num_rollouts,
+        seed=params.seed,
     )
     return EvaluationOutput(
         infosets=storage.num_infosets(),
         results=results,
     )
+
+
+def evaluate_and_record(
+    run_dir: Path,
+    *,
+    method: str = "lbr",
+    lbr: LBRConfig | None = None,
+    rollout: RolloutParams | None = None,
+    resolver_iterations: int = 64,
+    abstraction_hash: str | None = None,
+    ledger_path: Path = eval_ledger.DEFAULT_LEDGER_PATH,
+) -> dict[str, Any]:
+    """Evaluate a run and persist the result to the eval ledger (best-effort).
+
+    The single evaluate orchestrator shared by every transport (headless CLI,
+    Modal): method dispatch, payload shape, knob-tier derivation, and the
+    best-effort ledger recording live here once, so a cloud eval and a local
+    eval cannot drift in what they run or record.
+
+    Returns the portable evaluate payload; when recording succeeded it carries
+    ``ledger_result_path``. Recording failures print a warning but never fail
+    the evaluation itself — the ledger is a research convenience.
+    """
+    if method == "rollout":
+        params = rollout or RolloutParams()
+        out = evaluate_run_rollout(run_dir, params)
+        estimator = ROLLOUT_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_rollout_knobs_from_params(
+            samples=params.num_samples,
+            rollouts=params.num_rollouts,
+            use_current=not params.use_average_strategy,
+            base_seed=out.results.get("base_seed", params.seed),
+        )
+    else:  # "lbr" (default, trustworthy)
+        config = lbr or LBRConfig()
+        out = evaluate_run_lbr(
+            run_dir,
+            config,
+            resolver_iterations=resolver_iterations,
+            abstraction_hash=abstraction_hash,
+        )
+        estimator = LBR_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_lbr_knobs(config, out.results)
+    payload: dict[str, Any] = {
+        "op": "evaluate",
+        "run_id": run_dir.name,
+        "method": method,
+        "estimator": estimator,
+        "infosets": out.infosets,
+        "results": out.results,
+    }
+    try:
+        result_path, _ = eval_ledger.record_evaluation(
+            run_dir=run_dir,
+            payload=payload,
+            method=method,
+            estimator=estimator,
+            knobs=knobs,
+            ledger_path=ledger_path,
+        )
+        payload["ledger_result_path"] = str(result_path)
+        print(f"  Ledger:        appended to {ledger_path} (payload: {result_path})")
+    except Exception as exc:  # recording must never break the eval
+        print(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
+    return payload
