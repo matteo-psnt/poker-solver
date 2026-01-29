@@ -1,17 +1,22 @@
 """Tests for the headless (non-interactive) CLI transport."""
 
+import argparse
 import json
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+from src.core.actions.action_model import ActionModel
 from src.interfaces.cli import headless
+from src.pipeline.evaluation import ledger as eval_ledger
+from src.pipeline.training.run_tracker import RunMetadata
 from src.pipeline.training.services import (
     LBR_ESTIMATOR_LABEL,
     ROLLOUT_ESTIMATOR_LABEL,
     TrainingOutput,
 )
+from src.shared.config import Config
 
 
 def test_json_default_coerces_numpy_scalar():
@@ -133,3 +138,108 @@ def test_main_evaluate_rollout_opt_in(monkeypatch, tmp_path, capsys):
     assert rc == 0
     assert payload["method"] == "rollout"
     assert payload["estimator"] == ROLLOUT_ESTIMATOR_LABEL
+
+
+def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
+    """Write a per-eval payload + one ledger row for `run_id`."""
+    knobs = {
+        "scorer": "myopic",
+        "opponent": "blueprint",
+        "hands": len(samples),
+        "runouts": 12,
+        "include_off_tree": False,
+        "base_seed": base_seed,
+    }
+    results = {
+        "exploitability_mbb": mbb,
+        "std_error_mbb": 1.0,
+        "num_hands": len(samples),
+        "base_seed": base_seed,
+        "pair_samples_mbb": samples,
+    }
+    payload_path = eval_ledger.write_payload(run_dir, {"results": results}, knobs)
+    config = Config.default()
+    run_metadata = RunMetadata.new(
+        run_id=run_id,
+        config_name="quick_test",
+        config=config,
+        action_config_hash=ActionModel(config).get_config_hash(),
+        card_abstraction_hash="hash",
+    )
+    record = eval_ledger.build_record(
+        run_metadata=run_metadata,
+        method="lbr",
+        estimator=LBR_ESTIMATOR_LABEL,
+        infosets=10,
+        knobs=knobs,
+        results=results,
+        result_path=payload_path,
+        timestamp="2026-07-17T00:00:00",
+    )
+    eval_ledger.append_record(record, led_path)
+
+
+def test_cmd_ledger_lists_rows(tmp_path):
+    led = tmp_path / "ledger.jsonl"
+    run_dir = tmp_path / "run-a"
+    run_dir.mkdir()
+    _seed_eval(led, run_dir, "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
+
+    payload = headless._cmd_ledger(argparse.Namespace(ledger=str(led), run=None, limit=25))
+    assert payload["op"] == "ledger"
+    assert len(payload["rows"]) == 1
+    assert payload["rows"][0]["run_id"] == "run-a"
+
+
+def test_cmd_compare_valid_pairs(tmp_path):
+    led = tmp_path / "ledger.jsonl"
+    (tmp_path / "run-a").mkdir()
+    (tmp_path / "run-b").mkdir()
+    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[10.0, 20.0, 30.0])
+    _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=7, mbb=50.0, samples=[5.0, 10.0, 15.0])
+
+    payload = headless._cmd_compare(
+        argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=False)
+    )
+    assert payload["op"] == "compare"
+    assert payload["forced"] is False
+    assert payload["tier_warnings"] == []
+    assert "p_value" in payload["comparison"]
+
+
+def test_cmd_compare_refuses_seed_mismatch(tmp_path):
+    led = tmp_path / "ledger.jsonl"
+    (tmp_path / "run-a").mkdir()
+    (tmp_path / "run-b").mkdir()
+    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
+    _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[1.0, 2.0, 3.0])
+
+    with pytest.raises(SystemExit, match="Refusing to compare"):
+        headless._cmd_compare(
+            argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=False)
+        )
+
+
+def test_cmd_compare_force_overrides_mismatch(tmp_path):
+    led = tmp_path / "ledger.jsonl"
+    (tmp_path / "run-a").mkdir()
+    (tmp_path / "run-b").mkdir()
+    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
+    _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[4.0, 5.0, 6.0])
+
+    payload = headless._cmd_compare(
+        argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=True)
+    )
+    assert payload["forced"] is True
+    assert payload["tier_warnings"]  # non-empty: the override was recorded
+
+
+def test_cmd_compare_missing_run_raises(tmp_path):
+    led = tmp_path / "ledger.jsonl"
+    (tmp_path / "run-a").mkdir()
+    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=1.0, samples=[1.0, 2.0])
+
+    with pytest.raises(SystemExit, match="No ledger entry"):
+        headless._cmd_compare(
+            argparse.Namespace(a="run-a", b="ghost", ledger=str(led), force=False)
+        )
