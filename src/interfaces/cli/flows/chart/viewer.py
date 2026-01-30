@@ -7,7 +7,7 @@ from src.interfaces.api.app import FastAPIChartServer
 from src.interfaces.api.chart_service import ChartService
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
-from src.pipeline.training import services
+from src.pipeline import services
 
 
 def view_preflop_chart(ctx: CliContext) -> None:

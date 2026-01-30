@@ -33,6 +33,11 @@ class Street(Enum):
     def __str__(self) -> str:
         return self.name.lower()
 
+    @property
+    def board_card_count(self) -> int:
+        """Number of board cards a fully-dealt board has on this street."""
+        return _BOARD_CARD_COUNT[self]
+
     def is_preflop(self) -> bool:
         return self == Street.PREFLOP
 
@@ -50,6 +55,14 @@ class Street(Enum):
                 return Street.RIVER
             case _:
                 return None
+
+
+_BOARD_CARD_COUNT: dict[Street, int] = {
+    Street.PREFLOP: 0,
+    Street.FLOP: 3,
+    Street.TURN: 4,
+    Street.RIVER: 5,
+}
 
 
 class Card:
@@ -258,13 +271,8 @@ class GameState:
                 f"to_call ({self.to_call}) exceeds stack ({self.stacks[self.current_player]})"
             )
 
-        # Validate board cards
-        expected_board_size = {
-            Street.PREFLOP: 0,
-            Street.FLOP: 3,
-            Street.TURN: 4,
-            Street.RIVER: 5,
-        }[self.street]
+        # Validate board cards (exact match: a chance node mid-deal is invalid here)
+        expected_board_size = self.street.board_card_count
         if len(self.board) != expected_board_size:
             raise ValueError(
                 f"Board should have {expected_board_size} cards on {self.street}, "

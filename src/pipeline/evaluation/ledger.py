@@ -20,17 +20,36 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
-from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.gitinfo import get_git_commit, is_git_dirty
 from src.shared.jsonio import json_default
 
 LEDGER_SCHEMA_VERSION = 1
 DEFAULT_LEDGER_PATH = Path("data/eval_ledger.jsonl")
+
+
+@dataclass(frozen=True)
+class RunProvenance:
+    """Provenance of the evaluated run, recorded verbatim in each ledger row.
+
+    Plain fields rather than the training layer's ``RunMetadata`` — the ledger
+    only needs these scalars, and taking them directly keeps evaluation from
+    importing training.
+    """
+
+    run_id: str
+    git_commit: str | None
+    git_dirty: bool | None
+    config_name: str
+    card_abstraction_hash: str | None
+    action_config_hash: str | None
+    representation_version: int
+
 
 # Knobs that define an eval's comparison tier. Two evals may only be paired if these
 # match (plus a shared base_seed) — otherwise the comparison mixes exploiters or
@@ -116,7 +135,7 @@ def build_rollout_knobs_from_params(
 
 def build_record(
     *,
-    run_metadata: RunMetadata,
+    provenance: RunProvenance,
     method: str,
     estimator: str,
     infosets: int,
@@ -130,20 +149,20 @@ def build_record(
     return {
         "schema_version": LEDGER_SCHEMA_VERSION,
         "timestamp": timestamp,
-        "run_id": run_metadata.run_id,
+        "run_id": provenance.run_id,
         "method": method,
         "estimator": estimator,
         # Two commits matter and mean different things: the code that produced the
         # checkpoint, and the code that measured it (LBR methodology changes across
         # commits). Both are recorded so neither has to be reconstructed later.
-        "train_git_commit": run_metadata.git_commit,
-        "train_git_dirty": run_metadata.git_dirty,
+        "train_git_commit": provenance.git_commit,
+        "train_git_dirty": provenance.git_dirty,
         "eval_git_commit": get_git_commit(),
         "eval_git_dirty": is_git_dirty(),
-        "config_name": run_metadata.config_name,
-        "card_abstraction_hash": run_metadata.card_abstraction_hash,
-        "action_config_hash": run_metadata.action_config_hash,
-        "representation_version": run_metadata.representation_version,
+        "config_name": provenance.config_name,
+        "card_abstraction_hash": provenance.card_abstraction_hash,
+        "action_config_hash": provenance.action_config_hash,
+        "representation_version": provenance.representation_version,
         "knobs": knobs,
         "results": {
             "exploitability_mbb": results.get("exploitability_mbb"),
@@ -159,6 +178,7 @@ def record_evaluation(
     *,
     run_dir: Path,
     payload: dict[str, Any],
+    provenance: RunProvenance,
     method: str,
     estimator: str,
     knobs: dict[str, Any],
@@ -172,14 +192,12 @@ def record_evaluation(
     by :func:`tier_mismatches` without either surface reimplementing the schema.
 
     ``payload`` must carry ``results`` (with the per-hand ``pair_samples_mbb``) and
-    ``infosets``; run provenance is read from ``run_dir/.run.json``. Returns the payload
-    path and the appended record.
+    ``infosets``. Returns the payload path and the appended record.
     """
-    run_metadata = RunMetadata.load(run_dir / ".run.json")
     results = payload["results"]
     result_path = write_payload(run_dir, payload, knobs)
     record = build_record(
-        run_metadata=run_metadata,
+        provenance=provenance,
         method=method,
         estimator=estimator,
         infosets=payload["infosets"],

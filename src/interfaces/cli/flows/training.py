@@ -8,13 +8,13 @@ from src.interfaces.cli.flows.combo_precompute import handle_combo_precompute
 from src.interfaces.cli.flows.config_menu import select_config
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
+from src.pipeline import services
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
-from src.pipeline.training import services
+from src.pipeline.services import EvaluationOutput
 from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.pipeline.training.components import (
     build_card_abstraction,
 )
-from src.pipeline.training.services import EvaluationOutput
 from src.shared.config import Config
 
 

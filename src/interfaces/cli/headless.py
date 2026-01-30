@@ -5,7 +5,7 @@ is fully specified by CLI flags and emits a machine-readable summary. This is th
 surface used by scripts and cloud (Modal) execution — where an interactive prompt is
 not an option.
 
-Cloud callers should prefer importing :func:`src.pipeline.training.services.train`
+Cloud callers should prefer importing :func:`src.pipeline.services.train`
 directly (it returns a ``TrainingOutput`` object); this module is the local /
 subprocess transport around the same function and additionally writes a
 ``result.json`` into the run directory.
@@ -21,11 +21,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.evaluation.statistics import compare_paired_samples
-from src.pipeline.training import services
-from src.pipeline.training.services import RolloutParams
+from src.pipeline.services import RolloutParams
 from src.shared.jsonio import json_default
 
 

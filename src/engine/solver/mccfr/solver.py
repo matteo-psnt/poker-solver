@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import random
-from typing import ClassVar
 
 import eval7
 import numpy as np
@@ -11,7 +10,7 @@ import numpy as np
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action
 from src.core.game.rules import GameRules
-from src.core.game.state import GameState, Street
+from src.core.game.state import GameState
 from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.base import Storage
 from src.shared.config import Config
@@ -33,8 +32,6 @@ class MCCFRSolver:
     - Samples chance outcomes
     - Faster but higher variance
     """
-
-    _EXPECTED_BOARD_SIZE: ClassVar[dict[Street, int]] = chance.EXPECTED_BOARD_SIZE
 
     def __init__(
         self,

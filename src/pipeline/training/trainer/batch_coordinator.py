@@ -184,5 +184,4 @@ class TrainingBatchCoordinator:
                 iteration=iter_num,
                 utility=util,
                 num_infosets=total_infosets,
-                infoset_sampler=None,
             )

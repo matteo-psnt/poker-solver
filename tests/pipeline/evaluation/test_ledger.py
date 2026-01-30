@@ -4,21 +4,19 @@ from dataclasses import replace
 
 import pytest
 
-from src.core.actions.action_model import ActionModel
 from src.pipeline.evaluation import ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
-from src.pipeline.training.run_tracker import RunMetadata
-from src.shared.config import Config
 
 
-def _fake_metadata(run_id="run-x"):
-    config = Config.default()
-    return RunMetadata.new(
+def _fake_provenance(run_id="run-x"):
+    return ledger.RunProvenance(
         run_id=run_id,
+        git_commit="cafebabe" * 5,
+        git_dirty=False,
         config_name="quick_test",
-        config=config,
-        action_config_hash=ActionModel(config).get_config_hash(),
         card_abstraction_hash="deadbeef",
+        action_config_hash="beefcafe",
+        representation_version=1,
     )
 
 
@@ -110,7 +108,7 @@ class TestWriteAndAppend:
         knobs = ledger.build_lbr_knobs(_lbr_config(), results)
         payload_path = ledger.write_payload(tmp_path, {"results": results}, knobs)
         record = ledger.build_record(
-            run_metadata=_fake_metadata("run-x"),
+            provenance=_fake_provenance("run-x"),
             method="lbr",
             estimator="lbr",
             infosets=10,
@@ -120,7 +118,7 @@ class TestWriteAndAppend:
             timestamp="2026-07-17T00:00:00",
         )
         assert record["run_id"] == "run-x"
-        assert record["train_git_commit"] == _fake_metadata("run-x").git_commit
+        assert record["train_git_commit"] == _fake_provenance("run-x").git_commit
         assert record["results"]["n"] == 100
         assert record["results"]["exploitability_mbb"] == 100.0
         # eval_git_* are stamped from the current checkout (str/None, bool/None)
@@ -131,7 +129,6 @@ class TestRecordEvaluation:
     def test_writes_payload_and_appends_row(self, tmp_path):
         run_dir = tmp_path / "run-x"
         run_dir.mkdir()
-        _fake_metadata("run-x").save(run_dir / ".run.json")
         results = _results(base_seed=7)
         knobs = ledger.build_lbr_knobs(_lbr_config(), results)
         payload = {"op": "evaluate", "infosets": 10, "results": results}
@@ -140,6 +137,7 @@ class TestRecordEvaluation:
         result_path, record = ledger.record_evaluation(
             run_dir=run_dir,
             payload=payload,
+            provenance=_fake_provenance("run-x"),
             method="lbr",
             estimator="lbr",
             knobs=knobs,
