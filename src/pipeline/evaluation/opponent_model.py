@@ -37,6 +37,7 @@ from src.engine.search.range_inference import (
 )
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.policy_lookup import blueprint_action_distribution
 from src.shared.config import ResolverConfig
 
 
@@ -197,24 +198,7 @@ class BlueprintOpponent:
         """Blueprint strategy over ``legal`` at ``state``, or ``None`` if off-tree."""
         infoset_key = encode_infoset_key(state, player, self.card_abstraction)
         infoset = self.storage.get_infoset(infoset_key)
-        if infoset is None:
-            return None
-
-        legal_set = set(legal)
-        valid_indices: list[int] = []
-        valid_actions: list[Action] = []
-        for idx, action in enumerate(infoset.legal_actions):
-            if action in legal_set and self.rules.is_action_valid(state, action):
-                valid_indices.append(idx)
-                valid_actions.append(action)
-        if not valid_indices:
-            return None
-
-        strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=True)
-        dist: dict[Action, float] = {}
-        for action, prob in zip(valid_actions, strategy):
-            dist[action] = dist.get(action, 0.0) + float(prob)
-        return dist
+        return blueprint_action_distribution(infoset, state, self.rules, legal, use_average=True)
 
 
 class ResolvedOpponent:

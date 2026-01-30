@@ -11,6 +11,7 @@ from src.core.game.actions import Action
 from src.core.game.state import Card, GameState
 from src.engine.search.action_translation import translate_action_distribution
 from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.policy_lookup import blueprint_action_distribution
 from src.shared.numeric import NORMALIZE_EPS
 
 
@@ -155,34 +156,16 @@ def _action_likelihood_vector(
             rules=blueprint.rules,
         )
         infoset = blueprint.storage.get_infoset(infoset_key)
-        if infoset is None:
+        action_prob = blueprint_action_distribution(
+            infoset, hypo_state, blueprint.rules, legal_actions, use_average=True
+        )
+        if action_prob is None:
             uniform = 1.0 / len(legal_actions)
             prob = sum(weight * uniform for _, weight in translated)
             prob = max(prob, _LIKELIHOOD_FLOOR)
             cache[infoset_key] = prob
             likelihood[idx] = prob
             continue
-
-        valid_indices: list[int] = []
-        valid_actions: list[Action] = []
-        legal_set = set(legal_actions)
-        for i, action in enumerate(infoset.legal_actions):
-            if action in legal_set and blueprint.rules.is_action_valid(hypo_state, action):
-                valid_indices.append(i)
-                valid_actions.append(action)
-
-        if not valid_indices:
-            uniform = 1.0 / len(legal_actions)
-            prob = sum(weight * uniform for _, weight in translated)
-            prob = max(prob, _LIKELIHOOD_FLOOR)
-            cache[infoset_key] = prob
-            likelihood[idx] = prob
-            continue
-
-        strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=True)
-        action_prob: dict[Action, float] = {}
-        for action, prob in zip(valid_actions, strategy):
-            action_prob[action] = action_prob.get(action, 0.0) + float(prob)
 
         total_prob = 0.0
         for mapped_action, weight in translated:
