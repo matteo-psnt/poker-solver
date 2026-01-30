@@ -35,11 +35,10 @@ def view_preflop_chart(ctx: CliContext) -> None:
     print(f"\nLoading solver from {selected_run}...")
     run_dir = ctx.runs_dir / selected_run
     chart_service = ChartService.from_run_dir(run_dir, run_id=selected_run)
-    storage = chart_service.runtime.storage
 
-    print(f"  Loaded {storage.num_infosets():,} infosets")
+    print(f"  Loaded {chart_service.num_infosets():,} infosets")
 
-    if storage.num_infosets() == 0:
+    if chart_service.num_infosets() == 0:
         ui.error("No strategy data found in this run")
         ui.pause()
         return

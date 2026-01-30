@@ -1,27 +1,17 @@
-"""Preflop chart data preparation for the UI server."""
+"""Preflop chart presentation for the UI server.
+
+Pure formatting: grid assembly, labels, and payload shapes. All strategy
+access (state construction, key encoding, storage reads) lives in
+:mod:`src.pipeline.evaluation.preflop_chart`.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
-from src.core.game.rules import GameRules
-from src.core.game.state import Card, GameState, Street
-from src.engine.solver.infoset import InfoSetKey
-from src.engine.solver.storage.in_memory import InMemoryStorage
-
-
-@dataclass(frozen=True)
-class ChartDataRuntime:
-    """Runtime dependencies required to render chart data."""
-
-    action_model: ActionModel
-    rules: GameRules
-    storage: InMemoryStorage
-    starting_stack: int
-
+from src.pipeline.evaluation.preflop_chart import RANKS, PreflopChartData
 
 POSITION_OPTIONS = [
     {"id": 0, "label": "Button (BTN)"},
@@ -30,13 +20,17 @@ POSITION_OPTIONS = [
 _POSITION_LABELS = {option["id"]: option["label"] for option in POSITION_OPTIONS}
 
 
-def build_chart_metadata(
-    run_id: str,
-    action_model: ActionModel,
-) -> dict[str, Any]:
+def parse_situation(situation_id: str) -> float | None:
+    """Open-raise size (bb) encoded in ``situation_id``, or None for first-to-act."""
+    if situation_id.startswith("facing_raise_"):
+        return float(situation_id.removeprefix("facing_raise_"))
+    return None
+
+
+def build_chart_metadata(run_id: str, open_sizes_bb: Sequence[float]) -> dict[str, Any]:
     situations: list[dict[str, Any]] = [{"id": "first_to_act", "label": "First to act"}]
 
-    for raise_bb in action_model.get_preflop_open_sizes_bb():
+    for raise_bb in open_sizes_bb:
         situations.append(
             {
                 "id": f"facing_raise_{raise_bb}",
@@ -54,53 +48,42 @@ def build_chart_metadata(
     }
 
 
-def build_preflop_chart_data(
-    source: ChartDataRuntime,
+def render_preflop_chart(
+    chart: PreflopChartData,
+    *,
+    run_id: str,
     position: int,
     situation_id: str,
-    run_id: str,
 ) -> dict:
-    ranks = "AKQJT98765432"
-    situation_label = "First to act"
-    state = _initial_state(source)
-    if situation_id.startswith("facing_raise_"):
-        raise_bb = float(situation_id.removeprefix("facing_raise_"))
-        situation_label = f"Facing raise to {_format_bb_size(raise_bb)}"
-        raised_state = _apply_open_raise(state, source, raise_bb)
-        if raised_state is not None:
-            state = raised_state
-
-    betting_sequence = state.normalized_betting_sequence()
-    to_call = state.to_call
+    """Format one chart query's strategy data into the viewer payload."""
+    raise_bb = parse_situation(situation_id)
+    situation_label = (
+        f"Facing raise to {_format_bb_size(raise_bb)}" if raise_bb is not None else "First to act"
+    )
 
     grid = []
     action_meta: dict[str, dict] = {}
 
-    for i, r1 in enumerate(ranks):
+    for i, r1 in enumerate(RANKS):
         row = []
-        for j, r2 in enumerate(ranks):
+        for j, r2 in enumerate(RANKS):
             if i == j:
                 hand = f"{r1}{r2}"
-                strategy = _get_hand_strategy(
-                    source, r1, r2, False, True, position, betting_sequence, to_call
-                )
             elif i < j:
                 hand = f"{r1}{r2}s"
-                strategy = _get_hand_strategy(
-                    source, r1, r2, True, False, position, betting_sequence, to_call
-                )
             else:
                 hand = f"{r2}{r1}o"
-                strategy = _get_hand_strategy(
-                    source, r2, r1, False, False, position, betting_sequence, to_call
-                )
 
+            strategy = chart.hands.get(hand)
             if strategy is None:
                 row.append({"hand": hand, "actions": []})
                 continue
 
             actions = []
-            for action in strategy["actions"]:
+            breakdown = _build_action_breakdown(
+                strategy.actions, strategy.probabilities, chart.big_blind, chart.to_call
+            )
+            for action in breakdown:
                 action_id = action["id"]
                 action_meta[action_id] = {
                     "id": action_id,
@@ -114,17 +97,15 @@ def build_preflop_chart_data(
 
         grid.append(row)
 
-    ordered_actions = _order_action_meta(action_meta)
-
     return {
         "runId": run_id,
         "position": position,
         "situation": situation_id,
         "positionLabel": _POSITION_LABELS[position],
         "situationLabel": situation_label,
-        "bettingSequence": betting_sequence,
-        "ranks": ranks,
-        "actions": ordered_actions,
+        "bettingSequence": chart.betting_sequence,
+        "ranks": RANKS,
+        "actions": _order_action_meta(action_meta),
         "grid": grid,
     }
 
@@ -136,9 +117,9 @@ def _format_bb_size(size_bb: float) -> str:
 
 
 def _build_action_breakdown(
-    legal_actions: list[Action],
-    strategy: list[float],
-    rules: GameRules,
+    legal_actions: Sequence[Action],
+    strategy: Sequence[float],
+    big_blind: int,
     to_call: int,
 ) -> list[dict]:
     breakdown: list[dict] = []
@@ -152,7 +133,7 @@ def _build_action_breakdown(
         elif action.type in (ActionType.CALL, ActionType.CHECK):
             breakdown.append({"id": "call", "label": "Call / Check", "kind": "call", "prob": prob})
         elif action.type == ActionType.ALL_IN:
-            size_bb = action.amount / rules.big_blind if rules.big_blind else action.amount
+            size_bb = action.amount / big_blind if big_blind else action.amount
             breakdown.append(
                 {
                     "id": "allin",
@@ -164,7 +145,7 @@ def _build_action_breakdown(
             )
         elif action.type in (ActionType.BET, ActionType.RAISE):
             total = action.amount if action.type == ActionType.BET else action.amount + to_call
-            size_bb = total / rules.big_blind if rules.big_blind else total
+            size_bb = total / big_blind if big_blind else total
             action_id = f"size_{size_bb:.2f}"
             verb = "Open to" if action.type == ActionType.BET and to_call == 0 else "Raise to"
             breakdown.append(
@@ -178,103 +159,6 @@ def _build_action_breakdown(
             )
 
     return breakdown
-
-
-# Hole cards do not affect the betting structure; any two disjoint hands work.
-_DUMMY_HOLE_CARDS = (
-    (Card.new("As"), Card.new("Kd")),
-    (Card.new("Qc"), Card.new("Jh")),
-)
-
-
-def _initial_state(source: ChartDataRuntime) -> GameState:
-    return source.rules.create_initial_state(
-        starting_stack=source.starting_stack,
-        hole_cards=_DUMMY_HOLE_CARDS,
-        button=0,
-    )
-
-
-def _apply_open_raise(
-    state: GameState, source: ChartDataRuntime, raise_bb: float
-) -> GameState | None:
-    """Apply the open raise to ``raise_bb`` big blinds, or None if not in the tree."""
-    total_bet = int(raise_bb * source.rules.big_blind)
-    legal_actions = source.rules.get_legal_actions(state, action_model=source.action_model)
-    raise_action = next(
-        (
-            action
-            for action in legal_actions
-            if action.type == ActionType.RAISE and (action.amount + state.to_call) == total_bet
-        ),
-        None,
-    )
-
-    if raise_action is None:
-        return None
-
-    return state.apply_action(raise_action, source.rules)
-
-
-def _get_hand_strategy(
-    source: ChartDataRuntime,
-    rank1: str,
-    rank2: str,
-    suited: bool,
-    is_pair: bool,
-    position: int,
-    betting_sequence: str,
-    to_call: int,
-) -> dict | None:
-    hand_string = _ranks_to_hand_string(rank1, rank2, suited, is_pair)
-
-    spr_bucket = 2
-
-    key = InfoSetKey(
-        player_position=position,
-        street=Street.PREFLOP,
-        betting_sequence=betting_sequence,
-        preflop_hand=hand_string,
-        postflop_bucket=None,
-        spr_bucket=spr_bucket,
-    )
-
-    infoset = source.storage.get_infoset(key)
-
-    if infoset is None:
-        return None
-    if float(infoset.strategy_sum.sum()) == 0.0:
-        return None
-
-    strategy = [float(prob) for prob in infoset.get_filtered_strategy(use_average=True)]
-
-    return {
-        "actions": _build_action_breakdown(
-            infoset.legal_actions,
-            strategy,
-            source.rules,
-            to_call,
-        )
-    }
-
-
-def _ranks_to_hand_string(rank1: str, rank2: str, suited: bool, is_pair: bool) -> str:
-    ranks = "AKQJT98765432"
-
-    if is_pair:
-        return f"{rank1}{rank2}"
-
-    r1_val = 14 - ranks.index(rank1)
-    r2_val = 14 - ranks.index(rank2)
-
-    if r1_val > r2_val:
-        high, low = rank1, rank2
-    else:
-        high, low = rank2, rank1
-
-    suffix = "s" if suited else "o"
-
-    return f"{high}{low}{suffix}"
 
 
 def _order_action_meta(action_meta: dict[str, dict]) -> list[dict]:
