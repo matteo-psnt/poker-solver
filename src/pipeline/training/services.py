@@ -115,13 +115,6 @@ def run_training(
     )
 
 
-def start_training(config: Config, num_workers: int) -> TrainingSession:
-    """Start a new training session and run it."""
-    session = create_training_session(config)
-    run_training(session, num_workers=num_workers)
-    return session
-
-
 def train(
     config_name: str,
     *,
@@ -184,13 +177,6 @@ def train(
         storage_capacity=metadata.storage_capacity,
         status=metadata.status,
     )
-
-
-def resume_training(run_dir: Path, additional_iterations: int) -> tuple[TrainingSession, int]:
-    """Resume training from run_dir and execute additional_iterations."""
-    session, latest_iteration = create_resumed_session(run_dir)
-    run_training(session, num_iterations=additional_iterations)
-    return session, latest_iteration
 
 
 def precompute_abstraction(

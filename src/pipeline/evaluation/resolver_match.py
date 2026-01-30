@@ -27,13 +27,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from src.core.game.rules import GameRules
-from src.core.game.state import Card, GameState, Street
+from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.protocols import Blueprint
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.shared.units import pair_mean_mbb
-
-_DECK: list[Card] = Card.get_full_deck()
 
 
 @dataclass(frozen=True)
@@ -77,10 +75,10 @@ def play_resolver_match(
         rng = np.random.default_rng(np.random.SeedSequence([seed, deal]))
         order = [int(i) for i in rng.permutation(52)]
         hole_cards = (
-            (_DECK[order[0]], _DECK[order[1]]),
-            (_DECK[order[2]], _DECK[order[3]]),
+            (FULL_DECK[order[0]], FULL_DECK[order[1]]),
+            (FULL_DECK[order[2]], FULL_DECK[order[3]]),
         )
-        board_stack = [_DECK[i] for i in order[4:9]]  # flop, flop, flop, turn, river
+        board_stack = [FULL_DECK[i] for i in order[4:9]]  # flop, flop, flop, turn, river
         button = deal % 2
 
         seat_payoffs: list[float] = []
@@ -94,6 +92,9 @@ def play_resolver_match(
                 starting_stack=starting_stack,
                 resolver_seat=resolver_seat,
                 time_budget_ms=time_budget_ms,
+                resolver_rng=np.random.default_rng(
+                    np.random.SeedSequence([seed, deal, resolver_seat])
+                ),
             )
             seat_payoffs.append(payoff)
             decisions += game_decisions
@@ -126,6 +127,7 @@ def _play_game(
     starting_stack: int,
     resolver_seat: int,
     time_budget_ms: int,
+    resolver_rng: np.random.Generator | None = None,
 ) -> tuple[float, int, int]:
     """One game off a fixed deck; returns (resolver-seat payoff, decisions, fallbacks)."""
     resolver = HUResolver(
@@ -133,6 +135,7 @@ def _play_game(
         action_model=solver.action_model,
         rules=rules,
         config=solver.config.resolver,
+        rng=resolver_rng,
     )
     state = rules.create_initial_state(
         starting_stack=starting_stack,

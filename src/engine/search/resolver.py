@@ -52,11 +52,14 @@ class HUResolver:
         action_model: ActionModel,
         rules: GameRules,
         config: ResolverConfig,
+        rng: np.random.Generator | None = None,
     ):
         self.blueprint = blueprint
         self.action_model = action_model
         self.rules = rules
         self.config = config
+        # Seeded by eval harnesses for reproducibility; unseeded in live deployment.
+        self.rng = rng if rng is not None else np.random.default_rng()
         # History-replayed ranges: written ONLY by observe(). A driver that
         # feeds every realized action through observe() gives the resolver
         # Bayes-updated ranges for BOTH players; without a driver, solves fall
@@ -155,7 +158,7 @@ class HUResolver:
         blueprint_strategy = self._blueprint_strategy(state, root_actions, use_average=True)
         strategy = self._blend_strategies(resolver_strategy, blueprint_strategy)
 
-        idx = int(np.random.choice(len(root_actions), p=strategy))
+        idx = int(self.rng.choice(len(root_actions), p=strategy))
         chosen_action = root_actions[idx]
 
         return ResolveResult(
@@ -188,6 +191,7 @@ class HUResolver:
             budget_ms=budget_ms,
             num_runouts=self.config.leaf_rollouts,
             max_iterations=self.config.max_iterations,
+            rng=self.rng,
         )
         return tree.root.actions, solution
 

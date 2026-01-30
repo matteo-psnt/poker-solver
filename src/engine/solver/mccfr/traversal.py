@@ -10,8 +10,8 @@ from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.solver.infoset import InfoSet
 from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.numba_ops import compute_dcfr_strategy_weight
 from src.engine.solver.policy_lookup import filter_stored_actions
-from src.shared.numba_ops import compute_dcfr_strategy_weight
 
 if TYPE_CHECKING:
     from .solver import MCCFRSolver

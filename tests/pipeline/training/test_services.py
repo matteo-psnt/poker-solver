@@ -235,27 +235,6 @@ def test_run_training_passes_arguments():
     session.train.assert_called_once_with(num_workers=4, num_iterations=1000)
 
 
-def test_start_training_uses_create_and_run(monkeypatch):
-    """start_training should create a session and run it."""
-    config = MagicMock()
-    session = MagicMock()
-    seen = {}
-
-    monkeypatch.setattr(services, "create_training_session", lambda cfg: session)
-
-    def _mock_run_training(sess, **kwargs):
-        seen["session"] = sess
-        seen["kwargs"] = kwargs
-
-    monkeypatch.setattr(services, "run_training", _mock_run_training)
-
-    actual = services.start_training(config, num_workers=6)
-
-    assert actual is session
-    assert seen["session"] is session
-    assert seen["kwargs"] == {"num_workers": 6}
-
-
 def test_evaluate_run_rollout_returns_output(monkeypatch, tmp_path):
     """evaluate_run_rollout should build solver, compute exploitability, and return output."""
     config = MagicMock(name="config")

@@ -230,7 +230,12 @@ class ResolvedOpponent:
 
     wants_translated_state = False
 
-    def __init__(self, blueprint: Blueprint, resolver_config: ResolverConfig):
+    def __init__(
+        self,
+        blueprint: Blueprint,
+        resolver_config: ResolverConfig,
+        rng: np.random.Generator | None = None,
+    ):
         if resolver_config.max_iterations is None:
             raise ValueError(
                 "Deployed-opponent LBR requires resolver max_iterations to be set: "
@@ -243,6 +248,7 @@ class ResolvedOpponent:
             action_model=blueprint.action_model,
             rules=blueprint.rules,
             config=resolver_config,
+            rng=rng,
         )
         self._ranges: PlayerRanges | None = None
         self._seat: int | None = None

@@ -145,7 +145,7 @@ class ActionModel:
                 total_bet = round(float(token) * self.config.game.big_blind)
                 if 0 < total_bet <= stack:
                     sizes.append(total_bet)
-            elif token in ("jam", "allin", "all_in"):
+            elif token in JAM_TOKENS:
                 if stack > 0:
                     sizes.append(stack)
 
@@ -220,7 +220,7 @@ class ActionModel:
                     sizes.append(bet_size)
             elif isinstance(token, str):
                 t = token.lower()
-                if t in {"jam", "allin", "all_in"} and stack > 0:
+                if t in JAM_TOKENS and stack > 0:
                     sizes.append(stack)
                 elif t == "jam_low_spr" and stack > 0 and spr <= jam_spr_cutoff:
                     sizes.append(stack)
@@ -253,7 +253,7 @@ class ActionModel:
                 raise_size = pot
                 if raise_size > 0 and (to_call + raise_size) <= stack:
                     sizes.append(raise_size)
-            elif t in {"jam", "allin", "all_in"}:
+            elif t in JAM_TOKENS:
                 jam_raise = stack - to_call
                 if jam_raise > 0:
                     sizes.append(jam_raise)

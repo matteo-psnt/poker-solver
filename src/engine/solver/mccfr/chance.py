@@ -74,19 +74,12 @@ def sample_chance_outcome(self: MCCFRSolver, state: GameState) -> GameState:
 
     first_to_act = 1 - state.button_position
 
-    return GameState(
-        street=state.street,
-        pot=state.pot,
-        stacks=state.stacks,
+    return state.replace(
         board=tuple(new_board),
-        hole_cards=state.hole_cards,
-        betting_history=state.betting_history,
-        button_position=state.button_position,
         current_player=first_to_act,
         is_terminal=False,
         to_call=0,
         last_aggressor=None,
-        blind_to_call=state.blind_to_call,
     )
 
 
@@ -98,17 +91,9 @@ def deal_remaining_cards(self: MCCFRSolver, state: GameState) -> GameState:
     cards_needed = 5 - len(state.board)
     new_board.extend([Card(card) for card in self._deck.cards[:cards_needed]])
 
-    return GameState(
+    return state.replace(
         street=Street.RIVER,
-        pot=state.pot,
-        stacks=state.stacks,
         board=tuple(new_board),
-        hole_cards=state.hole_cards,
-        betting_history=state.betting_history,
-        button_position=state.button_position,
-        current_player=state.current_player,
         is_terminal=True,
         to_call=0,
-        last_aggressor=state.last_aggressor,
-        blind_to_call=state.blind_to_call,
     )

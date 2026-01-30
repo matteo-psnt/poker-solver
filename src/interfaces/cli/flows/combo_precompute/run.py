@@ -3,6 +3,7 @@
 import multiprocessing as mp
 
 from src.core.game.state import Street
+from src.interfaces.cli.flows.config_helpers import list_config_names
 from src.interfaces.cli.ui import prompts
 from src.interfaces.cli.ui.context import CliContext
 from src.pipeline.abstraction.config import PrecomputeConfig
@@ -10,22 +11,9 @@ from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 
-def _list_available_configs(ctx: CliContext) -> list:
-    """List all available abstraction config files."""
-    config_dir = ctx.base_dir / "config" / "abstraction"
-    configs = []
-
-    if config_dir.exists():
-        for yaml_file in sorted(config_dir.glob("*.yaml")):
-            if yaml_file.name != "README.md":
-                configs.append(yaml_file.stem)
-
-    return configs
-
-
 def _get_config_choice(ctx: CliContext) -> PrecomputeConfig | None:
     """Prompt user for configuration choice."""
-    available_configs = _list_available_configs(ctx)
+    available_configs = list_config_names(ctx.config_dir / "abstraction")
 
     if not available_configs:
         print("\nNo configuration files found in config/abstraction/")

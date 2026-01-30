@@ -51,8 +51,3 @@ def is_git_dirty() -> bool | None:
     if status is None:
         return None
     return bool(status)
-
-
-def git_provenance() -> dict[str, str | bool | None]:
-    """Convenience bundle: ``{"git_commit": ..., "git_dirty": ...}``."""
-    return {"git_commit": get_git_commit(), "git_dirty": is_git_dirty()}

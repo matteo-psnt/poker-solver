@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import ValidationError
 
 from src.interfaces.cli.ui import prompts, ui
@@ -9,12 +11,16 @@ from src.interfaces.cli.ui.context import CliContext
 from src.shared.config import Config
 
 
+def list_config_names(config_dir: Path) -> list[str]:
+    """Sorted stems of the ``*.yaml`` config files in ``config_dir`` ([] if missing)."""
+    if not config_dir.exists():
+        return []
+    return sorted(f.stem for f in config_dir.glob("*.yaml") if f.is_file())
+
+
 def list_abstraction_configs(ctx: CliContext) -> list[str]:
     """List available card abstraction config names from ``config/abstraction``."""
-    abstraction_config_dir = ctx.config_dir / "abstraction"
-    if not abstraction_config_dir.exists():
-        return []
-    return sorted(f.stem for f in abstraction_config_dir.glob("*.yaml") if f.is_file())
+    return list_config_names(ctx.config_dir / "abstraction")
 
 
 def try_merge(config: Config, overrides: dict) -> Config:
