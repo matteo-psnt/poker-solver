@@ -12,6 +12,7 @@ from src.core.game.state import Card, GameState
 from src.engine.search.action_translation import translate_action_distribution
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.policy_lookup import blueprint_action_distribution
+from src.engine.solver.protocols import Blueprint
 from src.shared.numeric import NORMALIZE_EPS
 
 
@@ -69,7 +70,7 @@ def blocked_combos(board: tuple[Card, ...]) -> np.ndarray:
     return (COMBO_MASKS & board_mask) != 0
 
 
-def infer_ranges(state: GameState, blueprint) -> PlayerRanges:
+def infer_ranges(state: GameState, blueprint: Blueprint) -> PlayerRanges:
     """
     Infer ranges from blueprint and action history.
 
@@ -87,7 +88,7 @@ def update_ranges(
     state: GameState,
     ranges: PlayerRanges,
     observed_action: Action,
-    blueprint,
+    blueprint: Blueprint,
 ) -> PlayerRanges:
     """
     Update ranges after an observed action using Bayesian likelihood weighting.
@@ -124,7 +125,7 @@ def _action_likelihood_vector(
     state: GameState,
     actor: int,
     observed_action: Action,
-    blueprint,
+    blueprint: Blueprint,
     blocked: np.ndarray,
 ) -> np.ndarray:
     likelihood = np.full(_NUM_COMBOS, _LIKELIHOOD_FLOOR, dtype=np.float64)

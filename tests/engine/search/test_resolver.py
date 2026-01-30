@@ -10,6 +10,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Card
 from src.engine.search import resolver as resolver_module
+from src.engine.search.agent import BlueprintAgent
 from src.engine.search.range_inference import (
     combo_index_for,
     infer_ranges,
@@ -57,7 +58,7 @@ def test_resolver_returns_legal_action():
     assert action in rules.get_legal_actions(state, action_model=action_model)
 
 
-def test_solver_act_with_resolver_enabled():
+def test_agent_act_with_resolver_enabled():
     state, rules = _make_initial_state()
     config = make_test_config(seed=42)
     action_model = ActionModel(config)
@@ -68,7 +69,8 @@ def test_solver_act_with_resolver_enabled():
         config=config,
     )
 
-    action = solver.act(state, use_resolver=True, time_budget_ms=50)
+    agent = BlueprintAgent(solver, use_resolver=True)
+    action = agent.act(state, time_budget_ms=50)
     assert action in rules.get_legal_actions(state, action_model=action_model)
 
 

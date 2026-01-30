@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.core.game.state import Street
+from src.engine.solver.protocols import Blueprint
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
@@ -219,7 +220,7 @@ def precompute_abstraction(
 
 def _load_blueprint(
     config: Config, checkpoint_dir: Path, abstraction_hash: str | None = None
-) -> object:
+) -> Blueprint:
     """Build a fresh evaluation blueprint (solver) from a checkpoint.
 
     Used as a picklable factory (via ``functools.partial``) so parallel-LBR worker

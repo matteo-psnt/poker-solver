@@ -38,33 +38,3 @@ def sample_action_from_strategy(
     probabilities = np.fromiter(distribution.values(), dtype=np.float64, count=len(actions))
     action_idx = int(np.random.choice(len(actions), p=probabilities))
     return actions[action_idx]
-
-
-def act(
-    self: MCCFRSolver,
-    state: GameState,
-    *,
-    use_resolver: bool | None = None,
-    time_budget_ms: int | None = None,
-    use_average: bool = True,
-) -> Action:
-    """Choose an action from blueprint policy or runtime subgame resolver."""
-    if use_resolver is None:
-        use_resolver = self.config.resolver.enabled
-
-    if use_resolver:
-        # Lazy import to avoid circular dependency when training imports solver.
-        from src.engine.search.resolver import HUResolver
-
-        resolver = getattr(self, "_resolver", None)
-        if resolver is None:
-            resolver = HUResolver(
-                blueprint=self,
-                action_model=self.action_model,
-                rules=self.rules,
-                config=self.config.resolver,
-            )
-            self._resolver = resolver
-        return resolver.act(state, time_budget_ms=time_budget_ms)
-
-    return sample_action_from_strategy(self, state, use_average=use_average)
