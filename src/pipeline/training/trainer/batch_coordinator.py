@@ -11,7 +11,7 @@ from tqdm import tqdm
 from src.pipeline.training.metrics import compute_quality_from_arrays
 from src.pipeline.training.metrics_history import MetricsHistoryWriter
 
-from . import checkpointing, reporting
+from . import reporting
 
 if TYPE_CHECKING:
     from src.pipeline.training.parallel_manager import SharedArrayWorkerManager
@@ -63,7 +63,7 @@ class TrainingBatchCoordinator:
 
     def run_batch(self, batch_idx: int, batch_iterator: tqdm, state: BatchLoopState) -> None:
         """Run a single batch and update shared loop state."""
-        checkpointing.wait_for_checkpoint(self.session)
+        self.session.checkpoints.wait()
 
         remaining = self.num_iterations - state.completed_iterations
         current_batch_size = min(self.batch_size, remaining)
@@ -107,13 +107,10 @@ class TrainingBatchCoordinator:
             max_worker_capacity,
         )
 
-        if checkpointing.should_checkpoint(
-            self.session,
-            self.start_iteration + state.completed_iterations,
-            self.batch_size,
+        if self.session.checkpoints.should_checkpoint(
+            self.start_iteration + state.completed_iterations
         ):
-            checkpointing.async_checkpoint(
-                session=self.session,
+            self.session.checkpoints.async_checkpoint(
                 worker_manager=self.worker_manager,
                 iteration=self.start_iteration + state.completed_iterations,
                 total_infosets=state.total_infosets,

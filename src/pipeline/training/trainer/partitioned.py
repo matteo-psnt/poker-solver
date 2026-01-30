@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from src.pipeline.training.parallel_manager import SharedArrayWorkerManager
 
-from . import checkpointing, reporting
+from . import reporting
 from .batch_coordinator import BatchLoopState, TrainingBatchCoordinator
 
 if TYPE_CHECKING:
@@ -120,9 +120,7 @@ def train_partitioned(
             verbose=verbose,
         )
 
-        # Anchor the checkpoint interval at the starting iteration so a resume does not
-        # immediately re-checkpoint the state it just loaded.
-        session.last_checkpoint_iteration = start_iteration
+        session.checkpoints.anchor(start_iteration)
 
         try:
             for batch_idx in batch_iterator:
@@ -141,12 +139,11 @@ def train_partitioned(
         elapsed_time = time.time() - training_start_time
         # Let any in-flight checkpoint finish, then guarantee the final state is saved
         # (on normal completion, not just interrupts) — deduped if already checkpointed.
-        checkpointing.wait_for_checkpoint(session)
+        session.checkpoints.wait()
         if completed_iterations > 0:
             if verbose:
                 print("[Master] Saving final checkpoint...", flush=True)
-            checkpointing.ensure_final_checkpoint(
-                session=session,
+            session.checkpoints.ensure_final_checkpoint(
                 worker_manager=worker_manager,
                 iteration=start_iteration + completed_iterations,
                 total_infosets=total_infosets,
