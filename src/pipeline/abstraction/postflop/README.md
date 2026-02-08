@@ -76,6 +76,7 @@ buckets:            # equity buckets per street
   turn: 100
   river: 200
 flop_runouts: null  # null = exact (all 1,176 runouts); turn/river always exact
+equity_histogram_bins: 8
 kmeans_max_iter: 300
 kmeans_n_init: 10
 num_workers: null
