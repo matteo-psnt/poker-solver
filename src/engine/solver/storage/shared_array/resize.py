@@ -6,6 +6,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from src.engine.solver.infoset import InfoSetKey
+from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.engine.solver.storage.shared_array.types import ExtraAllocation, ExtraRegion
 
 if TYPE_CHECKING:
@@ -67,44 +68,30 @@ def resize(storage: SharedArrayStorage, new_capacity: int) -> None:
         )
 
     old_capacity = storage.capacity
-    old_regrets = storage.shared_regrets
-    old_strategy = storage.shared_strategy_sum
-    old_action_counts = storage.shared_action_counts
-    old_reach_counts = storage.shared_reach_counts
-    old_cumulative_utility = storage.shared_cumulative_utility
+    old_arrays = {spec.attr: getattr(storage, spec.attr) for spec in ARRAY_SPECS}
+    old_handles = [getattr(storage.state, spec.shm_attr) for spec in ARRAY_SPECS]
 
     print(
         f"Resizing storage: {old_capacity:,} -> {new_capacity:,} infosets "
         f"(growth factor: {new_capacity / old_capacity:.1f}x)"
     )
 
-    old_shm_regrets = storage.state.shm_regrets
-    old_shm_strategy = storage.state.shm_strategy
-    old_shm_actions = storage.state.shm_actions
-    old_shm_reach = storage.state.shm_reach
-    old_shm_utility = storage.state.shm_utility
-
     storage.capacity = new_capacity
     storage.session_id = uuid.uuid4().hex[:8]
 
     storage.create_shared_memory()
 
-    storage.shared_regrets[:old_capacity, :] = old_regrets[:, :]
-    storage.shared_strategy_sum[:old_capacity, :] = old_strategy[:, :]
-    storage.shared_action_counts[:old_capacity] = old_action_counts[:]
-    storage.shared_reach_counts[:old_capacity] = old_reach_counts[:]
-    storage.shared_cumulative_utility[:old_capacity] = old_cumulative_utility[:]
+    for spec in ARRAY_SPECS:
+        new_array = getattr(storage, spec.attr)
+        if spec.per_action:
+            new_array[:old_capacity, :] = old_arrays[spec.attr][:, :]
+        else:
+            new_array[:old_capacity] = old_arrays[spec.attr][:]
 
     add_extra_region(storage, old_capacity, new_capacity)
 
     try:
-        for shm in (
-            old_shm_regrets,
-            old_shm_strategy,
-            old_shm_actions,
-            old_shm_reach,
-            old_shm_utility,
-        ):
+        for shm in old_handles:
             if shm is None:
                 continue
             shm.close()
@@ -123,16 +110,10 @@ def reattach_after_resize(
     preserved_next_id: int,
 ) -> None:
     """Reattach worker to resized shared memory."""
-    if storage.state.shm_regrets:
-        storage.state.shm_regrets.close()
-    if storage.state.shm_strategy:
-        storage.state.shm_strategy.close()
-    if storage.state.shm_actions:
-        storage.state.shm_actions.close()
-    if storage.state.shm_reach:
-        storage.state.shm_reach.close()
-    if storage.state.shm_utility:
-        storage.state.shm_utility.close()
+    for spec in ARRAY_SPECS:
+        shm = getattr(storage.state, spec.shm_attr)
+        if shm:
+            shm.close()
 
     old_capacity = storage.capacity
 

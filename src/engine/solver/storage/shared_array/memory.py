@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.engine.solver.storage.shared_array_layout import get_shm_name
 
 if TYPE_CHECKING:
@@ -23,50 +24,29 @@ def create_shared_memory(storage: SharedArrayStorage) -> None:
     """Create all shared memory segments (coordinator only)."""
     cleanup_stale_shm(storage)
 
-    regrets_size = storage.capacity * storage.max_actions * np.dtype(np.float64).itemsize
-    strategy_size = storage.capacity * storage.max_actions * np.dtype(np.float64).itemsize
-    actions_size = storage.capacity * np.dtype(np.int32).itemsize
-    reach_size = storage.capacity * np.dtype(np.int64).itemsize
-    utility_size = storage.capacity * np.dtype(np.float64).itemsize
-
-    storage.state.shm_regrets = shared_memory.SharedMemory(
-        create=True,
-        size=regrets_size,
-        name=get_shm_name_for_storage(storage, storage.SHM_REGRETS),
-    )
-    storage.state.shm_strategy = shared_memory.SharedMemory(
-        create=True,
-        size=strategy_size,
-        name=get_shm_name_for_storage(storage, storage.SHM_STRATEGY),
-    )
-    storage.state.shm_actions = shared_memory.SharedMemory(
-        create=True,
-        size=actions_size,
-        name=get_shm_name_for_storage(storage, storage.SHM_ACTIONS),
-    )
-    storage.state.shm_reach = shared_memory.SharedMemory(
-        create=True,
-        size=reach_size,
-        name=get_shm_name_for_storage(storage, storage.SHM_REACH),
-    )
-    storage.state.shm_utility = shared_memory.SharedMemory(
-        create=True,
-        size=utility_size,
-        name=get_shm_name_for_storage(storage, storage.SHM_UTILITY),
-    )
+    sizes: dict[str, int] = {}
+    for spec in ARRAY_SPECS:
+        size = spec.nbytes(storage.capacity, storage.max_actions)
+        sizes[spec.attr] = size
+        setattr(
+            storage.state,
+            spec.shm_attr,
+            shared_memory.SharedMemory(
+                create=True,
+                size=size,
+                name=get_shm_name_for_storage(storage, spec.shm_base),
+            ),
+        )
 
     create_numpy_views(storage)
 
-    storage.shared_regrets.fill(0)
-    storage.shared_strategy_sum.fill(0)
-    storage.shared_action_counts.fill(0)
-    storage.shared_reach_counts.fill(0)
-    storage.shared_cumulative_utility.fill(0)
+    for spec in ARRAY_SPECS:
+        getattr(storage, spec.attr).fill(0)
 
     print(
         "Master created shared memory: "
-        f"regrets={regrets_size // 1024 // 1024}MB, "
-        f"strategy={strategy_size // 1024 // 1024}MB"
+        f"regrets={sizes['shared_regrets'] // 1024 // 1024}MB, "
+        f"strategy={sizes['shared_strategy_sum'] // 1024 // 1024}MB"
     )
 
     if storage.ready_event is not None:
@@ -88,21 +68,14 @@ def attach_shared_memory(storage: SharedArrayStorage) -> None:
 
     for attempt in range(max_retries):
         try:
-            storage.state.shm_regrets = shared_memory.SharedMemory(
-                name=get_shm_name_for_storage(storage, storage.SHM_REGRETS)
-            )
-            storage.state.shm_strategy = shared_memory.SharedMemory(
-                name=get_shm_name_for_storage(storage, storage.SHM_STRATEGY)
-            )
-            storage.state.shm_actions = shared_memory.SharedMemory(
-                name=get_shm_name_for_storage(storage, storage.SHM_ACTIONS)
-            )
-            storage.state.shm_reach = shared_memory.SharedMemory(
-                name=get_shm_name_for_storage(storage, storage.SHM_REACH)
-            )
-            storage.state.shm_utility = shared_memory.SharedMemory(
-                name=get_shm_name_for_storage(storage, storage.SHM_UTILITY)
-            )
+            for spec in ARRAY_SPECS:
+                setattr(
+                    storage.state,
+                    spec.shm_attr,
+                    shared_memory.SharedMemory(
+                        name=get_shm_name_for_storage(storage, spec.shm_base)
+                    ),
+                )
 
             create_numpy_views(storage)
             return
@@ -120,55 +93,29 @@ def attach_shared_memory(storage: SharedArrayStorage) -> None:
 
 def create_numpy_views(storage: SharedArrayStorage) -> None:
     """Create NumPy array views into shared memory."""
-    if (
-        storage.state.shm_regrets is None
-        or storage.state.shm_strategy is None
-        or storage.state.shm_actions is None
-        or storage.state.shm_reach is None
-        or storage.state.shm_utility is None
-    ):
+    if any(getattr(storage.state, spec.shm_attr) is None for spec in ARRAY_SPECS):
         raise RuntimeError("Shared memory buffers are not initialized")
 
-    storage.shared_regrets = np.ndarray(
-        (storage.capacity, storage.max_actions),
-        dtype=np.float64,
-        buffer=storage.state.shm_regrets.buf,
-    )
-    storage.shared_strategy_sum = np.ndarray(
-        (storage.capacity, storage.max_actions),
-        dtype=np.float64,
-        buffer=storage.state.shm_strategy.buf,
-    )
-    storage.shared_action_counts = np.ndarray(
-        (storage.capacity,),
-        dtype=np.int32,
-        buffer=storage.state.shm_actions.buf,
-    )
-    storage.shared_reach_counts = np.ndarray(
-        (storage.capacity,),
-        dtype=np.int64,
-        buffer=storage.state.shm_reach.buf,
-    )
-    storage.shared_cumulative_utility = np.ndarray(
-        (storage.capacity,),
-        dtype=np.float64,
-        buffer=storage.state.shm_utility.buf,
-    )
+    for spec in ARRAY_SPECS:
+        shm = getattr(storage.state, spec.shm_attr)
+        setattr(
+            storage,
+            spec.attr,
+            np.ndarray(
+                spec.shape(storage.capacity, storage.max_actions),
+                dtype=spec.dtype,
+                buffer=shm.buf,
+            ),
+        )
 
 
 def cleanup_stale_shm(storage: SharedArrayStorage) -> None:
     """Clean up stale shared memory from previous runs."""
-    shm_names = [
-        get_shm_name_for_storage(storage, storage.SHM_REGRETS),
-        get_shm_name_for_storage(storage, storage.SHM_STRATEGY),
-        get_shm_name_for_storage(storage, storage.SHM_ACTIONS),
-        get_shm_name_for_storage(storage, storage.SHM_REACH),
-        get_shm_name_for_storage(storage, storage.SHM_UTILITY),
-    ]
-
-    for name in shm_names:
+    for spec in ARRAY_SPECS:
         try:
-            stale = shared_memory.SharedMemory(name=name)
+            stale = shared_memory.SharedMemory(
+                name=get_shm_name_for_storage(storage, spec.shm_base)
+            )
             stale.close()
             stale.unlink()
         except FileNotFoundError:
@@ -177,15 +124,8 @@ def cleanup_stale_shm(storage: SharedArrayStorage) -> None:
 
 def cleanup(storage: SharedArrayStorage) -> None:
     """Clean up shared memory (coordinator unlinks, workers just close)."""
-    handles = [
-        storage.state.shm_regrets,
-        storage.state.shm_strategy,
-        storage.state.shm_actions,
-        storage.state.shm_reach,
-        storage.state.shm_utility,
-    ]
-
-    for shm in handles:
+    for spec in ARRAY_SPECS:
+        shm = getattr(storage.state, spec.shm_attr)
         if shm is not None:
             try:
                 shm.close()
@@ -193,9 +133,4 @@ def cleanup(storage: SharedArrayStorage) -> None:
                     shm.unlink()
             except FileNotFoundError:
                 pass
-
-    storage.state.shm_regrets = None
-    storage.state.shm_strategy = None
-    storage.state.shm_actions = None
-    storage.state.shm_reach = None
-    storage.state.shm_utility = None
+        setattr(storage.state, spec.shm_attr, None)
