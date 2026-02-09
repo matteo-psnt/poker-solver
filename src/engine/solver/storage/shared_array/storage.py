@@ -72,6 +72,7 @@ class SharedArrayStorage(Storage):
     add_extra_region = resize_ops.add_extra_region
 
     respond_to_id_requests = sync_ops.respond_to_id_requests
+    rearm_unresolved_id_requests = sync_ops.rearm_unresolved_id_requests
 
     checkpoint = checkpoint_storage
     load_checkpoint = load_storage_checkpoint

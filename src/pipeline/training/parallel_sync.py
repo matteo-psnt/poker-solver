@@ -34,6 +34,9 @@ def _send_pending_id_requests(
         except queue.Full:
             continue
         keys.clear()
+        # In-flight keys must not re-enter pending on every visit; they are
+        # re-armed at batch boundaries if the owner never answers.
+        storage.state.requested_id_keys.update(keys_snapshot)
         sent += len(keys_snapshot)
     return sent
 
@@ -85,6 +88,7 @@ def _process_id_responses(response_queue: mp.Queue, storage: SharedArrayStorage)
         try:
             responses = response_queue.get_nowait()
             storage.state.remote_keys.update(responses)
+            storage.state.requested_id_keys.difference_update(responses)
             count += len(responses)
         except queue.Empty:
             break

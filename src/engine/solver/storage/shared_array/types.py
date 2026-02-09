@@ -51,6 +51,13 @@ class SharedArrayMutableState:
     remote_keys: dict[InfoSetKey, int] = field(default_factory=dict)
     legal_actions_cache: dict[int, list[Action]] = field(default_factory=dict)
     pending_id_requests: dict[int, set[InfoSetKey]] = field(default_factory=dict)
+    # Keys already sent to their owner and awaiting a response. Gates re-adding
+    # to pending_id_requests: without it, every visit to a hot unresolved key
+    # re-queues it and each flush re-pickles the same keys to the same owner —
+    # enough traffic to collapse multi-worker scaling. Re-armed (moved back to
+    # pending) at batch boundaries so keys the owner had not allocated yet are
+    # retried once per batch instead of once per flush.
+    requested_id_keys: set[InfoSetKey] = field(default_factory=set)
     extra_regions: list[ExtraRegion] = field(default_factory=list)
     extra_allocations: list[ExtraAllocation] = field(default_factory=list)
     shm_regrets: SharedMemory | None = None

@@ -167,24 +167,30 @@ class InfoSet:
     - Cumulative strategy (for computing average strategy)
     """
 
-    def __init__(self, key: InfoSetKey, legal_actions: list[Action]):
+    def __init__(
+        self, key: InfoSetKey, legal_actions: list[Action], *, allocate_arrays: bool = True
+    ):
         """
         Initialize information set.
 
         Args:
             key: InfoSetKey identifier
             legal_actions: List of legal actions at this infoset
+            allocate_arrays: Skip regret/strategy allocation when the caller
+                immediately replaces them with storage-backed views (this
+                constructor runs once per node visit in traversal).
         """
         self.key = key
         self.legal_actions = legal_actions
         self.num_actions = len(legal_actions)
 
         # CFR data structures
-        self.regrets = np.zeros(self.num_actions, dtype=np.float64)
-        self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)
+        if allocate_arrays:
+            self.regrets = np.zeros(self.num_actions, dtype=np.float64)
+            self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)
 
-        # Pruning state (regret-based action pruning)
-        self.pruned = np.zeros(self.num_actions, dtype=bool)
+        # Pruning state (regret-based action pruning); allocated on first use.
+        self._pruned: np.ndarray | None = None
 
         # Statistics tracking
         self.reach_count = 0  # Number of times this infoset was reached
@@ -198,6 +204,17 @@ class InfoSet:
         # (e.g. a remote infoset whose global ID this worker has not learned yet).
         # Traversal skips regret/strategy updates on non-writable infosets.
         self.writable = True
+
+    @property
+    def pruned(self) -> np.ndarray:
+        """Per-action pruning flags, allocated lazily (most runs never prune)."""
+        if self._pruned is None:
+            self._pruned = np.zeros(self.num_actions, dtype=bool)
+        return self._pruned
+
+    @pruned.setter
+    def pruned(self, value: np.ndarray) -> None:
+        self._pruned = value
 
     def sync_stats_to_storage(
         self,
