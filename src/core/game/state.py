@@ -197,7 +197,7 @@ class Card:
 FULL_DECK: tuple[Card, ...] = tuple(Card.get_full_deck())
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GameState:
     """
     Immutable game state for Heads-Up No-Limit Hold'em.
