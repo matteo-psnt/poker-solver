@@ -11,7 +11,7 @@ from src.cli.ui import prompts, ui
 from src.cli.ui.context import CliContext
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.in_memory import InMemoryStorage
-from src.training.run_tracker import RunTracker
+from src.training import services
 from src.utils.config import Config
 
 
@@ -27,7 +27,7 @@ class _DummyCardAbstraction(BucketingStrategy):
 
 def view_preflop_chart(ctx: CliContext) -> None:
     """Handle viewing preflop strategy chart."""
-    runs = RunTracker.list_runs(ctx.runs_dir)
+    runs = services.list_runs(ctx.runs_dir)
 
     if not runs:
         ui.error(f"No trained runs found in {ctx.runs_dir}")
@@ -137,5 +137,4 @@ def _ensure_ui_build(ctx: CliContext) -> bool:
 
 
 def _load_run_config(run_dir: Path) -> Config:
-    tracker = RunTracker.load(run_dir)
-    return tracker.metadata.config
+    return services.load_run_metadata(run_dir).config
