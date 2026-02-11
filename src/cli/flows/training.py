@@ -28,6 +28,9 @@ def train_solver(ctx: CliContext) -> None:
     if config is None:
         return
 
+    # Keep CLI run-related flows aligned with the selected training configuration.
+    ctx.set_runs_dir(config.training.runs_dir)
+
     if not _ensure_combo_abstraction(ctx, config):
         ui.pause()
         return
@@ -47,7 +50,7 @@ def evaluate_solver(ctx: CliContext) -> None:
     runs = RunTracker.list_runs(ctx.runs_dir)
 
     if not runs:
-        ui.error("No trained runs found in data/runs/")
+        ui.error(f"No trained runs found in {ctx.runs_dir}")
         ui.pause()
         return
 
@@ -172,7 +175,7 @@ def view_runs(ctx: CliContext) -> None:
     runs = RunTracker.list_runs(ctx.runs_dir)
 
     if not runs:
-        ui.error("No training runs found")
+        ui.error(f"No training runs found in {ctx.runs_dir}")
         ui.pause()
         return
 
@@ -216,7 +219,7 @@ def resume_training(ctx: CliContext) -> None:
     runs = RunTracker.list_runs(ctx.runs_dir)
 
     if not runs:
-        ui.error("No training runs found.")
+        ui.error(f"No training runs found in {ctx.runs_dir}")
         ui.pause()
         return
 

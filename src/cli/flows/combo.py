@@ -188,7 +188,7 @@ def _get_output_path(base_dir: Path, config_name: str, config: PrecomputeConfig)
     """Generate deterministic output path based on config.
 
     Args:
-        config_name: Name of the config (e.g., 'fast_test', 'default')
+        config_name: Name of the config (e.g., 'quick_test', 'default')
         config: PrecomputeConfig instance
 
     Returns:

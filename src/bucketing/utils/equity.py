@@ -219,39 +219,29 @@ class EquityCalculator:
         num_hands = len(hands)
         wins = np.zeros(num_hands)
         ties = np.zeros(num_hands)
+        cards_needed = 2 + (5 - len(board))
+        board_masks = {c.mask for c in board}
+
+        # Precompute legal decks per hand so each hand gets exactly num_samples
+        # valid simulations (opponent + runout don't collide with its hole cards).
+        available_per_hand: list[list[Card]] = []
+        for hand in hands:
+            hand_masks = {hand[0].mask, hand[1].mask}
+            forbidden = board_masks | hand_masks
+            available_per_hand.append([c for c in self.full_deck if c.mask not in forbidden])
 
         for _ in range(self.num_samples):
-            # Sample one opponent hand and board
-            # Create deck excluding board
-            used_cards = set(board)
-            deck = [c for c in Card.get_full_deck() if c not in used_cards]
-
-            # Sample opponent hand
-            opp_cards = random.sample(deck, 2)
-            opp_hand = tuple(opp_cards)
-
-            # Complete board
-            deck = [c for c in deck if c not in opp_cards]
-            cards_needed = 5 - len(board)
-            if cards_needed > 0:
-                new_cards = random.sample(deck, cards_needed)
-                full_board = board + tuple(new_cards)
-            else:
-                full_board = board
-
-            # Evaluate all hands against this opponent
             for i, hand in enumerate(hands):
-                # Skip if hand uses opponent's cards or board cards
-                if any(c in opp_hand or c in full_board for c in hand):
-                    continue
+                sampled_cards = random.sample(available_per_hand[i], cards_needed)
+                opp_hand: tuple[Card, Card] = (sampled_cards[0], sampled_cards[1])
+                full_board = board + tuple(sampled_cards[2:])
 
-                result = self._evaluate_showdown(hand, (opp_hand[0], opp_hand[1]), full_board)
+                result = self._evaluate_showdown(hand, opp_hand, full_board)
                 if result < 0:  # Win (compare_hands returns -1 for hand1 win)
                     wins[i] += 1
                 elif result == 0:
                     ties[i] += 1
 
-        # Calculate equities
         equities = (wins + 0.5 * ties) / self.num_samples
         return equities
 

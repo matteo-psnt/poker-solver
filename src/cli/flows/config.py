@@ -104,6 +104,19 @@ def edit_config(ctx: CliContext, config: Config) -> Config:
     return config
 
 
+def _list_abstraction_configs(ctx: CliContext) -> list[str]:
+    """List available card abstraction config names from config/abstraction."""
+    abstraction_config_dir = ctx.config_dir / "abstraction"
+    if not abstraction_config_dir.exists():
+        return []
+
+    return sorted(
+        config_file.stem
+        for config_file in abstraction_config_dir.glob("*.yaml")
+        if config_file.is_file()
+    )
+
+
 def _edit_training_params(ctx: CliContext, config: Config) -> Config:
     """Edit training parameters."""
     print("Training Parameters")
@@ -391,15 +404,24 @@ def _edit_card_abstraction(ctx: CliContext, config: Config) -> Config:
     print("Card Abstraction")
     print("-" * 40)
 
+    available_configs = _list_abstraction_configs(ctx)
+    if not available_configs:
+        ui.error(f"No abstraction config files found in {ctx.config_dir / 'abstraction'}/")
+        return config
+
     default_config = config.card_abstraction.config or "default_plus"
+    if default_config in available_configs:
+        prompt_default = default_config
+    elif "default_plus" in available_configs:
+        prompt_default = "default_plus"
+    else:
+        prompt_default = available_configs[0]
 
     config_name = prompts.select(
         ctx,
         "Combo abstraction config:",
-        choices=["fast_test", "default", "default_plus", "production"],
-        default=default_config
-        if default_config in ["fast_test", "default", "default_plus", "production"]
-        else "default_plus",
+        choices=available_configs,
+        default=prompt_default,
     )
 
     if config_name is None:

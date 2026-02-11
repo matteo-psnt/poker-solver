@@ -8,7 +8,7 @@ from questionary import Style
 from src.cli.ui.theme import STYLE
 
 
-@dataclass(frozen=True)
+@dataclass
 class CliContext:
     """Shared CLI context for paths and style."""
 
@@ -17,6 +17,17 @@ class CliContext:
     runs_dir: Path
     equity_buckets_dir: Path
     style: Style
+
+    def resolve_path(self, path: str | Path) -> Path:
+        """Resolve a path relative to project root when needed."""
+        path_obj = Path(path).expanduser()
+        if not path_obj.is_absolute():
+            path_obj = self.base_dir / path_obj
+        return path_obj.resolve()
+
+    def set_runs_dir(self, runs_dir: str | Path) -> None:
+        """Update the active runs directory used by CLI run-related flows."""
+        self.runs_dir = self.resolve_path(runs_dir)
 
     @classmethod
     def from_project_root(cls, base_dir: Path | None = None) -> "CliContext":

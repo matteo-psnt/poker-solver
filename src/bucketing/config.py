@@ -130,7 +130,7 @@ class PrecomputeConfig:
 
         Args:
             config_name: Name of config file (without .yaml extension)
-                        e.g., 'fast_test', 'default', 'production'
+                        e.g., 'quick_test', 'default', 'production'
 
         Returns:
             PrecomputeConfig instance with YAML overrides applied

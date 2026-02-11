@@ -30,7 +30,7 @@ def view_preflop_chart(ctx: CliContext) -> None:
     runs = RunTracker.list_runs(ctx.runs_dir)
 
     if not runs:
-        ui.error("No trained runs found in data/runs/")
+        ui.error(f"No trained runs found in {ctx.runs_dir}")
         ui.pause()
         return
 
