@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from src.pipeline.training.parallel_protocol import JobType
 from src.pipeline.training.parallel_sync import (
     _process_all_messages,
+    _send_late_responses,
     _send_pending_id_requests,
 )
 
@@ -16,9 +17,11 @@ class _DummyStorage:
             remote_keys={},
             pending_id_requests={0: set(), 1: set()},
             requested_id_keys=set(),
+            unanswered_id_requests={},
+            pending_late_responses={},
         )
 
-    def respond_to_id_requests(self, keys):
+    def respond_to_id_requests(self, keys, requester):
         return {key: idx for idx, key in enumerate(keys)}
 
 
@@ -47,9 +50,42 @@ def test_process_all_messages_drains_all_queues():
         storage=storage,  # type: ignore[arg-type]
     )
 
-    assert stats == {"requests": 2, "responses": 1}
+    assert stats == {"requests": 2, "responses": 1, "late_responses": 0}
     assert storage.state.remote_keys["remote_key"] == 9
     assert response_queues[1].qsize() == 1
+
+
+def test_late_responses_flush_to_requesters():
+    storage = _DummyStorage()
+    storage.state.pending_late_responses = {1: {"k1": 7}, 0: {"own": 3}}
+    response_queues = [queue.Queue(), queue.Queue()]
+
+    sent = _send_late_responses(
+        worker_id=0,
+        id_response_queues=response_queues,  # type: ignore[arg-type]
+        storage=storage,  # type: ignore[arg-type]
+    )
+
+    assert sent == 1
+    assert response_queues[1].get_nowait() == {"k1": 7}
+    # Own-worker and flushed entries are cleared either way.
+    assert storage.state.pending_late_responses == {}
+
+
+def test_late_responses_retry_when_queue_full():
+    storage = _DummyStorage()
+    storage.state.pending_late_responses = {1: {"k1": 7}}
+    full_queue = queue.Queue(maxsize=1)
+    full_queue.put("occupied")
+
+    sent = _send_late_responses(
+        worker_id=0,
+        id_response_queues=[queue.Queue(), full_queue],  # type: ignore[arg-type]
+        storage=storage,  # type: ignore[arg-type]
+    )
+
+    assert sent == 0
+    assert storage.state.pending_late_responses == {1: {"k1": 7}}
 
 
 def test_process_id_responses_clears_in_flight_tracking():

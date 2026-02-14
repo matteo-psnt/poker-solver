@@ -55,9 +55,15 @@ class SharedArrayMutableState:
     # to pending_id_requests: without it, every visit to a hot unresolved key
     # re-queues it and each flush re-pickles the same keys to the same owner —
     # enough traffic to collapse multi-worker scaling. Re-armed (moved back to
-    # pending) at batch boundaries so keys the owner had not allocated yet are
-    # retried once per batch instead of once per flush.
+    # pending) at batch boundaries as a lost-message backstop.
     requested_id_keys: set[InfoSetKey] = field(default_factory=set)
+    # Owner side: requesters of keys this worker owns but has not allocated yet.
+    # Answered proactively at allocation time (via pending_late_responses), so a
+    # request never waits on the requester retrying.
+    unanswered_id_requests: dict[InfoSetKey, set[int]] = field(default_factory=dict)
+    # Owner side: allocation-time responses queued per requester, flushed with
+    # the regular sync cadence.
+    pending_late_responses: dict[int, dict[InfoSetKey, int]] = field(default_factory=dict)
     extra_regions: list[ExtraRegion] = field(default_factory=list)
     extra_allocations: list[ExtraAllocation] = field(default_factory=list)
     shm_regrets: SharedMemory | None = None
