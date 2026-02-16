@@ -11,7 +11,7 @@ This solver uses **Monte Carlo Counterfactual Regret Minimization (MCCFR)** with
 
 ### Key Features
 
-- **Advanced CFR Variants**: CFR+ regret flooring with configurable iteration weighting (`none` | `linear` | `dcfr`); production training uses Discounted CFR
+- **Advanced CFR Variants**: configurable iteration weighting (`none` | `linear` | `dcfr`) with optional CFR+ regret flooring (off by default — the floor hurts under Monte Carlo sampling); production training uses Discounted CFR
 - **Suit Isomorphism Card Abstraction**: Exact, full-coverage combo-level abstraction that preserves suit relationships (flush draws, blockers) with no fallback path
 - **Node-Template Action Model**: Context-aware preflop/postflop sizing with SPR-gated jam logic
 - **Realtime Subgame Resolver**: Runtime local re-solving with configurable depth, rollout leaves, and conservative blueprint blending
