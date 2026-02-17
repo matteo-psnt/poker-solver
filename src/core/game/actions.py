@@ -144,32 +144,43 @@ class Action:
         return f"Action(type=ActionType.{self.type.name}, amount={self.amount})"
 
 
-# Commonly used action constructors for convenience
+# Interned action constructors. Actions are immutable value objects drawn from
+# a small grid, and get_legal_actions() creates them once per node visit — the
+# factories return shared instances so construction/validation runs once per
+# distinct action instead of millions of times per training run.
+_FOLD = Action(ActionType.FOLD, 0)
+_CHECK = Action(ActionType.CHECK, 0)
+_CALL = Action(ActionType.CALL, 0)
+
+
 def fold() -> Action:
-    """Create a fold action."""
-    return Action(ActionType.FOLD, 0)
+    """The fold action (interned)."""
+    return _FOLD
 
 
 def check() -> Action:
-    """Create a check action."""
-    return Action(ActionType.CHECK, 0)
+    """The check action (interned)."""
+    return _CHECK
 
 
 def call() -> Action:
-    """Create a call action."""
-    return Action(ActionType.CALL, 0)
+    """The call action (interned)."""
+    return _CALL
 
 
+@lru_cache(maxsize=4096)
 def bet(amount: int) -> Action:
-    """Create a bet action."""
+    """Create a bet action (interned per amount)."""
     return Action(ActionType.BET, amount)
 
 
+@lru_cache(maxsize=4096)
 def raises(amount: int) -> Action:
-    """Create a raise action."""
+    """Create a raise action (interned per amount)."""
     return Action(ActionType.RAISE, amount)
 
 
+@lru_cache(maxsize=4096)
 def all_in(amount: int) -> Action:
-    """Create an all-in action."""
+    """Create an all-in action (interned per amount)."""
     return Action(ActionType.ALL_IN, amount)

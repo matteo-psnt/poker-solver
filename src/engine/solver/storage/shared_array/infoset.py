@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from src.core.game.actions import Action, fold
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
 
 
 def get_or_create_infoset(
-    storage: SharedArrayStorage, key: InfoSetKey, legal_actions: list[Action]
+    storage: SharedArrayStorage, key: InfoSetKey, legal_actions: Sequence[Action]
 ) -> InfoSet:
     """Get existing infoset or create new one."""
     state = storage.state
@@ -73,7 +74,7 @@ def allocate_id(storage: SharedArrayStorage) -> int:
 
 
 def create_infoset_view(
-    storage: SharedArrayStorage, infoset_id: int, key: InfoSetKey, legal_actions: list[Action]
+    storage: SharedArrayStorage, infoset_id: int, key: InfoSetKey, legal_actions: Sequence[Action]
 ) -> InfoSet:
     """Create an infoset backed by shared-memory views."""
     num_actions = len(legal_actions)

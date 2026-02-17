@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -49,7 +50,7 @@ class SharedArrayMutableState:
     next_local_id: int
     owned_keys: dict[InfoSetKey, int] = field(default_factory=dict)
     remote_keys: dict[InfoSetKey, int] = field(default_factory=dict)
-    legal_actions_cache: dict[int, list[Action]] = field(default_factory=dict)
+    legal_actions_cache: dict[int, Sequence[Action]] = field(default_factory=dict)
     pending_id_requests: dict[int, set[InfoSetKey]] = field(default_factory=dict)
     # Keys already sent to their owner and awaiting a response. Gates re-adding
     # to pending_id_requests: without it, every visit to a hot unresolved key

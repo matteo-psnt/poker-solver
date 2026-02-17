@@ -95,7 +95,7 @@ def checkpoint(manager: SharedArrayWorkerManager, iteration: int) -> None:
     collected = collect_keys(manager)
 
     manager.storage.state.owned_keys = collected["owned_keys"]
-    manager.storage.state.legal_actions_cache = collected["legal_actions_cache"]
+    manager.storage.state.legal_actions_cache = dict(collected["legal_actions_cache"])
 
     if manager.storage.state.owned_keys:
         max_id = max(manager.storage.state.owned_keys.values())

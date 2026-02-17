@@ -39,6 +39,8 @@ class GameRules:
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.evaluator = get_evaluator()
+        # get_legal_actions memo; see its docstring for the key derivation.
+        self._legal_actions_cache: dict[tuple, tuple[Action, ...]] = {}
 
     def _stacks_to_tuple(self, stacks: list[int]) -> tuple[int, int]:
         """Convert stacks list to fixed-size tuple for type safety."""
@@ -147,20 +149,53 @@ class GameRules:
 
     def get_legal_actions(
         self, state: GameState, action_model: ActionModel | None = None
-    ) -> list[Action]:
+    ) -> tuple[Action, ...]:
         """
         Get all legal actions for the current player.
+
+        Returns a shared, memoized tuple: the action set is fully determined by
+        (street, normalized betting sequence, pot, current player's stack,
+        to_call, seat-relative position) for a fixed action model — the
+        sequence covers every history-derived input (raise counts, aggression
+        counts, template selection), and the scalars pin the absolute sizes.
+        MCCFR revisits the same finite betting tree every iteration, so the
+        key space is small (~hundreds of nodes) and hit rates approach 100%.
 
         Args:
             state: Current game state
             action_model: Optional action model to discretize actions
 
         Returns:
-            List of legal actions
+            Tuple of legal actions (shared instance — do not mutate assumptions
+            apply automatically since tuples are immutable)
         """
         if state.is_terminal:
-            return []
+            return ()
 
+        key = (
+            action_model,
+            state.street,
+            state.normalized_betting_sequence(),
+            state.pot,
+            state.stacks[state.current_player],
+            state.to_call,
+            state.current_player == state.button_position,
+        )
+        cached = self._legal_actions_cache.get(key)
+        if cached is not None:
+            return cached
+
+        result = tuple(self._compute_legal_actions(state, action_model))
+        if len(self._legal_actions_cache) >= (1 << 16):
+            # Off-tree eval states (arbitrary pots) could grow the memo without
+            # bound; in-tree training uses a few hundred keys and never trips this.
+            self._legal_actions_cache.clear()
+        self._legal_actions_cache[key] = result
+        return result
+
+    def _compute_legal_actions(
+        self, state: GameState, action_model: ActionModel | None
+    ) -> list[Action]:
         actions = []
         current_stack = state.stacks[state.current_player]
 
@@ -223,6 +258,14 @@ class GameRules:
         Returns:
             New game state after action
         """
+        child = self._apply_action_impl(state, action)
+        # Every branch appends exactly `action` at pot level `state.pot`, so the
+        # child's betting sequence extends the parent's by one token — O(1)
+        # instead of renormalizing the full history at every decision node.
+        child.derive_sequence_cache(state, action)
+        return child
+
+    def _apply_action_impl(self, state: GameState, action: Action) -> GameState:
         if state.is_terminal:
             raise ValueError("Cannot apply action to terminal state")
 
