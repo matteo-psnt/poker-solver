@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
+import sys
 import time
 from multiprocessing import shared_memory
 from typing import TYPE_CHECKING
@@ -13,6 +16,44 @@ from src.engine.solver.storage.shared_array_layout import get_shm_name
 
 if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage
+
+_MADV_HUGEPAGE = 14
+_hugepage_report_done = False
+
+
+def _advise_hugepages(buffers: list[memoryview]) -> None:
+    """Best-effort MADV_HUGEPAGE on the shm mappings (per process).
+
+    The hot arrays span gigabytes accessed randomly, so 4KB pages thrash the TLB;
+    transparent huge pages cut that when the kernel honors them for shmem
+    (``/sys/kernel/mm/transparent_hugepage/shmem_enabled`` = always/advise).
+    Failure is harmless — never raise.
+    """
+    global _hugepage_report_done
+    if sys.platform != "linux":
+        return
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
+        ok = 0
+        for buf in buffers:
+            addr = ctypes.addressof(ctypes.c_char.from_buffer(buf))
+            if libc.madvise(ctypes.c_void_p(addr), ctypes.c_size_t(len(buf)), _MADV_HUGEPAGE) == 0:
+                ok += 1
+        if not _hugepage_report_done:
+            _hugepage_report_done = True
+            try:
+                shmem_mode = (
+                    open("/sys/kernel/mm/transparent_hugepage/shmem_enabled").read().strip()
+                )
+            except OSError:
+                shmem_mode = "unknown"
+            print(
+                f"Hugepage advice: madvise ok on {ok}/{len(buffers)} mappings "
+                f"(shmem_enabled: {shmem_mode})",
+                flush=True,
+            )
+    except Exception:
+        pass
 
 
 def get_shm_name_for_storage(storage: SharedArrayStorage, base: str) -> str:
@@ -107,6 +148,8 @@ def create_numpy_views(storage: SharedArrayStorage) -> None:
                 buffer=shm.buf,
             ),
         )
+
+    _advise_hugepages([getattr(storage.state, spec.shm_attr).buf for spec in ARRAY_SPECS])
 
 
 def cleanup_stale_shm(storage: SharedArrayStorage) -> None:

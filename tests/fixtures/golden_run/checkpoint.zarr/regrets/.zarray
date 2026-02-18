@@ -1,16 +1,16 @@
 {
     "chunks": [
-        3000,
+        50000,
         10
     ],
     "compressor": {
         "blocksize": 0,
-        "clevel": 5,
-        "cname": "lz4",
+        "clevel": 1,
+        "cname": "zstd",
         "id": "blosc",
-        "shuffle": 1
+        "shuffle": 2
     },
-    "dtype": "<f8",
+    "dtype": "<f4",
     "fill_value": 0.0,
     "filters": null,
     "order": "C",

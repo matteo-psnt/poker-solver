@@ -298,7 +298,7 @@ class TestInfoSet:
         infoset.regrets[0] = -50.0
 
         # Update with DCFR enabled at iteration 100
-        # With beta=0, negative cumulative regrets get discount factor 1.0 (no discount)
+        # With beta=0, negative cumulative regret is halved: t^0 / (t^0 + 1) = 1/2
         infoset.update_regret(
             0,
             -10.0,
@@ -308,9 +308,8 @@ class TestInfoSet:
             dcfr_beta=0.0,
         )
 
-        # With beta=0, cumulative negative regret is not discounted
-        # Result: -50.0 * 1.0 + (-10.0) = -60.0
-        assert abs(infoset.regrets[0] - (-60.0)) < 1e-6
+        # Result: -50.0 * 0.5 + (-10.0) = -35.0
+        assert abs(infoset.regrets[0] - (-35.0)) < 1e-6
 
     def test_dcfr_cumulative_discounting_over_iterations(self):
         """Test that DCFR correctly discounts cumulative regrets over multiple iterations."""

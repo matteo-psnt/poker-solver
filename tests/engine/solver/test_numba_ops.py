@@ -37,8 +37,8 @@ class TestDCFRWeights:
         w_pos = compute_dcfr_weight(100, alpha=1.5, beta=0.0, is_positive=True)
         w_neg = compute_dcfr_weight(100, alpha=1.5, beta=0.0, is_positive=False)
 
-        # With beta=0, negative regrets get weight 1.0 (no discount)
-        assert w_neg == 1.0
+        # With beta=0, negative regrets are halved: t^0 / (t^0 + 1) = 1/2
+        assert w_neg == 0.5
         # With alpha=1.5, positive regrets get discounted
         assert w_pos < 1.0  # Discount applied
         assert w_pos > 0.9  # But close to 1 for iteration 100
@@ -49,12 +49,12 @@ class TestDCFRWeights:
         assert w_neg_beta < 1.0
 
     def test_dcfr_weight_zero_exponent(self):
-        """Zero exponent should give uniform weight 1.0."""
+        """Zero exponent halves regret: t^0 / (t^0 + 1) = 1/2 (Brown & Sandholm 2019)."""
         weight = compute_dcfr_weight(100, alpha=0.0, beta=0.0, is_positive=True)
-        assert weight == 1.0
+        assert weight == 0.5
 
         weight_neg = compute_dcfr_weight(100, alpha=0.0, beta=0.0, is_positive=False)
-        assert weight_neg == 1.0
+        assert weight_neg == 0.5
 
     def test_dcfr_weight_formula(self):
         """Test that the standard DCFR formula t^exp / (t^exp + 1) is correctly applied."""
@@ -115,9 +115,9 @@ class TestDCFRWeights:
         assert abs(w_pos - expected_pos) < 1e-6
         assert w_pos > 0.999  # Should be very close to 1.0 for large t
 
-        # Negative regret discount factor (beta=0 means no discount)
+        # Negative regret discount factor (beta=0 halves per update)
         w_neg = compute_dcfr_weight(iteration, alpha=1.5, beta=0.0, is_positive=False)
-        assert w_neg == 1.0
+        assert w_neg == 0.5
 
         # Strategy weight (t^gamma)
         w_strategy = compute_dcfr_strategy_weight(iteration, gamma=2.0)
