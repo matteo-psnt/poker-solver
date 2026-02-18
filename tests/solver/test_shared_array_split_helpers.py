@@ -34,37 +34,49 @@ def test_owner_for_key_with_two_workers():
 
 def test_owner_for_id_uses_base_and_extra_regions():
     # Base region example
-    assert owner_for_id(
-        1,
-        unknown_id=0,
-        base_slots_per_worker=10,
-        num_workers=2,
-        extra_regions=[],
-    ) == 0
-    assert owner_for_id(
-        11,
-        unknown_id=0,
-        base_slots_per_worker=10,
-        num_workers=2,
-        extra_regions=[],
-    ) == 1
+    assert (
+        owner_for_id(
+            1,
+            unknown_id=0,
+            base_slots_per_worker=10,
+            num_workers=2,
+            extra_regions=[],
+        )
+        == 0
+    )
+    assert (
+        owner_for_id(
+            11,
+            unknown_id=0,
+            base_slots_per_worker=10,
+            num_workers=2,
+            extra_regions=[],
+        )
+        == 1
+    )
 
     # Extra region: start=21, total=3, base=1, remainder=1
     # Worker 0 gets first 2 ids (21,22), worker 1 gets next 1 id (23).
-    assert owner_for_id(
-        22,
-        unknown_id=0,
-        base_slots_per_worker=10,
-        num_workers=2,
-        extra_regions=[(21, 3, 1, 1)],
-    ) == 0
-    assert owner_for_id(
-        23,
-        unknown_id=0,
-        base_slots_per_worker=10,
-        num_workers=2,
-        extra_regions=[(21, 3, 1, 1)],
-    ) == 1
+    assert (
+        owner_for_id(
+            22,
+            unknown_id=0,
+            base_slots_per_worker=10,
+            num_workers=2,
+            extra_regions=[(21, 3, 1, 1)],
+        )
+        == 0
+    )
+    assert (
+        owner_for_id(
+            23,
+            unknown_id=0,
+            base_slots_per_worker=10,
+            num_workers=2,
+            extra_regions=[(21, 3, 1, 1)],
+        )
+        == 1
+    )
 
 
 def test_get_shm_name_formats_session():

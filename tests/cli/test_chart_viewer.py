@@ -54,7 +54,9 @@ def test_viewer_uses_fastapi_server_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr(viewer.services, "list_runs", lambda _runs_dir: ["run-a"])
     monkeypatch.setattr(viewer.prompts, "select", lambda *_args, **_kwargs: "run-a")
     monkeypatch.setattr(viewer, "_ensure_ui_build", lambda _ctx: True)
-    monkeypatch.setattr(viewer.ChartService, "from_run_dir", lambda *_args, **_kwargs: _fake_chart_service())
+    monkeypatch.setattr(
+        viewer.ChartService, "from_run_dir", lambda *_args, **_kwargs: _fake_chart_service()
+    )
     monkeypatch.setattr(viewer, "FastAPIChartServer", _FastAPIServer)
     monkeypatch.setattr(viewer, "ChartServer", _LegacyServer)
     monkeypatch.setattr(viewer.ui, "pause", lambda *_args, **_kwargs: None)
@@ -99,7 +101,9 @@ def test_viewer_uses_legacy_server_when_env_enabled(tmp_path, monkeypatch):
     monkeypatch.setattr(viewer.services, "list_runs", lambda _runs_dir: ["run-a"])
     monkeypatch.setattr(viewer.prompts, "select", lambda *_args, **_kwargs: "run-a")
     monkeypatch.setattr(viewer, "_ensure_ui_build", lambda _ctx: True)
-    monkeypatch.setattr(viewer.ChartService, "from_run_dir", lambda *_args, **_kwargs: _fake_chart_service())
+    monkeypatch.setattr(
+        viewer.ChartService, "from_run_dir", lambda *_args, **_kwargs: _fake_chart_service()
+    )
     monkeypatch.setattr(viewer, "FastAPIChartServer", _FastAPIServer)
     monkeypatch.setattr(viewer, "ChartServer", _LegacyServer)
     monkeypatch.setattr(viewer.ui, "pause", lambda *_args, **_kwargs: None)

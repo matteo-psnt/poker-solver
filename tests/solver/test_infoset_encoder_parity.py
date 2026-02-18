@@ -42,7 +42,9 @@ def _legacy_infoset_key(state, player: int, card_abstraction) -> InfoSetKey:
         street=state.street,
         betting_sequence=betting_sequence,
         preflop_hand=None,
-        postflop_bucket=card_abstraction.get_bucket(state.hole_cards[player], state.board, state.street),
+        postflop_bucket=card_abstraction.get_bucket(
+            state.hole_cards[player], state.board, state.street
+        ),
         spr_bucket=spr_bucket,
     )
 

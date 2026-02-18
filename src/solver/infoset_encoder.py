@@ -52,7 +52,9 @@ def encode_infoset_key(
             spr_bucket=spr_bucket,
         )
 
-    postflop_bucket = card_abstraction.get_bucket(state.hole_cards[player], state.board, state.street)
+    postflop_bucket = card_abstraction.get_bucket(
+        state.hole_cards[player], state.board, state.street
+    )
     return InfoSetKey(
         player_position=player,
         street=state.street,
