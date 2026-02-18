@@ -263,50 +263,6 @@ class InfoSet:
             return average_strategy(self.strategy_sum[valid_indices])
         return regret_matching(self.regrets[valid_indices])
 
-    def get_strategy_safe(
-        self, legal_actions: list[Action], use_average: bool = True
-    ) -> tuple[np.ndarray, list[int]]:
-        """
-        Get strategy for given legal actions with validation and remapping.
-
-        This method handles the case where the legal actions at query time
-        may differ from the legal actions stored in the infoset. It finds
-        the overlap and returns a strategy over the provided legal actions.
-
-        Args:
-            legal_actions: List of legal actions to get strategy for
-            use_average: If True, use average strategy. If False, use current strategy.
-
-        Returns:
-            Tuple of (normalized_strategy, valid_indices):
-            - normalized_strategy: Probability distribution over legal_actions (float64)
-            - valid_indices: Indices in legal_actions that matched stored actions
-
-        Examples:
-            # Get strategy for specific legal actions
-            strategy, valid_idx = infoset.get_strategy_safe(
-                legal_actions=[fold(), call(), raise_(100)],
-                use_average=True
-            )
-        """
-        # Find valid indices by matching actions
-        # We compare actions for equality (fold == fold, raise_(100) == raise_(100))
-        valid_indices = [
-            i
-            for i, stored_action in enumerate(self.legal_actions)
-            if stored_action in legal_actions
-        ]
-
-        if not valid_indices:
-            # No overlap - return uniform over all legal actions
-            uniform = np.ones(len(legal_actions), dtype=np.float64) / len(legal_actions)
-            return uniform, list(range(len(legal_actions)))
-
-        # Get filtered and normalized strategy
-        strategy = self.get_filtered_strategy(valid_indices, use_average)
-
-        return strategy, valid_indices
-
     def get_average_utility(self) -> float:
         """
         Compute average utility (expected value) at this infoset.

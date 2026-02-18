@@ -11,7 +11,6 @@ import numpy as np
 
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
-from src.game.actions import ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
 from src.solver.infoset_encoder import encode_infoset_key
@@ -450,33 +449,6 @@ class MCCFRSolver:
 
         # If board doesn't match expected size for this street, need to deal
         return len(state.board) < expected_board_size[state.street]
-
-    def _street_action_complete(self, state: GameState) -> bool:
-        """
-        Check if betting action is complete on current street.
-
-        Returns:
-            True if street is complete and should advance
-        """
-        if len(state.betting_history) == 0:
-            return False
-
-        # If someone is all-in, action is complete
-        if state.is_all_in():
-            return True
-
-        # Check if both players have acted and betting is closed
-        # This is simplified - full logic would track actions per street
-        if state.to_call == 0:
-            # No bet facing, both checked
-            return len(state.betting_history) >= 2
-
-        # Someone bet, other called/folded
-        last_action = state.betting_history[-1] if state.betting_history else None
-        if last_action and last_action.type in (ActionType.CALL, ActionType.FOLD):
-            return True
-
-        return False
 
     def _sample_chance_outcome(self, state: GameState) -> GameState:
         """
