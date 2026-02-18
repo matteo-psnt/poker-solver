@@ -1,12 +1,10 @@
 """Preflop chart generation for CLI."""
 
-import os
 import subprocess
 import webbrowser
 
 from src.api.app import FastAPIChartServer
 from src.api.chart_service import ChartService
-from src.cli.flows.chart.server import ChartServer
 from src.cli.ui import prompts, ui
 from src.cli.ui.context import CliContext
 from src.training import services
@@ -48,17 +46,10 @@ def view_preflop_chart(ctx: CliContext) -> None:
 
     print("\nStarting chart viewer...")
 
-    use_legacy = os.getenv("POKER_SOLVER_USE_LEGACY_CHART_SERVER") == "1"
-    if use_legacy:
-        server = ChartServer(
-            chart_service=chart_service,
-            base_dir=ctx.base_dir,
-        )
-    else:
-        server = FastAPIChartServer(
-            service=chart_service,
-            base_dir=ctx.base_dir,
-        )
+    server = FastAPIChartServer(
+        service=chart_service,
+        base_dir=ctx.base_dir,
+    )
 
     try:
         server.start()

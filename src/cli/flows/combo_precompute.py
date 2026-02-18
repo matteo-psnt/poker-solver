@@ -14,7 +14,6 @@ from src.bucketing.postflop.hand_bucketing import PostflopBucketer
 from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.cli.ui import prompts
 from src.cli.ui.context import CliContext
-from src.cli.ui.menu import MenuItem, run_menu
 from src.game.state import Card, Street
 
 
@@ -52,24 +51,6 @@ def _list_available_configs(ctx: CliContext) -> list:
                 configs.append(yaml_file.stem)
 
     return configs
-
-
-def combo_menu(ctx: CliContext) -> None:
-    """Show combo abstraction tools submenu."""
-    items = [
-        MenuItem("Precompute Abstraction", handle_combo_precompute),
-        MenuItem("View Abstraction Info", handle_combo_info),
-        MenuItem("Test Bucket Lookup", handle_combo_test_lookup),
-        MenuItem("Analyze Bucketing Patterns", handle_combo_analyze_bucketing),
-        MenuItem("Analyze Coverage (Fallback Rate)", handle_combo_coverage),
-    ]
-
-    run_menu(ctx, "Combo Abstraction Tools:", items, exit_label="Back")
-
-
-def combo_abstraction_menu(ctx: CliContext) -> None:
-    """Backward-compatible alias for the combo menu."""
-    combo_menu(ctx)
 
 
 def _get_config_choice(ctx: CliContext) -> tuple:

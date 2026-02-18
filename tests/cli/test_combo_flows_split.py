@@ -1,9 +1,9 @@
-"""Tests for split combo flow modules and compatibility facade."""
+"""Tests for combo flow menu composition."""
 
 from unittest.mock import MagicMock
 
-from src.cli.flows import combo
 from src.cli.flows import combo_menu as combo_menu_module
+from src.cli.flows import combo_precompute as combo_precompute_module
 from src.cli.ui.context import CliContext
 
 
@@ -17,13 +17,12 @@ def _make_ctx(tmp_path):
     )
 
 
-def test_combo_facade_exports_split_handlers():
-    assert combo.combo_menu is combo_menu_module.combo_menu
-    assert callable(combo.handle_combo_precompute)
-    assert callable(combo.handle_combo_info)
-    assert callable(combo.handle_combo_test_lookup)
-    assert callable(combo.handle_combo_coverage)
-    assert callable(combo.handle_combo_analyze_bucketing)
+def test_combo_menu_uses_precompute_handlers():
+    assert callable(combo_precompute_module.handle_combo_precompute)
+    assert callable(combo_precompute_module.handle_combo_info)
+    assert callable(combo_precompute_module.handle_combo_test_lookup)
+    assert callable(combo_precompute_module.handle_combo_coverage)
+    assert callable(combo_precompute_module.handle_combo_analyze_bucketing)
 
 
 def test_combo_menu_builds_expected_entries(tmp_path, monkeypatch):
