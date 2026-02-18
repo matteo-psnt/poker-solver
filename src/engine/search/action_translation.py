@@ -63,14 +63,14 @@ def translate_action_distribution(
     span = upper.amount - lower.amount
     if span <= 0:
         return [(lower, 1.0)]
-
-    upper_w = (target_amount - lower.amount) / span
-    lower_w = 1.0 - upper_w
-    lower_w = float(np.clip(lower_w, 0.0, 1.0))
-    upper_w = float(np.clip(upper_w, 0.0, 1.0))
-    total = lower_w + upper_w
-    if total <= 0:
+    if state.pot <= 0:
         return [(action_model.discretize_action(state, observed_action), 1.0)]
-    lower_w /= total
-    upper_w /= total
-    return [(lower, lower_w), (upper, upper_w)]
+
+    # Randomized pseudo-harmonic mapping (Ganzfried & Sandholm, IJCAI 2013):
+    # with sizes a < x < b expressed in pot units,
+    # P(lower) = (b - x)(1 + a) / ((b - a)(1 + x)).
+    a = lower.amount / state.pot
+    b = upper.amount / state.pot
+    x = target_amount / state.pot
+    lower_w = float(np.clip(((b - x) * (1.0 + a)) / ((b - a) * (1.0 + x)), 0.0, 1.0))
+    return [(lower, lower_w), (upper, 1.0 - lower_w)]
