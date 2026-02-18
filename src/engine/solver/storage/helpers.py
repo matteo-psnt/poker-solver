@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 import pickle
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,10 +13,15 @@ import zarr
 from src.core.game.actions import Action, ActionType
 from src.engine.solver.storage.array_specs import ARRAY_SPECS
 
-# Checkpoint file names
+# Legacy fixed checkpoint file names (pre-manifest runs; still readable).
 CHECKPOINT_ZARR_DIR = "checkpoint.zarr"
 KEY_MAPPING_FILE = "key_mapping.pkl"
 ACTION_SIGNATURES_FILE = "action_signatures.pkl"
+
+# Manifest pointing at the current snapshot. Snapshots are written under
+# versioned names and become current only via an atomic manifest replace, so a
+# crash mid-write can never corrupt the last good checkpoint.
+CHECKPOINT_MANIFEST_FILE = "CHECKPOINT.json"
 
 
 @dataclass(frozen=True)
@@ -25,6 +33,15 @@ class CheckpointPaths:
 
     @classmethod
     def from_dir(cls, checkpoint_dir: Path) -> CheckpointPaths:
+        """Resolve the current snapshot: manifest if present, legacy names otherwise."""
+        manifest = read_checkpoint_manifest(checkpoint_dir)
+        if manifest is not None:
+            return cls(
+                base=checkpoint_dir,
+                checkpoint_zarr=checkpoint_dir / manifest["zarr"],
+                key_mapping=checkpoint_dir / manifest["key_mapping"],
+                action_signatures=checkpoint_dir / manifest["action_signatures"],
+            )
         return cls(
             base=checkpoint_dir,
             checkpoint_zarr=checkpoint_dir / CHECKPOINT_ZARR_DIR,
@@ -32,17 +49,103 @@ class CheckpointPaths:
             action_signatures=checkpoint_dir / ACTION_SIGNATURES_FILE,
         )
 
+    @classmethod
+    def for_iteration(cls, checkpoint_dir: Path, iteration: int) -> CheckpointPaths:
+        """Versioned artifact paths for writing a new snapshot."""
+        return cls(
+            base=checkpoint_dir,
+            checkpoint_zarr=checkpoint_dir / f"checkpoint-{iteration}.zarr",
+            key_mapping=checkpoint_dir / f"key_mapping-{iteration}.pkl",
+            action_signatures=checkpoint_dir / f"action_signatures-{iteration}.pkl",
+        )
+
+
+def read_checkpoint_manifest(checkpoint_dir: Path) -> dict | None:
+    """Read the checkpoint manifest, or None if this run predates manifests."""
+    path = checkpoint_dir / CHECKPOINT_MANIFEST_FILE
+    if not path.exists():
+        return None
+    manifest = json.loads(path.read_text())
+    for field in ("iteration", "zarr", "key_mapping", "action_signatures"):
+        if field not in manifest:
+            raise ValueError(f"Invalid checkpoint manifest {path}: missing {field!r}")
+    return manifest
+
+
+def resolve_resume_iteration(checkpoint_dir: Path, metadata_iterations: int) -> int | None:
+    """Resolve the iteration a resume should continue from.
+
+    The manifest is authoritative: ``commit_checkpoint_manifest`` writes its
+    ``iteration`` in the same atomic ``os.replace`` that publishes the arrays it
+    describes, whereas run metadata (``.run.json``) is written afterwards in a
+    separate, non-atomic step. A hard kill between the two -- SIGKILL, OOM, the
+    Modal guillotine -- leaves metadata behind the data on disk. Trusting
+    metadata there would re-run ``[metadata, manifest)`` and, because the deal
+    stream is a pure function of the absolute iteration index, replay deals
+    already baked into the loaded arrays and double-count them.
+
+    Falls back to metadata only for pre-manifest runs, which have no better
+    source. Returns None when neither knows of a checkpoint.
+    """
+    manifest = read_checkpoint_manifest(checkpoint_dir)
+    if manifest is None:
+        return metadata_iterations if metadata_iterations > 0 else None
+
+    manifest_iteration = int(manifest["iteration"])
+    if manifest_iteration != metadata_iterations:
+        print(
+            f"[resume] Run metadata reports iteration {metadata_iterations} but the "
+            f"checkpoint manifest reports {manifest_iteration}; trusting the manifest "
+            "(metadata was likely not flushed before the previous leg died).",
+            flush=True,
+        )
+    return manifest_iteration if manifest_iteration > 0 else None
+
+
+def commit_checkpoint_manifest(
+    checkpoint_dir: Path, iteration: int, paths: CheckpointPaths
+) -> None:
+    """Atomically make a fully-written snapshot current, then prune superseded artifacts."""
+    manifest = {
+        "iteration": iteration,
+        "zarr": paths.checkpoint_zarr.name,
+        "key_mapping": paths.key_mapping.name,
+        "action_signatures": paths.action_signatures.name,
+    }
+    tmp = checkpoint_dir / (CHECKPOINT_MANIFEST_FILE + ".tmp")
+    tmp.write_text(json.dumps(manifest))
+    os.replace(tmp, checkpoint_dir / CHECKPOINT_MANIFEST_FILE)
+    _prune_superseded_snapshots(checkpoint_dir, keep=manifest)
+
+
+def _prune_superseded_snapshots(checkpoint_dir: Path, keep: dict) -> None:
+    """Delete snapshots the manifest no longer references. Never fails a checkpoint."""
+    keep_names = {keep["zarr"], keep["key_mapping"], keep["action_signatures"]}
+    doomed: list[Path] = [
+        checkpoint_dir / CHECKPOINT_ZARR_DIR,
+        checkpoint_dir / KEY_MAPPING_FILE,
+        checkpoint_dir / ACTION_SIGNATURES_FILE,
+    ]
+    for pattern in ("checkpoint-*.zarr", "key_mapping-*.pkl", "action_signatures-*.pkl"):
+        doomed.extend(p for p in checkpoint_dir.glob(pattern) if p.name not in keep_names)
+    for path in doomed:
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+        except OSError as exc:
+            print(f"Warning: could not prune superseded checkpoint {path.name}: {exc}")
+
 
 def get_missing_checkpoint_files(checkpoint_dir: Path) -> list[str]:
     """Check for missing checkpoint files."""
-    missing = []
-    if not (checkpoint_dir / CHECKPOINT_ZARR_DIR).exists():
-        missing.append(CHECKPOINT_ZARR_DIR)
-    if not (checkpoint_dir / KEY_MAPPING_FILE).exists():
-        missing.append(KEY_MAPPING_FILE)
-    if not (checkpoint_dir / ACTION_SIGNATURES_FILE).exists():
-        missing.append(ACTION_SIGNATURES_FILE)
-    return missing
+    paths = CheckpointPaths.from_dir(checkpoint_dir)
+    return [
+        p.name
+        for p in (paths.checkpoint_zarr, paths.key_mapping, paths.action_signatures)
+        if not p.exists()
+    ]
 
 
 def load_key_mapping(paths: CheckpointPaths) -> dict:
@@ -63,7 +166,7 @@ def load_action_signatures(paths: CheckpointPaths) -> dict[int, list[tuple[str, 
 
 def load_checkpoint_arrays(checkpoint_dir: Path) -> dict[str, np.ndarray]:
     """Load checkpoint arrays from Zarr format (directory store for performance)."""
-    zarr_path = checkpoint_dir / CHECKPOINT_ZARR_DIR
+    zarr_path = CheckpointPaths.from_dir(checkpoint_dir).checkpoint_zarr
     if not zarr_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {zarr_path}")
 

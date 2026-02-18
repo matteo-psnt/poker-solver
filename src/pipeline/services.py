@@ -7,6 +7,7 @@ from typing import Any
 
 from src.core.game.state import Street
 from src.engine.solver.protocols import Blueprint
+from src.engine.solver.storage.helpers import read_checkpoint_manifest
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
@@ -48,6 +49,23 @@ class EvaluationOutput:
 
     infosets: int
     results: dict[str, Any]
+    # Which checkpoint was actually scored, from the manifest committed atomically
+    # with the arrays. Without it a stale read -- evaluating a checkpoint written
+    # before a still-running leg's newer one -- is indistinguishable from a real
+    # result, which is exactly how a 10M-iteration checkpoint was once silently
+    # reported as the score of a 16M-iteration run. None only for pre-manifest runs.
+    checkpoint_iteration: int | None = None
+
+
+def checkpoint_iteration_of(run_dir: Path) -> int | None:
+    """Iteration of the checkpoint currently published for ``run_dir``.
+
+    Read from the manifest rather than run metadata: the manifest is committed in
+    the same atomic replace as the arrays it names, so it describes exactly what an
+    evaluator loading this directory will see. None for pre-manifest runs.
+    """
+    manifest = read_checkpoint_manifest(run_dir)
+    return int(manifest["iteration"]) if manifest is not None else None
 
 
 @dataclass(frozen=True)
@@ -96,11 +114,14 @@ def create_training_session(config: Config) -> TrainingSession:
     return TrainingSession(config)
 
 
-def create_resumed_session(run_dir: Path) -> tuple[TrainingSession, int]:
+def create_resumed_session(
+    run_dir: Path, capacity_override: int | None = None
+) -> tuple[TrainingSession, int]:
     """Create a resumed session and return it with latest completed iteration."""
     metadata = load_run_metadata(run_dir)
     latest_iteration = metadata.iterations
-    return TrainingSession.resume(run_dir), latest_iteration
+    session = TrainingSession.resume(run_dir, capacity_override=capacity_override)
+    return session, latest_iteration
 
 
 def run_training(
@@ -332,7 +353,11 @@ def evaluate_run_lbr(
     if config.resolver is not None:
         results["resolver_iterations"] = config.resolver.max_iterations
         results["resolver_blend_alpha"] = config.resolver.policy_blend_alpha
-    return EvaluationOutput(infosets=storage.num_infosets(), results=results)
+    return EvaluationOutput(
+        infosets=storage.num_infosets(),
+        results=results,
+        checkpoint_iteration=checkpoint_iteration_of(run_dir),
+    )
 
 
 def evaluate_run_resolver_gate(
@@ -374,7 +399,11 @@ def evaluate_run_resolver_gate(
         "seed": seed,
         "pair_samples_mbb": result.pair_samples_mbb,
     }
-    return EvaluationOutput(infosets=storage.num_infosets(), results=results)
+    return EvaluationOutput(
+        infosets=storage.num_infosets(),
+        results=results,
+        checkpoint_iteration=checkpoint_iteration_of(run_dir),
+    )
 
 
 def evaluate_blueprint_match(
@@ -426,7 +455,11 @@ def evaluate_blueprint_match(
         "seed": seed,
         "pair_samples_mbb": result.pair_samples_mbb,
     }
-    return EvaluationOutput(infosets=storage_a.num_infosets(), results=results)
+    return EvaluationOutput(
+        infosets=storage_a.num_infosets(),
+        results=results,
+        checkpoint_iteration=checkpoint_iteration_of(run_dir_a),
+    )
 
 
 def evaluate_run_rollout(
@@ -460,6 +493,7 @@ def evaluate_run_rollout(
     return EvaluationOutput(
         infosets=storage.num_infosets(),
         results=results,
+        checkpoint_iteration=checkpoint_iteration_of(run_dir),
     )
 
 
@@ -510,6 +544,7 @@ def evaluate_and_record(
         "method": method,
         "estimator": estimator,
         "infosets": out.infosets,
+        "checkpoint_iteration": out.checkpoint_iteration,
         "results": out.results,
     }
     try:

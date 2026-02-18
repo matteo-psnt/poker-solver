@@ -8,6 +8,7 @@ import pytest
 
 from src.core.actions.action_model import ActionModel
 from src.engine.solver.mccfr import MCCFRSolver
+from src.engine.solver.storage.helpers import CheckpointPaths
 from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.training import components
 from src.pipeline.training.trainer import TrainingSession
@@ -299,7 +300,7 @@ class TestAsyncCheckpointing:
         assert trainer.checkpoints.pending is None
 
         # Verify checkpoint files exist
-        assert (trainer.run_dir / "key_mapping.pkl").exists()
+        assert CheckpointPaths.from_dir(trainer.run_dir).key_mapping.exists()
 
     @pytest.mark.timeout(60)
     def test_async_checkpoint_parallel_training(self, config_with_dummy_abstraction):
@@ -319,10 +320,11 @@ class TestAsyncCheckpointing:
         # Verify training completed
         assert results["total_iterations"] == 4
 
-        # Verify checkpoint was saved
-        assert (trainer.run_dir / "key_mapping.pkl").exists()
-        assert (trainer.run_dir / "checkpoint.zarr").exists()
-        assert (trainer.run_dir / "action_signatures.pkl").exists()
+        # Verify checkpoint was saved (manifest-resolved snapshot)
+        paths = CheckpointPaths.from_dir(trainer.run_dir)
+        assert paths.key_mapping.exists()
+        assert paths.checkpoint_zarr.exists()
+        assert paths.action_signatures.exists()
 
     @pytest.mark.timeout(30)
     def test_checkpoint_executor_cleanup(self, config_with_dummy_abstraction):
@@ -358,8 +360,8 @@ class TestAsyncCheckpointing:
         assert results["final_infosets"] > 0
 
         # Verify checkpoint files exist
-        key_mapping_file = trainer.run_dir / "key_mapping.pkl"
-        assert key_mapping_file.exists(), "key_mapping.pkl should exist"
+        key_mapping_file = CheckpointPaths.from_dir(trainer.run_dir).key_mapping
+        assert key_mapping_file.exists(), "key mapping should exist"
 
         # Load and verify the checkpoint contains all infosets
         with open(key_mapping_file, "rb") as f:
@@ -391,9 +393,10 @@ class TestAsyncCheckpointing:
         trainer.train(num_iterations=4, num_workers=2)
 
         # Verify checkpoint files exist
-        key_mapping_file = trainer.run_dir / "key_mapping.pkl"
-        checkpoint_dir = trainer.run_dir / "checkpoint.zarr"
-        action_sigs_file = trainer.run_dir / "action_signatures.pkl"
+        paths = CheckpointPaths.from_dir(trainer.run_dir)
+        key_mapping_file = paths.key_mapping
+        checkpoint_dir = paths.checkpoint_zarr
+        action_sigs_file = paths.action_signatures
 
         assert key_mapping_file.exists()
         assert checkpoint_dir.exists()
@@ -561,7 +564,7 @@ class TestCheckpointEnabledConfig:
         results1 = trainer1.train(num_iterations=4, num_workers=1)
 
         # Verify checkpoint exists
-        assert (trainer1.run_dir / "key_mapping.pkl").exists()
+        assert CheckpointPaths.from_dir(trainer1.run_dir).key_mapping.exists()
 
         initial_infosets = results1["final_infosets"]
 

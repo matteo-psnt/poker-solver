@@ -69,11 +69,21 @@ class TrainingBatchCoordinator:
         current_batch_size = min(self.batch_size, remaining)
         iterations_per_worker = self._get_iterations_per_worker(current_batch_size)
 
+        # Seed coordinate must be the batch's ABSOLUTE iteration index, not the
+        # 0-based loop counter: ``batch_idx`` restarts at 0 on resume while
+        # ``start_iteration`` carries the offset, so a resumed leg would otherwise
+        # replay the deal stream from the beginning -- re-traversing already-trained
+        # deals and double-counting them in the average strategy. Absolute iteration
+        # is also batch-size invariant, so legs with different batch sizes cannot
+        # collide. Kept distinct from ``batch_idx``, which still indexes metrics rows.
+        batch_start_iteration = self.start_iteration + state.completed_iterations
+
         batch_result = self.worker_manager.run_batch(
             iterations_per_worker=iterations_per_worker,
-            batch_id=batch_idx,
-            start_iteration=self.start_iteration + state.completed_iterations,
+            batch_id=batch_start_iteration,
+            start_iteration=batch_start_iteration,
             verbose=self.verbose,
+            auto_resize=False,
         )
 
         batch_utilities = batch_result["utilities"]
@@ -83,6 +93,23 @@ class TrainingBatchCoordinator:
         max_worker_capacity = batch_result.get("max_worker_capacity", 0.0)
         state.last_capacity = batch_result.get("capacity", state.last_capacity)
         state.interrupted = bool(batch_result.get("interrupted"))
+
+        if max_worker_capacity >= self.worker_manager.storage.CAPACITY_THRESHOLD:
+            # A resize crash (e.g. /dev/shm exhaustion while old and new arrays
+            # coexist) must never cost more than the current batch: block and
+            # persist a checkpoint before attempting it.
+            self.session.checkpoints.ensure_final_checkpoint(
+                worker_manager=self.worker_manager,
+                iteration=self.start_iteration + state.completed_iterations,
+                total_infosets=state.total_infosets,
+                storage_capacity=state.last_capacity or 0,
+                training_start_time=self.training_start_time,
+            )
+            self.worker_manager.check_and_resize_if_needed(
+                max_worker_capacity=max_worker_capacity,
+                verbose=self.verbose,
+            )
+            state.last_capacity = self.worker_manager.capacity
 
         if batch_idx < self.num_batches - 1:
             inter_batch_timeout = max(60.0, batch_result["batch_time"] * 2.0)
