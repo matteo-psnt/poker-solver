@@ -1,5 +1,6 @@
 """Configuration handling for CLI."""
 
+from src.cli.flows.combo_precompute import handle_combo_precompute
 from src.cli.ui import prompts, ui
 from src.cli.ui.context import CliContext
 from src.utils.config import Config
@@ -448,8 +449,6 @@ def _edit_card_abstraction(ctx: CliContext, config: Config) -> Config:
         )
 
         if precompute:
-            from src.cli.flows.combo import handle_combo_precompute
-
             handle_combo_precompute(ctx)
 
     return config

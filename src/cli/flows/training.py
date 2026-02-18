@@ -4,6 +4,7 @@ import multiprocessing as mp
 from pathlib import Path
 from typing import cast
 
+from src.cli.flows.combo_precompute import handle_combo_precompute
 from src.cli.flows.config import select_config
 from src.cli.ui import prompts, ui
 from src.cli.ui.context import CliContext
@@ -257,8 +258,6 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
     Returns:
         True if abstraction exists or was successfully created, False otherwise
     """
-    from src.cli.flows.combo import handle_combo_precompute
-
     # Try to build the card abstraction
     try:
         build_card_abstraction(config, prompt_user=False, auto_compute=False)
@@ -315,8 +314,6 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
             print("\n" + "=" * 60)
             print("RUNNING PRECOMPUTATION")
             print("=" * 60)
-            from src.cli.flows.combo import handle_combo_precompute
-
             handle_combo_precompute(ctx)
 
             # Verify it was successful
