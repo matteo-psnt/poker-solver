@@ -20,6 +20,8 @@ dependencies = [
     "zarr<3",
     "numcodecs<0.16",
     "eval7>=0.1.10",
+    "fastapi>=0.118.0",
+    "uvicorn>=0.37.0",
 ]
 
 [project.scripts]
@@ -66,13 +68,13 @@ timeout_func_only = true
 # Development, testing, and code quality tools
 dev = [
     "pytest>=9.0.2",
-    "pytest-cov>=4.1.0",
     "ruff>=0.14.9",
     "ty",
     "pre-commit>=4.5.1",
     "types-pyyaml>=6.0.12.20250915",
     "types-tqdm>=4.67.0.20250809",
     "pytest-timeout>=2.4.0",
+    "httpx>=0.28.0",
 ]
 
 [tool.uv]

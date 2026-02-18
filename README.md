@@ -162,9 +162,6 @@ uv run pytest
 
 # Run fast tests only (excludes slow integration tests)
 uv run pytest -m "not slow"
-
-# Run with coverage
-uv run pytest --cov=src --cov-report=html
 ```
 
 ### Code Quality
@@ -177,6 +174,13 @@ uv run ruff format .
 # Type checking
 uv run ty check
 ```
+
+### Chart Viewer Backend
+
+The preflop chart viewer now serves data through FastAPI.
+
+- Default: FastAPI server (`/health`, `/api/meta`, `/api/chart`) + static UI from `ui/dist`
+- Fallback: legacy stdlib HTTP server by setting `POKER_SOLVER_USE_LEGACY_CHART_SERVER=1`
 
 ### Project Structure
 

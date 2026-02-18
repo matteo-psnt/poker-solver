@@ -1,26 +1,27 @@
-import pickle
 import time
 import uuid
 from multiprocessing import shared_memory
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numcodecs
 import numpy as np
-import xxhash
-import zarr
 
 from src.bucketing.utils.infoset import InfoSet, InfoSetKey
 from src.game.actions import Action, fold
 from src.solver.storage.base import Storage
-from src.solver.storage.helpers import (
-    CheckpointPaths,
-    _validate_action_signatures,
-    build_legal_actions,
-    get_missing_checkpoint_files,
-    load_action_signatures,
-    load_checkpoint_data,
-    load_key_mapping,
+from src.solver.storage.shared_array_checkpoint import checkpoint_storage, load_storage_checkpoint
+from src.solver.storage.shared_array_layout import get_shm_name
+from src.solver.storage.shared_array_ownership import (
+    is_owned_by_id as _is_owned_by_id,
+)
+from src.solver.storage.shared_array_ownership import (
+    owner_for_id as _owner_for_id,
+)
+from src.solver.storage.shared_array_ownership import (
+    owner_for_key as _owner_for_key,
+)
+from src.solver.storage.shared_array_ownership import (
+    stable_hash as _stable_hash,
 )
 
 if TYPE_CHECKING:
@@ -183,30 +184,8 @@ class SharedArrayStorage(Storage):
     # =========================================================================
 
     def _stable_hash(self, key: InfoSetKey) -> int:
-        """
-        Compute stable hash of InfoSetKey using xxhash.
-
-        Python's built-in hash() is randomized per process, which breaks
-        ownership consistency across workers. xxhash provides a stable,
-        fast, cross-process hash.
-
-        Args:
-            key: InfoSetKey to hash
-
-        Returns:
-            64-bit integer hash
-        """
-        # Build deterministic byte representation (no pickle randomization)
-        parts = [
-            str(key.player_position).encode(),
-            key.street.name.encode(),
-            key.betting_sequence.encode(),
-            (key.preflop_hand or "").encode(),
-            str(key.postflop_bucket if key.postflop_bucket is not None else -1).encode(),
-            str(key.spr_bucket).encode(),
-        ]
-        key_bytes = b"|".join(parts)
-        return xxhash.xxh64(key_bytes).intdigest()
+        """Compute stable hash of InfoSetKey."""
+        return _stable_hash(key)
 
     def get_owner(self, key: InfoSetKey) -> int:
         """
@@ -221,7 +200,7 @@ class SharedArrayStorage(Storage):
         Returns:
             Worker ID that owns this key
         """
-        return self._stable_hash(key) % self.num_workers
+        return _owner_for_key(key, self.num_workers)
 
     def is_owned(self, key: InfoSetKey) -> bool:
         """Check if this worker owns the given infoset key."""
@@ -233,11 +212,13 @@ class SharedArrayStorage(Storage):
 
         Ownership by ID is determined by which worker's range contains the ID.
         """
-        if infoset_id == self.UNKNOWN_ID:
-            return False  # Reserved region has no owner
-        if self.id_range_start <= infoset_id < self.id_range_end:
-            return True
-        return any(alloc["start"] <= infoset_id < alloc["end"] for alloc in self._extra_allocations)
+        return _is_owned_by_id(
+            infoset_id=infoset_id,
+            unknown_id=self.UNKNOWN_ID,
+            id_range_start=self.id_range_start,
+            id_range_end=self.id_range_end,
+            extra_allocations=self._extra_allocations,
+        )
 
     def get_owner_by_id(self, infoset_id: int) -> int | None:
         """
@@ -245,28 +226,13 @@ class SharedArrayStorage(Storage):
 
         Uses initial base ranges plus any appended resize regions.
         """
-        if infoset_id == self.UNKNOWN_ID:
-            return None
-
-        # Base ranges (fixed at initialization)
-        base_end = 1 + self.base_slots_per_worker * self.num_workers
-        if 1 <= infoset_id < base_end:
-            return (infoset_id - 1) // self.base_slots_per_worker
-
-        # Extra regions (appended on resize)
-        for extra_start, extra_total, base, remainder in self._extra_regions:
-            extra_end = extra_start + extra_total
-            if extra_start <= infoset_id < extra_end:
-                offset = infoset_id - extra_start
-                # Distribute remainder to lower worker IDs
-                if base == 0:
-                    return offset if offset < remainder else None
-                threshold = (base + 1) * remainder
-                if offset < threshold:
-                    return offset // (base + 1)
-                return remainder + (offset - threshold) // base
-
-        return None
+        return _owner_for_id(
+            infoset_id,
+            unknown_id=self.UNKNOWN_ID,
+            base_slots_per_worker=self.base_slots_per_worker,
+            num_workers=self.num_workers,
+            extra_regions=self._extra_regions,
+        )
 
     # =========================================================================
     # Shared Memory Management
@@ -274,7 +240,7 @@ class SharedArrayStorage(Storage):
 
     def _get_shm_name(self, base: str) -> str:
         """Get session-namespaced shared memory name."""
-        return f"{base}_{self.session_id}"
+        return get_shm_name(base, self.session_id)
 
     def _create_shared_memory(self):
         """Create all shared memory segments (coordinator only)."""
@@ -951,111 +917,7 @@ class SharedArrayStorage(Storage):
         After key collection from workers, saves complete key→ID mapping and
         densified arrays to avoid sparse ID gaps.
         """
-        if not self.checkpoint_dir or not self.is_coordinator:
-            return
-
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-        # After key collection, _owned_keys contains all keys from all workers
-        num_keys = len(self._owned_keys)
-        if num_keys == 0:
-            return
-
-        items = sorted(self._owned_keys.items(), key=lambda item: item[1])
-        dense_ids = {key: idx for idx, (key, _) in enumerate(items)}
-
-        # Save key mapping
-        paths = CheckpointPaths.from_dir(self.checkpoint_dir)
-        with open(paths.key_mapping, "wb") as f:
-            pickle.dump(
-                {
-                    "owned_keys": dense_ids,
-                },
-                f,
-            )
-
-        # Vectorized array extraction (much faster than row-by-row loop)
-        # Extract old IDs in order, then use fancy indexing for bulk copy
-        old_ids = np.array([old_id for (_, old_id) in items], dtype=np.int32)
-
-        # Single vectorized operations instead of Python loop
-        regrets_dense = self.shared_regrets[old_ids, :].copy()
-        strategies_dense = self.shared_strategy_sum[old_ids, :].copy()
-        action_counts_dense = self.shared_action_counts[old_ids].copy()
-        reach_counts_dense = self.shared_reach_counts[old_ids].copy()
-        cumulative_utility_dense = self.shared_cumulative_utility[old_ids].copy()
-
-        # Use DirectoryStore for fast parallel I/O
-        store = zarr.DirectoryStore(paths.checkpoint_zarr)
-        root = zarr.open(store, mode="w")
-
-        compressor = numcodecs.Blosc(
-            cname="zstd",
-            clevel=self.zarr_compression_level,
-            shuffle=numcodecs.Blosc.BITSHUFFLE,
-        )
-
-        chunk_size = self.zarr_chunk_size
-
-        root.create_dataset(
-            "regrets",
-            data=regrets_dense,
-            chunks=(chunk_size, self.max_actions),
-            compressor=compressor,
-            dtype=np.float64,
-        )
-        root.create_dataset(
-            "strategies",
-            data=strategies_dense,
-            chunks=(chunk_size, self.max_actions),
-            compressor=compressor,
-            dtype=np.float64,
-        )
-        root.create_dataset(
-            "action_counts",
-            data=action_counts_dense,
-            chunks=(chunk_size,),
-            compressor=compressor,
-            dtype=np.int32,
-        )
-        root.create_dataset(
-            "reach_counts",
-            data=reach_counts_dense,
-            chunks=(chunk_size,),
-            compressor=compressor,
-            dtype=np.int64,
-        )
-        root.create_dataset(
-            "cumulative_utility",
-            data=cumulative_utility_dense,
-            chunks=(chunk_size,),
-            compressor=compressor,
-            dtype=np.float64,
-        )
-
-        # Store metadata
-        root.attrs["iteration"] = iteration
-        root.attrs["num_infosets"] = len(items)
-        root.attrs["max_actions"] = self.max_actions
-        root.attrs["timestamp"] = time.time()
-        root.attrs["format_version"] = "1.0"
-
-        # Save action signatures
-        action_sigs = {}
-        for new_id, (_, old_id) in enumerate(items):
-            actions = self._legal_actions_cache.get(old_id)
-            if actions is None:
-                continue
-            action_sigs[new_id] = [(action.type.name, action.amount) for action in actions]
-
-        with open(paths.action_signatures, "wb") as f:
-            pickle.dump(action_sigs, f)
-
-        _validate_action_signatures(
-            action_counts_dense,
-            action_sigs,
-            f"SharedArrayStorage.checkpoint(iter={iteration})",
-        )
+        checkpoint_storage(self, iteration)
 
     def load_checkpoint(self) -> bool:
         """
@@ -1069,89 +931,7 @@ class SharedArrayStorage(Storage):
         Returns:
             True if checkpoint was loaded, False otherwise
         """
-        if not self.checkpoint_dir:
-            return False
-
-        missing_files = get_missing_checkpoint_files(self.checkpoint_dir)
-        if missing_files:
-            return False
-
-        # Load metadata first (cheap)
-        paths = CheckpointPaths.from_dir(self.checkpoint_dir)
-        mapping_data = load_key_mapping(paths)
-        saved_owned_keys = mapping_data["owned_keys"]
-        saved_action_sigs = load_action_signatures(paths)
-
-        if not saved_owned_keys:
-            return True
-
-        # Pre-filter keys by ownership (vectorized)
-        # Build list of (key, old_id) for keys this worker owns
-        my_keys = []
-        my_old_ids = []
-        for key, old_id in saved_owned_keys.items():
-            if self.get_owner(key) == self.worker_id:
-                my_keys.append(key)
-                my_old_ids.append(old_id)
-
-        if not my_keys:
-            print(f"Worker {self.worker_id} owns 0/{len(saved_owned_keys)} keys from checkpoint")
-            return True
-
-        # Convert to numpy array for vectorized indexing
-        my_old_ids_array = np.array(my_old_ids, dtype=np.int32)
-
-        # Load checkpoint arrays (full load, but only once)
-        data = load_checkpoint_data(
-            self.checkpoint_dir, context="SharedArrayStorage.load_checkpoint"
-        )
-
-        if data.max_actions != self.max_actions:
-            raise ValueError(
-                f"Checkpoint max_actions mismatch: {data.max_actions} vs {self.max_actions}"
-            )
-
-        if self.capacity < data.max_id + 1:
-            raise ValueError(f"Storage capacity too small: {self.capacity} vs {data.max_id + 1}")
-
-        # Extract only the rows we need (vectorized fancy indexing)
-        my_regrets = data.arrays["regrets"][my_old_ids_array, :]
-        my_strategies = data.arrays["strategies"][my_old_ids_array, :]
-        my_action_counts = data.arrays["action_counts"][my_old_ids_array]
-        my_reach_counts = data.arrays["reach_counts"][my_old_ids_array]
-        my_utility = data.arrays["cumulative_utility"][my_old_ids_array]
-
-        # Allocate new IDs for all keys at once
-        new_ids = []
-        for key in my_keys:
-            new_id = self._allocate_id()
-            self._owned_keys[key] = new_id
-            new_ids.append(new_id)
-
-        new_ids_array = np.array(new_ids, dtype=np.int32)
-
-        # Bulk copy using vectorized operations
-        self.shared_action_counts[new_ids_array] = my_action_counts
-        self.shared_reach_counts[new_ids_array] = my_reach_counts
-        self.shared_cumulative_utility[new_ids_array] = my_utility
-
-        # Bulk copy regrets/strategies (full width, mask handled by action_counts)
-        # This is faster than element-by-element even if we copy some zeros
-        self.shared_regrets[new_ids_array, :] = my_regrets
-        self.shared_strategy_sum[new_ids_array, :] = my_strategies
-
-        # Reconstruct legal actions
-        for idx, (new_id, old_id) in enumerate(zip(new_ids, my_old_ids)):
-            legal_actions = build_legal_actions(
-                saved_action_sigs, old_id, "SharedArrayStorage.load_checkpoint"
-            )
-            self._legal_actions_cache[new_id] = legal_actions
-
-        print(
-            f"Worker {self.worker_id} loaded {len(my_keys)}/{len(saved_owned_keys)} "
-            f"infosets from checkpoint"
-        )
-        return True
+        return load_storage_checkpoint(self)
 
     # =========================================================================
     # Cleanup

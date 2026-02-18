@@ -1,28 +1,15 @@
 """Preflop chart generation for CLI."""
 
+import os
 import subprocess
 import webbrowser
-from pathlib import Path
 
-from src.actions.betting_actions import BettingActions
-from src.bucketing.base import BucketingStrategy
+from src.api.app import FastAPIChartServer
+from src.api.chart_service import ChartService
 from src.cli.flows.chart.server import ChartServer
 from src.cli.ui import prompts, ui
 from src.cli.ui.context import CliContext
-from src.solver.mccfr import MCCFRSolver
-from src.solver.storage.in_memory import InMemoryStorage
 from src.training import services
-from src.utils.config import Config
-
-
-class _DummyCardAbstraction(BucketingStrategy):
-    """Placeholder abstraction for viewing charts (not used)."""
-
-    def get_bucket(self, hole_cards, board, street):
-        return 0
-
-    def num_buckets(self, street):
-        return 1
 
 
 def view_preflop_chart(ctx: CliContext) -> None:
@@ -49,9 +36,8 @@ def view_preflop_chart(ctx: CliContext) -> None:
 
     print(f"\nLoading solver from {selected_run}...")
     run_dir = ctx.runs_dir / selected_run
-    config = _load_run_config(run_dir)
-    # Use read-only InMemoryStorage for viewing charts
-    storage = InMemoryStorage(checkpoint_dir=run_dir)
+    chart_service = ChartService.from_run_dir(run_dir, run_id=selected_run)
+    storage = chart_service.runtime.storage
 
     print(f"  Loaded {storage.num_infosets():,} infosets")
 
@@ -60,24 +46,19 @@ def view_preflop_chart(ctx: CliContext) -> None:
         ui.pause()
         return
 
-    # For viewing charts, we don't need the full solver - just the storage
-    # But MCCFRSolver requires action/card abstraction, so provide minimal instances
-    action_abs = BettingActions(config.action_abstraction, big_blind=config.game.big_blind)
-
-    solver = MCCFRSolver(
-        action_abstraction=action_abs,
-        card_abstraction=_DummyCardAbstraction(),
-        storage=storage,
-        config=config.merge({"system": {"seed": 42}}),
-    )
-
     print("\nStarting chart viewer...")
 
-    server = ChartServer(
-        solver=solver,
-        run_id=selected_run,
-        base_dir=ctx.base_dir,
-    )
+    use_legacy = os.getenv("POKER_SOLVER_USE_LEGACY_CHART_SERVER") == "1"
+    if use_legacy:
+        server = ChartServer(
+            chart_service=chart_service,
+            base_dir=ctx.base_dir,
+        )
+    else:
+        server = FastAPIChartServer(
+            service=chart_service,
+            base_dir=ctx.base_dir,
+        )
 
     try:
         server.start()
@@ -134,7 +115,3 @@ def _ensure_ui_build(ctx: CliContext) -> bool:
         ui.error(f"UI build failed (exit code {exc.returncode}).")
 
     return False
-
-
-def _load_run_config(run_dir: Path) -> Config:
-    return services.load_run_metadata(run_dir).config

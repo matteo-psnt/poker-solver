@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+from typing import Any, Protocol
+
 from src.actions.betting_actions import BettingActions
 from src.bucketing.utils.infoset import InfoSetKey
 from src.game.actions import Action, ActionType
 from src.game.rules import GameRules
 from src.game.state import Card, Street
-from src.solver.mccfr import MCCFRSolver
+
+
+class ChartDataSource(Protocol):
+    """Minimum interface needed to generate preflop chart data."""
+
+    action_abstraction: BettingActions
+    rules: GameRules
+    storage: Any
+
+    @property
+    def starting_stack(self) -> int: ...
 
 POSITION_OPTIONS = [
     {"id": 0, "label": "Button (BTN)"},
@@ -45,7 +57,7 @@ def build_chart_metadata(
 
 
 def build_preflop_chart_data(
-    solver: MCCFRSolver,
+    source: ChartDataSource,
     position: int,
     situation_id: str,
     run_id: str,
@@ -61,9 +73,9 @@ def build_preflop_chart_data(
         raise_bb = float(size_text)
         situation_label = f"Facing raise to {_format_bb_size(raise_bb)}"
         betting_sequence = _generate_betting_sequence_for_raise(
-            action_abstraction=solver.action_abstraction,
-            rules=solver.rules,
-            starting_stack=solver.config.game.starting_stack,
+            action_abstraction=source.action_abstraction,
+            rules=source.rules,
+            starting_stack=source.starting_stack,
             raise_bb=raise_bb,
         )
 
@@ -76,17 +88,17 @@ def build_preflop_chart_data(
             if i == j:
                 hand = f"{r1}{r2}"
                 strategy = _get_hand_strategy(
-                    solver, r1, r2, False, True, position, betting_sequence
+                    source, r1, r2, False, True, position, betting_sequence
                 )
             elif i < j:
                 hand = f"{r1}{r2}s"
                 strategy = _get_hand_strategy(
-                    solver, r1, r2, True, False, position, betting_sequence
+                    source, r1, r2, True, False, position, betting_sequence
                 )
             else:
                 hand = f"{r2}{r1}o"
                 strategy = _get_hand_strategy(
-                    solver, r2, r1, False, False, position, betting_sequence
+                    source, r2, r1, False, False, position, betting_sequence
                 )
 
             if strategy is None:
@@ -272,7 +284,7 @@ def _generate_betting_sequence_for_raise(
 
 
 def _get_hand_strategy(
-    solver: MCCFRSolver,
+    source: ChartDataSource,
     rank1: str,
     rank2: str,
     suited: bool,
@@ -293,7 +305,7 @@ def _get_hand_strategy(
         spr_bucket=spr_bucket,
     )
 
-    infoset = solver.storage.get_infoset(key)
+    infoset = source.storage.get_infoset(key)
 
     if infoset is None:
         return None
@@ -306,8 +318,8 @@ def _get_hand_strategy(
         "actions": _build_action_breakdown(
             infoset.legal_actions,
             strategy,
-            solver.action_abstraction,
-            solver.rules,
+            source.action_abstraction,
+            source.rules,
         )
     }
 
