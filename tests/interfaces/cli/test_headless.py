@@ -96,7 +96,9 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     run_dir.mkdir()
 
     fake_out = SimpleNamespace(
-        infosets=42, results={"exploitability_mbb": 1.0, "std_error_mbb": 0.1}
+        infosets=42,
+        checkpoint_iteration=1000,
+        results={"exploitability_mbb": 1.0, "std_error_mbb": 0.1},
     )
     monkeypatch.setattr(headless.services, "evaluate_run_lbr", lambda *a, **kw: fake_out)
 
@@ -115,7 +117,9 @@ def test_main_evaluate_rollout_opt_in(monkeypatch, tmp_path, capsys):
     run_dir.mkdir()
 
     fake_out = SimpleNamespace(
-        infosets=7, results={"exploitability_mbb": 9.0, "std_error_mbb": 0.5}
+        infosets=7,
+        checkpoint_iteration=1000,
+        results={"exploitability_mbb": 9.0, "std_error_mbb": 0.5},
     )
     monkeypatch.setattr(headless.services, "evaluate_run_rollout", lambda *a, **kw: fake_out)
 
@@ -198,7 +202,7 @@ def test_cmd_compare_valid_pairs(tmp_path):
     _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=7, mbb=50.0, samples=[5.0, 10.0, 15.0])
 
     payload = headless._cmd_compare(
-        argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=False)
+        argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=False, a_at=None, b_at=None)
     )
     assert payload["op"] == "compare"
     assert payload["forced"] is False
@@ -215,7 +219,9 @@ def test_cmd_compare_refuses_seed_mismatch(tmp_path):
 
     with pytest.raises(SystemExit, match="Refusing to compare"):
         headless._cmd_compare(
-            argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=False)
+            argparse.Namespace(
+                a="run-a", b="run-b", ledger=str(led), force=False, a_at=None, b_at=None
+            )
         )
 
 
@@ -227,7 +233,7 @@ def test_cmd_compare_force_overrides_mismatch(tmp_path):
     _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[4.0, 5.0, 6.0])
 
     payload = headless._cmd_compare(
-        argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=True)
+        argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=True, a_at=None, b_at=None)
     )
     assert payload["forced"] is True
     assert payload["tier_warnings"]  # non-empty: the override was recorded
@@ -240,5 +246,7 @@ def test_cmd_compare_missing_run_raises(tmp_path):
 
     with pytest.raises(SystemExit, match="No ledger entry"):
         headless._cmd_compare(
-            argparse.Namespace(a="run-a", b="ghost", ledger=str(led), force=False)
+            argparse.Namespace(
+                a="run-a", b="ghost", ledger=str(led), force=False, a_at=None, b_at=None
+            )
         )

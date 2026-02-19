@@ -143,6 +143,7 @@ def build_record(
     results: dict[str, Any],
     result_path: Path,
     timestamp: str,
+    checkpoint_iteration: int | None = None,
 ) -> dict[str, Any]:
     """Compose the compact ledger row (no per-hand samples — those live in the payload)."""
     samples = results.get("pair_samples_mbb") or []
@@ -163,6 +164,12 @@ def build_record(
         "card_abstraction_hash": provenance.card_abstraction_hash,
         "action_config_hash": provenance.action_config_hash,
         "representation_version": provenance.representation_version,
+        # WHICH checkpoint produced this number. A run id alone does not identify
+        # one: the same run is evaluated at successive iterations, so without this
+        # two rows for one run are indistinguishable and a stale read looks like a
+        # real result. ``infosets`` was already being passed in and silently dropped.
+        "checkpoint_iteration": checkpoint_iteration,
+        "infosets": infosets,
         "knobs": knobs,
         "results": {
             "exploitability_mbb": results.get("exploitability_mbb"),
@@ -205,6 +212,7 @@ def record_evaluation(
         results=results,
         result_path=result_path,
         timestamp=timestamp or datetime.now().isoformat(),
+        checkpoint_iteration=payload.get("checkpoint_iteration"),
     )
     append_record(record, ledger_path)
     return result_path, record
@@ -246,13 +254,26 @@ def read_records(ledger_path: Path = DEFAULT_LEDGER_PATH) -> list[dict[str, Any]
 
 
 def latest_record_for_run(
-    run_id: str, ledger_path: Path = DEFAULT_LEDGER_PATH
+    run_id: str,
+    ledger_path: Path = DEFAULT_LEDGER_PATH,
+    checkpoint_iteration: int | None = None,
 ) -> dict[str, Any] | None:
-    """Most recent ledger row for a run id (by append order), or None."""
+    """Most recent ledger row for a run id (by append order), or None.
+
+    ``checkpoint_iteration`` selects a specific checkpoint of that run. A run id
+    alone is ambiguous once a run has been evaluated at more than one iteration --
+    the common case for a long run scored at successive checkpoints -- and without
+    this the newest row silently wins, so two checkpoints of one run cannot be
+    compared at all.
+    """
     match = None
     for record in read_records(ledger_path):
-        if record.get("run_id") == run_id:
-            match = record
+        if record.get("run_id") != run_id:
+            continue
+        if checkpoint_iteration is not None:
+            if record.get("checkpoint_iteration") != checkpoint_iteration:
+                continue
+        match = record
     return match
 
 
