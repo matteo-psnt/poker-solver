@@ -82,6 +82,18 @@ class SolverConfig:
     cfr_plus: bool = True
     linear_cfr: bool = True
 
+    # DCFR (Discounted CFR) parameters
+    enable_dcfr: bool = False
+    dcfr_alpha: float = 1.5  # Positive regret discount exponent
+    dcfr_beta: float = 0.0  # Negative regret discount exponent
+    dcfr_gamma: float = 2.0  # Strategy discount exponent
+
+    # Regret-based pruning parameters
+    enable_pruning: bool = False
+    pruning_threshold: float = 300.0  # Absolute regret threshold for pruning
+    prune_start_iteration: int = 100  # Don't prune until this iteration
+    prune_reactivate_frequency: int = 100  # Re-enable all actions every N iterations
+
 
 @dataclass(frozen=True)
 class Config:

@@ -314,3 +314,199 @@ class TestInfoSet:
         assert "FOLD" in s
         assert "CALL" in s
         assert "Strategy" in s
+
+    # DCFR and pruning tests
+
+    def test_update_regret_with_dcfr(self):
+        """Test that DCFR regret updates apply weighting."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # Update with DCFR enabled at iteration 100
+        infoset.update_regret(
+            0,
+            10.0,
+            iteration=100,
+            enable_dcfr=True,
+            dcfr_alpha=1.5,
+            dcfr_beta=0.0,
+        )
+
+        # Regret should be weighted by DCFR formula: 10.0 * 100^0.5 = 100
+        expected_weight = 100.0**0.5  # = 10
+        expected_regret = 10.0 * expected_weight  # = 100
+        assert abs(infoset.regrets[0] - expected_regret) < 1e-6
+
+    def test_update_regret_dcfr_negative_regret(self):
+        """Test DCFR with negative regret using beta parameter."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # Negative regret with beta=0 should not be weighted
+        infoset.update_regret(
+            0,
+            -10.0,
+            iteration=100,
+            enable_dcfr=True,
+            dcfr_alpha=1.5,
+            dcfr_beta=0.0,
+        )
+
+        # With beta=0, negative regrets get weight 1.0
+        assert abs(infoset.regrets[0] - (-10.0)) < 1e-6
+
+    def test_pruning_initialization(self):
+        """Pruned array should be initialized to False."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        assert len(infoset.pruned) == 3
+        assert not any(infoset.pruned)
+
+    def test_is_pruned(self):
+        """Test is_pruned method."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # Initially not pruned
+        assert not infoset.is_pruned(0)
+        assert not infoset.is_pruned(1)
+        assert not infoset.is_pruned(2)
+
+        # Manually set pruned
+        infoset.pruned[0] = True
+        assert infoset.is_pruned(0)
+        assert not infoset.is_pruned(1)
+
+    def test_is_pruned_invalid_index(self):
+        """Test is_pruned with invalid index."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call()]
+        infoset = InfoSet(key, actions)
+
+        with pytest.raises(ValueError, match="Invalid action index"):
+            infoset.is_pruned(5)
+
+    def test_update_pruning_negative_regret(self):
+        """Actions with sufficiently negative regret should be pruned."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # Set regrets: one very negative, two positive
+        infoset.regrets = np.array([-500.0, 10.0, 20.0])
+
+        # Update pruning (after start iteration, but not at reactivation point)
+        infoset.update_pruning(
+            iteration=201,
+            pruning_threshold=300.0,
+            prune_start_iteration=100,
+            prune_reactivate_frequency=100,
+        )
+
+        # Action 0 should be pruned (regret -500 < -300)
+        assert infoset.is_pruned(0)
+        assert not infoset.is_pruned(1)
+        assert not infoset.is_pruned(2)
+
+    def test_update_pruning_reactivation_on_positive_regret(self):
+        """Pruned actions should reactivate if regret becomes positive."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # Start with negative regret and prune
+        infoset.regrets = np.array([-500.0, 10.0, 20.0])
+        infoset.update_pruning(
+            iteration=201,
+            pruning_threshold=300.0,
+            prune_start_iteration=100,
+            prune_reactivate_frequency=100,
+        )
+        assert infoset.is_pruned(0)
+
+        # Update regret to positive
+        infoset.regrets[0] = 5.0
+        infoset.update_pruning(
+            iteration=202,
+            pruning_threshold=300.0,
+            prune_start_iteration=100,
+            prune_reactivate_frequency=100,
+        )
+
+        # Should be reactivated
+        assert not infoset.is_pruned(0)
+
+    def test_update_pruning_periodic_reactivation(self):
+        """All actions should be reactivated at reactivation frequency."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # Set all regrets negative and prune
+        infoset.regrets = np.array([-500.0, -400.0, -600.0])
+        infoset.update_pruning(
+            iteration=199,
+            pruning_threshold=300.0,
+            prune_start_iteration=100,
+            prune_reactivate_frequency=100,
+        )
+
+        # At least one should be unpruned (safety mechanism)
+        assert sum(infoset.pruned) <= 2
+
+        # At reactivation iteration, all should be unpruned
+        infoset.update_pruning(
+            iteration=200,
+            pruning_threshold=300.0,
+            prune_start_iteration=100,
+            prune_reactivate_frequency=100,
+        )
+        assert not any(infoset.pruned)
+
+    def test_update_pruning_disabled_early_iterations(self):
+        """Pruning should be disabled before prune_start_iteration."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # Set very negative regrets
+        infoset.regrets = np.array([-500.0, -400.0, -600.0])
+
+        # Update pruning before start iteration
+        infoset.update_pruning(
+            iteration=50,  # Before start iteration
+            pruning_threshold=300.0,
+            prune_start_iteration=100,
+            prune_reactivate_frequency=100,
+        )
+
+        # No actions should be pruned
+        assert not any(infoset.pruned)
+
+    def test_update_pruning_safety_mechanism(self):
+        """At least one action should always remain unpruned."""
+        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
+        actions = [fold(), call(), bet(50)]
+        infoset = InfoSet(key, actions)
+
+        # All regrets deeply negative
+        infoset.regrets = np.array([-500.0, -600.0, -400.0])
+
+        infoset.update_pruning(
+            iteration=200,
+            pruning_threshold=300.0,
+            prune_start_iteration=100,
+            prune_reactivate_frequency=100,
+        )
+
+        # At least one action must be unpruned (safety mechanism)
+        assert sum(infoset.pruned) < 3
+
+        # The action with highest (least negative) regret should be unpruned
+        # That's action 2 with regret -400
+        assert not infoset.is_pruned(2)

@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from src.game.actions import Action
-from src.utils.numba_ops import average_strategy, regret_matching
+from src.utils.numba_ops import (
+    average_strategy,
+    compute_dcfr_strategy_weight,
+    compute_dcfr_weight,
+    regret_matching,
+)
 
 if TYPE_CHECKING:
     from src.game.state import Street
@@ -148,6 +153,9 @@ class InfoSet:
         self.regrets = np.zeros(self.num_actions, dtype=np.float64)
         self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)
 
+        # Pruning state (regret-based action pruning)
+        self.pruned = np.zeros(self.num_actions, dtype=bool)
+
         # Statistics tracking
         self.reach_count = 0  # Number of times this infoset was reached
         self.cumulative_utility = 0.0  # Sum of node utilities (for average)
@@ -280,6 +288,9 @@ class InfoSet:
         cfr_plus: bool = False,
         linear_cfr: bool = False,
         iteration: int = 1,
+        enable_dcfr: bool = False,
+        dcfr_alpha: float = 1.5,
+        dcfr_beta: float = 0.0,
     ):
         """
         Update cumulative regret for an action.
@@ -288,22 +299,32 @@ class InfoSet:
         - Vanilla CFR: regrets can be negative
         - CFR+: regrets are floored at 0 (much faster convergence)
         - Linear CFR: regrets weighted by iteration number
+        - DCFR: regrets discounted to emphasize recent iterations
 
         Args:
             action_idx: Index of action in legal_actions
             regret: Regret value to add (can be negative)
             cfr_plus: If True, floor regrets at 0 (CFR+)
             linear_cfr: If True, weight by iteration (Linear CFR)
-            iteration: Current iteration (for linear weighting)
+            iteration: Current iteration (for linear/DCFR weighting)
+            enable_dcfr: If True, apply DCFR discounting (overrides linear_cfr)
+            dcfr_alpha: Positive regret discount exponent (DCFR)
+            dcfr_beta: Negative regret discount exponent (DCFR)
         """
         if action_idx < 0 or action_idx >= self.num_actions:
             raise ValueError(f"Invalid action index: {action_idx}")
 
-        # Apply weighting for Linear CFR
+        # Apply weighting
         weighted_regret = regret
-        if linear_cfr:
-            # Linear weighting: multiply by iteration number
-            # Can also use (iteration + 1) ** 0.5 for square-root weighting
+        if enable_dcfr:
+            # DCFR: Apply iteration-based discount weighting
+            # Weight = t^(exponent-1) where t = iteration
+            # Higher exponent and higher t → more weight to recent iterations
+            is_positive = regret > 0
+            discount_weight = compute_dcfr_weight(iteration, dcfr_alpha, dcfr_beta, is_positive)
+            weighted_regret = regret * discount_weight
+        elif linear_cfr:
+            # Linear CFR: multiply by iteration number
             weighted_regret = regret * iteration
 
         # Update regret
@@ -320,6 +341,8 @@ class InfoSet:
         node_utility: float = 0.0,
         linear_cfr: bool = False,
         iteration: int = 1,
+        enable_dcfr: bool = False,
+        dcfr_gamma: float = 2.0,
     ):
         """
         Update cumulative strategy (weighted by reach probability).
@@ -327,24 +350,90 @@ class InfoSet:
         Supports multiple CFR variants:
         - Vanilla/CFR+: Uniform weighting
         - Linear CFR: Weight by iteration number
+        - DCFR: Weight by iteration with gamma exponent
 
         Args:
             reach_prob: Probability of reaching this infoset
             node_utility: Expected utility at this node (optional)
             linear_cfr: If True, weight by iteration (Linear CFR)
-            iteration: Current iteration (for linear weighting)
+            iteration: Current iteration (for linear/DCFR weighting)
+            enable_dcfr: If True, apply DCFR gamma weighting
+            dcfr_gamma: Strategy discount exponent (DCFR)
         """
         strategy = self.get_strategy()
 
-        # Apply weighting for Linear CFR
+        # Apply weighting
         weight = reach_prob
-        if linear_cfr:
+        if enable_dcfr:
+            # DCFR: Apply gamma-weighted discounting
+            gamma_weight = compute_dcfr_strategy_weight(iteration, dcfr_gamma)
+            weight = reach_prob * gamma_weight
+        elif linear_cfr:
             # Linear weighting: multiply by iteration number
             weight = reach_prob * iteration
 
         self.strategy_sum += strategy * weight
         self.reach_count += 1
         self.cumulative_utility += node_utility
+
+    def is_pruned(self, action_idx: int) -> bool:
+        """
+        Check if an action is currently pruned.
+
+        Args:
+            action_idx: Index of action in legal_actions
+
+        Returns:
+            True if action is pruned, False otherwise
+        """
+        if action_idx < 0 or action_idx >= self.num_actions:
+            raise ValueError(f"Invalid action index: {action_idx}")
+        return bool(self.pruned[action_idx])
+
+    def update_pruning(
+        self,
+        iteration: int,
+        pruning_threshold: float,
+        prune_start_iteration: int,
+        prune_reactivate_frequency: int,
+    ):
+        """
+        Update pruning state based on current regrets.
+
+        Actions with sufficiently negative regrets are pruned (temporarily excluded
+        from traversal). Pruned actions are periodically re-activated to ensure
+        convergence guarantees.
+
+        Args:
+            iteration: Current iteration number
+            pruning_threshold: Absolute regret threshold (prune if regret < -threshold)
+            prune_start_iteration: Don't prune until this iteration (allow exploration)
+            prune_reactivate_frequency: Re-enable all actions every N iterations
+        """
+        # Don't prune in early iterations (need exploration)
+        if iteration < prune_start_iteration:
+            self.pruned[:] = False
+            return
+
+        # Periodic full re-activation (ensures convergence)
+        if iteration % prune_reactivate_frequency == 0:
+            self.pruned[:] = False
+            return
+
+        # Update pruning based on regrets
+        for i in range(self.num_actions):
+            if self.regrets[i] < -pruning_threshold:
+                # Prune actions with deeply negative regret
+                self.pruned[i] = True
+            elif self.regrets[i] > 0:
+                # Re-activate if regret becomes positive
+                self.pruned[i] = False
+
+        # Safety: ensure at least one action is not pruned
+        if np.all(self.pruned):
+            # Un-prune the action with highest (least negative) regret
+            best_idx = int(np.argmax(self.regrets))
+            self.pruned[best_idx] = False
 
     def reset_regrets(self):
         """Reset all regrets to zero (for some CFR variants)."""
