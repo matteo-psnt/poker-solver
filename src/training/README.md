@@ -656,9 +656,9 @@ def resume_training():
 **Start Training:**
 ```python
 from src.training.trainer import TrainingSession
-from src.utils.config import Config
+from src.utils.config_loader import load_config
 
-config = Config.load("production")
+config = load_config("config/training/production.yaml")
 trainer = TrainingSession(config)
 # Parallel training (always) with 8 workers
 results = trainer.train(num_iterations=10000, num_workers=8)
@@ -686,8 +686,10 @@ results = trainer.train(num_iterations=1000)  # num_workers defaults to CPU coun
 
 **Custom Configuration:**
 ```python
+from src.utils.config import Config
+
 config = Config.default().merge({
-    "storage": {"backend": "memory"},
+    "storage": {"checkpoint_enabled": False},
     "training": {"checkpoint_frequency": 500, "num_iterations": 5000},
 })
 ```
@@ -696,7 +698,7 @@ config = Config.default().merge({
 
 **Parallel correctness:**
 1. ✅ ~~Should we use shared memory?~~ - Implemented hash-partitioned shared memory
-2. Is eventual consistency (batch-level sync) theoretically sound for MCCFR?
+2. ✅ ~~Is lock-free access theoretically sound?~~ - Yes, stale reads acceptable for MCCFR sampling
 3. Does hash-based partitioning create load imbalance?
 
 **Performance concerns:**
@@ -711,6 +713,6 @@ config = Config.default().merge({
 
 ---
 
-**Last Updated:** December 22, 2025
+**Last Updated:** February 19, 2026
 **Author:** Training system maintainer
 **Related Docs:** ARCHITECTURE.md, README.md
