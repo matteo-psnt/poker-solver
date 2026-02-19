@@ -5,7 +5,8 @@ Defaults are defined as dataclass field defaults. YAML files provide overrides.
 No duplication, no sync required, no wrapper classes.
 """
 
-from dataclasses import asdict, dataclass, field
+import warnings
+from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from typing import Any
 
 
@@ -109,24 +110,55 @@ class Config:
 
     def merge(self, overrides: dict[str, Any]) -> "Config":
         """Return a new Config with the provided overrides merged in."""
-        from src.utils.config_loader import _merge_config
-
-        return _merge_config(self, overrides)
+        return merge_dataclass_config(self, overrides)
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> "Config":
-        """
-        Create Config from dictionary.
+        """Create Config from dictionary values merged over defaults."""
+        return merge_dataclass_config(cls(), config_dict)
 
-        Args:
-            config_dict: Configuration dictionary
 
-        Returns:
-            Config instance with values from dict
-        """
-        # Import here to avoid circular dependency
-        from src.utils.config_loader import _merge_config
+def merge_dataclass_config(base: Any, overrides: dict[str, Any], *, strict: bool = False) -> Any:
+    """
+    Recursively merge dictionary overrides into a dataclass instance.
 
-        # Start with defaults, merge in provided values
-        base = cls()
-        return _merge_config(base, config_dict)
+    Returns a new instance of the same type as base with overrides applied.
+    """
+    if not is_dataclass(base):
+        raise TypeError(f"base must be a dataclass, got {type(base)}")
+
+    if not overrides:
+        return base
+
+    kwargs: dict[str, Any] = {}
+    valid_field_names = {field_info.name for field_info in fields(base)}
+
+    for field_info in fields(base):
+        field_name = field_info.name
+        current_value = getattr(base, field_name)
+
+        if field_name not in overrides:
+            continue
+
+        override_value = overrides[field_name]
+        if is_dataclass(current_value) and isinstance(override_value, dict):
+            kwargs[field_name] = merge_dataclass_config(
+                current_value,
+                override_value,
+                strict=strict,
+            )
+        else:
+            kwargs[field_name] = override_value
+
+    unknown_keys = set(overrides.keys()) - valid_field_names
+    if unknown_keys:
+        dataclass_name = type(base).__name__
+        message = (
+            f"Unknown keys in config for {dataclass_name}: {sorted(unknown_keys)}. "
+            f"Valid keys are: {sorted(valid_field_names)}"
+        )
+        if strict:
+            raise ValueError(message)
+        warnings.warn(message, UserWarning, stacklevel=2)
+
+    return replace(base, **kwargs) if kwargs else base

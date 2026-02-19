@@ -5,11 +5,17 @@ This module defines the core game state, including cards, streets, and the
 complete game state dataclass that tracks all information needed for a poker hand.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import eval7
+
+if TYPE_CHECKING:
+    from src.game.rules import GameRules
 
 from src.game.actions import Action, ActionType
 
@@ -277,55 +283,24 @@ class GameState:
         """Check if current player can raise (facing a bet with chips left)."""
         return self.to_call > 0 and self.stacks[self.current_player] > self.to_call
 
-    def legal_actions(self, action_abstraction=None) -> list[Action]:
-        """
-        Get legal actions for current player.
-
-        Args:
-            action_abstraction: Optional action abstraction
-
-        Returns:
-            List of legal actions (delegates to GameRules)
-        """
-        # Import here to avoid circular dependency
-        from src.game.rules import get_rules
-
-        return get_rules().get_legal_actions(self, action_abstraction)
-
-    def apply_action(self, action: Action, rules=None) -> "GameState":
-        """
-        Apply action to get next state.
-
-        Args:
-            action: Action to apply
-            rules: Optional GameRules instance (uses cached instance if not provided)
-
-        Returns:
-            Next game state (delegates to GameRules)
-        """
+    def legal_actions(
+        self, action_abstraction=None, rules: GameRules | None = None
+    ) -> list[Action]:
+        """Get legal actions for current player using the provided rules engine."""
         if rules is None:
-            # Import here to avoid circular dependency
-            from src.game.rules import get_rules
+            raise ValueError("rules is required for GameState.legal_actions()")
+        return rules.get_legal_actions(self, action_abstraction)
 
-            rules = get_rules()
+    def apply_action(self, action: Action, rules: GameRules | None = None) -> GameState:
+        """Apply an action using the provided rules engine and return the next state."""
+        if rules is None:
+            raise ValueError("rules is required for GameState.apply_action()")
         return rules.apply_action(self, action)
 
-    def get_payoff(self, player: int, rules=None) -> float:
-        """
-        Get payoff for a player (only valid in terminal states).
-
-        Args:
-            player: Player index (0 or 1)
-            rules: Optional GameRules instance (uses cached instance if not provided)
-
-        Returns:
-            Chips won/lost (delegates to GameRules)
-        """
+    def get_payoff(self, player: int, rules: GameRules | None = None) -> float:
+        """Compute payoff for a player using the provided rules engine."""
         if rules is None:
-            # Import here to avoid circular dependency
-            from src.game.rules import get_rules
-
-            rules = get_rules()
+            raise ValueError("rules is required for GameState.get_payoff()")
         return rules.get_payoff(self, player)
 
     def _normalize_betting_sequence(self) -> str:
