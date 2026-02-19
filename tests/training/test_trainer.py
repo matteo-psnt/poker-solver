@@ -21,7 +21,7 @@ def config_with_dummy_abstraction(tmp_path, monkeypatch):
     config = Config.default().merge({"training": {"runs_dir": str(tmp_path / "runs")}})
 
     # Mock the builder to return DummyCardAbstraction
-    def mock_build_card_abstraction(config, prompt_user=False, auto_compute=False):
+    def mock_build_card_abstraction(config):
         return DummyCardAbstraction()
 
     monkeypatch.setattr(components, "build_card_abstraction", mock_build_card_abstraction)

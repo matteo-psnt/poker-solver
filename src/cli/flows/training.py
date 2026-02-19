@@ -257,7 +257,7 @@ def _run_precompute_and_verify(ctx: CliContext, config: Config) -> bool:
     handle_combo_precompute(ctx)
 
     try:
-        build_card_abstraction(config, prompt_user=False, auto_compute=False)
+        build_card_abstraction(config)
         print("\n✓ Precomputation completed successfully!")
         print("Continuing with training setup...\n")
         return True
@@ -277,7 +277,7 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
         True if abstraction exists or was successfully created, False otherwise
     """
     try:
-        build_card_abstraction(config, prompt_user=False, auto_compute=False)
+        build_card_abstraction(config)
         return True
     except FileNotFoundError as e:
         ui.error(str(e))

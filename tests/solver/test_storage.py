@@ -404,13 +404,14 @@ class TestSharedArrayStorage:
             storage.get_or_create_infoset(remote_key, [fold(), call()])
 
             # Should have added to pending requests
-            pending = storage.get_pending_id_requests()
+            pending = storage.state.pending_id_requests
             assert remote_owner in pending
             assert remote_key in pending[remote_owner]
 
             # Clear and verify
-            storage.clear_pending_id_requests()
-            pending = storage.get_pending_id_requests()
+            for owner_id in storage.state.pending_id_requests:
+                storage.state.pending_id_requests[owner_id].clear()
+            pending = storage.state.pending_id_requests
             assert len(pending[remote_owner]) == 0
 
         finally:
@@ -448,7 +449,7 @@ class TestSharedArrayStorage:
             assert remote_key not in storage.state.remote_keys
 
             # Simulate receiving response from owner
-            storage.receive_id_responses({remote_key: 500})
+            storage.state.remote_keys.update({remote_key: 500})
 
             # Now it should be in cache
             assert remote_key in storage.state.remote_keys

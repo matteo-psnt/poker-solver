@@ -6,30 +6,20 @@ Provides centralized, reusable functions for building solver components
 to eliminate code duplication.
 """
 
-import json
 from pathlib import Path
+from typing import Any
 
 from src.actions.betting_actions import BettingActions
 from src.bucketing.base import BucketingStrategy
-from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop.precompute import PostflopPrecomputer
+from src.evaluation.exploitability import compute_exploitability
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.base import Storage
+from src.solver.storage.in_memory import InMemoryStorage
 from src.solver.storage.shared_array import SharedArrayStorage
+from src.training.abstraction_resolver import ComboAbstractionResolver
 from src.training.run_tracker import RunMetadata
 from src.utils.config import Config
-
-
-def _read_metadata(path: Path) -> dict | None:
-    """Read abstraction metadata.json; return None for unreadable files."""
-    metadata_file = path / "metadata.json"
-    if not metadata_file.exists():
-        return None
-    try:
-        with open(metadata_file) as f:
-            return json.load(f)
-    except Exception:
-        return None
 
 
 def build_action_abstraction(config: Config) -> BettingActions:
@@ -49,8 +39,6 @@ def build_action_abstraction(config: Config) -> BettingActions:
 
 def build_card_abstraction(
     config: Config,
-    prompt_user: bool = False,
-    auto_compute: bool = False,
     abstractions_dir: Path | None = None,
 ) -> BucketingStrategy:
     """
@@ -60,8 +48,6 @@ def build_card_abstraction(
 
     Args:
         config: Configuration object
-        prompt_user: Whether to prompt user if abstraction not found (default: False for tests)
-        auto_compute: Whether to auto-compute if abstraction not found
         abstractions_dir: Optional directory containing precomputed abstractions
 
     Returns:
@@ -71,98 +57,14 @@ def build_card_abstraction(
         ValueError: If config is invalid
         FileNotFoundError: If abstraction file doesn't exist
     """
-    # Get the abstraction path/config
-    abstraction_path = config.card_abstraction.abstraction_path
-    abstraction_config = config.card_abstraction.config
-
-    if abstraction_path:
-        # Direct path provided
-        path_obj = Path(abstraction_path)
-        if not path_obj.exists():
-            raise FileNotFoundError(
-                f"Combo abstraction file not found: {path_obj}\n"
-                "Please run 'Precompute Combo Abstraction' from the CLI first."
-            )
-        return PostflopPrecomputer.load(path_obj)
-
-    elif abstraction_config:
-        # Config name provided - look for matching abstraction
-        base_path = abstractions_dir or Path("data/combo_abstraction")
-
-        if not base_path.exists():
-            raise FileNotFoundError(
-                f"No combo abstractions found (directory doesn't exist: {base_path}).\n"
-                f"Please run 'Precompute Combo Abstraction' from the CLI with config '{abstraction_config}'.yaml first."
-            )
-
-        expected_config = PrecomputeConfig.from_yaml(abstraction_config)
-        expected_hash = expected_config.get_config_hash()
-
-        # Find abstraction matching this config name
-        matching: list[tuple[Path, str | None]] = []
-        for path in base_path.iterdir():
-            if not path.is_dir():
-                continue
-            metadata = _read_metadata(path)
-            if not metadata:
-                continue
-            config_data = metadata.get("config", {})
-            if not isinstance(config_data, dict):
-                continue
-            saved_config_name = config_data.get("config_name")
-            if saved_config_name != abstraction_config:
-                continue
-            saved_hash = config_data.get("config_hash")
-            matching.append((path, saved_hash if isinstance(saved_hash, str) else None))
-
-        if not matching:
-            raise FileNotFoundError(
-                f"No combo abstraction found for config '{abstraction_config}'.\n"
-                f"Please run 'Precompute Combo Abstraction' from the CLI first with {abstraction_config}.yaml."
-            )
-
-        hash_matches = [
-            (path, saved_hash) for path, saved_hash in matching if saved_hash == expected_hash
-        ]
-        if len(hash_matches) == 1:
-            return PostflopPrecomputer.load(hash_matches[0][0])
-
-        if len(hash_matches) > 1:
-            options = ", ".join(sorted(str(path) for path, _ in hash_matches))
-            raise ValueError(
-                f"Multiple combo abstractions found for config '{abstraction_config}' "
-                f"with matching hash {expected_hash}:\n"
-                f"  {options}\n"
-                "Set card_abstraction.abstraction_path to disambiguate."
-            )
-
-        # No exact hash match. If there is exactly one candidate, keep old behavior:
-        # accept missing hash or fail on mismatch.
-        if len(matching) == 1:
-            only_path, saved_hash = matching[0]
-            if saved_hash and saved_hash != expected_hash:
-                raise ValueError(
-                    f"Card abstraction config hash mismatch for '{abstraction_config}':\n"
-                    f"  Expected: {expected_hash}\n"
-                    f"  Saved:    {saved_hash}\n"
-                    f"The saved abstraction was computed with different parameters.\n"
-                    f"Please re-run 'Precompute Combo Abstraction' with the current config."
-                )
-            return PostflopPrecomputer.load(only_path)
-
-        options = ", ".join(sorted(str(path) for path, _ in matching))
-        raise ValueError(
-            f"Multiple combo abstractions found for config '{abstraction_config}' "
-            f"but none match expected hash {expected_hash}.\n"
-            f"  {options}\n"
-            "Recompute abstractions or set card_abstraction.abstraction_path explicitly."
-        )
-
-    else:
-        raise ValueError(
-            "card_abstraction requires either 'config' or 'abstraction_path'.\n"
-            "Example: config: default"
-        )
+    resolver = ComboAbstractionResolver(
+        abstractions_dir=abstractions_dir,
+        loader=PostflopPrecomputer.load,
+    )
+    return resolver.load(
+        abstraction_path=config.card_abstraction.abstraction_path,
+        abstraction_config=config.card_abstraction.config,
+    )
 
 
 def build_storage(
@@ -247,4 +149,41 @@ def build_solver(
         card_abstraction=card_abstraction,
         storage=storage,
         config=config,
+    )
+
+
+def build_evaluation_solver(
+    config: Config,
+    *,
+    checkpoint_dir: Path,
+    abstractions_dir: Path | None = None,
+) -> tuple[MCCFRSolver, InMemoryStorage]:
+    """Build solver and storage for read-only checkpoint evaluation."""
+    storage = InMemoryStorage(checkpoint_dir=checkpoint_dir)
+    action_abstraction = build_action_abstraction(config)
+    card_abstraction = build_card_abstraction(
+        config,
+        abstractions_dir=abstractions_dir,
+    )
+    solver = build_solver(config, action_abstraction, card_abstraction, storage)
+    return solver, storage
+
+
+def evaluate_solver_exploitability(
+    solver: MCCFRSolver,
+    *,
+    num_samples: int,
+    num_rollouts_per_infoset: int,
+    use_average_strategy: bool = True,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """Compute exploitability for a solver instance with a shared evaluation path."""
+    if not isinstance(solver, MCCFRSolver):
+        raise TypeError("Exploitability computation requires MCCFRSolver")
+    return compute_exploitability(
+        solver,
+        num_samples=num_samples,
+        use_average_strategy=use_average_strategy,
+        num_rollouts_per_infoset=num_rollouts_per_infoset,
+        seed=seed,
     )

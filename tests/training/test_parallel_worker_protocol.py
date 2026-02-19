@@ -1,6 +1,7 @@
 """Tests for parallel worker protocol and queue sync helpers."""
 
 import queue
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -11,16 +12,13 @@ from src.training.parallel_sync import _process_all_messages, _send_updates_to_o
 class _DummyStorage:
     def __init__(self):
         self.applied_updates = []
-        self.remote = {}
+        self.state = SimpleNamespace(remote_keys={})
 
     def apply_updates(self, updates):
         self.applied_updates.append(updates)
 
     def respond_to_id_requests(self, keys):
         return {key: idx for idx, key in enumerate(keys)}
-
-    def receive_id_responses(self, responses):
-        self.remote.update(responses)
 
     def get_owner_by_id(self, infoset_id: int):
         if infoset_id in (1, 2):
@@ -61,7 +59,7 @@ def test_process_all_messages_drains_all_queues():
 
     assert stats == {"updates": 1, "requests": 2, "responses": 1}
     assert len(storage.applied_updates) == 1
-    assert storage.remote["remote_key"] == 9
+    assert storage.state.remote_keys["remote_key"] == 9
     assert response_queues[1].qsize() == 1
 
 
