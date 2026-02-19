@@ -33,14 +33,15 @@ class Street(Enum):
 
     def next_street(self) -> "Street | None":
         """Get the next street, or None if this is the river."""
-        if self == Street.PREFLOP:
-            return Street.FLOP
-        elif self == Street.FLOP:
-            return Street.TURN
-        elif self == Street.TURN:
-            return Street.RIVER
-        else:
-            return None
+        match self:
+            case Street.PREFLOP:
+                return Street.FLOP
+            case Street.FLOP:
+                return Street.TURN
+            case Street.TURN:
+                return Street.RIVER
+            case _:
+                return None
 
 
 class Card:

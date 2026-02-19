@@ -4,7 +4,7 @@ import random
 
 from src.bucketing.postflop.hand_bucketing import PostflopBucketer
 from src.bucketing.postflop.precompute import PostflopPrecomputer
-from src.cli.flows.combo_precompute.common import _select_abstraction
+from src.cli.flows.combo_precompute.common import BOARD_CARDS_BY_STREET, _select_abstraction
 from src.cli.ui import prompts
 from src.cli.ui.context import CliContext
 from src.game.state import Card, Street
@@ -68,7 +68,7 @@ def _run_basic_validation(abstraction: PostflopBucketer, num_samples: int = 100)
             failures += 1
             continue
 
-        expected_board_cards = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}[street]
+        expected_board_cards = BOARD_CARDS_BY_STREET[street]
         for _ in range(num_samples):
             total_checks += 1
             try:

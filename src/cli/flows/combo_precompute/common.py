@@ -5,7 +5,14 @@ from pathlib import Path
 
 from src.cli.ui import prompts
 from src.cli.ui.context import CliContext
-from src.game.state import Card
+from src.game.state import Card, Street
+
+# Board card counts for each street
+BOARD_CARDS_BY_STREET: dict[Street, int] = {
+    Street.FLOP: 3,
+    Street.TURN: 4,
+    Street.RIVER: 5,
+}
 
 
 def _get_config_name_from_metadata(metadata: dict) -> str:

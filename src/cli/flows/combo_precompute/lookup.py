@@ -2,7 +2,11 @@
 
 from src.bucketing.postflop.hand_bucketing import PostflopBucketer
 from src.bucketing.postflop.precompute import PostflopPrecomputer
-from src.cli.flows.combo_precompute.common import _parse_cards, _select_abstraction
+from src.cli.flows.combo_precompute.common import (
+    BOARD_CARDS_BY_STREET,
+    _parse_cards,
+    _select_abstraction,
+)
 from src.cli.ui import prompts
 from src.cli.ui.context import CliContext
 from src.game.state import Street
@@ -66,10 +70,8 @@ def handle_combo_test_lookup(ctx: CliContext) -> None:
             continue
 
         try:
-            expected_board_cards = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}[street]
-
             hole_cards = _parse_cards(hole_input, expected=2)
-            board_cards = _parse_cards(board_input, expected=expected_board_cards)
+            board_cards = _parse_cards(board_input, expected=BOARD_CARDS_BY_STREET[street])
 
             bucket = abstraction.get_bucket(tuple(hole_cards), tuple(board_cards), street)
 
@@ -83,7 +85,9 @@ def handle_combo_test_lookup(ctx: CliContext) -> None:
             )
 
             if iso_board_input:
-                iso_board_cards = _parse_cards(iso_board_input, expected=expected_board_cards)
+                iso_board_cards = _parse_cards(
+                    iso_board_input, expected=BOARD_CARDS_BY_STREET[street]
+                )
                 iso_bucket = abstraction.get_bucket(
                     tuple(hole_cards), tuple(iso_board_cards), street
                 )

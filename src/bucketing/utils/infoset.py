@@ -102,8 +102,7 @@ class InfoSetKey:
         """Get human-readable hand representation."""
         if self.street.name == "PREFLOP":
             return self.preflop_hand or ""
-        else:
-            return f"B{self.postflop_bucket}"
+        return f"B{self.postflop_bucket}"
 
     def __str__(self) -> str:
         """Human-readable string representation."""
@@ -272,8 +271,7 @@ class InfoSet:
         """
         if self.reach_count > 0:
             return self.cumulative_utility / self.reach_count
-        else:
-            return 0.0
+        return 0.0
 
     def update_regret(
         self,
