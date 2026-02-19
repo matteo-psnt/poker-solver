@@ -34,6 +34,11 @@ def _compute_seed(base_seed: int, worker_id: int, batch_id: int = 0) -> int:
     pairs sharing a seed would silently draw correlated MCCFR samples. Mixing the
     coordinates by hand does not give that — ``SeedSequence`` is what hashes them
     into independent streams.
+
+    ``batch_id`` is the batch's ABSOLUTE starting iteration (see
+    ``TrainingBatchCoordinator.run_batch``), never a 0-based loop counter. A
+    per-leg counter would restart at 0 on resume and replay the deal stream,
+    biasing the average strategy toward the re-sampled deals.
     """
     return int(np.random.SeedSequence([base_seed, worker_id, batch_id]).generate_state(1)[0])
 
