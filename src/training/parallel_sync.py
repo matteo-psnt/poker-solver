@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from src.solver.storage.shared_array import SharedArrayStorage
 
 
-def _process_incoming_updates(update_queue: mp.Queue, storage: "SharedArrayStorage") -> int:
+def _process_incoming_updates(update_queue: mp.Queue, storage: SharedArrayStorage) -> int:
     """
     Process incoming cross-partition updates from other workers.
 
@@ -34,7 +34,7 @@ def _process_id_requests(
     worker_id: int,
     request_queue: mp.Queue,
     response_queues: list[mp.Queue],
-    storage: "SharedArrayStorage",
+    storage: SharedArrayStorage,
 ) -> int:
     """
     Process incoming ID requests and send responses.
@@ -68,7 +68,7 @@ def _process_id_requests(
     return count
 
 
-def _process_id_responses(response_queue: mp.Queue, storage: "SharedArrayStorage") -> int:
+def _process_id_responses(response_queue: mp.Queue, storage: SharedArrayStorage) -> int:
     """
     Process incoming ID responses and update remote key cache.
     """
@@ -88,7 +88,7 @@ def _send_updates_to_owners(
     num_workers: int,
     updates: dict[int, tuple[np.ndarray, np.ndarray]],
     update_queues: list[mp.Queue],
-    storage: "SharedArrayStorage",
+    storage: SharedArrayStorage,
 ) -> None:
     """
     Send cross-partition updates to their respective owners.
@@ -125,7 +125,7 @@ def _process_all_messages(
     id_request_queue: mp.Queue,
     id_response_queue: mp.Queue,
     id_response_queues: list[mp.Queue],
-    storage: "SharedArrayStorage",
+    storage: SharedArrayStorage,
 ) -> dict[str, int]:
     """
     Process all pending messages from all queues.

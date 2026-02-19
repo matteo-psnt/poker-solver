@@ -203,8 +203,8 @@ def _worker_loop(
                     job_queue.put(job)  # Put it back for the right worker
                     continue
 
-                owned_keys = dict(storage._owned_keys)
-                legal_actions_cache = dict(storage._legal_actions_cache)
+                owned_keys = dict(storage.state.owned_keys)
+                legal_actions_cache = dict(storage.state.legal_actions_cache)
 
                 # Defensive: ensure this worker hasn't assigned duplicate IDs
                 ids = list(owned_keys.values())
@@ -225,7 +225,7 @@ def _worker_loop(
                         "legal_actions_cache": legal_actions_cache,
                         "id_range_start": storage.id_range_start,
                         "id_range_end": storage.id_range_end,
-                        "next_local_id": storage.next_local_id,
+                        "next_local_id": storage.state.next_local_id,
                     }
                 )
 
@@ -243,8 +243,8 @@ def _worker_loop(
                 )
 
                 # Preserve owned keys and next_local_id before reattach
-                preserved_keys = dict(storage._owned_keys)
-                preserved_next_id = storage.next_local_id
+                preserved_keys = dict(storage.state.owned_keys)
+                preserved_next_id = storage.state.next_local_id
 
                 # Reattach to new shared memory
                 storage.reattach_after_resize(

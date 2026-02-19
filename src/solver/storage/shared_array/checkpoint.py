@@ -21,10 +21,10 @@ from src.solver.storage.helpers import (
 )
 
 if TYPE_CHECKING:
-    from src.solver.storage.shared_array import SharedArrayStorage
+    from src.solver.storage.shared_array.storage import SharedArrayStorage
 
 
-def checkpoint_storage(storage: "SharedArrayStorage", iteration: int) -> None:
+def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
     """
     Save checkpoint to disk (coordinator only).
 
@@ -35,21 +35,16 @@ def checkpoint_storage(storage: "SharedArrayStorage", iteration: int) -> None:
 
     storage.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    num_keys = len(storage._owned_keys)
+    num_keys = len(storage.state.owned_keys)
     if num_keys == 0:
         return
 
-    items = sorted(storage._owned_keys.items(), key=lambda item: item[1])
+    items = sorted(storage.state.owned_keys.items(), key=lambda item: item[1])
     dense_ids = {key: idx for idx, (key, _) in enumerate(items)}
 
     paths = CheckpointPaths.from_dir(storage.checkpoint_dir)
     with open(paths.key_mapping, "wb") as f:
-        pickle.dump(
-            {
-                "owned_keys": dense_ids,
-            },
-            f,
-        )
+        pickle.dump({"owned_keys": dense_ids}, f)
 
     old_ids = np.array([old_id for (_, old_id) in items], dtype=np.int32)
 
@@ -114,7 +109,7 @@ def checkpoint_storage(storage: "SharedArrayStorage", iteration: int) -> None:
 
     action_sigs = {}
     for new_id, (_, old_id) in enumerate(items):
-        actions = storage._legal_actions_cache.get(old_id)
+        actions = storage.state.legal_actions_cache.get(old_id)
         if actions is None:
             continue
         action_sigs[new_id] = [(action.type.name, action.amount) for action in actions]
@@ -129,7 +124,7 @@ def checkpoint_storage(storage: "SharedArrayStorage", iteration: int) -> None:
     )
 
 
-def load_storage_checkpoint(storage: "SharedArrayStorage") -> bool:
+def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     """
     Load checkpoint from disk and restore this worker's owned partition.
 
@@ -185,7 +180,7 @@ def load_storage_checkpoint(storage: "SharedArrayStorage") -> bool:
     new_ids = []
     for key in my_keys:
         new_id = storage._allocate_id()
-        storage._owned_keys[key] = new_id
+        storage.state.owned_keys[key] = new_id
         new_ids.append(new_id)
 
     new_ids_array = np.array(new_ids, dtype=np.int32)
@@ -200,7 +195,7 @@ def load_storage_checkpoint(storage: "SharedArrayStorage") -> bool:
         legal_actions = build_legal_actions(
             saved_action_sigs, old_id, "SharedArrayStorage.load_checkpoint"
         )
-        storage._legal_actions_cache[new_id] = legal_actions
+        storage.state.legal_actions_cache[new_id] = legal_actions
 
     print(
         f"Worker {storage.worker_id} loaded {len(my_keys)}/{len(saved_owned_keys)} "

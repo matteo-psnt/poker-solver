@@ -1,8 +1,28 @@
 """Ownership and stable-hashing helpers for shared-array storage."""
 
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import cast
+
 import xxhash
 
 from src.bucketing.utils.infoset import InfoSetKey
+from src.solver.storage.shared_array.types import AllocationLike, RegionLike
+
+
+def _unpack_region(region: tuple[int, int, int, int] | RegionLike) -> tuple[int, int, int, int]:
+    """Extract typed region fields from tuple/dataclass representations."""
+    if isinstance(region, tuple):
+        return cast(tuple[int, int, int, int], region)
+
+    region_like = cast(RegionLike, region)
+    return (
+        region_like.start,
+        region_like.total,
+        region_like.base,
+        region_like.remainder,
+    )
 
 
 def stable_hash(key: InfoSetKey) -> int:
@@ -34,14 +54,14 @@ def is_owned_by_id(
     unknown_id: int,
     id_range_start: int,
     id_range_end: int,
-    extra_allocations: list[dict[str, int]],
+    extra_allocations: Sequence[AllocationLike],
 ) -> bool:
     """Determine if a worker owns a specific infoset id."""
     if infoset_id == unknown_id:
         return False
     if id_range_start <= infoset_id < id_range_end:
         return True
-    return any(alloc["start"] <= infoset_id < alloc["end"] for alloc in extra_allocations)
+    return any(alloc.start <= infoset_id < alloc.end for alloc in extra_allocations)
 
 
 def owner_for_id(
@@ -50,7 +70,7 @@ def owner_for_id(
     unknown_id: int,
     base_slots_per_worker: int,
     num_workers: int,
-    extra_regions: list[tuple[int, int, int, int]],
+    extra_regions: Sequence[tuple[int, int, int, int] | RegionLike],
 ) -> int | None:
     """
     Determine owner worker for a given infoset id.
@@ -64,7 +84,8 @@ def owner_for_id(
     if 1 <= infoset_id < base_end:
         return (infoset_id - 1) // base_slots_per_worker
 
-    for extra_start, extra_total, base, remainder in extra_regions:
+    for region in extra_regions:
+        extra_start, extra_total, base, remainder = _unpack_region(region)
         extra_end = extra_start + extra_total
         if extra_start <= infoset_id < extra_end:
             offset = infoset_id - extra_start

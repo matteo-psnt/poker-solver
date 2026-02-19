@@ -2,12 +2,12 @@
 
 from src.bucketing.utils.infoset import InfoSetKey
 from src.game.state import Street
-from src.solver.storage.shared_array_layout import get_shm_name
-from src.solver.storage.shared_array_ownership import (
+from src.solver.storage.shared_array.ownership import (
     owner_for_id,
     owner_for_key,
     stable_hash,
 )
+from src.solver.storage.shared_array_layout import get_shm_name
 
 
 def _sample_key() -> InfoSetKey:
