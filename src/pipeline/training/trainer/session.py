@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import multiprocessing as mp
 import uuid
 from datetime import datetime
@@ -133,18 +134,46 @@ class TrainingSession:
         return session
 
     def release_bootstrap_storage(self) -> None:
-        """Free the session-level coordinator storage before training claims the name.
+        """Free the session-level bootstrap storage before workers are forked.
 
         ``__init__`` builds a single-worker ``SharedArrayStorage`` so ``resume``
-        can verify the checkpoint actually loads. Training then builds its own
-        coordinator storage under the *same* ``session_id``, whose
-        ``cleanup_stale_shm`` unlinks these segments regardless -- so this only
-        makes the handoff explicit and reclaims the memory instead of leaking it.
+        can verify the checkpoint actually loads. Two distinct costs follow, and
+        both are released here.
+
+        Shared memory: training builds its own coordinator storage under the
+        *same* ``session_id``, whose ``cleanup_stale_shm`` unlinks these segments
+        regardless -- so releasing makes the handoff explicit and reclaims the
+        allocation instead of orphaning it for the run's lifetime.
+
+        Python heap: with ``num_workers=1`` this storage owns *every* key, so on
+        resume ``owned_keys`` holds one entry per infoset -- measured at ~289
+        bytes each, i.e. ~3 GB at 10.6M infosets and ~5 GB at 18M. Workers are
+        forked, and CPython's refcounting touches inherited pages, so each child
+        copies that heap: ~98 GB across 32 workers at 10.6M infosets, ~84 GB
+        across 16 at 18M. That is the resume OOM -- SIGKILL right after "All N
+        workers started" -- and it is why fresh runs are immune (their heap is
+        near-empty at fork). The worker manager's own storage is built with
+        ``load_checkpoint_on_init=False`` and its dicts are empty at fork, so
+        this bootstrap copy is the whole cost.
+
         Idempotent: safe if training is entered more than once.
         """
         storage = getattr(self, "storage", None)
         if storage is None:
             return
+        # Drop the key dictionaries before the fork, not just the shared memory:
+        # these are the pages children would copy.
+        state = storage.state
+        state.owned_keys = {}
+        state.remote_keys = {}
+        state.legal_actions_cache = {}
+        state.pending_id_requests = {}
+        state.requested_id_keys = set()
+        state.unanswered_id_requests = {}
+        state.pending_late_responses = {}
+        # Return the freed arenas to the allocator now; leaving collection to a
+        # later automatic pass would let the fork copy pages we no longer need.
+        gc.collect()
         # Drop the numpy views first: they export pointers into the buffers, and
         # SharedMemory.close() raises BufferError while any are still alive.
         for spec in ARRAY_SPECS:
