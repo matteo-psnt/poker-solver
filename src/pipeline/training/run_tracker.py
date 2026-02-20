@@ -285,6 +285,17 @@ class RunMetadata:
         # while self.iterations still holds the checkpoint count, so start_iter is
         # exactly the resume point.
         self.status = "running"
+        # A still-"running" previous attempt cannot actually be running: we are
+        # resuming, so its process is gone and no mark_* ever ran (guillotine, OOM,
+        # SIGKILL). Reap it. Without this every dead attempt stays "running"
+        # forever, and a run whose attempts mostly died reads as a run still in
+        # flight -- c2ef8c accumulated 15 such attempts, 4 h of wall clock that
+        # committed nothing, and none of them were distinguishable from live ones.
+        # end_iter falls back to self.iterations, which for an attempt that died
+        # before its first checkpoint equals start_iter: committed nothing, stated
+        # explicitly rather than left null.
+        if self.attempts and self.attempts[-1].status == "running":
+            self._close_current_attempt("died")
         self.attempts.append(
             AttemptRecord(
                 index=len(self.attempts),
