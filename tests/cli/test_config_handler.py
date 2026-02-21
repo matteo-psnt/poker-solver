@@ -49,7 +49,7 @@ def test_edit_card_abstraction_uses_dynamic_yaml_choices(tmp_path, monkeypatch, 
         equity_buckets_dir=tmp_path / "equity_buckets",
         style=mock_style,
     )
-    base_config = Config.default().merge({"card_abstraction": {"config": "default_plus"}})
+    base_config = Config.default().merge({"card_abstraction": {"config": "default"}})
 
     captured: dict[str, object] = {}
 
@@ -81,7 +81,7 @@ def test_edit_card_abstraction_no_configs_returns_original(tmp_path, monkeypatch
         equity_buckets_dir=tmp_path / "equity_buckets",
         style=mock_style,
     )
-    base_config = Config.default().merge({"card_abstraction": {"config": "default_plus"}})
+    base_config = Config.default().merge({"card_abstraction": {"config": "default"}})
 
     errors: list[str] = []
 

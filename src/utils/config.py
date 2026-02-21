@@ -10,11 +10,30 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from typing import Any
 
 
+def _contains_legacy_action_abstraction(data: Any) -> bool:
+    """Return True if a nested dict contains removed action_abstraction keys."""
+    if isinstance(data, dict):
+        if "action_abstraction" in data:
+            return True
+        return any(_contains_legacy_action_abstraction(v) for v in data.values())
+    if isinstance(data, list):
+        return any(_contains_legacy_action_abstraction(v) for v in data)
+    return False
+
+
+def _validate_no_legacy_action_abstraction(data: Any) -> None:
+    if _contains_legacy_action_abstraction(data):
+        raise ValueError(
+            "Legacy key 'action_abstraction' is no longer supported. "
+            "Use top-level 'action_model' and 'resolver' configuration sections."
+        )
+
+
 @dataclass(frozen=True)
 class CardAbstractionConfig:
     """Card abstraction configuration with defaults."""
 
-    config: str | None = "default_plus"
+    config: str | None = "default"
     abstraction_path: str | None = None
 
 
@@ -59,8 +78,69 @@ class GameConfig:
 
 
 @dataclass(frozen=True)
+class ActionModelConfig:
+    """Action model configuration with node-template and SPR-aware defaults."""
+
+    version: int = 1
+    preflop_templates: dict[str, list[float | str]] = field(
+        default_factory=lambda: {
+            "sb_first_in": ["fold", "call", 2.5, 3.5],
+            "bb_vs_limp": ["check", 4.0],
+            "bb_vs_open": ["fold", "call"],
+            "sb_vs_3bet": ["fold", "call"],
+            "bb_vs_4bet": ["fold", "call", "jam"],
+            "sb_vs_5bet": ["fold", "call"],
+        }
+    )
+    postflop_templates: dict[str, list[float | str]] = field(
+        default_factory=lambda: {
+            "first_aggressive": [0.33, 1.0, "jam_low_spr"],
+            "facing_bet": ["min_raise", "jam"],
+            "after_one_raise": ["pot_raise", "jam"],
+            "after_two_raises": ["jam"],
+        }
+    )
+    spr_buckets: list[float] = field(default_factory=lambda: [2.0, 6.0])
+    raise_count_rules: dict[str, str] = field(
+        default_factory=lambda: {
+            "facing_1": "facing_bet",
+            "facing_2": "after_one_raise",
+            "facing_3_plus": "after_two_raises",
+        }
+    )
+    off_tree_mapping: str = "nearest"
+
+    @property
+    def preflop_raises(self) -> list[float]:
+        """Compatibility accessor for legacy code paths."""
+        values = self.preflop_templates.get("sb_first_in", [])
+        return [float(v) for v in values if isinstance(v, (int, float))]
+
+    @property
+    def postflop(self) -> dict[str, list[float]]:
+        """Compatibility accessor for legacy street-based templates."""
+        first = self.postflop_templates.get("first_aggressive", [])
+        fractions = [float(v) for v in first if isinstance(v, (int, float))]
+        return {
+            "flop": fractions or [0.33, 0.75, 1.25],
+            "turn": fractions or [0.5, 1.0, 1.5],
+            "river": fractions or [0.5, 1.0, 2.0],
+        }
+
+    @property
+    def all_in_spr_threshold(self) -> float:
+        if not self.spr_buckets:
+            return 2.0
+        return float(self.spr_buckets[0])
+
+    @property
+    def max_raises_per_street(self) -> int:
+        return 4
+
+
+@dataclass(frozen=True)
 class ActionAbstractionConfig:
-    """Action abstraction configuration with defaults."""
+    """Legacy street-based action abstraction config (compatibility only)."""
 
     max_raises_per_street: int = 4
     all_in_spr_threshold: float = 2.0
@@ -72,6 +152,17 @@ class ActionAbstractionConfig:
             "river": [0.50, 1.0, 2.0],
         }
     )
+
+
+@dataclass(frozen=True)
+class ResolverConfig:
+    """Runtime subgame resolver configuration."""
+
+    enabled: bool = True
+    time_budget_ms: int = 300
+    max_depth: int = 2
+    max_raises_per_street: int = 2
+    leaf_value_mode: str = "blueprint_rollout"
 
 
 @dataclass(frozen=True)
@@ -107,7 +198,8 @@ class Config:
     storage: StorageConfig = StorageConfig()
     system: SystemConfig = SystemConfig()
     game: GameConfig = GameConfig()
-    action_abstraction: ActionAbstractionConfig = ActionAbstractionConfig()
+    action_model: ActionModelConfig = ActionModelConfig()
+    resolver: ResolverConfig = ResolverConfig()
     solver: SolverConfig = SolverConfig()
     card_abstraction: CardAbstractionConfig = CardAbstractionConfig()
 
@@ -128,6 +220,11 @@ class Config:
     def from_dict(cls, config_dict: dict[str, Any]) -> "Config":
         """Create Config from dictionary values merged over defaults."""
         return merge_dataclass_config(cls(), config_dict)
+
+    @property
+    def action_abstraction(self) -> ActionModelConfig:
+        """Compatibility alias for migrated call sites."""
+        return self.action_model
 
 
 def merge_dataclass_config(base: Any, overrides: dict[str, Any], *, strict: bool = False) -> Any:
