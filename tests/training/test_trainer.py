@@ -6,7 +6,7 @@ import time
 import numpy as np
 import pytest
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.shared_array import SharedArrayStorage
 from src.training import components
@@ -37,14 +37,14 @@ class TestTrainer:
 
         assert trainer.config is not None
         assert trainer.solver is not None
-        assert trainer.action_abstraction is not None
+        assert trainer.action_model is not None
         assert trainer.card_abstraction is not None
 
-    def test_build_action_abstraction(self, config_with_dummy_abstraction):
+    def test_build_action_model(self, config_with_dummy_abstraction):
         trainer = TrainingSession(config_with_dummy_abstraction)
 
-        action_abs = trainer.action_abstraction
-        assert isinstance(action_abs, BettingActions)
+        action_model = trainer.action_model
+        assert isinstance(action_model, ActionModel)
 
     def test_build_storage_memory(self, config_with_dummy_abstraction):
         config = config_with_dummy_abstraction.merge({"storage": {"checkpoint_enabled": False}})

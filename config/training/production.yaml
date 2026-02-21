@@ -16,18 +16,27 @@ game:
   small_blind: 1
   big_blind: 2
 
-# ===== Action Abstraction =====
-action_abstraction:
-  # Production-grade betting sizes based on solver research
-  preflop_raises: [2.5, 3.5, 5.0]  # Min-raise, standard, larger sizing
+# ===== Action Model =====
+action_model:
+  # Node-template abstraction with SPR-gated jamming and off-tree translation.
+  preflop_templates:
+    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
+    bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
+    sb_vs_3bet: ["fold", "call", "2.3x_last", "jam"]
+  postflop_templates:
+    first_aggressive: [0.33, 0.66, 1.25]
+    facing_bet: ["min_raise", "pot_raise", "jam"]
+    after_one_raise: ["pot_raise", "jam"]
+    after_two_raises: ["jam"]
+  jam_spr_threshold: 2.0
+  off_tree_mapping: "probabilistic"
 
-  postflop:
-    flop: [0.33, 0.66, 1.25]  # Range bet, standard bet, overbet
-    turn: [0.50, 1.0, 1.5]    # Half pot, pot, large overbet
-    river: [0.50, 1.0, 2.0]   # Thin value, pot, polarized overbet
-
-  all_in_spr_threshold: 2.0
+resolver:
+  enabled: true
+  time_budget_ms: 300
+  max_depth: 2
   max_raises_per_street: 5
+  leaf_value_mode: "blueprint_rollout"
 
 # ===== Card Abstraction =====
 card_abstraction:

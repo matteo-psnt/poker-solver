@@ -124,7 +124,7 @@ class TestGameRules:
             hole_cards=((Card(1), Card(2)), (Card(3), Card(4))),
         )
 
-        actions = rules.get_legal_actions(state, action_abstraction=action_abs)
+        actions = rules.get_legal_actions(state, action_model=action_abs)
 
         # Should have multiple bet sizes from abstraction
         assert len(actions) > 1
@@ -138,7 +138,7 @@ class TestGameRules:
             hole_cards=((Card(1), Card(2)), (Card(3), Card(4))),
         )
 
-        actions = rules.get_legal_actions(state, action_abstraction=None)
+        actions = rules.get_legal_actions(state, action_model=None)
 
         # Without abstraction, should have all-in option
         action_types = [a.type for a in actions]
@@ -387,7 +387,7 @@ class TestGameRules:
 
         # Can raise with action abstraction
         action_abs = BettingActions()
-        actions = rules.get_legal_actions(state, action_abstraction=action_abs)
+        actions = rules.get_legal_actions(state, action_model=action_abs)
 
         # Should have raise options
         has_raise = any(a.type == ActionType.RAISE for a in actions)
@@ -414,7 +414,7 @@ class TestGameRules:
         )
 
         action_abs = BettingActions()
-        actions = rules.get_legal_actions(state, action_abstraction=action_abs)
+        actions = rules.get_legal_actions(state, action_model=action_abs)
 
         # Should have bet options
         has_bet = any(a.type == ActionType.BET for a in actions)

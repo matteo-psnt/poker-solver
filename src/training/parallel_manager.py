@@ -33,7 +33,7 @@ class SharedArrayWorkerManager:
         self,
         num_workers: int,
         config: "Config",
-        serialized_action_abstraction: bytes,
+        serialized_action_model: bytes,
         serialized_card_abstraction: bytes,
         session_id: str | None = None,
         base_seed: int = 42,
@@ -47,7 +47,7 @@ class SharedArrayWorkerManager:
         Args:
             num_workers: Number of workers
             config: Configuration object
-            serialized_action_abstraction: Pickled BettingActions
+            serialized_action_model: Pickled ActionModel
             serialized_card_abstraction: Pickled BucketingStrategy
             session_id: Unique session ID (auto-generated if None)
             base_seed: Base random seed
@@ -58,7 +58,7 @@ class SharedArrayWorkerManager:
 
         self.num_workers = num_workers
         self.config = config
-        self.serialized_action_abstraction = serialized_action_abstraction
+        self.serialized_action_model = serialized_action_model
         self.serialized_card_abstraction = serialized_card_abstraction
         self.session_id = session_id or str(uuid.uuid4())[:8]
         self.base_seed = base_seed
@@ -121,7 +121,7 @@ class SharedArrayWorkerManager:
                     self.num_workers,
                     self.session_id,
                     self.config,
-                    self.serialized_action_abstraction,
+                    self.serialized_action_model,
                     self.serialized_card_abstraction,
                     self.base_seed,
                     self.job_queue,

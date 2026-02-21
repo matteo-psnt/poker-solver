@@ -26,8 +26,8 @@
 #   #   after_two_raises: ["jam"]
 #
 #   # SPR buckets used by templates like jam_low_spr
-#   # spr_buckets: [2.0, 6.0]
-#   # off_tree_mapping: "nearest"
+#   # jam_spr_threshold: 2.0
+#   # off_tree_mapping: "probabilistic"
 #
 # resolver:
 #   # enabled: true

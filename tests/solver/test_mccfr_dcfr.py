@@ -6,7 +6,7 @@ Tests that DCFR and pruning work correctly with the MCCFR solver.
 
 import pytest
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.shared_array import SharedArrayStorage
 from tests.test_helpers import DummyCardAbstraction, make_test_config
@@ -18,7 +18,7 @@ class TestDCFR:
     @pytest.mark.slow
     def test_dcfr_training_runs(self):
         """DCFR should complete training iterations without error."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
@@ -43,7 +43,7 @@ class TestDCFR:
     @pytest.mark.slow
     def test_dcfr_disables_linear_cfr(self):
         """Enabling DCFR should disable Linear CFR with warning."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
@@ -65,7 +65,7 @@ class TestDCFR:
     @pytest.mark.slow
     def test_dcfr_convergence(self):
         """DCFR should converge (strategies should update)."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
@@ -97,7 +97,7 @@ class TestPruning:
     @pytest.mark.slow
     def test_pruning_training_runs(self):
         """Pruning should complete training iterations without error."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test_pruning", is_coordinator=True
@@ -122,7 +122,7 @@ class TestPruning:
     @pytest.mark.slow
     def test_pruning_disabled_with_outcome_sampling(self):
         """Pruning should be disabled with outcome sampling."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test_pruning", is_coordinator=True
@@ -142,7 +142,7 @@ class TestPruning:
     @pytest.mark.slow
     def test_pruning_state_exists(self):
         """Pruning state should exist in infosets when pruning is enabled."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test_pruning", is_coordinator=True
@@ -174,7 +174,7 @@ class TestDCFRWithPruning:
     @pytest.mark.slow
     def test_dcfr_and_pruning_together(self):
         """DCFR and pruning should work together without errors."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test_both", is_coordinator=True
@@ -205,7 +205,7 @@ class TestDCFRWithPruning:
     @pytest.mark.slow
     def test_dcfr_and_pruning_convergence(self):
         """DCFR + pruning should produce valid strategies."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test_both", is_coordinator=True

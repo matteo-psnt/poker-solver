@@ -27,7 +27,11 @@ class BettingActions:
         Postflop: fold, call, check, bet 33% pot, bet 75% pot, all-in
     """
 
-    def __init__(self, config: ActionAbstractionConfig | None = None, big_blind: int = 2):
+    def __init__(
+        self,
+        config: ActionAbstractionConfig | None = None,
+        big_blind: int = 2,
+    ):
         """
         Initialize action abstraction from configuration.
 

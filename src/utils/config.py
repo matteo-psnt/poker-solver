@@ -10,25 +10,6 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from typing import Any
 
 
-def _contains_legacy_action_abstraction(data: Any) -> bool:
-    """Return True if a nested dict contains removed action_abstraction keys."""
-    if isinstance(data, dict):
-        if "action_abstraction" in data:
-            return True
-        return any(_contains_legacy_action_abstraction(v) for v in data.values())
-    if isinstance(data, list):
-        return any(_contains_legacy_action_abstraction(v) for v in data)
-    return False
-
-
-def _validate_no_legacy_action_abstraction(data: Any) -> None:
-    if _contains_legacy_action_abstraction(data):
-        raise ValueError(
-            "Legacy key 'action_abstraction' is no longer supported. "
-            "Use top-level 'action_model' and 'resolver' configuration sections."
-        )
-
-
 @dataclass(frozen=True)
 class CardAbstractionConfig:
     """Card abstraction configuration with defaults."""
@@ -100,7 +81,7 @@ class ActionModelConfig:
             "after_two_raises": ["jam"],
         }
     )
-    spr_buckets: list[float] = field(default_factory=lambda: [2.0, 6.0])
+    jam_spr_threshold: float = 2.0
     raise_count_rules: dict[str, str] = field(
         default_factory=lambda: {
             "facing_1": "facing_bet",
@@ -108,7 +89,7 @@ class ActionModelConfig:
             "facing_3_plus": "after_two_raises",
         }
     )
-    off_tree_mapping: str = "nearest"
+    off_tree_mapping: str = "probabilistic"
 
     @property
     def preflop_raises(self) -> list[float]:
@@ -129,9 +110,7 @@ class ActionModelConfig:
 
     @property
     def all_in_spr_threshold(self) -> float:
-        if not self.spr_buckets:
-            return 2.0
-        return float(self.spr_buckets[0])
+        return float(self.jam_spr_threshold)
 
     @property
     def max_raises_per_street(self) -> int:
@@ -163,6 +142,11 @@ class ResolverConfig:
     max_depth: int = 2
     max_raises_per_street: int = 2
     leaf_value_mode: str = "blueprint_rollout"
+    leaf_rollouts: int = 8
+    leaf_use_average_strategy: bool = True
+    range_update_mode: str = "bayes_light"
+    policy_blend_alpha: float = 0.35
+    min_strategy_prob: float = 1e-6
 
 
 @dataclass(frozen=True)
@@ -214,17 +198,12 @@ class Config:
 
     def merge(self, overrides: dict[str, Any]) -> "Config":
         """Return a new Config with the provided overrides merged in."""
-        return merge_dataclass_config(self, overrides)
+        return merge_dataclass_config(self, overrides, strict=True)
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> "Config":
         """Create Config from dictionary values merged over defaults."""
-        return merge_dataclass_config(cls(), config_dict)
-
-    @property
-    def action_abstraction(self) -> ActionModelConfig:
-        """Compatibility alias for migrated call sites."""
-        return self.action_model
+        return merge_dataclass_config(cls(), config_dict, strict=True)
 
 
 def merge_dataclass_config(base: Any, overrides: dict[str, Any], *, strict: bool = False) -> Any:

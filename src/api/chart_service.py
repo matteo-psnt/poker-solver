@@ -6,7 +6,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.chart.data import build_chart_metadata, build_preflop_chart_data
 from src.game.rules import GameRules
 from src.solver.storage.in_memory import InMemoryStorage
@@ -17,7 +17,7 @@ from src.training import services
 class ChartDataRuntime:
     """Minimal runtime state required to render preflop chart data."""
 
-    action_abstraction: BettingActions
+    action_model: ActionModel
     rules: GameRules
     storage: InMemoryStorage
     starting_stack: int
@@ -37,15 +37,15 @@ class ChartService:
         metadata = services.load_run_metadata(run_dir)
         config = metadata.config
 
-        action_abstraction = BettingActions(
-            config.action_abstraction,
+        action_model = ActionModel(
+            config.action_model,
             big_blind=config.game.big_blind,
         )
         rules = GameRules(config.game.small_blind, config.game.big_blind)
         storage = InMemoryStorage(checkpoint_dir=run_dir)
 
         runtime = ChartDataRuntime(
-            action_abstraction=action_abstraction,
+            action_model=action_model,
             rules=rules,
             storage=storage,
             starting_stack=config.game.starting_stack,
@@ -53,7 +53,7 @@ class ChartService:
         return cls(run_id=run_id or run_dir.name, runtime=runtime)
 
     def get_metadata(self) -> dict:
-        return build_chart_metadata(self.run_id, self.runtime.action_abstraction)
+        return build_chart_metadata(self.run_id, self.runtime.action_model)
 
     def get_chart(self, position: int, situation_id: str) -> dict:
         key = (position, situation_id)

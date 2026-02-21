@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.game.state import Card, GameState, Street
 from src.solver.mccfr import MCCFRSolver
 from src.solver.storage.shared_array import SharedArrayStorage
@@ -13,7 +13,7 @@ class TestMCCFRSolver:
     """Tests for MCCFRSolver."""
 
     def test_create_solver(self):
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -25,7 +25,7 @@ class TestMCCFRSolver:
         assert solver.num_infosets() == 0
 
     def test_deal_initial_state(self):
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -44,7 +44,7 @@ class TestMCCFRSolver:
 
     def test_train_iteration_executes(self):
         """Test that one iteration completes without error."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -60,7 +60,7 @@ class TestMCCFRSolver:
 
     def test_multiple_iterations(self):
         """Test multiple training iterations."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -75,7 +75,7 @@ class TestMCCFRSolver:
 
     def test_infosets_accumulate(self):
         """Test that infosets accumulate over iterations."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -96,7 +96,7 @@ class TestMCCFRSolver:
 
     def test_strategies_update(self):
         """Test that strategies are updated during training."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -123,7 +123,7 @@ class TestMCCFRSolver:
 
     def test_is_chance_node(self):
         """Test chance node detection."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -139,7 +139,7 @@ class TestMCCFRSolver:
 
     def test_sample_chance_outcome_deals_cards(self):
         """Test that chance node sampling deals cards."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -184,7 +184,7 @@ class TestMCCFRSolver:
         - Card dealing randomness
         - Action abstraction consistency
         """
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
 
         # Run with seed 42
@@ -215,7 +215,7 @@ class TestMCCFRSolver:
 
     def test_checkpoint(self):
         """Test that checkpoint doesn't crash."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -227,7 +227,7 @@ class TestMCCFRSolver:
         solver.checkpoint()  # Should not crash
 
     def test_str_representation(self):
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -240,7 +240,7 @@ class TestMCCFRSolver:
 
     def test_custom_stack_size(self):
         """Test solver with custom stack size."""
-        action_abs = BettingActions()
+        action_abs = ActionModel()
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True

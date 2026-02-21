@@ -12,7 +12,7 @@ class TestRunTracker:
 
     def _action_config_hash(self) -> str:
         config = Config.default()
-        return components.build_action_abstraction(config).get_config_hash()
+        return components.build_action_model(config).get_config_hash()
 
     def test_create_new_tracker(self, tmp_path):
         """Test creating a new run tracker."""

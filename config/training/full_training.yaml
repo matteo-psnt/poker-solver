@@ -1,15 +1,21 @@
 # Full Training Configuration
 # Production-scale training (10M iterations with disk-backed storage)
 
-# ===== Action Abstraction =====
-action_abstraction:
-  preflop_raises: [2.5, 3.5, 5.0]
-  postflop:
-    flop: [0.33, 0.66, 1.25]
-    turn: [0.50, 1.0, 1.5]
-    river: [0.50, 1.0, 2.0]
-  all_in_spr_threshold: 2.0
+# ===== Action Model =====
+action_model:
+  preflop_templates:
+    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
+  postflop_templates:
+    first_aggressive: [0.33, 0.66, 1.25]
+  jam_spr_threshold: 2.0
+  off_tree_mapping: "probabilistic"
+
+resolver:
+  enabled: true
+  time_budget_ms: 300
+  max_depth: 2
   max_raises_per_street: 4
+  leaf_value_mode: "blueprint_rollout"
 
 training:
   num_iterations: 10000000

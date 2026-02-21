@@ -9,7 +9,7 @@ to eliminate code duplication.
 from pathlib import Path
 from typing import Any
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.bucketing.base import BucketingStrategy
 from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.evaluation.exploitability import compute_exploitability
@@ -22,19 +22,23 @@ from src.training.run_tracker import RunMetadata
 from src.utils.config import Config
 
 
-def build_action_abstraction(config: Config) -> BettingActions:
+def build_action_model(config: Config) -> ActionModel:
     """
-    Build action abstraction from config.
+    Build action model from config.
 
     Args:
         config: Configuration object
 
     Returns:
-        BettingActions instance
+        ActionModel instance
     """
-    action_config = config.action_abstraction
+    action_config = config.action_model
     big_blind = config.game.big_blind
-    return BettingActions(action_config, big_blind=big_blind)
+    return ActionModel(
+        action_config,
+        big_blind=big_blind,
+        max_raises_per_street=config.resolver.max_raises_per_street,
+    )
 
 
 def build_card_abstraction(
@@ -124,7 +128,7 @@ def build_storage(
 
 def build_solver(
     config: Config,
-    action_abstraction: BettingActions,
+    action_model: ActionModel,
     card_abstraction: BucketingStrategy,
     storage: Storage,
 ) -> MCCFRSolver:
@@ -133,7 +137,7 @@ def build_solver(
 
     Args:
         config: Configuration object
-        action_abstraction: Pre-built action abstraction
+        action_model: Pre-built action model
         card_abstraction: Pre-built card abstraction
         storage: Pre-built storage backend
 
@@ -145,7 +149,7 @@ def build_solver(
     """
 
     return MCCFRSolver(
-        action_abstraction=action_abstraction,
+        action_model=action_model,
         card_abstraction=card_abstraction,
         storage=storage,
         config=config,
@@ -160,12 +164,12 @@ def build_evaluation_solver(
 ) -> tuple[MCCFRSolver, InMemoryStorage]:
     """Build solver and storage for read-only checkpoint evaluation."""
     storage = InMemoryStorage(checkpoint_dir=checkpoint_dir)
-    action_abstraction = build_action_abstraction(config)
+    action_model = build_action_model(config)
     card_abstraction = build_card_abstraction(
         config,
         abstractions_dir=abstractions_dir,
     )
-    solver = build_solver(config, action_abstraction, card_abstraction, storage)
+    solver = build_solver(config, action_model, card_abstraction, storage)
     return solver, storage
 
 
