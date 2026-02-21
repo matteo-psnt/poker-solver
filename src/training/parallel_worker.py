@@ -25,6 +25,17 @@ from src.training.parallel_sync import (
 from src.utils.config import Config
 
 
+def _compute_seed(base_seed: int | None, worker_id: int, batch_id: int = 0) -> int:
+    """
+    Compute a deterministic seed for a worker/batch combination.
+
+    If base_seed is None, generates a random seed component.
+    """
+    if base_seed is None:
+        return random.randint(0, 2**31 - 1) + worker_id * 10000 + batch_id * 1000
+    return base_seed + worker_id * 10000 + batch_id * 1000
+
+
 def _worker_loop(
     worker_id: int,
     num_workers: int,
@@ -101,12 +112,7 @@ def _worker_loop(
 
         # Create solver config with worker-specific seed
         # Each worker needs a unique seed to explore different parts of the game tree
-        if base_seed is None:
-            worker_seed = random.randint(0, 2**31 - 1) + worker_id * 10000
-        else:
-            worker_seed = base_seed + worker_id * 10000
-
-        # Create a new config with the worker-specific seed
+        worker_seed = _compute_seed(base_seed, worker_id)
         worker_config = config.merge({"system": {"seed": worker_seed}})
 
         # Create solver with shared array storage
@@ -272,11 +278,8 @@ def _worker_loop(
                 # Update solver state
                 solver.iteration = iteration_offset
 
-                # Update seed for this batch (handle None seed)
-                if base_seed is None:
-                    batch_seed = random.randint(0, 2**31 - 1) + batch_id * 1000
-                else:
-                    batch_seed = base_seed + worker_id * 10000 + batch_id * 1000
+                # Update seed for this batch
+                batch_seed = _compute_seed(base_seed, worker_id, batch_id)
                 random.seed(batch_seed)
                 np.random.seed(batch_seed)
 
