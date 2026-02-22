@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.shared_array.checkpoint import (
     checkpoint_storage,
@@ -28,7 +29,6 @@ from src.engine.solver.storage.shared_array.types import (
     PendingUpdateQueue,
     SharedArrayMutableState,
 )
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
 
 from . import infoset as infoset_ops
 from . import memory as memory_ops

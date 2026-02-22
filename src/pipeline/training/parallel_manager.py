@@ -9,8 +9,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.shared_array import SharedArrayStorage
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
 from src.pipeline.training.parallel_protocol import JobType
 from src.pipeline.training.parallel_worker import _worker_loop
 from src.shared.config import Config

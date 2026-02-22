@@ -4,7 +4,7 @@ import numpy as np
 
 from src.core.game.actions import bet, call, fold
 from src.core.game.state import Street
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
+from src.engine.solver.infoset import InfoSetKey
 
 # SharedArrayStorage checkpoint tests are covered by parallel training integration tests
 

@@ -3,13 +3,13 @@ from pathlib import Path
 import numpy as np
 
 from src.core.game.actions import Action
+from src.engine.solver.infoset import InfoSet, InfoSetKey
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.helpers import (
     build_legal_actions,
     get_missing_checkpoint_files,
     load_checkpoint_data,
 )
-from src.pipeline.abstraction.utils.infoset import InfoSet, InfoSetKey
 
 
 class InMemoryStorage(Storage):

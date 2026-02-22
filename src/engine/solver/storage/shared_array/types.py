@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import numpy as np
 
 from src.core.game.actions import Action
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
+from src.engine.solver.infoset import InfoSetKey
 
 if TYPE_CHECKING:
     from multiprocessing.shared_memory import SharedMemory

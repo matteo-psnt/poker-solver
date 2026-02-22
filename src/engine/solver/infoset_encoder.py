@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from src.core.game.state import GameState, Street
-from src.pipeline.abstraction.base import BucketingStrategy
-from src.pipeline.abstraction.preflop.hand_classes import PreflopHandClasses
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
+from src.core.game.state import Card, GameState, Street
+from src.engine.solver.infoset import InfoSetKey
+from src.engine.solver.protocols import BucketingStrategy
 
 # SPR (Stack-to-Pot Ratio) thresholds for bucketing
 # Shallow: SPR < 4 (push/fold decisions)
@@ -14,7 +13,35 @@ from src.pipeline.abstraction.utils.infoset import InfoSetKey
 SPR_SHALLOW_THRESHOLD = 4.0
 SPR_DEEP_THRESHOLD = 13.0
 
-_PREFLOP_HAND_CLASSES = PreflopHandClasses()
+_RANKS = "AKQJT98765432"
+_RANK_VALUES = {rank: 14 - idx for idx, rank in enumerate(_RANKS)}
+
+
+def _rank_char(card: Card) -> str:
+    card_repr = repr(card)
+    if card_repr.startswith("10"):
+        return "T"
+    return card_repr[0]
+
+
+def _same_suit(card1: Card, card2: Card) -> bool:
+    return repr(card1)[-1] == repr(card2)[-1]
+
+
+def _preflop_hand_string(hole_cards: tuple[Card, Card]) -> str:
+    c1, c2 = hole_cards
+    r1 = _rank_char(c1)
+    r2 = _rank_char(c2)
+
+    if r1 == r2:
+        return f"{r1}{r2}"
+
+    if _RANK_VALUES[r1] > _RANK_VALUES[r2]:
+        high, low = r1, r2
+    else:
+        high, low = r2, r1
+    suffix = "s" if _same_suit(c1, c2) else "o"
+    return f"{high}{low}{suffix}"
 
 
 def _get_spr_bucket(spr: float) -> int:
@@ -42,7 +69,7 @@ def encode_infoset_key(
     betting_sequence = state._normalize_betting_sequence()
 
     if state.street == Street.PREFLOP:
-        preflop_hand = _PREFLOP_HAND_CLASSES.get_hand_string(state.hole_cards[player])
+        preflop_hand = _preflop_hand_string(state.hole_cards[player])
         return InfoSetKey(
             player_position=player,
             street=state.street,

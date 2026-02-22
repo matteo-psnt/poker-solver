@@ -8,7 +8,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, Street
-from src.pipeline.abstraction.utils.infoset import InfoSetKey
+from src.engine.solver.infoset import InfoSetKey
 
 
 class ChartDataSource(Protocol):

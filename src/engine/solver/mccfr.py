@@ -14,8 +14,8 @@ from src.core.game.actions import Action
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.base import Storage
-from src.pipeline.abstraction.base import BucketingStrategy
 from src.shared.config import Config
 from src.shared.numba_ops import compute_dcfr_strategy_weight
 
