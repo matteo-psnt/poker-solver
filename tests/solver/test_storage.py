@@ -680,9 +680,7 @@ class TestSharedArrayStorage:
             assert storage.id_range_start == initial_range_start  # Start stays same
             assert storage.id_range_end == initial_range_end  # Base range unchanged
             assert storage.state.extra_allocations  # Extra capacity allocated
-            assert any(
-                alloc["end"] > initial_range_end for alloc in storage.state.extra_allocations
-            )
+            assert any(alloc.end > initial_range_end for alloc in storage.state.extra_allocations)
             assert storage.state.next_local_id == next_id_before  # next_id preserved
 
             # Verify data was preserved

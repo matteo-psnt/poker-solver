@@ -162,12 +162,8 @@ class PostflopPrecomputer:
         """
         self.config = config
 
-        # Get Street dicts from config properties
-        self.num_board_clusters = config.num_board_clusters
-        self.num_buckets = config.num_buckets
-
         # Initialize board clusterer
-        self.board_clusterer = BoardClusterer(self.num_board_clusters)
+        self.board_clusterer = BoardClusterer(config=self.config)
 
         # Storage for computed equities: street -> cluster_id -> hand_id -> equity
         self._equities: dict[Street, dict[int, dict[int, float]]] = {
@@ -213,7 +209,9 @@ class PostflopPrecomputer:
         print(f"Found {total_boards} canonical boards for {street.name}")
 
         # Step 2: Cluster boards by texture
-        print(f"Step 2: Clustering boards into {self.num_board_clusters[street]} clusters...")
+        print(
+            f"Step 2: Clustering boards into {self.config.num_board_clusters[street]} clusters..."
+        )
         canonical_boards = [info.canonical_board for info in board_infos]
         representative_boards = [info.representative for info in board_infos]
 
@@ -221,9 +219,6 @@ class PostflopPrecomputer:
             canonical_boards=canonical_boards,
             representative_boards=representative_boards,
             street=street,
-            representatives_per_cluster=self.config.representatives_per_cluster,
-            representative_selection=self.config.representative_selection,
-            selection_seed=self.config.seed,
         )
 
         clusters = self.board_clusterer.get_all_clusters(street)
@@ -307,7 +302,7 @@ class PostflopPrecomputer:
                 self._equities[street][cluster_id][hand_id] = float(np.mean(equity_list))
 
         # Step 5: Cluster into buckets using K-means
-        print(f"Step 5: Clustering into {self.num_buckets[street]} buckets...")
+        print(f"Step 5: Clustering into {self.config.num_buckets[street]} buckets...")
         self._cluster_street(street)
 
         print(f"Completed precomputation for {street.name}")
@@ -319,7 +314,7 @@ class PostflopPrecomputer:
         Uses global clustering across all clusters for consistency.
         Now operates on (cluster_id, hand_id) pairs instead of (board_id, hand_id).
         """
-        num_buckets = self.num_buckets[street]
+        num_buckets = self.config.num_buckets[street]
 
         # Collect all equity values with their (cluster_id, hand_id) keys
         all_data = []
@@ -396,25 +391,18 @@ class PostflopPrecomputer:
             pickle.dump(self.abstraction, f)
 
         # Save metadata
+        statistics: dict[str, dict[str, int]] = {}
         metadata = {
-            "config": {
-                "config_name": self.config.config_name,
-                "config_hash": self.config.get_config_hash(),
-                "num_board_clusters": {s.name: n for s, n in self.num_board_clusters.items()},
-                "representatives_per_cluster": self.config.representatives_per_cluster,
-                "representative_selection": self.config.representative_selection,
-                "num_buckets": {s.name: n for s, n in self.num_buckets.items()},
-                "equity_samples": self.config.equity_samples,
-                "seed": self.config.seed,
-            },
-            "statistics": {},
+            "config": self.config.model_dump(),
+            "config_hash": self.config.get_config_hash(),
+            "statistics": statistics,
         }
 
         for street in [Street.FLOP, Street.TURN, Street.RIVER]:
             if street in self._equities and self._equities[street]:
                 num_clusters = len(self._equities[street])
                 num_combos = sum(len(h) for h in self._equities[street].values())
-                metadata["statistics"][street.name] = {
+                statistics[street.name] = {
                     "num_clusters": num_clusters,
                     "num_combos": num_combos,
                     "num_buckets": self.abstraction.num_buckets(street),

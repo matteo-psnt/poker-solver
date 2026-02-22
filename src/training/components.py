@@ -22,25 +22,6 @@ from src.training.run_tracker import RunMetadata
 from src.utils.config import Config
 
 
-def build_action_model(config: Config) -> ActionModel:
-    """
-    Build action model from config.
-
-    Args:
-        config: Configuration object
-
-    Returns:
-        ActionModel instance
-    """
-    action_config = config.action_model
-    big_blind = config.game.big_blind
-    return ActionModel(
-        action_config,
-        big_blind=big_blind,
-        max_raises_per_street=config.resolver.max_raises_per_street,
-    )
-
-
 def build_card_abstraction(
     config: Config,
     abstractions_dir: Path | None = None,
@@ -65,10 +46,7 @@ def build_card_abstraction(
         abstractions_dir=abstractions_dir,
         loader=PostflopPrecomputer.load,
     )
-    return resolver.load(
-        abstraction_path=config.card_abstraction.abstraction_path,
-        abstraction_config=config.card_abstraction.config,
-    )
+    return resolver.load(abstraction_config=config.card_abstraction.config)
 
 
 def build_storage(
@@ -164,7 +142,7 @@ def build_evaluation_solver(
 ) -> tuple[MCCFRSolver, InMemoryStorage]:
     """Build solver and storage for read-only checkpoint evaluation."""
     storage = InMemoryStorage(checkpoint_dir=checkpoint_dir)
-    action_model = build_action_model(config)
+    action_model = ActionModel(config)
     card_abstraction = build_card_abstraction(
         config,
         abstractions_dir=abstractions_dir,

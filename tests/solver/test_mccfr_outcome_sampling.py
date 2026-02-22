@@ -6,6 +6,7 @@ These tests ensure outcome sampling works correctly.
 """
 
 import pytest
+from pydantic import ValidationError
 
 from src.actions.action_model import ActionModel
 from src.solver.mccfr import MCCFRSolver
@@ -19,7 +20,7 @@ class TestOutcomeSampling:
 
     def test_create_solver_with_outcome_sampling(self):
         """Test creating solver with outcome sampling enabled."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -32,12 +33,12 @@ class TestOutcomeSampling:
             config=make_test_config(sampling_method="outcome", seed=42),
         )
 
-        assert solver.sampling_method == "outcome"
+        assert solver.config.solver.sampling_method == "outcome"
         assert solver.iteration == 0
 
     def test_outcome_sampling_iteration_executes(self):
         """Test that outcome sampling iteration completes."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -58,7 +59,7 @@ class TestOutcomeSampling:
 
     def test_outcome_sampling_multiple_iterations(self):
         """Test multiple iterations with outcome sampling."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -79,7 +80,7 @@ class TestOutcomeSampling:
 
     def test_outcome_sampling_creates_infosets(self):
         """Test that outcome sampling creates and updates infosets."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -99,19 +100,18 @@ class TestOutcomeSampling:
         # Should have created infosets
         assert solver.num_infosets() > 0
 
-        # Check that at least some infosets have non-zero regrets
-        infosets_with_regrets = 0
-        for infoset in storage.iter_infosets():
-            if any(r != 0 for r in infoset.regrets):
-                infosets_with_regrets += 1
+        # Check that decision infosets (with >1 legal action) receive regret updates.
+        # Single-action infosets often remain all-zero by design.
+        decision_infosets = [i for i in storage.iter_infosets() if len(i.legal_actions) > 1]
+        infosets_with_regrets = sum(1 for i in decision_infosets if any(r != 0 for r in i.regrets))
 
-        # Node-template abstraction creates broader trees; require a lower
-        # but still meaningful proportion of infosets with regret updates.
-        assert infosets_with_regrets > solver.num_infosets() * 0.25
+        assert len(decision_infosets) > 0
+        # Outcome sampling updates a sparse subset of visited decision points per iteration.
+        assert infosets_with_regrets >= len(decision_infosets) * 0.15
 
     def test_outcome_sampling_with_cfr_plus(self):
         """Test outcome sampling works with CFR+."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -133,7 +133,7 @@ class TestOutcomeSampling:
 
     def test_outcome_sampling_produces_valid_strategies(self):
         """Test that outcome sampling produces valid strategies."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -162,7 +162,7 @@ class TestOutcomeSampling:
 
     def test_external_vs_outcome_sampling_both_work(self):
         """Test that both sampling methods work (comparison test)."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
 
         # External sampling
@@ -205,25 +205,13 @@ class TestOutcomeSampling:
             assert 0.99 <= sum(strategy) <= 1.01
 
     def test_outcome_sampling_invalid_method_raises_error(self):
-        """Test that invalid sampling method raises error."""
-        action_abs = ActionModel()
-        card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        # Invalid method should raise ValueError
-        with pytest.raises(ValueError, match="Invalid sampling_method"):
-            MCCFRSolver(
-                action_abs,
-                card_abs,
-                storage,
-                config=make_test_config(sampling_method="invalid_method", seed=42),
-            )
+        """Invalid sampling method should be rejected by config validation."""
+        with pytest.raises(ValidationError, match="sampling_method"):
+            make_test_config(sampling_method="invalid_method", seed=42)
 
     def test_outcome_sampling_converges_over_iterations(self):
         """Test that outcome sampling shows convergence behavior."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True

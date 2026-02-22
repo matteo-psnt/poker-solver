@@ -28,7 +28,7 @@ def translate_action_distribution(
     if observed_action in legal_actions:
         return [(observed_action, 1.0)]
 
-    mode = action_model.off_tree_mapping
+    mode = action_model.config.action_model.off_tree_mapping
     if mode != "probabilistic":
         return [(action_model.discretize_action(state, observed_action), 1.0)]
 

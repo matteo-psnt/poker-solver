@@ -8,13 +8,12 @@ templates (preflop node type, postflop raise depth, and SPR-gated all-in nodes).
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
 import xxhash
 
 from src.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
 from src.game.state import GameState
-from src.utils.config import ActionModelConfig
+from src.utils.config import Config
 
 
 class ActionModel:
@@ -27,45 +26,14 @@ class ActionModel:
     - runtime subgame resolving
     """
 
-    def __init__(
-        self,
-        config: ActionModelConfig | None = None,
-        *,
-        big_blind: int = 2,
-        max_raises_per_street: int = 4,
-    ):
-        if config is None:
-            config = ActionModelConfig()
-        if not isinstance(config, ActionModelConfig):
-            raise TypeError("config must be an ActionModelConfig")
-
+    def __init__(self, config: Config):
+        if not isinstance(config, Config):
+            raise TypeError("config must be a Config")
         self.config = config
-        self.big_blind = big_blind
-        self.max_raises_per_street = max_raises_per_street
-        self.preflop_templates = {k: list(v) for k, v in config.preflop_templates.items()}
-        self.postflop_templates = {k: list(v) for k, v in config.postflop_templates.items()}
-        self.jam_spr_threshold = float(config.jam_spr_threshold)
-        self.raise_count_rules = dict(config.raise_count_rules)
-        self.off_tree_mapping = config.off_tree_mapping.lower().strip()
-        if self.off_tree_mapping not in {"nearest", "probabilistic"}:
-            raise ValueError(
-                f"Unsupported off_tree_mapping '{config.off_tree_mapping}'. "
-                "Expected 'nearest' or 'probabilistic'."
-            )
-
-        # Compatibility attributes used by chart/evaluation code paths.
-        self.preflop_raises = self.get_preflop_open_sizes_bb()
-        first_aggressive = self.postflop_templates.get("first_aggressive", [])
-        frac_only = [float(v) for v in first_aggressive if isinstance(v, (float, int))]
-        self.postflop_bets = {
-            "flop": frac_only or [0.33, 0.75, 1.25],
-            "turn": self.postflop_templates.get("first_aggressive_turn", frac_only or [0.5, 1.0]),
-            "river": self.postflop_templates.get("first_aggressive_river", frac_only or [0.5, 1.0]),
-        }
 
     def get_preflop_open_sizes_bb(self) -> list[float]:
         """Return configured SB first-in non-all-in open sizes in BB units."""
-        options = self.preflop_templates.get("sb_first_in", [])
+        options = self.config.action_model.preflop_templates["sb_first_in"]
         sizes: list[float] = []
         for token in options:
             if isinstance(token, (int, float)) and float(token) > 0:
@@ -78,14 +46,14 @@ class ActionModel:
             return []
 
         raises_this_street = self._count_raises_on_current_street(state)
-        if raises_this_street >= self.max_raises_per_street:
+        if raises_this_street >= self.config.resolver.max_raises_per_street:
             return []
 
         if state.street.is_preflop():
             return self._preflop_bet_sizes(state)
 
         template_key = self._postflop_template_key(state, raises_this_street)
-        tokens = self.postflop_templates.get(template_key, [])
+        tokens = self.config.action_model.postflop_templates[template_key]
         return self._postflop_bet_sizes_from_tokens(state, tokens)
 
     def get_raise_sizes(self, state: GameState) -> list[int]:
@@ -98,14 +66,14 @@ class ActionModel:
             return []
 
         raises_this_street = self._count_raises_on_current_street(state)
-        if raises_this_street >= self.max_raises_per_street:
+        if raises_this_street >= self.config.resolver.max_raises_per_street:
             return []
 
         if state.street.is_preflop():
             return self._preflop_raise_sizes(state)
 
         template_key = self._postflop_template_key(state, raises_this_street)
-        tokens = self.postflop_templates.get(template_key, [])
+        tokens = self.config.action_model.postflop_templates[template_key]
         return self._postflop_raise_sizes_from_tokens(state, tokens)
 
     def get_legal_actions(self, state: GameState) -> list[Action]:
@@ -172,9 +140,9 @@ class ActionModel:
     def get_config_hash(self) -> str:
         """Compute a stable hash for action model compatibility checks."""
         config_data = {
-            "big_blind": self.big_blind,
-            "max_raises_per_street": self.max_raises_per_street,
-            "action_model": asdict(self.config),
+            "big_blind": self.config.game.big_blind,
+            "max_raises_per_street": self.config.resolver.max_raises_per_street,
+            "action_model": self.config.action_model.model_dump(),
         }
         payload = json.dumps(config_data, sort_keys=True, separators=(",", ":"))
         return xxhash.xxh64(payload.encode()).hexdigest()
@@ -197,13 +165,13 @@ class ActionModel:
 
     def _preflop_bet_sizes(self, state: GameState) -> list[int]:
         template_key = self._preflop_template_key(state)
-        tokens = self.preflop_templates.get(template_key, [])
+        tokens = self.config.action_model.preflop_templates[template_key]
         stack = state.stacks[state.current_player]
         sizes: list[int] = []
 
         for token in tokens:
             if isinstance(token, (int, float)):
-                total_bet = int(round(float(token) * self.big_blind))
+                total_bet = int(round(float(token) * self.config.game.big_blind))
                 if 0 < total_bet <= stack:
                     sizes.append(total_bet)
             elif token in ("jam", "allin", "all_in"):
@@ -214,14 +182,14 @@ class ActionModel:
 
     def _preflop_raise_sizes(self, state: GameState) -> list[int]:
         template_key = self._preflop_template_key(state)
-        tokens = self.preflop_templates.get(template_key, [])
+        tokens = self.config.action_model.preflop_templates[template_key]
         stack = state.stacks[state.current_player]
         to_call = state.to_call
         sizes: list[int] = []
 
         for token in tokens:
             if isinstance(token, (int, float)):
-                total_bet = int(round(float(token) * self.big_blind))
+                total_bet = int(round(float(token) * self.config.game.big_blind))
                 raise_amount = total_bet - to_call
                 if raise_amount > 0 and total_bet <= stack:
                     sizes.append(raise_amount)
@@ -233,47 +201,44 @@ class ActionModel:
         return sorted(set(s for s in sizes if s > 0))
 
     def _parse_preflop_raise_token(self, token: str, *, to_call: int, stack: int) -> int | None:
-        token = token.strip().lower()
-        if token in {"fold", "call", "check", "limp"}:
+        normalized = token.strip().lower()
+        if normalized in {"fold", "call", "check", "limp"}:
             return None
-        if token in {"jam", "allin", "all_in"}:
+        if normalized in {"jam", "allin", "all_in"}:
             raise_amount = stack - to_call
             return raise_amount if raise_amount > 0 else None
-        if token.endswith("x_open"):
-            try:
-                mult = float(token[: -len("x_open")])
-            except ValueError:
-                return None
+        if normalized.endswith("x_open"):
+            mult = float(normalized[: -len("x_open")])
             total_bet = int(round(mult * max(1, to_call)))
             raise_amount = total_bet - to_call
             if raise_amount > 0 and total_bet <= stack:
                 return raise_amount
             return None
-        if token.endswith("x_last"):
-            try:
-                mult = float(token[: -len("x_last")])
-            except ValueError:
-                return None
+        if normalized.endswith("x_last"):
+            mult = float(normalized[: -len("x_last")])
             total_bet = int(round(mult * max(1, to_call)))
             raise_amount = total_bet - to_call
             if raise_amount > 0 and total_bet <= stack:
                 return raise_amount
             return None
-        return None
+
+        raise ValueError(f"Unsupported preflop raise token: {token}")
 
     def _postflop_template_key(self, state: GameState, raises_this_street: int) -> str:
+        templates = self.config.action_model.postflop_templates
         if state.to_call == 0 and raises_this_street == 0:
-            if state.street.name == "TURN" and "first_aggressive_turn" in self.postflop_templates:
+            if state.street.name == "TURN" and "first_aggressive_turn" in templates:
                 return "first_aggressive_turn"
-            if state.street.name == "RIVER" and "first_aggressive_river" in self.postflop_templates:
+            if state.street.name == "RIVER" and "first_aggressive_river" in templates:
                 return "first_aggressive_river"
             return "first_aggressive"
 
+        raise_rules = self.config.action_model.raise_count_rules
         if raises_this_street <= 1:
-            return self.raise_count_rules.get("facing_1", "facing_bet")
+            return raise_rules["facing_1"]
         if raises_this_street == 2:
-            return self.raise_count_rules.get("facing_2", "after_one_raise")
-        return self.raise_count_rules.get("facing_3_plus", "after_two_raises")
+            return raise_rules["facing_2"]
+        return raise_rules["facing_3_plus"]
 
     def _postflop_bet_sizes_from_tokens(
         self, state: GameState, tokens: list[float | str]
@@ -373,13 +338,13 @@ class ActionModel:
         return stack / state.pot
 
     def _jam_spr_cutoff(self) -> float:
-        return self.jam_spr_threshold
+        return float(self.config.action_model.jam_spr_threshold)
 
     def __str__(self) -> str:
         return (
             "ActionModel("
-            f"preflop_templates={sorted(self.preflop_templates.keys())}, "
-            f"postflop_templates={sorted(self.postflop_templates.keys())}, "
-            f"jam_spr_threshold={self.jam_spr_threshold}, "
-            f"off_tree_mapping={self.off_tree_mapping})"
+            f"preflop_templates={sorted(self.config.action_model.preflop_templates.keys())}, "
+            f"postflop_templates={sorted(self.config.action_model.postflop_templates.keys())}, "
+            f"jam_spr_threshold={self.config.action_model.jam_spr_threshold}, "
+            f"off_tree_mapping={self.config.action_model.off_tree_mapping})"
         )

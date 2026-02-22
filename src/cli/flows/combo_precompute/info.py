@@ -1,5 +1,6 @@
 """Inspection/info flows for combo abstractions."""
 
+from src.bucketing.config import PrecomputeConfig
 from src.bucketing.postflop.precompute import PostflopPrecomputer
 from src.cli.flows.combo_precompute.common import (
     _get_config_name_from_metadata,
@@ -8,6 +9,17 @@ from src.cli.flows.combo_precompute.common import (
 from src.cli.ui import prompts
 from src.cli.ui.context import CliContext
 from src.game.state import Street
+
+
+def _parse_metadata_config(metadata: dict) -> PrecomputeConfig | None:
+    """Parse metadata config as PrecomputeConfig."""
+    config_data = metadata.get("config")
+    if not isinstance(config_data, dict):
+        return None
+    try:
+        return PrecomputeConfig.model_validate(config_data)
+    except Exception:
+        return None
 
 
 def handle_combo_info(ctx: CliContext) -> None:
@@ -34,17 +46,17 @@ def handle_combo_info(ctx: CliContext) -> None:
         print(f"📁 {path.name}")
         print("   " + "-" * 57)
 
-        config_name = _get_config_name_from_metadata(metadata)
+        parsed_config = _parse_metadata_config(metadata)
+        config_name = (
+            parsed_config.config_name if parsed_config else _get_config_name_from_metadata(metadata)
+        )
         print(f"   Config: {config_name}")
 
-        if "config" in metadata:
-            config = metadata["config"]
-            print(f"   Seed: {config.get('seed', 'N/A')}")
-            print(f"   Equity samples: {config.get('equity_samples', 'N/A')}")
-            print(
-                f"   Representatives per cluster: {config.get('representatives_per_cluster', 'N/A')}"
-            )
-            print(f"   Representative selection: {config.get('representative_selection', 'N/A')}")
+        if parsed_config is not None:
+            print(f"   Seed: {parsed_config.seed}")
+            print(f"   Equity samples: {parsed_config.equity_samples}")
+            print(f"   Representatives per cluster: {parsed_config.representatives_per_cluster}")
+            print(f"   Representative selection: {parsed_config.representative_selection}")
 
         if "statistics" in metadata:
             print("\n   Street statistics:")

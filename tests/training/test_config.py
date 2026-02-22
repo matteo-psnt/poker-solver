@@ -4,9 +4,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from src.utils.config import Config
-from src.utils.config_loader import _merge_config, load_config
+from src.utils.config import Config, GameConfig, SolverConfig, SystemConfig
+from src.utils.config_loader import load_config
 
 
 class TestDefaultBehavior:
@@ -33,11 +34,11 @@ class TestDefaultBehavior:
         """Verify config is frozen (cannot be modified)."""
         cfg = Config()
 
-        with pytest.raises(Exception):  # FrozenInstanceError
-            cfg.training.num_iterations = 999  # type: ignore
+        with pytest.raises(ValidationError):
+            cfg.training.num_iterations = 999
 
-        with pytest.raises(Exception):
-            cfg.storage.initial_capacity = 999  # type: ignore
+        with pytest.raises(ValidationError):
+            cfg.storage.initial_capacity = 999
 
 
 class TestMergeBehavior:
@@ -48,7 +49,7 @@ class TestMergeBehavior:
         base = Config()
         overrides = {"training": {"num_iterations": 50_000}}
 
-        merged = _merge_config(base, overrides)
+        merged = base.merge(overrides)
 
         # Overridden value
         assert merged.training.num_iterations == 50_000
@@ -61,16 +62,16 @@ class TestMergeBehavior:
             "game": {"big_blind": 4},
         }
 
-        merged = _merge_config(base, overrides)
+        merged = base.merge(overrides)
 
         assert merged.training.num_iterations == 50_000
         assert merged.training.verbose is False
         assert merged.game.big_blind == 4
 
     def test_merge_empty_overrides(self):
-        """Verify merging empty dict returns original."""
+        """Verify merging empty dict returns equivalent config."""
         base = Config()
-        merged = _merge_config(base, {})
+        merged = base.merge({})
 
         assert merged == base
 
@@ -79,7 +80,7 @@ class TestMergeBehavior:
         base = Config()
         overrides = {"training": {"num_iterations": 50_000}}
 
-        merged = _merge_config(base, overrides)
+        merged = base.merge(overrides)
 
         assert merged is not base
         assert base.training.num_iterations == Config().training.num_iterations  # unchanged
@@ -165,21 +166,122 @@ action_abstraction:
             yaml_path = Path(f.name)
 
         try:
-            with pytest.raises(ValueError, match="action_abstraction"):
+            with pytest.raises(ValidationError):
                 load_config(yaml_path)
         finally:
             yaml_path.unlink()
+
+    def test_load_extends_chain(self):
+        """Verify YAML extends inheritance: child values override base, rest inherited."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "base.yaml"
+            child_path = Path(tmpdir) / "child.yaml"
+
+            base_path.write_text(
+                """
+training:
+  num_iterations: 1000
+  verbose: false
+solver:
+  cfr_plus: true
+"""
+            )
+            child_path.write_text(
+                """
+extends: base.yaml
+training:
+  num_iterations: 9999
+"""
+            )
+
+            cfg = load_config(child_path)
+
+            assert cfg.training.num_iterations == 9999  # child wins
+            assert cfg.training.verbose is False  # inherited from base
+            assert cfg.solver.cfr_plus is True  # inherited from base
 
 
 class TestTypeSafety:
     """Test that types are enforced."""
 
     def test_dataclass_fields_have_types(self):
-        """Verify all fields are typed (not Any)."""
+        """Verify all fields are typed correctly."""
         cfg = Config()
 
-        # Spot check - if these work, types are enforced
         assert isinstance(cfg.training.num_iterations, int)
         assert isinstance(cfg.training.verbose, bool)
         assert isinstance(cfg.game.starting_stack, int)
         assert cfg.system.seed is None or isinstance(cfg.system.seed, int)
+
+
+class TestValidation:
+    """Test that field-level and cross-field validation fires correctly."""
+
+    def test_dcfr_alpha_must_be_positive(self):
+        """dcfr_alpha <= 0 should raise ValidationError."""
+        with pytest.raises(ValidationError, match="greater than 0"):
+            SolverConfig(dcfr_alpha=-1.0)
+
+    def test_dcfr_alpha_zero_invalid(self):
+        """dcfr_alpha = 0 should raise ValidationError (must be > 0)."""
+        with pytest.raises(ValidationError):
+            SolverConfig(dcfr_alpha=0.0)
+
+    def test_sampling_method_literal(self):
+        """Invalid sampling_method value should raise ValidationError."""
+        with pytest.raises(ValidationError):
+            SolverConfig(sampling_method="bad_method")  # type: ignore
+
+    def test_sampling_method_valid_values(self):
+        """Both valid sampling methods should be accepted."""
+        SolverConfig(sampling_method="external")
+        SolverConfig(sampling_method="outcome")
+
+    def test_big_blind_must_exceed_small_blind(self):
+        """big_blind <= small_blind should raise ValidationError."""
+        with pytest.raises(ValidationError, match="big_blind"):
+            GameConfig(small_blind=5, big_blind=5)
+
+        with pytest.raises(ValidationError, match="big_blind"):
+            GameConfig(small_blind=5, big_blind=3)
+
+    def test_log_level_literal(self):
+        """Invalid log_level should raise ValidationError."""
+        with pytest.raises(ValidationError):
+            SystemConfig(log_level="VERBOSE")  # type: ignore
+
+    def test_log_level_valid_values(self):
+        """All valid log levels should be accepted."""
+        for level in ("DEBUG", "INFO", "WARNING", "ERROR"):
+            SystemConfig(log_level=level)
+
+    def test_extra_keys_rejected(self):
+        """Unknown keys in dict should raise ValidationError."""
+        with pytest.raises(ValidationError):
+            Config.model_validate({"unknown_section": {"foo": 1}})
+
+    def test_unknown_yaml_key_raises_on_load(self):
+        """Unknown top-level key in YAML raises ValidationError at load time."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("completely_unknown_key: 42\n")
+            yaml_path = Path(f.name)
+
+        try:
+            with pytest.raises(ValidationError):
+                load_config(yaml_path)
+        finally:
+            yaml_path.unlink()
+
+    def test_zarr_compression_level_bounds(self):
+        """zarr_compression_level must be between 1 and 9 inclusive."""
+        from src.utils.config import StorageConfig
+
+        with pytest.raises(ValidationError):
+            StorageConfig(zarr_compression_level=0)
+
+        with pytest.raises(ValidationError):
+            StorageConfig(zarr_compression_level=10)
+
+        # Boundary values are valid
+        StorageConfig(zarr_compression_level=1)
+        StorageConfig(zarr_compression_level=9)

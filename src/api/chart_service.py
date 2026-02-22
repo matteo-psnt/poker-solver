@@ -37,10 +37,7 @@ class ChartService:
         metadata = services.load_run_metadata(run_dir)
         config = metadata.config
 
-        action_model = ActionModel(
-            config.action_model,
-            big_blind=config.game.big_blind,
-        )
+        action_model = ActionModel(config)
         rules = GameRules(config.game.small_blind, config.game.big_blind)
         storage = InMemoryStorage(checkpoint_dir=run_dir)
 

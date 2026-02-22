@@ -332,7 +332,7 @@ class TestInfoSet:
             0,
             10.0,
             iteration=100,
-            enable_dcfr=True,
+            iteration_weighting="dcfr",
             dcfr_alpha=1.5,
             dcfr_beta=0.0,
         )
@@ -358,7 +358,7 @@ class TestInfoSet:
             0,
             -10.0,
             iteration=100,
-            enable_dcfr=True,
+            iteration_weighting="dcfr",
             dcfr_alpha=1.5,
             dcfr_beta=0.0,
         )
@@ -383,7 +383,7 @@ class TestInfoSet:
                 0,
                 constant_regret,
                 iteration=iteration,
-                enable_dcfr=True,
+                iteration_weighting="dcfr",
                 dcfr_alpha=alpha,
                 dcfr_beta=0.0,
             )
@@ -415,9 +415,11 @@ class TestInfoSet:
         iteration = 100
 
         infoset_dcfr.update_regret(
-            0, new_regret, iteration=iteration, enable_dcfr=True, dcfr_alpha=1.5
+            0, new_regret, iteration=iteration, iteration_weighting="dcfr", dcfr_alpha=1.5
         )
-        infoset_vanilla.update_regret(0, new_regret, iteration=iteration, enable_dcfr=False)
+        infoset_vanilla.update_regret(
+            0, new_regret, iteration=iteration, iteration_weighting="none"
+        )
 
         # DCFR should have smaller cumulative regret due to discounting old regret
         assert infoset_dcfr.regrets[0] < infoset_vanilla.regrets[0]

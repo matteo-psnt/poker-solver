@@ -16,13 +16,13 @@ BOARD_CARDS_BY_STREET: dict[Street, int] = {
 
 
 def _get_config_name_from_metadata(metadata: dict) -> str:
-    """Extract config name from metadata JSON, handling old/new formats."""
+    """Extract config name from metadata JSON."""
     if "config" in metadata and isinstance(metadata["config"], dict):
         config_name = metadata["config"].get("config_name")
         if config_name:
             return config_name
 
-    return metadata.get("config_name", "unknown")
+    return "unknown"
 
 
 def _list_existing_abstractions(base_path: Path) -> list[tuple[Path, dict]]:

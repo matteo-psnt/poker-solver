@@ -13,24 +13,24 @@ class TestMCCFRSolver:
     """Tests for MCCFRSolver."""
 
     def test_create_solver(self):
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
-        solver = MCCFRSolver(action_abs, card_abs, storage)
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
 
         assert solver.iteration == 0
         assert solver.num_infosets() == 0
 
     def test_deal_initial_state(self):
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
 
         state = solver._deal_initial_state()
 
@@ -44,7 +44,7 @@ class TestMCCFRSolver:
 
     def test_train_iteration_executes(self):
         """Test that one iteration completes without error."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -60,7 +60,7 @@ class TestMCCFRSolver:
 
     def test_multiple_iterations(self):
         """Test multiple training iterations."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -75,7 +75,7 @@ class TestMCCFRSolver:
 
     def test_infosets_accumulate(self):
         """Test that infosets accumulate over iterations."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -96,7 +96,7 @@ class TestMCCFRSolver:
 
     def test_strategies_update(self):
         """Test that strategies are updated during training."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -123,12 +123,12 @@ class TestMCCFRSolver:
 
     def test_is_chance_node(self):
         """Test chance node detection."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
 
         state = solver._deal_initial_state()
 
@@ -139,12 +139,12 @@ class TestMCCFRSolver:
 
     def test_sample_chance_outcome_deals_cards(self):
         """Test that chance node sampling deals cards."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
 
         # Create state needing flop
         state = GameState(
@@ -184,7 +184,7 @@ class TestMCCFRSolver:
         - Card dealing randomness
         - Action abstraction consistency
         """
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
 
         # Run with seed 42
@@ -215,24 +215,24 @@ class TestMCCFRSolver:
 
     def test_checkpoint(self):
         """Test that checkpoint doesn't crash."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
 
         for _ in range(10):
             solver.train_iteration()
         solver.checkpoint()  # Should not crash
 
     def test_str_representation(self):
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage)
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
 
         s = str(solver)
         assert "MCCFRSolver" in s
@@ -240,7 +240,7 @@ class TestMCCFRSolver:
 
     def test_custom_stack_size(self):
         """Test solver with custom stack size."""
-        action_abs = ActionModel()
+        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True

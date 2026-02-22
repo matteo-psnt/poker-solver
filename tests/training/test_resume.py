@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from src.actions.action_model import ActionModel
 from src.training import components
 from src.training.trainer import TrainingSession
 from src.utils.config import Config
@@ -64,8 +65,7 @@ def test_config(temp_run_dir):
             "max_raises_per_street": 2,
         },
         "card_abstraction": {
-            "config": None,
-            "abstraction_path": None,
+            "config": "default",
         },
         "storage": {
             # Storage config uses defaults - checkpoint enabled, zarr format
@@ -140,7 +140,7 @@ def test_resume_no_checkpoint(temp_run_dir):
     # Create run directory but no checkpoint files
     temp_run_dir.mkdir(parents=True, exist_ok=True)
     config_obj = Config.default()
-    action_config_hash = components.build_action_model(config_obj).get_config_hash()
+    action_config_hash = ActionModel(config_obj).get_config_hash()
     (temp_run_dir / ".run.json").write_text(
         json.dumps(
             {

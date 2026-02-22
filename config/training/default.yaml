@@ -34,14 +34,11 @@
 #   # time_budget_ms: 300
 #   # max_depth: 2
 #   # max_raises_per_street: 4
-#   # leaf_value_mode: "blueprint_rollout"
 
 # ===== Card Abstraction =====
 # card_abstraction:
 #   # Reference to precomputed abstraction config
 #   # config: default  # default: "default"
-#   # Or use direct file path:
-#   # abstraction_path: "data/combo_abstraction/combo-20251220-120000/combo_abstraction.pkl"
 
 # ===== Solver Configuration =====
 # solver:
@@ -53,8 +50,8 @@
 #   # CFR+ provides ~100x faster convergence than vanilla CFR
 #   # cfr_plus: true  # default: true
 #
-#   # Linear CFR provides additional 2-3x speedup
-#   # linear_cfr: true  # default: true
+#   # Iteration weighting: "linear" (default), "dcfr", or "none"
+#   # iteration_weighting: "linear"
 
 # ===== Training Configuration =====
 # training:

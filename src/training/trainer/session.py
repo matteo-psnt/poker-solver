@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.actions.action_model import ActionModel
 from src.solver.storage.helpers import get_missing_checkpoint_files
 from src.training import components
 from src.training.metrics import MetricsTracker
@@ -40,7 +41,7 @@ class TrainingSession:
         self._pending_checkpoint: concurrent.futures.Future[float] | None = None
 
         try:
-            self.action_model = components.build_action_model(config)
+            self.action_model = ActionModel(config)
             self.card_abstraction = components.build_card_abstraction(config)
             action_config_hash = self.action_model.get_config_hash()
 

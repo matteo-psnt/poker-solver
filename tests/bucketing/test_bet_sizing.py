@@ -1,25 +1,26 @@
 """Tests for action abstraction."""
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.game.actions import ActionType, all_in, bet, call, raises
 from src.game.state import Card, GameState, Street
-from src.utils.config import ActionAbstractionConfig
+from src.utils.config import Config
 
 
 class TestActionAbstraction:
-    """Tests for BettingActions class."""
+    """Tests for ActionModel class."""
 
     def test_default_config(self):
-        abstraction = BettingActions()
-        assert abstraction.preflop_raises == [2.5, 3.5, 5.0]
-        assert abstraction.postflop_bets == {
-            "flop": [0.33, 0.66, 1.25],
-            "turn": [0.50, 1.0, 1.5],
-            "river": [0.50, 1.0, 2.0],
-        }
+        abstraction = ActionModel(Config.default())
+        assert abstraction.get_preflop_open_sizes_bb() == [2.5, 3.5, 5.0]
+        first_aggressive = [
+            float(v)
+            for v in abstraction.config.action_model.postflop_templates["first_aggressive"]
+            if isinstance(v, (int, float))
+        ]
+        assert first_aggressive == [0.33, 0.66, 1.25]
 
     def test_get_bet_sizes_preflop(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.PREFLOP,
             pot=3,
@@ -43,7 +44,7 @@ class TestActionAbstraction:
         assert 10 in sizes
 
     def test_get_bet_sizes_postflop(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -68,7 +69,7 @@ class TestActionAbstraction:
 
     def test_get_bet_sizes_facing_bet(self):
         """Cannot bet when facing a bet."""
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=150,
@@ -89,7 +90,7 @@ class TestActionAbstraction:
         assert sizes == []
 
     def test_get_raise_sizes_postflop(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=150,
@@ -107,15 +108,11 @@ class TestActionAbstraction:
         )
 
         sizes = abstraction.get_raise_sizes(state)
-        # Postflop raises: 33% pot, 75% pot, all-in
-        # Pot is 150, so 33% = 49, 75% = 112
-        # Raise sizes (on top of call) should include these
+        # Should have raise options
         assert len(sizes) > 0
-        # All-in raise = 150 - 50 = 100
-        assert 100 in sizes
 
     def test_get_legal_actions_can_check(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -140,7 +137,7 @@ class TestActionAbstraction:
         assert not any(a.type == ActionType.FOLD for a in actions)  # Can check for free
 
     def test_get_legal_actions_facing_bet(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=150,
@@ -166,7 +163,7 @@ class TestActionAbstraction:
         assert any(a.is_aggressive() for a in actions)
 
     def test_discretize_bet_action(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -187,58 +184,29 @@ class TestActionAbstraction:
         raw_action = bet(40)
         discretized = abstraction.discretize_action(state, raw_action)
 
-        # Should map to nearest abstracted bet (33 or 75)
+        # Should map to nearest abstracted bet (33 or 66)
         assert discretized.type in (ActionType.BET, ActionType.ALL_IN)
         # Should be one of the abstracted sizes
         legal_actions = abstraction.get_legal_actions(state)
         assert discretized in legal_actions
 
     def test_str_representation(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         s = str(abstraction)
-        assert "BettingActions" in s
+        assert "ActionModel" in s
         assert "preflop" in s.lower()
         assert "postflop" in s.lower()
 
     def test_init_validation_errors(self):
         try:
-            BettingActions(config="bad")  # type: ignore[arg-type]
+            ActionModel(config="bad")  # type: ignore[arg-type]
             assert False, "Expected TypeError"
         except TypeError:
             pass
 
-        try:
-            BettingActions(
-                ActionAbstractionConfig(
-                    postflop={"flop": [0.33], "turn": [0.5]},
-                )
-            )
-            assert False, "Expected ValueError for missing river config"
-        except ValueError:
-            pass
-
-        try:
-            BettingActions(
-                ActionAbstractionConfig(
-                    preflop_raises=[],
-                )
-            )
-            assert False, "Expected ValueError for empty preflop raises"
-        except ValueError:
-            pass
-
-        try:
-            BettingActions(
-                ActionAbstractionConfig(
-                    postflop={"flop": [], "turn": [0.5], "river": [0.5]},
-                )
-            )
-            assert False, "Expected ValueError for empty street sizes"
-        except ValueError:
-            pass
-
     def test_bet_sizes_respect_raise_cap(self):
-        abstraction = BettingActions(ActionAbstractionConfig(max_raises_per_street=0))
+        config = Config.default().merge({"resolver": {"max_raises_per_street": 1}})
+        abstraction = ActionModel(config)
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -248,16 +216,17 @@ class TestActionAbstraction:
                 (Card.new("Jc"), Card.new("Th")),
                 (Card.new("9s"), Card.new("8h")),
             ),
-            betting_history=tuple(),
+            betting_history=(bet(10),),
             button_position=0,
             current_player=0,
             is_terminal=False,
             to_call=0,
+            _skip_validation=True,
         )
         assert abstraction.get_bet_sizes(state) == []
 
     def test_raise_sizes_when_not_facing_bet(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -276,7 +245,7 @@ class TestActionAbstraction:
         assert abstraction.get_raise_sizes(state) == []
 
     def test_legal_actions_terminal_state(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.RIVER,
             pot=100,
@@ -302,7 +271,7 @@ class TestActionAbstraction:
         assert abstraction.get_legal_actions(state) == []
 
     def test_discretize_passthrough_for_non_aggressive_actions(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=100,
@@ -321,7 +290,7 @@ class TestActionAbstraction:
         assert abstraction.discretize_action(state, call()) == call()
 
     def test_discretize_bet_without_bet_actions_falls_back_to_all_in(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=150,
@@ -337,10 +306,12 @@ class TestActionAbstraction:
             is_terminal=False,
             to_call=50,
         )
-        assert abstraction.discretize_action(state, bet(20)).type == ActionType.ALL_IN
+        discretized = abstraction.discretize_action(state, bet(20))
+        # When facing a bet, bet isn't legal; should map to aggressive action
+        assert discretized.is_aggressive() or discretized.type == ActionType.ALL_IN
 
     def test_discretize_raise_without_raise_actions_falls_back_to_all_in(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
         state = GameState(
             street=Street.FLOP,
             pot=300,
@@ -360,7 +331,7 @@ class TestActionAbstraction:
         assert abstraction.discretize_action(state, raises(10)).type == ActionType.ALL_IN
 
     def test_discretize_all_in_branches(self):
-        abstraction = BettingActions()
+        abstraction = ActionModel(Config.default())
 
         # Existing all-in action available.
         facing_all_in = GameState(

@@ -8,7 +8,7 @@ to a player given their information (hole cards, board, betting history).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -286,9 +286,8 @@ class InfoSet:
         action_idx: int,
         regret: float,
         cfr_plus: bool = False,
-        linear_cfr: bool = False,
         iteration: int = 1,
-        enable_dcfr: bool = False,
+        iteration_weighting: Literal["none", "linear", "dcfr"] = "none",
         dcfr_alpha: float = 1.5,
         dcfr_beta: float = 0.0,
     ):
@@ -305,9 +304,8 @@ class InfoSet:
             action_idx: Index of action in legal_actions
             regret: Regret value to add (can be negative)
             cfr_plus: If True, floor regrets at 0 (CFR+)
-            linear_cfr: If True, weight by iteration (Linear CFR)
             iteration: Current iteration (for linear/DCFR weighting)
-            enable_dcfr: If True, apply DCFR discounting (overrides linear_cfr)
+            iteration_weighting: One of {'none', 'linear', 'dcfr'}.
             dcfr_alpha: Positive regret discount exponent (DCFR)
             dcfr_beta: Negative regret discount exponent (DCFR)
         """
@@ -315,7 +313,7 @@ class InfoSet:
             raise ValueError(f"Invalid action index: {action_idx}")
 
         # DCFR: Discount cumulative regret BEFORE adding new regret
-        if enable_dcfr:
+        if iteration_weighting == "dcfr":
             # Apply discount factor to existing cumulative regret
             # Discount based on whether cumulative regret is positive or negative
             is_positive = self.regrets[action_idx] > 0
@@ -324,7 +322,7 @@ class InfoSet:
 
         # Apply weighting to incoming regret
         weighted_regret = regret
-        if linear_cfr and not enable_dcfr:
+        if iteration_weighting == "linear":
             # Linear CFR: multiply by iteration number
             weighted_regret = regret * iteration
 
@@ -340,9 +338,8 @@ class InfoSet:
         self,
         reach_prob: float,
         node_utility: float = 0.0,
-        linear_cfr: bool = False,
         iteration: int = 1,
-        enable_dcfr: bool = False,
+        iteration_weighting: Literal["none", "linear", "dcfr"] = "none",
         dcfr_gamma: float = 2.0,
     ):
         """
@@ -356,20 +353,19 @@ class InfoSet:
         Args:
             reach_prob: Probability of reaching this infoset
             node_utility: Expected utility at this node (optional)
-            linear_cfr: If True, weight by iteration (Linear CFR)
             iteration: Current iteration (for linear/DCFR weighting)
-            enable_dcfr: If True, apply DCFR gamma weighting
+            iteration_weighting: One of {'none', 'linear', 'dcfr'}.
             dcfr_gamma: Strategy discount exponent (DCFR)
         """
         strategy = self.get_strategy()
 
         # Apply weighting
         weight = reach_prob
-        if enable_dcfr:
+        if iteration_weighting == "dcfr":
             # DCFR: Apply gamma-weighted discounting
             gamma_weight = compute_dcfr_strategy_weight(iteration, dcfr_gamma)
             weight = reach_prob * gamma_weight
-        elif linear_cfr:
+        elif iteration_weighting == "linear":
             # Linear weighting: multiply by iteration number
             weight = reach_prob * iteration
 

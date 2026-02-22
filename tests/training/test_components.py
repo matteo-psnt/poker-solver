@@ -13,54 +13,12 @@ from src.utils.config import Config
 from tests.test_helpers import DummyCardAbstraction
 
 
-class TestBuildActionModel:
-    """Tests for build_action_model."""
-
-    def test_build_default(self):
-        """Test building action model with default config."""
-        config = Config.default()
-        action_model = components.build_action_model(config)
-
-        assert isinstance(action_model, ActionModel)
-        assert action_model.get_preflop_open_sizes_bb()
-        assert action_model.big_blind == 2
-
-    def test_build_with_custom_big_blind(self):
-        """Test building with custom big blind."""
-        config = Config.default().merge({"game": {"big_blind": 10}})
-
-        action_model = components.build_action_model(config)
-
-        assert isinstance(action_model, ActionModel)
-        assert action_model.big_blind == 10
-
-
 class TestBuildCardAbstraction:
     """Tests for build_card_abstraction."""
 
-    def test_build_fails_without_abstraction(self):
-        """Test that building fails when no abstraction is configured."""
-        config = Config.default().merge(
-            {"card_abstraction": {"abstraction_path": None, "config": None}}
-        )
-
-        with pytest.raises(ValueError, match="card_abstraction requires either"):
-            components.build_card_abstraction(config)
-
-    def test_build_fails_with_missing_path(self):
-        """Test that building fails when path doesn't exist."""
-        config = Config.default().merge(
-            {"card_abstraction": {"abstraction_path": "/nonexistent/path.pkl"}}
-        )
-
-        with pytest.raises(FileNotFoundError):
-            components.build_card_abstraction(config)
-
     def test_build_fails_with_invalid_config_name(self):
         """Test that building fails when config has no matching abstraction."""
-        config = Config.default().merge(
-            {"card_abstraction": {"abstraction_path": None, "config": "nonexistent_config_xyz"}}
-        )
+        config = Config.default().merge({"card_abstraction": {"config": "nonexistent_config_xyz"}})
 
         with pytest.raises(FileNotFoundError, match="Config file not found"):
             components.build_card_abstraction(config)
@@ -74,10 +32,10 @@ class TestBuildCardAbstraction:
         with open(candidate / "metadata.json", "w") as f:
             json.dump(
                 {
+                    "config_hash": expected_hash,
                     "config": {
                         "config_name": "default",
-                        "config_hash": expected_hash,
-                    }
+                    },
                 },
                 f,
             )
@@ -90,9 +48,7 @@ class TestBuildCardAbstraction:
             return DummyCardAbstraction()
 
         monkeypatch.setattr(components.PostflopPrecomputer, "load", _mock_load)
-        config = Config.default().merge(
-            {"card_abstraction": {"abstraction_path": None, "config": "default"}}
-        )
+        config = Config.default().merge({"card_abstraction": {"config": "default"}})
 
         abstraction = components.build_card_abstraction(
             config,
@@ -112,17 +68,15 @@ class TestBuildCardAbstraction:
             with open(candidate / "metadata.json", "w") as f:
                 json.dump(
                     {
+                        "config_hash": expected_hash,
                         "config": {
                             "config_name": "default",
-                            "config_hash": expected_hash,
-                        }
+                        },
                     },
                     f,
                 )
 
-        config = Config.default().merge(
-            {"card_abstraction": {"abstraction_path": None, "config": "default"}}
-        )
+        config = Config.default().merge({"card_abstraction": {"config": "default"}})
         with pytest.raises(ValueError, match="Multiple combo abstractions found"):
             components.build_card_abstraction(
                 config,
@@ -168,7 +122,7 @@ class TestBuildSolver:
         """Test building solver with basic components."""
         config = Config.default()
 
-        action_model = components.build_action_model(config)
+        action_model = ActionModel(config)
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -186,7 +140,7 @@ class TestBuildSolver:
         """Test that solver uses configured seed."""
         config = Config.default().merge({"system": {"seed": 42}})
 
-        action_model = components.build_action_model(config)
+        action_model = ActionModel(config)
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -203,7 +157,7 @@ class TestBuildSolver:
             {"game": {"starting_stack": 500, "small_blind": 5, "big_blind": 10}}
         )
 
-        action_model = components.build_action_model(config)
+        action_model = ActionModel(config)
         card_abs = DummyCardAbstraction()
         storage = SharedArrayStorage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
@@ -223,7 +177,7 @@ class TestComponentIntegration:
         config = Config.default().merge({"storage": {"checkpoint_enabled": True}})
 
         # Build all components
-        action_model = components.build_action_model(config)
+        action_model = ActionModel(config)
         storage = components.build_storage(config, run_dir=tmp_path)
 
         # Use dummy abstraction since we don't have real data

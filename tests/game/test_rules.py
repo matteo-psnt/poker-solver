@@ -2,10 +2,11 @@
 
 import pytest
 
-from src.actions.betting_actions import BettingActions
+from src.actions.action_model import ActionModel
 from src.game.actions import ActionType, all_in, bet, call, check, fold, raises
 from src.game.rules import GameRules
 from src.game.state import Card, GameState, Street
+from src.utils.config import Config
 
 
 class TestGameRules:
@@ -117,7 +118,7 @@ class TestGameRules:
     def test_get_legal_actions_with_abstraction(self):
         """Test legal actions with action abstraction."""
         rules = GameRules()
-        action_abs = BettingActions()
+        action_abs = ActionModel(Config.default())
 
         state = rules.create_initial_state(
             starting_stack=200,
@@ -386,7 +387,7 @@ class TestGameRules:
         )
 
         # Can raise with action abstraction
-        action_abs = BettingActions()
+        action_abs = ActionModel(Config.default())
         actions = rules.get_legal_actions(state, action_model=action_abs)
 
         # Should have raise options
@@ -413,7 +414,7 @@ class TestGameRules:
             last_aggressor=None,
         )
 
-        action_abs = BettingActions()
+        action_abs = ActionModel(Config.default())
         actions = rules.get_legal_actions(state, action_model=action_abs)
 
         # Should have bet options

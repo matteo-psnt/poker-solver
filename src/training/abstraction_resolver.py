@@ -30,6 +30,14 @@ def _read_metadata(path: Path) -> dict | None:
         return None
 
 
+def _parse_saved_config(config_data: dict) -> PrecomputeConfig | None:
+    """Parse saved metadata config as PrecomputeConfig; return None if invalid."""
+    try:
+        return PrecomputeConfig.model_validate(config_data)
+    except Exception:
+        return None
+
+
 class ComboAbstractionResolver:
     """Resolves configured abstraction references into concrete filesystem paths."""
 
@@ -41,30 +49,10 @@ class ComboAbstractionResolver:
         self.abstractions_dir = abstractions_dir or Path("data/combo_abstraction")
         self._loader = loader or PostflopPrecomputer.load
 
-    def load(
-        self,
-        *,
-        abstraction_path: str | None,
-        abstraction_config: str | None,
-    ) -> BucketingStrategy:
-        """Load abstraction from either explicit path or config name."""
-        if abstraction_path:
-            path_obj = Path(abstraction_path)
-            if not path_obj.exists():
-                raise FileNotFoundError(
-                    f"Combo abstraction file not found: {path_obj}\n"
-                    "Please run 'Precompute Combo Abstraction' from the CLI first."
-                )
-            return self._loader(path_obj)
-
-        if abstraction_config:
-            resolved_path = self._resolve_config_path(abstraction_config)
-            return self._loader(resolved_path)
-
-        raise ValueError(
-            "card_abstraction requires either 'config' or 'abstraction_path'.\n"
-            "Example: config: default"
-        )
+    def load(self, *, abstraction_config: str) -> BucketingStrategy:
+        """Load abstraction by config name."""
+        resolved_path = self._resolve_config_path(abstraction_config)
+        return self._loader(resolved_path)
 
     def _resolve_config_path(self, config_name: str) -> Path:
         # Validate config file early so users get actionable errors.
@@ -96,7 +84,7 @@ class ComboAbstractionResolver:
                 f"Multiple combo abstractions found for config '{config_name}' "
                 f"with matching hash {expected_hash}:\n"
                 f"  {options}\n"
-                "Set card_abstraction.abstraction_path to disambiguate."
+                "Delete duplicate abstraction directories to disambiguate."
             )
 
         if len(matching) == 1:
@@ -116,7 +104,7 @@ class ComboAbstractionResolver:
             f"Multiple combo abstractions found for config '{config_name}' "
             f"but none match expected hash {expected_hash}.\n"
             f"  {options}\n"
-            "Recompute abstractions or set card_abstraction.abstraction_path explicitly."
+            "Recompute abstractions to match the current config."
         )
 
     def _find_candidates(self, config_name: str) -> list[_AbstractionCandidate]:
@@ -130,10 +118,13 @@ class ComboAbstractionResolver:
             config_data = metadata.get("config", {})
             if not isinstance(config_data, dict):
                 continue
-            saved_config_name = config_data.get("config_name")
+            saved_config = _parse_saved_config(config_data)
+            if saved_config is None:
+                continue
+            saved_config_name = saved_config.config_name
             if saved_config_name != config_name:
                 continue
-            saved_hash = config_data.get("config_hash")
+            saved_hash = metadata.get("config_hash")
             matching.append(
                 _AbstractionCandidate(
                     path=path,

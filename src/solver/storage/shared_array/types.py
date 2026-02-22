@@ -41,10 +41,6 @@ class ExtraAllocation:
     end: int
     next: int
 
-    def __getitem__(self, key: str) -> int:
-        """Backward-compatible dict-like access for tests/callers."""
-        return getattr(self, key)
-
     @property
     def size(self) -> int:
         return self.end - self.start
@@ -65,13 +61,6 @@ class ExtraRegion:
     total: int
     base: int
     remainder: int
-
-    def __iter__(self):
-        """Backward-compatible tuple-like behavior for tests/callers."""
-        yield self.start
-        yield self.total
-        yield self.base
-        yield self.remainder
 
 
 @dataclass(slots=True)

@@ -1,53 +1,32 @@
 # DCFR + Pruning Test Configuration
-# Tests Discounted CFR with regret-based pruning for accelerated convergence
-
-action_model:
-  preflop_templates:
-    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
-  postflop_templates:
-    first_aggressive: [0.33, 0.66, 1.25]
-  jam_spr_threshold: 2.0
-  off_tree_mapping: "probabilistic"
+# Tests Discounted CFR with regret-based pruning (Brown & Sandholm 2019).
 
 resolver:
-  enabled: true
-  time_budget_ms: 300
-  max_depth: 2
   max_raises_per_street: 3
-  leaf_value_mode: "blueprint_rollout"
+
+solver:
+  iteration_weighting: dcfr
+  dcfr_alpha: 1.5
+  dcfr_beta: 0.0
+  dcfr_gamma: 2.0
+
+  # Pruning
+  enable_pruning: true
+  pruning_threshold: 300.0
+  prune_start_iteration: 100
+  prune_reactivate_frequency: 100
 
 training:
   num_iterations: 10000
   checkpoint_frequency: 2000
   iterations_per_worker: 100
-  verbose: true
-
-solver:
-  sampling_method: "external"  # Pruning requires external sampling
-  cfr_plus: true  # CFR+ (floor regrets at 0) works well with DCFR
-  linear_cfr: false  # Disabled when DCFR is enabled (redundant)
-
-  # DCFR settings (recommended values from literature: Brown & Sandholm 2019)
-  enable_dcfr: true
-  dcfr_alpha: 1.5   # Positive regret discount exponent
-  dcfr_beta: 0.0    # Negative regret discount exponent (no discount)
-  dcfr_gamma: 2.0   # Strategy discount exponent
-
-  # Pruning settings
-  enable_pruning: true
-  pruning_threshold: 300.0  # Prune actions with regret < -300
-  prune_start_iteration: 100  # Don't prune until iteration 100
-  prune_reactivate_frequency: 100  # Re-enable all actions every 100 iterations
 
 card_abstraction:
   config: quick_test
 
 storage:
-  checkpoint_enabled: true
   initial_capacity: 1000000
-  zarr_compression_level: 1
-  zarr_chunk_size: 50000
 
 system:
   seed: 42
-  log_level: "INFO"
+  config_name: "dcfr_test"

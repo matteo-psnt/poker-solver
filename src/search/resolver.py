@@ -65,11 +65,7 @@ class HUResolver:
     def solve(self, state: GameState, *, time_budget_ms: int | None = None) -> ResolveResult:
         """Run local resolve and return root strategy and sampled action."""
         budget = int(time_budget_ms or self.config.time_budget_ms)
-        self._ranges = (
-            infer_ranges(state, self.blueprint, mode=self.config.range_update_mode)
-            if self._ranges is None
-            else self._ranges
-        )
+        self._ranges = infer_ranges(state, self.blueprint) if self._ranges is None else self._ranges
 
         tree = build_local_tree(
             state,
@@ -81,12 +77,6 @@ class HUResolver:
         root_actions = tree.root.actions
         if not root_actions:
             raise ValueError("Resolver found no legal root actions.")
-
-        if self.config.leaf_value_mode != "blueprint_rollout":
-            raise ValueError(
-                f"Unsupported resolver leaf_value_mode: {self.config.leaf_value_mode}. "
-                "Only 'blueprint_rollout' is supported."
-            )
 
         leaves = tree.leaves
         leaf_values = estimate_leaf_values(
@@ -127,7 +117,6 @@ class HUResolver:
             self._ranges,
             chosen_action,
             self.blueprint,
-            mode=self.config.range_update_mode,
         )
         return ResolveResult(
             action=chosen_action,

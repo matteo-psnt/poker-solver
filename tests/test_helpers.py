@@ -23,9 +23,8 @@ def make_test_config(**overrides) -> Config:
         "big_blind": ("game", "big_blind"),
         "sampling_method": ("solver", "sampling_method"),
         "cfr_plus": ("solver", "cfr_plus"),
-        "linear_cfr": ("solver", "linear_cfr"),
+        "iteration_weighting": ("solver", "iteration_weighting"),
         # DCFR parameters
-        "enable_dcfr": ("solver", "enable_dcfr"),
         "dcfr_alpha": ("solver", "dcfr_alpha"),
         "dcfr_beta": ("solver", "dcfr_beta"),
         "dcfr_gamma": ("solver", "dcfr_gamma"),
