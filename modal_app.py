@@ -251,6 +251,99 @@ def blueprint_match(
     return {"run_a": run_a, "run_b": run_b, "results": out.results}
 
 
+# Sized from the largest checkpoint on the Volume: migrating loads every array at its
+# OLD dtype and writes the new one alongside (~6.7 GB at capacity 24M/max_actions 10),
+# then `verify` reloads and builds an InMemoryStorage whose key map is ~289 B per
+# infoset (~5.2 GB at 18M). Peak lands near 8 GB; 24 GB leaves room for a bigger run.
+# retries=0: migrate_run rolls the destination back on failure, so a silent respawn
+# would just repeat a failing copy of a multi-GB tree.
+@app.function(
+    image=image,
+    volumes={DATA_MOUNT: data_volume},
+    cpu=4,
+    memory=24576,
+    timeout=3600,
+    retries=0,
+)
+def migrate(run_id: str, dest_run_id: str | None = None) -> dict[str, Any]:
+    """Bring a run on the Volume up to the current representation version.
+
+    Functional, like ``migrate_run`` itself: the source run is never mutated, the
+    result lands in a NEW run directory (default ``<run_id>-v<version>``). That is
+    what makes this safe to run against a checkpoint you cannot regenerate -- a
+    failed migration cannot damage the original, and the pre-migration numbers stay
+    reproducible against the run that produced them.
+
+    Idempotent, for the same reason ``resume`` is: an already-current run, or a
+    destination that already exists at the current version, returns a no-op instead
+    of raising. ``migrate_run`` deletes the destination on any failure, so a
+    destination that exists is a *completed* migration, never a partial one.
+    """
+    from src.pipeline.training.migrations import migrate_run
+    from src.pipeline.training.versioning import (
+        REPRESENTATION_VERSION,
+        run_representation_version,
+    )
+
+    data_volume.reload()
+    runs = Path("data/runs")
+    src = runs / run_id
+    if not src.exists():
+        raise FileNotFoundError(f"Run not found on the Volume: {run_id}")
+
+    from_version = run_representation_version(src)
+    if from_version == REPRESENTATION_VERSION:
+        print(f"[migrate] {run_id} is already at version {REPRESENTATION_VERSION}.", flush=True)
+        return {
+            "run_id": run_id,
+            "migrated_run_id": run_id,
+            "from_version": from_version,
+            "to_version": REPRESENTATION_VERSION,
+            "no_op": True,
+        }
+
+    dest = dest_run_id or f"{run_id}-v{REPRESENTATION_VERSION}"
+    dst = runs / dest
+    if dst.exists():
+        existing = run_representation_version(dst)
+        if existing == REPRESENTATION_VERSION:
+            print(f"[migrate] {dest} already exists at version {existing}.", flush=True)
+            return {
+                "run_id": run_id,
+                "migrated_run_id": dest,
+                "from_version": from_version,
+                "to_version": existing,
+                "no_op": True,
+            }
+        raise FileExistsError(
+            f"Destination {dest} exists at version {existing}, not "
+            f"{REPRESENTATION_VERSION}; refusing to overwrite. Remove it or pass a "
+            "different --dest-run-id."
+        )
+
+    print(f"[migrate] {run_id} v{from_version} -> v{REPRESENTATION_VERSION} as {dest}", flush=True)
+    migrate_run(src, dst)
+    data_volume.commit()
+
+    metadata = _run_metadata_summary(dst)
+    return {
+        "run_id": run_id,
+        "migrated_run_id": dest,
+        "from_version": from_version,
+        "to_version": REPRESENTATION_VERSION,
+        "no_op": False,
+        **metadata,
+    }
+
+
+def _run_metadata_summary(run_dir: Path) -> dict[str, Any]:
+    """Iterations/infosets of a run, for reporting a migration result."""
+    from src.pipeline import services
+
+    metadata = services.load_run_metadata(run_dir)
+    return {"iterations": metadata.iterations, "num_infosets": metadata.num_infosets}
+
+
 # retries=0: see train. A retried resume is now convergent rather than compounding
 # (the target is absolute), but a silent respawn still burns a container reloading a
 # checkpoint to die the same way, and reads as a live attempt while it does it.
@@ -489,6 +582,54 @@ def run_train(
         f"(± {results['std_error_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
     )
     print(f"  infosets: {eval_result['infosets']:,}")
+
+
+@app.local_entrypoint()
+def run_migrate(
+    run_id: str,
+    dest_run_id: str = "",
+    cpu: int = 4,
+    memory: int = 24576,
+    timeout: int = 3600,
+) -> None:
+    """Migrate a Volume run to the current representation version.
+
+    Every run trained before a representation bump is unresumable and unevaluable
+    until it goes through this: the loader refuses a version mismatch rather than
+    silently reading a checkpoint under the wrong dtypes.
+
+    Writes a NEW run (default ``<run_id>-v<version>``) and leaves the original
+    untouched, so the pre-migration numbers stay reproducible against the run that
+    produced them. Blocks on the result -- migrations are minutes, not hours -- but
+    spawns first so a client death does not cancel the work mid-copy.
+    """
+    from src.shared.orchestration_log import record_spawn
+
+    call = migrate.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
+        run_id=run_id,
+        dest_run_id=dest_run_id or None,
+    )
+    record_spawn(
+        run_id=run_id,
+        function="migrate",
+        object_id=call.object_id,
+        resources={"cpu": cpu, "memory": memory, "timeout": timeout},
+        extra={"dest_run_id": dest_run_id or None},
+    )
+    print(f"SPAWNED migrate call {call.object_id}")
+    result = _await_call(call, run_id, "migrate")
+
+    if result.get("no_op"):
+        print(
+            f"NO-OP: {result['run_id']} is already at version {result['to_version']} "
+            f"(as {result['migrated_run_id']})."
+        )
+        return
+    print("MIGRATED:")
+    print(f"  {result['run_id']} v{result['from_version']} -> v{result['to_version']}")
+    print(f"  new run_id: {result['migrated_run_id']}")
+    print(f"  iterations: {result['iterations']:,}  infosets: {result['num_infosets']:,}")
+    print(f"\nResume it with:  --run-id {result['migrated_run_id']}")
 
 
 @app.local_entrypoint()
