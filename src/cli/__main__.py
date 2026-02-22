@@ -1,6 +1,0 @@
-"""Module entrypoint for `python -m src.cli`."""
-
-from src.cli.app import main
-
-if __name__ == "__main__":
-    main()
