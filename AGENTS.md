@@ -60,6 +60,8 @@ Use this workflow:
 - Run full suite (`uv run pytest`) when your change impacts training,
   abstraction/bucketing, evaluator logic, config loading, or shared
   infrastructure.
+- At the end of changes, run `uv run pre-commit run --all-files` to catch any
+  unexpected formatting, lint, typing, or import-layer issues before handoff.
 
 Marker and timeout policy:
 - Mark expensive tests with `@pytest.mark.slow`.

@@ -80,7 +80,7 @@ class GameConfig(StrictFrozenModel):
     big_blind: PositiveInt = Field(default=2)
 
     @model_validator(mode="after")
-    def blinds_are_consistent(self) -> "GameConfig":
+    def blinds_are_consistent(self) -> GameConfig:
         if self.big_blind <= self.small_blind:
             raise ValueError(
                 f"big_blind ({self.big_blind}) must be greater than small_blind ({self.small_blind})"
@@ -121,7 +121,7 @@ class ActionModelConfig(StrictFrozenModel):
     off_tree_mapping: Literal["nearest", "probabilistic"] = Field(default="probabilistic")
 
     @model_validator(mode="after")
-    def validate_templates_and_rules(self) -> "ActionModelConfig":
+    def validate_templates_and_rules(self) -> ActionModelConfig:
         required_preflop_templates = {
             "sb_first_in",
             "bb_vs_limp",
@@ -281,7 +281,7 @@ class SolverConfig(StrictFrozenModel):
     prune_reactivate_frequency: PositiveInt = Field(default=100)
 
     @model_validator(mode="after")
-    def pruning_requires_external_sampling(self) -> "SolverConfig":
+    def pruning_requires_external_sampling(self) -> SolverConfig:
         if self.enable_pruning and self.sampling_method != "external":
             raise ValueError(
                 "enable_pruning=True requires sampling_method='external'. "
@@ -320,17 +320,17 @@ class Config(StrictFrozenModel):
         return self.model_dump()
 
     @classmethod
-    def default(cls) -> "Config":
+    def default(cls) -> Config:
         """Return a Config populated with all defaults."""
         return cls()
 
-    def merge(self, overrides: dict[str, Any]) -> "Config":
+    def merge(self, overrides: dict[str, Any]) -> Config:
         """Return a new Config with the provided overrides merged in."""
         merged = deep_merge_dicts(self.model_dump(), overrides)
         return Config.model_validate(merged)
 
     @classmethod
-    def from_dict(cls, config_dict: dict[str, Any]) -> "Config":
+    def from_dict(cls, config_dict: dict[str, Any]) -> Config:
         """Create Config from a dict merged over defaults."""
         merged = deep_merge_dicts(cls().model_dump(), config_dict)
         return cls.model_validate(merged)

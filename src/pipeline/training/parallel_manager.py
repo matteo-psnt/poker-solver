@@ -32,7 +32,7 @@ class SharedArrayWorkerManager:
     def __init__(
         self,
         num_workers: int,
-        config: "Config",
+        config: Config,
         serialized_action_model: bytes,
         serialized_card_abstraction: bytes,
         session_id: str | None = None,
@@ -498,7 +498,7 @@ class SharedArrayWorkerManager:
         all_owned_keys: dict = {}
         all_legal_actions: dict = {}
         worker_ranges: dict[int, tuple[int, int]] = {}
-        id_owners: dict[int, tuple[int, "InfoSetKey"]] = {}
+        id_owners: dict[int, tuple[int, InfoSetKey]] = {}
 
         responses_received = 0
         while responses_received < self.num_workers:

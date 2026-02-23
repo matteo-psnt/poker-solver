@@ -19,6 +19,8 @@ Example:
     Hand [A♠ K♥] → [A₀ K₁] (mixed suits)
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from itertools import permutations
 
@@ -69,7 +71,7 @@ class SuitMapping:
         object.__setattr__(self, "mapping", dict(mapping) if mapping else {})
         object.__setattr__(self, "next_label", next_label)
 
-    def get_or_assign(self, suit: str) -> tuple["SuitMapping", int]:
+    def get_or_assign(self, suit: str) -> tuple[SuitMapping, int]:
         """
         Get canonical label for a suit, assigning a new one if needed.
 
@@ -105,7 +107,7 @@ class CanonicalCard:
     rank_idx: int
     suit_label: int
 
-    def __lt__(self, other: "CanonicalCard") -> bool:
+    def __lt__(self, other: CanonicalCard) -> bool:
         """Ordering: by rank first, then suit."""
         if self.rank_idx != other.rank_idx:
             return self.rank_idx < other.rank_idx

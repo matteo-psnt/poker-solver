@@ -40,7 +40,7 @@ def _worker_loop(
     worker_id: int,
     num_workers: int,
     session_id: str,
-    config: "Config",
+    config: Config,
     serialized_action_model: bytes,
     serialized_card_abstraction: bytes,
     base_seed: int,

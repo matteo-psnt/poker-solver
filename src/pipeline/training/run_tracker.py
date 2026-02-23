@@ -4,6 +4,8 @@ Simple training run tracking.
 Just saves basic metadata per run - no complex registry or manifests.
 """
 
+from __future__ import annotations
+
 import json
 import shutil
 from dataclasses import dataclass
@@ -36,7 +38,7 @@ class RunMetadata:
         config_name: str,
         config: Config,
         action_config_hash: str,
-    ) -> "RunMetadata":
+    ) -> RunMetadata:
         storage_capacity = config.storage.initial_capacity if config else 0
         return cls(
             run_id=run_id,
@@ -54,7 +56,7 @@ class RunMetadata:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RunMetadata":
+    def from_dict(cls, data: dict[str, Any]) -> RunMetadata:
         config_dict = data.get("config")
         if not isinstance(config_dict, dict) or not config_dict:
             raise ValueError("Run metadata missing required config")
@@ -78,7 +80,7 @@ class RunMetadata:
         )
 
     @classmethod
-    def load(cls, path: Path) -> "RunMetadata":
+    def load(cls, path: Path) -> RunMetadata:
         with open(path) as f:
             data = json.load(f)
         return cls.from_dict(data)
@@ -153,7 +155,7 @@ class RunTracker:
         self,
         run_dir: Path,
         config_name: str = "default",
-        config: "Config | None" = None,
+        config: Config | None = None,
         action_config_hash: str | None = None,
     ):
         """
@@ -270,7 +272,7 @@ class RunTracker:
         self.metadata.save(self.metadata_file)
 
     @classmethod
-    def load(cls, run_dir: Path) -> "RunTracker":
+    def load(cls, run_dir: Path) -> RunTracker:
         """Load existing run tracker."""
         run_path = Path(run_dir)
         metadata_path = run_path / ".run.json"

@@ -5,7 +5,7 @@ Provides confidence intervals, significance tests, and variance calculations
 for match results.
 """
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 from scipy import stats
@@ -67,7 +67,7 @@ def compute_win_rate_confidence_interval(
     # Wilson score interval
     denominator = 1 + z**2 / total
     center = (p + z**2 / (2 * total)) / denominator
-    margin = z * np.sqrt((p * (1 - p) / total + z**2 / (4 * total**2))) / denominator
+    margin = z * np.sqrt(p * (1 - p) / total + z**2 / (4 * total**2)) / denominator
 
     lower = max(0.0, center - margin)
     upper = min(1.0, center + margin)

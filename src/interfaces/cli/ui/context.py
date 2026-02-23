@@ -1,5 +1,7 @@
 """Shared CLI context and paths."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,7 +32,7 @@ class CliContext:
         self.runs_dir = self.resolve_path(runs_dir)
 
     @classmethod
-    def from_project_root(cls, base_dir: Path | None = None) -> "CliContext":
+    def from_project_root(cls, base_dir: Path | None = None) -> CliContext:
         if base_dir is None:
             base_dir = Path(__file__).resolve().parents[4]
 
