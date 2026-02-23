@@ -122,13 +122,13 @@ class CanonicalCard:
 def get_card_suit(card: Card) -> str:
     """Extract suit character from a Card."""
     # eval7 suit attribute returns 0-3 (c=0, d=1, h=2, s=3)
-    return EVAL7_SUIT_TO_CHAR[card._card.suit]
+    return EVAL7_SUIT_TO_CHAR[card.suit_eval7()]
 
 
 def get_card_rank_idx(card: Card) -> int:
     """Extract rank index from a Card (0=A, 1=K, ..., 12=2)."""
     # eval7 rank encoding: 0=2, 1=3, ..., 12=A
-    return EVAL7_RANK_TO_OUR_IDX[card._card.rank]
+    return EVAL7_RANK_TO_OUR_IDX[card.rank_eval7()]
 
 
 def canonicalize_board(

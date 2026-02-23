@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from src.core.game.state import Card, Street
 from src.pipeline.abstraction.base import BucketingStrategy
+from src.pipeline.abstraction.postflop.board_clustering import BoardClusterer
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
     RANKS,
     SUITS,
@@ -31,9 +31,6 @@ from src.pipeline.abstraction.postflop.suit_isomorphism import (
     get_canonical_hand_id,
 )
 from src.pipeline.abstraction.preflop.hand_classes import PreflopHandClasses
-
-if TYPE_CHECKING:
-    from src.pipeline.abstraction.postflop.board_clustering import BoardClusterer
 
 
 @dataclass(frozen=True)
@@ -115,6 +112,23 @@ class PostflopBucketer(BucketingStrategy):
     def __setstate__(self, state: dict) -> None:
         """Unpickle support."""
         self.__dict__.update(state)
+
+    def set_board_clusterer(self, clusterer: BoardClusterer) -> None:
+        """Attach a fitted board clusterer for runtime cluster prediction."""
+        self._board_clusterer = clusterer
+
+    def assign_bucket(self, street: Street, cluster_id: int, hand_id: int, bucket_id: int) -> None:
+        """Assign a bucket to a (street, cluster, hand) key."""
+        if cluster_id not in self._buckets[street]:
+            self._buckets[street][cluster_id] = {}
+        self._buckets[street][cluster_id][hand_id] = bucket_id
+
+    def assign_buckets(self, street: Street, assignments: dict[int, dict[int, int]]) -> None:
+        """Bulk-assign buckets for a street (cluster_id -> hand_id -> bucket_id)."""
+        for cluster_id, cluster_assignments in assignments.items():
+            if cluster_id not in self._buckets[street]:
+                self._buckets[street][cluster_id] = {}
+            self._buckets[street][cluster_id].update(cluster_assignments)
 
     def canonicalize(self, hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -> CanonicalHand:
         """

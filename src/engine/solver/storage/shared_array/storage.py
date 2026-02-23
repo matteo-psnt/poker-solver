@@ -52,16 +52,16 @@ class SharedArrayStorage(Storage):
     CAPACITY_THRESHOLD = 0.85
     GROWTH_FACTOR = 2.0
 
-    _get_shm_name = memory_ops.get_shm_name_for_storage
-    _create_shared_memory = memory_ops.create_shared_memory
-    _attach_shared_memory = memory_ops.attach_shared_memory
-    _create_numpy_views = memory_ops.create_numpy_views
-    _cleanup_stale_shm = memory_ops.cleanup_stale_shm
+    get_shm_name = memory_ops.get_shm_name_for_storage
+    create_shared_memory = memory_ops.create_shared_memory
+    attach_shared_memory = memory_ops.attach_shared_memory
+    create_numpy_views = memory_ops.create_numpy_views
+    cleanup_stale_shm = memory_ops.cleanup_stale_shm
     cleanup = memory_ops.cleanup
 
     get_or_create_infoset = infoset_ops.get_or_create_infoset
-    _allocate_id = infoset_ops.allocate_id
-    _create_infoset_view = infoset_ops.create_infoset_view
+    allocate_id = infoset_ops.allocate_id
+    create_infoset_view = infoset_ops.create_infoset_view
     get_infoset = infoset_ops.get_infoset
     num_infosets = infoset_ops.num_infosets
     iter_infosets = infoset_ops.iter_infosets
@@ -72,7 +72,7 @@ class SharedArrayStorage(Storage):
     get_resize_stats = resize_ops.get_resize_stats
     resize = resize_ops.resize
     reattach_after_resize = resize_ops.reattach_after_resize
-    _add_extra_region = resize_ops.add_extra_region
+    add_extra_region = resize_ops.add_extra_region
 
     respond_to_id_requests = sync_ops.respond_to_id_requests
     buffer_update = sync_ops.buffer_update
@@ -126,9 +126,9 @@ class SharedArrayStorage(Storage):
         self.shared_cumulative_utility = np.empty((0,), dtype=np.float64)
 
         if is_coordinator:
-            self._create_shared_memory()
+            self.create_shared_memory()
         else:
-            self._attach_shared_memory()
+            self.attach_shared_memory()
 
         if checkpoint_dir and load_checkpoint_on_init:
             self.load_checkpoint()

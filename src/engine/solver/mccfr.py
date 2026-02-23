@@ -93,7 +93,7 @@ class MCCFRSolver:
             Utility for player 0
         """
         # Deal random cards and create initial state
-        state = self._deal_initial_state()
+        state = self.deal_initial_state()
 
         # Alternate traversing player per iteration
         # This halves computational cost while preserving CFR convergence
@@ -113,7 +113,7 @@ class MCCFRSolver:
 
         return util
 
-    def _deal_initial_state(self) -> GameState:
+    def deal_initial_state(self) -> GameState:
         """
         Deal random cards and create initial game state.
 
@@ -166,13 +166,13 @@ class MCCFRSolver:
             # If terminal but board incomplete (all-in before river), deal remaining cards
             if len(state.board) < 5:
                 # Deal all remaining cards to complete the board
-                complete_state = self._deal_remaining_cards(state)
+                complete_state = self.deal_remaining_cards(state)
                 return complete_state.get_payoff(traversing_player, self.rules)
             return state.get_payoff(traversing_player, self.rules)
 
         # Chance node - sample card
-        if self._is_chance_node(state):
-            next_state = self._sample_chance_outcome(state)
+        if self.is_chance_node(state):
+            next_state = self.sample_chance_outcome(state)
             return self._cfr_external_sampling(next_state, traversing_player, reach_probs)
 
         # Decision node
@@ -228,8 +228,8 @@ class MCCFRSolver:
                 next_state = state.apply_action(action, self.rules)
 
                 # Check if we need to deal cards after this action
-                if self._is_chance_node(next_state):
-                    next_state = self._sample_chance_outcome(next_state)
+                if self.is_chance_node(next_state):
+                    next_state = self.sample_chance_outcome(next_state)
 
                 # Recursively compute utility
                 action_utilities[i] = self._cfr_external_sampling(
@@ -330,8 +330,8 @@ class MCCFRSolver:
             next_state = state.apply_action(action, self.rules)
 
             # Check if we need to deal cards after this action
-            if self._is_chance_node(next_state):
-                next_state = self._sample_chance_outcome(next_state)
+            if self.is_chance_node(next_state):
+                next_state = self.sample_chance_outcome(next_state)
 
             return self._cfr_external_sampling(next_state, traversing_player, new_reach_probs)
 
@@ -359,13 +359,13 @@ class MCCFRSolver:
         if state.is_terminal:
             # If terminal but board incomplete (all-in before river), deal remaining cards
             if len(state.board) < 5:
-                complete_state = self._deal_remaining_cards(state)
+                complete_state = self.deal_remaining_cards(state)
                 return complete_state.get_payoff(traversing_player, self.rules)
             return state.get_payoff(traversing_player, self.rules)
 
         # Chance node - sample card
-        if self._is_chance_node(state):
-            next_state = self._sample_chance_outcome(state)
+        if self.is_chance_node(state):
+            next_state = self.sample_chance_outcome(state)
             return self._cfr_outcome_sampling(next_state, traversing_player, reach_probs)
 
         # Decision node
@@ -410,8 +410,8 @@ class MCCFRSolver:
         next_state = state.apply_action(action, self.rules)
 
         # Check if we need to deal cards after this action
-        if self._is_chance_node(next_state):
-            next_state = self._sample_chance_outcome(next_state)
+        if self.is_chance_node(next_state):
+            next_state = self.sample_chance_outcome(next_state)
 
         # Update reach probability for sampled action (outcome sampling importance weights)
         new_reach_probs = reach_probs.copy()
@@ -484,7 +484,7 @@ class MCCFRSolver:
 
         return sampled_utility
 
-    def _is_chance_node(self, state: GameState) -> bool:
+    def is_chance_node(self, state: GameState) -> bool:
         """
         Check if state is a chance node (needs to deal cards).
 
@@ -524,7 +524,7 @@ class MCCFRSolver:
         self._deck.cards = [c for c in self._deck.cards if c.mask not in known_cards]
         random.shuffle(self._deck.cards)
 
-    def _sample_chance_outcome(self, state: GameState) -> GameState:
+    def sample_chance_outcome(self, state: GameState) -> GameState:
         """
         Sample cards to deal at chance node.
 
@@ -570,7 +570,7 @@ class MCCFRSolver:
             last_aggressor=None,
         )
 
-    def _deal_remaining_cards(self, state: GameState) -> GameState:
+    def deal_remaining_cards(self, state: GameState) -> GameState:
         """
         Deal all remaining board cards for showdown (all-in situation).
 

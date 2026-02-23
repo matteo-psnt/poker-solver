@@ -48,7 +48,7 @@ def _reference_infoset_key(state, player: int, card_abstraction) -> InfoSetKey:
     effective_stack = min(state.stacks)
     spr = effective_stack / state.pot if state.pot > 0 else 0
     spr_bucket = _reference_get_spr_bucket(spr)
-    betting_sequence = state._normalize_betting_sequence()
+    betting_sequence = state.normalized_betting_sequence()
 
     if state.street == Street.PREFLOP:
         return InfoSetKey(

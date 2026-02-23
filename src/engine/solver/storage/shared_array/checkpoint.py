@@ -179,7 +179,7 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
 
     new_ids = []
     for key in my_keys:
-        new_id = storage._allocate_id()
+        new_id = storage.allocate_id()
         storage.state.owned_keys[key] = new_id
         new_ids.append(new_id)
 

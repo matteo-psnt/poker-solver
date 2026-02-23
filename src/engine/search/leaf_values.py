@@ -53,11 +53,11 @@ def _rollout_with_blueprint(
 ) -> float:
     if state.is_terminal:
         if len(state.board) < 5:
-            state = blueprint._deal_remaining_cards(state)
+            state = blueprint.deal_remaining_cards(state)
         return float(state.get_payoff(traversing_player, blueprint.rules))
 
-    if blueprint._is_chance_node(state):
-        next_state = blueprint._sample_chance_outcome(state)
+    if blueprint.is_chance_node(state):
+        next_state = blueprint.sample_chance_outcome(state)
         return _rollout_with_blueprint(
             blueprint,
             next_state,

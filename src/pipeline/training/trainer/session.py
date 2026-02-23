@@ -37,8 +37,8 @@ class TrainingSession:
                 run_id = f"run-{timestamp}"
             self.run_dir = runs_base_dir / run_id
 
-        self._checkpoint_executor: concurrent.futures.ThreadPoolExecutor | None = None
-        self._pending_checkpoint: concurrent.futures.Future[float] | None = None
+        self.checkpoint_executor: concurrent.futures.ThreadPoolExecutor | None = None
+        self.pending_checkpoint: concurrent.futures.Future[float] | None = None
 
         try:
             self.action_model = ActionModel(config)
@@ -68,7 +68,7 @@ class TrainingSession:
             self.metrics = MetricsTracker()
 
             if self.config.storage.checkpoint_enabled:
-                self._checkpoint_executor = concurrent.futures.ThreadPoolExecutor(
+                self.checkpoint_executor = concurrent.futures.ThreadPoolExecutor(
                     max_workers=1, thread_name_prefix="checkpoint"
                 )
         except Exception:

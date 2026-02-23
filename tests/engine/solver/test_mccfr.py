@@ -32,7 +32,7 @@ class TestMCCFRSolver:
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
 
-        state = solver._deal_initial_state()
+        state = solver.deal_initial_state()
 
         # Check initial state properties
         assert state.pot == 3  # SB + BB
@@ -130,10 +130,10 @@ class TestMCCFRSolver:
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
 
-        state = solver._deal_initial_state()
+        state = solver.deal_initial_state()
 
         # Initially not a chance node (players need to act)
-        is_chance = solver._is_chance_node(state)
+        is_chance = solver.is_chance_node(state)
         # This depends on betting history, so just check it returns bool
         assert isinstance(is_chance, bool)
 
@@ -164,7 +164,7 @@ class TestMCCFRSolver:
         )
 
         # Sample flop
-        new_state = solver._sample_chance_outcome(state)
+        new_state = solver.sample_chance_outcome(state)
 
         # Should have flop cards
         assert len(new_state.board) == 3
@@ -249,7 +249,7 @@ class TestMCCFRSolver:
             action_abs, card_abs, storage, config=make_test_config(starting_stack=100)
         )
 
-        state = solver._deal_initial_state()
+        state = solver.deal_initial_state()
 
         # Check custom stack size
         assert state.stacks[0] == 99  # 100 - 1 (SB)

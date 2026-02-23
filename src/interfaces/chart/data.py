@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, Street
 from src.engine.solver.infoset import InfoSetKey
+from src.engine.solver.storage.in_memory import InMemoryStorage
 
 
-class ChartDataSource(Protocol):
-    """Minimum interface needed to generate preflop chart data."""
+@dataclass(frozen=True)
+class ChartDataRuntime:
+    """Runtime dependencies required to render chart data."""
 
     action_model: ActionModel
     rules: GameRules
+    storage: InMemoryStorage
     starting_stack: int
-    storage: Any  # Storage backend with get_infoset method
 
 
 POSITION_OPTIONS = [
@@ -56,7 +59,7 @@ def build_chart_metadata(
 
 
 def build_preflop_chart_data(
-    source: ChartDataSource,
+    source: ChartDataRuntime,
     position: int,
     situation_id: str,
     run_id: str,
@@ -248,11 +251,11 @@ def _generate_betting_sequence_for_raise(
         return ""
 
     new_state = state.apply_action(raise_action, rules)
-    return new_state._normalize_betting_sequence()
+    return new_state.normalized_betting_sequence()
 
 
 def _get_hand_strategy(
-    source: ChartDataSource,
+    source: ChartDataRuntime,
     rank1: str,
     rank2: str,
     suited: bool,
