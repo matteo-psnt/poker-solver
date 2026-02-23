@@ -58,6 +58,12 @@ From the CLI, you can:
 
 ## Architecture
 
+The codebase follows a layered package layout with a single allowed dependency direction:
+
+- `src/interfaces` -> `src/pipeline` -> `src/engine` -> `src/core`
+- `src/shared` is layer-neutral and can be imported by all layers
+- Reverse imports across layers are forbidden
+
 ### Card Abstraction: Suit Isomorphism
 
 The solver uses **combo-level abstraction** that preserves suit relationships to the board:
@@ -73,7 +79,7 @@ This is a significant improvement over naive 169-class abstractions that ignore 
 3. **Bucket** hands within clusters by equity distributions
 4. **Result**: 12-19x state space reduction with minimal strategic loss
 
-See [Card Abstraction README](src/bucketing/postflop/README.md) for details.
+See [Card Abstraction README](src/pipeline/abstraction/postflop/README.md) for details.
 
 ## Configuration
 
@@ -175,7 +181,7 @@ print(f"{results['exploitability_mbb']:.2f} ± {results['std_error_mbb']:.2f} mb
 print(f"95% CI: [{results['confidence_95_mbb'][0]:.2f}, {results['confidence_95_mbb'][1]:.2f}]")
 ```
 
-See [Evaluation README](src/evaluation/README.md) for methodology and best practices.
+See [Evaluation README](src/pipeline/evaluation/README.md) for methodology and best practices.
 
 ## Development
 
@@ -198,6 +204,9 @@ uv run ruff format .
 
 # Type checking
 uv run ty check
+
+# Layering/architecture contracts
+uv run lint-imports
 ```
 
 ### Chart Viewer Backend
@@ -211,23 +220,19 @@ The preflop chart viewer now serves data through FastAPI.
 ```
 poker-solver/
 ├── src/
-│   ├── solver/          # MCCFR implementation
-│   ├── training/        # Training loop, parallel workers, checkpointing
-│   ├── evaluation/      # Exploitability, head-to-head evaluation
-│   ├── bucketing/       # Card abstraction (preflop & postflop)
-│   ├── actions/         # Action abstraction, bet sizing
-│   ├── game/            # Game state, rules, hand evaluation
-│   ├── cli/             # Interactive CLI application
-│   └── utils/           # Configuration, helpers
-├── tests/               # pytest test suite
+│   ├── interfaces/      # User-facing entrypoints (CLI, API, charts)
+│   ├── pipeline/        # Training, evaluation, abstraction workflows
+│   ├── engine/          # Solver/search internals
+│   ├── core/            # Poker domain foundations (game/actions)
+│   └── shared/          # Cross-layer utilities (config, helpers)
+├── tests/               # Mirrors src/ layout + integration tests
 ├── config/
 │   ├── training/        # Training configuration presets
 │   └── abstraction/     # Card abstraction presets
 ├── data/
 │   ├── runs/            # Training runs and checkpoints
 │   └── combo_abstraction/  # Precomputed card abstractions
-├── ui/                  # React web interface for charts
-└── docs/                # Additional documentation
+└── ui/                  # React web interface for charts
 ```
 
 ## License

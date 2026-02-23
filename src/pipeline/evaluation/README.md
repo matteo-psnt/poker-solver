@@ -255,10 +255,10 @@ This is **fundamentally different** from exact BR but is tractable for large gam
 
 ## Testing
 
-Tests in [test_exploitability_rollout.py](../../tests/evaluation/test_exploitability_rollout.py).
+Tests in [test_exploitability_rollout.py](../../../tests/pipeline/evaluation/test_exploitability_rollout.py).
 
 ```bash
-uv run pytest tests/evaluation/test_exploitability_rollout.py -v
+uv run pytest tests/pipeline/evaluation/test_exploitability_rollout.py -v
 ```
 
 ## References
