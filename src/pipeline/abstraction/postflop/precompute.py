@@ -14,10 +14,8 @@ The result is a sparse lookup table:
 import json
 import multiprocessing as mp
 import pickle
-import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +29,6 @@ from src.pipeline.abstraction.postflop.board_enumeration import (
     CanonicalBoardEnumerator,
 )
 from src.pipeline.abstraction.postflop.hand_bucketing import (
-    CanonicalHand,
     PostflopBucketer,
     get_all_canonical_hands,
     get_representative_hand,
@@ -43,18 +40,6 @@ from src.pipeline.abstraction.postflop.suit_isomorphism import (
     get_canonical_hand_id,
 )
 from src.pipeline.abstraction.utils.equity import EquityCalculator
-
-
-@dataclass
-class ComboEquity:
-    """Equity information for a canonical combo."""
-
-    combo: CanonicalHand
-    equity: float
-
-    # For debugging/verification
-    representative_board: tuple[Card, ...]
-    representative_hand: tuple[Card, Card]
 
 
 def compute_equity_for_combo(
@@ -101,30 +86,6 @@ def compute_equity_for_combo(
         get_canonical_hand_id(canonical_hand),
         equity,
     )
-
-
-def _worker_compute_board_equities(args) -> list[tuple[int, int, float]]:
-    """
-    Worker function to compute equities for all combos on a single board.
-
-    This is the unit of parallelism - one board per worker.
-    """
-    board_info, equity_samples, seed = args
-
-    results = []
-
-    # Get all canonical combos for this board
-    for i, combo in enumerate(get_all_canonical_hands(board_info.representative)):
-        board_id, hand_id, equity = compute_equity_for_combo(
-            canonical_board=combo.board,
-            canonical_hand=combo.hand,
-            representative_board=board_info.representative,
-            equity_samples=equity_samples,
-            seed=seed + i,  # Vary seed per combo for variety
-        )
-        results.append((board_id, hand_id, equity))
-
-    return results
 
 
 def _worker_compute_cluster_equities(args) -> list[tuple[int, int, int, float]]:
@@ -425,39 +386,3 @@ class PostflopPrecomputer:
 
         with open(path / "combo_abstraction.pkl", "rb") as f:
             return pickle.load(f)
-
-
-def estimate_precompute_time(
-    config: PrecomputeConfig,
-    sample_size: int = 100,
-) -> dict[Street, float]:
-    """
-    Estimate precomputation time by running a small sample.
-
-    Returns estimated hours per street.
-    """
-    estimates = {}
-
-    for street in [Street.FLOP, Street.TURN, Street.RIVER]:
-        enumerator = CanonicalBoardEnumerator(street)
-        enumerator.enumerate()
-
-        total_boards = len(list(enumerator.iterate()))
-
-        # Time a few boards
-        start = time.time()
-        sample_boards = list(enumerator.iterate())[:sample_size]
-
-        for board_info in sample_boards:
-            for combo in get_all_canonical_hands(board_info.representative):
-                # Just enumerate, don't compute equity for estimate
-                pass
-
-        elapsed = time.time() - start
-
-        # Estimate total time
-        # Equity calculation is ~100x slower than enumeration
-        estimated_seconds = (elapsed / sample_size) * total_boards * 100
-        estimates[street] = estimated_seconds / 3600  # Convert to hours
-
-    return estimates

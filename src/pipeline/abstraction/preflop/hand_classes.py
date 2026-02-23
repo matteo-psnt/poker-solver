@@ -141,17 +141,3 @@ class PreflopHandClasses:
     def __str__(self) -> str:
         """String representation."""
         return "PreflopHandClasses(169 hands)"
-
-
-def get_preflop_hand_string(hole_cards: tuple[Card, Card]) -> str:
-    """
-    Convenience function to get hand string.
-
-    Args:
-        hole_cards: Tuple of two cards
-
-    Returns:
-        Canonical hand string
-    """
-    mapper = PreflopHandClasses()
-    return mapper.get_hand_string(hole_cards)

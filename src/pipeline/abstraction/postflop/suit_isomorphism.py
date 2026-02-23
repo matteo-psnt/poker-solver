@@ -30,12 +30,9 @@ from src.core.game.state import Card
 SUITS = ["s", "h", "d", "c"]  # spades, hearts, diamonds, clubs
 # eval7 uses sequential encoding: c=0, d=1, h=2, s=3
 EVAL7_SUIT_TO_CHAR = {0: "c", 1: "d", 2: "h", 3: "s"}
-SUIT_TO_IDX = {"s": 0, "h": 1, "d": 2, "c": 3}
-CANONICAL_SUITS = [0, 1, 2, 3]  # Canonical suit labels
 
 # Rank ordering (A high)
 RANKS = "AKQJT98765432"
-RANK_TO_IDX = {r: i for i, r in enumerate(RANKS)}
 # eval7 rank encoding: 0=2, 1=3, ..., 12=A
 EVAL7_RANK_TO_OUR_IDX = {
     0: 12,
@@ -305,16 +302,6 @@ def get_canonical_hand_id(canonical_hand: tuple[CanonicalCard, CanonicalCard]) -
     return idx1 * 52 + idx2
 
 
-def board_to_canonical_tuple(board: tuple[Card, ...]) -> tuple[tuple[int, int], ...]:
-    """
-    Convert board to a hashable canonical tuple representation.
-
-    Useful for dictionary keys and caching.
-    """
-    canonical_board, _ = canonicalize_board(board)
-    return tuple(c.to_tuple() for c in canonical_board)
-
-
 def hand_relative_to_board(
     hole_cards: tuple[Card, Card], board: tuple[Card, ...]
 ) -> tuple[tuple[int, int], tuple[int, int]]:
@@ -333,48 +320,3 @@ def hand_relative_to_board(
     _, suit_mapping = canonicalize_board(board)
     canonical_hand = canonicalize_hand(hole_cards, suit_mapping)
     return (canonical_hand[0].to_tuple(), canonical_hand[1].to_tuple())
-
-
-def count_canonical_boards(street_cards: int) -> int:
-    """
-    Count the number of canonical boards for a given street.
-
-    Under suit isomorphism, many raw boards are equivalent.
-
-    Args:
-        street_cards: Number of board cards (3=flop, 4=turn, 5=river)
-
-    Returns:
-        Number of canonical boards
-
-    Note:
-        Flop: ~1755 canonical boards (vs 22100 raw)
-        Turn: ~16432 canonical boards (vs 270725 raw)
-        River: ~134459 canonical boards (vs 2598960 raw)
-    """
-    # These are precomputed values for Hold'em
-    if street_cards == 3:
-        return 1755
-    elif street_cards == 4:
-        return 16432
-    elif street_cards == 5:
-        return 134459
-    else:
-        raise ValueError(f"Invalid street_cards: {street_cards}")
-
-
-def count_canonical_hands_given_board(_board_suit_count: int) -> int:
-    """
-    Count canonical hands given a board with a certain number of distinct suits.
-
-    Args:
-        board_suit_count: Number of distinct suits on the board (1-4)
-
-    Returns:
-        Number of canonical hand combos
-    """
-    # With n suits on board, hand can use those n suits + up to (4-n) new suits
-    # But new suits are interchangeable among themselves
-    # This is complex to compute exactly; for now return upper bound
-    # Actual: ~300-500 canonical combos per board typically
-    return 1326  # Conservative upper bound (can optimize later)

@@ -5,6 +5,7 @@ Implements MCCFR with external sampling (default) or outcome sampling for scalab
 """
 
 import random
+from typing import ClassVar
 
 import eval7
 import numpy as np
@@ -484,6 +485,14 @@ class MCCFRSolver:
 
         return sampled_utility
 
+    # Expected board cards per street
+    _EXPECTED_BOARD_SIZE: ClassVar[dict[Street, int]] = {
+        Street.PREFLOP: 0,
+        Street.FLOP: 3,
+        Street.TURN: 4,
+        Street.RIVER: 5,
+    }
+
     def is_chance_node(self, state: GameState) -> bool:
         """
         Check if state is a chance node (needs to deal cards).
@@ -491,16 +500,7 @@ class MCCFRSolver:
         Returns:
             True if cards need to be dealt
         """
-        # Check if board size doesn't match street
-        expected_board_size = {
-            Street.PREFLOP: 0,
-            Street.FLOP: 3,
-            Street.TURN: 4,
-            Street.RIVER: 5,
-        }
-
-        # If board doesn't match expected size for this street, need to deal
-        return len(state.board) < expected_board_size[state.street]
+        return len(state.board) < self._EXPECTED_BOARD_SIZE[state.street]
 
     def _prepare_shuffled_deck(self, state: GameState) -> None:
         """
