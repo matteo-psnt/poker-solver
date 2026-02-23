@@ -232,7 +232,7 @@ def _generate_betting_sequence_for_raise(
     )
 
     total_bet = int(raise_bb * rules.big_blind)
-    legal_actions = action_model.get_legal_actions(state)
+    legal_actions = rules.get_legal_actions(state, action_model=action_model)
     raise_action = next(
         (
             action

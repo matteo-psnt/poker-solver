@@ -41,11 +41,11 @@ def test_resolver_returns_legal_action():
     )
 
     action = resolver.act(state, time_budget_ms=50)
-    assert action in action_model.get_legal_actions(state)
+    assert action in rules.get_legal_actions(state, action_model=action_model)
 
 
 def test_solver_act_with_resolver_enabled():
-    state, _ = _make_initial_state()
+    state, rules = _make_initial_state()
     config = make_test_config(seed=42)
     action_model = ActionModel(config)
     solver = MCCFRSolver(
@@ -56,7 +56,7 @@ def test_solver_act_with_resolver_enabled():
     )
 
     action = solver.act(state, use_resolver=True, time_budget_ms=50)
-    assert action in action_model.get_legal_actions(state)
+    assert action in rules.get_legal_actions(state, action_model=action_model)
 
 
 def test_resolver_uses_depth_cutoff_leaves(monkeypatch):

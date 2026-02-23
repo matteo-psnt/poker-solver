@@ -102,7 +102,9 @@ def _action_likelihood_vector(
             likelihood[idx] = cached
             continue
 
-        legal_actions = blueprint.action_model.get_legal_actions(hypo_state)
+        legal_actions = blueprint.rules.get_legal_actions(
+            hypo_state, action_model=blueprint.action_model
+        )
         if not legal_actions:
             cache[infoset_key] = _EPS
             likelihood[idx] = _EPS
@@ -112,6 +114,7 @@ def _action_likelihood_vector(
             hypo_state,
             observed_action=observed_action,
             action_model=blueprint.action_model,
+            rules=blueprint.rules,
         )
         infoset = blueprint.storage.get_infoset(infoset_key)
         if infoset is None:

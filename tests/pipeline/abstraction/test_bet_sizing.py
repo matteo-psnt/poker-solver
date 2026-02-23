@@ -2,8 +2,17 @@
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import ActionType, all_in, bet, call, raises
+from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 from src.shared.config import Config
+
+
+def _legal_actions(abstraction: ActionModel, state: GameState):
+    rules = GameRules(
+        small_blind=abstraction.config.game.small_blind,
+        big_blind=abstraction.config.game.big_blind,
+    )
+    return rules.get_legal_actions(state, action_model=abstraction)
 
 
 class TestActionAbstraction:
@@ -129,7 +138,7 @@ class TestActionAbstraction:
             to_call=0,
         )
 
-        actions = abstraction.get_legal_actions(state)
+        actions = _legal_actions(abstraction, state)
 
         # Should have check and multiple bet sizes
         assert any(a.type == ActionType.CHECK for a in actions)
@@ -154,7 +163,7 @@ class TestActionAbstraction:
             to_call=50,
         )
 
-        actions = abstraction.get_legal_actions(state)
+        actions = _legal_actions(abstraction, state)
 
         # Should have fold, call, and raises
         assert any(a.type == ActionType.FOLD for a in actions)
@@ -187,7 +196,7 @@ class TestActionAbstraction:
         # Should map to nearest abstracted bet (33 or 66)
         assert discretized.type in (ActionType.BET, ActionType.ALL_IN)
         # Should be one of the abstracted sizes
-        legal_actions = abstraction.get_legal_actions(state)
+        legal_actions = _legal_actions(abstraction, state)
         assert discretized in legal_actions
 
     def test_str_representation(self):
@@ -268,7 +277,7 @@ class TestActionAbstraction:
             to_call=0,
             _skip_validation=True,
         )
-        assert abstraction.get_legal_actions(state) == []
+        assert _legal_actions(abstraction, state) == []
 
     def test_discretize_passthrough_for_non_aggressive_actions(self):
         abstraction = ActionModel(Config.default())

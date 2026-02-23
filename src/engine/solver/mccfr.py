@@ -181,7 +181,7 @@ class MCCFRSolver:
 
         # Get infoset
         infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
-        legal_actions = self.action_model.get_legal_actions(state)
+        legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
 
         if not legal_actions:
             # No legal actions (shouldn't happen)
@@ -374,7 +374,7 @@ class MCCFRSolver:
 
         # Get infoset
         infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
-        legal_actions = self.action_model.get_legal_actions(state)
+        legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
 
         if not legal_actions:
             raise ValueError(f"No legal actions at state: {state}")
@@ -607,7 +607,7 @@ class MCCFRSolver:
 
         Falls back to uniform random over legal actions for unseen infosets.
         """
-        legal_actions = self.action_model.get_legal_actions(state)
+        legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
         if not legal_actions:
             raise ValueError(f"No legal actions at state: {state}")
 

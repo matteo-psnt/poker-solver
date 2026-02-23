@@ -17,9 +17,9 @@ def _initial_state():
 
 
 def test_action_model_preflop_legal_actions():
-    state, _ = _initial_state()
+    state, rules = _initial_state()
     model = ActionModel(Config.default())
-    actions = model.get_legal_actions(state)
+    actions = rules.get_legal_actions(state, action_model=model)
     types = {a.type for a in actions}
 
     assert ActionType.FOLD in types

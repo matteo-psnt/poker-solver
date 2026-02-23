@@ -74,7 +74,7 @@ def _expand(
         return
 
     # Skip explicit chance expansion to keep branching bounded.
-    actions = action_model.get_legal_actions(node.state)
+    actions = rules.get_legal_actions(node.state, action_model=action_model)
     if not actions:
         node.is_leaf = True
         return

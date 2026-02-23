@@ -276,7 +276,7 @@ class HeadToHeadEvaluator:
 
         if infoset is None:
             # No strategy for this infoset, use random legal action
-            legal_actions = self.action_model.get_legal_actions(state)
+            legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
             return legal_actions[np.random.choice(len(legal_actions))]
 
         # Filter stored actions to those legal in the concrete state.
@@ -288,7 +288,7 @@ class HeadToHeadEvaluator:
                 legal_actions.append(action)
 
         if not legal_actions:
-            legal_actions = self.action_model.get_legal_actions(state)
+            legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
             return legal_actions[np.random.choice(len(legal_actions))]
 
         strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=True)
