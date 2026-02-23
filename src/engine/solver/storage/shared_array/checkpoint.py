@@ -19,6 +19,7 @@ from src.engine.solver.storage.helpers import (
     validate_action_counts,
 )
 from src.engine.solver.storage.shared_array.ownership import stable_hash
+from src.shared import checkpoint_profile
 
 if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage
@@ -39,67 +40,90 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
     if num_keys == 0:
         return
 
-    items = sorted(storage.state.owned_keys.items(), key=lambda item: item[1])
+    with checkpoint_profile.phase("sort_owned_keys"):
+        items = sorted(storage.state.owned_keys.items(), key=lambda item: item[1])
 
     # Write a fresh versioned snapshot; the previous one stays intact until the
     # manifest commit below flips to this one atomically.
     paths = CheckpointPaths.for_iteration(storage.checkpoint_dir, iteration)
 
-    old_ids = np.array([old_id for (_, old_id) in items], dtype=np.int32)
+    with checkpoint_profile.phase("gather_array_rows"):
+        old_ids = np.array([old_id for (_, old_id) in items], dtype=np.int32)
 
-    dense: dict[str, np.ndarray] = {}
-    for spec in ARRAY_SPECS:
-        array = getattr(storage, spec.attr)
-        dense[spec.checkpoint_key] = (
-            array[old_ids, :].copy() if spec.per_action else array[old_ids].copy()
+        dense: dict[str, np.ndarray] = {}
+        for spec in ARRAY_SPECS:
+            array = getattr(storage, spec.attr)
+            dense[spec.checkpoint_key] = (
+                array[old_ids, :].copy() if spec.per_action else array[old_ids].copy()
+            )
+
+    with checkpoint_profile.phase("zarr_write"):
+        store = zarr.DirectoryStore(paths.checkpoint_zarr)
+        root = zarr.open(store, mode="w")
+
+        compressor = numcodecs.Blosc(
+            cname="zstd",
+            clevel=storage.zarr_compression_level,
+            shuffle=numcodecs.Blosc.BITSHUFFLE,
         )
 
-    store = zarr.DirectoryStore(paths.checkpoint_zarr)
-    root = zarr.open(store, mode="w")
+        chunk_size = storage.zarr_chunk_size
 
-    compressor = numcodecs.Blosc(
-        cname="zstd",
-        clevel=storage.zarr_compression_level,
-        shuffle=numcodecs.Blosc.BITSHUFFLE,
-    )
+        for spec in ARRAY_SPECS:
+            root.create_dataset(
+                spec.checkpoint_key,
+                data=dense[spec.checkpoint_key],
+                chunks=(chunk_size, storage.max_actions) if spec.per_action else (chunk_size,),
+                compressor=compressor,
+                dtype=spec.dtype,
+            )
 
-    chunk_size = storage.zarr_chunk_size
-
-    for spec in ARRAY_SPECS:
-        root.create_dataset(
-            spec.checkpoint_key,
-            data=dense[spec.checkpoint_key],
-            chunks=(chunk_size, storage.max_actions) if spec.per_action else (chunk_size,),
-            compressor=compressor,
-            dtype=spec.dtype,
-        )
-
-    root.attrs["iteration"] = iteration
-    root.attrs["num_infosets"] = len(items)
-    root.attrs["max_actions"] = storage.max_actions
-    root.attrs["timestamp"] = time.time()
-    root.attrs["format_version"] = "1.0"
+        root.attrs["iteration"] = iteration
+        root.attrs["num_infosets"] = len(items)
+        root.attrs["max_actions"] = storage.max_actions
+        root.attrs["timestamp"] = time.time()
+        root.attrs["format_version"] = "1.0"
 
     # Row order IS the dense id, so keys, hashes and action lists are written as
     # parallel columns and no id column is needed. The hash is written from the
     # same function ownership uses, so a reader can shard without rebuilding keys.
-    keys = [key for (key, _) in items]
-    action_lists = [storage.state.legal_actions_cache.get(old_id) for (_, old_id) in items]
-    key_table.write_key_table(
-        paths.key_table,
-        keys=keys,
-        key_hashes=[stable_hash(key) for key in keys],
-        action_lists=action_lists,
-    )
+    with checkpoint_profile.phase("extract_keys_and_actions"):
+        keys = [key for (key, _) in items]
+        action_lists = [storage.state.legal_actions_cache.get(old_id) for (_, old_id) in items]
 
-    validate_action_counts(
-        dense["action_counts"],
-        [actions or () for actions in action_lists],
-        f"SharedArrayStorage.checkpoint(iter={iteration})",
-    )
+    with checkpoint_profile.phase("stable_hash"):
+        key_hashes = [stable_hash(key) for key in keys]
+
+    with checkpoint_profile.phase("write_key_table"):
+        key_table.write_key_table(
+            paths.key_table,
+            keys=keys,
+            key_hashes=key_hashes,
+            action_lists=action_lists,
+        )
+
+    with checkpoint_profile.phase("validate_action_counts"):
+        validate_action_counts(
+            dense["action_counts"],
+            [actions or () for actions in action_lists],
+            f"SharedArrayStorage.checkpoint(iter={iteration})",
+        )
 
     # All artifacts written and validated — make this snapshot current.
-    commit_checkpoint_manifest(storage.checkpoint_dir, iteration, paths)
+    with checkpoint_profile.phase("commit_manifest"):
+        commit_checkpoint_manifest(storage.checkpoint_dir, iteration, paths)
+
+    # File count, not byte size, is what a Modal Volume commit scales with.
+    with checkpoint_profile.phase("measure_artifacts"):
+        zarr_tree = checkpoint_profile.measure_tree(paths.checkpoint_zarr)
+        table_tree = checkpoint_profile.measure_tree(paths.key_table)
+    checkpoint_profile.add_stats(
+        num_infosets=len(items),
+        zarr_files=zarr_tree["files"],
+        zarr_bytes=zarr_tree["bytes"],
+        key_table_files=table_tree["files"],
+        key_table_bytes=table_tree["bytes"],
+    )
 
 
 def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, TypedDict, cast
 from src.core.game.actions import Action
 from src.engine.solver.infoset import InfoSetKey
 from src.pipeline.training.parallel_protocol import JobType
+from src.shared import checkpoint_profile
 
 from .gather import gather_worker_results
 
@@ -99,7 +100,8 @@ def collect_keys(
 
 def checkpoint(manager: SharedArrayWorkerManager, iteration: int) -> None:
     """Save checkpoint to disk after collecting key mappings from workers."""
-    collected = collect_keys(manager)
+    with checkpoint_profile.phase("collect_keys"):
+        collected = collect_keys(manager)
 
     # collect_keys merges into the coordinator storage's own dicts and returns
     # them; these assignments are identity-preserving (no copies of 10M+ entries).
@@ -118,4 +120,5 @@ def checkpoint(manager: SharedArrayWorkerManager, iteration: int) -> None:
             flush=True,
         )
 
-    manager.storage.checkpoint(iteration)
+    with checkpoint_profile.phase("storage_write"):
+        manager.storage.checkpoint(iteration)

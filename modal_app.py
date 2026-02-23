@@ -21,6 +21,7 @@ is live-mounted for fast iteration).
 from __future__ import annotations
 
 import dataclasses
+import time
 from pathlib import Path
 from typing import Any
 
@@ -114,7 +115,20 @@ def train(
     # Checkpoints were written under /root/data/runs (the Volume); commit so they
     # survive the container teardown. Skipped for throughput calibration runs.
     if commit:
+        from src.shared import checkpoint_profile
+
+        run_dir = Path(out.runs_dir) / out.run_id
+        # Timed and recorded next to the per-checkpoint rows: the commit is the one
+        # part of a cloud checkpoint's cost that no local profile can observe.
+        tree = checkpoint_profile.measure_tree(run_dir)
+        start = time.perf_counter()
         data_volume.commit()
+        checkpoint_profile.record_volume_commit(
+            run_dir,
+            time.perf_counter() - start,
+            run_files=tree["files"],
+            run_bytes=tree["bytes"],
+        )
     return dataclasses.asdict(out)
 
 
