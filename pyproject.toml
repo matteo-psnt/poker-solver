@@ -12,7 +12,6 @@ dependencies = [
     "pyyaml>=6.0",
     "tqdm>=4.65.0",
     "scipy>=1.15.3",
-    "scipy-stubs>=1.15.3.0",
     "scikit-learn==1.7.2",
     "numba>=0.63.1",
     "xxhash>=3.6.0",
@@ -27,12 +26,6 @@ dependencies = [
 
 [project.scripts]
 poker-solver = "src.interfaces.cli.app:main"
-
-[project.optional-dependencies]
-# Visualization and performance profiling
-optimization = [
-    "matplotlib>=3.7.0",
-]
 
 [build-system]
 requires = ["hatchling"]
@@ -78,6 +71,8 @@ dev = [
     "pytest-timeout>=2.4.0",
     "httpx>=0.28.0",
     "import-linter>=2.10",
+    "deptry>=0.24.0",
+    "vulture>=2.14",
 ]
 
 [tool.uv]

@@ -3,16 +3,6 @@
 # Run manually: pre-commit run --all-files
 
 repos:
-  # Ruff - Fast Python linter and formatter
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.9
-    hooks:
-      # Run the linter
-      - id: ruff
-        args: [--fix]
-      # Run the formatter
-      - id: ruff-format
-
   # Basic file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -29,6 +19,14 @@ repos:
       - id: mixed-line-ending
         args: ['--fix=lf']
 
+  # Ruff - fast auto-fix linting followed by formatting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
   # Type checking with ty
   - repo: local
     hooks:
@@ -43,3 +41,15 @@ repos:
         entry: uv run lint-imports
         language: system
         pass_filenames: false
+      - id: deptry
+        name: deptry
+        entry: uv run deptry
+        language: system
+        pass_filenames: false
+        args: [src, --known-first-party, src]
+      - id: vulture
+        name: vulture
+        entry: uv run vulture
+        language: system
+        pass_filenames: false
+        args: [src, --min-confidence, "90"]
