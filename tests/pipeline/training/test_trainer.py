@@ -1,6 +1,5 @@
 """Tests for Trainer class."""
 
-import pickle
 import time
 
 import numpy as np
@@ -8,7 +7,8 @@ import pytest
 
 from src.core.actions.action_model import ActionModel
 from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.helpers import CheckpointPaths
+from src.engine.solver.storage import key_table
+from src.engine.solver.storage.helpers import CheckpointPaths, get_missing_checkpoint_files
 from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.training import components
 from src.pipeline.training.trainer import TrainingSession
@@ -300,7 +300,7 @@ class TestAsyncCheckpointing:
         assert trainer.checkpoints.pending is None
 
         # Verify checkpoint files exist
-        assert CheckpointPaths.from_dir(trainer.run_dir).key_mapping.exists()
+        assert CheckpointPaths.from_dir(trainer.run_dir).key_table.exists()
 
     @pytest.mark.timeout(60)
     def test_async_checkpoint_parallel_training(self, config_with_dummy_abstraction):
@@ -322,9 +322,9 @@ class TestAsyncCheckpointing:
 
         # Verify checkpoint was saved (manifest-resolved snapshot)
         paths = CheckpointPaths.from_dir(trainer.run_dir)
-        assert paths.key_mapping.exists()
+        assert paths.key_table.exists()
         assert paths.checkpoint_zarr.exists()
-        assert paths.action_signatures.exists()
+        assert not get_missing_checkpoint_files(trainer.run_dir)
 
     @pytest.mark.timeout(30)
     def test_checkpoint_executor_cleanup(self, config_with_dummy_abstraction):
@@ -360,20 +360,42 @@ class TestAsyncCheckpointing:
         assert results["final_infosets"] > 0
 
         # Verify checkpoint files exist
-        key_mapping_file = CheckpointPaths.from_dir(trainer.run_dir).key_mapping
-        assert key_mapping_file.exists(), "key mapping should exist"
+        table_dir = CheckpointPaths.from_dir(trainer.run_dir).key_table
+        assert table_dir.exists(), "key table should exist"
 
         # Load and verify the checkpoint contains all infosets
-        with open(key_mapping_file, "rb") as f:
-            mapping = pickle.load(f)
-
-        owned_keys = mapping["owned_keys"]
-        assert len(owned_keys) > 0, "Checkpoint should contain collected keys"
+        num_keys = key_table.num_rows(table_dir)
+        assert num_keys > 0, "Checkpoint should contain collected keys"
 
         # Verify the count matches what was reported
-        assert len(owned_keys) == results["final_infosets"], (
-            f"Checkpoint has {len(owned_keys)} keys but training reported "
+        assert num_keys == results["final_infosets"], (
+            f"Checkpoint has {num_keys} keys but training reported "
             f"{results['final_infosets']} infosets"
+        )
+
+    @pytest.mark.timeout(60)
+    def test_incremental_key_collection_accumulates_across_checkpoints(
+        self, config_with_dummy_abstraction
+    ):
+        """Workers ship only deltas per collect; a later checkpoint must still
+        contain every key accumulated across collects, not just the last delta."""
+        config = config_with_dummy_abstraction.merge(
+            {
+                "training": {"checkpoint_frequency": 2, "num_iterations": 6, "verbose": False},
+                "storage": {"checkpoint_enabled": True},
+            }
+        )
+
+        trainer = TrainingSession(config, run_id="test_incremental_collect")
+        # batch_size=2 over 6 iterations => 3 batches => multiple collect cycles.
+        results = trainer.train(num_iterations=6, num_workers=2, batch_size=2)
+
+        table_dir = CheckpointPaths.from_dir(trainer.run_dir).key_table
+        num_keys = key_table.num_rows(table_dir)
+        assert num_keys == results["final_infosets"], (
+            f"final checkpoint has {num_keys} keys but training "
+            f"reported {results['final_infosets']} infosets — incremental collect "
+            "dropped previously shipped keys"
         )
 
     @pytest.mark.timeout(40)  # Reduced from 60
@@ -394,19 +416,15 @@ class TestAsyncCheckpointing:
 
         # Verify checkpoint files exist
         paths = CheckpointPaths.from_dir(trainer.run_dir)
-        key_mapping_file = paths.key_mapping
         checkpoint_dir = paths.checkpoint_zarr
-        action_sigs_file = paths.action_signatures
 
-        assert key_mapping_file.exists()
+        assert paths.key_table.exists()
         assert checkpoint_dir.exists()
-        assert action_sigs_file.exists()
+        assert not get_missing_checkpoint_files(trainer.run_dir)
 
-        # Load and verify the checkpoint contains valid data
-        with open(key_mapping_file, "rb") as f:
-            mapping = pickle.load(f)
-
-        owned_keys = mapping["owned_keys"]
+        # Row index IS the infoset id, so the table's row count must match the
+        # array height exactly -- an off-by-one here would misindex every row.
+        num_keys = key_table.num_rows(paths.key_table)
 
         # Load from zarr
         import zarr
@@ -415,11 +433,8 @@ class TestAsyncCheckpointing:
         regrets_data = zarr_data["regrets"][:]
         max_id = regrets_data.shape[0]
 
-        # Verify max_id is consistent with keys
         assert max_id > 0
-        if owned_keys:
-            actual_max = max(owned_keys.values())
-            assert max_id == actual_max + 1, f"max_id should be {actual_max + 1} but got {max_id}"
+        assert max_id == num_keys, f"array height {max_id} != {num_keys} table rows"
 
         action_counts = zarr_data["action_counts"][:]
 
@@ -439,7 +454,7 @@ class TestAsyncCheckpointing:
         assert non_zero_strategies > 0, "Some strategies should be non-zero"
 
         print("\nCheckpoint verification:")
-        print(f"  Keys: {len(owned_keys)}")
+        print(f"  Keys: {num_keys}")
         print(f"  Max ID: {max_id}")
         print(f"  Non-zero regrets: {non_zero_regrets}/{max_id}")
         print(f"  Non-zero strategies: {non_zero_strategies}/{max_id}")
@@ -540,9 +555,9 @@ class TestCheckpointEnabledConfig:
         trainer.train(num_iterations=4, num_workers=1)
 
         # Verify NO checkpoint files created
-        assert not (trainer.run_dir / "key_mapping.pkl").exists()
+        assert not list(trainer.run_dir.glob("keys-*"))
         assert not (trainer.run_dir / "checkpoint.zarr").exists()
-        assert not (trainer.run_dir / "action_signatures.pkl").exists()
+        assert not list(trainer.run_dir.glob("checkpoint-*.zarr"))
 
     @pytest.mark.slow
     @pytest.mark.timeout(60)
@@ -564,7 +579,7 @@ class TestCheckpointEnabledConfig:
         results1 = trainer1.train(num_iterations=4, num_workers=1)
 
         # Verify checkpoint exists
-        assert CheckpointPaths.from_dir(trainer1.run_dir).key_mapping.exists()
+        assert CheckpointPaths.from_dir(trainer1.run_dir).key_table.exists()
 
         initial_infosets = results1["final_infosets"]
 

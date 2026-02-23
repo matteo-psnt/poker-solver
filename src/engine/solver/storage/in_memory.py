@@ -7,7 +7,6 @@ from src.core.game.actions import Action
 from src.engine.solver.infoset import InfoSet, InfoSetKey
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.helpers import (
-    build_legal_actions,
     get_missing_checkpoint_files,
     load_checkpoint_data,
 )
@@ -79,12 +78,13 @@ class InMemoryStorage(Storage):
             raise ValueError(f"Checkpoint is incomplete. Missing files: {missing_files}")
 
         data = load_checkpoint_data(self.checkpoint_dir, context="InMemoryStorage checkpoint load")
-        self.key_to_id = data.owned_keys
-        self.id_to_key = {v: k for k, v in self.key_to_id.items()}
+        # Row index is the infoset id, so the two directions come straight from order.
+        self.id_to_key = dict(enumerate(data.keys))
+        self.key_to_id = {key: i for i, key in self.id_to_key.items()}
         self.next_id = data.max_id
 
-        action_sigs = data.action_signatures
-        print(f"Loaded {len(action_sigs)} action signatures from checkpoint")
+        action_lists = data.action_lists
+        print(f"Loaded {len(action_lists)} action signatures from checkpoint")
 
         all_regrets = data.arrays["regrets"]
         action_counts = data.arrays["action_counts"]
@@ -97,9 +97,7 @@ class InMemoryStorage(Storage):
             regrets = all_regrets[infoset_id, :n_actions].copy()
             strategies = all_strategies[infoset_id, :n_actions].astype(np.float64, copy=True)
 
-            legal_actions = build_legal_actions(
-                action_sigs, infoset_id, "InMemoryStorage checkpoint load"
-            )
+            legal_actions = action_lists[infoset_id]
 
             infoset = InfoSet(key, legal_actions)
             infoset.regrets = regrets

@@ -23,8 +23,7 @@ def _write_manifest(checkpoint_dir, iteration: int) -> None:
             {
                 "iteration": iteration,
                 "zarr": f"checkpoint-{iteration}.zarr",
-                "key_mapping": f"key_mapping-{iteration}.pkl",
-                "action_signatures": f"action_signatures-{iteration}.pkl",
+                "key_table": f"keys-{iteration}",
             }
         )
     )

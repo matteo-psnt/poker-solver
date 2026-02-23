@@ -20,7 +20,7 @@ from src.engine.solver.storage.helpers import load_checkpoint_arrays
 # encoding such that an existing run can no longer be loaded/continued as-is.
 # A bump is only safe alongside a migration or a documented barrier; the
 # golden-run test is what forces that discipline.
-REPRESENTATION_VERSION = 2
+REPRESENTATION_VERSION = 3
 
 RUN_METADATA_FILE = ".run.json"
 

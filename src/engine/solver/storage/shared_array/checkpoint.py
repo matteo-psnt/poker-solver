@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pickle
 import time
 from typing import TYPE_CHECKING
 
@@ -10,17 +9,16 @@ import numcodecs
 import numpy as np
 import zarr
 
+from src.engine.solver.storage import key_table
 from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.engine.solver.storage.helpers import (
     CheckpointPaths,
-    _validate_action_signatures,
-    build_legal_actions,
     commit_checkpoint_manifest,
     get_missing_checkpoint_files,
-    load_action_signatures,
-    load_checkpoint_data,
-    load_key_mapping,
+    load_checkpoint_arrays,
+    validate_action_counts,
 )
+from src.engine.solver.storage.shared_array.ownership import stable_hash
 
 if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage
@@ -42,13 +40,10 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
         return
 
     items = sorted(storage.state.owned_keys.items(), key=lambda item: item[1])
-    dense_ids = {key: idx for idx, (key, _) in enumerate(items)}
 
     # Write a fresh versioned snapshot; the previous one stays intact until the
     # manifest commit below flips to this one atomically.
     paths = CheckpointPaths.for_iteration(storage.checkpoint_dir, iteration)
-    with open(paths.key_mapping, "wb") as f:
-        pickle.dump({"owned_keys": dense_ids}, f)
 
     old_ids = np.array([old_id for (_, old_id) in items], dtype=np.int32)
 
@@ -85,19 +80,21 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
     root.attrs["timestamp"] = time.time()
     root.attrs["format_version"] = "1.0"
 
-    action_sigs = {}
-    for new_id, (_, old_id) in enumerate(items):
-        actions = storage.state.legal_actions_cache.get(old_id)
-        if actions is None:
-            continue
-        action_sigs[new_id] = [(action.type.name, action.amount) for action in actions]
+    # Row order IS the dense id, so keys, hashes and action lists are written as
+    # parallel columns and no id column is needed. The hash is written from the
+    # same function ownership uses, so a reader can shard without rebuilding keys.
+    keys = [key for (key, _) in items]
+    action_lists = [storage.state.legal_actions_cache.get(old_id) for (_, old_id) in items]
+    key_table.write_key_table(
+        paths.key_table,
+        keys=keys,
+        key_hashes=[stable_hash(key) for key in keys],
+        action_lists=action_lists,
+    )
 
-    with open(paths.action_signatures, "wb") as f:
-        pickle.dump(action_sigs, f)
-
-    _validate_action_signatures(
+    validate_action_counts(
         dense["action_counts"],
-        action_sigs,
+        [actions or () for actions in action_lists],
         f"SharedArrayStorage.checkpoint(iter={iteration})",
     )
 
@@ -120,62 +117,49 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
         return False
 
     paths = CheckpointPaths.from_dir(storage.checkpoint_dir)
-    mapping_data = load_key_mapping(paths)
-    saved_owned_keys = mapping_data["owned_keys"]
-    saved_action_sigs = load_action_signatures(paths)
-
-    if not saved_owned_keys:
+    total_rows = key_table.num_rows(paths.key_table)
+    if total_rows == 0:
         return True
 
-    my_keys = []
-    my_old_ids = []
-    for key, old_id in saved_owned_keys.items():
-        if storage.get_owner(key) == storage.worker_id:
-            my_keys.append(key)
-            my_old_ids.append(old_id)
-
+    # Read ONLY this worker's shard. Reading the whole table here (which is what the
+    # pickled format forced) cost ~28 GB per worker at 18.9M keys and is what made a
+    # 16-worker resume OOM; ownership is decided on a memory-mapped hash column.
+    owned = key_table.read_owned_rows(paths.key_table, storage.num_workers, storage.worker_id)
+    my_keys = owned.keys
     if not my_keys:
-        print(f"Worker {storage.worker_id} owns 0/{len(saved_owned_keys)} keys from checkpoint")
+        print(f"Worker {storage.worker_id} owns 0/{total_rows} keys from checkpoint")
         return True
 
-    my_old_ids_array = np.array(my_old_ids, dtype=np.int32)
+    my_old_ids_array = owned.row_ids.astype(np.int32, copy=False)
 
-    data = load_checkpoint_data(
-        storage.checkpoint_dir, context="SharedArrayStorage.load_checkpoint"
-    )
+    arrays = load_checkpoint_arrays(storage.checkpoint_dir)
+    max_actions = arrays["regrets"].shape[1]
 
-    if data.max_actions != storage.max_actions:
-        raise ValueError(
-            f"Checkpoint max_actions mismatch: {data.max_actions} vs {storage.max_actions}"
-        )
+    if max_actions != storage.max_actions:
+        raise ValueError(f"Checkpoint max_actions mismatch: {max_actions} vs {storage.max_actions}")
 
-    if storage.capacity < data.max_id + 1:
-        raise ValueError(f"Storage capacity too small: {storage.capacity} vs {data.max_id + 1}")
+    if storage.capacity < total_rows:
+        raise ValueError(f"Storage capacity too small: {storage.capacity} vs {total_rows}")
 
     new_ids = []
     for key in my_keys:
         new_id = storage.allocate_id()
         storage.state.owned_keys[key] = new_id
+        storage.state.unshipped_keys.append((key, new_id))
         new_ids.append(new_id)
 
     new_ids_array = np.array(new_ids, dtype=np.int32)
 
     for spec in ARRAY_SPECS:
         array = getattr(storage, spec.attr)
-        saved = data.arrays[spec.checkpoint_key]
+        saved = arrays[spec.checkpoint_key]
         if spec.per_action:
             array[new_ids_array, :] = saved[my_old_ids_array, :]
         else:
             array[new_ids_array] = saved[my_old_ids_array]
 
-    for new_id, old_id in zip(new_ids, my_old_ids):
-        legal_actions = build_legal_actions(
-            saved_action_sigs, old_id, "SharedArrayStorage.load_checkpoint"
-        )
+    for new_id, legal_actions in zip(new_ids, owned.action_lists):
         storage.state.legal_actions_cache[new_id] = legal_actions
 
-    print(
-        f"Worker {storage.worker_id} loaded {len(my_keys)}/{len(saved_owned_keys)} "
-        "infosets from checkpoint"
-    )
+    print(f"Worker {storage.worker_id} loaded {len(my_keys)}/{total_rows} infosets from checkpoint")
     return True

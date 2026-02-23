@@ -145,9 +145,17 @@ contains:
 data/runs/<run_id>/checkpoints/<checkpoint_id>/
 ├── checkpoint.zarr/         # regrets, strategies, action_counts,
 │                            # reach_counts, cumulative_utility
-├── key_mapping.pkl          # infoset key → row index
-└── action_signatures.pkl
+└── keys-<iteration>/        # columnar key table (see storage/key_table.py):
+                             # one row per infoset, row index IS the infoset id,
+                             # incl. a stable_hash column so a worker can select
+                             # its shard from a memory-mapped column and
+                             # materialize only its own rows
 ```
+
+The key table is columnar rather than a pickled dict because pickle is
+all-or-nothing: every worker had to load the whole checkpoint to keep the ~1/N
+it owns (~28 GB per worker at 18.9M keys), which is what made resuming a large
+run OOM.
 
 Config knobs (all have defaults; production.yaml relies on them):
 
