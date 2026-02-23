@@ -38,6 +38,7 @@ def get_or_create_infoset(
 
         infoset_id = allocate_id(storage)
         state.owned_keys[key] = infoset_id
+        state.unshipped_keys.append((key, infoset_id))
         storage.shared_action_counts[infoset_id] = num_actions
         state.legal_actions_cache[infoset_id] = legal_actions
 
