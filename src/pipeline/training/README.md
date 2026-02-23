@@ -432,9 +432,9 @@ def get_strategy(regrets):
 training:
   num_iterations: 100000
   checkpoint_frequency: 1000
+  iterations_per_worker: 500
   verbose: true
   runs_dir: "data/runs"
-  parallel_result_timeout_seconds: null  # null = wait indefinitely for workers
 
 action_model:
   preflop_templates:
@@ -452,23 +452,25 @@ resolver:
   time_budget_ms: 300
   max_depth: 2
   max_raises_per_street: 4
-  leaf_value_mode: "blueprint_rollout"
-  range_update_mode: "bayes_light"
+  leaf_rollouts: 8
+  leaf_use_average_strategy: true
   policy_blend_alpha: 0.35
+  min_strategy_prob: 1.0e-6
 
 card_abstraction:
   config: "default"  # References precomputed abstraction
 
 storage:
-  backend: "disk"
-  cache_size: 100000
-  flush_frequency: 1000
+  checkpoint_enabled: true
+  initial_capacity: 2000000
+  max_actions: 10
+  zarr_compression_level: 1
+  zarr_chunk_size: 50000
 
 solver:
-  type: "mccfr"
   sampling_method: "external"
   cfr_plus: true
-  linear_cfr: false
+  iteration_weighting: "linear"
 
 game:
   starting_stack: 200

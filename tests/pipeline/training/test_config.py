@@ -200,6 +200,21 @@ training:
             assert cfg.training.verbose is False  # inherited from base
             assert cfg.solver.cfr_plus is True  # inherited from base
 
+    def test_all_training_profiles_load(self):
+        """All repository training YAML profiles should parse with strict schema."""
+        config_dir = Path(__file__).resolve().parents[3] / "config" / "training"
+        profile_paths = sorted(config_dir.glob("*.yaml"))
+
+        assert profile_paths, "No training config files found"
+
+        for profile_path in profile_paths:
+            cfg = load_config(profile_path)
+            assert cfg.system.config_name
+
+            # Enforce explicit profile naming for non-template profiles.
+            if profile_path.stem != "default":
+                assert cfg.system.config_name == profile_path.stem
+
 
 class TestTypeSafety:
     """Test that types are enforced."""
