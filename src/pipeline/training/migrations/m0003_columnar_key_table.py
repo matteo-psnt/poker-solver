@@ -26,10 +26,22 @@ from src.engine.solver.storage.helpers import (
     CHECKPOINT_MANIFEST_FILE,
     KEY_MAPPING_FILE,
     KEY_TABLE_DIR,
-    read_checkpoint_manifest,
 )
 from src.engine.solver.storage.shared_array.ownership import stable_hash
 from src.pipeline.training.migrations.base import Migration, MigrationKind
+
+
+def _read_v2_manifest(run_dir: Path) -> dict | None:
+    """Read the manifest WITHOUT the current schema check.
+
+    ``read_checkpoint_manifest`` requires ``key_table``, which is precisely the
+    field a pre-v3 manifest does not have -- using it here would make the
+    migration reject every run it exists to convert.
+    """
+    path = run_dir / CHECKPOINT_MANIFEST_FILE
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
 
 
 def _legacy_paths(run_dir: Path) -> tuple[Path, Path]:
@@ -38,8 +50,8 @@ def _legacy_paths(run_dir: Path) -> tuple[Path, Path]:
     ``CheckpointPaths`` only understands the current layout, so the pre-v3 names
     are resolved here rather than kept alive in the loader.
     """
-    manifest = read_checkpoint_manifest(run_dir)
-    if manifest is None:
+    manifest = _read_v2_manifest(run_dir)
+    if manifest is None or "key_mapping" not in manifest:
         return run_dir / KEY_MAPPING_FILE, run_dir / ACTION_SIGNATURES_FILE
     return run_dir / manifest["key_mapping"], run_dir / manifest["action_signatures"]
 
@@ -69,7 +81,7 @@ def _migrate(run_dir: Path) -> None:
     # A manifest-less (pre-manifest) run resolves its artifacts by fixed name, so
     # the table has to land on the fixed name too; manifest runs get the versioned
     # name the manifest will point at.
-    manifest = read_checkpoint_manifest(run_dir)
+    manifest = _read_v2_manifest(run_dir)
     table_name = KEY_TABLE_DIR if manifest is None else f"keys-{int(manifest['iteration'])}"
     table_dir = run_dir / table_name
     key_table.write_key_table(
@@ -89,7 +101,7 @@ def _migrate(run_dir: Path) -> None:
 
 def _rewrite_manifest(run_dir: Path, table_name: str) -> None:
     """Swap the two pickle entries for the table entry, keeping the write atomic."""
-    manifest = read_checkpoint_manifest(run_dir)
+    manifest = _read_v2_manifest(run_dir)
     if manifest is None:
         return
     manifest.pop("key_mapping", None)
