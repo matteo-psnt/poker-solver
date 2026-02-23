@@ -139,7 +139,7 @@ def build_preflop_chart_data(
 
 def _format_bb_size(size_bb: float) -> str:
     if abs(size_bb - round(size_bb)) < 1e-6:
-        return f"{int(round(size_bb))}bb"
+        return f"{round(size_bb)}bb"
     return f"{size_bb:.1f}bb"
 
 

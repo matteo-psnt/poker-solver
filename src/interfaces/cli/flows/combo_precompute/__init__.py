@@ -8,10 +8,10 @@ from .run import handle_combo_precompute
 from .validate import handle_combo_validate
 
 __all__ = [
-    "handle_combo_precompute",
+    "handle_combo_analyze_bucketing",
+    "handle_combo_coverage",
     "handle_combo_info",
+    "handle_combo_precompute",
     "handle_combo_test_lookup",
     "handle_combo_validate",
-    "handle_combo_coverage",
-    "handle_combo_analyze_bucketing",
 ]

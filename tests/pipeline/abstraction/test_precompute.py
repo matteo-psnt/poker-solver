@@ -91,7 +91,7 @@ class TestEquityComputation:
 
         # Test first combo
         combo = combos[0]
-        board_id, hand_id, equity = compute_equity_for_combo(
+        _board_id, _hand_id, equity = compute_equity_for_combo(
             canonical_board=combo.board,
             canonical_hand=combo.hand,
             representative_board=board,

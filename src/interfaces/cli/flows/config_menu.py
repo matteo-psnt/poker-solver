@@ -68,7 +68,7 @@ def edit_config(ctx: CliContext, config: Config) -> Config:
     """
     ui.header("Edit Configuration")
 
-    choices = list(CATEGORY_EDITORS.keys()) + ["Done"]
+    choices = [*list(CATEGORY_EDITORS.keys()), "Done"]
 
     while True:
         category = prompts.select(ctx, "What would you like to edit?", choices=choices)

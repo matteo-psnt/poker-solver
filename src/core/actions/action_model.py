@@ -171,7 +171,7 @@ class ActionModel:
 
         for token in tokens:
             if isinstance(token, (int, float)):
-                total_bet = int(round(float(token) * self.config.game.big_blind))
+                total_bet = round(float(token) * self.config.game.big_blind)
                 if 0 < total_bet <= stack:
                     sizes.append(total_bet)
             elif token in ("jam", "allin", "all_in"):
@@ -189,7 +189,7 @@ class ActionModel:
 
         for token in tokens:
             if isinstance(token, (int, float)):
-                total_bet = int(round(float(token) * self.config.game.big_blind))
+                total_bet = round(float(token) * self.config.game.big_blind)
                 raise_amount = total_bet - to_call
                 if raise_amount > 0 and total_bet <= stack:
                     sizes.append(raise_amount)
@@ -209,14 +209,14 @@ class ActionModel:
             return raise_amount if raise_amount > 0 else None
         if normalized.endswith("x_open"):
             mult = float(normalized[: -len("x_open")])
-            total_bet = int(round(mult * max(1, to_call)))
+            total_bet = round(mult * max(1, to_call))
             raise_amount = total_bet - to_call
             if raise_amount > 0 and total_bet <= stack:
                 return raise_amount
             return None
         if normalized.endswith("x_last"):
             mult = float(normalized[: -len("x_last")])
-            total_bet = int(round(mult * max(1, to_call)))
+            total_bet = round(mult * max(1, to_call))
             raise_amount = total_bet - to_call
             if raise_amount > 0 and total_bet <= stack:
                 return raise_amount

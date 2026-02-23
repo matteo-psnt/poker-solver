@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import multiprocessing as mp
 import queue
 import time
@@ -535,7 +536,7 @@ class SharedArrayWorkerManager:
 
         # Validate worker ID ranges don't overlap (defensive)
         ranges = sorted(worker_ranges.items(), key=lambda kv: kv[1][0])
-        for (wid_a, (start_a, end_a)), (wid_b, (start_b, end_b)) in zip(ranges, ranges[1:]):
+        for (wid_a, (start_a, end_a)), (wid_b, (start_b, end_b)) in itertools.pairwise(ranges):
             if start_b < end_a:
                 raise RuntimeError(
                     f"Worker ID ranges overlap: worker {wid_a} [{start_a},{end_a}) "
