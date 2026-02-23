@@ -15,7 +15,7 @@ from src.engine.solver.storage.helpers import (
     CheckpointPaths,
     commit_checkpoint_manifest,
     get_missing_checkpoint_files,
-    load_checkpoint_arrays,
+    load_checkpoint_rows,
     validate_action_counts,
 )
 from src.engine.solver.storage.shared_array.ownership import stable_hash
@@ -132,8 +132,9 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
 
     my_old_ids_array = owned.row_ids.astype(np.int32, copy=False)
 
-    arrays = load_checkpoint_arrays(storage.checkpoint_dir)
-    max_actions = arrays["regrets"].shape[1]
+    # Read only this worker's rows; the full arrays would be ~1.9 GB per worker at
+    # 18.9M keys (~30 GB across 16) of data it discards immediately.
+    arrays, max_actions = load_checkpoint_rows(storage.checkpoint_dir, my_old_ids_array)
 
     if max_actions != storage.max_actions:
         raise ValueError(f"Checkpoint max_actions mismatch: {max_actions} vs {storage.max_actions}")
@@ -152,11 +153,12 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
 
     for spec in ARRAY_SPECS:
         array = getattr(storage, spec.attr)
+        # Rows come back positionally in row_ids order, which is new_ids order.
         saved = arrays[spec.checkpoint_key]
         if spec.per_action:
-            array[new_ids_array, :] = saved[my_old_ids_array, :]
+            array[new_ids_array, :] = saved
         else:
-            array[new_ids_array] = saved[my_old_ids_array]
+            array[new_ids_array] = saved
 
     for new_id, legal_actions in zip(new_ids, owned.action_lists):
         storage.state.legal_actions_cache[new_id] = legal_actions
