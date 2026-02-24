@@ -20,6 +20,7 @@ from src.engine.solver.storage.helpers import (
 from src.pipeline.training import components
 from src.pipeline.training.metrics import MetricsTracker
 from src.pipeline.training.run_tracker import RunTracker
+from src.pipeline.training.versioning import ensure_current
 from src.shared.config import Config
 
 from . import partitioned
@@ -99,6 +100,10 @@ class TrainingSession:
         run_path = Path(run_dir)
         if not run_path.exists():
             raise FileNotFoundError(f"Run directory not found: {run_path}")
+
+        # Refuse stale/newer representation versions before touching checkpoint
+        # data: without this, a metadata-only format bump would load silently.
+        ensure_current(run_path)
 
         run_tracker = RunTracker.load(run_path)
         metadata = run_tracker.metadata
