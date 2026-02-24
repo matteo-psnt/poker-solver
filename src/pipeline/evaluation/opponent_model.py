@@ -225,6 +225,11 @@ class ResolvedOpponent:
     the whole observed history instead of the uniform ranges that made the
     deployed system measurably exploitable.
 
+    Uses :class:`HUResolver` directly rather than :class:`BlueprintAgent`
+    deliberately: LBR needs the full P(action | combo) strategy matrix under
+    externally tracked ranges (plus per-hand reseeding), not the agent's
+    sampled act/observe interface.
+
     Determinism: requires ``resolver_config.max_iterations`` — budget-driven
     solves vary with wall clock, which would break reproducibility and paired
     (CRN) comparisons across checkpoints.

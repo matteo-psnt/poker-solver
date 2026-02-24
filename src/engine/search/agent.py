@@ -10,6 +10,8 @@ importing) the training machinery.
 
 from __future__ import annotations
 
+import numpy as np
+
 from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.search.resolver import HUResolver
@@ -25,6 +27,10 @@ class BlueprintAgent:
     instance persists across the agent's lifetime — feed every realized action
     (both seats) through :meth:`observe` so its range inference tracks the
     hand; drop the agent (or build a fresh one) between hands.
+
+    ``rng`` drives the resolver's leaf-runout sampling and is therefore part of
+    the played strategy: evaluation harnesses pin it per hand (fresh agent,
+    fresh generator) so results are reproducible and worker-count independent.
     """
 
     def __init__(
@@ -33,6 +39,7 @@ class BlueprintAgent:
         *,
         use_resolver: bool | None = None,
         resolver_config: ResolverConfig | None = None,
+        rng: np.random.Generator | None = None,
     ):
         self.blueprint = blueprint
         config = resolver_config if resolver_config is not None else blueprint.config.resolver
@@ -44,6 +51,7 @@ class BlueprintAgent:
                 action_model=blueprint.action_model,
                 rules=blueprint.rules,
                 config=config,
+                rng=rng,
             )
             if use_resolver
             else None
