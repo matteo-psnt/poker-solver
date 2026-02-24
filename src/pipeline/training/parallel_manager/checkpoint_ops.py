@@ -34,7 +34,12 @@ def collect_keys(
     Workers ship only entries added since the previous collect; this merges them
     into the coordinator storage's accumulated view (``state.owned_keys`` /
     ``state.legal_actions_cache``), which is what checkpoints are written from.
-    Returns the accumulated view.
+    Returns the accumulated view — the live storage-owned dicts, not copies.
+
+    Cross-worker id collisions are structurally impossible (ids come only from
+    worker-exclusive ranges, both at allocation and resume-load); the range
+    overlap check below is the tripwire for a partitioning bug, and each worker
+    checks its own shipped delta for duplicates.
     """
     for worker_id in range(manager.num_workers):
         manager.job_queue.put(
@@ -56,7 +61,6 @@ def collect_keys(
     accumulated_actions = cast(
         "dict[int, Sequence[Action]]", manager.storage.state.legal_actions_cache
     )
-    id_owners = manager.checkpoint_id_owners
     worker_ranges: dict[int, tuple[int, int]] = {}
 
     for result in responses:
@@ -68,19 +72,7 @@ def collect_keys(
             cast(int, result["id_range_end"]),
         )
 
-        for key, infoset_id in owned_keys.items():
-            prev = id_owners.get(infoset_id)
-            if prev is not None and prev[1] != key:
-                prev_worker, prev_key = prev
-                raise RuntimeError(
-                    f"Duplicate infoset_id {infoset_id} across workers "
-                    f"(prev worker {prev_worker}, key {prev_key} vs "
-                    f"worker {worker_id}, key {key}). "
-                    "ID ranges likely overlapping or num_workers changed."
-                )
-            id_owners[infoset_id] = (worker_id, key)
-            accumulated_keys[key] = infoset_id
-
+        accumulated_keys.update(owned_keys)
         accumulated_actions.update(legal_actions)
 
     ranges = sorted(worker_ranges.items(), key=lambda item: item[1][0])

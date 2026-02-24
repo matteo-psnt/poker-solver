@@ -16,6 +16,8 @@ catches them. The existing resume tests all run ``num_workers=1``, which never e
 the ship/accumulate path at all.
 """
 
+import itertools
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -25,6 +27,7 @@ import pytest
 from src.engine.solver.storage import key_table
 from src.engine.solver.storage.helpers import CheckpointPaths
 from src.pipeline.training import components
+from src.pipeline.training.parallel_manager import checkpoint_ops
 from src.pipeline.training.trainer import TrainingSession
 from src.shared.config import Config
 from tests.test_helpers import DummyCardAbstraction
@@ -123,3 +126,48 @@ def test_successive_multiworker_checkpoints_accumulate(temp_run_dir):
 
     dropped = keys_first - keys_second
     assert not dropped, f"{len(dropped)} keys from the earlier checkpoint were dropped"
+
+
+@pytest.mark.timeout(120)
+def test_multi_collect_ships_deltas_and_accumulates(temp_run_dir, monkeypatch):
+    """Exercise the actual incremental mechanic: several COLLECT_KEYS within ONE
+    manager lifetime, so later collects ship only the delta and truncate
+    ``unshipped_keys``.
+
+    The other tests in this file span manager lifetimes (one collect each), so a
+    coordinator that shipped the delta but failed to accumulate, or a worker that
+    truncated too much, would pass them.
+    """
+    config = _build_config(temp_run_dir, checkpoint_frequency=1).merge(
+        {"storage": {"max_checkpoint_overhead": 0.99}}
+    )
+
+    collect_sizes: list[int] = []
+    real_collect = checkpoint_ops.collect_keys
+
+    def recording_collect(manager, timeout=60.0):
+        collected = real_collect(manager, timeout=timeout)
+        collect_sizes.append(len(collected["owned_keys"]))
+        return collected
+
+    monkeypatch.setattr(checkpoint_ops, "collect_keys", recording_collect)
+
+    session = TrainingSession(config, run_id=temp_run_dir.name)
+    session.train(num_iterations=12, num_workers=NUM_WORKERS, batch_size=2)
+
+    # checkpoint_frequency=1 with batch_size=2 checkpoints after every batch, the
+    # coordinator waits out the pending checkpoint at each batch start, and
+    # max_checkpoint_overhead=0.99 defeats back-pressure deferral: 6 collects.
+    assert len(collect_sizes) == 6, f"expected 6 collects, got {len(collect_sizes)}"
+    assert all(a <= b for a, b in itertools.pairwise(collect_sizes)), (
+        f"accumulated view shrank between collects: {collect_sizes}"
+    )
+    assert collect_sizes[0] < collect_sizes[-1], "guard: later batches must allocate new keys"
+
+    # The key table on disk must match the workers' id-derived infoset count
+    # (reported per batch, independent of the ship/accumulate machinery) — catches
+    # both a coordinator that failed to accumulate and a worker that over-truncated.
+    metadata = json.loads((temp_run_dir / ".run.json").read_text())
+    keys_on_disk = _checkpointed_keys(temp_run_dir)
+    assert len(keys_on_disk) == collect_sizes[-1]
+    assert len(keys_on_disk) == metadata["num_infosets"]

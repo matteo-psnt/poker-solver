@@ -6,7 +6,6 @@ import multiprocessing as mp
 import uuid
 from typing import TYPE_CHECKING, Protocol
 
-from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.shared.config import Config
 
@@ -83,7 +82,6 @@ class SharedArrayWorkerManager:
         self.checkpoint_dir = checkpoint_dir
 
         self.processes: list[mp.Process] = []
-        self.checkpoint_id_owners: dict[int, tuple[int, InfoSetKey]] = {}
 
         lifecycle.initialize_runtime(self)
         self._start_workers()
