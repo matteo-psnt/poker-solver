@@ -108,6 +108,10 @@ def migrate_run(src: Path, dst: Path, migrations: list[Migration] | None = None)
     Plans the whole chain first (a barrier/gap fails before any disk write), then
     copies ``src`` → ``dst`` and applies each step on the copy, stamping the version and
     recording history per step. Rolls ``dst`` back on any failure.
+
+    Exception-safe, not kill-safe: a hard kill mid-run can leave a partial ``dst``
+    behind. It still fails loud — it carries a stale version stamp, so loaders
+    refuse it and a retry hits the exists-check — but it must be deleted by hand.
     """
     src, dst = Path(src), Path(dst)
     if dst.exists():

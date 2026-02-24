@@ -5,8 +5,9 @@ Migrations are *functional* — the applier runs them on a copy, never the origi
 and each declares a ``kind`` that sets how strictly it is verified:
 
 - ``EXACT``: preserves the learned strategy (module renames, storage reformat,
-  metadata-only changes). ``verify`` must confirm the checkpoint fingerprint is
-  unchanged against a value recorded at authoring time.
+  metadata-only changes). ``verify`` checks structural invariants; exactness
+  itself is enforced by the golden-run round-trip tests, which fingerprint the
+  full chain's output against the source.
 - ``APPROXIMATE``: cannot preserve strategy exactly (e.g. an action-size addition
   that widens arrays). ``verify`` only confirms the result loads and is coherent;
   LBR — never used here — measures the warm-start quality separately.
@@ -17,10 +18,27 @@ and each declares a ``kind`` that sets how strictly it is verified:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+from src.engine.solver.storage.helpers import CHECKPOINT_MANIFEST_FILE
+
+
+def read_pre_v3_manifest(run_dir: Path) -> dict | None:
+    """Read the checkpoint manifest WITHOUT the current schema check.
+
+    ``read_checkpoint_manifest`` requires ``key_table`` -- precisely the field a
+    pre-v3 manifest does not have -- so a migration using it would reject every
+    manifested run it exists to convert. Pre-v3 migrations resolve their inputs
+    here instead.
+    """
+    path = run_dir / CHECKPOINT_MANIFEST_FILE
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
 
 
 class MigrationKind(Enum):

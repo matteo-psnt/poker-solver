@@ -26,22 +26,11 @@ from src.engine.solver.storage.helpers import (
     CHECKPOINT_MANIFEST_FILE,
     KEY_MAPPING_FILE,
     KEY_TABLE_DIR,
+    CheckpointPaths,
 )
+from src.engine.solver.storage.in_memory import InMemoryStorage
 from src.engine.solver.storage.shared_array.ownership import stable_hash
-from src.pipeline.training.migrations.base import Migration, MigrationKind
-
-
-def _read_v2_manifest(run_dir: Path) -> dict | None:
-    """Read the manifest WITHOUT the current schema check.
-
-    ``read_checkpoint_manifest`` requires ``key_table``, which is precisely the
-    field a pre-v3 manifest does not have -- using it here would make the
-    migration reject every run it exists to convert.
-    """
-    path = run_dir / CHECKPOINT_MANIFEST_FILE
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
+from src.pipeline.training.migrations.base import Migration, MigrationKind, read_pre_v3_manifest
 
 
 def _legacy_paths(run_dir: Path) -> tuple[Path, Path]:
@@ -50,7 +39,7 @@ def _legacy_paths(run_dir: Path) -> tuple[Path, Path]:
     ``CheckpointPaths`` only understands the current layout, so the pre-v3 names
     are resolved here rather than kept alive in the loader.
     """
-    manifest = _read_v2_manifest(run_dir)
+    manifest = read_pre_v3_manifest(run_dir)
     if manifest is None or "key_mapping" not in manifest:
         return run_dir / KEY_MAPPING_FILE, run_dir / ACTION_SIGNATURES_FILE
     return run_dir / manifest["key_mapping"], run_dir / manifest["action_signatures"]
@@ -81,7 +70,7 @@ def _migrate(run_dir: Path) -> None:
     # A manifest-less (pre-manifest) run resolves its artifacts by fixed name, so
     # the table has to land on the fixed name too; manifest runs get the versioned
     # name the manifest will point at.
-    manifest = _read_v2_manifest(run_dir)
+    manifest = read_pre_v3_manifest(run_dir)
     table_name = KEY_TABLE_DIR if manifest is None else f"keys-{int(manifest['iteration'])}"
     table_dir = run_dir / table_name
     key_table.write_key_table(
@@ -101,7 +90,7 @@ def _migrate(run_dir: Path) -> None:
 
 def _rewrite_manifest(run_dir: Path, table_name: str) -> None:
     """Swap the two pickle entries for the table entry, keeping the write atomic."""
-    manifest = _read_v2_manifest(run_dir)
+    manifest = read_pre_v3_manifest(run_dir)
     if manifest is None:
         return
     manifest.pop("key_mapping", None)
@@ -113,22 +102,26 @@ def _rewrite_manifest(run_dir: Path, table_name: str) -> None:
 
 
 def _verify(run_dir: Path) -> None:
-    from src.engine.solver.storage.in_memory import InMemoryStorage
-
     storage = InMemoryStorage(checkpoint_dir=run_dir)
-    if storage.num_infosets() <= 0:
+    num_infosets = storage.num_infosets()
+    if num_infosets <= 0:
         raise ValueError("post-migration checkpoint has no infosets")
 
     # Ownership must be reproducible from the persisted hash column, since that is
     # what every worker now shards on; a mismatch would silently re-partition the
-    # tree and drop updates.
-    from src.engine.solver.storage.helpers import CheckpointPaths
-
+    # tree and drop updates. Sweep every shard so the check cannot pass vacuously
+    # on a table whose rows all hash elsewhere.
     table_dir = CheckpointPaths.from_dir(run_dir).key_table
-    rows = key_table.read_owned_rows(table_dir, num_workers=4, worker_id=1)
-    for key in rows.keys:
-        if stable_hash(key) % 4 != 1:
-            raise ValueError("post-migration key table shards inconsistently with stable_hash")
+    num_workers = 4
+    sharded = 0
+    for worker_id in range(num_workers):
+        rows = key_table.read_owned_rows(table_dir, num_workers=num_workers, worker_id=worker_id)
+        sharded += len(rows.keys)
+        for key in rows.keys:
+            if stable_hash(key) % num_workers != worker_id:
+                raise ValueError("post-migration key table shards inconsistently with stable_hash")
+    if sharded != num_infosets:
+        raise ValueError(f"post-migration shards cover {sharded} of {num_infosets} rows")
 
 
 MIGRATION = Migration(
