@@ -74,16 +74,26 @@ def _sample_action_index(strategy: np.ndarray) -> int:
     return len(probs) - 1
 
 
-def _update_average_strategy(
+def _accumulate_average_strategy(
     self: MCCFRSolver,
     infoset: InfoSet,
     valid_indices: list[int],
     strategy: np.ndarray,
-    player_reach_prob: float,
-    node_utility: float,
+    reach_weight: float,
 ) -> None:
-    """Update cumulative strategy and infoset statistics."""
-    weight = player_reach_prob
+    """Accumulate the current iterate into the average strategy.
+
+    Zinkevich's average weights each iterate by the acting player's OWN reach
+    ``pi_i(I)``; ``reach_weight`` is whatever part of that weight the visit
+    frequency of the call site does not already supply. Under external sampling
+    the update runs at OPPONENT nodes, which are visited exactly when the
+    sampled opponent/chance actions lead there — visit frequency contributes
+    ``pi_i * pi_chance`` on its own (chance is iteration-invariant and
+    normalizes out per infoset), so the correct ``reach_weight`` is 1.0 and any
+    explicit reach term would double-count (OpenSpiel's ``AverageType.SIMPLE``
+    placement; see docs/AVERAGE_STRATEGY_WEIGHTING.md, option A).
+    """
+    weight = reach_weight
     if self.config.solver.iteration_weighting == "dcfr":
         weight *= compute_dcfr_strategy_weight(self.iteration, self.config.solver.dcfr_gamma)
     elif self.config.solver.iteration_weighting == "linear":
@@ -92,9 +102,6 @@ def _update_average_strategy(
     strategy_sum = infoset.strategy_sum
     for local_idx, strategy_prob in enumerate(strategy.tolist()):
         strategy_sum[valid_indices[local_idx]] += strategy_prob * weight
-
-    infoset.increment_reach_count()
-    infoset.add_cumulative_utility(node_utility)
 
 
 def cfr_external_sampling(
@@ -199,16 +206,25 @@ def cfr_external_sampling(
                     prune_reactivate_frequency=self.config.solver.prune_reactivate_frequency,
                 )
 
-            _update_average_strategy(
-                self,
-                infoset,
-                valid_indices,
-                strategy,
-                player_reach_prob=reach_probs[current_player],
-                node_utility=node_utility,
-            )
+            # Diagnostics only (no strategy consumer reads these): visit count
+            # and running utility of the traverser's own nodes. The average
+            # strategy itself accumulates at OPPONENT nodes below — a
+            # traverser-node update would be pi_{-i}-weighted, since the
+            # traverser enumerates its own actions and its visit frequency
+            # carries no pi_i (see docs/AVERAGE_STRATEGY_WEIGHTING.md).
+            infoset.increment_reach_count()
+            infoset.add_cumulative_utility(node_utility)
+        else:
+            self.dropped_unknown_id_updates += 1
 
         return node_utility
+
+    # Opponent node: this is where the average strategy accumulates — visit
+    # frequency supplies the pi_i weighting (see _accumulate_average_strategy).
+    if infoset.writable:
+        _accumulate_average_strategy(self, infoset, valid_indices, strategy, reach_weight=1.0)
+    else:
+        self.dropped_unknown_id_updates += 1
 
     action_idx = _sample_action_index(strategy)
     action = legal_actions[action_idx]
@@ -282,13 +298,17 @@ def cfr_outcome_sampling(
                 dcfr_beta=self.config.solver.dcfr_beta,
             )
 
-        _update_average_strategy(
+        # Unchanged pending the outcome-sampling audit: here the traverser's
+        # reach IS threaded (both players multiply into reach_probs above), so
+        # the explicit weight is live, unlike the external-sampling site.
+        _accumulate_average_strategy(
             self,
             infoset,
             valid_indices,
             strategy,
-            player_reach_prob=reach_probs[current_player],
-            node_utility=sampled_utility,
+            reach_weight=reach_probs[current_player],
         )
+        infoset.increment_reach_count()
+        infoset.add_cumulative_utility(sampled_utility)
 
     return sampled_utility
