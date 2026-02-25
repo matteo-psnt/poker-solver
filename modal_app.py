@@ -699,20 +699,6 @@ def run_resume(
     )
 
 
-def _print_variance_decomposition(results: dict[str, Any]) -> None:
-    """Print the terminal-type variance decomposition of an LBR eval, if present."""
-    decomposition = results.get("variance_decomposition")
-    if not decomposition:
-        return
-    print("  variance by terminal type (within-group share of total):")
-    for label, group in decomposition["groups"].items():
-        print(
-            f"    {label:>9}: {group['variance_share']:>5.1%} of variance "
-            f"({group['n']} deals, {group['share_of_samples']:.1%})"
-        )
-    print(f"    (between-group: {decomposition['between_group_share']:.1%})")
-
-
 def _await_call(call: Any, run_id: str, function: str) -> dict[str, Any]:
     """Block on a spawned call and snapshot its Modal exit status either way.
 
@@ -755,6 +741,7 @@ def run_eval(
     Pass --include-off-tree to arm the exploiter with off-tree bet/raise sizes and
     --scorer lookahead for the depth-limited best-response scorer (both produce a
     stronger, still-rigorous exploiter; never mix settings within one comparison)."""
+    from src.pipeline.evaluation.paired_report import print_variance_decomposition
     from src.shared.orchestration_log import record_spawn
 
     eval_call = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
@@ -786,7 +773,7 @@ def run_eval(
     )
     print(f"  infosets: {eval_result['infosets']:,}")
     print(f"  base_seed: {results['base_seed']} (reuse for paired run_compare)")
-    _print_variance_decomposition(results)
+    print_variance_decomposition(results)
 
 
 @app.local_entrypoint()
@@ -810,7 +797,7 @@ def run_compare(
     cancels the shared deal luck and resolves far smaller gaps than comparing two
     independent CIs. Positive ``diff`` means ``run_b`` is less exploitable (better).
     """
-    from src.pipeline.evaluation.statistics import compare_paired_samples
+    from src.pipeline.evaluation.paired_report import report_paired_lbr
     from src.shared.orchestration_log import record_spawn
 
     fn = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout)
@@ -831,38 +818,13 @@ def run_compare(
     result_a = _await_call(call_a, run_a, "evaluate")
     result_b = _await_call(call_b, run_b, "evaluate")
 
-    results_a, results_b = result_a["results"], result_b["results"]
-    if results_a["base_seed"] != results_b["base_seed"]:
-        raise RuntimeError(
-            f"base_seed mismatch ({results_a['base_seed']} vs {results_b['base_seed']}): "
-            "the evals are not paired."
-        )
-
-    comparison = compare_paired_samples(
-        results_a["pair_samples_mbb"], results_b["pair_samples_mbb"]
+    report_paired_lbr(
+        (f"{run_a} ({result_a['infosets']:,} infosets)", result_a["results"]),
+        (f"{run_b} ({result_b['infosets']:,} infosets)", result_b["results"]),
+        diff_label="A - B",
+        better_labels=(run_b, run_a),
+        show_pairing_gain=True,
     )
-
-    for name, result in ((run_a, result_a), (run_b, result_b)):
-        results = result["results"]
-        print(f"\n{name} ({result['infosets']:,} infosets):")
-        print(f"  {results['exploitability_mbb']:.1f} mbb/g (± {results['std_error_mbb']:.1f})")
-        _print_variance_decomposition(results)
-
-    print(f"\nPAIRED DIFFERENCE (A - B, {comparison['n']} common deals):")
-    print(
-        f"  {comparison['mean_diff']:.1f} mbb/g (± {comparison['se_diff']:.1f}; "
-        f"95% CI [{comparison['ci_lower']:.1f}, {comparison['ci_upper']:.1f}])"
-    )
-    print(f"  p-value: {comparison['p_value']:.4f} | correlation: {comparison['correlation']:.3f}")
-    print(
-        f"  pairing gain: SE {comparison['se_diff']:.1f} vs {comparison['se_unpaired']:.1f} "
-        f"unpaired ({comparison['se_unpaired'] / max(comparison['se_diff'], 1e-12):.1f}x tighter)"
-    )
-    if comparison["is_significant"]:
-        better = run_b if comparison["mean_diff"] > 0 else run_a
-        print(f"  VERDICT: {better} is significantly less exploitable (95% level).")
-    else:
-        print("  VERDICT: no significant difference at the 95% level.")
 
 
 @app.local_entrypoint()
@@ -887,7 +849,7 @@ def run_deployed_gate(
     exploitable — the resolver's measured cut in real (LBR-boundable)
     exploitability, the Plan C headline number.
     """
-    from src.pipeline.evaluation.statistics import compare_paired_samples
+    from src.pipeline.evaluation.paired_report import report_paired_lbr
     from src.shared.orchestration_log import record_spawn
 
     fn = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout)
@@ -925,34 +887,12 @@ def run_deployed_gate(
     result_bare = _await_call(call_bare, run_id, "evaluate")
     result_deployed = _await_call(call_deployed, run_id, "evaluate")
 
-    results_bare = result_bare["results"]
-    results_deployed = result_deployed["results"]
-    if results_bare["base_seed"] != results_deployed["base_seed"]:
-        raise RuntimeError(
-            f"base_seed mismatch ({results_bare['base_seed']} vs "
-            f"{results_deployed['base_seed']}): the evals are not paired."
-        )
-
-    comparison = compare_paired_samples(
-        results_bare["pair_samples_mbb"], results_deployed["pair_samples_mbb"]
+    report_paired_lbr(
+        (f"{run_id} — bare blueprint", result_bare["results"]),
+        (f"{run_id} — deployed", result_deployed["results"]),
+        diff_label="bare - deployed",
+        better_labels=("DEPLOYED", "BARE BLUEPRINT"),
     )
-
-    for name, results in (("bare blueprint", results_bare), ("deployed", results_deployed)):
-        print(f"\n{run_id} — {name}:")
-        print(f"  {results['exploitability_mbb']:.1f} mbb/g (± {results['std_error_mbb']:.1f})")
-        _print_variance_decomposition(results)
-
-    print(f"\nPAIRED DIFFERENCE (bare - deployed, {comparison['n']} common deals):")
-    print(
-        f"  {comparison['mean_diff']:.1f} mbb/g (± {comparison['se_diff']:.1f}; "
-        f"95% CI [{comparison['ci_lower']:.1f}, {comparison['ci_upper']:.1f}])"
-    )
-    print(f"  p-value: {comparison['p_value']:.4f} | correlation: {comparison['correlation']:.3f}")
-    if comparison["is_significant"]:
-        better = "DEPLOYED" if comparison["mean_diff"] > 0 else "BARE BLUEPRINT"
-        print(f"  VERDICT: {better} is significantly less exploitable (95% level).")
-    else:
-        print("  VERDICT: no significant difference at the 95% level.")
 
 
 @app.local_entrypoint()
