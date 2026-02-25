@@ -91,9 +91,15 @@ def collect_keys(
 
 
 def checkpoint(manager: SharedArrayWorkerManager, iteration: int) -> None:
-    """Save checkpoint to disk after collecting key mappings from workers."""
+    """Save checkpoint to disk after collecting key mappings from workers.
+
+    The collect timeout must cover the WORST-case delta, not the typical one:
+    the first collect of a run ships every key allocated so far (minutes of
+    pickling per worker at production tree sizes — few workers and a late
+    first checkpoint compound), and the default 60s killed exactly such runs.
+    """
     with checkpoint_profile.phase("collect_keys"):
-        collected = collect_keys(manager)
+        collected = collect_keys(manager, timeout=1800.0)
 
     # collect_keys merges into the coordinator storage's own dicts and returns
     # them; these assignments are identity-preserving (no copies of 10M+ entries).
