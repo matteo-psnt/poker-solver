@@ -5,27 +5,15 @@ import webbrowser
 
 from src.interfaces.api.app import FastAPIChartServer
 from src.interfaces.api.chart_service import ChartService
+from src.interfaces.cli.flows.run_picker import select_run
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
-from src.pipeline import services
 
 
 def view_preflop_chart(ctx: CliContext) -> None:
     """Handle viewing preflop strategy chart."""
-    runs = services.list_runs(ctx.runs_dir)
-
-    if not runs:
-        ui.error(f"No trained runs found in {ctx.runs_dir}")
-        ui.pause()
-        return
-
-    selected_run = prompts.select(
-        ctx,
-        "Select run to visualize:",
-        choices=[*runs, "Cancel"],
-    )
-
-    if selected_run == "Cancel" or selected_run is None:
+    selected_run = select_run(ctx, "Select run to visualize:")
+    if selected_run is None:
         return
 
     if not _ensure_ui_build(ctx):

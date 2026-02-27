@@ -6,6 +6,7 @@ from typing import cast
 
 from src.interfaces.cli.flows.combo_precompute import handle_combo_precompute
 from src.interfaces.cli.flows.config_menu import select_config
+from src.interfaces.cli.flows.run_picker import select_run
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
 from src.pipeline import services
@@ -45,20 +46,8 @@ def evaluate_solver(ctx: CliContext) -> None:
     """Evaluate a trained solver."""
     ui.header("Evaluate Solver")
 
-    runs = services.list_runs(ctx.runs_dir)
-
-    if not runs:
-        ui.error(f"No trained runs found in {ctx.runs_dir}")
-        ui.pause()
-        return
-
-    selected_run = prompts.select(
-        ctx,
-        "Select run to evaluate:",
-        choices=[*runs, "Cancel"],
-    )
-
-    if selected_run is None or selected_run == "Cancel":
+    selected_run = select_run(ctx, "Select run to evaluate:")
+    if selected_run is None:
         return
 
     run_dir = ctx.runs_dir / selected_run
@@ -138,20 +127,10 @@ def view_runs(ctx: CliContext) -> None:
     """View past training runs."""
     ui.header("Past Training Runs")
 
-    runs = services.list_runs(ctx.runs_dir)
-
-    if not runs:
-        ui.error(f"No training runs found in {ctx.runs_dir}")
-        ui.pause()
-        return
-
-    selected = prompts.select(
-        ctx,
-        "Select run to view details:",
-        choices=[*runs, "Back"],
+    selected = select_run(
+        ctx, "Select run to view details:", cancel_label="Back", allow_unloadable=True
     )
-
-    if selected is None or selected == "Back":
+    if selected is None:
         return
 
     run_dir = ctx.runs_dir / selected
@@ -181,20 +160,8 @@ def resume_training(ctx: CliContext) -> None:
     """Resume training from a checkpoint."""
     ui.header("Resume Training")
 
-    runs = services.list_runs(ctx.runs_dir)
-
-    if not runs:
-        ui.error(f"No training runs found in {ctx.runs_dir}")
-        ui.pause()
-        return
-
-    selected = prompts.select(
-        ctx,
-        "Select run to view:",
-        choices=[*runs, "Cancel"],
-    )
-
-    if selected is None or selected == "Cancel":
+    selected = select_run(ctx, "Select run to resume:")
+    if selected is None:
         return
 
     run_dir = ctx.runs_dir / selected
