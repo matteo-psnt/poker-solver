@@ -74,6 +74,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+from tqdm import tqdm
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
@@ -773,7 +774,7 @@ def compute_lbr_exploitability(
         engine = _HUNLLocalBestResponse(blueprint, config, np.random.default_rng(base_seed))
         pairs = [
             _play_hand_pair(engine, hand, base_seed, starting_stack)
-            for hand in range(config.num_hands)
+            for hand in tqdm(range(config.num_hands), desc="LBR hands", unit="hand")
         ]
     else:
         if blueprint_factory is None:
@@ -926,6 +927,14 @@ def _run_hands_parallel(
         initializer=_init_worker,
         initargs=(blueprint_factory, config, base_seed, starting_stack),
     ) as pool:
-        # pool.map preserves input order → results are in canonical hand order, so the
-        # mean/std reduction is bitwise-identical to the serial path.
-        return pool.map(_worker_play_hand, range(config.num_hands), chunksize=chunksize)
+        # imap preserves input order exactly like map (results stay in canonical hand
+        # order, so the mean/std reduction is bitwise-identical), but yields as chunks
+        # finish — so tqdm can render live progress on an otherwise silent eval.
+        return list(
+            tqdm(
+                pool.imap(_worker_play_hand, range(config.num_hands), chunksize=chunksize),
+                total=config.num_hands,
+                desc="LBR hands",
+                unit="hand",
+            )
+        )
