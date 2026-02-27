@@ -95,14 +95,40 @@ class TestDCFR:
 
 
 class TestPruning:
-    """Regret-based pruning is unimplemented on shared storage and rejected at load.
+    """Regret-based pruning, derived live from the persistent regrets each visit
+    (``InfoSet.pruned_mask``) — no stored mask. The mask logic is unit-tested in
+    ``test_infoset.py``; here we check the config guard and end-to-end training."""
 
-    The per-action pruned mask lives only on the per-visit ``InfoSet`` view and has
-    no shared-array backing, so a mark never survives to the next visit. The knob is
-    refused at config load rather than silently doing nothing (see ``SolverConfig``).
-    """
+    def test_pruning_requires_external_sampling(self):
+        """Pruning skips the traverser's own dominated actions, which only external
+        sampling enumerates; outcome sampling is rejected at load."""
+        with pytest.raises(ValidationError, match="requires sampling_method='external'"):
+            make_test_config(seed=42, enable_pruning=True, sampling_method="outcome")
 
-    @pytest.mark.parametrize("sampling_method", ["external", "outcome"])
-    def test_pruning_rejected_at_config(self, sampling_method):
-        with pytest.raises(ValidationError, match="enable_pruning=True is not supported"):
-            make_test_config(seed=42, enable_pruning=True, sampling_method=sampling_method)
+    @pytest.mark.slow
+    def test_pruning_training_produces_valid_strategies(self):
+        """Training with pruning enabled runs to completion and yields valid averages."""
+        action_abs = ActionModel(make_test_config())
+        card_abs = DummyCardAbstraction()
+        storage = build_test_storage(
+            num_workers=1, worker_id=0, session_id="test_pruning", is_coordinator=True
+        )
+        config = make_test_config(
+            seed=42,
+            enable_pruning=True,
+            pruning_threshold=1.0,  # aggressive so pruning actually fires at small scale
+            prune_start_iteration=10,
+            prune_reactivate_frequency=25,
+            sampling_method="external",
+        )
+        solver = MCCFRSolver(action_abs, card_abs, storage, config=config)
+
+        for _ in range(100):
+            solver.train_iteration()
+
+        assert solver.iteration == 100
+        assert solver.num_infosets() > 0
+        for infoset in storage.iter_infosets():
+            strategy = infoset.get_average_strategy()
+            assert 0.99 <= strategy.sum() <= 1.01
+            assert all(p >= 0 for p in strategy)

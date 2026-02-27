@@ -127,11 +127,28 @@ def cfr_external_sampling(
 
     if current_player == traversing_player:
         action_utilities = np.zeros(len(legal_actions))
+        solver_config = self.config.solver
+        prune = (
+            infoset.pruned_mask(
+                self.iteration,
+                solver_config.pruning_threshold,
+                solver_config.prune_start_iteration,
+                solver_config.prune_reactivate_frequency,
+            )
+            if solver_config.enable_pruning
+            else None
+        )
+        # Collapse "nothing pruned this visit" to None so every node where pruning
+        # does nothing — the overwhelming majority — takes the vectorised fast path
+        # exactly like a pruning-disabled run. Pruning then pays the masked
+        # Python-loop paths only on the few nodes that actually skip an action.
+        if prune is not None and not prune.any():
+            prune = None
 
         for local_idx, action in enumerate(legal_actions):
             original_idx = valid_indices[local_idx]
 
-            if self.config.solver.enable_pruning and infoset.is_pruned(original_idx):
+            if prune is not None and prune[original_idx]:
                 continue
 
             next_state = state.apply_action(action, self.rules)
@@ -145,9 +162,9 @@ def cfr_external_sampling(
                 reach_probs,
             )
 
-        if self.config.solver.enable_pruning:
+        if prune is not None:
             unpruned_mask = np.array(
-                [not infoset.is_pruned(valid_indices[i]) for i in range(len(legal_actions))]
+                [not prune[valid_indices[i]] for i in range(len(legal_actions))]
             )
             if np.any(unpruned_mask):
                 unpruned_strategy = strategy[unpruned_mask]
@@ -167,8 +184,7 @@ def cfr_external_sampling(
         # Skipped only for placeholder views whose global ID is still unknown.
         if infoset.writable:
             opponent = 1 - current_player
-            solver_config = self.config.solver
-            if not solver_config.enable_pruning and len(valid_indices) == infoset.num_actions:
+            if prune is None and len(valid_indices) == infoset.num_actions:
                 apply_regret_updates(
                     infoset.regrets,
                     action_utilities,
@@ -184,7 +200,7 @@ def cfr_external_sampling(
                 for local_idx in range(len(legal_actions)):
                     original_idx = valid_indices[local_idx]
 
-                    if solver_config.enable_pruning and infoset.is_pruned(original_idx):
+                    if prune is not None and prune[original_idx]:
                         continue
 
                     regret = action_utilities[local_idx] - node_utility
@@ -197,14 +213,6 @@ def cfr_external_sampling(
                         dcfr_alpha=solver_config.dcfr_alpha,
                         dcfr_beta=solver_config.dcfr_beta,
                     )
-
-            if self.config.solver.enable_pruning:
-                infoset.update_pruning(
-                    iteration=self.iteration,
-                    pruning_threshold=self.config.solver.pruning_threshold,
-                    prune_start_iteration=self.config.solver.prune_start_iteration,
-                    prune_reactivate_frequency=self.config.solver.prune_reactivate_frequency,
-                )
 
             # Diagnostics only (no strategy consumer reads these): visit count
             # and running utility of the traverser's own nodes. The average

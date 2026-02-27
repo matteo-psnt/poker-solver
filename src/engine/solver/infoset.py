@@ -190,9 +190,6 @@ class InfoSet:
             self.regrets = np.zeros(self.num_actions, dtype=np.float64)
             self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)
 
-        # Pruning state (regret-based action pruning); allocated on first use.
-        self._pruned: np.ndarray | None = None
-
         # Statistics tracking
         self.reach_count = 0  # Number of times this infoset was reached
         self.cumulative_utility = 0.0  # Sum of node utilities (for average)
@@ -205,17 +202,6 @@ class InfoSet:
         # (e.g. a remote infoset whose global ID this worker has not learned yet).
         # Traversal skips regret/strategy updates on non-writable infosets.
         self.writable = True
-
-    @property
-    def pruned(self) -> np.ndarray:
-        """Per-action pruning flags, allocated lazily (most runs never prune)."""
-        if self._pruned is None:
-            self._pruned = np.zeros(self.num_actions, dtype=bool)
-        return self._pruned
-
-    @pruned.setter
-    def pruned(self, value: np.ndarray) -> None:
-        self._pruned = value
 
     def sync_stats_to_storage(
         self,
@@ -387,60 +373,33 @@ class InfoSet:
             # Vanilla CFR: Allow negative regrets
             self.regrets[action_idx] += weighted_regret
 
-    def is_pruned(self, action_idx: int) -> bool:
-        """
-        Check if an action is currently pruned.
-
-        Args:
-            action_idx: Index of action in legal_actions
-
-        Returns:
-            True if action is pruned, False otherwise
-        """
-        if action_idx < 0 or action_idx >= self.num_actions:
-            raise ValueError(f"Invalid action index: {action_idx}")
-        return bool(self.pruned[action_idx])
-
-    def update_pruning(
+    def pruned_mask(
         self,
         iteration: int,
         pruning_threshold: float,
         prune_start_iteration: int,
         prune_reactivate_frequency: int,
-    ):
+    ) -> np.ndarray:
+        """Per-action prune flags for this visit, derived live from the regrets.
+
+        Regret-based pruning (Brown & Sandholm 2019): an action whose cumulative
+        regret is below ``-pruning_threshold`` is skipped, so its subtree is not
+        traversed and its regret is not updated this visit. It needs no stored
+        state — ``regrets`` already persists in shared storage, and because a
+        pruned action's regret is frozen while pruned, the decision is naturally
+        sticky across visits. A periodic reactivation window (before
+        ``prune_start_iteration`` and whenever ``iteration`` is a multiple of
+        ``prune_reactivate_frequency``) returns an all-false mask so every action
+        is re-explored and a prematurely pruned action can recover — the
+        convergence safeguard. Never prunes every action: there must be something
+        to sample and to renormalise the node value over.
         """
-        Update pruning state based on current regrets.
-
-        Actions with sufficiently negative regrets are pruned (temporarily excluded
-        from traversal). Pruned actions are periodically re-activated to ensure
-        convergence guarantees.
-
-        Args:
-            iteration: Current iteration number
-            pruning_threshold: Absolute regret threshold (prune if regret < -threshold)
-            prune_start_iteration: Don't prune until this iteration (allow exploration)
-            prune_reactivate_frequency: Re-enable all actions every N iterations
-        """
-        # Don't prune in early iterations (need exploration)
-        if iteration < prune_start_iteration:
-            self.pruned[:] = False
-            return
-
-        # Periodic full re-activation (ensures convergence)
-        if iteration % prune_reactivate_frequency == 0:
-            self.pruned[:] = False
-            return
-
-        # Prune actions with deeply negative regret
-        self.pruned |= self.regrets < -pruning_threshold
-        # Re-activate actions with positive regret
-        self.pruned &= ~(self.regrets > 0)
-
-        # Safety: ensure at least one action is not pruned
-        if np.all(self.pruned):
-            # Un-prune the action with highest (least negative) regret
-            best_idx = int(np.argmax(self.regrets))
-            self.pruned[best_idx] = False
+        if iteration < prune_start_iteration or iteration % prune_reactivate_frequency == 0:
+            return np.zeros(self.num_actions, dtype=bool)
+        mask = self.regrets < -pruning_threshold
+        if mask.all():
+            return np.zeros(self.num_actions, dtype=bool)
+        return mask
 
     def __str__(self) -> str:
         """Human-readable string representation."""
