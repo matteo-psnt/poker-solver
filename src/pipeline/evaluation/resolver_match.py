@@ -82,6 +82,15 @@ def play_resolver_match(
 
         seat_payoffs: list[float] = []
         for resolver_seat in (0, 1):
+            # The bare-blueprint opponent samples its mixed strategy from the global
+            # legacy RNG (sample_action_from_strategy -> np.random.choice), which
+            # play_resolver_match never seeds -- so without this the advertised
+            # ``seed`` did not actually determine the result (the opponent consumed
+            # whatever ambient global-RNG state the process was in). Seed it per game
+            # for reproducibility, mirroring blueprint_match's per-game np.random.seed.
+            np.random.seed(
+                int(np.random.SeedSequence([seed, deal, resolver_seat]).generate_state(1)[0])
+            )
             payoff, game_decisions, game_fallbacks = _play_game(
                 solver,
                 rules,
