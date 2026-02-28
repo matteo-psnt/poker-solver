@@ -31,3 +31,20 @@ class ChartResponse(BaseModel):
     ranks: str
     actions: list[dict[str, Any]]
     grid: list[list[dict[str, Any]]]
+
+
+class NewHandRequest(BaseModel):
+    """Optional seat/button overrides for a new hand; both randomized when unset."""
+
+    human_seat: int | None = Field(default=None, ge=0, le=1, alias="humanSeat")
+    button: int | None = Field(default=None, ge=0, le=1)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ActionRequest(BaseModel):
+    """The human's chosen action, referenced by its id in the current legal set."""
+
+    action_id: int = Field(ge=0, alias="actionId")
+
+    model_config = ConfigDict(populate_by_name=True)
