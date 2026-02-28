@@ -145,20 +145,44 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     if total_rows == 0:
         return True
 
+    # Progress logging matters here specifically: for the num_workers=1 resume
+    # bootstrap, this worker owns EVERY row, so each phase below is single-threaded
+    # over the whole table -- minutes at production sizes. Without the per-phase
+    # timing, resume emits only the trailing summary and looks hung the whole time.
+    wid = storage.worker_id
+    load_start = time.perf_counter()
+    print(
+        f"[checkpoint-load] worker {wid}: loading up to {total_rows:,} rows "
+        f"(num_workers={storage.num_workers}) from {storage.checkpoint_dir}...",
+        flush=True,
+    )
+
     # Read ONLY this worker's shard. Reading the whole table here (which is what the
     # pickled format forced) cost ~28 GB per worker at 18.9M keys and is what made a
     # 16-worker resume OOM; ownership is decided on a memory-mapped hash column.
+    phase_start = time.perf_counter()
     owned = key_table.read_owned_rows(paths.key_table, storage.num_workers, storage.worker_id)
     my_keys = owned.keys
     if not my_keys:
-        print(f"Worker {storage.worker_id} owns 0/{total_rows} keys from checkpoint")
+        print(f"Worker {wid} owns 0/{total_rows} keys from checkpoint", flush=True)
         return True
+    print(
+        f"[checkpoint-load] worker {wid}: read {len(my_keys):,}/{total_rows:,} owned keys "
+        f"in {time.perf_counter() - phase_start:.1f}s",
+        flush=True,
+    )
 
     my_old_ids_array = owned.row_ids.astype(np.int32, copy=False)
 
     # Read only this worker's rows; the full arrays would be ~1.9 GB per worker at
     # 18.9M keys (~30 GB across 16) of data it discards immediately.
+    phase_start = time.perf_counter()
     arrays, max_actions = load_checkpoint_rows(storage.checkpoint_dir, my_old_ids_array)
+    print(
+        f"[checkpoint-load] worker {wid}: read {len(my_keys):,} array rows "
+        f"in {time.perf_counter() - phase_start:.1f}s",
+        flush=True,
+    )
 
     if max_actions != storage.max_actions:
         raise ValueError(f"Checkpoint max_actions mismatch: {max_actions} vs {storage.max_actions}")
@@ -166,6 +190,7 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     if storage.capacity < total_rows:
         raise ValueError(f"Storage capacity too small: {storage.capacity} vs {total_rows}")
 
+    phase_start = time.perf_counter()
     new_ids = []
     for key in my_keys:
         new_id = storage.allocate_id()
@@ -186,6 +211,15 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
 
     for new_id, legal_actions in zip(new_ids, owned.action_lists):
         storage.state.legal_actions_cache[new_id] = legal_actions
+    print(
+        f"[checkpoint-load] worker {wid}: populated {len(my_keys):,} infosets "
+        f"in {time.perf_counter() - phase_start:.1f}s",
+        flush=True,
+    )
 
-    print(f"Worker {storage.worker_id} loaded {len(my_keys)}/{total_rows} infosets from checkpoint")
+    print(
+        f"Worker {wid} loaded {len(my_keys)}/{total_rows} infosets from checkpoint "
+        f"in {time.perf_counter() - load_start:.1f}s total",
+        flush=True,
+    )
     return True
