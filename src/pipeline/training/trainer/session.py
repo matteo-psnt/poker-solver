@@ -12,8 +12,10 @@ from typing import Any
 import numpy as np
 
 from src.core.actions.action_model import ActionModel
+from src.engine.solver.storage import key_table
 from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.engine.solver.storage.helpers import (
+    CheckpointPaths,
     get_missing_checkpoint_files,
     resolve_resume_iteration,
 )
@@ -116,6 +118,15 @@ class TrainingSession:
         if missing_files:
             raise ValueError(f"Checkpoint is incomplete. Missing files: {missing_files}")
 
+        # Cheap non-empty verification: read only the key-table row count (a header
+        # read), not the whole checkpoint. The session's bootstrap storage is built
+        # with load_checkpoint_on_init=False, so the O(N) array/dtype validation the
+        # eager load used to do up front now happens when each worker loads its shard
+        # at train time -- gross corruption surfaces there, loudly, per worker.
+        total_rows = key_table.num_rows(CheckpointPaths.from_dir(run_path).key_table)
+        if total_rows == 0:
+            raise ValueError(f"Checkpoint in {run_path} has no infosets to resume from.")
+
         if metadata.config is None:
             raise ValueError(f"Missing config in run metadata: {run_tracker.metadata_path}")
         config = metadata.config
@@ -123,43 +134,36 @@ class TrainingSession:
         session = cls(config, run_id=run_path.name, run_tracker=run_tracker)
         session.capacity_override = capacity_override
 
-        if session.storage.num_infosets() == 0:
-            raise ValueError(
-                "Failed to load checkpoint data. Storage has 0 infosets.\n"
-                f"Expected to load from: {run_path}"
-            )
-
         session.solver.iteration = checkpoint_iter
 
         assert session.run_tracker is not None
         session.run_tracker.mark_resumed()
 
-        print(f"✅ Resumed from checkpoint at iteration {checkpoint_iter}")
+        print(
+            f"✅ Resumed from checkpoint at iteration {checkpoint_iter} ({total_rows:,} infosets)"
+        )
 
         return session
 
     def release_bootstrap_storage(self) -> None:
         """Free the session-level bootstrap storage before workers are forked.
 
-        ``__init__`` builds a single-worker ``SharedArrayStorage`` so ``resume``
-        can verify the checkpoint actually loads. Two distinct costs follow, and
-        both are released here.
+        ``__init__`` builds a single-worker ``SharedArrayStorage`` as the solver's
+        storage handle. It is built with ``load_checkpoint_on_init=False``, so on
+        resume it holds no checkpoint data -- the actual workers each load their
+        own 1/N shard at train time. This releases its shared-memory arrays:
+        training builds its own coordinator storage under the *same* ``session_id``,
+        whose ``cleanup_stale_shm`` unlinks these segments regardless, so releasing
+        makes the handoff explicit and reclaims the allocation instead of orphaning
+        it for the run's lifetime.
 
-        Shared memory: training builds its own coordinator storage under the
-        *same* ``session_id``, whose ``cleanup_stale_shm`` unlinks these segments
-        regardless -- so releasing makes the handoff explicit and reclaims the
-        allocation instead of orphaning it for the run's lifetime.
-
-        Python heap: with ``num_workers=1`` this storage owns *every* key, so on
-        resume ``owned_keys`` holds one entry per infoset -- measured at ~289
-        bytes each, i.e. ~3 GB at 10.6M infosets and ~5 GB at 18M. Workers are
-        forked, and CPython's refcounting touches inherited pages, so each child
-        copies that heap: ~98 GB across 32 workers at 10.6M infosets, ~84 GB
-        across 16 at 18M. That is the resume OOM -- SIGKILL right after "All N
-        workers started" -- and it is why fresh runs are immune (their heap is
-        near-empty at fork). The worker manager's own storage is built with
-        ``load_checkpoint_on_init=False`` and its dicts are empty at fork, so
-        this bootstrap copy is the whole cost.
+        The key dictionaries below are empty at this point (the bootstrap neither
+        loads a checkpoint nor trains), so clearing them is defensive. It also
+        closes a former resume OOM: when the bootstrap *did* eager-load, its
+        ``owned_keys`` held one entry per infoset (~289 B each, ~3 GB at 10.6M
+        infosets), and forked children copied that heap via CPython refcount page
+        touches -- ~98 GB across 32 workers -- SIGKILLing the run right after "All N
+        workers started". Not eager-loading removes that heap at the source.
 
         Idempotent: safe if training is entered more than once.
         """
