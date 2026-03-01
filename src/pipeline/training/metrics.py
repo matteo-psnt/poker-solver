@@ -38,6 +38,7 @@ class MetricsTracker:
         # For accurate iterations/second calculation
         self.window_start_time = time.time()
         self.window_start_iteration = 0
+        self._last_rate = 0.0
 
         # Utility tracking
         self.utility_window: deque[float] = deque(maxlen=window_size)
@@ -64,6 +65,10 @@ class MetricsTracker:
             utility: Player 0 utility for this iteration
             num_infosets: Total number of infosets discovered
         """
+        # On resume, the first logged iteration is far past 0; anchor the rate
+        # window there so the first reading doesn't cover the whole prior run.
+        if self.iteration == 0 and iteration > 1:
+            self.window_start_iteration = iteration - 1
         self.iteration = iteration
         self.utility_window.append(utility)
         self.infoset_window.append(num_infosets)
@@ -139,13 +144,21 @@ class MetricsTracker:
             return 0.0
 
         iterations_in_window = self.iteration - self.window_start_iteration
+        if iterations_in_window == 0:
+            # Re-read within the same window (e.g., the progress-bar postfix
+            # right after the history row reset it): return the cached rate
+            # instead of a spurious 0.0.
+            return self._last_rate
+
+        rate = float(iterations_in_window / elapsed)
 
         # Reset window if we've accumulated enough iterations
         if iterations_in_window >= self.window_size:
             self.window_start_time = current_time
             self.window_start_iteration = self.iteration
+            self._last_rate = rate
 
-        return float(iterations_in_window / elapsed) if elapsed > 0 else 0.0
+        return rate
 
     def get_elapsed_time(self) -> float:
         """
