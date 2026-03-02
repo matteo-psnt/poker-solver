@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 from tqdm import tqdm
 
-from src.pipeline.training.metrics import compute_quality_from_arrays
+from src.pipeline.training.metrics import (
+    compute_quality_from_arrays,
+    mean_policy_l1_delta,
+    regret_matched_policies,
+)
 from src.pipeline.training.metrics_history import MetricsHistoryWriter
 
 from . import reporting
@@ -65,6 +69,15 @@ class TrainingBatchCoordinator:
         self.history_writer = MetricsHistoryWriter(session.run_dir / "metrics.jsonl")
         seed = session.config.system.seed
         self._quality_rng = np.random.default_rng(seed if seed is not None else 0)
+
+        # Fixed probe set for the policy-convergence delta: a constant sample of
+        # infoset ids whose current policy is diffed batch-to-batch. Fixed once,
+        # after a warmup, so the set spans more than the first-discovered
+        # (early-street) infosets. Biased-but-consistent is all a delta needs.
+        self._probe_ids: np.ndarray | None = None
+        self._prev_probe_policies: dict[int, np.ndarray] | None = None
+        self._probe_size = 1000
+        self._probe_warmup_infosets = 10_000
 
     def run_batch(self, batch_idx: int, batch_iterator: tqdm, state: BatchLoopState) -> None:
         """Run a single batch and update shared loop state."""
@@ -223,6 +236,38 @@ class TrainingBatchCoordinator:
             print(f"[metrics-history] quality sampling skipped: {exc}", flush=True)
             return None
 
+    def _policy_delta(self, total_infosets: int) -> float | None:
+        """Mean L1 change of the fixed probe set's current policy since last batch.
+
+        ~0 => the policy has stopped moving (converged/plateaued); larger => still
+        learning. None until the probe set is fixed (post-warmup) and one prior
+        snapshot exists. Reads shared arrays only — never perturbs training.
+        """
+        storage = getattr(self.worker_manager, "storage", None)
+        if storage is None or total_infosets < self._probe_warmup_infosets:
+            return None
+        try:
+            action_counts = storage.shared_action_counts
+            regrets = storage.shared_regrets
+            if self._probe_ids is None:
+                capacity = action_counts.shape[0]
+                probes = self._quality_rng.integers(0, capacity, size=self._probe_size * 64)
+                hits = np.unique(probes[action_counts[probes] > 0])
+                if hits.size < self._probe_size:
+                    return None
+                self._probe_ids = self._quality_rng.choice(hits, self._probe_size, replace=False)
+            current = regret_matched_policies(regrets, action_counts, self._probe_ids)
+            delta = (
+                None
+                if self._prev_probe_policies is None
+                else mean_policy_l1_delta(self._prev_probe_policies, current)
+            )
+            self._prev_probe_policies = current
+            return delta
+        except Exception as exc:  # pragma: no cover - defensive; metrics must not kill a run
+            print(f"[metrics-history] policy delta skipped: {exc}", flush=True)
+            return None
+
     def _record_history(
         self,
         iteration: int,
@@ -264,6 +309,9 @@ class TrainingBatchCoordinator:
             # size; None on batches where the exchange barrier was skipped.
             "exchange_s": exchange_s,
             "unresolved_frontier": unresolved_frontier,
+            # Mean L1 change of the fixed probe set's current policy since the
+            # previous batch: ~0 = converged/plateaued, larger = still learning.
+            "policy_delta_l1": self._policy_delta(total_infosets),
             "avg_utility": metrics.get_avg_utility(),
             "utility_std": metrics.get_utility_std(),
         }
