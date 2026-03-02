@@ -300,6 +300,7 @@ def _worker_loop(
 
                 utilities = []
                 dropped_before = solver.dropped_unknown_id_updates
+                applied_before = solver.applied_updates
                 iter_start = time.time()
 
                 try:
@@ -334,6 +335,7 @@ def _worker_loop(
                             "dropped_unknown_id_updates": (
                                 solver.dropped_unknown_id_updates - dropped_before
                             ),
+                            "applied_updates": solver.applied_updates - applied_before,
                             # True when this worker has no ID-sync work in any
                             # direction; the coordinator skips the exchange
                             # barrier when every worker reports idle.
