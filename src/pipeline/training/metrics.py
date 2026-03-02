@@ -411,6 +411,50 @@ def compute_quality_from_arrays(
     }
 
 
+def compute_per_street_quality(
+    sampled_items: list[tuple[object, int]],
+    regrets: np.ndarray,
+    action_counts: np.ndarray,
+) -> dict[str, dict[str, float]]:
+    """Per-street solver-quality from a sample of ``(InfoSetKey, id)`` pairs.
+
+    Buckets sampled infosets by ``key.street.name`` (the caller supplies keys, so
+    no ID→street map is needed) and reports mean positive regret, average
+    normalized entropy, uniform-strategy %, and count per street — the ``WHERE is
+    convergence lagging`` view (e.g. river stays uniform long after flop sharpens).
+    """
+    regrets_by_street: dict[str, list[float]] = {}
+    entropy_by_street: dict[str, list[float]] = {}
+    uniform_by_street: dict[str, int] = {}
+    count_by_street: dict[str, int] = {}
+    for key, row_id in sampled_items:
+        k = int(action_counts[row_id])
+        if k <= 0:
+            continue
+        pos = np.maximum(np.asarray(regrets[row_id, :k], dtype=np.float64), 0.0)
+        total = float(pos.sum())
+        strategy = pos / total if total > 0 else np.full(k, 1.0 / k)
+        entropy = normalized_entropy(strategy)
+        street = getattr(getattr(key, "street", None), "name", "UNKNOWN")
+        if total > 0:
+            regrets_by_street.setdefault(street, []).append(float(pos[pos > 0].mean()))
+        entropy_by_street.setdefault(street, []).append(entropy)
+        uniform_by_street[street] = uniform_by_street.get(street, 0) + (1 if entropy > 0.99 else 0)
+        count_by_street[street] = count_by_street.get(street, 0) + 1
+
+    out: dict[str, dict[str, float]] = {}
+    for street, n in count_by_street.items():
+        regret_list = regrets_by_street.get(street, [])
+        entropy_list = entropy_by_street.get(street, [])
+        out[street] = {
+            "mean_pos_regret": float(np.mean(regret_list)) if regret_list else 0.0,
+            "avg_entropy": float(np.mean(entropy_list)) if entropy_list else 0.0,
+            "uniform_pct": round(100.0 * uniform_by_street.get(street, 0) / n, 2) if n else 0.0,
+            "count": n,
+        }
+    return out
+
+
 def regret_matched_policies(
     regrets: np.ndarray, action_counts: np.ndarray, ids: np.ndarray
 ) -> dict[int, np.ndarray]:
