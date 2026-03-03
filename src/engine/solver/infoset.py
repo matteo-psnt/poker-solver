@@ -15,8 +15,9 @@ import numpy as np
 
 from src.core.game.actions import Action
 from src.engine.solver.numba_ops import (
+    WEIGHTING_CODES,
+    apply_regret_updates,
     average_strategy,
-    compute_dcfr_weight,
     regret_matching,
 )
 
@@ -331,17 +332,17 @@ class InfoSet:
         dcfr_beta: float = 0.0,
     ):
         """
-        Update cumulative regret for an action.
+        Update cumulative regret for one action.
 
-        Supports multiple CFR variants:
-        - Vanilla CFR: regrets can be negative
-        - CFR+: regrets are floored at 0 (much faster convergence)
-        - Linear CFR: regrets weighted by iteration number
-        - DCFR: cumulative regrets discounted each iteration (Brown & Sandholm 2019)
+        Thin single-action delegate to :func:`apply_regret_updates` — the one
+        implementation of the CFR/CFR+/linear/DCFR regret math. With
+        ``node_utility=0`` and ``opponent_reach=1`` the kernel's weighted
+        regret reduces exactly to ``regret`` ((r - 0.0) * 1.0 == r), so this
+        adds no math of its own.
 
         Args:
             action_idx: Index of action in legal_actions
-            regret: Regret value to add (can be negative)
+            regret: Already-weighted regret value to add (can be negative)
             cfr_plus: If True, floor regrets at 0 (CFR+)
             iteration: Current iteration (for linear/DCFR weighting)
             iteration_weighting: One of {'none', 'linear', 'dcfr'}.
@@ -351,27 +352,18 @@ class InfoSet:
         if action_idx < 0 or action_idx >= self.num_actions:
             raise ValueError(f"Invalid action index: {action_idx}")
 
-        # DCFR: Discount cumulative regret BEFORE adding new regret
-        if iteration_weighting == "dcfr":
-            # Apply discount factor to existing cumulative regret
-            # Discount based on whether cumulative regret is positive or negative
-            is_positive = self.regrets[action_idx] > 0
-            discount_factor = compute_dcfr_weight(iteration, dcfr_alpha, dcfr_beta, is_positive)
-            self.regrets[action_idx] *= discount_factor
-
-        # Apply weighting to incoming regret
-        weighted_regret = regret
-        if iteration_weighting == "linear":
-            # Linear CFR: multiply by iteration number
-            weighted_regret = regret * iteration
-
-        # Update regret
-        if cfr_plus:
-            # CFR+: Floor cumulative regrets at 0
-            self.regrets[action_idx] = max(0, self.regrets[action_idx] + weighted_regret)
-        else:
-            # Vanilla CFR: Allow negative regrets
-            self.regrets[action_idx] += weighted_regret
+        apply_regret_updates(
+            self.regrets,
+            np.array([action_idx], dtype=np.int64),
+            np.array([regret], dtype=np.float64),
+            0.0,
+            1.0,
+            cfr_plus,
+            iteration,
+            WEIGHTING_CODES[iteration_weighting],
+            dcfr_alpha,
+            dcfr_beta,
+        )
 
     def pruned_mask(
         self,

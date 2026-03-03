@@ -231,13 +231,8 @@ def solve_subgame(
         elif iterations >= _MIN_ITERATIONS and time.perf_counter() >= deadline:
             break
 
-    avg = node_data[id(root)].strategy_sum
-    totals = avg.sum(axis=1, keepdims=True)
-    uniform = np.full(avg.shape[1], 1.0 / avg.shape[1])
     return SubgameSolution(
-        root_strategy=np.where(
-            totals > NORMALIZE_EPS, avg / np.maximum(totals, NORMALIZE_EPS), uniform
-        ),
+        root_strategy=_normalize_or_uniform(node_data[id(root)].strategy_sum),
         root_values=root_values,
         iterations=iterations,
     )
@@ -348,7 +343,9 @@ def _cfr_pass(
     actor_is_hero = node.state.current_player == ctx.hero
     reach_actor = reach_hero if actor_is_hero else reach_opp
 
-    strategy = _regret_matching(nd.regrets)
+    # RM+ invariant: `nd.regrets` is clipped at 0 in place after every update,
+    # so normalizing the raw rows IS regret matching here.
+    strategy = _normalize_or_uniform(nd.regrets)
     nd.strategy_sum += reach_actor[:, None] * strategy
 
     v_hero = np.zeros(NUM_COMBOS)
@@ -373,12 +370,18 @@ def _cfr_pass(
     return v_hero, v_opp, action_values
 
 
-def _regret_matching(regrets: np.ndarray) -> np.ndarray:
-    # RM+ invariant: `regrets` is clipped at 0 in place after every update, so
-    # it is already nonnegative here.
-    totals = regrets.sum(axis=1, keepdims=True)
-    uniform = np.full(regrets.shape[1], 1.0 / regrets.shape[1])
-    return np.where(totals > NORMALIZE_EPS, regrets / np.maximum(totals, NORMALIZE_EPS), uniform)
+def _normalize_or_uniform(rows: np.ndarray) -> np.ndarray:
+    """Normalize each (combos x actions) row to a distribution, uniform where empty.
+
+    The resolver's one normalization: RM+ regret matching (rows are already
+    clipped at 0) and average-strategy extraction are the same operation on
+    nonnegative rows. Intentionally distinct from the 1-D numba training
+    kernels in ``numba_ops`` (exact ``sum > 0`` semantics, hot path) — see
+    the note on ``regret_matching`` there.
+    """
+    totals = rows.sum(axis=1, keepdims=True)
+    uniform = np.full(rows.shape[1], 1.0 / rows.shape[1])
+    return np.where(totals > NORMALIZE_EPS, rows / np.maximum(totals, NORMALIZE_EPS), uniform)
 
 
 def _leaf_values(
