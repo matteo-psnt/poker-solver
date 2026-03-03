@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import logging
 import shutil
 import sys
 import time
@@ -14,6 +15,8 @@ import numpy as np
 
 from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.engine.solver.storage.shared_array_layout import get_shm_name
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage
@@ -48,10 +51,9 @@ def _advise_hugepages(buffers: list[memoryview]) -> None:
                 )
             except OSError:
                 shmem_mode = "unknown"
-            print(
+            logger.info(
                 f"Hugepage advice: madvise ok on {ok}/{len(buffers)} mappings "
                 f"(shmem_enabled: {shmem_mode})",
-                flush=True,
             )
     except Exception:
         pass
@@ -129,7 +131,7 @@ def create_shared_memory(storage: SharedArrayStorage) -> None:
     for spec in ARRAY_SPECS:
         getattr(storage, spec.attr).fill(0)
 
-    print(
+    logger.info(
         "Master created shared memory: "
         f"regrets={sizes['shared_regrets'] // 1024 // 1024}MB, "
         f"strategy={sizes['shared_strategy_sum'] // 1024 // 1024}MB"

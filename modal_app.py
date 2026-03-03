@@ -54,6 +54,17 @@ DEFAULT_CPU = 8
 DEFAULT_MEMORY_MB = 8192
 
 
+def _configure_logging() -> None:
+    """Route library-layer logs (bare-format, stderr) in this process.
+
+    Called at the top of every remote function and of local entrypoints that
+    render library reports; deferred import to match this module's convention.
+    """
+    from src.shared.log import configure_logging
+
+    configure_logging()
+
+
 @app.function(
     image=image,
     volumes={DATA_MOUNT: data_volume},
@@ -71,6 +82,7 @@ def precompute(
     Output lands under /root/data/combo_abstraction (the Volume). num_workers is pinned
     to the cpu reservation (the container reports host cores, not the reservation).
     """
+    _configure_logging()
     from src.pipeline import services
 
     out = services.precompute_abstraction(
@@ -103,6 +115,7 @@ def train(
     commit: bool = True,
 ) -> dict[str, Any]:
     """Run a headless training session in the container and (optionally) persist checkpoints."""
+    _configure_logging()
     from src.pipeline import services
 
     out = services.train(
@@ -171,6 +184,7 @@ def evaluate(
     ``opponent="deployed"`` measures blueprint+resolver (the system that actually
     plays) with solves pinned to ``resolver_iterations`` CFR iterations.
     """
+    _configure_logging()
     from src.pipeline import services
     from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 
@@ -225,6 +239,7 @@ def resolver_gate(
     seed: int = 1,
 ) -> dict[str, Any]:
     """Duplicate-deal head-to-head: blueprint+resolver vs bare blueprint."""
+    _configure_logging()
     from src.pipeline import services
 
     data_volume.reload()
@@ -253,6 +268,7 @@ def blueprint_match(
     seed: int = 1,
 ) -> dict[str, Any]:
     """Duplicate-deal head-to-head between two runs' blueprints (A's edge in mbb/hand)."""
+    _configure_logging()
     from src.pipeline import services
 
     data_volume.reload()
@@ -293,6 +309,7 @@ def migrate(run_id: str, dest_run_id: str | None = None) -> dict[str, Any]:
     of raising. ``migrate_run`` deletes the destination on any failure, so a
     destination that exists is a *completed* migration, never a partial one.
     """
+    _configure_logging()
     from src.pipeline.training.migrations import migrate_run
     from src.pipeline.training.versioning import (
         REPRESENTATION_VERSION,
@@ -390,6 +407,7 @@ def resume(
     re-partitioning. ``capacity`` pre-allocates shared storage above the checkpoint's
     capacity so the leg never has to resize mid-run.
     """
+    _configure_logging()
     from src.pipeline import services
 
     data_volume.reload()
@@ -795,6 +813,7 @@ def run_eval(
     Pass --include-off-tree to arm the exploiter with off-tree bet/raise sizes and
     --scorer lookahead for the depth-limited best-response scorer (both produce a
     stronger, still-rigorous exploiter; never mix settings within one comparison)."""
+    _configure_logging()
     from src.pipeline.evaluation.paired_report import print_variance_decomposition
     from src.shared.orchestration_log import record_spawn
 
@@ -851,6 +870,7 @@ def run_compare(
     cancels the shared deal luck and resolves far smaller gaps than comparing two
     independent CIs. Positive ``diff`` means ``run_b`` is less exploitable (better).
     """
+    _configure_logging()
     from src.pipeline.evaluation.paired_report import report_paired_lbr
     from src.shared.orchestration_log import record_spawn
 
@@ -903,6 +923,7 @@ def run_deployed_gate(
     exploitable — the resolver's measured cut in real (LBR-boundable)
     exploitability, the Plan C headline number.
     """
+    _configure_logging()
     from src.pipeline.evaluation.paired_report import report_paired_lbr
     from src.shared.orchestration_log import record_spawn
 

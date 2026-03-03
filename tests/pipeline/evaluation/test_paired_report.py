@@ -3,6 +3,14 @@
 import pytest
 
 from src.pipeline.evaluation.paired_report import report_paired_lbr
+from src.shared.log import configure_logging
+
+
+@pytest.fixture(autouse=True)
+def _bare_logging():
+    # The report goes through the library logger; install the bare stderr handler
+    # (idempotent, resolves sys.stderr dynamically) so capsys sees it in .err.
+    configure_logging()
 
 
 def _results(base_seed: int, samples: list[float]) -> dict:
@@ -38,7 +46,7 @@ def test_reports_comparison_and_verdict(capsys):
     assert comparison["mean_diff"] == pytest.approx(99.25)
     assert comparison["is_significant"]
 
-    out = capsys.readouterr().out
+    out = capsys.readouterr().err
     assert "PAIRED DIFFERENCE (A - B, 4 common deals)" in out
     assert "pairing gain" in out
     assert "VERDICT: arm-b is significantly less exploitable" in out
@@ -53,6 +61,6 @@ def test_insignificant_difference_has_no_winner(capsys):
     )
 
     assert not comparison["is_significant"]
-    out = capsys.readouterr().out
+    out = capsys.readouterr().err
     assert "no significant difference" in out
     assert "pairing gain" not in out

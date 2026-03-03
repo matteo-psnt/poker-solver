@@ -5,10 +5,13 @@ Tracks key metrics during CFR training: utilities, iteration count,
 timing, convergence indicators, solver-quality metrics, etc.
 """
 
+import logging
 import time
 from collections import deque
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsTracker:
@@ -233,30 +236,30 @@ class MetricsTracker:
         """Print formatted metrics summary with solver-quality indicators."""
         summary = self.get_summary()
 
-        print(f"\n{'=' * 80}")
-        print(f"Iteration: {summary['iteration']:,}")
-        print(
+        logger.info(f"\n{'=' * 80}")
+        logger.info(f"Iteration: {summary['iteration']:,}")
+        logger.info(
             f"Avg Utility (last {self.window_size}): {summary['avg_utility']:+.2f} "
             f"(±{summary['utility_std']:.2f})"
         )
-        print(f"Avg Infosets: {summary['avg_infosets']:.0f}")
-        print(f"Speed: {summary['iter_per_sec']:.1f} iter/s")
-        print(f"Elapsed: {_format_time(summary['elapsed_time'])}")
+        logger.info(f"Avg Infosets: {summary['avg_infosets']:.0f}")
+        logger.info(f"Speed: {summary['iter_per_sec']:.1f} iter/s")
+        logger.info(f"Elapsed: {_format_time(summary['elapsed_time'])}")
 
         # Print solver-quality metrics if available
         if "mean_pos_regret" in summary:
-            print("\nSolver Quality Metrics:")
-            print(
+            logger.info("\nSolver Quality Metrics:")
+            logger.info(
                 f"  Regrets: mean={summary['mean_pos_regret']:.2e}, "
                 f"max={summary['max_pos_regret']:.2e}, "
                 f"zero={summary['zero_regret_pct']:.1f}%"
             )
-            print(
+            logger.info(
                 f"  Strategy: entropy={summary['avg_entropy']:.3f}, "
                 f"uniform={summary['uniform_strategy_pct']:.1f}%"
             )
 
-        print(f"{'=' * 80}\n")
+        logger.info(f"{'=' * 80}\n")
 
     def get_compact_summary(self) -> str:
         """

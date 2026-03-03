@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import multiprocessing as mp
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -9,6 +10,8 @@ from typing import TYPE_CHECKING, cast
 from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.training.parallel_protocol import JobType
 from src.pipeline.training.parallel_worker import _worker_loop
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .manager import MessageQueue, SharedArrayWorkerManager
@@ -18,9 +21,8 @@ def initialize_runtime(manager: SharedArrayWorkerManager) -> None:
     """Create coordinator storage and communication primitives."""
     manager.ready_event = mp.Event()
 
-    print(
+    logger.info(
         f"[Master] Creating shared memory (session={manager.session_id})...",
-        flush=True,
     )
     manager.storage = SharedArrayStorage(
         num_workers=manager.num_workers,
@@ -37,7 +39,7 @@ def initialize_runtime(manager: SharedArrayWorkerManager) -> None:
     )
 
     total_mb = manager.capacity * manager.max_actions * 4 * 2 // 1024 // 1024
-    print(f"[Master] Shared memory created: {total_mb}MB total", flush=True)
+    logger.info(f"[Master] Shared memory created: {total_mb}MB total")
 
     manager.job_queue = cast("MessageQueue", mp.Queue())
     manager.result_queue = cast("MessageQueue", mp.Queue())
@@ -51,7 +53,7 @@ def initialize_runtime(manager: SharedArrayWorkerManager) -> None:
 
 def start_workers(manager: SharedArrayWorkerManager) -> None:
     """Start all worker processes."""
-    print(f"[Master] Starting {manager.num_workers} workers...", flush=True)
+    logger.info(f"[Master] Starting {manager.num_workers} workers...")
 
     for worker_id in range(manager.num_workers):
         process = mp.Process(
@@ -77,12 +79,12 @@ def start_workers(manager: SharedArrayWorkerManager) -> None:
         process.start()
         manager.processes.append(process)
 
-    print(f"[Master] All {manager.num_workers} workers started", flush=True)
+    logger.info(f"[Master] All {manager.num_workers} workers started")
 
 
 def shutdown(manager: SharedArrayWorkerManager) -> None:
     """Shutdown all workers and cleanup shared memory."""
-    print("[Master] Shutting down workers...", flush=True)
+    logger.info("[Master] Shutting down workers...")
 
     for _ in range(manager.num_workers):
         manager.job_queue.put({"type": JobType.SHUTDOWN.value})
@@ -90,9 +92,9 @@ def shutdown(manager: SharedArrayWorkerManager) -> None:
     for process in manager.processes:
         process.join(timeout=10)
         if process.is_alive():
-            print(f"[Master] Force terminating worker {process.pid}", flush=True)
+            logger.info(f"[Master] Force terminating worker {process.pid}")
             process.terminate()
 
     manager.processes.clear()
     manager.storage.cleanup()
-    print("[Master] All workers shut down", flush=True)
+    logger.info("[Master] All workers shut down")

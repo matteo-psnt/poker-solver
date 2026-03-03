@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import queue
-import sys
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import multiprocessing as mp
@@ -67,11 +69,9 @@ def _process_id_requests(
                     response_queues[requester].put(responses, timeout=1.0)
                     count += len(responses)
                 except queue.Full:
-                    print(
+                    logger.warning(
                         f"[Worker {worker_id}] Warning: ID response queue for worker "
                         f"{requester} is full; dropping {len(responses)} ids",
-                        file=sys.stderr,
-                        flush=True,
                     )
 
         except queue.Empty:

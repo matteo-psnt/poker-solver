@@ -16,6 +16,7 @@ there is no board clustering, no representative sampling, and no fallback.
 """
 
 import json
+import logging
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -39,6 +40,8 @@ from src.pipeline.abstraction.postflop.bucketer import (
 from src.pipeline.abstraction.postflop.canonical_hands import enumerate_hand_classes
 from src.pipeline.abstraction.postflop.quality import compute_street_quality
 from src.pipeline.abstraction.utils.equity import RangeEquityEngine
+
+logger = logging.getLogger(__name__)
 
 _HAND_ID_TO_COL = build_hand_column_index()
 
@@ -121,11 +124,11 @@ class PostflopPrecomputer:
         board_ids, equity_matrix, weight_matrix, hist_matrix = self.compute_street_matrices(
             street, board_limit=board_limit
         )
-        print(f"Bucketing {street.name} into {self.config.num_buckets[street]} buckets...")
+        logger.info(f"Bucketing {street.name} into {self.config.num_buckets[street]} buckets...")
         self.bucket_street(street, board_ids, equity_matrix, weight_matrix, hist_matrix)
 
         quality = self._quality[street]
-        print(
+        logger.info(
             f"Completed {street.name}: {quality['class_count']:,} classes "
             f"({quality['combo_count']:,} combos) into {quality['num_buckets']} buckets, "
             f"variance explained {quality['variance_explained']:.4f}"
@@ -140,7 +143,7 @@ class PostflopPrecomputer:
         Exposed separately from bucketing so bucket-count sweeps can reuse one
         expensive equity pass across many bucketing configurations.
         """
-        print(f"Enumerating canonical boards for {street.name}...")
+        logger.info(f"Enumerating canonical boards for {street.name}...")
         enumerator = CanonicalBoardEnumerator(street)
         enumerator.enumerate()
         board_infos = sorted(enumerator.iterate(), key=lambda info: info.board_id)
@@ -149,7 +152,7 @@ class PostflopPrecomputer:
 
         n_boards = len(board_infos)
         board_ids = np.array([info.board_id for info in board_infos], dtype=np.int64)
-        print(f"Computing exact equities for {n_boards} canonical {street.name} boards...")
+        logger.info(f"Computing exact equities for {n_boards} canonical {street.name} boards...")
 
         histogram_bins = self.config.equity_histogram_bins if street != Street.RIVER else None
 
@@ -388,7 +391,7 @@ class PostflopPrecomputer:
         with open(path / METADATA_FILENAME, "w") as f:
             json.dump(metadata, f, indent=2)
 
-        print(f"Saved abstraction to {path}")
+        logger.info(f"Saved abstraction to {path}")
 
     @classmethod
     def load(cls, path: Path) -> DenseBucketer:

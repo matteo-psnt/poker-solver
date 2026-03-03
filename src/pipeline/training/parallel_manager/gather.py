@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -40,18 +43,17 @@ def gather_worker_results(
         except KeyboardInterrupt:
             interrupted = True
             if verbose:
-                print(
+                logger.info(
                     f"⚠️  Interrupt received; waiting for {description}...",
-                    flush=True,
                 )
             continue
         if not isinstance(raw_result, dict):
             if verbose:
-                print(f"[Master] Ignoring unexpected non-dict result: {raw_result}", flush=True)
+                logger.info(f"[Master] Ignoring unexpected non-dict result: {raw_result}")
             continue
         result = cast(dict[str, object], raw_result)
         if accept(result):
             results.append(result)
         elif verbose:
-            print(f"[Master] Ignoring unexpected result: {result}", flush=True)
+            logger.info(f"[Master] Ignoring unexpected result: {result}")
     return results, interrupted

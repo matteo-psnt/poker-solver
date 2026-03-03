@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import TYPE_CHECKING
 
 from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.engine.solver.storage.shared_array.types import ExtraAllocation, ExtraRegion
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage
@@ -71,7 +74,7 @@ def resize(storage: SharedArrayStorage, new_capacity: int) -> None:
     old_arrays = {spec.attr: getattr(storage, spec.attr) for spec in ARRAY_SPECS}
     old_handles = [getattr(storage.state, spec.shm_attr) for spec in ARRAY_SPECS]
 
-    print(
+    logger.info(
         f"Resizing storage: {old_capacity:,} -> {new_capacity:,} infosets "
         f"(growth factor: {new_capacity / old_capacity:.1f}x)"
     )
@@ -97,9 +100,11 @@ def resize(storage: SharedArrayStorage, new_capacity: int) -> None:
             shm.close()
             shm.unlink()
     except Exception as exc:
-        print(f"Warning: Error cleaning up old shared memory: {exc}")
+        logger.warning(f"Warning: Error cleaning up old shared memory: {exc}")
 
-    print(f"Resize complete: new capacity {new_capacity:,}, new session_id={storage.session_id}")
+    logger.info(
+        f"Resize complete: new capacity {new_capacity:,}, new session_id={storage.session_id}"
+    )
 
 
 def reattach_after_resize(
@@ -125,7 +130,7 @@ def reattach_after_resize(
     storage.attach_shared_memory()
     add_extra_region(storage, old_capacity, new_capacity)
 
-    print(
+    logger.info(
         f"Worker {storage.worker_id} reattached after resize: "
         f"session={new_session_id}, initial_capacity={new_capacity:,}, "
         f"id_range=[{storage.id_range_start}, {storage.id_range_end}), "
