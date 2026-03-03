@@ -470,6 +470,60 @@ def resume_test(
 
 
 @app.local_entrypoint()
+def gating_test(
+    config: str = "default",
+    iterations: int = 1000000,
+    n_workers: int = 16,
+    seed: int = 42,
+    deals: int = 2000,
+) -> None:
+    """Isolate the dropped-update effect on quality: train a 1-worker blueprint
+    (ZERO cross-worker ID drops -- it owns every infoset) and an ``n_workers``
+    blueprint (production drop level) to the SAME total iterations, then score them
+    head-to-head. Comparable => drops are benign; the 1-worker edge quantifies the
+    quality cost of dropping ~40% of update-samples.
+
+    The two arms train independent blueprints, so they run as CONCURRENT Modal
+    containers (spawn both, then await both) -- serializing them would just add the
+    fast n-worker arm's wall-clock on top of the slow single-core 1-worker arm.
+    spawn() also means a client death does not cancel the trains (they commit to
+    the Volume) -- recover run_ids and match with ``run_match`` if that happens."""
+    from src.shared.orchestration_log import record_spawn
+
+    def _spawn(cpu: int, label: str):
+        call = train.with_options(cpu=max(cpu, 2), memory=32768, timeout=7200).spawn(
+            config_name=config, num_workers=cpu, num_iterations=iterations, seed=seed
+        )
+        record_spawn(run_id="", function="train", object_id=call.object_id, extra={"arm": label})
+        print(f"SPAWNED {label} train (cpu={cpu}) call {call.object_id}", flush=True)
+        return call
+
+    call_1w = _spawn(1, "1-worker(zero-drops)")
+    call_nw = _spawn(n_workers, f"{n_workers}-worker")
+    res_1w = call_1w.get()
+    res_nw = call_nw.get()
+    run_1w, run_nw = res_1w["run_id"], res_nw["run_id"]
+    print(f"  1-worker:  run_id={run_1w} infosets={res_1w['num_infosets']:,}", flush=True)
+    print(f"  {n_workers}-worker: run_id={run_nw} infosets={res_nw['num_infosets']:,}", flush=True)
+
+    print(
+        f"\nBLUEPRINT MATCH: {run_1w} (1-worker, A) vs {run_nw} ({n_workers}-worker, B)", flush=True
+    )
+    result = blueprint_match.remote(run_a=run_1w, run_b=run_nw, num_deals=deals, seed=1)
+    r = result["results"]
+    print(f"  infosets: A(1w)={r['infosets_a']:,}  B({n_workers}w)={r['infosets_b']:,}")
+    print(
+        f"  A(1-worker) edge: {r['a_mbb_per_hand']:+.1f} mbb/hand "
+        f"(± {r['se_mbb']:.1f}; 95% CI {r['confidence_95_mbb']})"
+    )
+    print(f"  p-value: {r['p_value']:.5f} over {r['num_deals']} duplicate deals")
+    print(
+        "\nINTERPRET: A~0 => drops benign (rewrite not justified). "
+        "A>>0 & significant => drops cost quality (rewrite target)."
+    )
+
+
+@app.local_entrypoint()
 def run_match(
     run_a: str,
     run_b: str,
