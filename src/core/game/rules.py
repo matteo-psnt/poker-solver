@@ -273,15 +273,12 @@ class GameRules:
         opponent = state.opponent(current_player)
         to_call = state.to_call
 
-        # Basic action legality checks that don't require an abstraction
-        if action.type == ActionType.FOLD and to_call == 0:
-            raise ValueError("Cannot fold when no bet is faced")
-        if action.type == ActionType.CALL and to_call == 0:
-            raise ValueError("Cannot call when no bet is faced")
-        if action.type == ActionType.BET and to_call != 0:
-            raise ValueError("Cannot bet when facing a bet")
-        if action.type == ActionType.RAISE and to_call == 0:
-            raise ValueError("Cannot raise when no bet is faced")
+        # Single source of action legality: the same validator the traversal's
+        # stored-action filter and the evaluators use. (Strictly wider than the
+        # four inline guards this replaced — those never checked CHECK-facing-a-
+        # bet or amount/stack bounds.)
+        if not self.is_action_valid(state, action):
+            raise ValueError(f"Illegal action {action} (to_call={to_call}) for state")
 
         # Copy mutable state
         pot = state.pot
