@@ -85,6 +85,54 @@ result:
 Results include per-hand samples (`pair_samples_mbb`), which enable *paired*
 statistical comparison between runs evaluated with the same seed and tier.
 
+## Head-to-Head Match — the Abstraction Gate (`blueprint_match.py`)
+
+`play_blueprint_match()` plays two blueprints against each other on duplicate,
+seat-swapped deals off a fixed deck and reports A's chip edge in mbb/hand
+(`a_mbb_per_hand`, with SE, 95% CI, and a paired p-value). Each blueprint maps
+the real game state to **its own** card abstraction and action model, so this is
+the one metric that compares blueprints trained on **different abstractions** —
+exact BR and (on-tree) LBR both live on a single tree and cannot. It answers a
+*different* question than exploitability:
+
+- **Exact BR / LBR** — "how far from optimal is this blueprint?"
+- **Head-to-head** — "does A win chips off B when they actually play?"
+
+These are complementary, not redundant: head-to-head is **intransitive** — a
+*more*-exploitable blueprint can still beat a less-exploitable one. Use both.
+
+**Scope.** Rigorous when the two blueprints differ only in their **card**
+abstraction (bucket count/scheme, board-order) — they share the action grid, so
+every state stays on a common action tree. An **action**-abstraction difference
+(bet-size grid) would put an opponent's off-grid bet outside the other's tree
+and needs off-tree translation (shadow-state, as in LBR) that this harness does
+**not** implement — out of scope until there is such a change to gate.
+
+**Variance — read each match's own CI.** Duplicate-deal CRN cancels card luck
+only on pairs where the two blueprints *agree* (a self-match is provably
+all-zero pairs — see `test_blueprint_match.py`); where they disagree the pair
+carries full poker-pot variance. So the estimator is **noisy**: at 2000 deals
+the SE is ~240 mbb/hand *even for near-identical strategies*, and a real
+cross-abstraction match (more disagreement) is noisier still. SE falls as
+1/√deals — reaching exact-BR-comparable ~100 mbb resolution needs ~45k deals.
+**Never quote a fixed threshold**; read the CI the match reports. For finer
+resolution just raise `--deals`: play is cheap (blueprint *load* dominates a
+match), so 200k+ deals (SE ~24, ~20 min) is affordable — a variance-reduction
+estimator (e.g. AIVAT) is not worth its correctness cost *here*, where samples
+are nearly free. (AIVAT earns its keep on the deployed/LBR eval, where each hand
+costs a resolver solve — see `hunl_local_best_response.py`.)
+
+**Recording.** A match is pairwise, so it does not use the single-run eval
+ledger; `services.record_blueprint_match()` writes a self-describing payload
+(both run IDs, **both card-abstraction hashes**, git provenance, edge/CI/p)
+under run A's `evals/` dir — a chip edge is uninterpretable later without the
+record of which two abstractions were compared.
+
+    # single match
+    modal run modal_app.py::run_match --run-a <A> --run-b <B> --deals 45000
+    # training-identity floor over matched replicates (should be ~0)
+    modal run --detach modal_app.py::run_match_calibrate --run-ids <a,b,c> --deals 50000
+
 ## Orchestration & the Eval Ledger
 
 All evaluation transports (headless CLI, Modal) route through one
@@ -145,6 +193,8 @@ abstractions, and is not interpretable in big-blind terms.
 - `shadow_state.py` — off-tree shadow-state translation
 - `ledger.py` — eval ledger (rows, tiers, mismatch detection)
 - `statistics.py` — paired-sample comparison
+- `public_tree_br.py` — public-tree exact BR (deterministic checkpoint gate)
+- `blueprint_match.py` — duplicate-deal head-to-head (abstraction-safe gate)
 - `resolver_match.py` — resolver-in-eval machinery
 - `exploitability.py` — legacy rollout diagnostic
 - `best_response.py` / `tabular_cfr.py` — exact BR for toy-game validation

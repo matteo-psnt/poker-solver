@@ -53,6 +53,9 @@ ROLLOUT_ESTIMATOR_LABEL = "rollout_one_ply (uninformative; not a valid bound —
 # value is exploitability of the board-restricted game, not full HUNL — compare
 # within a tier, don't quote as a bound on the full game.
 EXACT_BR_ESTIMATOR_LABEL = "public_tree_exact_br (deterministic exact BR on sampled public tree)"
+BLUEPRINT_MATCH_ESTIMATOR_LABEL = (
+    "blueprint_match (duplicate-deal head-to-head chip edge; abstraction-safe, not a bound)"
+)
 
 
 @dataclass(frozen=True)
@@ -625,6 +628,61 @@ def evaluate_blueprint_match(
         results=results,
         checkpoint_iteration=checkpoint_iteration_of(run_dir_a),
     )
+
+
+def record_blueprint_match(
+    run_dir_a: Path,
+    run_dir_b: Path,
+    *,
+    num_deals: int = 2000,
+    seed: int = 1,
+) -> dict[str, Any]:
+    """Run a head-to-head match and persist a durable, self-describing payload.
+
+    A blueprint match is inherently PAIRWISE, so it does not fit the single-run eval
+    ledger (``evaluate_and_record``); instead the full result is written non-clobbering
+    under run A's dir with BOTH runs' provenance embedded — the card-abstraction hashes
+    especially, since a chip edge is uninterpretable later without recording which two
+    abstractions were compared. The payload (not any ledger row) is the durable record,
+    so a client guillotine after the match commits loses nothing.
+
+    Returns the payload; the caller (Modal) commits the Volume so it survives the
+    container.
+    """
+    metadata_a = load_run_metadata(run_dir_a)
+    metadata_b = load_run_metadata(run_dir_b)
+    out = evaluate_blueprint_match(run_dir_a, run_dir_b, num_deals=num_deals, seed=seed)
+
+    def _provenance(meta: RunMetadata) -> dict[str, Any]:
+        return {
+            "run_id": meta.run_id,
+            "git_commit": meta.git_commit,
+            "git_dirty": meta.git_dirty,
+            "config_name": meta.config_name,
+            "card_abstraction_hash": meta.card_abstraction_hash,
+            "action_config_hash": meta.action_config_hash,
+            "representation_version": meta.representation_version,
+        }
+
+    payload: dict[str, Any] = {
+        "op": "blueprint_match",
+        "run_a": metadata_a.run_id,
+        "run_b": metadata_b.run_id,
+        "estimator": BLUEPRINT_MATCH_ESTIMATOR_LABEL,
+        "provenance_a": _provenance(metadata_a),
+        "provenance_b": _provenance(metadata_b),
+        "checkpoint_iteration_a": checkpoint_iteration_of(run_dir_a),
+        "checkpoint_iteration_b": checkpoint_iteration_of(run_dir_b),
+        "infosets": out.infosets,
+        "results": out.results,
+    }
+    knobs = {"run_b": metadata_b.run_id, "num_deals": num_deals, "base_seed": seed}
+    try:
+        result_path = eval_ledger.write_payload(run_dir_a, payload, knobs)
+        payload["result_path"] = str(result_path)
+    except OSError as exc:  # recording is a research convenience; never fail the match
+        logger.warning("Blueprint-match payload not written: %s", exc)
+    return payload
 
 
 def evaluate_run_rollout(
