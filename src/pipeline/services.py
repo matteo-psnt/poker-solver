@@ -20,6 +20,7 @@ from src.pipeline.evaluation.hunl_local_best_response import (
     compute_lbr_exploitability,
     dominant_terminal,
 )
+from src.pipeline.evaluation.public_tree_br import PublicBRConfig, compute_public_tree_br
 from src.pipeline.evaluation.resolver_match import play_resolver_match
 from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
@@ -46,6 +47,12 @@ LBR_ESTIMATOR_LABEL = "local_best_response (rigorous lower bound on exploitabili
 # estimates — it is not a valid bound in either direction. Kept as an explicit
 # opt-in for diagnostics/comparison only; do NOT treat it as exploitability.
 ROLLOUT_ESTIMATOR_LABEL = "rollout_one_ply (uninformative; not a valid bound — diagnostic only)"
+
+# Exact best response on a deterministic sampled public tree: zero evaluation
+# variance, exactly paired across checkpoints under one board plan. The absolute
+# value is exploitability of the board-restricted game, not full HUNL — compare
+# within a tier, don't quote as a bound on the full game.
+EXACT_BR_ESTIMATOR_LABEL = "public_tree_exact_br (deterministic exact BR on sampled public tree)"
 
 
 @dataclass(frozen=True)
@@ -317,6 +324,23 @@ def precompute_abstraction(
     return out
 
 
+def _effective_abstraction_hash(
+    run_dir: Path, metadata: RunMetadata, abstraction_hash: str | None
+) -> str:
+    """The abstraction hash an eval must pin to, refusing unpinnable runs."""
+    effective = abstraction_hash or metadata.card_abstraction_hash
+    if effective is None:
+        raise ValueError(
+            f"Run '{run_dir.name}' does not record which card abstraction it was trained "
+            "against, so it cannot be evaluated faithfully: resolving by config name alone "
+            "would silently rebucket the checkpoint under whatever abstraction that name "
+            "now points at, yielding plausible but invalid numbers.\n"
+            "Pass abstraction_hash explicitly if you know it (see the abstraction's "
+            "metadata.json 'config_hash')."
+        )
+    return effective
+
+
 def _load_blueprint(
     config: Config, checkpoint_dir: Path, abstraction_hash: str | None = None
 ) -> Blueprint:
@@ -404,16 +428,7 @@ def evaluate_run_lbr(
     """
     config = config or LBRConfig()
     metadata = load_run_metadata(run_dir)
-    effective_hash = abstraction_hash or metadata.card_abstraction_hash
-    if effective_hash is None:
-        raise ValueError(
-            f"Run '{run_dir.name}' does not record which card abstraction it was trained "
-            "against, so it cannot be evaluated faithfully: resolving by config name alone "
-            "would silently rebucket the checkpoint under whatever abstraction that name "
-            "now points at, yielding plausible but invalid numbers.\n"
-            "Pass abstraction_hash explicitly if you know it (see the abstraction's "
-            "metadata.json 'config_hash')."
-        )
+    effective_hash = _effective_abstraction_hash(run_dir, metadata, abstraction_hash)
     solver, storage = build_evaluation_solver(
         metadata.config,
         checkpoint_dir=run_dir,
@@ -444,6 +459,65 @@ def evaluate_run_lbr(
     if config.resolver is not None:
         results["resolver_iterations"] = config.resolver.max_iterations
         results["resolver_blend_alpha"] = config.resolver.policy_blend_alpha
+    return EvaluationOutput(
+        infosets=storage.num_infosets(),
+        results=results,
+        checkpoint_iteration=checkpoint_iteration_of(run_dir),
+    )
+
+
+def evaluate_run_exact_br(
+    run_dir: Path,
+    config: PublicBRConfig | None = None,
+    *,
+    abstraction_hash: str | None = None,
+) -> EvaluationOutput:
+    """Exact best response on the sampled public tree (deterministic point value).
+
+    Zero evaluation variance: the same checkpoint under the same
+    :class:`PublicBRConfig` always scores identically, so two checkpoints in one
+    tier are exactly paired — a difference is pure signal, with no hand budget
+    or p-value involved. The value is the exploitability of the board-sampled
+    restricted game (see :mod:`~src.pipeline.evaluation.public_tree_br`), not of
+    full HUNL: compare within a tier, don't quote it as a bound.
+
+    Raises:
+        FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
+        ValueError: Invalid configuration or checkpoint state.
+    """
+    config = config or PublicBRConfig()
+    metadata = load_run_metadata(run_dir)
+    effective_hash = _effective_abstraction_hash(run_dir, metadata, abstraction_hash)
+    solver, storage = build_evaluation_solver(
+        metadata.config,
+        checkpoint_dir=run_dir,
+        abstraction_hash=effective_hash,
+    )
+    result = compute_public_tree_br(
+        solver, config, starting_stack=metadata.config.game.starting_stack
+    )
+    results: dict[str, Any] = {
+        "exploitability_mbb": result.exploitability_mbb,
+        "std_error_mbb": 0.0,
+        "num_hands": 0,
+        "seat_values_mbb": [
+            {
+                "br_seat": r.br_seat,
+                "button": r.button,
+                "value_mbb": r.value_mbb,
+                "missing_policy_mass": r.missing_policy_mass,
+            }
+            for r in result.seat_results
+        ],
+        "missing_policy_mass": result.missing_policy_mass,
+        "nodes_visited": result.nodes_visited,
+        "num_flops": result.num_flops,
+        "num_turns": config.num_turns,
+        "num_rivers": config.num_rivers,
+        "board_seed": config.board_seed,
+        "elapsed_s": result.elapsed_s,
+        "big_blind": metadata.config.game.big_blind,
+    }
     return EvaluationOutput(
         infosets=storage.num_infosets(),
         results=results,
@@ -594,6 +668,7 @@ def evaluate_and_record(
     method: str = "lbr",
     lbr: LBRConfig | None = None,
     rollout: RolloutParams | None = None,
+    exact_br: PublicBRConfig | None = None,
     resolver_iterations: int = 64,
     abstraction_hash: str | None = None,
     ledger_path: Path = eval_ledger.DEFAULT_LEDGER_PATH,
@@ -618,6 +693,16 @@ def evaluate_and_record(
             rollouts=params.num_rollouts,
             use_current=not params.use_average_strategy,
             base_seed=out.results.get("base_seed", params.seed),
+        )
+    elif method == "exact_br":
+        br_config = exact_br or PublicBRConfig()
+        out = evaluate_run_exact_br(run_dir, br_config, abstraction_hash=abstraction_hash)
+        estimator = EXACT_BR_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_exact_br_knobs_from_params(
+            num_flops=br_config.num_flops,
+            num_turns=br_config.num_turns,
+            num_rivers=br_config.num_rivers,
+            board_seed=br_config.board_seed,
         )
     else:  # "lbr" (default, trustworthy)
         config = lbr or LBRConfig()

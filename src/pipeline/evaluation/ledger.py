@@ -133,6 +133,24 @@ def build_rollout_knobs_from_params(
     }
 
 
+def build_exact_br_knobs_from_params(
+    *, num_flops: int, num_turns: int, num_rivers: int, board_seed: int
+) -> dict[str, Any]:
+    """Canonical exact-BR knob tier: the board plan IS the comparison tier.
+
+    ``base_seed`` mirrors ``board_seed`` so the pairing guard applies unchanged:
+    two exact-BR evals are comparable iff they scored the same sampled boards.
+    Values are deterministic points — within a matched tier a difference is
+    exact, with no paired samples or p-value involved.
+    """
+    return {
+        "num_flops": num_flops,
+        "num_turns": num_turns,
+        "num_rivers": num_rivers,
+        "base_seed": board_seed,
+    }
+
+
 def build_record(
     *,
     provenance: RunProvenance,

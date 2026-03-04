@@ -1,21 +1,56 @@
 # Evaluation Module
 
-This module measures blueprint quality. The primary, trustworthy metric is
-**Local Best Response (LBR)** exploitability; a legacy rollout estimator is
-retained only as a fast smoke-test diagnostic.
+This module measures blueprint quality. Two trustworthy metrics coexist:
+**public-tree exact BR** (`public_tree_br.py`) — a deterministic,
+zero-variance point value for comparing checkpoints — and **Local Best
+Response (LBR)** exploitability, a Monte Carlo lower bound that also covers
+off-tree play and the deployed (resolver) system. A legacy rollout estimator
+is retained only as a fast smoke-test diagnostic.
 
 ## What is Exploitability?
 
 Exploitability measures how much an optimal opponent (best response) can gain
 against your strategy — the gold-standard metric for evaluating CFR
-convergence in poker. Exact best response is computationally infeasible for
-HUNL (it exists in `best_response.py` and is validated on toy games like
-Kuhn), so we approximate it from below with LBR.
+convergence in poker. Exact best response over full HUNL is computationally
+infeasible (the generic implementation in `best_response.py` is validated on
+toy games like Kuhn), so we approximate it two ways: exactly on a
+deterministic board-sampled restriction of the game (`public_tree_br.py`),
+and from below with LBR on the full game.
 
 **Units:** milli-big-blinds per game (mbb/g). Lower is better. LBR is a
 *lower bound* on true exploitability: it reports how much a specific,
 tractable exploiter wins, so real exploitability is at least the reported
 value.
+
+## Public-Tree Exact BR (`public_tree_br.py`)
+
+`compute_public_tree_br()` computes an **exact, full-lookahead best response**
+— per-combo, range-vs-range, with exact card-removal — against the
+blueprint's average strategy, on the blueprint's own betting tree with chance
+restricted to a fixed, seed-deterministic board sample (`PublicBRConfig`:
+`num_flops`/`num_turns`/`num_rivers`/`board_seed`). Its distinguishing
+property is **zero evaluation variance**: the same checkpoint always scores
+identically, and two checkpoints scored under one config are exactly paired —
+a difference is pure signal, with no hand budget or p-value involved. The
+scalar reference game in `tests/pipeline/evaluation/restricted_hunl.py`
+validates the vectorized engine against the generic `best_response.py` to
+1e-9.
+
+Caveats: the absolute value is the exploitability of the board-restricted
+game (it deflates as the sample thins), not a bound on full HUNL; and it is
+on-tree only. Use it as the default cross-checkpoint gate; use LBR for
+off-tree pressure and for measuring the deployed (resolver) system.
+
+**Prefer running it on Modal** — production checkpoints are multi-GB loads
+and the walk is CPU-heavy, so don't occupy a laptop with it:
+
+    modal run modal_app.py::run_eval --run-id <run> --method exact-br \
+        --br-flops 8 --br-turns 2 --br-rivers 2 --br-board-seed 7
+
+This routes through the same `evaluate_and_record()` orchestrator and commits
+the ledger row to the Volume. The local CLI form (`poker-solver-run evaluate
+--method exact_br --br-flops N --br-turns K --br-rivers K --br-board-seed S`)
+exists for small checkpoints and debugging only.
 
 ## Local Best Response (`hunl_local_best_response.py`)
 
