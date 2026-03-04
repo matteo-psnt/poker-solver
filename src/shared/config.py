@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 PositiveInt = Annotated[int, Field(gt=0)]
 PositiveFloat = Annotated[float, Field(gt=0)]
 NonNegFloat = Annotated[float, Field(ge=0)]
+NonNegInt = Annotated[int, Field(ge=0)]
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +71,12 @@ class StorageConfig(StrictFrozenModel):
     max_checkpoint_overhead: Annotated[float, Field(gt=0.0, lt=1.0)] = Field(default=0.1)
     zarr_compression_level: Annotated[int, Field(ge=1, le=9)] = Field(default=1)
     zarr_chunk_size: PositiveInt = Field(default=50_000)
+    # Spare one checkpoint per this many iterations from pruning, so the run ends
+    # holding a ladder of snapshots instead of only its last one (0 = keep only the
+    # last). Costs a full copy of the table per retained point, so keep it a large
+    # multiple of checkpoint_frequency: below that every checkpoint lands in its own
+    # band and nothing is ever pruned.
+    checkpoint_retain_every: NonNegInt = Field(default=0)
 
 
 class SystemConfig(StrictFrozenModel):
