@@ -198,7 +198,6 @@ def cfr_external_sampling(
         # CFR+/DCFR math directly to shared memory for every infoset it visits.
         # Skipped only for placeholder views whose global ID is still unknown.
         if infoset.writable:
-            opponent = 1 - current_player
             # One kernel call for every shape: full row (identity indices,
             # allocation-free), partial-legal subset, or unpruned subset.
             if prune is None:
@@ -211,12 +210,20 @@ def cfr_external_sampling(
                 unpruned = [j for j in range(len(legal_actions)) if not prune[valid_indices[j]]]
                 target_indices = np.array([valid_indices[j] for j in unpruned], dtype=np.int64)
                 utilities = action_utilities[unpruned]
+            # Opponent reach is deliberately 1.0. Under external sampling the
+            # opponent's actions are SAMPLED, so this node is visited with
+            # probability pi_{-i} and the visit frequency already supplies that
+            # weight -- the same argument _accumulate_average_strategy makes for
+            # its own weight below. Passing reach_probs[opponent] here (as this
+            # did until 2026-07-25) applied the opponent's sampled action reach a
+            # second time, squaring it, and the regrets then minimised a
+            # reweighted objective whose fixed point is not the equilibrium.
             apply_regret_updates(
                 infoset.regrets,
                 target_indices,
                 utilities,
                 node_utility,
-                reach_probs[opponent],
+                1.0,
                 solver_config.cfr_plus,
                 self.iteration,
                 WEIGHTING_CODES[solver_config.iteration_weighting],

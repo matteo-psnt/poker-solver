@@ -11,37 +11,33 @@ done by ``best_response.exploitability``, itself already anchored to hand-comput
 Kuhn values in ``tests/pipeline/evaluation/test_best_response.py``. So a failure
 here implicates the kernel and little else.
 
-**Finding, 2026-07-25.** It does not converge. Under external sampling the regret
-update is scaled by ``reach_probs[opponent]`` in ``traversal.cfr_external_sampling``
--- the product of the opponent's *sampled action* probabilities along the path
-(instrumented: chance never multiplies into it). But the opponent's actions were
-sampled, so the traversal already visits an infoset with probability pi_{-i},
-carrying that same action reach along with the chance reach. Applying it a second
-time squares the action component, and the regrets then minimise a reweighted
-objective whose fixed point is not the equilibrium. It is the same double-counting
-``docs/AVERAGE_STRATEGY_WEIGHTING.md`` diagnosed for the average-strategy
-accumulator, still live on the regret accumulator.
+**These tests found a real defect on the day they were written, 2026-07-25**, and
+it is now fixed. Under external sampling the regret update was scaled by
+``reach_probs[opponent]`` -- the product of the opponent's *sampled action*
+probabilities (instrumented: chance never multiplied into it). Because those
+actions were sampled, the traversal already visits an infoset with probability
+pi_{-i}, carrying that same action reach; applying it again squared the action
+component and the regrets minimised a reweighted objective whose fixed point is
+not the equilibrium. Same double-counting ``docs/AVERAGE_STRATEGY_WEIGHTING.md``
+diagnosed for the average-strategy accumulator, still live on the regret one.
 
-Evidence that this is a floor rather than slow convergence -- Leduc, seed 42,
-identical apart from that one multiplier:
+It was a floor, not slowness -- Leduc, seed 42, identical but for that multiplier:
 
 ===========  ========  ========  ========  ========
 iterations      100k      250k      500k        1M
 ===========  ========  ========  ========  ========
-current       0.16402   0.11945   0.13381   0.11580
-multiplier    0.10823   0.06976   0.04701   0.03348
- dropped
+before        0.16402   0.11945   0.13381   0.11580
+after         0.10823   0.06976   0.04701   0.03348
 ===========  ========  ========  ========  ========
 
-Dropping it decays 3.23x over a 10x iteration budget, against the 3.16x that
-O(1/sqrt(T)) predicts. Keeping it decays 1.42x, non-monotonically, and the gap
-between the two *widens* (1.52x -> 3.46x) -- a uniformly slower method would hold
-a constant ratio. Kuhn agrees but is a weak witness on its own: it is shallow
-enough that ~97% of regret updates carry a multiplier of exactly 1.0.
+After decays 3.23x over a 10x iteration budget against the 3.16x that O(1/sqrt(T))
+predicts; before decayed 1.42x, non-monotonically, and the gap between the two
+*widened* (1.52x -> 3.46x), which a uniformly slower method would not do. On Kuhn
+the fix moved exploitability at 200k from 1.3e-2 to 2.9e-3.
 
-``test_dropping_the_opponent_reach_multiplier_restores_convergence`` pins the
-mechanism, and the convergence assertions are ``xfail(strict=True)`` so they
-announce themselves the moment the kernel is fixed.
+The convergence assertions below are the permanent guard: reintroducing the
+multiplier puts Kuhn back at ~1.3e-2 and fails
+``test_average_strategy_converges_to_equilibrium`` outright.
 """
 
 from __future__ import annotations
@@ -49,7 +45,6 @@ from __future__ import annotations
 import pytest
 
 from src.core.game.actions import bet, call, check, fold, raises
-from src.engine.solver.mccfr import traversal
 from src.pipeline.evaluation.best_response import exploitability, on_policy_value
 from tests.engine.solver.mccfr.extensive_game_solver import (
     ExtensiveGameSolver,
@@ -70,10 +65,8 @@ LEDUC_ACTIONS = {"f": fold(), "c": call(), "r": raises(1)}
 KUHN_ITERATIONS = 200_000
 LEDUC_ITERATIONS = 100_000
 
-# The plateau the kernel currently settles on, with headroom. Not a target -- a
-# tripwire, so a change that makes convergence *worse* cannot pass unnoticed
-# while the tight assertions below sit in xfail.
-KUHN_CURRENT_PLATEAU = 0.03
+# Measured 0.108 at LEDUC_ITERATIONS post-fix, against 0.164 before it.
+LEDUC_EXPLOITABILITY_BOUND = 0.15
 
 
 def _train(game, actions, iterations: int, session: str, **config_overrides):
@@ -113,44 +106,13 @@ class TestKuhnGroundTruth:
         """12 = 3 cards x (2 own decision points) x 2 players."""
         assert kuhn_solver.num_infosets() == 12
 
-    def test_exploitability_stays_within_the_known_plateau(self, kuhn_game, kuhn_solver):
-        assert exploitability(kuhn_game, average_policy(kuhn_solver)) < KUHN_CURRENT_PLATEAU
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Production kernel does not converge: external sampling scales the regret "
-            "update by the opponent's reach, which the sampled visit frequency already "
-            "supplies. See the module docstring and the mechanism test below."
-        ),
-    )
     def test_average_strategy_converges_to_equilibrium(self, kuhn_game, kuhn_solver):
-        assert exploitability(kuhn_game, average_policy(kuhn_solver)) < 5e-3
+        """The binding assertion, and the regression guard for the 07-25 fix.
 
-
-@pytest.mark.slow
-@pytest.mark.timeout(90)
-class TestRegretWeightingMechanism:
-    def test_dropping_the_opponent_reach_multiplier_restores_convergence(
-        self, kuhn_game, monkeypatch
-    ):
-        """Neutralising just that one factor recovers O(1/sqrt(T)).
-
-        This is what separates "the kernel deviates" from "the adapter is wrong":
-        an adapter bug would not be repaired by changing a regret weight, and
-        every other part of the setup is held fixed, seed included.
+        Measures 2.9e-3 at this budget. Reintroducing the opponent-reach
+        multiplier the fix removed puts it back at ~1.3e-2 and fails here.
         """
-        original = traversal.apply_regret_updates
-
-        def without_opponent_reach(
-            regrets, target_indices, utilities, node_utility, opponent_reach, *args
-        ):
-            return original(regrets, target_indices, utilities, node_utility, 1.0, *args)
-
-        monkeypatch.setattr(traversal, "apply_regret_updates", without_opponent_reach)
-        solver = _train(kuhn_game, KUHN_ACTIONS, KUHN_ITERATIONS, "conformance-kuhn-unweighted")
-
-        assert exploitability(kuhn_game, average_policy(solver)) < 5e-3
+        assert exploitability(kuhn_game, average_policy(kuhn_solver)) < 5e-3
 
 
 @pytest.mark.slow
@@ -210,34 +172,9 @@ class TestLeduc:
         later = exploitability(game, average_policy(solver))
 
         assert later < early
-
-    def test_the_opponent_reach_multiplier_costs_accuracy_here_too(self, monkeypatch):
-        """The same comparison as the Kuhn mechanism test, in a deeper tree.
-
-        Leduc is the load-bearing witness for the finding: it has a mid-tree
-        chance node and two betting rounds, so most regret updates carry a
-        genuinely sub-1.0 multiplier, where Kuhn's shallow tree leaves ~97% of
-        them at exactly 1.0. Asserted at a modest budget; the module docstring
-        records the full 1M curve that distinguishes a floor from slowness.
-        """
-        game = LeducPoker()
-        current = exploitability(
-            game, average_policy(_train(game, LEDUC_ACTIONS, LEDUC_ITERATIONS, "leduc-current"))
-        )
-
-        original = traversal.apply_regret_updates
-        monkeypatch.setattr(
-            traversal,
-            "apply_regret_updates",
-            lambda regrets, indices, utilities, node_utility, opponent_reach, *args: original(
-                regrets, indices, utilities, node_utility, 1.0, *args
-            ),
-        )
-        dropped = exploitability(
-            game, average_policy(_train(game, LEDUC_ACTIONS, LEDUC_ITERATIONS, "leduc-dropped"))
-        )
-
-        assert dropped < 0.8 * current
+        # Level, not just direction: the pre-fix kernel sat at 0.164 here, so this
+        # bound is the deeper-tree half of the regression guard.
+        assert later < LEDUC_EXPLOITABILITY_BOUND
 
 
 @pytest.mark.slow
