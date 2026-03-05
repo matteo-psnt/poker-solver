@@ -303,7 +303,7 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services,
         "build_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None: seen.update(
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
         or (object(), storage),
@@ -345,7 +345,7 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services,
         "build_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None: seen.update(
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
         or (object(), storage),
@@ -404,7 +404,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services,
         "build_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None: seen.update(
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
         or (object(), storage),
@@ -493,7 +493,7 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services,
         "build_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None: (object(), storage),
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (object(), storage),
     )
     monkeypatch.setattr(
         services,

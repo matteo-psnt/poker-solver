@@ -8,6 +8,7 @@ from src.core.game.actions import Action
 from src.engine.solver.infoset import InfoSet, InfoSetKey
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.helpers import (
+    CheckpointPaths,
     get_missing_checkpoint_files,
     load_checkpoint_data,
 )
@@ -28,10 +29,16 @@ class InMemoryStorage(Storage):
     latency: ~36s of a ~77s load at 6.8M infosets. Consumers that genuinely need
     every infoset (:meth:`iter_infosets`, :attr:`infosets`) still materialize the
     whole table, just on demand rather than up front.
+
+    at_iteration:
+        Load a retained ladder rung instead of the published snapshot, so one run
+        can be scored at several iteration counts (the within-run convergence
+        curve). ``None`` loads whatever the manifest currently publishes.
     """
 
-    def __init__(self, checkpoint_dir: Path | None = None):
+    def __init__(self, checkpoint_dir: Path | None = None, *, at_iteration: int | None = None):
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
+        self.at_iteration = at_iteration
 
         # Lazily-materialized InfoSet cache, keyed by id. The authoritative row
         # count is ``id_to_key``; this may hold only the touched subset.
@@ -111,11 +118,12 @@ class InMemoryStorage(Storage):
     def _load_from_checkpoint(self):
         if not self.checkpoint_dir:
             return
-        missing_files = get_missing_checkpoint_files(self.checkpoint_dir)
+        paths = CheckpointPaths.resolve(self.checkpoint_dir, self.at_iteration)
+        missing_files = get_missing_checkpoint_files(paths)
         if missing_files:
             raise ValueError(f"Checkpoint is incomplete. Missing files: {missing_files}")
 
-        data = load_checkpoint_data(self.checkpoint_dir, context="InMemoryStorage checkpoint load")
+        data = load_checkpoint_data(paths, context="InMemoryStorage checkpoint load")
         # Row index is the infoset id, so the two directions come straight from order.
         self.id_to_key = dict(enumerate(data.keys))
         self.key_to_id = {key: i for i, key in self.id_to_key.items()}

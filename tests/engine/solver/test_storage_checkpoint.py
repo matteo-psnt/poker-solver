@@ -1,6 +1,7 @@
 import uuid
 
 import numpy as np
+import pytest
 
 from src.core.game.actions import bet, call, fold
 from src.core.game.state import Street
@@ -78,3 +79,81 @@ def test_checkpoint_roundtrip_smoke(tmp_path):
     assert loaded_two.reach_count == 2
     assert loaded_two.cumulative_utility == -4.0
     assert _action_signature(loaded_two.legal_actions) == _action_signature(actions_two)
+
+
+def test_a_retained_rung_loads_its_own_strategy_not_the_latest(tmp_path):
+    """Scoring ``--at N`` must return the strategy as of N, not the published one.
+
+    The whole point of the ladder is a within-run curve, so a rung load that
+    silently fell back to the current snapshot would produce a flat line that looks
+    like a converged solver. Two rungs, deliberately different regrets, both read
+    back through the ordinary evaluation loader.
+    """
+    session_id = f"test_{uuid.uuid4().hex[:8]}"
+    storage = build_test_storage(
+        num_workers=1,
+        worker_id=0,
+        session_id=session_id,
+        initial_capacity=64,
+        max_actions=5,
+        is_coordinator=True,
+        checkpoint_dir=tmp_path,
+        checkpoint_retain_every=1,
+    )
+    key = InfoSetKey(
+        player_position=0,
+        street=Street.PREFLOP,
+        betting_sequence="",
+        preflop_hand="AKs",
+        postflop_bucket=None,
+        spr_bucket=1,
+    )
+    try:
+        infoset = storage.get_or_create_infoset(key, [fold(), call(), bet(50)])
+        infoset.regrets[:] = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        storage.checkpoint(iteration=1)
+
+        infoset.regrets[:] = np.array([7.0, 8.0, 9.0], dtype=np.float32)
+        storage.checkpoint(iteration=2)
+    finally:
+        storage.cleanup()
+
+    early = InMemoryStorage(checkpoint_dir=tmp_path, at_iteration=1).get_infoset(key)
+    assert early is not None
+    np.testing.assert_allclose(early.regrets, [1.0, 2.0, 3.0])
+
+    latest = InMemoryStorage(checkpoint_dir=tmp_path).get_infoset(key)
+    assert latest is not None
+    np.testing.assert_allclose(latest.regrets, [7.0, 8.0, 9.0])
+
+
+def test_asking_for_an_unretained_iteration_fails_loudly(tmp_path):
+    """Every run trained before retention hits this; it must not read as corruption."""
+    session_id = f"test_{uuid.uuid4().hex[:8]}"
+    storage = build_test_storage(
+        num_workers=1,
+        worker_id=0,
+        session_id=session_id,
+        initial_capacity=64,
+        max_actions=5,
+        is_coordinator=True,
+        checkpoint_dir=tmp_path,
+    )
+    try:
+        storage.get_or_create_infoset(
+            InfoSetKey(
+                player_position=0,
+                street=Street.PREFLOP,
+                betting_sequence="",
+                preflop_hand="AKs",
+                postflop_bucket=None,
+                spr_bucket=1,
+            ),
+            [fold(), call()],
+        )
+        storage.checkpoint(iteration=2)
+    finally:
+        storage.cleanup()
+
+    with pytest.raises(ValueError, match=r"No retained checkpoint at iteration 1.*available"):
+        InMemoryStorage(checkpoint_dir=tmp_path, at_iteration=1)

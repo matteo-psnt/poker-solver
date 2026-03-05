@@ -103,6 +103,33 @@ def test_iteration_is_sourced_from_the_manifest(tmp_path):
     assert checkpoint_iteration_of(tmp_path) == 16_160_000
 
 
+def test_a_scored_ladder_rung_reports_the_rung_not_the_published_iteration(tmp_path):
+    """A curve point must be labelled with the checkpoint the evaluator actually loaded.
+
+    Reporting the manifest's iteration here would stamp every rung of a within-run
+    curve with the run's final iteration -- the precise mislabelling this field was
+    added to prevent, reintroduced once per point.
+    """
+    (tmp_path / CHECKPOINT_MANIFEST_FILE).write_text(
+        json.dumps(
+            {
+                "iteration": 8_000_000,
+                "zarr": "checkpoint-8000000.zarr",
+                "key_table": "keys-8000000",
+                "retained": [
+                    {
+                        "iteration": 2_000_000,
+                        "zarr": "checkpoint-2000000.zarr",
+                        "key_table": "keys-2000000",
+                    }
+                ],
+            }
+        )
+    )
+    assert checkpoint_iteration_of(tmp_path, 2_000_000) == 2_000_000
+    assert checkpoint_iteration_of(tmp_path) == 8_000_000
+
+
 def test_pre_manifest_runs_report_no_iteration(tmp_path):
     assert checkpoint_iteration_of(tmp_path) is None
 

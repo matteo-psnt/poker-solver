@@ -146,3 +146,32 @@ class TestRetainedLookup:
 
         with pytest.raises(ValueError, match="No retained checkpoint at iteration 1500"):
             CheckpointPaths.for_retained(tmp_path, 1500)
+
+    def test_a_run_without_a_ladder_names_what_it_has(self, tmp_path):
+        """The common case: --at against a run trained before retention was enabled.
+
+        The message must list the alternatives, or it reads like a corrupt checkpoint.
+        """
+        _commit(tmp_path, 1000, retain_every=0)
+
+        with pytest.raises(ValueError, match=r"available: \[1000\]"):
+            CheckpointPaths.for_retained(tmp_path, 500)
+
+
+class TestResolve:
+    """One entry point for every reader, so published and rung loads cannot diverge."""
+
+    def test_none_resolves_the_published_snapshot(self, tmp_path):
+        _commit(tmp_path, 1000, retain_every=1000)
+        _commit(tmp_path, 2000, retain_every=1000)
+
+        assert CheckpointPaths.resolve(tmp_path) == CheckpointPaths.from_dir(tmp_path)
+        assert CheckpointPaths.resolve(tmp_path).checkpoint_zarr.name == "checkpoint-2000.zarr"
+
+    def test_an_iteration_resolves_that_rung(self, tmp_path):
+        _commit(tmp_path, 1000, retain_every=1000)
+        _commit(tmp_path, 2000, retain_every=1000)
+
+        resolved = CheckpointPaths.resolve(tmp_path, 1000)
+        assert resolved == CheckpointPaths.for_retained(tmp_path, 1000)
+        assert resolved.checkpoint_zarr.name == "checkpoint-1000.zarr"

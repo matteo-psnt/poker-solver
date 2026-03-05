@@ -31,6 +31,12 @@ training:
 
 storage:
   initial_capacity: 4000000
+  # Spare one checkpoint per 1M iterations from pruning, so a run ends holding a
+  # ladder (1M, 2M, ... ) instead of only its final snapshot -- this is what makes a
+  # within-run exploitability-vs-iterations curve possible (`evaluate --at N`).
+  # Costs a full table copy per rung (~2 GB at 8M iterations), so ~8 rungs per 8M run.
+  # Must stay a multiple of checkpoint_frequency; below it nothing is ever pruned.
+  checkpoint_retain_every: 1000000
 
 system:
   config_name: "production"

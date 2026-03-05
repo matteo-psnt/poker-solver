@@ -30,6 +30,9 @@ training:
 
 storage:
   initial_capacity: 4000000
+  # Match production so an XL-vs-prod comparison can be made rung-by-rung, not just
+  # at the final checkpoint. See production.yaml for the cost note.
+  checkpoint_retain_every: 1000000
 
 system:
   config_name: "production_xl"
