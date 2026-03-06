@@ -75,7 +75,7 @@ class MCCFRSolver:
         traversing_player = self.iteration % 2
 
         if self.config.solver.sampling_method == "external":
-            util = self._cfr_external_sampling(state, traversing_player, [1.0, 1.0])
+            util = self._cfr_external_sampling(state, traversing_player)
         else:
             util = self._cfr_outcome_sampling(state, traversing_player, [1.0, 1.0])
 
@@ -107,13 +107,8 @@ class MCCFRSolver:
         """
         return infoset_encoder.encode_infoset_key(state, player, self.card_abstraction)
 
-    def _cfr_external_sampling(
-        self,
-        state: GameState,
-        traversing_player: int,
-        reach_probs: list[float],
-    ) -> float:
-        return traversal.cfr_external_sampling(self, state, traversing_player, reach_probs)
+    def _cfr_external_sampling(self, state: GameState, traversing_player: int) -> float:
+        return traversal.cfr_external_sampling(self, state, traversing_player)
 
     def _cfr_outcome_sampling(
         self,

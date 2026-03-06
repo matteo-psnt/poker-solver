@@ -123,15 +123,21 @@ def cfr_external_sampling(
     self: MCCFRSolver,
     state: GameState,
     traversing_player: int,
-    reach_probs: list[float],
 ) -> float:
-    """Recursive MCCFR traversal with external sampling."""
+    """Recursive MCCFR traversal with external sampling.
+
+    Carries no reach vector, unlike the outcome-sampling traversal below. Both
+    accumulators here take their weight from the visit frequency instead: the
+    opponent's and chance's actions are sampled, so a node is reached exactly
+    pi_{-i} of the time, and threading an explicit reach would apply that same
+    factor twice (see the regret update and ``_accumulate_average_strategy``).
+    """
     if state.is_terminal:
         return _terminal_utility(self, state, traversing_player)
 
     if self.is_chance_node(state):
         next_state = self.sample_chance_outcome(state)
-        return cfr_external_sampling(self, next_state, traversing_player, reach_probs)
+        return cfr_external_sampling(self, next_state, traversing_player)
 
     current_player = state.current_player
     infoset, legal_actions, valid_indices, strategy = _infoset_context(
@@ -174,7 +180,6 @@ def cfr_external_sampling(
                 self,
                 next_state,
                 traversing_player,
-                reach_probs,
             )
 
         if prune is not None:
@@ -256,14 +261,11 @@ def cfr_external_sampling(
     action_idx = _sample_action_index(strategy)
     action = legal_actions[action_idx]
 
-    new_reach_probs = reach_probs.copy()
-    new_reach_probs[current_player] *= float(strategy[action_idx])
-
     next_state = state.apply_action(action, self.rules)
     if self.is_chance_node(next_state):
         next_state = self.sample_chance_outcome(next_state)
 
-    return cfr_external_sampling(self, next_state, traversing_player, new_reach_probs)
+    return cfr_external_sampling(self, next_state, traversing_player)
 
 
 def cfr_outcome_sampling(
