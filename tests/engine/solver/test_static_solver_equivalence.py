@@ -212,3 +212,20 @@ class TestNoDroppedUpdates:
                 np.testing.assert_array_equal(flat.infoset_at(node_id, bucket).regrets, ref.regrets)
         finally:
             flat.close()
+
+
+class TestConvenienceConstructor:
+    def test_build_wires_tree_storage_and_solver(self):
+        """``StaticTreeSolver.build`` is the natural entry point; keep it exercised."""
+        config = make_test_config(seed=42, small_blind=1, big_blind=2, starting_stack=20)
+        abstraction = BucketsByStreet(COUNTS)
+        solver = StaticTreeSolver.build(ActionModel(config), abstraction, config)
+        try:
+            assert solver.tree is solver.storage.tree
+            assert solver.storage.regrets.shape == (solver.tree.num_slots,)
+            for _ in range(20):
+                solver.train_iteration()
+            assert solver.num_infosets() > 0
+            assert solver.dropped_unknown_id_updates == 0
+        finally:
+            solver.storage.close()

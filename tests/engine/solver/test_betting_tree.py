@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 import random
 
+import numpy as np
 import pytest
 
 from src.core.actions.action_model import ActionModel
@@ -228,6 +229,57 @@ class TestLayout:
                 assert end - start == node.num_actions
                 cursor = end
         assert cursor == tree.num_slots
+
+
+class TestProductionScale:
+    """The small fixtures above cannot overflow anything; production can.
+
+    At production bucket counts the tree spans ~89M action slots. If the offset
+    arrays were int32 the last node's slot range would wrap silently, and every
+    infoset past the wrap point would alias one before it — training would run,
+    converge to nonsense, and nothing would raise. These assertions cost one tree
+    build and close that off.
+    """
+
+    @pytest.fixture(scope="class")
+    def production_tree(self):
+        from src.shared.config_loader import load_config
+
+        config = load_config("config/training/production.yaml")
+        rules = GameRules(small_blind=config.game.small_blind, big_blind=config.game.big_blind)
+        return BettingTree(
+            rules,
+            ActionModel(config),
+            starting_stack=config.game.starting_stack,
+            buckets_per_street={Street.FLOP: 100, Street.TURN: 300, Street.RIVER: 600},
+        )
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_offsets_are_int64(self, production_tree):
+        assert production_tree.row_offset.dtype == np.int64
+        assert production_tree.slot_offset.dtype == np.int64
+        assert production_tree.num_actions.dtype == np.int64
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_last_slot_range_closes_the_array_exactly(self, production_tree):
+        """The final infoset must end precisely at num_slots — no wrap, no gap."""
+        tree = production_tree
+        assert tree.num_slots > np.iinfo(np.int32).max // 32, (
+            "production tree unexpectedly small; this test would prove nothing"
+        )
+        last = tree.nodes[-1]
+        _, end = tree.slots(last.node_id, tree.num_buckets(last.street) - 1)
+        assert end == tree.num_slots
+        assert tree.row(last.node_id, tree.num_buckets(last.street) - 1) == tree.num_rows - 1
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_all_slot_offsets_are_monotonic(self, production_tree):
+        """A wrap would show up as a decrease somewhere in the prefix sum."""
+        assert np.all(np.diff(production_tree.slot_offset) >= 0)
+        assert np.all(np.diff(production_tree.row_offset) > 0)
 
 
 class TestPreflopIndex:
