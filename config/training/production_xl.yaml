@@ -30,8 +30,10 @@ training:
 
 storage:
   initial_capacity: 4000000
-  # Match production so an XL-vs-prod comparison can be made rung-by-rung, not just
-  # at the final checkpoint. See production.yaml for the cost note.
+  # Match production so both sides of an XL-vs-prod comparison have the same ladder
+  # and their convergence curves are directly comparable. See production.yaml for
+  # the cost note. (Head-to-head matches still score final checkpoints only —
+  # record_blueprint_match takes no rung selector.)
   checkpoint_retain_every: 1000000
 
 system:
