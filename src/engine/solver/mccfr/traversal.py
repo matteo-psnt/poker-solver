@@ -48,7 +48,22 @@ def _infoset_context(
     state: GameState,
     current_player: int,
 ) -> tuple[InfoSet, Sequence[Action], list[int], np.ndarray]:
-    """Build infoset, filter valid actions, and compute strategy over valid actions."""
+    """Resolve the acting infoset, its actions, and its current strategy.
+
+    Dispatched through the solver because infoset *identity* is not a property of
+    the CFR math: the dynamic backend hashes a string key, the static backend
+    indexes a preallocated betting tree, and the conformance harness substitutes
+    a different game entirely. Everything below this call is identity-agnostic.
+    """
+    return self.lookup_infoset(state, current_player)
+
+
+def dynamic_infoset_context(
+    self: MCCFRSolver,
+    state: GameState,
+    current_player: int,
+) -> tuple[InfoSet, Sequence[Action], list[int], np.ndarray]:
+    """Key-hashing lookup: build infoset, filter valid actions, compute strategy."""
     infoset_key = self.encode_infoset_key(state, current_player)
     legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
 

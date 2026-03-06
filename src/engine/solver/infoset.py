@@ -167,16 +167,36 @@ class InfoSet:
     - Legal actions at this infoset
     - Cumulative regrets (for regret matching)
     - Cumulative strategy (for computing average strategy)
+
+    Position fields:
+        ``node_id``/``bucket``/``row`` locate the infoset in a
+        :class:`~src.engine.solver.betting_tree.BettingTree` and are populated by
+        ``StaticArrayStorage``; key-addressed backends leave them ``None``. They
+        are class-level defaults rather than instance assignments because this
+        class is constructed once per node visit, and three unconditional stores
+        on that path buy nothing for the backend that does not use them.
     """
 
+    node_id: int | None = None
+    bucket: int | None = None
+    row: int | None = None
+
     def __init__(
-        self, key: InfoSetKey, legal_actions: Sequence[Action], *, allocate_arrays: bool = True
+        self,
+        key: InfoSetKey | None,
+        legal_actions: Sequence[Action],
+        *,
+        allocate_arrays: bool = True,
     ):
         """
         Initialize information set.
 
         Args:
-            key: InfoSetKey identifier
+            key: InfoSetKey identifier, or None for tree-indexed infosets.
+                ``StaticArrayStorage`` identifies an infoset by its
+                ``(node_id, bucket)`` position in the betting tree and never
+                builds a key — the string hashing a key exists to support is the
+                cost that design removes. Only ``__str__``/``__repr__`` read it.
             legal_actions: List of legal actions at this infoset
             allocate_arrays: Skip regret/strategy allocation when the caller
                 immediately replaces them with storage-backed views (this
