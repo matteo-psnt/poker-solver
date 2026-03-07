@@ -166,8 +166,27 @@ class StaticArrayStorage:
         return infoset
 
     def view(self, node_id: int, bucket: int) -> InfoSet:
-        """Same view as :meth:`infoset_at` but without marking coverage."""
+        """Same view as :meth:`infoset_at` but without marking coverage.
+
+        The bounds check is not defensive boilerplate. Rows are contiguous per
+        node, so an out-of-range bucket does not fall off the end of the array —
+        it lands on a perfectly valid row belonging to a *different node*, and
+        two unrelated infosets then share storage with no error anywhere. The
+        old key-addressed design was immune (a bad bucket just made a distinct,
+        meaningless key); flat indexing is not, so the check buys back the
+        safety that indexing gave up. The production bucketer raises on illegal
+        combos before reaching here, so this fires only for a buggy or custom
+        ``BucketingStrategy`` — which is exactly when silent corruption would be
+        hardest to trace.
+        """
         node = self.tree.nodes[node_id]
+        if not 0 <= bucket < self.tree.buckets_per_node[node_id]:
+            raise IndexError(
+                f"bucket {bucket} out of range for node {node_id} "
+                f"({node.street.name}, {self.tree.buckets_per_node[node_id]} buckets). "
+                "An out-of-range bucket would alias another node's infoset."
+            )
+
         start, end = self.tree.slots(node_id, bucket)
         row = self.tree.row(node_id, bucket)
 

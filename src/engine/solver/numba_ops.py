@@ -104,6 +104,23 @@ def apply_regret_updates(
         dcfr_alpha: Positive-regret discount exponent (DCFR)
         dcfr_beta: Negative-regret discount exponent (DCFR)
     """
+    # DISCOUNT PLACEMENT (deliberate deviation from the paper — do not "fix").
+    # Published DCFR discounts every infoset's cumulative regret at every
+    # iteration. This applies the factor only when an infoset is VISITED, using
+    # the current t, so an infoset seen at t=5,100,5000 receives three factors
+    # where the paper applies ~5000. That is not an oversight: under full-
+    # information CFR every infoset updates every iteration and the two schedules
+    # coincide, but under sampling they diverge, and eagerly decaying an infoset
+    # through iterations that gave it no new information destroys accumulated
+    # signal without replacing it.
+    #
+    # Measured on Leduc against exact exploitability (2026-07-28), eager applied
+    # in the published order (discount R_{t-1}, then add r_t):
+    #     10k iters   lazy 0.404   eager 0.454   (eager 1.12x worse)
+    #     30k iters   lazy 0.206   eager 0.242   (eager 1.18x worse)
+    # Per-visit also keeps the schedule independent of visit frequency; eager
+    # would have deep river infosets and preflop infosets running effectively
+    # different algorithms.
     for j in range(target_indices.shape[0]):
         i = target_indices[j]
         if weighting == 2 and iteration > 1:

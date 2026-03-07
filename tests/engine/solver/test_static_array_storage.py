@@ -164,3 +164,34 @@ class TestSharedMemory:
                 worker.close()
         finally:
             owner.close()
+
+
+class TestBucketBounds:
+    """An out-of-range bucket must fail loudly, not alias another node's rows.
+
+    Rows are contiguous per node, so `row_offset[n] + oversized_bucket` lands on
+    a real row owned by a later node. Without a check, two unrelated infosets
+    silently share storage and nothing anywhere reports an error.
+    """
+
+    def test_bucket_past_the_end_raises(self, storage, tree):
+        node = tree.nodes[0]
+        n = tree.num_buckets(node.street)
+        with pytest.raises(IndexError, match="out of range"):
+            storage.infoset_at(node.node_id, n)
+
+    def test_negative_bucket_raises(self, storage, tree):
+        with pytest.raises(IndexError, match="out of range"):
+            storage.infoset_at(tree.nodes[0].node_id, -1)
+
+    def test_oversized_bucket_would_have_hit_a_real_row(self, storage, tree):
+        """Shows the check is load-bearing: the bad index is otherwise valid."""
+        node = tree.nodes[0]
+        n = tree.num_buckets(node.street)
+        aliased = int(tree.row_offset[node.node_id]) + n
+        assert aliased < tree.num_rows, "expected the bad index to be in-array"
+
+    def test_last_valid_bucket_still_works(self, storage, tree):
+        node = tree.nodes[0]
+        infoset = storage.infoset_at(node.node_id, tree.num_buckets(node.street) - 1)
+        assert len(infoset.regrets) == node.num_actions
