@@ -1012,6 +1012,7 @@ def ochs_gate_eval(
     ochs_runs: str,
     at_iteration: int = 1_000_000,
     board_seeds: str = "7,11,13",
+    pair_by_iteration: bool = False,
     br_flops: int = 16,
     br_turns: int = 3,
     br_rivers: int = 3,
@@ -1032,6 +1033,14 @@ def ochs_gate_eval(
     arm-to-arm difference (CRN). The replicate spread WITHIN an arm is training
     noise, and it is what any claimed effect has to clear — it is reported
     alongside the difference rather than left implicit.
+
+    ``at_iteration=0`` scores each run at its OWN latest checkpoint instead of a
+    shared rung. That trades the shared-budget guarantee for reach: runs
+    interrupted at different points still carry useful signal at their
+    individual endpoints. It is only interpretable when runs are paired by
+    similar iteration counts, so ``pair_by_iteration`` reports them that way and
+    prints each run's actual checkpoint iteration — a comparison across
+    different budgets is a comparison of budgets, not of abstractions.
     """
     scalar = [r.strip() for r in scalar_runs.split(",") if r.strip()]
     ochs = [r.strip() for r in ochs_runs.split(",") if r.strip()]
@@ -1055,14 +1064,19 @@ def ochs_gate_eval(
                     br_turns=br_turns,
                     br_rivers=br_rivers,
                     br_board_seed=board_seed,
-                    at_iteration=at_iteration,
+                    at_iteration=at_iteration or None,
                 )
 
     scores: dict[tuple[str, str, int], float] = {}
+    iterations: dict[str, int] = {}
     for key, call in calls.items():
         result = _await_call(call, key[1], "evaluate")
         scores[key] = result["results"]["exploitability_mbb"]
-        print(f"  {key[0]:>6} {key[1]} board={key[2]}: {scores[key]:.1f} mbb/g")
+        iterations[key[1]] = result.get("checkpoint_iteration") or at_iteration
+        print(
+            f"  {key[0]:>6} {key[1]} board={key[2]} "
+            f"@{iterations[key[1]]:,}: {scores[key]:.1f} mbb/g"
+        )
 
     def mean(values: list[float]) -> float:
         return sum(values) / len(values)
@@ -1072,6 +1086,43 @@ def ochs_gate_eval(
             return 0.0
         m = mean(values)
         return (sum((v - m) ** 2 for v in values) / (len(values) - 1)) ** 0.5
+
+    if pair_by_iteration:
+        # Runs stopped at different iterations, so arm MEANS would confound the
+        # abstraction with the budget. Pair each scalar run with the OCHS run
+        # closest to it in iterations and report the gap alongside it, so a
+        # mismatched pair cannot be read as a clean comparison.
+        print("\n=== paired by nearest iteration count (mbb/g; lower is better) ===")
+        header = (
+            "scalar run".ljust(14)
+            + "iters".rjust(12)
+            + "BR".rjust(9)
+            + "   | "
+            + "ochs run".ljust(14)
+            + "iters".rjust(12)
+            + "BR".rjust(9)
+            + "diff".rjust(9)
+        )
+        print(header)
+        print("-" * len(header))
+        remaining = list(ochs)
+        for s_run in sorted(scalar, key=lambda r: -iterations[r]):
+            if not remaining:
+                break
+            o_run = min(remaining, key=lambda r: abs(iterations[r] - iterations[s_run]))
+            remaining.remove(o_run)
+            s_br = mean([scores[("scalar", s_run, b)] for b in boards])
+            o_br = mean([scores[("ochs", o_run, b)] for b in boards])
+            skew = (iterations[o_run] - iterations[s_run]) / iterations[s_run]
+            flag = "" if abs(skew) < 0.03 else f"  [ochs {skew:+.0%} iters]"
+            print(
+                f"{s_run[-6:]:<14}{iterations[s_run]:>12,}{s_br:>9.1f}   | "
+                f"{o_run[-6:]:<14}{iterations[o_run]:>12,}{o_br:>9.1f}{o_br - s_br:>+9.1f}{flag}"
+            )
+        print(
+            "\n  A pair whose iteration counts differ compares budgets as well as "
+            "abstractions;\n  read the flagged rows with that in mind."
+        )
 
     print("\n=== exact BR by arm and board seed (mbb/g; lower is better) ===")
     header = "board".ljust(8) + "scalar mean".rjust(14) + "ochs mean".rjust(12) + "diff".rjust(10)
@@ -1106,10 +1157,16 @@ def ochs_gate_eval(
     else:
         verdict = "INCONCLUSIVE — the difference is inside training noise"
     print(f"\n  verdict: {verdict}")
+    # Report the budget actually scored, not the requested rung: with
+    # at_iteration=0 each run is scored at its own endpoint, and quoting "0"
+    # would understate the budget to nothing.
+    scored = sorted(iterations.values())
+    lo, hi = scored[0], scored[-1]
+    span = f"{lo:,}" if lo == hi else f"{lo:,}-{hi:,}"
     print(
-        f"\n  CAVEAT: iteration {at_iteration:,} is ~{at_iteration * 22.8 / 87984:.0f} regret "
-        "updates per infoset, below the 1e3 CFR needs. An inconclusive result here is\n"
-        "  uninformative rather than evidence of no effect."
+        f"\n  CAVEAT: scored at iteration {span} = ~{lo * 22.8 / 87984:.0f}-"
+        f"{hi * 22.8 / 87984:.0f} regret updates per infoset, against the ~1e3 CFR\n"
+        "  needs. Read a null here as uninformative rather than as evidence of no effect."
     )
 
 
