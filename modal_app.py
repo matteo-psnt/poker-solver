@@ -884,9 +884,12 @@ def run_train(
 def ochs_gate(
     seeds: str = "42,43,44",
     board_seeds: str = "7,11,13",
-    train_cpu: int = 16,
-    eval_cpu: int = 16,
-    eval_memory: int = 32768,
+    train_cpu: int = 2,
+    eval_cpu: int = 8,
+    eval_memory: int = 16384,
+    br_flops: int = 16,
+    br_turns: int = 3,
+    br_rivers: int = 3,
     timeout: int = 10800,
 ) -> None:
     """Does OCHS on the river actually lower exploitability?
@@ -922,8 +925,12 @@ def ochs_gate(
     train_calls: dict[tuple[str, int], Any] = {}
     for arm, config_name in arms.items():
         for seed in train_seeds:
+            # num_workers=1: multi-worker Hogwild drops 39-74% of update samples,
+            # which would both shrink the effective budget and vary between arms.
+            # One worker makes training deterministic and the drop rate
+            # structurally zero, so the river feature is the only difference.
             call = train.with_options(cpu=train_cpu, timeout=timeout).spawn(
-                config_name=config_name, num_workers=train_cpu, seed=seed
+                config_name=config_name, num_workers=1, seed=seed
             )
             record_spawn(
                 run_id=f"{arm}-seed{seed}",
@@ -943,7 +950,7 @@ def ochs_gate(
             f"infosets={result['num_infosets']:,}"
         )
 
-    print(f"\n=== exact BR over {len(boards)} board seeds ===")
+    print(f"\n=== exact BR over {len(boards)} board seeds @ {br_flops}/{br_turns}/{br_rivers} ===")
     eval_calls: dict[tuple[str, int, int], Any] = {}
     for (arm, seed), run_id in runs.items():
         for board_seed in boards:
@@ -951,9 +958,9 @@ def ochs_gate(
                 run_id=run_id,
                 method="exact_br",
                 num_workers=eval_cpu,
-                br_flops=64,
-                br_turns=4,
-                br_rivers=4,
+                br_flops=br_flops,
+                br_turns=br_turns,
+                br_rivers=br_rivers,
                 br_board_seed=board_seed,
             )
             eval_calls[(arm, seed, board_seed)] = call
