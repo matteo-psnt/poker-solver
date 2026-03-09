@@ -42,6 +42,7 @@ Stack depth:
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -228,6 +229,31 @@ class BettingTree:
 
     def legal_actions(self, node_id: int) -> tuple[Action, ...]:
         return self.nodes[node_id].legal_actions
+
+    def fingerprint(self) -> str:
+        """Stable hash of everything that fixes what a stored row MEANS.
+
+        A checkpoint is a bare array of numbers; the tree is the only thing that
+        says which infoset each row belongs to. Loading one against a different
+        tree would not fail — it would silently reinterpret every row as a
+        different infoset, and training would continue on scrambled regrets. So
+        this covers node identity and order, per-node action counts, and the
+        per-street bucket counts: change any of them and the layout or the
+        meaning changes.
+
+        Node ORDER matters as much as membership, since ids are assigned by DFS
+        order and the offsets follow from it.
+        """
+        digest = hashlib.sha256()
+        digest.update(b"betting-tree-v1")
+        digest.update(str(self.starting_stack).encode())
+        for street in sorted(self.buckets_per_street, key=lambda s: s.name):
+            digest.update(f"{street.name}={self.num_buckets(street)};".encode())
+        for node in self.nodes:
+            digest.update(
+                f"{node.street.name}|{node.betting_sequence}|{node.num_actions};".encode()
+            )
+        return digest.hexdigest()[:16]
 
     def __len__(self) -> int:
         return len(self.nodes)

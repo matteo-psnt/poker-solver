@@ -24,6 +24,7 @@ quantity that was starving.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import cast
 
 import numpy as np
@@ -38,6 +39,7 @@ from src.engine.solver.infoset_index import bucket_of
 from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.static_array import StaticArrayStorage
+from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.shared.config import Config
 
 from .solver import MCCFRSolver
@@ -59,7 +61,7 @@ class StaticTreeSolver(MCCFRSolver):
     # hashing this design removes. The base class only touches ``self.storage``
     # in ``checkpoint`` and ``num_infosets``, both overridden below, so nothing
     # reaches the ABC surface through this attribute.
-    storage: StaticArrayStorage  # type: ignore[assignment]
+    storage: StaticArrayStorage
 
     def __init__(
         self,
@@ -69,10 +71,16 @@ class StaticTreeSolver(MCCFRSolver):
         config: Config,
         *,
         tree: BettingTree | None = None,
+        checkpoint_dir: Path | None = None,
+        checkpoint_retain_every: int = 0,
     ):
         super().__init__(action_model, card_abstraction, cast("Storage", storage), config)
         self.storage = storage
         self.tree = tree if tree is not None else storage.tree
+        self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
+        # Retention is a property of the RUN, not of an individual call: a leg
+        # that forgot to pass it would silently stop sparing measurement points.
+        self.checkpoint_retain_every = checkpoint_retain_every
 
     @classmethod
     def build(
@@ -123,10 +131,33 @@ class StaticTreeSolver(MCCFRSolver):
         return self.storage.num_touched_infosets()
 
     def checkpoint(self) -> None:
-        raise NotImplementedError(
-            "StaticArrayStorage checkpointing is not wired yet; this solver is "
-            "currently exercised by tests and benchmarks only."
+        """Write a snapshot of the flat arrays and publish it atomically.
+
+        ``checkpoint_retain_every`` spares one snapshot per band from pruning,
+        which is what makes a within-run exploitability curve computable after
+        the run ends. Without it a run finishes holding exactly one checkpoint —
+        the reason no such curve has ever existed here.
+        """
+        if self.checkpoint_dir is None:
+            raise ValueError(
+                "StaticTreeSolver has no checkpoint_dir; pass one at construction "
+                "to enable checkpointing."
+            )
+        save_checkpoint(
+            self.storage,
+            self.checkpoint_dir,
+            self.iteration,
+            retain_every=self.checkpoint_retain_every,
         )
+
+    def restore(self, *, at_iteration: int | None = None) -> int:
+        """Load a snapshot into this solver's storage and adopt its iteration."""
+        if self.checkpoint_dir is None:
+            raise ValueError("StaticTreeSolver has no checkpoint_dir to restore from.")
+        self.iteration = load_checkpoint(
+            self.storage, self.checkpoint_dir, at_iteration=at_iteration
+        )
+        return self.iteration
 
     def __str__(self) -> str:
         return (

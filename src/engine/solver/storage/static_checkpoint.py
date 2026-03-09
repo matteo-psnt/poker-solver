@@ -1,0 +1,238 @@
+"""Checkpointing for :class:`StaticArrayStorage`.
+
+A static checkpoint is just the flat arrays plus the tree fingerprint. There is
+no key table, which is the whole point: in the dynamic backend the key table and
+its stable hash were ~83% of the checkpoint write cost, and they existed only to
+record which infoset each row belonged to. Here the tree already says that, and
+the tree is a pure function of config — so the checkpoint stores numbers and a
+16-byte fingerprint proving which tree those numbers are indexed by.
+
+That fingerprint is load-bearing rather than defensive. A checkpoint carries no
+self-describing row identity, so loading one against a different tree would not
+fail — it would silently reinterpret every row as a different infoset and
+continue training on scrambled regrets. Refusing the load is the only way that
+failure is ever visible.
+
+Layout on disk::
+
+    <dir>/STATIC_CHECKPOINT.json     manifest: current + retained ladder
+    <dir>/static-<iteration>.zarr    the five arrays
+
+The manifest is published with an atomic ``os.replace`` after the arrays are
+fully written, so a snapshot is either current or absent, never half-current.
+The retained ladder keeps at most one snapshot per ``retain_every`` band, which
+is what makes a within-run exploitability curve computable after the fact — the
+absence of that ladder is why no such curve has ever existed for this project.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+
+import numcodecs
+import numpy as np
+import zarr
+
+from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
+
+logger = logging.getLogger(__name__)
+
+MANIFEST_FILE = "STATIC_CHECKPOINT.json"
+FORMAT_VERSION = "static-1"
+
+# clevel=1 / 50k chunks: benchmarked as both fastest and smallest for these
+# arrays; there is nothing left to tune here.
+DEFAULT_COMPRESSION_LEVEL = 1
+DEFAULT_CHUNK_SIZE = 50_000
+
+
+class FingerprintMismatchError(RuntimeError):
+    """The checkpoint was written against a different betting tree."""
+
+
+@dataclass(frozen=True)
+class StaticCheckpointManifest:
+    iteration: int
+    zarr_name: str
+    fingerprint: str
+    retained: list[dict]
+
+    @classmethod
+    def read(cls, checkpoint_dir: Path) -> StaticCheckpointManifest | None:
+        path = Path(checkpoint_dir) / MANIFEST_FILE
+        if not path.exists():
+            return None
+        raw = json.loads(path.read_text())
+        for field in ("iteration", "zarr", "fingerprint"):
+            if field not in raw:
+                raise ValueError(f"Invalid static checkpoint manifest {path}: missing {field!r}")
+        return cls(
+            iteration=int(raw["iteration"]),
+            zarr_name=raw["zarr"],
+            fingerprint=raw["fingerprint"],
+            retained=list(raw.get("retained", [])),
+        )
+
+    def entry_for(self, iteration: int | None) -> dict:
+        """The manifest entry for ``iteration``, or the current one when None."""
+        if iteration is None:
+            return {"iteration": self.iteration, "zarr": self.zarr_name}
+        for entry in [*self.retained, {"iteration": self.iteration, "zarr": self.zarr_name}]:
+            if int(entry["iteration"]) == iteration:
+                return entry
+        available = sorted({int(e["iteration"]) for e in self.retained} | {self.iteration})
+        raise KeyError(f"No retained checkpoint at iteration {iteration}; have {available}")
+
+
+def save_checkpoint(
+    storage: StaticArrayStorage,
+    checkpoint_dir: Path,
+    iteration: int,
+    *,
+    retain_every: int = 0,
+    compression_level: int = DEFAULT_COMPRESSION_LEVEL,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> Path:
+    """Write a snapshot and atomically publish it. Returns the zarr path."""
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    zarr_path = checkpoint_dir / f"static-{iteration}.zarr"
+
+    compressor = numcodecs.Blosc(
+        cname="zstd", clevel=compression_level, shuffle=numcodecs.Blosc.BITSHUFFLE
+    )
+    root = zarr.open(zarr.DirectoryStore(zarr_path), mode="w")
+    for name in _ARRAYS:
+        array = getattr(storage, name)
+        root.create_dataset(
+            name,
+            data=np.asarray(array),
+            chunks=(min(chunk_size, max(1, array.shape[0])),),
+            compressor=compressor,
+            dtype=array.dtype,
+        )
+    root.attrs["iteration"] = iteration
+    root.attrs["fingerprint"] = storage.tree.fingerprint()
+    root.attrs["format_version"] = FORMAT_VERSION
+    root.attrs["num_rows"] = storage.tree.num_rows
+    root.attrs["num_slots"] = storage.tree.num_slots
+
+    previous = StaticCheckpointManifest.read(checkpoint_dir)
+    manifest = {
+        "iteration": iteration,
+        "zarr": zarr_path.name,
+        "fingerprint": storage.tree.fingerprint(),
+        "format_version": FORMAT_VERSION,
+        "retained": _extend_ladder(previous, iteration, zarr_path.name, retain_every),
+    }
+    tmp = checkpoint_dir / (MANIFEST_FILE + ".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2))
+    os.replace(tmp, checkpoint_dir / MANIFEST_FILE)
+
+    _prune(checkpoint_dir, manifest)
+    return zarr_path
+
+
+def _extend_ladder(
+    previous: StaticCheckpointManifest | None,
+    iteration: int,
+    zarr_name: str,
+    retain_every: int,
+) -> list[dict]:
+    """The retained ladder after committing ``iteration`` — one entry per band.
+
+    Append-only, and preserved even when a later call passes ``retain_every=0``:
+    a resume whose caller forgot the knob must not delete measurement points an
+    earlier leg was told to keep.
+    """
+    ladder: list[dict] = list(previous.retained) if previous else []
+    if retain_every <= 0:
+        return ladder
+    occupied = {int(entry["iteration"]) // retain_every for entry in ladder}
+    if iteration // retain_every not in occupied:
+        ladder.append({"iteration": iteration, "zarr": zarr_name})
+    return ladder
+
+
+def _prune(checkpoint_dir: Path, manifest: dict) -> None:
+    """Delete snapshots that are neither current nor retained."""
+    keep = {manifest["zarr"]} | {entry["zarr"] for entry in manifest["retained"]}
+    for path in checkpoint_dir.glob("static-*.zarr"):
+        if path.name not in keep:
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def load_checkpoint(
+    storage: StaticArrayStorage,
+    checkpoint_dir: Path,
+    *,
+    at_iteration: int | None = None,
+) -> int:
+    """Load a snapshot into ``storage`` in place. Returns the iteration loaded.
+
+    ``at_iteration`` selects a retained ladder rung instead of the current
+    snapshot — sweeping it is how a within-run convergence curve is built.
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    manifest = StaticCheckpointManifest.read(checkpoint_dir)
+    if manifest is None:
+        raise FileNotFoundError(f"No static checkpoint manifest in {checkpoint_dir}")
+
+    expected = storage.tree.fingerprint()
+    if manifest.fingerprint != expected:
+        raise FingerprintMismatchError(
+            f"Checkpoint in {checkpoint_dir} was written against betting tree "
+            f"{manifest.fingerprint}, but this storage indexes tree {expected}. "
+            "Loading it would reinterpret every row as a different infoset. "
+            "Rebuild the tree from the config the checkpoint was trained under."
+        )
+
+    entry = manifest.entry_for(at_iteration)
+    root = zarr.open(zarr.DirectoryStore(checkpoint_dir / entry["zarr"]), mode="r")
+
+    stored = root.attrs.get("fingerprint")
+    if stored != expected:
+        raise FingerprintMismatchError(
+            f"Snapshot {entry['zarr']} carries fingerprint {stored}, expected {expected}. "
+            "The manifest and the arrays disagree; the directory is corrupt."
+        )
+
+    for name in _ARRAYS:
+        target = getattr(storage, name)
+        source = root[name][:]
+        if source.shape != target.shape:
+            raise ValueError(
+                f"Checkpoint array {name!r} has shape {source.shape}, storage expects "
+                f"{target.shape} — fingerprints matched, so this is a format bug."
+            )
+        target[:] = source
+
+    loaded = int(entry["iteration"])
+    logger.info(
+        f"Loaded static checkpoint at iteration {loaded:,} "
+        f"({storage.num_touched_infosets():,} rows touched, tree {expected})"
+    )
+    return loaded
+
+
+def retained_iterations(checkpoint_dir: Path) -> list[int]:
+    """Every iteration still on disk, oldest first — the ladder plus current."""
+    manifest = StaticCheckpointManifest.read(Path(checkpoint_dir))
+    if manifest is None:
+        return []
+    return sorted({int(e["iteration"]) for e in manifest.retained} | {manifest.iteration})
+
+
+__all__ = (
+    "MANIFEST_FILE",
+    "FingerprintMismatchError",
+    "StaticCheckpointManifest",
+    "load_checkpoint",
+    "retained_iterations",
+    "save_checkpoint",
+)
