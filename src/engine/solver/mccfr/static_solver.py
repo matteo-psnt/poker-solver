@@ -73,6 +73,7 @@ class StaticTreeSolver(MCCFRSolver):
         tree: BettingTree | None = None,
         checkpoint_dir: Path | None = None,
         checkpoint_retain_every: int = 0,
+        abstraction_id: str | None = None,
     ):
         super().__init__(action_model, card_abstraction, cast("Storage", storage), config)
         self.storage = storage
@@ -81,6 +82,10 @@ class StaticTreeSolver(MCCFRSolver):
         # Retention is a property of the RUN, not of an individual call: a leg
         # that forgot to pass it would silently stop sparing measurement points.
         self.checkpoint_retain_every = checkpoint_retain_every
+        # Identifies the bucket ASSIGNMENT, which the tree fingerprint cannot:
+        # two abstractions with the same per-street counts produce an identical
+        # fingerprint while mapping hands to different buckets.
+        self.abstraction_id = abstraction_id
 
     @classmethod
     def build(
@@ -148,6 +153,7 @@ class StaticTreeSolver(MCCFRSolver):
             self.checkpoint_dir,
             self.iteration,
             retain_every=self.checkpoint_retain_every,
+            abstraction_id=self.abstraction_id,
         )
 
     def restore(self, *, at_iteration: int | None = None) -> int:
@@ -155,7 +161,10 @@ class StaticTreeSolver(MCCFRSolver):
         if self.checkpoint_dir is None:
             raise ValueError("StaticTreeSolver has no checkpoint_dir to restore from.")
         self.iteration = load_checkpoint(
-            self.storage, self.checkpoint_dir, at_iteration=at_iteration
+            self.storage,
+            self.checkpoint_dir,
+            at_iteration=at_iteration,
+            abstraction_id=self.abstraction_id,
         )
         return self.iteration
 
