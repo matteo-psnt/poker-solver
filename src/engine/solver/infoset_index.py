@@ -64,6 +64,28 @@ _PREFLOP_INDEX = _build_preflop_index()
 NUM_PREFLOP_HANDS = len(_PREFLOP_INDEX)
 
 
+def _build_preflop_strings() -> list[str]:
+    """Index -> canonical hand string, the exact inverse of :data:`_PREFLOP_INDEX`."""
+    strings = [""] * NUM_PREFLOP_HANDS
+    for (high, low, suited), index in _PREFLOP_INDEX.items():
+        strings[index] = f"{high}{low}" if high == low else f"{high}{low}{'s' if suited else 'o'}"
+    return strings
+
+
+_PREFLOP_STRINGS = _build_preflop_strings()
+
+
+def preflop_hand_string_at(index: int) -> str:
+    """Canonical hand string for a preflop index — inverse of :func:`preflop_hand_index`.
+
+    Exists so consumers that enumerate preflop buckets by index (the exact-BR
+    engine builds a policy row per index) resolve them through the SAME ordering
+    the solver stores them under. A second, independently-derived ordering would
+    attach every policy row to the wrong hand, silently.
+    """
+    return _PREFLOP_STRINGS[index]
+
+
 def preflop_hand_index(hole_cards: tuple[Card, Card]) -> int:
     """Map hole cards to their canonical starting-hand index (0-168)."""
     card1, card2 = hole_cards
