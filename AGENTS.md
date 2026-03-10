@@ -15,11 +15,35 @@ frontend lives in `ui/` (`npm run dev` / `npm run build` from `ui/`).
 ## Commands
 - `uv sync --group dev` — install dependencies.
 - `uv run poker-solver` — interactive CLI.
-- `uv run poker-solver-run` — headless entrypoint: `train`, `evaluate`,
-  `ledger`, `compare`, `checkpoint-profile`. Use `ledger`/`compare` for eval
-  bookkeeping instead of hand-transcribing scores.
-- `modal_app.py` — cloud training/eval on Modal (`uv run modal run
-  modal_app.py`); mirrors the local layout with `data/` on a Volume.
+- `uv run poker-solver-run` — headless entrypoint: `train`, `resume`,
+  `precompute`, `evaluate`, `curve`, `report`, `promote`, `ledger`, `compare`,
+  `checkpoint-profile`. Every long-running operation is reachable here, so cloud
+  jobs are shell invocations of this module rather than provider-specific
+  reimplementations.
+- **Experiment bookkeeping.** Tag runs with `--experiment`/`--arm`/`--parent`
+  (`--set k=v` for config overrides); `report --experiment` pins every arm to the
+  control's knob tier and pairs each variant against its control. `curve --run`
+  is the within-run exploitability-vs-iteration artifact. `promote` moves the
+  baseline. Never hand-transcribe scores — and never compare arms across knob
+  tiers, which `compare`/`report` refuse by design.
+- **Eval records are per-run files**, not ledger appends: `evaluate` writes the
+  complete row into `<run_dir>/evals/record-*.json`, and `data/eval_ledger.jsonl`
+  is a rebuildable cache (`ledger --rebuild`). This is what makes concurrent
+  evaluation from several boxes safe.
+- `infra/` — **fire-and-forget cloud training on Azure Batch**. `just submit
+  <config> <absolute-iteration> [experiment] [arm] [k=v...]` queues a leg and
+  returns; the pool scales 0→N→0 on its own. `just jobs` / `pool-status` /
+  `fetch`. Terraform owns the account and pool; jobs and tasks are created at
+  runtime by the justfile, never in HCL. `infra/store/` is a **separate**
+  Terraform state holding the durable share, so `just destroy` cannot reach the
+  experiment record. Active runs live on the node's `/mnt/work` data disk and are
+  *published* to the share — never point `runs_dir` at the share. Constraints that
+  look arbitrary but are measured (UserSubscription mode, `Dals_v6` not
+  `Dalds_v6`, Gen2-only images, the SKU policy) are documented in
+  `infra/README.md`; read it before changing pool config.
+- `modal_app.py` — the previous Modal substrate. Its train/resume/evaluate/
+  precompute entrypoints still work but are superseded by `infra/`; prefer it for
+  the one-off experiments (noise floor, pruning calibration, gating tests).
 - `uv run pytest -m "not slow"` — fast gate; `uv run pytest` — full suite.
 - `uv run pre-commit run --all-files` — full quality gate (ruff lint+format,
   ty, import-linter, deptry, vulture). Run before handing off changes.

@@ -2,8 +2,10 @@
 
 Unlike the questionary menu in :mod:`src.interfaces.cli.app`, every operation here
 is fully specified by CLI flags and emits a machine-readable summary. This is the
-surface used by scripts and cloud (Modal) execution — where an interactive prompt is
-not an option.
+surface used by scripts and cloud execution — where an interactive prompt is not an
+option. Every long-running operation (train, resume, evaluate, precompute) is
+reachable here, so a cloud job is a shell invocation of this module rather than a
+provider-specific reimplementation.
 
 Cloud callers should prefer importing :func:`src.pipeline.services.train`
 directly (it returns a ``TrainingOutput`` object); this module is the local /
@@ -51,16 +53,107 @@ def _resolve_run_dir(run: str, runs_dir: str) -> Path:
     raise SystemExit(f"Run not found: '{run}' (looked at {as_path} and {candidate})")
 
 
+def _parse_overrides(pairs: list[str]) -> dict[str, Any]:
+    """Parse ``--set key__path=value`` into the config loader's override kwargs.
+
+    Values go through JSON so ``1000``/``true``/``null`` arrive as the types the
+    strict config models require; anything JSON rejects stays a plain string, which
+    is what bare names like ``--set system__config_name=probe`` want.
+    """
+    overrides: dict[str, Any] = {}
+    for pair in pairs:
+        key, sep, raw = pair.partition("=")
+        if not sep:
+            raise SystemExit(f"--set expects KEY=VALUE, got '{pair}'")
+        try:
+            overrides[key] = json.loads(raw)
+        except json.JSONDecodeError:
+            overrides[key] = raw
+    return overrides
+
+
 def _cmd_train(args: argparse.Namespace) -> dict[str, Any]:
     out = services.train(
         args.config,
         num_workers=args.workers,
         num_iterations=args.iterations,
         seed=args.seed,
+        config_overrides=_parse_overrides(args.overrides),
+        experiment=services.ExperimentTag(
+            experiment_id=args.experiment,
+            arm=args.arm,
+            parent_run_id=args.parent,
+        ),
     )
     payload: dict[str, Any] = {"op": "train", **dataclasses.asdict(out)}
     _write_result(Path(out.runs_dir) / out.run_id, payload)
     return payload
+
+
+def _cmd_resume(args: argparse.Namespace) -> dict[str, Any]:
+    """Argparse transport around :func:`services.resume`."""
+    run_dir = _resolve_run_dir(args.run, args.runs_dir)
+    out = services.resume(
+        run_dir,
+        args.to_iteration,
+        num_workers=args.workers,
+        capacity_override=args.capacity,
+    )
+    payload: dict[str, Any] = {
+        "op": "resume",
+        "runs_dir": args.runs_dir,
+        **dataclasses.asdict(out),
+    }
+    _write_result(run_dir, payload)
+    return payload
+
+
+def _cmd_precompute(args: argparse.Namespace) -> dict[str, Any]:
+    """Precompute a combo abstraction into ``data/combo_abstraction/<name>``."""
+    out = services.precompute_abstraction(
+        args.config,
+        num_workers=args.workers,
+        overwrite=args.overwrite,
+    )
+    return {
+        "op": "precompute",
+        "abstraction_config": args.config,
+        "output_dir": str(out),
+    }
+
+
+def _cmd_curve(args: argparse.Namespace) -> dict[str, Any]:
+    """Argparse transport around :func:`services.exploitability_curve`."""
+    run_dir = _resolve_run_dir(args.run, args.runs_dir)
+    out = services.exploitability_curve(
+        run_dir,
+        ledger_path=Path(args.ledger),
+        tier_index=args.tier,
+    )
+    return {"op": "curve", "decay_ratio": out.decay_ratio, **dataclasses.asdict(out)}
+
+
+def _cmd_report(args: argparse.Namespace) -> dict[str, Any]:
+    """Argparse transport around :func:`services.experiment_report`."""
+    out = services.experiment_report(
+        args.experiment,
+        ledger_path=Path(args.ledger),
+        runs_dir=Path(args.runs_dir),
+        baseline_path=Path(args.baseline),
+    )
+    return {"op": "report", **dataclasses.asdict(out)}
+
+
+def _cmd_promote(args: argparse.Namespace) -> dict[str, Any]:
+    """Point the baseline at a run, closing one turn of the base-fork loop."""
+    run_dir = _resolve_run_dir(args.run, args.runs_dir)
+    baseline = services.promote_baseline(
+        run_dir.name,
+        args.rationale,
+        path=Path(args.baseline),
+        checkpoint_iteration=services.checkpoint_iteration_of(run_dir),
+    )
+    return {"op": "promote", "baseline": str(args.baseline), **dataclasses.asdict(baseline)}
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
@@ -109,12 +202,36 @@ def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_ledger(args: argparse.Namespace) -> dict[str, Any]:
-    """List recent eval-ledger rows as a compact table."""
-    records = eval_ledger.read_records(Path(args.ledger))
+    """List recent eval-ledger rows as a compact table, optionally rebuilding first."""
+    ledger_path = Path(args.ledger)
+    rebuilt = None
+    if args.rebuild:
+        recovered, preserved = eval_ledger.rebuild_ledger(Path(args.runs_dir), ledger_path)
+        rebuilt = {"recovered": recovered, "preserved": preserved}
+
+    records = eval_ledger.read_records(ledger_path)
     if args.run:
         records = [r for r in records if r.get("run_id") == args.run]
-    records = records[-args.limit :]
-    return {"op": "ledger", "ledger": str(args.ledger), "rows": records}
+    if args.experiment:
+        records = [r for r in records if r.get("experiment_id") == args.experiment]
+    if args.method:
+        records = [r for r in records if r.get("method") == args.method]
+    if args.since:
+        # Instants, not strings: the ledger holds naive-local legacy rows beside
+        # UTC-aware new ones, so a lexicographic cutoff skews by the writer's
+        # offset — the exact defect `record_instant` exists to remove.
+        cutoff = eval_ledger.record_instant({"timestamp": args.since})
+        records = [r for r in records if eval_ledger.record_instant(r) >= cutoff]
+    # `records[-0:]` is the whole list, so a 0 limit already meant "all" by accident.
+    # Made deliberate: `--limit 0` is how a rebuild shows everything it recovered.
+    if args.limit > 0:
+        records = records[-args.limit :]
+    return {
+        "op": "ledger",
+        "ledger": str(args.ledger),
+        "rebuilt": rebuilt,
+        "rows": records,
+    }
 
 
 def _cmd_checkpoint_profile(args: argparse.Namespace) -> dict[str, Any]:
@@ -185,12 +302,27 @@ def _cmd_compare(args: argparse.Namespace) -> dict[str, Any]:
             "to override (the resulting p-value will not be trustworthy)."
         )
 
-    payload_a = eval_ledger.load_payload(rec_a)
-    payload_b = eval_ledger.load_payload(rec_b)
-    comparison = compare_paired_samples(
-        payload_a["results"]["pair_samples_mbb"],
-        payload_b["results"]["pair_samples_mbb"],
-    )
+    runs_dir = Path(args.runs_dir)
+    payload_a = eval_ledger.load_payload(rec_a, runs_dir)
+    payload_b = eval_ledger.load_payload(rec_b, runs_dir)
+
+    # Checked AFTER --force, deliberately: --force overrides a judgement about
+    # whether a comparison is meaningful, but it cannot conjure per-hand samples
+    # that were never recorded. exact_br is deterministic and stores none, so the
+    # forced path would otherwise die on a bare KeyError.
+    samples_a = payload_a["results"].get("pair_samples_mbb")
+    samples_b = payload_b["results"].get("pair_samples_mbb")
+    if not samples_a or not samples_b:
+        missing, rec_missing = (args.a, rec_a) if not samples_a else (args.b, rec_b)
+        raise SystemExit(
+            f"Cannot pair: the eval for '{missing}' recorded no per-hand samples "
+            f"(method '{rec_missing.get('method')}'). Deterministic estimators like "
+            "exact_br have nothing to pair — within a matched board tier compare "
+            "their exploitability_mbb directly; no p-value applies. --force does "
+            "not help here."
+        )
+
+    comparison = compare_paired_samples(samples_a, samples_b)
     return {
         "op": "compare",
         "run_a": args.a,
@@ -213,7 +345,89 @@ def _fmt_commit(commit: str | None, dirty: bool | None) -> str:
     return short
 
 
+def _print_curve(payload: dict[str, Any]) -> None:
+    points = payload["points"]
+    print(f"Convergence curve for {payload['run_id']}")
+    if not points:
+        print("  No placeable evaluations for this run.")
+        if payload["unplaceable_records"]:
+            print(
+                f"  {payload['unplaceable_records']} recorded eval(s) carry no "
+                "checkpoint_iteration (pre-provenance) — they cannot be placed on an axis."
+            )
+        if payload["retained_iterations"]:
+            rungs = ", ".join(f"{i:,}" for i in payload["retained_iterations"])
+            print(f"  Ladder on disk: {rungs}")
+            print("  Score them with: evaluate --run <id> --at <iteration>")
+        else:
+            print(
+                "  No retained checkpoint ladder either — train with "
+                "storage.checkpoint_retain_every set to build one."
+            )
+        return
+
+    print(f"  Tier: {payload['tier']}")
+    print(f"  {'iteration':>12}  {'mbb/g':>10}  {'± se':>8}  {'hands':>8}")
+    for point in points:
+        print(
+            f"  {point['iteration']:>12,}  {point['exploitability_mbb']:>10.1f}  "
+            f"{point['std_error_mbb']:>8.1f}  {point['num_hands']:>8,}"
+        )
+
+    if payload["decay_ratio"] is not None:
+        first, last = points[0], points[-1]
+        budget_ratio = last["iteration"] / first["iteration"] if first["iteration"] else 0
+        print(
+            f"  Decay:       {payload['decay_ratio']:.2f}x over {budget_ratio:.0f}x budget "
+            f"(O(1/sqrt(T)) predicts ~{budget_ratio**0.5:.2f}x)"
+        )
+    if payload["missing_iterations"]:
+        gaps = ", ".join(f"{i:,}" for i in payload["missing_iterations"])
+        print(f"  Unscored rungs: {gaps}")
+    for other in payload["other_tiers"]:
+        print(f"  (also recorded, not mixed in: {other})")
+
+
+def _print_report(payload: dict[str, Any]) -> None:
+    print(f"Experiment {payload['experiment_id']}")
+    if payload["baseline_run_id"]:
+        print(f"  Baseline: {payload['baseline_run_id']}")
+    for note in payload["notes"]:
+        print(f"  ! {note}")
+    if not payload["arms"]:
+        return
+
+    print(f"  {'arm':<24} {'mbb/g':>9} {'± se':>8} {'vs control':>12} {'p':>8}")
+    for arm in payload["arms"]:
+        delta = arm["vs_control_mbb"]
+        p_value = arm["vs_control_p_value"]
+        # Lower exploitability is better, so a negative delta is the idea helping.
+        delta_col = "—" if delta is None else f"{delta:+.1f}"
+        p_col = "—" if p_value is None else f"{p_value:.3f}"
+        if arm["arm"] == services.CONTROL_ARM:
+            delta_col, p_col = "(control)", ""
+        print(
+            f"  {arm['arm']:<24} {arm['exploitability_mbb']:>9.1f} "
+            f"{arm['std_error_mbb']:>8.1f} {delta_col:>12} {p_col:>8}"
+        )
+        for reason in arm["vs_control_blocked"]:
+            print(f"      not attributable: {reason}")
+    print("  (vs control is variant − control; negative = less exploitable = better)")
+
+
 def _print_ledger(payload: dict[str, Any]) -> None:
+    # Printed BEFORE the empty-rows early return: `just fetch` runs `--rebuild`
+    # without --json, and the recovery counts are the entire point of that call.
+    # A rebuild that found nothing and one that recovered 200 rows must not look
+    # identical.
+    rebuilt = payload.get("rebuilt")
+    if rebuilt:
+        print(
+            f"Rebuilt {payload['ledger']}: {rebuilt['recovered']} row(s) recovered "
+            f"from per-run records, {rebuilt['preserved']} preserved (no record to "
+            "rebuild from — pre-dating per-run records)."
+        )
+
     rows = payload["rows"]
     if not rows:
         print(f"No eval-ledger entries in {payload['ledger']}.")
@@ -278,6 +492,41 @@ def _print_human(payload: dict[str, Any]) -> None:
         )
         print(f"  Status:      {payload['status']}")
         return
+    if payload["op"] == "resume":
+        if payload["no_op"]:
+            print(
+                f"Nothing to do: {payload['run_id']} is at "
+                f"{payload['resumed_from_iteration']:,}, target was "
+                f"{payload['target_iteration']:,}."
+            )
+            return
+        print("Resume complete.")
+        print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
+        print(
+            f"  Iterations:  {payload['resumed_from_iteration']:,} -> "
+            f"{payload['iterations']:,}  (target {payload['target_iteration']:,})"
+        )
+        print(f"  Infosets:    {payload['num_infosets']:,}")
+        print(f"  Status:      {payload['status']}")
+        return
+    if payload["op"] == "precompute":
+        print("Precompute complete.")
+        print(f"  Abstraction: {payload['abstraction_config']}")
+        print(f"  Output:      {payload['output_dir']}")
+        return
+    if payload["op"] == "curve":
+        _print_curve(payload)
+        return
+    if payload["op"] == "report":
+        _print_report(payload)
+        return
+    if payload["op"] == "promote":
+        print(f"Baseline is now {payload['run_id']}")
+        if payload["checkpoint_iteration"] is not None:
+            print(f"  Checkpoint:  {payload['checkpoint_iteration']:,}")
+        print(f"  Rationale:   {payload['rationale']}")
+        print(f"  Recorded in: {payload['baseline']}")
+        return
 
     results = payload["results"]
     print("Evaluation complete.")
@@ -315,7 +564,69 @@ def build_parser() -> argparse.ArgumentParser:
         "--iterations", type=int, default=None, help="Override the config iteration count."
     )
     p_train.add_argument("--seed", type=int, default=None, help="Override system.seed.")
+    p_train.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="overrides",
+        metavar="KEY=VALUE",
+        help="Nested config override, `__` as the separator — e.g. "
+        "--set storage__checkpoint_retain_every=1000. Repeatable.",
+    )
+    p_train.add_argument("--experiment", default=None, help="Experiment id this run is an arm of.")
+    p_train.add_argument(
+        "--arm",
+        default=None,
+        help="Arm within the experiment, e.g. 'control' or 'variant:pruning'. A variant's "
+        "score is uninterpretable without a paired control — the extra training a fork "
+        "gets moves the number on its own.",
+    )
+    p_train.add_argument(
+        "--parent", default=None, help="Run id this was forked from (base-fork lineage)."
+    )
     p_train.set_defaults(func=_cmd_train)
+
+    p_resume = sub.add_parser(
+        "resume",
+        parents=[common],
+        help="Resume a run and train up to an absolute iteration target.",
+    )
+    p_resume.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
+    p_resume.add_argument(
+        "--runs-dir", default="data/runs", help="Base runs dir for id resolution."
+    )
+    p_resume.add_argument(
+        "--to-iteration",
+        type=int,
+        required=True,
+        help="ABSOLUTE target iteration (not an increment) — retry-safe under scheduler restarts.",
+    )
+    p_resume.add_argument(
+        "--workers", type=int, default=None, help="Parallel workers (default: all CPUs)."
+    )
+    p_resume.add_argument(
+        "--capacity",
+        type=int,
+        default=None,
+        help="Pre-allocate shared storage above the checkpoint's capacity (avoids mid-run resize).",
+    )
+    p_resume.set_defaults(func=_cmd_resume)
+
+    p_precompute = sub.add_parser(
+        "precompute",
+        parents=[common],
+        help="Precompute a combo abstraction into data/combo_abstraction/.",
+    )
+    p_precompute.add_argument(
+        "--config", required=True, help="Abstraction config stem (e.g. production)."
+    )
+    p_precompute.add_argument(
+        "--workers", type=int, default=None, help="Parallel workers (default: config value)."
+    )
+    p_precompute.add_argument(
+        "--overwrite", action="store_true", help="Recompute even if a complete abstraction exists."
+    )
+    p_precompute.set_defaults(func=_cmd_precompute)
 
     p_eval = sub.add_parser(
         "evaluate",
@@ -433,8 +744,83 @@ def build_parser() -> argparse.ArgumentParser:
         help="Eval ledger path to read.",
     )
     p_ledger.add_argument("--run", default=None, help="Filter to a single run id.")
-    p_ledger.add_argument("--limit", type=int, default=25, help="Show only the last N rows.")
+    p_ledger.add_argument("--experiment", default=None, help="Filter to one experiment id.")
+    p_ledger.add_argument(
+        "--method", default=None, choices=["lbr", "rollout", "exact_br"], help="Filter by method."
+    )
+    p_ledger.add_argument(
+        "--since", default=None, metavar="ISO8601", help="Only rows at or after this timestamp."
+    )
+    p_ledger.add_argument(
+        "--limit", type=int, default=25, help="Show only the last N rows (0 = all)."
+    )
+    p_ledger.add_argument("--runs-dir", default="data/runs", help="Runs dir scanned by --rebuild.")
+    p_ledger.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Regenerate the ledger from the per-run records on disk before listing. "
+        "Recovers rows lost to concurrent writers; rows predating per-run records are "
+        "preserved as-is, never dropped.",
+    )
     p_ledger.set_defaults(func=_cmd_ledger)
+
+    p_curve = sub.add_parser(
+        "curve",
+        parents=[common],
+        help="Within-run exploitability vs iteration, from the retained checkpoint ladder.",
+    )
+    p_curve.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
+    p_curve.add_argument("--runs-dir", default="data/runs", help="Base runs dir for id resolution.")
+    p_curve.add_argument(
+        "--ledger",
+        default=str(eval_ledger.DEFAULT_LEDGER_PATH),
+        help="Eval ledger path to read.",
+    )
+    p_curve.add_argument(
+        "--tier",
+        type=int,
+        default=0,
+        help="Which comparison tier to plot when a run was scored by more than one "
+        "(0 = best-covered). Tiers are never merged — see the listing in the output.",
+    )
+    p_curve.set_defaults(func=_cmd_curve)
+
+    p_report = sub.add_parser(
+        "report",
+        parents=[common],
+        help="Score every arm of an experiment, each attributed against its control.",
+    )
+    p_report.add_argument("--experiment", required=True, help="Experiment id to report on.")
+    p_report.add_argument(
+        "--runs-dir", default="data/runs", help="Runs dir, for resolving eval payloads."
+    )
+    p_report.add_argument(
+        "--ledger", default=str(eval_ledger.DEFAULT_LEDGER_PATH), help="Eval ledger path."
+    )
+    p_report.add_argument(
+        "--baseline", default=str(services.DEFAULT_BASELINE_PATH), help="Baseline pointer file."
+    )
+    p_report.set_defaults(func=_cmd_report)
+
+    p_promote = sub.add_parser(
+        "promote",
+        parents=[common],
+        help="Make a run the new baseline (closes one turn of the base-fork loop).",
+    )
+    p_promote.add_argument("--run", required=True, help="Run id to promote.")
+    p_promote.add_argument(
+        "--rationale",
+        required=True,
+        help="Why this run becomes the baseline. Required — a lineage that moved for "
+        "an unrecorded reason cannot be audited later.",
+    )
+    p_promote.add_argument(
+        "--runs-dir", default="data/runs", help="Base runs dir for id resolution."
+    )
+    p_promote.add_argument(
+        "--baseline", default=str(services.DEFAULT_BASELINE_PATH), help="Baseline pointer file."
+    )
+    p_promote.set_defaults(func=_cmd_promote)
 
     p_profile = sub.add_parser(
         "checkpoint-profile",
@@ -454,6 +840,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compare.add_argument("--a", required=True, help="First run id (baseline).")
     p_compare.add_argument("--b", required=True, help="Second run id (candidate).")
+    p_compare.add_argument(
+        "--runs-dir", default="data/runs", help="Runs dir, for resolving eval payloads."
+    )
     p_compare.add_argument(
         "--a-at",
         type=int,

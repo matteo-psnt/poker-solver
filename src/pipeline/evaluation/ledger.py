@@ -20,14 +20,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.shared.gitinfo import get_git_commit, is_git_dirty
 from src.shared.jsonio import json_default
+
+logger = logging.getLogger(__name__)
 
 LEDGER_SCHEMA_VERSION = 1
 DEFAULT_LEDGER_PATH = Path("data/eval_ledger.jsonl")
@@ -49,6 +53,14 @@ class RunProvenance:
     card_abstraction_hash: str | None
     action_config_hash: str | None
     representation_version: int
+    # Experiment lineage, copied onto the row so a report can group and attribute
+    # arms without opening every run's .run.json. None on unaffiliated runs.
+    experiment_id: str | None = None
+    arm: str | None = None
+    parent_run_id: str | None = None
+    # `config_name` is not identity (it comes from system.config_name in the YAML),
+    # so an override-variant is only distinguishable from its base by this.
+    config_hash: str | None = None
 
 
 # Knobs that define an eval's comparison tier. Two evals may only be paired if these
@@ -56,6 +68,20 @@ class RunProvenance:
 # measured strategies and the number is meaningless. Kept as data so `compare` and
 # the record builder agree on exactly what "same tier" means.
 TIER_KNOBS = ("scorer", "opponent", "include_off_tree")
+
+# Knobs that also change what is being measured, but only when they apply to the
+# method in question — a myopic eval has no lookahead depth, a blueprint opponent
+# has no resolver iterations. Checked when present on either side, so a depth-2 and
+# a depth-4 lookahead can no longer pair silently (they are different exploiters).
+CONDITIONAL_TIER_KNOBS = (
+    "runouts",
+    "resolver_iterations",
+    "lookahead_depth",
+    "lookahead_top_k",
+    "num_flops",
+    "num_turns",
+    "num_rivers",
+)
 
 
 def _knob_hash(knobs: dict[str, Any]) -> str:
@@ -179,9 +205,13 @@ def build_record(
         "eval_git_commit": get_git_commit(),
         "eval_git_dirty": is_git_dirty(),
         "config_name": provenance.config_name,
+        "config_hash": provenance.config_hash,
         "card_abstraction_hash": provenance.card_abstraction_hash,
         "action_config_hash": provenance.action_config_hash,
         "representation_version": provenance.representation_version,
+        "experiment_id": provenance.experiment_id,
+        "arm": provenance.arm,
+        "parent_run_id": provenance.parent_run_id,
         # WHICH checkpoint produced this number. A run id alone does not identify
         # one: the same run is evaluated at successive iterations, so without this
         # two rows for one run are indistinguishable and a stale read looks like a
@@ -195,7 +225,7 @@ def build_record(
             "num_hands": results.get("num_hands"),
             "n": len(samples),
         },
-        "result_path": str(result_path),
+        "result_path": payload_pointer(result_path, provenance.run_id),
     }
 
 
@@ -220,7 +250,8 @@ def record_evaluation(
     ``infosets``. Returns the payload path and the appended record.
     """
     results = payload["results"]
-    result_path = write_payload(run_dir, payload, knobs)
+    slug = eval_slug(knobs)
+    result_path = write_payload(run_dir, payload, slug)
     record = build_record(
         provenance=provenance,
         method=method,
@@ -229,46 +260,166 @@ def record_evaluation(
         knobs=knobs,
         results=results,
         result_path=result_path,
-        timestamp=timestamp or datetime.now().isoformat(),
+        timestamp=timestamp or datetime.now(UTC).isoformat(),
         checkpoint_iteration=payload.get("checkpoint_iteration"),
     )
+    write_record(run_dir, record, slug)
     append_record(record, ledger_path)
     return result_path, record
 
 
-def write_payload(run_dir: Path, payload: dict[str, Any], knobs: dict[str, Any]) -> Path:
+def eval_slug(knobs: dict[str, Any]) -> str:
+    """Unique per-eval filename stem: UTC stamp + knob hash + random suffix.
+
+    The random suffix is what makes this safe for concurrent writers. Microsecond
+    stamps alone collide when several boxes evaluate the same run with the same
+    knobs -- exactly the fan-out shape a noise-floor sweep produces -- and the repo
+    already learned this for ``run_id`` (``uuid4().hex[:6]`` in session.py). UTC so
+    names from boxes in different timezones still sort.
+    """
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+    return f"{stamp}-{_knob_hash(knobs)}-{uuid.uuid4().hex[:6]}"
+
+
+def write_payload(run_dir: Path, payload: dict[str, Any], slug: str) -> Path:
     """Write the full eval payload to a non-overwriting per-eval file under the run dir.
 
-    Named by timestamp + a knob hash so re-evaluating a run under different (or the
-    same) settings never clobbers a prior result — the pre-ledger ``evaluate_result.json``
-    was overwritten on every eval, silently discarding history.
+    Named by timestamp + knob hash + random suffix so re-evaluating a run under
+    different (or the same) settings never clobbers a prior result — the pre-ledger
+    ``evaluate_result.json`` was overwritten on every eval, discarding history.
     """
     evals_dir = run_dir / "evals"
     evals_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    path = evals_dir / f"eval-{stamp}-{_knob_hash(knobs)}.json"
+    path = evals_dir / f"eval-{slug}.json"
     path.write_text(json.dumps(payload, indent=2, default=json_default))
     return path
 
 
+def write_record(run_dir: Path, record: dict[str, Any], slug: str) -> Path:
+    """Write the complete ledger row beside its payload, under the run directory.
+
+    This is the durable copy. The shared ``eval_ledger.jsonl`` is an append to a
+    file every writer shares, which is the one shared-mutable-state in the system
+    and the one thing that has actually lost data (12/14 rows in a parallel sweep).
+    A uniquely-named file under the run being evaluated has no such contention: a
+    run directory has a single writer, so this write cannot race anything.
+
+    The full row is written, not just the payload -- ``eval_git_commit``, ``knobs``
+    and ``timestamp`` are captured at record time and exist nowhere else, so a
+    payload alone cannot reconstruct a row.
+    """
+    records_dir = run_dir / "evals"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    path = records_dir / f"record-{slug}.json"
+    path.write_text(json.dumps(record, indent=2, default=json_default))
+    return path
+
+
 def append_record(record: dict[str, Any], ledger_path: Path = DEFAULT_LEDGER_PATH) -> None:
-    """Append one row to the ledger JSONL, creating it if needed."""
+    """Append one row to the ledger JSONL cache, creating it if needed.
+
+    Best-effort convenience so the common single-machine case needs no rebuild.
+    The durable copy is :func:`write_record`; anything lost here is recoverable
+    with ``ledger --rebuild``.
+    """
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     with open(ledger_path, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, default=json_default) + "\n")
 
 
+def record_instant(record: dict[str, Any]) -> datetime:
+    """When an eval happened, as an aware datetime, for ordering.
+
+    Two timestamp vintages coexist and must not be compared as strings. Rows
+    written before the UTC switch are naive *local* time -- that is what
+    ``datetime.now()`` produced at write time -- while new rows carry an explicit
+    ``+00:00``. Lexicographic comparison would skew the two apart by the writer's
+    UTC offset, so naive values are attached to the local zone (the zone that
+    actually produced them) rather than reinterpreted as UTC.
+
+    Unparseable or missing timestamps sort first, keeping them visible rather
+    than dropping them.
+    """
+    raw = str(record.get("timestamp") or "")
+    try:
+        stamp = datetime.fromisoformat(raw)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    # astimezone() on a naive value interprets it as local time, which is the
+    # assumption we want here and the reason this is not `replace(tzinfo=UTC)`.
+    return stamp.astimezone() if stamp.tzinfo is None else stamp
+
+
 def read_records(ledger_path: Path = DEFAULT_LEDGER_PATH) -> list[dict[str, Any]]:
-    """Read all ledger rows in append order. Missing ledger → empty list."""
+    """Read all ledger rows, oldest first. Missing ledger → empty list.
+
+    Sorted by recorded instant rather than file order: rows written by different
+    machines arrive interleaved, so append order is "whose write landed last", not
+    "when the eval happened".
+
+    A torn line is skipped rather than raised on. An unterminated final write
+    would otherwise make the whole ledger unreadable -- including by
+    ``ledger --rebuild``, the one command able to repair it.
+    """
     if not ledger_path.exists():
         return []
     records = []
     with open(ledger_path, encoding="utf-8") as handle:
-        for line in handle:
+        for number, line in enumerate(handle, start=1):
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 records.append(json.loads(line))
-    return records
+            except ValueError:
+                logger.warning(
+                    "Skipping unparseable ledger line %d in %s; `ledger --rebuild` "
+                    "can regenerate rows that have a per-run record.",
+                    number,
+                    ledger_path,
+                )
+    return sorted(records, key=record_instant)
+
+
+def rebuild_ledger(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) -> tuple[int, int]:
+    """Regenerate the ledger cache from the per-run records on disk.
+
+    Forward-only by necessity: rows written before :func:`write_record` existed have
+    no record file to rebuild from, and their ``eval_git_commit``/``knobs``/
+    ``timestamp`` exist nowhere else. Those rows are preserved verbatim rather than
+    dropped, so a rebuild is always non-destructive.
+
+    Returns ``(recovered, preserved)``.
+    """
+    existing = read_records(ledger_path)
+
+    recovered: dict[str, dict[str, Any]] = {}
+    for path in sorted(runs_dir.glob("*/evals/record-*.json")):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        key = record.get("result_path")
+        if key:
+            recovered[key] = record
+
+    # Every row without a record file is kept verbatim, duplicates included. The
+    # historical ledger genuinely contains rows sharing a result_path (an eval
+    # recorded twice during the 07-18 clobber recovery); collapsing them here would
+    # make a command whose whole purpose is not losing rows lose rows.
+    preserved = [r for r in existing if r.get("result_path") not in recovered]
+    merged = sorted([*preserved, *recovered.values()], key=record_instant)
+
+    # Write to a temp file and rename, rather than truncating in place. The
+    # `preserved` rows are by definition the ones with no per-run record to
+    # regenerate them from, so a crash midway through an in-place rewrite would
+    # destroy exactly the rows this function exists to protect. Same tmp+replace
+    # pattern as the checkpoint manifest in engine/solver/storage/helpers.py.
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ledger_path.with_suffix(ledger_path.suffix + ".tmp")
+    tmp.write_text("".join(json.dumps(r, default=json_default) + "\n" for r in merged))
+    tmp.replace(ledger_path)
+    return len(recovered), len(preserved)
 
 
 def latest_record_for_run(
@@ -283,6 +434,10 @@ def latest_record_for_run(
     the common case for a long run scored at successive checkpoints -- and without
     this the newest row silently wins, so two checkpoints of one run cannot be
     compared at all.
+
+    "Most recent" is by recorded timestamp (:func:`read_records` sorts), not by
+    position in the file: with several machines appending, file order says whose
+    write landed last, which is not the same question.
     """
     match = None
     for record in read_records(ledger_path):
@@ -295,14 +450,106 @@ def latest_record_for_run(
     return match
 
 
-def load_payload(record: dict[str, Any]) -> dict[str, Any]:
-    """Load the full per-eval payload a ledger row points at."""
-    path = Path(record["result_path"])
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Eval payload for run '{record.get('run_id')}' not found at {path}"
-        )
-    return json.loads(path.read_text())
+def tier_key(record: dict[str, Any]) -> tuple[Any, ...]:
+    """Identity of the comparison tier a row belongs to.
+
+    The same rule :func:`tier_mismatches` enforces pairwise, expressed as a
+    groupable key. Both must cover the SAME knobs or they contradict each other:
+    without the conditional ones a depth-2 and a depth-4 lookahead eval hash into
+    one tier and get plotted on a single axis, which is exactly the silent
+    instrument-mixing a tier is supposed to prevent. Same for exact_br rows scored
+    over different board budgets.
+    """
+    knobs = record.get("knobs") or {}
+    return (
+        record.get("method"),
+        *(knobs.get(k) for k in TIER_KNOBS),
+        *(knobs.get(k) for k in CONDITIONAL_TIER_KNOBS),
+        knobs.get("base_seed"),
+    )
+
+
+def tier_label(record: dict[str, Any]) -> str:
+    """Human-readable one-line description of a row's tier.
+
+    Must name every knob :func:`tier_key` splits on, or two genuinely different
+    tiers render as identical strings -- and the operator sees "also recorded, not
+    mixed in: <the same text>" with no way to tell what ``--tier 1`` would select.
+    Conditional knobs are shown only when present, so a myopic row is not padded
+    with lookahead fields that do not apply to it.
+    """
+    knobs = record.get("knobs") or {}
+    parts = [str(record.get("method") or "?")]
+    parts += [f"{k}={knobs[k]}" for k in TIER_KNOBS if knobs.get(k) is not None]
+    parts += [f"{k}={knobs[k]}" for k in CONDITIONAL_TIER_KNOBS if knobs.get(k) is not None]
+    if knobs.get("base_seed") is not None:
+        parts.append(f"seed={knobs['base_seed']}")
+    return " ".join(parts)
+
+
+def curve_series(
+    records: list[dict[str, Any]], run_id: str
+) -> list[tuple[str, dict[int, dict[str, Any]]]]:
+    """Group one run's rows into per-tier convergence series, best-covered first.
+
+    A convergence curve is only meaningful within a single tier -- mixing a
+    depth-2 and a depth-4 lookahead scorer plots two different instruments on one
+    axis -- so this never merges tiers. Within a tier the *last* row for a given
+    checkpoint wins (a re-evaluation supersedes its predecessor).
+    """
+    series: dict[tuple[Any, ...], dict[int, dict[str, Any]]] = {}
+    labels: dict[tuple[Any, ...], str] = {}
+    for record in records:
+        if record.get("run_id") != run_id:
+            continue
+        iteration = record.get("checkpoint_iteration")
+        if iteration is None:
+            continue
+        key = tier_key(record)
+        labels.setdefault(key, tier_label(record))
+        series.setdefault(key, {})[int(iteration)] = record
+    return [(labels[k], points) for k, points in sorted(series.items(), key=_series_rank)]
+
+
+def _series_rank(item: tuple[tuple[Any, ...], dict[int, dict[str, Any]]]) -> tuple[int, int]:
+    """Most-covered series first; ties broken by the deepest checkpoint reached."""
+    _, points = item
+    return (-len(points), -max(points, default=0))
+
+
+def payload_pointer(result_path: Path, run_id: str) -> str:
+    """Portable, run-relative pointer to a payload: ``<run_id>/evals/<file>``.
+
+    Rows used to store a working-directory-relative path, which resolves to nothing
+    on a machine that mounts its data elsewhere -- or, worse, to a *different*
+    machine's local ``data/``. Anchoring at the run id makes the pointer mean the
+    same thing wherever the runs directory happens to live.
+    """
+    return f"{run_id}/{result_path.parent.name}/{result_path.name}"
+
+
+def load_payload(record: dict[str, Any], runs_dir: Path | None = None) -> dict[str, Any]:
+    """Load the full per-eval payload a ledger row points at.
+
+    Tries, in order: the run-relative pointer under ``runs_dir`` (current format),
+    the stored path as-is (legacy CWD-relative rows), and finally the payload's
+    basename under the run's ``evals/`` — the filename is unique by construction, so
+    that last one recovers a row whose pointer was written by an older layout.
+    """
+    stored = str(record["result_path"])
+    run_id = record.get("run_id") or ""
+    candidates: list[Path] = []
+    if runs_dir is not None:
+        candidates.append(runs_dir / stored)
+    candidates.append(Path(stored))
+    if runs_dir is not None and run_id:
+        candidates.append(runs_dir / run_id / "evals" / Path(stored).name)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return json.loads(candidate.read_text())
+
+    raise FileNotFoundError(f"Eval payload for run '{run_id}' not found at {stored}")
 
 
 def tier_mismatches(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
@@ -312,9 +559,34 @@ def tier_mismatches(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
     base seed* (paired common-random-numbers requires hand-for-hand identical deals)
     and *identical comparison-tier knobs* (never mix scorer/opponent/off-tree). Equal
     hand counts are required too, since paired stats need equal-length sequences.
+
+    Also refuses to pair across ``method``, and to pair rows whose payloads carry no
+    per-hand samples: two ``exact_br`` rows used to pass every check vacuously (their
+    knobs have no scorer/opponent/off-tree keys, so ``None == None``) and then fail
+    downstream with a bare ``KeyError: 'pair_samples_mbb'``.
     """
     reasons: list[str] = []
     ka, kb = a.get("knobs", {}), b.get("knobs", {})
+
+    method_a, method_b = a.get("method"), b.get("method")
+    if method_a != method_b:
+        reasons.append(
+            f"method differs ({method_a!r} vs {method_b!r}): these are different "
+            "estimators, not two measurements of the same thing."
+        )
+    elif method_a == "exact_br":
+        reasons.append(
+            "exact_br rows carry no per-hand samples, so there is nothing to pair. "
+            "Compare their exploitability_mbb directly — within a matched board tier "
+            "the difference is exact and needs no p-value."
+        )
+
+    for knob in ("card_abstraction_hash", "action_config_hash"):
+        if a.get(knob) != b.get(knob):
+            reasons.append(
+                f"{knob} differs ({a.get(knob)!r} vs {b.get(knob)!r}): the two runs are "
+                "bucketed differently, so their exploitability numbers are not on one scale."
+            )
 
     seed_a, seed_b = ka.get("base_seed"), kb.get("base_seed")
     if seed_a is None or seed_b is None:
@@ -333,6 +605,13 @@ def tier_mismatches(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
             reasons.append(
                 f"{knob} differs ({ka.get(knob)!r} vs {kb.get(knob)!r}): mixing tiers "
                 "compares two different exploiters/strategies, not two runs."
+            )
+
+    for knob in CONDITIONAL_TIER_KNOBS:
+        if (knob in ka or knob in kb) and ka.get(knob) != kb.get(knob):
+            reasons.append(
+                f"{knob} differs ({ka.get(knob)!r} vs {kb.get(knob)!r}): the exploiter "
+                "searched to a different depth/width, so the two numbers are not comparable."
             )
 
     na = a.get("results", {}).get("num_hands")
