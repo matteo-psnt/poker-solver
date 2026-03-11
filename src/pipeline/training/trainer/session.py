@@ -22,7 +22,7 @@ from src.engine.solver.storage.helpers import (
 )
 from src.pipeline.training import components
 from src.pipeline.training.metrics import MetricsTracker
-from src.pipeline.training.run_tracker import RunTracker
+from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.versioning import ensure_current
 from src.shared.config import Config
 
@@ -40,6 +40,7 @@ class TrainingSession:
         config: Config,
         run_id: str | None = None,
         run_tracker: RunTracker | None = None,
+        experiment: ExperimentTag | None = None,
     ):
         self.config = config
         # Set by resume(): pre-allocate shared storage above the checkpoint's
@@ -68,12 +69,16 @@ class TrainingSession:
             card_abstraction_hash = components.resolve_card_abstraction_hash(config)
 
             if self.run_tracker is None:
+                tag = experiment or ExperimentTag()
                 self.run_tracker = RunTracker(
                     run_dir=self.run_dir,
                     config_name=self.config.system.config_name,
                     config=config,
                     action_config_hash=action_config_hash,
                     card_abstraction_hash=card_abstraction_hash,
+                    experiment_id=tag.experiment_id,
+                    arm=tag.arm,
+                    parent_run_id=tag.parent_run_id,
                 )
             else:
                 self.run_tracker.verify_action_config_hash(action_config_hash)

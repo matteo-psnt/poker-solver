@@ -159,7 +159,9 @@ def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
         "base_seed": base_seed,
         "pair_samples_mbb": samples,
     }
-    payload_path = eval_ledger.write_payload(run_dir, {"results": results}, knobs)
+    payload_path = eval_ledger.write_payload(
+        run_dir, {"results": results}, eval_ledger.eval_slug(knobs)
+    )
     provenance = eval_ledger.RunProvenance(
         run_id=run_id,
         git_commit="cafebabe" * 5,
@@ -188,7 +190,18 @@ def test_cmd_ledger_lists_rows(tmp_path):
     run_dir.mkdir()
     _seed_eval(led, run_dir, "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
 
-    payload = headless._cmd_ledger(argparse.Namespace(ledger=str(led), run=None, limit=25))
+    payload = headless._cmd_ledger(
+        argparse.Namespace(
+            ledger=str(led),
+            run=None,
+            limit=25,
+            experiment=None,
+            method=None,
+            since=None,
+            rebuild=False,
+            runs_dir=str(tmp_path),
+        )
+    )
     assert payload["op"] == "ledger"
     assert len(payload["rows"]) == 1
     assert payload["rows"][0]["run_id"] == "run-a"
@@ -202,7 +215,15 @@ def test_cmd_compare_valid_pairs(tmp_path):
     _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=7, mbb=50.0, samples=[5.0, 10.0, 15.0])
 
     payload = headless._cmd_compare(
-        argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=False, a_at=None, b_at=None)
+        argparse.Namespace(
+            a="run-a",
+            b="run-b",
+            ledger=str(led),
+            force=False,
+            a_at=None,
+            b_at=None,
+            runs_dir=str(tmp_path),
+        )
     )
     assert payload["op"] == "compare"
     assert payload["forced"] is False
@@ -220,7 +241,13 @@ def test_cmd_compare_refuses_seed_mismatch(tmp_path):
     with pytest.raises(SystemExit, match="Refusing to compare"):
         headless._cmd_compare(
             argparse.Namespace(
-                a="run-a", b="run-b", ledger=str(led), force=False, a_at=None, b_at=None
+                a="run-a",
+                b="run-b",
+                ledger=str(led),
+                force=False,
+                a_at=None,
+                b_at=None,
+                runs_dir=str(tmp_path),
             )
         )
 
@@ -233,7 +260,15 @@ def test_cmd_compare_force_overrides_mismatch(tmp_path):
     _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[4.0, 5.0, 6.0])
 
     payload = headless._cmd_compare(
-        argparse.Namespace(a="run-a", b="run-b", ledger=str(led), force=True, a_at=None, b_at=None)
+        argparse.Namespace(
+            a="run-a",
+            b="run-b",
+            ledger=str(led),
+            force=True,
+            a_at=None,
+            b_at=None,
+            runs_dir=str(tmp_path),
+        )
     )
     assert payload["forced"] is True
     assert payload["tier_warnings"]  # non-empty: the override was recorded
@@ -247,6 +282,127 @@ def test_cmd_compare_missing_run_raises(tmp_path):
     with pytest.raises(SystemExit, match="No ledger entry"):
         headless._cmd_compare(
             argparse.Namespace(
-                a="run-a", b="ghost", ledger=str(led), force=False, a_at=None, b_at=None
+                a="run-a",
+                b="ghost",
+                ledger=str(led),
+                force=False,
+                a_at=None,
+                b_at=None,
+                runs_dir=str(tmp_path),
+            )
+        )
+
+
+def test_compare_refuses_samples_free_evals_even_under_force(tmp_path):
+    """--force overrides a judgement, but cannot conjure samples that were never
+    recorded. exact_br is deterministic and stores none; the forced path used to
+    die on a bare KeyError."""
+    led = tmp_path / "ledger.jsonl"
+    for name in ("run-a", "run-b"):
+        run_dir = tmp_path / name
+        run_dir.mkdir()
+        payload = run_dir / "evals" / "eval-x.json"
+        payload.parent.mkdir(parents=True, exist_ok=True)
+        payload.write_text(json.dumps({"results": {"exploitability_mbb": 1.0}}))
+        row = {
+            "run_id": name,
+            "method": "exact_br",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "knobs": {"base_seed": 3, "num_flops": 10},
+            "results": {"exploitability_mbb": 1.0, "num_hands": 0},
+            "result_path": f"{name}/evals/eval-x.json",
+        }
+        eval_ledger.append_record(row, led)
+
+    with pytest.raises(SystemExit, match="no per-hand samples"):
+        headless._cmd_compare(
+            argparse.Namespace(
+                a="run-a",
+                b="run-b",
+                ledger=str(led),
+                force=True,
+                a_at=None,
+                b_at=None,
+                runs_dir=str(tmp_path),
+            )
+        )
+
+
+def _ledger_ns(led, tmp_path, **over):
+    base = dict(
+        ledger=str(led),
+        run=None,
+        limit=25,
+        experiment=None,
+        method=None,
+        since=None,
+        rebuild=False,
+        runs_dir=str(tmp_path),
+    )
+    base.update(over)
+    return argparse.Namespace(**base)
+
+
+def test_since_filter_compares_instants_not_strings(tmp_path):
+    """The ledger holds naive-local legacy rows beside UTC-aware ones; a
+    lexicographic cutoff skews them by the writer's UTC offset."""
+    from datetime import datetime, timedelta
+
+    led = tmp_path / "ledger.jsonl"
+    now = datetime.now().astimezone()
+    old_naive = (now - timedelta(hours=2)).replace(tzinfo=None).isoformat()
+    new_utc = (now + timedelta(hours=2)).astimezone(eval_ledger.UTC).isoformat()
+    for run_id, ts in (("old", old_naive), ("new", new_utc)):
+        eval_ledger.append_record({"run_id": run_id, "timestamp": ts}, led)
+
+    payload = headless._cmd_ledger(_ledger_ns(led, tmp_path, since=now.isoformat()))
+    assert [r["run_id"] for r in payload["rows"]] == ["new"]
+
+
+def test_rebuild_counts_are_printed_in_human_mode(tmp_path, capsys):
+    """`just fetch` runs --rebuild without --json; a rebuild that recovered
+    nothing must not look identical to one that recovered hundreds of rows."""
+    led = tmp_path / "ledger.jsonl"
+    eval_ledger.append_record(
+        {"run_id": "r", "timestamp": "2026-01-01T00:00:00+00:00", "result_path": "x"}, led
+    )
+    payload = headless._cmd_ledger(_ledger_ns(led, tmp_path, rebuild=True))
+    headless._print_human(payload)
+    out = capsys.readouterr().out
+    assert "Rebuilt" in out
+    assert "preserved" in out
+
+
+def test_missing_samples_error_names_the_right_record(tmp_path):
+    """When only B lacks samples, the message must report B's method, not A's."""
+    led = tmp_path / "ledger.jsonl"
+    (tmp_path / "run-a").mkdir()
+    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=3, mbb=1.0, samples=[1.0, 2.0])
+
+    run_b = tmp_path / "run-b"
+    (run_b / "evals").mkdir(parents=True)
+    (run_b / "evals" / "e.json").write_text(json.dumps({"results": {"exploitability_mbb": 2.0}}))
+    eval_ledger.append_record(
+        {
+            "run_id": "run-b",
+            "method": "exact_br",
+            "timestamp": "2026-01-02T00:00:00+00:00",
+            "knobs": {"base_seed": 3},
+            "results": {"exploitability_mbb": 2.0, "num_hands": 2},
+            "result_path": "run-b/evals/e.json",
+        },
+        led,
+    )
+
+    with pytest.raises(SystemExit, match="exact_br"):
+        headless._cmd_compare(
+            argparse.Namespace(
+                a="run-a",
+                b="run-b",
+                ledger=str(led),
+                force=True,
+                a_at=None,
+                b_at=None,
+                runs_dir=str(tmp_path),
             )
         )

@@ -23,7 +23,7 @@ attempts (provisioning, resume fights) that live on neither side alone.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,7 +73,7 @@ def record_spawn(
     """
     record: dict[str, Any] = {
         "event": "spawn",
-        "ts": launched_at or datetime.now().isoformat(),
+        "ts": launched_at or datetime.now(UTC).isoformat(),
         "run_id": run_id,
         "function": function,
         "object_id": object_id,
@@ -124,7 +124,7 @@ def snapshot_call(
     status_name, error = _query_modal_status(object_id, call)
     record: dict[str, Any] = {
         "event": "snapshot",
-        "ts": datetime.now().isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "run_id": run_id,
         "function": function,
         "object_id": object_id,
