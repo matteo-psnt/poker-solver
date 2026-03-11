@@ -19,7 +19,11 @@ from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
-from src.pipeline.training.static_parallel import train_static_parallel, worker_seed
+from src.pipeline.training.static_parallel import (
+    train_static_parallel,
+    worker_iteration_indices,
+    worker_seed,
+)
 from tests.test_helpers import make_test_config
 
 BUCKETS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 3}
@@ -167,3 +171,54 @@ def test_single_worker_smoke(tmp_path):
     assert result.dropped_updates == 0
     assert 0.0 < result.coverage <= 1.0
     assert result.mean_visits_per_touched > 0
+
+
+class TestGlobalIterationNumbering:
+    """solver.iteration is read as t, not as a progress counter.
+
+    It drives the DCFR discount t^a/(t^a+1), the strategy weight t^gamma, and the
+    traversing-player and button alternation. Letting each worker count from 0
+    would cap t at num_iterations/num_workers and apply the wrong discount
+    schedule — training still runs and still looks plausible, which is why this
+    is asserted rather than assumed.
+    """
+
+    @pytest.mark.parametrize("workers", [1, 2, 3, 7])
+    def test_assignments_tile_the_range_exactly(self, workers):
+        total = 100
+        covered = []
+        for w in range(workers):
+            covered.extend(worker_iteration_indices(w, workers, total))
+        assert sorted(covered) == list(range(total))
+
+    def test_workers_are_disjoint(self):
+        a = set(worker_iteration_indices(0, 3, 100))
+        b = set(worker_iteration_indices(1, 3, 100))
+        assert not (a & b)
+
+    def test_every_worker_spans_the_full_t_range(self):
+        """Contiguous blocks would give worker 0 only small t and the last only large t."""
+        total, workers = 1000, 4
+        for w in range(workers):
+            idx = worker_iteration_indices(w, workers, total)
+            assert min(idx) < total * 0.1, "worker never sees early t"
+            assert max(idx) > total * 0.9, "worker never sees late t"
+
+    def test_more_workers_than_iterations_is_safe(self):
+        covered = []
+        for w in range(8):
+            covered.extend(worker_iteration_indices(w, 8, 3))
+        assert sorted(covered) == [0, 1, 2]
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_parallel_run_covers_every_global_iteration(self, tmp_path):
+        """End to end: the coordinator refuses a run whose indices do not tile."""
+        result = train_static_parallel(
+            _config(),
+            num_iterations=97,
+            num_workers=4,
+            session_id="static-par-tiling",
+            abstraction=Buckets(),
+        )
+        assert result.iterations == 97
