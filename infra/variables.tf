@@ -58,32 +58,6 @@ variable "max_nodes" {
   default     = 2
 }
 
-variable "stall_cpu_floor" {
-  description = <<-EOT
-    Average CPU (as a FRACTION, 0-1) below which a node is treated as stalled and
-    force-deallocated. A deadlocked or stuck-I/O trainer sits near zero; a healthy
-    one pegs its cores, so this discriminates well.
-
-    Chosen low on purpose. If Azure ever reports $CPUPercent as 0-100 rather than
-    0-1, this threshold simply never fires -- the backstop goes inert rather than
-    killing healthy work. That is the safe direction for an unvalidated heuristic.
-    Confirm against a live pool with `just autoscale-check` before trusting it.
-  EOT
-  type        = number
-  default     = 0.05
-}
-
-variable "stall_window_minutes" {
-  description = <<-EOT
-    How long CPU must stay below the floor before a node is considered stalled.
-    Generous because staging is legitimately low-CPU: copying ~2,000 checkpoint
-    files over SMB is I/O-bound, and killing a leg mid-stage would be a false
-    positive of the worst kind.
-  EOT
-  type        = number
-  default     = 60
-}
-
 variable "data_disk_gb" {
   description = <<-EOT
     Per-node working disk, mounted at /mnt/work. Required because als_v6 has no

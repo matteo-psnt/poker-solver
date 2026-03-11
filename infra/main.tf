@@ -284,28 +284,29 @@ resource "azurerm_batch_pool" "train" {
   # node is never counted idle while its task is still going; `taskcompletion`
   # then guarantees a node is not deallocated out from under a running leg -- both
   # matter here because a leg runs for hours.
+  # MEASURED CONSTRAINTS, both found by running this against Azure:
+  #
+  #  * Comments are `//`. A `#` comment is rejected ("Invalid character"), and
+  #    an invalid formula means the pool silently stops autoscaling.
+  #  * GetSample MUST use the two-argument form. The one-argument form demands
+  #    70% sample coverage and THROWS below it, and a thrown formula aborts the
+  #    whole evaluation -- so an idle pool (thin data, by definition) refuses to
+  #    scale UP. Observed: `InsufficientSampleData: wanted 70%, received 50%`
+  #    while the evaluation had already computed the correct target.
+  #
+  # There is deliberately NO CPU-based stall clause here. One was written and
+  # then removed: `$CPUPercent` reports a sample PERCENTAGE on this pool but
+  # yields no usable values -- `avg`/`max`/`Count` over it all fail, and `avg`
+  # returns NaN even with a live busy node and 99% coverage. A backstop that
+  # cannot fire is worse than none, because it reads like protection. Hang
+  # protection is the task-level maxWallClockTime instead; see infra/README.md.
   auto_scale {
     evaluation_interval = "PT5M"
     formula             = <<-EOT
       maxNodes = ${var.max_nodes};
-
-      # EVERY GetSample uses the two-argument form. The one-argument form demands
-      # 70% sample coverage and THROWS below it -- and a thrown formula aborts the
-      # whole evaluation, so the pool silently refuses to scale UP. Measured: with
-      # 50% CPU coverage the evaluation failed with InsufficientSampleData while
-      # having already computed the correct target. A guard clause does not save
-      # you here, because Batch evaluates both branches of the ternary.
       pending = max($PendingTasks.GetSample(5 * TimeInterval_Minute, 20));
-
-      # The percent guard is still needed on top, so cpuAvg is a MEANINGFUL number
-      # rather than NaN when coverage is thin. Defaults to 1 (busy) so a pool with
-      # no CPU history can never conclude it is stalled.
-      cpuPct = $CPUPercent.GetSamplePercent(${var.stall_window_minutes} * TimeInterval_Minute);
-      cpuAvg = cpuPct < 20 ? 1 : avg($CPUPercent.GetSample(${var.stall_window_minutes} * TimeInterval_Minute, 5));
-      stalled = cpuAvg < ${var.stall_cpu_floor};
-
-      $TargetDedicatedNodes = stalled ? 0 : min(maxNodes, pending);
-      $NodeDeallocationOption = stalled ? terminate : taskcompletion;
+      $TargetDedicatedNodes = min(maxNodes, pending);
+      $NodeDeallocationOption = taskcompletion;
     EOT
   }
 
