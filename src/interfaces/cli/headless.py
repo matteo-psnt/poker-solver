@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from src.interfaces.cli.headless_render import print_human
 from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
@@ -336,223 +337,16 @@ def _cmd_compare(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _fmt_commit(commit: str | None, dirty: bool | None) -> str:
-    if not commit:
-        return "—"
-    short = commit[:7]
-    if dirty:
-        short += "-dirty"
-    return short
+# One builder per subcommand below. Each takes the shared `--json` parent so the
+# flag stays defined once, and ends in `set_defaults(func=...)` binding the command
+# to its transport — the parser and the function it dispatches to sit together.
+# argparse exports no public name for what add_subparsers() returns, so the private
+# one is the only way to type these builders at all.
+_SubParsers = argparse._SubParsersAction  # noqa: SLF001
 
 
-def _print_curve(payload: dict[str, Any]) -> None:
-    points = payload["points"]
-    print(f"Convergence curve for {payload['run_id']}")
-    if not points:
-        print("  No placeable evaluations for this run.")
-        if payload["unplaceable_records"]:
-            print(
-                f"  {payload['unplaceable_records']} recorded eval(s) carry no "
-                "checkpoint_iteration (pre-provenance) — they cannot be placed on an axis."
-            )
-        if payload["retained_iterations"]:
-            rungs = ", ".join(f"{i:,}" for i in payload["retained_iterations"])
-            print(f"  Ladder on disk: {rungs}")
-            print("  Score them with: evaluate --run <id> --at <iteration>")
-        else:
-            print(
-                "  No retained checkpoint ladder either — train with "
-                "storage.checkpoint_retain_every set to build one."
-            )
-        return
-
-    print(f"  Tier: {payload['tier']}")
-    print(f"  {'iteration':>12}  {'mbb/g':>10}  {'± se':>8}  {'hands':>8}")
-    for point in points:
-        print(
-            f"  {point['iteration']:>12,}  {point['exploitability_mbb']:>10.1f}  "
-            f"{point['std_error_mbb']:>8.1f}  {point['num_hands']:>8,}"
-        )
-
-    if payload["decay_ratio"] is not None:
-        first, last = points[0], points[-1]
-        budget_ratio = last["iteration"] / first["iteration"] if first["iteration"] else 0
-        print(
-            f"  Decay:       {payload['decay_ratio']:.2f}x over {budget_ratio:.0f}x budget "
-            f"(O(1/sqrt(T)) predicts ~{budget_ratio**0.5:.2f}x)"
-        )
-    if payload["missing_iterations"]:
-        gaps = ", ".join(f"{i:,}" for i in payload["missing_iterations"])
-        print(f"  Unscored rungs: {gaps}")
-    for other in payload["other_tiers"]:
-        print(f"  (also recorded, not mixed in: {other})")
-
-
-def _print_report(payload: dict[str, Any]) -> None:
-    print(f"Experiment {payload['experiment_id']}")
-    if payload["baseline_run_id"]:
-        print(f"  Baseline: {payload['baseline_run_id']}")
-    for note in payload["notes"]:
-        print(f"  ! {note}")
-    if not payload["arms"]:
-        return
-
-    print(f"  {'arm':<24} {'mbb/g':>9} {'± se':>8} {'vs control':>12} {'p':>8}")
-    for arm in payload["arms"]:
-        delta = arm["vs_control_mbb"]
-        p_value = arm["vs_control_p_value"]
-        # Lower exploitability is better, so a negative delta is the idea helping.
-        delta_col = "—" if delta is None else f"{delta:+.1f}"
-        p_col = "—" if p_value is None else f"{p_value:.3f}"
-        if arm["arm"] == services.CONTROL_ARM:
-            delta_col, p_col = "(control)", ""
-        print(
-            f"  {arm['arm']:<24} {arm['exploitability_mbb']:>9.1f} "
-            f"{arm['std_error_mbb']:>8.1f} {delta_col:>12} {p_col:>8}"
-        )
-        for reason in arm["vs_control_blocked"]:
-            print(f"      not attributable: {reason}")
-    print("  (vs control is variant − control; negative = less exploitable = better)")
-
-
-def _print_ledger(payload: dict[str, Any]) -> None:
-    # Printed BEFORE the empty-rows early return: `just fetch` runs `--rebuild`
-    # without --json, and the recovery counts are the entire point of that call.
-    # A rebuild that found nothing and one that recovered 200 rows must not look
-    # identical.
-    rebuilt = payload.get("rebuilt")
-    if rebuilt:
-        print(
-            f"Rebuilt {payload['ledger']}: {rebuilt['recovered']} row(s) recovered "
-            f"from per-run records, {rebuilt['preserved']} preserved (no record to "
-            "rebuild from — pre-dating per-run records)."
-        )
-
-    rows = payload["rows"]
-    if not rows:
-        print(f"No eval-ledger entries in {payload['ledger']}.")
-        return
-    print(f"Eval ledger ({payload['ledger']}): {len(rows)} row(s)")
-    header = (
-        f"{'run_id':<26} {'commit':<14} {'scorer':<10} {'opp':<10} "
-        f"{'seed':>12} {'hands':>6} {'mbb/g':>12}"
-    )
-    print(header)
-    print("-" * len(header))
-    for r in rows:
-        knobs = r.get("knobs", {})
-        res = r.get("results", {})
-        mbb = res.get("exploitability_mbb")
-        se = res.get("std_error_mbb")
-        score = f"{mbb:.1f}±{se:.1f}" if isinstance(mbb, (int, float)) and se is not None else "—"
-        print(
-            f"{r.get('run_id', '')[:26]:<26} "
-            f"{_fmt_commit(r.get('eval_git_commit'), r.get('eval_git_dirty')):<14} "
-            f"{knobs.get('scorer', '')!s:<10} "
-            f"{knobs.get('opponent', '')!s:<10} "
-            f"{knobs.get('base_seed', '')!s:>12} "
-            f"{res.get('num_hands', '')!s:>6} "
-            f"{score:>12}"
-        )
-
-
-def _print_compare(payload: dict[str, Any]) -> None:
-    c = payload["comparison"]
-    print(f"Paired comparison: {payload['run_a']}  vs  {payload['run_b']}")
-    if payload["tier_warnings"]:
-        print("  ⚠️  FORCED over tier mismatches (p-value not trustworthy):")
-        for w in payload["tier_warnings"]:
-            print(f"     - {w}")
-    print(f"  mean(a):       {c['mean_a']:+.2f} mbb/g")
-    print(f"  mean(b):       {c['mean_b']:+.2f} mbb/g")
-    print(f"  mean_diff:     {c['mean_diff']:+.2f} mbb/g (± {c['se_diff']:.2f})")
-    print(f"  95% CI:        [{c['ci_lower']:+.2f}, {c['ci_upper']:+.2f}]")
-    print(
-        f"  p-value:       {c['p_value']:.4g}  ({'significant' if c['is_significant'] else 'n.s.'})"
-    )
-    print(f"  correlation:   {c['correlation']:.3f}  (se unpaired would be {c['se_unpaired']:.2f})")
-
-
-def _print_human(payload: dict[str, Any]) -> None:
-    if payload["op"] == "ledger":
-        _print_ledger(payload)
-        return
-    if payload["op"] == "compare":
-        _print_compare(payload)
-        return
-    if payload["op"] == "train":
-        print("Training complete.")
-        print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
-        print(f"  Config:      {payload['config_name']}")
-        print(f"  Iterations:  {payload['iterations']:,}")
-        print(f"  Infosets:    {payload['num_infosets']:,}")
-        print(
-            f"  Runtime:     {payload['runtime_seconds']:.2f}s "
-            f"({payload['iterations_per_second']:.1f} it/s)"
-        )
-        print(f"  Status:      {payload['status']}")
-        return
-    if payload["op"] == "resume":
-        if payload["no_op"]:
-            print(
-                f"Nothing to do: {payload['run_id']} is at "
-                f"{payload['resumed_from_iteration']:,}, target was "
-                f"{payload['target_iteration']:,}."
-            )
-            return
-        print("Resume complete.")
-        print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
-        print(
-            f"  Iterations:  {payload['resumed_from_iteration']:,} -> "
-            f"{payload['iterations']:,}  (target {payload['target_iteration']:,})"
-        )
-        print(f"  Infosets:    {payload['num_infosets']:,}")
-        print(f"  Status:      {payload['status']}")
-        return
-    if payload["op"] == "precompute":
-        print("Precompute complete.")
-        print(f"  Abstraction: {payload['abstraction_config']}")
-        print(f"  Output:      {payload['output_dir']}")
-        return
-    if payload["op"] == "curve":
-        _print_curve(payload)
-        return
-    if payload["op"] == "report":
-        _print_report(payload)
-        return
-    if payload["op"] == "promote":
-        print(f"Baseline is now {payload['run_id']}")
-        if payload["checkpoint_iteration"] is not None:
-            print(f"  Checkpoint:  {payload['checkpoint_iteration']:,}")
-        print(f"  Rationale:   {payload['rationale']}")
-        print(f"  Recorded in: {payload['baseline']}")
-        return
-
-    results = payload["results"]
-    print("Evaluation complete.")
-    print(f"  Run ID:        {payload['run_id']}")
-    print(f"  Estimator:     {payload['estimator']}")
-    print(f"  Infosets:      {payload['infosets']:,}")
-    print(
-        f"  Exploitability: {results['exploitability_mbb']:.2f} mbb/g "
-        f"(± {results['std_error_mbb']:.2f})"
-    )
-
-
-def build_parser() -> argparse.ArgumentParser:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit the result payload as JSON only (no human-readable summary).",
-    )
-
-    parser = argparse.ArgumentParser(
-        prog="poker-solver-run",
-        description="Headless training/evaluation entrypoint for scripts and cloud runs.",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-
+def _add_train_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run train`."""
     p_train = sub.add_parser(
         "train", parents=[common], help="Train a solver from a named training config."
     )
@@ -586,6 +380,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_train.set_defaults(func=_cmd_train)
 
+
+def _add_resume_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run resume`."""
     p_resume = sub.add_parser(
         "resume",
         parents=[common],
@@ -612,6 +409,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_resume.set_defaults(func=_cmd_resume)
 
+
+def _add_precompute_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run precompute`."""
     p_precompute = sub.add_parser(
         "precompute",
         parents=[common],
@@ -628,6 +428,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_precompute.set_defaults(func=_cmd_precompute)
 
+
+def _add_eval_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run evaluate`."""
     p_eval = sub.add_parser(
         "evaluate",
         parents=[common],
@@ -735,6 +538,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--seed", type=int, default=None, help="Random seed (default: random).")
     p_eval.set_defaults(func=_cmd_evaluate)
 
+
+def _add_ledger_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run ledger`."""
     p_ledger = sub.add_parser(
         "ledger", parents=[common], help="List recorded evaluations from the eval ledger."
     )
@@ -764,6 +570,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ledger.set_defaults(func=_cmd_ledger)
 
+
+def _add_curve_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run curve`."""
     p_curve = sub.add_parser(
         "curve",
         parents=[common],
@@ -785,6 +594,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_curve.set_defaults(func=_cmd_curve)
 
+
+def _add_report_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run report`."""
     p_report = sub.add_parser(
         "report",
         parents=[common],
@@ -802,6 +614,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_report.set_defaults(func=_cmd_report)
 
+
+def _add_promote_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run promote`."""
     p_promote = sub.add_parser(
         "promote",
         parents=[common],
@@ -822,6 +637,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_promote.set_defaults(func=_cmd_promote)
 
+
+def _add_profile_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run checkpoint-profile`."""
     p_profile = sub.add_parser(
         "checkpoint-profile",
         parents=[common],
@@ -833,6 +651,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_profile.set_defaults(func=_cmd_checkpoint_profile)
 
+
+def _add_compare_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run compare`."""
     p_compare = sub.add_parser(
         "compare",
         parents=[common],
@@ -870,6 +691,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compare.set_defaults(func=_cmd_compare)
 
+
+def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the result payload as JSON only (no human-readable summary).",
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="poker-solver-run",
+        description="Headless training/evaluation entrypoint for scripts and cloud runs.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+    _add_train_parser(sub, common)
+    _add_resume_parser(sub, common)
+    _add_precompute_parser(sub, common)
+    _add_eval_parser(sub, common)
+    _add_ledger_parser(sub, common)
+    _add_curve_parser(sub, common)
+    _add_report_parser(sub, common)
+    _add_promote_parser(sub, common)
+    _add_profile_parser(sub, common)
+    _add_compare_parser(sub, common)
     return parser
 
 
@@ -885,7 +730,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2, default=json_default))
     else:
         payload = args.func(args)
-        _print_human(payload)
+        print_human(payload)
     return 0
 
 
