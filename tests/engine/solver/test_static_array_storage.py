@@ -195,3 +195,50 @@ class TestBucketBounds:
         node = tree.nodes[0]
         infoset = storage.infoset_at(node.node_id, tree.num_buckets(node.street) - 1)
         assert len(infoset.regrets) == node.num_actions
+
+
+class TestSharedNamesAreTreeKeyed:
+    """A worker that built a different tree must not attach at all.
+
+    Workers rebuild the tree locally and then index SHARED arrays with it. Two
+    processes disagreeing about the tree would each write to different rows of
+    the same memory — silent, total corruption. Tree enumeration is in fact
+    deterministic across processes (verified separately), but "deterministic
+    today" is not a guarantee, so the segment names are keyed by the fingerprint
+    to make a mismatch unattachable rather than merely unlikely.
+    """
+
+    def test_mismatched_tree_cannot_attach(self, tree):
+        config = make_test_config(seed=42, small_blind=1, big_blind=2, starting_stack=20)
+        rules = GameRules(small_blind=1, big_blind=2)
+        other = BettingTree(
+            rules,
+            ActionModel(config),
+            starting_stack=20,
+            buckets_per_street={Street.FLOP: 7, Street.TURN: 9, Street.RIVER: 11},
+        )
+        assert other.fingerprint() != tree.fingerprint()
+
+        owner = StaticArrayStorage(tree, session_id="tree-keyed")
+        try:
+            with pytest.raises(FileNotFoundError, match="DIFFERENT tree"):
+                StaticArrayStorage(other, session_id="tree-keyed", attach=True)
+        finally:
+            owner.close()
+
+    def test_matching_tree_attaches(self, tree):
+        owner = StaticArrayStorage(tree, session_id="tree-keyed-ok")
+        try:
+            worker = StaticArrayStorage(tree, session_id="tree-keyed-ok", attach=True)
+            worker.close()
+        finally:
+            owner.close()
+
+    def test_names_fit_the_platform_limit(self, tree):
+        """macOS caps shared-memory names at 31 chars including the leading slash."""
+        storage = StaticArrayStorage(tree)
+        try:
+            for array in ("regrets", "strategy_sum", "cumulative_utility"):
+                assert len(storage._shm_name(array)) <= 30
+        finally:
+            storage.close()
