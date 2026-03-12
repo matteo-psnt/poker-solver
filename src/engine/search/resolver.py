@@ -23,9 +23,8 @@ from src.engine.search.range_inference import (
 )
 from src.engine.search.subgame_cfr import solve_subgame
 from src.engine.search.tree_builder import build_local_tree
-from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.protocols import Blueprint
+from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
 from src.shared.config import ResolverConfig
 from src.shared.numeric import NORMALIZE_EPS
 
@@ -48,13 +47,18 @@ class HUResolver:
     def __init__(
         self,
         *,
-        blueprint: Blueprint,
+        blueprint: ScorableBlueprint,
         action_model: ActionModel,
         rules: GameRules,
         config: ResolverConfig,
         rng: np.random.Generator | None = None,
     ):
         self.blueprint = blueprint
+        # Backend-agnostic policy access: key-addressed storage and the
+        # tree-addressed one answer 'which infoset is this?' incompatibly.
+        # Resolved once: the blueprint's storage backend does not change mid-solve,
+        # and range inference hits this per combo.
+        self._policy_source = policy_source_for(blueprint)
         self.action_model = action_model
         self.rules = rules
         self.config = config
@@ -211,7 +215,11 @@ class HUResolver:
             if blocked[idx]:
                 continue
             hypo_state = replace_actor_hole_cards(state, actor=actor, combo=combo)
-            key = encode_infoset_key(hypo_state, actor, self.blueprint.card_abstraction)
+            # Cache on the bucket, not a rebuilt key: for a fixed state the
+            # bucket is the only part of infoset identity that varies with the
+            # hand, so this is the same partition the key gave — and it is the
+            # one thing both storage backends agree on.
+            key = self._policy_source.bucket_for(hypo_state, actor)
             row = cache.get(key)
             if row is None:
                 row = self._blueprint_strategy(hypo_state, actions, use_average=True)
@@ -251,10 +259,9 @@ class HUResolver:
         if not actions:
             return np.array([], dtype=np.float64)
 
-        infoset_key = encode_infoset_key(
-            state, state.current_player, self.blueprint.card_abstraction
-        )
-        infoset = self.blueprint.storage.get_infoset(infoset_key)
+        source = self._policy_source
+        bucket = source.bucket_for(state, state.current_player)
+        infoset = source.infoset_at(state, bucket)
         distribution = blueprint_action_distribution(
             infoset, state, self.rules, actions, use_average=use_average
         )
