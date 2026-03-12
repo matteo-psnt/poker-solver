@@ -332,3 +332,35 @@ fetch:
         echo "  nothing published yet"; exit 0; }
     echo "  fetched into data/runs"
     uv run poker-solver-run ledger --rebuild --limit 10
+
+# Print a leg's published log. Unlike `job-log`, this survives the node.
+#
+# Batch keeps task stdout/stderr ON THE NODE, and the pool scales to zero within
+# minutes of a task ending -- so `job-log` returns NodeNotFound for exactly the
+# failed legs you most need to read. run_leg.sh copies its log to the share on
+# every publish; this reads that copy.
+[doc("Print a leg's log from the share (survives node teardown). Args: task")]
+leg-log task:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    J=$({{tfs}} output -json)
+    ACCT=$(jq -r '.storage_account.value' <<<"$J")
+    SHARE=$(jq -r '.share_name.value' <<<"$J")
+    KEY=$({{tfs}} output -raw access_key)
+    TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
+    az storage file download --account-name "$ACCT" --account-key "$KEY" \
+        --share-name "$SHARE" --path "logs/{{task}}.log" --dest "$TMP" \
+        --no-progress -o none 2>/dev/null || { echo "  no published log for {{task}}"; exit 0; }
+    tr '\r' '\n' < "$TMP" | grep -v "Training batches:" | tail -80
+
+# Every leg log on the share, newest last.
+[doc("List published leg logs.")]
+leg-logs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    J=$({{tfs}} output -json)
+    ACCT=$(jq -r '.storage_account.value' <<<"$J")
+    SHARE=$(jq -r '.share_name.value' <<<"$J")
+    KEY=$({{tfs}} output -raw access_key)
+    az storage file list --account-name "$ACCT" --account-key "$KEY" \
+        --share-name "$SHARE" --path logs -o tsv --query "[].name" 2>/dev/null || echo "  none"

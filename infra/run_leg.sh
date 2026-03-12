@@ -109,6 +109,23 @@ publish_all() {
       sed 's/^/       /' /tmp/publish_err >&2 || true
     fi
   done
+  publish_log
+}
+
+# Batch keeps a task's stdout/stderr ON THE NODE. The pool scales to zero the
+# moment a task ends, so a failed leg's logs are destroyed within minutes of
+# being the only record of why it failed -- which is exactly what happened to a
+# 30M leg: it died at ~720k iterations and the node was reclaimed before the
+# logs could be read, leaving `exit 1` and nothing else.
+#
+# Copied to the share on every publish, not only at exit, so a leg that is later
+# killed outright still leaves the log behind.
+publish_log() {
+  [ -n "${LEG_LOG:-}" ] && [ -f "$LEG_LOG" ] || return 0
+  mkdir -p "$SHARE/logs" 2>/dev/null || true
+  # tail: the interesting part is always the end, and a multi-hour tqdm stream is
+  # mostly progress-bar repaints that would cost more to copy than they inform.
+  tail -c 2000000 "$LEG_LOG" > "$SHARE/logs/${AZ_BATCH_TASK_ID:-leg}.log" 2>/dev/null || true
 }
 
 # Publish on ANY exit -- success, failure, or cancellation. An operator-cancelled
@@ -241,19 +258,32 @@ fi
 RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
 GUARD=(timeout --signal=TERM --kill-after=120s "$RUN_TIMEOUT")
 
+# Tee'd to node-local disk, then copied to the share by publish_log. Node-local
+# first because the training stream is chatty and writing every line straight to
+# SMB would put the leg's throughput at the mercy of the share.
+LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
+
 # `|| rc=$?` because `set -e` would abort before the exit code could be read,
-# and a timed-out leg must still reach the reporting below.
+# and a timed-out leg must still reach the reporting below. PIPESTATUS, not $?,
+# because the tee makes this a pipeline and $? would report tee's success.
 rc=0
 if [ -z "${RUN_ID:-}" ]; then
   log "fresh train: config=$RUN_CONFIG iterations=$RUN_TO (timeout $RUN_TIMEOUT)"
+  set +o pipefail
   "${GUARD[@]}" uv run poker-solver-run train \
-    --config "$RUN_CONFIG" --iterations "$RUN_TO" "${ARGS[@]}" || rc=$?
+    --config "$RUN_CONFIG" --iterations "$RUN_TO" "${ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
 else
   log "resume: run=$RUN_ID to=$RUN_TO (absolute) (timeout $RUN_TIMEOUT)"
+  set +o pipefail
   "${GUARD[@]}" uv run poker-solver-run resume \
     --run "$RUN_ID" --to-iteration "$RUN_TO" \
-    ${RUN_WORKERS:+--workers "$RUN_WORKERS"} || rc=$?
+    ${RUN_WORKERS:+--workers "$RUN_WORKERS"} 2>&1 | tee -a "$LEG_LOG"
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
 fi
+publish_log
 # 124 is timeout's own "deadline expired"; surface it as itself rather than as a
 # training failure, so `just jobs` distinguishes a hang from a crash.
 if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
