@@ -36,8 +36,8 @@ from src.engine.search.range_inference import (
     update_ranges,
 )
 from src.engine.search.resolver import HUResolver
-from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.policy_lookup import blueprint_action_distribution
+from src.engine.solver.policy_source import policy_source_for
 from src.engine.solver.protocols import Blueprint
 from src.shared.config import ResolverConfig
 
@@ -107,7 +107,7 @@ class BlueprintOpponent:
         self.rules = blueprint.rules
         self.action_model = blueprint.action_model
         self.card_abstraction = blueprint.card_abstraction
-        self.storage = blueprint.storage
+        self._policy_source = policy_source_for(blueprint)
         self.queries: int = 0
         self.uniform_fallbacks: int = 0
         # Optional cross-call BlueprintDistMemo (lookahead scorer): pure cache,
@@ -147,7 +147,10 @@ class BlueprintOpponent:
             if COMBO_MASKS[idx] & known:
                 continue
             opp_state = replace_actor_hole_cards(state, actor=actor, combo=ALL_COMBOS[idx])
-            key = encode_infoset_key(opp_state, actor, self.card_abstraction)
+            # identity(), not the bucket: this memo is CROSS-CALL, and a bucket
+            # alone omits street and betting sequence, so unrelated nodes sharing
+            # a bucket would collide.
+            key = self._policy_source.identity(opp_state, actor)
             dist = cache.get(key)
             if dist is None:
                 dist = self._memoized_distribution(key, opp_state, actor)
@@ -209,8 +212,7 @@ class BlueprintOpponent:
         self, state: GameState, player: int, legal: list[Action]
     ) -> dict[Action, float] | None:
         """Blueprint strategy over ``legal`` at ``state``, or ``None`` if off-tree."""
-        infoset_key = encode_infoset_key(state, player, self.card_abstraction)
-        infoset = self.storage.get_infoset(infoset_key)
+        infoset = self._policy_source.infoset_for(state, player)
         return blueprint_action_distribution(infoset, state, self.rules, legal, use_average=True)
 
 

@@ -2,12 +2,13 @@
 
 Chart presentation (grid assembly, labels, payload shapes) lives in
 ``src.interfaces.chart``; everything that touches solver internals lives here.
-Query nodes are real ``GameState``s and keys go through the canonical
-:func:`~src.engine.solver.infoset_encoder.encode_infoset_key` — the previous
-renderer hand-built an ``InfoSetKey`` with an assumed SPR bucket, which
-silently rendered blank charts whenever key encoding, SPR bucketing, or the
-stack configuration drifted from that assumption. Routed through the encoder,
-the chart follows the solver automatically.
+Query nodes are real ``GameState``s and lookups go through
+:func:`~src.engine.solver.policy_source.policy_source_for` — the previous
+renderer hand-built an ``InfoSetKey`` with an assumed SPR bucket, which silently
+rendered blank charts whenever key encoding, SPR bucketing, or the stack
+configuration drifted from that assumption. Routed through the policy source,
+the chart follows the solver automatically AND works against either storage
+backend, since a tree-addressed blueprint has no keys to build.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 
 from src.core.game.actions import Action, ActionType
 from src.core.game.state import Card, GameState
-from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.policy_source import policy_source_for
 from src.engine.solver.protocols import Blueprint
 
 RANKS = "AKQJT98765432"
@@ -84,6 +85,7 @@ def preflop_chart_data(
             state = raised
             applied_raise = True
 
+    source = policy_source_for(blueprint)
     blocked = frozenset(state.hole_cards[1 - position])
     hands: dict[str, HandStrategy] = {}
     for hand in _hand_classes():
@@ -91,8 +93,7 @@ def preflop_chart_data(
         hole_cards = list(state.hole_cards)
         hole_cards[position] = combo
         query_state = state.replace(hole_cards=(hole_cards[0], hole_cards[1]), validate=False)
-        key = encode_infoset_key(query_state, position, blueprint.card_abstraction)
-        infoset = blueprint.storage.get_infoset(key)
+        infoset = source.infoset_for(query_state, position)
         if infoset is None or float(infoset.strategy_sum.sum()) == 0.0:
             continue
         probabilities = infoset.get_filtered_strategy(use_average=True)
