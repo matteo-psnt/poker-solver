@@ -277,9 +277,13 @@ panic:
     set -euo pipefail
     just _login
     POOL=$({{tf}} output -raw pool_id)
+    # `stop`, not `terminate`: there is no `az batch job terminate`, and the CLI
+    # answers an unknown verb by printing help and exiting 1 -- which the `|| true`
+    # then swallowed, so panic reported success while stopping nothing. Found the
+    # hard way on a task stranded by an unusable node.
     for job in $(az batch job list --query "[?state!='completed'].id" -o tsv); do
-        echo "  terminating job $job"
-        az batch job terminate --job-id "$job" --yes 2>/dev/null || true
+        echo "  stopping job $job"
+        az batch job stop --job-id "$job" --terminate-reason "panic" || true
     done
     # Replace the formula outright rather than disabling autoscale: disabling it
     # leaves targetDedicatedNodes wherever it was.
