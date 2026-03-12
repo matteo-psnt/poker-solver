@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-import os
 import queue
 import signal
 import time
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, cast
+
+from src.shared.procinfo import rss_mb
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ def gather_worker_results(
                     f"Timeout waiting for {description} after {timeout:.0f}s with no "
                     f"message ({len(results)}/{expected} received). "
                     f"{_worker_status(manager.processes)}. "
-                    f"Master rss={_rss_mb()} MB."
+                    f"Master rss={rss_mb()} MB."
                 )
             continue
         except KeyboardInterrupt:
@@ -129,17 +130,3 @@ def gather_worker_results(
         elif verbose:
             logger.info(f"[Master] Ignoring unexpected result: {result}")
     return results, interrupted
-
-
-def _rss_mb() -> str:
-    """Resident set size of this process, or '?' where it is not readable.
-
-    Reported alongside a stall because memory pressure is the leading explanation
-    for workers going silent, and the number is worthless after the fact.
-    """
-    try:
-        with open(f"/proc/{os.getpid()}/statm") as handle:
-            pages = int(handle.read().split()[1])
-        return str(pages * os.sysconf("SC_PAGE_SIZE") // (1024 * 1024))
-    except (OSError, ValueError, IndexError):
-        return "?"

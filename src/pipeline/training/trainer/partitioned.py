@@ -6,6 +6,7 @@ import logging
 import pickle
 import random
 import signal
+import sys
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -146,11 +147,18 @@ def _train_partitioned(
             logger.info(f"   Worker pool ready ({pool_init_time:.2f}s)\n")
 
         num_batches = (num_iterations + batch_size_val - 1) // batch_size_val
+        # Disabled when stderr is not a terminal. A progress bar repaints its
+        # whole line on EVERY update, which is invisible on a terminal and
+        # catastrophic in a redirected log: a multi-hour cloud leg wrote a
+        # stderr file large enough that `az batch task file download` timed out,
+        # so the one artifact needed to diagnose a stalled run could not be read.
+        # The per-batch "[Master] Batch N complete in Xs (Y iter/s)" lines carry
+        # the same information and cost one line each.
         batch_iterator = tqdm(
             range(num_batches),
             desc="Training batches",
             unit="batch",
-            disable=not verbose,
+            disable=not verbose or not sys.stderr.isatty(),
         )
 
         completed_iterations = 0
