@@ -1,0 +1,110 @@
+"""Service-layer APIs for training and evaluation orchestration.
+
+The one seam between transports (headless CLI, Modal, the Azure leg wrapper,
+the interactive menu) and the pipeline internals. A transport composes calls
+from here; it never reaches past them, which is what keeps a cloud run and a
+local run doing the same thing.
+
+The flat ``src.pipeline.services`` namespace is the public API. Submodules
+group by concern only:
+
+``runs``
+    Readers over the run directory — what exists, what state it is in.
+``training``
+    Start a run, or continue one to an absolute iteration target.
+``abstraction``
+    Produce a card abstraction, or measure one at several bucket counts.
+``evaluation``
+    Score a run; one entrypoint per estimator, plus the record orchestrator.
+``experiments``
+    Read the experiment record — curves, baselines, arm-vs-control attribution.
+"""
+
+from src.pipeline.services.abstraction import precompute_abstraction, sweep_bucket_counts
+from src.pipeline.services.evaluation import (
+    BLUEPRINT_MATCH_ESTIMATOR_LABEL,
+    EXACT_BR_ESTIMATOR_LABEL,
+    LBR_ESTIMATOR_LABEL,
+    ROLLOUT_ESTIMATOR_LABEL,
+    EvaluationOutput,
+    RolloutParams,
+    evaluate_and_record,
+    evaluate_blueprint_match,
+    evaluate_run_exact_br,
+    evaluate_run_lbr,
+    evaluate_run_resolver_gate,
+    evaluate_run_rollout,
+    record_blueprint_match,
+)
+from src.pipeline.services.experiments import (
+    CONTROL_ARM,
+    DEFAULT_BASELINE_PATH,
+    ArmResult,
+    Baseline,
+    CurveOutput,
+    CurvePoint,
+    ExperimentReport,
+    experiment_report,
+    exploitability_curve,
+    load_baseline,
+    promote_baseline,
+)
+from src.pipeline.services.runs import (
+    RunSummary,
+    checkpoint_iteration_of,
+    describe_runs,
+    list_runs,
+    load_run_metadata,
+)
+from src.pipeline.services.training import (
+    ResumeOutput,
+    TrainingOutput,
+    create_resumed_session,
+    create_training_session,
+    resume,
+    run_training,
+    train,
+)
+from src.pipeline.training.run_tracker import ExperimentTag
+
+__all__ = [
+    "BLUEPRINT_MATCH_ESTIMATOR_LABEL",
+    "CONTROL_ARM",
+    "DEFAULT_BASELINE_PATH",
+    "EXACT_BR_ESTIMATOR_LABEL",
+    "LBR_ESTIMATOR_LABEL",
+    "ROLLOUT_ESTIMATOR_LABEL",
+    "ArmResult",
+    "Baseline",
+    "CurveOutput",
+    "CurvePoint",
+    "EvaluationOutput",
+    "ExperimentReport",
+    "ExperimentTag",
+    "ResumeOutput",
+    "RolloutParams",
+    "RunSummary",
+    "TrainingOutput",
+    "checkpoint_iteration_of",
+    "create_resumed_session",
+    "create_training_session",
+    "describe_runs",
+    "evaluate_and_record",
+    "evaluate_blueprint_match",
+    "evaluate_run_exact_br",
+    "evaluate_run_lbr",
+    "evaluate_run_resolver_gate",
+    "evaluate_run_rollout",
+    "experiment_report",
+    "exploitability_curve",
+    "list_runs",
+    "load_baseline",
+    "load_run_metadata",
+    "precompute_abstraction",
+    "promote_baseline",
+    "record_blueprint_match",
+    "resume",
+    "run_training",
+    "sweep_bucket_counts",
+    "train",
+]

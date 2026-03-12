@@ -14,6 +14,7 @@ from src.pipeline.services import (
     ROLLOUT_ESTIMATOR_LABEL,
     TrainingOutput,
 )
+from src.pipeline.services import evaluation as services_evaluation
 from src.shared.jsonio import json_default
 
 
@@ -100,7 +101,9 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
         checkpoint_iteration=1000,
         results={"exploitability_mbb": 1.0, "std_error_mbb": 0.1},
     )
-    monkeypatch.setattr(headless.services, "evaluate_run_lbr", lambda *a, **kw: fake_out)
+    # Patched on the owning submodule: `evaluate_and_record` dispatches through its
+    # own namespace, which the re-export in the package __init__ does not stand in for.
+    monkeypatch.setattr(services_evaluation, "evaluate_run_lbr", lambda *a, **kw: fake_out)
 
     rc = headless.main(["evaluate", "--run", "run-xyz", "--runs-dir", str(tmp_path), "--json"])
 
@@ -121,7 +124,7 @@ def test_main_evaluate_rollout_opt_in(monkeypatch, tmp_path, capsys):
         checkpoint_iteration=1000,
         results={"exploitability_mbb": 9.0, "std_error_mbb": 0.5},
     )
-    monkeypatch.setattr(headless.services, "evaluate_run_rollout", lambda *a, **kw: fake_out)
+    monkeypatch.setattr(services_evaluation, "evaluate_run_rollout", lambda *a, **kw: fake_out)
 
     rc = headless.main(
         [
@@ -367,7 +370,7 @@ def test_rebuild_counts_are_printed_in_human_mode(tmp_path, capsys):
         {"run_id": "r", "timestamp": "2026-01-01T00:00:00+00:00", "result_path": "x"}, led
     )
     payload = headless._cmd_ledger(_ledger_ns(led, tmp_path, rebuild=True))
-    headless._print_human(payload)
+    headless.print_human(payload)
     out = capsys.readouterr().out
     assert "Rebuilt" in out
     assert "preserved" in out

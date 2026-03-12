@@ -2,13 +2,13 @@
 
 from types import SimpleNamespace
 
-from src.pipeline import services
+from src.pipeline.services import runs as services_runs
 from src.pipeline.training.versioning import REPRESENTATION_VERSION
 
 
 def _patch_metadata(monkeypatch, *, version, commit="abc123", dirty=False):
     monkeypatch.setattr(
-        services,
+        services_runs,
         "load_run_metadata",
         lambda _dir: SimpleNamespace(
             representation_version=version,
@@ -20,14 +20,14 @@ def _patch_metadata(monkeypatch, *, version, commit="abc123", dirty=False):
             status="completed",
         ),
     )
-    monkeypatch.setattr(services, "commits_ahead_of", lambda _commit: 4)
+    monkeypatch.setattr(services_runs, "commits_ahead_of", lambda _commit: 4)
 
 
 def test_missing_checkpoint_is_not_loadable(tmp_path, monkeypatch):
     (tmp_path / "run-x").mkdir()
     _patch_metadata(monkeypatch, version=REPRESENTATION_VERSION)
 
-    summary = services._summarize_run(tmp_path, "run-x")
+    summary = services_runs._summarize_run(tmp_path, "run-x")
 
     assert not summary.loadable
     assert summary.blocker == "no checkpoint"
@@ -40,7 +40,7 @@ def test_stale_format_is_not_loadable(tmp_path, monkeypatch):
     (run / "CHECKPOINT.json").write_text("{}")
     _patch_metadata(monkeypatch, version=REPRESENTATION_VERSION - 1)
 
-    summary = services._summarize_run(tmp_path, "run-old")
+    summary = services_runs._summarize_run(tmp_path, "run-old")
 
     assert not summary.loadable
     assert summary.blocker is not None and "format" in summary.blocker
@@ -52,7 +52,7 @@ def test_current_run_is_loadable(tmp_path, monkeypatch):
     (run / "CHECKPOINT.json").write_text("{}")
     _patch_metadata(monkeypatch, version=REPRESENTATION_VERSION, dirty=True)
 
-    summary = services._summarize_run(tmp_path, "run-cur")
+    summary = services_runs._summarize_run(tmp_path, "run-cur")
 
     assert summary.loadable
     assert summary.blocker is None
@@ -65,7 +65,7 @@ def test_legacy_zarr_layout_counts_as_checkpoint(tmp_path, monkeypatch):
     (run / "checkpoint-6000.zarr").mkdir()
     _patch_metadata(monkeypatch, version=REPRESENTATION_VERSION)
 
-    assert services._summarize_run(tmp_path, "run-legacy").loadable
+    assert services_runs._summarize_run(tmp_path, "run-legacy").loadable
 
 
 def test_unreadable_metadata_is_blocked(tmp_path, monkeypatch):
@@ -74,9 +74,9 @@ def test_unreadable_metadata_is_blocked(tmp_path, monkeypatch):
     def _raise(_dir):
         raise ValueError("corrupt")
 
-    monkeypatch.setattr(services, "load_run_metadata", _raise)
+    monkeypatch.setattr(services_runs, "load_run_metadata", _raise)
 
-    summary = services._summarize_run(tmp_path, "run-bad")
+    summary = services_runs._summarize_run(tmp_path, "run-bad")
 
     assert not summary.loadable
     assert summary.blocker == "unreadable metadata"
