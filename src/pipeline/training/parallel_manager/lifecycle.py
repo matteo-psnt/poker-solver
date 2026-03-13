@@ -37,6 +37,7 @@ def initialize_runtime(manager: SharedArrayWorkerManager) -> None:
         zarr_compression_level=manager.config.storage.zarr_compression_level,
         zarr_chunk_size=manager.config.storage.zarr_chunk_size,
         checkpoint_retain_every=manager.config.storage.checkpoint_retain_every,
+        remote_key_cache_size=manager.config.storage.remote_key_cache_size,
     )
 
     total_mb = manager.capacity * manager.max_actions * 4 * 2 // 1024 // 1024

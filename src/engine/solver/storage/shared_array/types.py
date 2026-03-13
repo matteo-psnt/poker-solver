@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from multiprocessing.shared_memory import SharedMemory
 
 
+from .remote_cache import RemoteKeyCache
+
+
 @dataclass(slots=True)
 class ExtraAllocation:
     """ID allocation interval assigned to a specific worker."""
@@ -68,7 +71,7 @@ class SharedArrayMutableState:
     next_local_id: int
     owned_keys: dict[InfoSetKey, int] = field(default_factory=dict)
     unshipped_keys: list[tuple[InfoSetKey, int]] = field(default_factory=list)
-    remote_keys: dict[InfoSetKey, int] = field(default_factory=dict)
+    remote_keys: RemoteKeyCache = field(default_factory=RemoteKeyCache)
     legal_actions_cache: dict[int, Sequence[Action]] = field(default_factory=dict)
     pending_id_requests: dict[int, set[InfoSetKey]] = field(default_factory=dict)
     requested_id_keys: set[InfoSetKey] = field(default_factory=set)

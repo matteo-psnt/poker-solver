@@ -37,6 +37,9 @@ class BatchResult(TypedDict):
     # (macOS has no /proc), which is distinct from "measured zero".
     max_worker_rss_mb: int | None
     master_rss_mb: int | None
+    # Cumulative across workers. Non-zero means the remote-key cap is biting;
+    # rising fast means it is too low and sample efficiency is paying for it.
+    remote_cache_evictions: int
 
 
 def run_batch(
@@ -87,6 +90,9 @@ def run_batch(
     # double-counts them several times over. The largest single worker is the
     # honest number for "how close is one worker to the ceiling".
     worker_rss: list[int] = []
+    # SUM here, unlike RSS: evictions are disjoint events per worker, not a
+    # shared quantity double-counted across them.
+    evictions = 0
     for result in received:
         if "error" in result:
             errors.append(result)
@@ -103,6 +109,9 @@ def run_batch(
             rss = result.get("rss_mb")
             if isinstance(rss, int):
                 worker_rss.append(rss)
+            evicted = result.get("remote_cache_evictions")
+            if isinstance(evicted, int):
+                evictions += evicted
 
     batch_time = time.time() - batch_start
     total_iters = sum(iterations_per_worker)
@@ -144,6 +153,7 @@ def run_batch(
         "max_worker_capacity": max_worker_capacity,
         "max_worker_rss_mb": max(worker_rss) if worker_rss else None,
         "master_rss_mb": rss_mb(),
+        "remote_cache_evictions": evictions,
         "resized": resized,
         "capacity": manager.capacity,
         "interrupted": interrupted,
