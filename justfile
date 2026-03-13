@@ -172,11 +172,20 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     # RUN_TIMEOUT must stay comfortably below it or the cheap stop never fires.
     RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
     MAX_WALL="${MAX_WALL:-P1D}"
+    # Retries, but ONLY for a resume. This is the property the whole design was
+    # built on and had switched off: `--to-iteration` is ABSOLUTE and no-ops once
+    # reached, so re-running a resume converges on the same endpoint however many
+    # times it runs, and Batch reschedules onto a healthy node. A FRESH submit is
+    # not idempotent -- retrying it starts a second run from zero -- so it stays
+    # at 0. Two nodes have now gone `unusable` mid-leg with
+    # MountConfigurationError; without this, each costs a manual restart.
+    if [ -n "{{run}}" ]; then RETRIES="${RUN_RETRIES:-2}"; else RETRIES="${RUN_RETRIES:-0}"; fi
     # RUN_WORKERS empty = all CPUs. Worth setting BELOW the core count on a big
     # abstraction: every worker pickle.loads its own copy (385 MB for production),
     # so 16 workers cost 6.2 GB in duplicates alone before any training state.
     az batch task create --job-id "$JOB" --task-id "$TASK" \
         --max-wall-clock-time "$MAX_WALL" \
+        --max-task-retry-count "$RETRIES" \
         --command-line "/bin/bash -c '$LEG'" \
         --environment-settings \
             CODE_SNAPSHOT="{{snap}}" RUN_CONFIG="{{config}}" RUN_TO="{{to}}" \
@@ -185,6 +194,7 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
             RUN_TIMEOUT="$RUN_TIMEOUT" RUN_WORKERS="${RUN_WORKERS:-}" \
         -o none
     echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
+    echo "  retries:  $RETRIES $([ -n "{{run}}" ] && echo "(resume is idempotent)" || echo "(fresh submit is not idempotent)")"
     echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
 
 # Start a NEW run and train it to an absolute iteration count.

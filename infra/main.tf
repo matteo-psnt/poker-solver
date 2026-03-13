@@ -312,13 +312,30 @@ resource "azurerm_batch_pool" "train" {
 
   # The durable share, mounted on every node. Code snapshots, card abstractions,
   # published runs and eval records all travel through here.
+  #
+  # MOUNT OPTIONS ARE A RELIABILITY CONTROL, not tuning. Two nodes have gone
+  # `unusable` with MountConfigurationError MID-LEG (not at startup), stranding a
+  # task that Batch then reports as `running` forever. Both happened while
+  # publishing multi-GB checkpoint snapshots, which is the only sustained SMB
+  # load this pool generates.
+  #
+  #   vers=3.1.1    Azure Files' recommended dialect; 3.0 predates the reconnect
+  #                 and encryption improvements, and this share supports it.
+  #   nosharesock   a dedicated TCP connection for this mount rather than one
+  #                 shared across mounts to the same server -- one stalled
+  #                 operation then cannot take the whole mount down with it.
+  #   actimeo=30    caches attributes for 30s. Publishing walks thousands of
+  #                 files with cp -u, which stats every one; without this each
+  #                 stat is a round trip and the metadata traffic alone can
+  #                 exhaust the share's IOPS allowance.
+  #   mfsymlinks    symlink support, so a copy cannot fail on one unexpectedly.
   mount {
     azure_file_share {
       account_name        = data.azurerm_storage_account.store.name
       account_key         = data.azurerm_storage_account.store.primary_access_key
       azure_file_url      = "https://${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.store_share_name}"
       relative_mount_path = "shared"
-      mount_options       = "-o vers=3.0,dir_mode=0777,file_mode=0777,serverino"
+      mount_options       = "-o vers=3.1.1,dir_mode=0777,file_mode=0777,serverino,nosharesock,actimeo=30,mfsymlinks"
     }
   }
 
