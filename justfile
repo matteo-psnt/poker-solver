@@ -199,6 +199,8 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
             RUN_PARENT="{{parent}}" RUN_SETS_HEX="$SETS_HEX" \
             RUN_TIMEOUT="$RUN_TIMEOUT" RUN_WORKERS="${RUN_WORKERS:-}" \
             RUN_STATIC="${RUN_STATIC:-}" RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-}" \
+            RUN_OP="${RUN_OP:-}" RUN_EVAL_METHOD="${RUN_EVAL_METHOD:-}" \
+            RUN_EVAL_AT="${RUN_EVAL_AT:-}" RUN_EVAL_FLAGS_HEX="${RUN_EVAL_FLAGS_HEX:-}" \
         -o none
     echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
     if [ "$RETRIES" = "0" ]; then
@@ -403,3 +405,24 @@ leg-logs:
     KEY=$({{tfs}} output -raw access_key)
     az storage file list --account-name "$ACCT" --account-key "$KEY" \
         --share-name "$SHARE" --path logs -o tsv --query "[].name" 2>/dev/null || echo "  none"
+
+# Score a published run ON A NODE. Args: run [method] [rungs] [flags...]
+#
+#   just score run-production-025433-1095
+#   just score run-... exact_br 10000000,20000000,30000000
+#   just score run-... exact_br "" --br-flops 8
+#
+# On the node because the share is a LOCAL mount there: one checkpoint is ~540 MB
+# of small zarr chunks, ~20 minutes to pull over SMB, which makes scoring a
+# 30-rung ladder from a laptop impractical. `rungs` is comma-separated and scored
+# in ONE task -- the fetch dominates, so a whole curve costs about one download.
+[doc("Score a published run on a node. Args: run [method] [rungs] [flags...]")]
+score run method="exact_br" rungs="" *flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SNAP=$(just push-code)
+    echo "  code snapshot: $SNAP"
+    HEX=$(printf '%s' "{{flags}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
+    RUN_OP=evaluate RUN_EVAL_METHOD="{{method}}" RUN_EVAL_AT="{{rungs}}" \
+      RUN_EVAL_FLAGS_HEX="$HEX" RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
+      just _task "$SNAP" "" "0" "{{run}}" "" "" "" ""

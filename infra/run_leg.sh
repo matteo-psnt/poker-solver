@@ -27,6 +27,9 @@
 #   RUN_WORKERS     worker count (empty = all CPUs)
 #   RUN_STATIC      1 = statically-enumerated tree (fixed memory, resumable)
 #   RUN_CHECKPOINT_EVERY  static only: checkpoint every N iterations
+#   RUN_OP          train (default) | evaluate
+#   RUN_EVAL_METHOD lbr | exact_br | rollout      RUN_EVAL_AT  comma-separated rungs
+#   RUN_EVAL_FLAGS_HEX  hex-encoded extra evaluate flags
 set -euo pipefail
 
 WORK=/mnt/work
@@ -268,6 +271,42 @@ LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
 # `|| rc=$?` because `set -e` would abort before the exit code could be read,
 # and a timed-out leg must still reach the reporting below. PIPESTATUS, not $?,
 # because the tee makes this a pipeline and $? would report tee's success.
+# EVALUATE mode. Scoring belongs on the node, not on a laptop: the share is a
+# local mount here and a WAN download away from anywhere else -- one checkpoint
+# is ~540 MB of small zarr chunks, which took ~20 minutes to pull over SMB and
+# would make scoring a 30-rung ladder impractical.
+#
+# RUN_EVAL_AT takes a COMMA-SEPARATED list of rungs, scored in one task. The
+# fetch dominates the cost, so a whole convergence curve for the price of one.
+if [ "${RUN_OP:-train}" = "evaluate" ]; then
+  EVAL_FLAGS=""
+  if [ -n "${RUN_EVAL_FLAGS_HEX:-}" ]; then
+    EVAL_FLAGS=$(python3 -c "import sys; sys.stdout.write(bytes.fromhex(sys.argv[1]).decode())" "$RUN_EVAL_FLAGS_HEX")
+  fi
+  # shellcheck disable=SC2206
+  EXTRA=($EVAL_FLAGS)
+  METHOD="${RUN_EVAL_METHOD:-exact_br}"
+  rc=0
+  IFS=',' read -ra RUNGS <<< "${RUN_EVAL_AT:-}"
+  [ "${#RUNGS[@]}" -eq 0 ] && RUNGS=("")
+  for rung in "${RUNGS[@]}"; do
+    AT=()
+    [ -n "$rung" ] && AT=(--at "$rung")
+    log "evaluate: run=$RUN_ID method=$METHOD ${rung:+at=$rung}"
+    set +o pipefail
+    "${GUARD[@]}" uv run poker-solver-run evaluate \
+      --run "$RUN_ID" --method "$METHOD" "${AT[@]}" "${EXTRA[@]}" 2>&1 | tee -a "$LEG_LOG"
+    step=${PIPESTATUS[0]}
+    set -o pipefail
+    # One bad rung must not abandon the rest: a partial curve beats none, and
+    # the failure is visible in the log and absent from the ledger.
+    [ "$step" = 0 ] || { log "WARN rung ${rung:-latest} failed (rc=$step)"; rc=$step; }
+    publish_log
+  done
+  log "evaluate complete"
+  exit "$rc"
+fi
+
 # RUN_STATIC=1 selects the statically-enumerated tree. One command covers both
 # fresh and resume there, because `train-static --run <id>` continues an existing
 # run and `--iterations` is an absolute target -- so the fresh/resume split the
