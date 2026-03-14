@@ -179,7 +179,13 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     # not idempotent -- retrying it starts a second run from zero -- so it stays
     # at 0. Two nodes have now gone `unusable` mid-leg with
     # MountConfigurationError; without this, each costs a manual restart.
-    if [ -n "{{run}}" ]; then RETRIES="${RUN_RETRIES:-2}"; else RETRIES="${RUN_RETRIES:-0}"; fi
+    # A static leg is idempotent even when fresh: run_leg.sh derives a stable run
+    # id from the task id, so a retry resumes rather than starting a second run.
+    if [ -n "{{run}}" ] || [ "${RUN_STATIC:-}" = "1" ]; then
+        RETRIES="${RUN_RETRIES:-2}"
+    else
+        RETRIES="${RUN_RETRIES:-0}"
+    fi
     # RUN_WORKERS empty = all CPUs. Worth setting BELOW the core count on a big
     # abstraction: every worker pickle.loads its own copy (385 MB for production),
     # so 16 workers cost 6.2 GB in duplicates alone before any training state.
