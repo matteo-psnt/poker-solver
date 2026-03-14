@@ -10,10 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from src.core.actions.action_model import ActionModel
+from src.core.game.rules import GameRules
+from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr import MCCFRSolver
+from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.in_memory import InMemoryStorage
 from src.engine.solver.storage.shared_array import SharedArrayStorage
+from src.engine.solver.storage.static_array import StaticArrayStorage
+from src.engine.solver.storage.static_checkpoint import load_checkpoint
 from src.pipeline.abstraction.base import BucketingStrategy
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 from src.pipeline.evaluation.exploitability import compute_exploitability
@@ -210,3 +215,41 @@ def evaluate_solver_exploitability(
         num_rollouts_per_infoset=num_rollouts_per_infoset,
         seed=seed,
     )
+
+
+def build_static_evaluation_solver(
+    config: Config,
+    *,
+    checkpoint_dir: Path,
+    abstractions_dir: Path | None = None,
+    abstraction_hash: str | None = None,
+    at_iteration: int | None = None,
+) -> tuple[StaticTreeSolver, StaticArrayStorage]:
+    """Build a read-only blueprint over a STATIC checkpoint.
+
+    The static and dynamic backends are not interchangeable -- one is addressed
+    by a hashed key, the other by ``(node_id, bucket)`` -- so evaluation cannot
+    share a loader. It shares the seam below it instead: both produce something
+    satisfying ``ScorableBlueprint``, and ``policy_source_for`` dispatches on the
+    concrete storage. The scoring engines never learn which they were handed.
+
+    ``session_id=None`` allocates process-local arrays rather than shared memory:
+    an evaluation is a single read-only process, and taking a named segment would
+    collide with a training run of the same id.
+    """
+    action_model = ActionModel(config)
+    card_abstraction = build_card_abstraction(
+        config,
+        abstractions_dir=abstractions_dir,
+        abstraction_hash=abstraction_hash,
+    )
+    rules = GameRules(config.game.small_blind, config.game.big_blind)
+    tree = build_betting_tree(
+        rules, action_model, card_abstraction, starting_stack=config.game.starting_stack
+    )
+    storage = StaticArrayStorage(tree)
+    # Verifies the tree fingerprint, so a checkpoint written against a different
+    # tree is refused rather than silently reinterpreted row-for-row.
+    load_checkpoint(storage, checkpoint_dir, at_iteration=at_iteration)
+    solver = StaticTreeSolver(action_model, card_abstraction, storage, config, tree=tree)
+    return solver, storage
