@@ -225,6 +225,22 @@ print(chr(10).join(sorted(n for n in names if n)))
     # Manifest last here too, so a torn fetch never claims more than it copied.
     cp -u "$src/CHECKPOINT.json" "$RUNS/$RUN_ID/" 2>/dev/null || true
     log "fetched $kept complete snapshot dir(s)"
+  elif [ "${RUN_OP:-train}" = "evaluate" ] && [ -n "${RUN_EVAL_AT:-}" ]; then
+    # SELECTIVE. A static run has no CHECKPOINT.json, so the copy below would
+    # take the WHOLE ladder -- thirty ~540 MB rungs, ~16 GB, to score three of
+    # them. Scoring needs the manifest and the rungs actually named.
+    find "$src" -maxdepth 1 -mindepth 1 ! -name 'static-*' \
+         -exec cp -ru {} "$RUNS/$RUN_ID/" \; 2>/dev/null || true
+    IFS=',' read -ra WANT <<< "$RUN_EVAL_AT"
+    for it in "${WANT[@]}"; do
+      [ -n "$it" ] || continue
+      if [ -d "$src/static-$it.zarr" ]; then
+        cp -ru "$src/static-$it.zarr" "$RUNS/$RUN_ID/" 2>/dev/null || true
+        log "  fetched rung $it"
+      else
+        log "  WARN rung $it not on the share"
+      fi
+    done
   else
     cp -ru "$src/." "$RUNS/$RUN_ID/"
   fi
