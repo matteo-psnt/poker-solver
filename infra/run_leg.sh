@@ -235,8 +235,19 @@ print(chr(10).join(sorted(n for n in names if n)))
     for it in "${WANT[@]}"; do
       [ -n "$it" ] || continue
       if [ -d "$src/static-$it.zarr" ]; then
-        cp -ru "$src/static-$it.zarr" "$RUNS/$RUN_ID/" 2>/dev/null || true
-        log "  fetched rung $it"
+        # rm first, and NO -u. A cancelled task leaves partial rungs on the node,
+        # and `cp -u` treats those as already-present and skips them -- so the
+        # next task inherits a TRUNCATED checkpoint and dies inside zarr. That
+        # is what happened to rung 10000000: "fetched" in one second, then a
+        # read error. Node-local state is never evidence of a complete copy.
+        rm -rf "$RUNS/$RUN_ID/static-$it.zarr"
+        if cp -r "$src/static-$it.zarr" "$RUNS/$RUN_ID/" 2>/tmp/fetch_err; then
+          log "  fetched rung $it"
+        else
+          # Reported, not swallowed: a silent copy failure becomes a confusing
+          # load error several minutes later, in a different subsystem.
+          log "  WARN rung $it copy FAILED: $(tail -1 /tmp/fetch_err 2>/dev/null)"
+        fi
       else
         log "  WARN rung $it not on the share"
       fi
