@@ -205,6 +205,8 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
     if [ "$RETRIES" = "0" ]; then
         echo "  retries:  0 (a fresh dynamic submit is not idempotent -- a retry would start a second run)"
+    elif [ "${RUN_OP:-}" = "evaluate" ]; then
+        echo "  retries:  $RETRIES (scoring is idempotent: re-scoring rewrites the same record)"
     elif [ "${RUN_STATIC:-}" = "1" ]; then
         echo "  retries:  $RETRIES (static leg: stable run id, so a retry resumes)"
     else
