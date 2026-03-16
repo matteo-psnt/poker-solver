@@ -198,7 +198,7 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
             RUN_ID="{{run}}" RUN_EXPERIMENT="{{experiment}}" RUN_ARM="{{arm}}" \
             RUN_PARENT="{{parent}}" RUN_SETS_HEX="$SETS_HEX" \
             RUN_TIMEOUT="$RUN_TIMEOUT" RUN_WORKERS="${RUN_WORKERS:-}" \
-            RUN_STATIC="${RUN_STATIC:-}" RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-}" \
+            RUN_STATIC="${RUN_STATIC:-}" RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-1000000}" \
             RUN_OP="${RUN_OP:-}" RUN_EVAL_METHOD="${RUN_EVAL_METHOD:-}" \
             RUN_EVAL_AT="${RUN_EVAL_AT:-}" RUN_EVAL_FLAGS_HEX="${RUN_EVAL_FLAGS_HEX:-}" \
         -o none
