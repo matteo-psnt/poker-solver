@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.engine.solver.protocols import Blueprint
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.blueprint_match import play_blueprint_match
@@ -154,6 +155,22 @@ def _load_blueprint(
     Cython member and cannot be sent across a process boundary.
     """
     solver, _ = build_evaluation_solver(
+        config,
+        checkpoint_dir=checkpoint_dir,
+        abstraction_hash=abstraction_hash,
+        at_iteration=at_iteration,
+    )
+    return solver
+
+
+def _load_static_blueprint(
+    config: Config,
+    checkpoint_dir: Path,
+    abstraction_hash: str | None = None,
+    at_iteration: int | None = None,
+) -> ScorableBlueprint:
+    """Picklable factory for a static blueprint, for parallel scoring workers."""
+    solver, _ = build_static_evaluation_solver(
         config,
         checkpoint_dir=checkpoint_dir,
         abstraction_hash=abstraction_hash,
@@ -305,8 +322,20 @@ def evaluate_run_exact_br(
     metadata = load_run_metadata(run_dir)
     effective_hash = _effective_abstraction_hash(run_dir, metadata, abstraction_hash)
     solver, storage = build_blueprint_for(run_dir, metadata, effective_hash, at_iteration)
+    # The four (seat, button) walks are independent; workers rebuild the
+    # blueprint because the solver is not picklable. Same factory shape parallel
+    # LBR uses, so only picklable args are captured.
+    loader = _load_static_blueprint if is_static_run(run_dir) else _load_blueprint
+    factory = (
+        functools.partial(loader, metadata.config, run_dir, effective_hash, at_iteration)
+        if config.num_workers > 1
+        else None
+    )
     result = compute_public_tree_br(
-        solver, config, starting_stack=metadata.config.game.starting_stack
+        solver,
+        config,
+        starting_stack=metadata.config.game.starting_stack,
+        blueprint_factory=factory,
     )
     results: dict[str, Any] = {
         "exploitability_mbb": result.exploitability_mbb,
