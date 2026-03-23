@@ -253,17 +253,15 @@ def evaluate_run_lbr(
     config = config or LBRConfig()
     metadata = load_run_metadata(run_dir)
     effective_hash = _effective_abstraction_hash(run_dir, metadata, abstraction_hash)
-    solver, storage = build_evaluation_solver(
-        metadata.config,
-        checkpoint_dir=run_dir,
-        abstraction_hash=effective_hash,
-        at_iteration=at_iteration,
-    )
+    solver, storage = build_blueprint_for(run_dir, metadata, effective_hash, at_iteration)
     # For parallel LBR each worker rebuilds its own solver from the checkpoint (the
     # solver is not picklable across processes); the factory captures only picklable
-    # args (config + checkpoint dir).
+    # args (config + checkpoint dir). Loader chosen per backend, matching the
+    # blueprint above -- a static run loaded by the key-addressed loader dies on a
+    # missing checkpoint.zarr, which is what LBR-on-static did before this.
+    loader = _load_static_blueprint if is_static_run(run_dir) else _load_blueprint
     factory = (
-        functools.partial(_load_blueprint, metadata.config, run_dir, effective_hash, at_iteration)
+        functools.partial(loader, metadata.config, run_dir, effective_hash, at_iteration)
         if config.num_workers > 1
         else None
     )

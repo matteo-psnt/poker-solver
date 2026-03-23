@@ -37,8 +37,7 @@ from src.engine.search.range_inference import (
 )
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import policy_source_for
-from src.engine.solver.protocols import Blueprint
+from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
 from src.shared.config import ResolverConfig
 
 
@@ -102,7 +101,7 @@ class BlueprintOpponent:
 
     wants_translated_state = True
 
-    def __init__(self, blueprint: Blueprint, dist_memo=None):
+    def __init__(self, blueprint: ScorableBlueprint, dist_memo=None):
         self.blueprint = blueprint
         self.rules = blueprint.rules
         self.action_model = blueprint.action_model
@@ -251,7 +250,7 @@ class ResolvedOpponent:
 
     def __init__(
         self,
-        blueprint: Blueprint,
+        blueprint: ScorableBlueprint,
         resolver_config: ResolverConfig,
         rng: np.random.Generator | None = None,
     ):
