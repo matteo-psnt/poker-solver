@@ -131,6 +131,15 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     # One job per day, holding that day's tasks. Created on demand; the `|| true`
     # is the second and later submissions finding it already there.
     JOB="poker-$(date -u +%Y%m%d)"
+    # A job that has been STOPPED cannot take new tasks: `az batch task create`
+    # answers JobCompleted. Since the id is per-day, one `just panic` -- or one
+    # stranded task that had to be cleared at job level -- would otherwise block
+    # every further submission until midnight UTC. Fall back to a suffixed id.
+    STATE=$(az batch job show --job-id "$JOB" --query state -o tsv 2>/dev/null || echo absent)
+    if [ "$STATE" != "absent" ] && [ "$STATE" != "active" ]; then
+        JOB="$JOB-$(date -u +%H%M%S)"
+        echo "  previous job is $STATE; using $JOB"
+    fi
     # Explicit, not defaulted: these are billing controls, and a billing control
     # that depends on a service default is one upgrade away from not existing.
     #   retry 0  -- a task that fails deterministically must not re-burn a node
@@ -156,14 +165,53 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     # rejects it. Base64 would reintroduce the problem via its `=` padding; hex
     # has no special characters at all.
     SETS_HEX=$(printf '%s' "{{sets}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
+    # Two nested ceilings, deliberately different:
+    #   RUN_TIMEOUT  kills the TRAINING process and still runs the publish trap,
+    #                so a wedged leg loses at most one rung interval.
+    #   maxWallClock kills the TASK, losing whatever the trap did not reach.
+    # RUN_TIMEOUT must stay comfortably below it or the cheap stop never fires.
+    RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
+    MAX_WALL="${MAX_WALL:-P1D}"
+    # Retries, but ONLY for a resume. This is the property the whole design was
+    # built on and had switched off: `--to-iteration` is ABSOLUTE and no-ops once
+    # reached, so re-running a resume converges on the same endpoint however many
+    # times it runs, and Batch reschedules onto a healthy node. A FRESH submit is
+    # not idempotent -- retrying it starts a second run from zero -- so it stays
+    # at 0. Two nodes have now gone `unusable` mid-leg with
+    # MountConfigurationError; without this, each costs a manual restart.
+    # A static leg is idempotent even when fresh: run_leg.sh derives a stable run
+    # id from the task id, so a retry resumes rather than starting a second run.
+    if [ -n "{{run}}" ] || [ "${RUN_STATIC:-}" = "1" ]; then
+        RETRIES="${RUN_RETRIES:-2}"
+    else
+        RETRIES="${RUN_RETRIES:-0}"
+    fi
+    # RUN_WORKERS empty = all CPUs. Worth setting BELOW the core count on a big
+    # abstraction: every worker pickle.loads its own copy (385 MB for production),
+    # so 16 workers cost 6.2 GB in duplicates alone before any training state.
     az batch task create --job-id "$JOB" --task-id "$TASK" \
-        --max-wall-clock-time "P1D" \
+        --max-wall-clock-time "$MAX_WALL" \
+        --max-task-retry-count "$RETRIES" \
         --command-line "/bin/bash -c '$LEG'" \
         --environment-settings \
             CODE_SNAPSHOT="{{snap}}" RUN_CONFIG="{{config}}" RUN_TO="{{to}}" \
             RUN_ID="{{run}}" RUN_EXPERIMENT="{{experiment}}" RUN_ARM="{{arm}}" \
             RUN_PARENT="{{parent}}" RUN_SETS_HEX="$SETS_HEX" \
+            RUN_TIMEOUT="$RUN_TIMEOUT" RUN_WORKERS="${RUN_WORKERS:-}" \
+            RUN_STATIC="${RUN_STATIC:-}" RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-1000000}" \
+            RUN_OP="${RUN_OP:-}" RUN_EVAL_METHOD="${RUN_EVAL_METHOD:-}" \
+            RUN_EVAL_AT="${RUN_EVAL_AT:-}" RUN_EVAL_FLAGS_HEX="${RUN_EVAL_FLAGS_HEX:-}" \
         -o none
+    echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
+    if [ "$RETRIES" = "0" ]; then
+        echo "  retries:  0 (a fresh dynamic submit is not idempotent -- a retry would start a second run)"
+    elif [ "${RUN_OP:-}" = "evaluate" ]; then
+        echo "  retries:  $RETRIES (scoring is idempotent: re-scoring rewrites the same record)"
+    elif [ "${RUN_STATIC:-}" = "1" ]; then
+        echo "  retries:  $RETRIES (static leg: stable run id, so a retry resumes)"
+    else
+        echo "  retries:  $RETRIES (resume is idempotent: --to-iteration is absolute)"
+    fi
     echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
 
 # Start a NEW run and train it to an absolute iteration count.
@@ -268,9 +316,13 @@ panic:
     set -euo pipefail
     just _login
     POOL=$({{tf}} output -raw pool_id)
+    # `stop`, not `terminate`: there is no `az batch job terminate`, and the CLI
+    # answers an unknown verb by printing help and exiting 1 -- which the `|| true`
+    # then swallowed, so panic reported success while stopping nothing. Found the
+    # hard way on a task stranded by an unusable node.
     for job in $(az batch job list --query "[?state!='completed'].id" -o tsv); do
-        echo "  terminating job $job"
-        az batch job terminate --job-id "$job" --yes 2>/dev/null || true
+        echo "  stopping job $job"
+        az batch job stop --job-id "$job" --terminate-reason "panic" || true
     done
     # Replace the formula outright rather than disabling autoscale: disabling it
     # leaves targetDedicatedNodes wherever it was.
@@ -323,3 +375,66 @@ fetch:
         echo "  nothing published yet"; exit 0; }
     echo "  fetched into data/runs"
     uv run poker-solver-run ledger --rebuild --limit 10
+
+# Print a leg's published log. Unlike `job-log`, this survives the node.
+#
+# Batch keeps task stdout/stderr ON THE NODE, and the pool scales to zero within
+# minutes of a task ending -- so `job-log` returns NodeNotFound for exactly the
+# failed legs you most need to read. run_leg.sh copies its log to the share on
+# every publish; this reads that copy.
+[doc("Print a leg's log from the share (survives node teardown). Args: task")]
+leg-log task:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    J=$({{tfs}} output -json)
+    ACCT=$(jq -r '.storage_account.value' <<<"$J")
+    SHARE=$(jq -r '.share_name.value' <<<"$J")
+    KEY=$({{tfs}} output -raw access_key)
+    TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
+    az storage file download --account-name "$ACCT" --account-key "$KEY" \
+        --share-name "$SHARE" --path "logs/{{task}}.log" --dest "$TMP" \
+        --no-progress -o none 2>/dev/null || { echo "  no published log for {{task}}"; exit 0; }
+    tr '\r' '\n' < "$TMP" | grep -v "Training batches:" | tail -80
+
+# Every leg log on the share, newest last.
+[doc("List published leg logs.")]
+leg-logs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    J=$({{tfs}} output -json)
+    ACCT=$(jq -r '.storage_account.value' <<<"$J")
+    SHARE=$(jq -r '.share_name.value' <<<"$J")
+    KEY=$({{tfs}} output -raw access_key)
+    az storage file list --account-name "$ACCT" --account-key "$KEY" \
+        --share-name "$SHARE" --path logs -o tsv --query "[].name" 2>/dev/null || echo "  none"
+
+# Score a published run ON A NODE. Args: run [method] [rungs] [flags...]
+#
+#   just score run-production-025433-1095
+#   just score run-... exact_br 10000000,20000000,30000000
+#   just score run-... exact_br "" --br-flops 8
+#
+# On a node because the share is a LOCAL mount there: one checkpoint is ~540 MB
+# of small zarr chunks, ~20 minutes to pull over SMB, which makes scoring a
+# ladder from a laptop impractical.
+#
+# ONE TASK PER RUNG, not one task looping over them. Rungs are independent, so
+# Batch is the scheduler: it spreads them across nodes up to max_nodes and
+# queues the rest. A single looping task pinned the whole curve to one node no
+# matter how much pool was available. Each task also parallelises its own four
+# BR walks internally, so a rung uses ~4 cores and a node can hold one comfortably.
+[doc("Score a published run on a node, one task per rung. Args: run [method] [rungs] [flags...]")]
+score run method="exact_br" rungs="" *flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SNAP=$(just push-code)
+    echo "  code snapshot: $SNAP"
+    HEX=$(printf '%s' "{{flags}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
+    IFS=',' read -ra RUNGS <<< "{{rungs}}"
+    [ "${#RUNGS[@]}" -eq 0 ] && RUNGS=("")
+    for rung in "${RUNGS[@]}"; do
+        RUN_OP=evaluate RUN_EVAL_METHOD="{{method}}" RUN_EVAL_AT="$rung" \
+          RUN_EVAL_FLAGS_HEX="$HEX" RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
+          just _task "$SNAP" "" "0" "{{run}}" "" "" "" ""
+    done
+    echo "  ${#RUNGS[@]} rung(s) queued — Batch runs them across the pool"

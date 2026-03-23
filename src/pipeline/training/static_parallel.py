@@ -40,6 +40,7 @@ from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.static_array import StaticArrayStorage
+from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.pipeline.training.abstraction_resolver import ComboAbstractionResolver
 from src.shared.config import Config
 
@@ -68,7 +69,9 @@ def worker_seed(base_seed: int, worker_id: int, batch_id: int = 0) -> int:
     return int(np.random.SeedSequence([base_seed, worker_id, batch_id]).generate_state(1)[0])
 
 
-def worker_iteration_indices(worker_id: int, num_workers: int, num_iterations: int) -> range:
+def worker_iteration_indices(
+    worker_id: int, num_workers: int, num_iterations: int, start: int = 0
+) -> range:
     """Global iteration indices for one worker: ``worker_id, +N, +2N, ...``
 
     INTERLEAVED, not contiguous blocks, and the difference is not cosmetic.
@@ -81,8 +84,13 @@ def worker_iteration_indices(worker_id: int, num_workers: int, num_iterations: i
     Interleaving gives every worker the full range of *t*, and the union across
     workers is exactly ``range(num_iterations)`` — the same absolute numbering a
     single-worker run would see.
+
+    ``start`` is the absolute iteration this chunk begins at, so a resumed or
+    mid-run chunk keeps numbering from where the checkpoint left off rather than
+    replaying *t* from zero -- which would re-apply the early, barely-discounted
+    part of the DCFR schedule to an already-trained table.
     """
-    return range(worker_id, num_iterations, num_workers)
+    return range(start + worker_id, num_iterations, num_workers)
 
 
 def _build_local(config: Config, abstraction: BucketingStrategy | None = None):
@@ -112,6 +120,7 @@ def _worker_entry(
     base_seed: int,
     result_queue: mp.Queue,
     abstraction: BucketingStrategy | None = None,
+    chunk_id: int = 0,
 ) -> None:
     """Train ``iterations`` on the shared arrays, then report.
 
@@ -124,7 +133,10 @@ def _worker_entry(
         storage = StaticArrayStorage(tree, session_id=session_id, attach=True)
         solver = StaticTreeSolver(action_model, abstraction, storage, config, tree=tree)
 
-        seed = worker_seed(base_seed, worker_id)
+        # chunk_id mixed in: without it every chunk re-seeds identically and
+        # replays the same RNG stream, so extra chunks would add correlated
+        # samples instead of new ones.
+        seed = worker_seed(base_seed, worker_id, chunk_id)
         random.seed(seed)
         np.random.seed(seed)
 
@@ -164,6 +176,9 @@ def train_static_parallel(
     base_seed: int = 42,
     checkpoint_retain_every: int = 0,
     abstraction: BucketingStrategy | None = None,
+    checkpoint_every: int = 0,
+    start_iteration: int = 0,
+    resume: bool = False,
 ) -> StaticTrainingResult:
     """Train on static storage across ``num_workers`` processes.
 
@@ -180,63 +195,110 @@ def train_static_parallel(
     )
 
     try:
-        assignments = [
-            worker_iteration_indices(w, num_workers, num_iterations) for w in range(num_workers)
-        ]
+        # Resume BEFORE any training: the arrays must hold the checkpoint's state
+        # before a worker touches them, and `start` decides the absolute `t` the
+        # DCFR schedule continues from.
+        start = start_iteration
+        if resume and checkpoint_dir is not None and start == 0:
+            try:
+                start = load_checkpoint(storage, checkpoint_dir)
+                logger.info(f"[static] resumed from iteration {start:,}")
+            except FileNotFoundError:
+                start = 0  # nothing banked yet; a fresh run
+        if start >= num_iterations:
+            # Absolute target already met. Same contract as the dynamic resume:
+            # a retried leg past its target is a no-op, not a repeat.
+            logger.info(
+                f"[static] already at {start:,} >= target {num_iterations:,}; nothing to do"
+            )
+            touched = storage.num_touched_infosets()
+            return StaticTrainingResult(
+                iterations=start,
+                num_rows=tree.num_rows,
+                touched_rows=touched,
+                coverage=storage.coverage(),
+                mean_visits_per_touched=storage.mean_visits_per_touched_infoset(),
+                elapsed_s=0.0,
+                iterations_per_second=0.0,
+                dropped_updates=0,
+            )
 
+        # Chunking is what makes a LONG run survivable: a process that dies loses
+        # at most one chunk instead of everything since the start. 0 means one
+        # chunk, i.e. the historical checkpoint-only-at-the-end behaviour.
+        step = checkpoint_every if checkpoint_every > 0 else (num_iterations - start)
         started = time.time()
         ctx = mp.get_context("spawn")
-        result_queue: mp.Queue = ctx.Queue()
-        processes = [
-            ctx.Process(
-                target=_worker_entry,
-                args=(
-                    config,
-                    worker_id,
-                    session_id,
-                    assignments[worker_id],
-                    base_seed,
-                    result_queue,
-                    abstraction,
-                ),
-                daemon=False,
-            )
-            for worker_id in range(num_workers)
-            if len(assignments[worker_id]) > 0
-        ]
-        for process in processes:
-            process.start()
+        dropped = 0
+        chunk_id = 0
+        done = start
 
-        results = [result_queue.get() for _ in processes]
-        for process in processes:
-            process.join()
+        while done < num_iterations:
+            chunk_end = min(done + step, num_iterations)
+            assignments = [
+                worker_iteration_indices(w, num_workers, chunk_end, start=done)
+                for w in range(num_workers)
+            ]
+            result_queue: mp.Queue = ctx.Queue()
+            processes = [
+                ctx.Process(
+                    target=_worker_entry,
+                    args=(
+                        config,
+                        worker_id,
+                        session_id,
+                        assignments[worker_id],
+                        base_seed,
+                        result_queue,
+                        abstraction,
+                        chunk_id,
+                    ),
+                    daemon=False,
+                )
+                for worker_id in range(num_workers)
+                if len(assignments[worker_id]) > 0
+            ]
+            for process in processes:
+                process.start()
 
-        failures = [r for r in results if r.get("error")]
-        if failures:
-            raise RuntimeError(f"{len(failures)} static worker(s) failed: {failures[0]['error']}")
+            results = [result_queue.get() for _ in processes]
+            for process in processes:
+                process.join()
+
+            failures = [r for r in results if r.get("error")]
+            if failures:
+                raise RuntimeError(
+                    f"{len(failures)} static worker(s) failed: {failures[0]['error']}"
+                )
+
+            completed = sum(r["iterations"] for r in results)
+            if completed != chunk_end - done:
+                raise AssertionError(
+                    f"workers ran {completed} iterations against a chunk of "
+                    f"{chunk_end - done}; the interleaved assignment does not tile it."
+                )
+            chunk_dropped = sum(r["dropped"] for r in results)
+            if chunk_dropped:
+                # Structurally impossible here; a nonzero value means something
+                # reintroduced dynamic allocation and must not pass silently.
+                raise AssertionError(
+                    f"{chunk_dropped} updates were dropped on static storage, which has no "
+                    "code path for it — dynamic allocation has been reintroduced."
+                )
+            dropped += chunk_dropped
+            done = chunk_end
+            chunk_id += 1
+
+            # Checkpoint per chunk, so the bound on loss is the chunk, not the run.
+            if checkpoint_dir is not None:
+                save_checkpoint(storage, checkpoint_dir, done, retain_every=checkpoint_retain_every)
+                logger.info(
+                    f"[static] {done:,}/{num_iterations:,} "
+                    f"({storage.coverage():.1%} coverage) checkpointed"
+                )
 
         elapsed = time.time() - started
-        completed = sum(r["iterations"] for r in results)
-        if completed != num_iterations:
-            raise AssertionError(
-                f"workers ran {completed} iterations against a target of {num_iterations}; "
-                "the interleaved index assignment does not tile the range."
-            )
-        dropped = sum(r["dropped"] for r in results)
-        if dropped:
-            # Structurally impossible here; a nonzero value means something
-            # reintroduced dynamic allocation and must not pass silently.
-            raise AssertionError(
-                f"{dropped} updates were dropped on static storage, which has no "
-                "code path for it — dynamic allocation has been reintroduced."
-            )
-
-        if checkpoint_dir is not None:
-            from src.engine.solver.storage.static_checkpoint import save_checkpoint
-
-            save_checkpoint(
-                storage, checkpoint_dir, num_iterations, retain_every=checkpoint_retain_every
-            )
+        num_iterations = done
 
         touched = storage.num_touched_infosets()
         return StaticTrainingResult(

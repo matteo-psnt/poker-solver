@@ -20,6 +20,7 @@ from src.engine.solver.storage.helpers import (
     get_missing_checkpoint_files,
     resolve_resume_iteration,
 )
+from src.engine.solver.storage.shared_array.remote_cache import RemoteKeyCache
 from src.pipeline.training import components
 from src.pipeline.training.metrics import MetricsTracker
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
@@ -187,7 +188,9 @@ class TrainingSession:
         # Shares InfoSetKey objects with owned_keys, so leaving it would make
         # clearing owned_keys free nothing.
         state.unshipped_keys = []
-        state.remote_keys = {}
+        # Fresh cache, SAME capacity: a plain {} here would silently restore the
+        # unbounded behaviour after every reset.
+        state.remote_keys = RemoteKeyCache(storage.remote_key_cache_size)
         state.legal_actions_cache = {}
         state.pending_id_requests = {}
         state.requested_id_keys = set()

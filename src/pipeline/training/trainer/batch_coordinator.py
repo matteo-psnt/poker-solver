@@ -177,6 +177,9 @@ class TrainingBatchCoordinator:
             unresolved_frontier=unresolved_frontier,
             new_infosets=new_infosets,
             capacity_pct=round(100.0 * float(max_worker_capacity), 1),
+            max_worker_rss_mb=batch_result.get("max_worker_rss_mb"),
+            master_rss_mb=batch_result.get("master_rss_mb"),
+            remote_cache_evictions=batch_result.get("remote_cache_evictions"),
         )
         reporting.update_progress_bar(
             self.session,
@@ -282,6 +285,9 @@ class TrainingBatchCoordinator:
         unresolved_frontier: int | None = None,
         new_infosets: int | None = None,
         capacity_pct: float | None = None,
+        max_worker_rss_mb: int | None = None,
+        master_rss_mb: int | None = None,
+        remote_cache_evictions: int | None = None,
     ) -> None:
         """Append one convergence-curve row (utility, speed, and solver-health) to disk."""
         metrics = self.session.metrics
@@ -300,6 +306,15 @@ class TrainingBatchCoordinator:
             # discovery, not refinement (see the 25M long-run postmortem).
             "new_infosets": new_infosets,
             "capacity_pct": capacity_pct,
+            # Memory telemetry. Three legs stalled with every worker ALIVE and
+            # none producing -- pressure, not a crash -- and nothing recorded how
+            # much memory the run was using, so the cause is still open. RSS
+            # counts shared pages per-process, so this is the LARGEST worker, not
+            # a node total; compare workers to each other and watch it grow.
+            "max_worker_rss_mb": max_worker_rss_mb,
+            "master_rss_mb": master_rss_mb,
+            # Remote-key cache pressure: 0 = the cap is not binding.
+            "remote_cache_evictions": remote_cache_evictions,
             # Cross-worker updates skipped for not-yet-propagated infoset IDs this
             # batch, plus the applied count and the resulting per-visit drop RATE
             # — the sample-efficiency signal for hash-sharded multi-worker runs.

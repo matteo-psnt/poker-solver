@@ -25,6 +25,11 @@
 #   RUN_PARENT      parent run id
 #   RUN_SETS_HEX    hex-encoded, space-separated k=v config overrides
 #   RUN_WORKERS     worker count (empty = all CPUs)
+#   RUN_STATIC      1 = statically-enumerated tree (fixed memory, resumable)
+#   RUN_CHECKPOINT_EVERY  static only: checkpoint every N iterations
+#   RUN_OP          train (default) | evaluate
+#   RUN_EVAL_METHOD lbr | exact_br | rollout      RUN_EVAL_AT  comma-separated rungs
+#   RUN_EVAL_FLAGS_HEX  hex-encoded extra evaluate flags
 set -euo pipefail
 
 WORK=/mnt/work
@@ -109,6 +114,23 @@ publish_all() {
       sed 's/^/       /' /tmp/publish_err >&2 || true
     fi
   done
+  publish_log
+}
+
+# Batch keeps a task's stdout/stderr ON THE NODE. The pool scales to zero the
+# moment a task ends, so a failed leg's logs are destroyed within minutes of
+# being the only record of why it failed -- which is exactly what happened to a
+# 30M leg: it died at ~720k iterations and the node was reclaimed before the
+# logs could be read, leaving `exit 1` and nothing else.
+#
+# Copied to the share on every publish, not only at exit, so a leg that is later
+# killed outright still leaves the log behind.
+publish_log() {
+  [ -n "${LEG_LOG:-}" ] && [ -f "$LEG_LOG" ] || return 0
+  mkdir -p "$SHARE/logs" 2>/dev/null || true
+  # tail: the interesting part is always the end, and a multi-hour tqdm stream is
+  # mostly progress-bar repaints that would cost more to copy than they inform.
+  tail -c 2000000 "$LEG_LOG" > "$SHARE/logs/${AZ_BATCH_TASK_ID:-leg}.log" 2>/dev/null || true
 }
 
 # Publish on ANY exit -- success, failure, or cancellation. An operator-cancelled
@@ -203,6 +225,33 @@ print(chr(10).join(sorted(n for n in names if n)))
     # Manifest last here too, so a torn fetch never claims more than it copied.
     cp -u "$src/CHECKPOINT.json" "$RUNS/$RUN_ID/" 2>/dev/null || true
     log "fetched $kept complete snapshot dir(s)"
+  elif [ "${RUN_OP:-train}" = "evaluate" ] && [ -n "${RUN_EVAL_AT:-}" ]; then
+    # SELECTIVE. A static run has no CHECKPOINT.json, so the copy below would
+    # take the WHOLE ladder -- thirty ~540 MB rungs, ~16 GB, to score three of
+    # them. Scoring needs the manifest and the rungs actually named.
+    find "$src" -maxdepth 1 -mindepth 1 ! -name 'static-*' \
+         -exec cp -ru {} "$RUNS/$RUN_ID/" \; 2>/dev/null || true
+    IFS=',' read -ra WANT <<< "$RUN_EVAL_AT"
+    for it in "${WANT[@]}"; do
+      [ -n "$it" ] || continue
+      if [ -d "$src/static-$it.zarr" ]; then
+        # rm first, and NO -u. A cancelled task leaves partial rungs on the node,
+        # and `cp -u` treats those as already-present and skips them -- so the
+        # next task inherits a TRUNCATED checkpoint and dies inside zarr. That
+        # is what happened to rung 10000000: "fetched" in one second, then a
+        # read error. Node-local state is never evidence of a complete copy.
+        rm -rf "$RUNS/$RUN_ID/static-$it.zarr"
+        if cp -r "$src/static-$it.zarr" "$RUNS/$RUN_ID/" 2>/tmp/fetch_err; then
+          log "  fetched rung $it"
+        else
+          # Reported, not swallowed: a silent copy failure becomes a confusing
+          # load error several minutes later, in a different subsystem.
+          log "  WARN rung $it copy FAILED: $(tail -1 /tmp/fetch_err 2>/dev/null)"
+        fi
+      else
+        log "  WARN rung $it not on the share"
+      fi
+    done
   else
     cp -ru "$src/." "$RUNS/$RUN_ID/"
   fi
@@ -230,13 +279,114 @@ if [ -n "$RUN_SETS" ]; then
   for kv in $RUN_SETS; do [ -n "$kv" ] && ARGS+=(--set "$kv"); done
 fi
 
-if [ -z "${RUN_ID:-}" ]; then
-  log "fresh train: config=$RUN_CONFIG iterations=$RUN_TO"
-  uv run poker-solver-run train --config "$RUN_CONFIG" --iterations "$RUN_TO" "${ARGS[@]}"
-else
-  log "resume: run=$RUN_ID to=$RUN_TO (absolute)"
-  uv run poker-solver-run resume --run "$RUN_ID" --to-iteration "$RUN_TO" \
-    ${RUN_WORKERS:+--workers "$RUN_WORKERS"}
+# Wall-clock ceiling for the training process itself. The task-level
+# maxWallClockTime (P1D) is not a backstop for a hang: it is longer than any leg
+# is meant to run, so a wedged process bills a full node-day before Batch acts.
+# One leg proved this -- training died, the process could not exit, and the task
+# stayed `running` indefinitely.
+#
+# --signal=TERM first so the trap below still publishes; --kill-after guarantees
+# the process dies even if it ignores TERM, which is the case that hung.
+RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
+GUARD=(timeout --signal=TERM --kill-after=120s "$RUN_TIMEOUT")
+
+# Tee'd to node-local disk, then copied to the share by publish_log. Node-local
+# first because the training stream is chatty and writing every line straight to
+# SMB would put the leg's throughput at the mercy of the share.
+LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
+
+# `|| rc=$?` because `set -e` would abort before the exit code could be read,
+# and a timed-out leg must still reach the reporting below. PIPESTATUS, not $?,
+# because the tee makes this a pipeline and $? would report tee's success.
+# EVALUATE mode. Scoring belongs on the node, not on a laptop: the share is a
+# local mount here and a WAN download away from anywhere else -- one checkpoint
+# is ~540 MB of small zarr chunks, which took ~20 minutes to pull over SMB and
+# would make scoring a 30-rung ladder impractical.
+#
+# RUN_EVAL_AT takes a COMMA-SEPARATED list of rungs, scored in one task. The
+# fetch dominates the cost, so a whole convergence curve for the price of one.
+if [ "${RUN_OP:-train}" = "evaluate" ]; then
+  EVAL_FLAGS=""
+  if [ -n "${RUN_EVAL_FLAGS_HEX:-}" ]; then
+    EVAL_FLAGS=$(python3 -c "import sys; sys.stdout.write(bytes.fromhex(sys.argv[1]).decode())" "$RUN_EVAL_FLAGS_HEX")
+  fi
+  # shellcheck disable=SC2206
+  EXTRA=($EVAL_FLAGS)
+  METHOD="${RUN_EVAL_METHOD:-exact_br}"
+  ok=0
+  bad=0
+  IFS=',' read -ra RUNGS <<< "${RUN_EVAL_AT:-}"
+  [ "${#RUNGS[@]}" -eq 0 ] && RUNGS=("")
+  for rung in "${RUNGS[@]}"; do
+    AT=()
+    [ -n "$rung" ] && AT=(--at "$rung")
+    log "evaluate: run=$RUN_ID method=$METHOD ${rung:+at=$rung}"
+    set +o pipefail
+    "${GUARD[@]}" uv run poker-solver-run evaluate \
+      --run "$RUN_ID" --method "$METHOD" "${AT[@]}" "${EXTRA[@]}" 2>&1 | tee -a "$LEG_LOG"
+    step=${PIPESTATUS[0]}
+    set -o pipefail
+    # One bad rung must not abandon the rest: a partial curve beats none, and
+    # the failure is visible in the log and absent from the ledger.
+    if [ "$step" = 0 ]; then ok=$((ok + 1)); else
+      bad=$((bad + 1)); log "WARN rung ${rung:-latest} failed (rc=$step)"
+    fi
+    publish_log
+  done
+  log "evaluate complete: $ok scored, $bad failed"
+  # Exit 0 when ANYTHING scored. A non-zero exit makes Batch retry the WHOLE
+  # task, re-fetching and re-scoring the rungs that already succeeded -- one bad
+  # rung turned a 30-minute job into nearly four hours and wrote every record
+  # twice. A partial result is not a failure to retry; the gap is visible in this
+  # log and absent from the ledger. Only a clean sweep of failures is worth a
+  # retry, since that is what a transient node fault looks like.
+  [ "$ok" -gt 0 ] && exit 0
+  exit 1
 fi
+
+# RUN_STATIC=1 selects the statically-enumerated tree. One command covers both
+# fresh and resume there, because `train-static --run <id>` continues an existing
+# run and `--iterations` is an absolute target -- so the fresh/resume split the
+# dynamic path needs does not exist.
+rc=0
+if [ "${RUN_STATIC:-}" = "1" ]; then
+  # Derive a STABLE run id from the task when none was given. A Batch retry keeps
+  # the same task id, so the retry resumes this run rather than starting a second
+  # one from zero -- which is what makes retries safe here and not on the dynamic
+  # fresh-train path.
+  STATIC_RUN="${RUN_ID:-run-${AZ_BATCH_TASK_ID:-local}}"
+  STATIC_ARGS=(--run "$STATIC_RUN")
+  [ -n "${RUN_CHECKPOINT_EVERY:-}" ] && STATIC_ARGS+=(--checkpoint-every "$RUN_CHECKPOINT_EVERY")
+  log "static: config=${RUN_CONFIG:-} run=${RUN_ID:-<new>} to=$RUN_TO (timeout $RUN_TIMEOUT)"
+  set +o pipefail
+  "${GUARD[@]}" uv run poker-solver-run train-static \
+    --config "$RUN_CONFIG" --iterations "$RUN_TO" \
+    "${STATIC_ARGS[@]}" "${ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
+elif [ -z "${RUN_ID:-}" ]; then
+  log "fresh train: config=$RUN_CONFIG iterations=$RUN_TO (timeout $RUN_TIMEOUT)"
+  set +o pipefail
+  "${GUARD[@]}" uv run poker-solver-run train \
+    --config "$RUN_CONFIG" --iterations "$RUN_TO" "${ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
+else
+  log "resume: run=$RUN_ID to=$RUN_TO (absolute) (timeout $RUN_TIMEOUT)"
+  set +o pipefail
+  "${GUARD[@]}" uv run poker-solver-run resume \
+    --run "$RUN_ID" --to-iteration "$RUN_TO" \
+    ${RUN_WORKERS:+--workers "$RUN_WORKERS"} 2>&1 | tee -a "$LEG_LOG"
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
+fi
+publish_log
+# 124 is timeout's own "deadline expired"; surface it as itself rather than as a
+# training failure, so `just jobs` distinguishes a hang from a crash.
+if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+  log "TIMEOUT after $RUN_TIMEOUT -- leg killed; published rungs are on the share"
+  exit 124
+fi
+[ "$rc" = 0 ] || exit "$rc"
 
 log "leg complete"
