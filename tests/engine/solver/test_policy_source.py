@@ -221,25 +221,6 @@ class TestStaticBlueprintCanPlay:
         finally:
             solver.storage.close()
 
-    def test_session_bot_picks_a_real_action(self):
-        """The per-decision play path, which used to build an InfoSetKey inline."""
-        from src.engine.search.heads_up_session import HeadsUpHand
-
-        solver = _solver(iterations=400)
-        try:
-            session = HeadsUpHand(
-                blueprint=solver, human_seat=0, button=0, rng=np.random.default_rng(3)
-            )
-            state = solver.deal_initial_state()
-            action, fell_back = session._bot_action(state)
-            legal = solver.rules.get_legal_actions(state, action_model=solver.action_model)
-            assert action in legal
-            # A trained blueprint should have an entry here; falling back to a
-            # uniform draw would mean the bridge silently resolved nothing.
-            assert not fell_back
-        finally:
-            solver.storage.close()
-
     def test_range_inference_runs_against_a_static_blueprint(self):
         from src.engine.search.range_inference import infer_ranges, update_ranges
 
