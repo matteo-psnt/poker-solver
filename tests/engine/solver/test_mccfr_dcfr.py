@@ -8,8 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.core.actions.action_model import ActionModel
-from src.engine.solver.mccfr import MCCFRSolver
-from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
+from tests.test_helpers import DummyCardAbstraction, build_test_solver, make_test_config
 
 
 class TestDCFR:
@@ -18,12 +17,8 @@ class TestDCFR:
     @pytest.mark.slow
     def test_dcfr_training_runs(self):
         """DCFR should complete training iterations without error."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
-        )
-
         config = make_test_config(
             seed=42,
             iteration_weighting="dcfr",
@@ -31,7 +26,7 @@ class TestDCFR:
             dcfr_beta=0.0,
             dcfr_gamma=2.0,
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=config)
+        solver, _storage = build_test_solver(config, card_abs)
 
         for _ in range(10):
             solver.train_iteration()
@@ -42,46 +37,34 @@ class TestDCFR:
     @pytest.mark.slow
     def test_dcfr_weighting_reflected_in_solver(self):
         """iteration_weighting='dcfr' should be reflected in solver config."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
-        )
-
         config = make_test_config(seed=42, iteration_weighting="dcfr")
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=config)
+        solver, _storage = build_test_solver(config, card_abs)
 
         assert solver.config.solver.iteration_weighting == "dcfr"
 
     @pytest.mark.slow
     def test_linear_weighting_reflected_in_solver(self):
         """iteration_weighting='linear' should be reflected in solver config."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test_linear", is_coordinator=True
-        )
-
         config = make_test_config(seed=42, iteration_weighting="linear")
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=config)
+        solver, _storage = build_test_solver(config, card_abs)
 
         assert solver.config.solver.iteration_weighting == "linear"
 
     @pytest.mark.slow
     def test_dcfr_convergence(self):
         """DCFR should converge (strategies should update)."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test_dcfr", is_coordinator=True
-        )
-
         config = make_test_config(
             seed=42,
             iteration_weighting="dcfr",
             cfr_plus=True,
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=config)
+        solver, storage = build_test_solver(config, card_abs)
 
         for _ in range(100):
             solver.train_iteration()
@@ -108,11 +91,8 @@ class TestPruning:
     @pytest.mark.slow
     def test_pruning_training_produces_valid_strategies(self):
         """Training with pruning enabled runs to completion and yields valid averages."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test_pruning", is_coordinator=True
-        )
         config = make_test_config(
             seed=42,
             enable_pruning=True,
@@ -121,7 +101,7 @@ class TestPruning:
             prune_reactivate_frequency=25,
             sampling_method="external",
         )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=config)
+        solver, storage = build_test_solver(config, card_abs)
 
         for _ in range(100):
             solver.train_iteration()

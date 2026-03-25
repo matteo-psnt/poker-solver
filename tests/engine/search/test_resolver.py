@@ -17,11 +17,9 @@ from src.engine.search.range_inference import (
     replace_actor_hole_cards,
 )
 from src.engine.search.resolver import HUResolver
-from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.in_memory import InMemoryStorage
 from tests.test_helpers import (
     DummyCardAbstraction,
-    build_test_storage,
+    build_test_solver,
     make_test_config,
     skew_preflop_infoset,
 )
@@ -41,12 +39,7 @@ def test_resolver_returns_legal_action():
     state, rules = _make_initial_state()
     config = make_test_config(seed=42)
     action_model = ActionModel(config)
-    solver = MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=DummyCardAbstraction(),
-        storage=InMemoryStorage(),
-        config=config,
-    )
+    solver, _storage = build_test_solver(config, DummyCardAbstraction())
     resolver = HUResolver(
         blueprint=solver,
         action_model=action_model,
@@ -62,12 +55,7 @@ def test_agent_act_with_resolver_enabled():
     state, rules = _make_initial_state()
     config = make_test_config(seed=42)
     action_model = ActionModel(config)
-    solver = MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=DummyCardAbstraction(),
-        storage=InMemoryStorage(),
-        config=config,
-    )
+    solver, _storage = build_test_solver(config, DummyCardAbstraction())
 
     agent = BlueprintAgent(solver, use_resolver=True)
     action = agent.act(state, time_budget_ms=50)
@@ -78,12 +66,7 @@ def test_agent_forwards_rng_to_resolver():
     """The injected generator must reach the resolver: it drives leaf-runout
     sampling, so eval harnesses pin it per hand for reproducibility."""
     config = make_test_config(seed=42)
-    solver = MCCFRSolver(
-        action_model=ActionModel(config),
-        card_abstraction=DummyCardAbstraction(),
-        storage=InMemoryStorage(),
-        config=config,
-    )
+    solver, _storage = build_test_solver(config, DummyCardAbstraction())
 
     rng = np.random.default_rng(7)
     agent = BlueprintAgent(solver, use_resolver=True, rng=rng)
@@ -97,12 +80,7 @@ def test_resolver_solves_subgame_with_per_combo_strategy(monkeypatch):
     state, rules = _make_initial_state()
     config = make_test_config(seed=42, **{"resolver.max_depth": 2})
     action_model = ActionModel(config)
-    solver = MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=DummyCardAbstraction(),
-        storage=InMemoryStorage(),
-        config=config,
-    )
+    solver, _storage = build_test_solver(config, DummyCardAbstraction())
     resolver = HUResolver(
         blueprint=solver,
         action_model=action_model,
@@ -144,15 +122,7 @@ def test_resolver_is_not_clairvoyant():
     # would break bitwise comparison.
     config = make_test_config(seed=42, **{"resolver.max_iterations": 20})
     action_model = ActionModel(config)
-    storage = build_test_storage(
-        num_workers=1, worker_id=0, session_id="resolver-clair", is_coordinator=True
-    )
-    solver = MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=DummyCardAbstraction(),
-        storage=storage,
-        config=config,
-    )
+    solver, _storage = build_test_solver(config, DummyCardAbstraction())
     for _ in range(10):  # trained strategies give the internal-node path real bite
         solver.train_iteration()
 
@@ -197,15 +167,7 @@ def test_resolver_unknown_field_rejected(field):
 def _trained_solver(config, session_id: str):
     """Small trained solver so blueprint lookups have real bite."""
     action_model = ActionModel(config)
-    storage = build_test_storage(
-        num_workers=1, worker_id=0, session_id=session_id, is_coordinator=True
-    )
-    solver = MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=DummyCardAbstraction(),
-        storage=storage,
-        config=config,
-    )
+    solver, _storage = build_test_solver(config, DummyCardAbstraction())
     for _ in range(10):
         solver.train_iteration()
     return solver, action_model
@@ -410,12 +372,7 @@ def test_resolver_blend_alpha_zero_returns_blueprint_mix():
     state, rules = _make_initial_state()
     config = make_test_config(seed=42, **{"resolver.policy_blend_alpha": 0.0})
     action_model = ActionModel(config)
-    solver = MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=DummyCardAbstraction(),
-        storage=InMemoryStorage(),
-        config=config,
-    )
+    solver, _storage = build_test_solver(config, DummyCardAbstraction())
     resolver = HUResolver(
         blueprint=solver,
         action_model=action_model,

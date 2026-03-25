@@ -4,33 +4,45 @@ from typing import Any
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action
+from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState
 from src.engine.search.range_inference import replace_actor_hole_cards
-from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.shared_array import SharedArrayStorage
+from src.engine.solver.mccfr.static_solver import StaticTreeSolver
+from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.pipeline.abstraction.base import BucketingStrategy
-from src.shared.config import Config, StorageConfig
+from src.shared.config import Config
 
 
-def build_test_storage(session_id: str = "test", **overrides: Any) -> SharedArrayStorage:
-    """A SharedArrayStorage carrying the declared ``StorageConfig`` defaults.
+def build_test_solver(
+    config: Config | None = None,
+    card_abstraction: BucketingStrategy | None = None,
+    *,
+    checkpoint_dir: Any = None,
+) -> tuple[StaticTreeSolver, StaticArrayStorage]:
+    """A solver and its storage over a tree enumerated for ``config``.
 
-    The checkpoint knobs are required at the constructor, but tests that never
-    tune checkpointing shouldn't restate their values — that would just re-scatter
-    the literals ``StorageConfig`` exists to own. Take them from it instead.
+    Tree, table and solver are built together because on the static backend they
+    are not independently meaningful: the table's shape IS the tree's row layout,
+    so a storage built against a different tree cannot be attached to this solver.
+    That is why this returns a pair rather than offering a bare-storage helper —
+    there is no longer such a thing as storage you can build without a tree.
     """
-    defaults = StorageConfig()
-    overrides.setdefault("num_workers", 1)
-    overrides.setdefault("worker_id", 0)
-    overrides.setdefault("is_coordinator", True)
-    overrides.setdefault("checkpoint_retain_every", defaults.checkpoint_retain_every)
-    return SharedArrayStorage(
-        session_id=session_id,
-        zarr_compression_level=defaults.zarr_compression_level,
-        zarr_chunk_size=defaults.zarr_chunk_size,
-        **overrides,
+    config = config or make_test_config()
+    abstraction = card_abstraction or DummyCardAbstraction()
+    action_model = ActionModel(config)
+    tree = build_betting_tree(
+        GameRules(config.game.small_blind, config.game.big_blind),
+        action_model,
+        abstraction,
+        starting_stack=config.game.starting_stack,
     )
+    storage = StaticArrayStorage(tree)
+    solver = StaticTreeSolver(
+        action_model, abstraction, storage, config, tree=tree, checkpoint_dir=checkpoint_dir
+    )
+    return solver, storage
 
 
 def build_trained_test_solver(
@@ -39,12 +51,13 @@ def build_trained_test_solver(
     starting_stack: int = 400,
     session_id: str = "test-solver",
     **config_overrides,
-):
-    """A minimally trained (deliberately weak) blueprint on shared-array storage.
+) -> StaticTreeSolver:
+    """A minimally trained (deliberately weak) blueprint on the static tree.
 
-    Training is seeded (config seed=42) so repeated builds are strategy-identical;
-    ``session_id`` only names the backing shared memory — pass a unique one when
-    solvers are rebuilt inside parallel worker processes.
+    Training is seeded (config seed=42) so repeated builds are strategy-identical.
+    ``session_id`` is accepted and ignored: the static table is process-local, so
+    unlike the shared-memory backend it needs no name to avoid collisions between
+    solvers rebuilt inside parallel worker processes.
     """
     config = make_test_config(
         seed=42,
@@ -53,8 +66,7 @@ def build_trained_test_solver(
         starting_stack=starting_stack,
         **config_overrides,
     )
-    storage = build_test_storage(session_id)
-    solver = MCCFRSolver(ActionModel(config), DummyCardAbstraction(), storage, config=config)
+    solver, _ = build_test_solver(config)
     for _ in range(iterations):
         solver.train_iteration()
     return solver
@@ -123,15 +135,13 @@ def skew_preflop_infoset(
 
     Manufactures the preflop infoset ``actor`` would hold with ``combo`` and puts
     all average-strategy mass on ``action`` (an in-place ``strategy_sum`` write —
-    the array is a view into shared-array storage, so later blueprint lookups see
+    the array is a view into the static table, so later blueprint lookups see
     it). Observing ``action`` then provably up-weights that hand class in range
     inference, with no training. Tiny trained test blueprints are near-uniform,
     which gives a Bayes update nothing to grip.
     """
     hypo = replace_actor_hole_cards(state, actor=actor, combo=combo)
-    key = encode_infoset_key(hypo, actor, blueprint.card_abstraction)
-    legal = blueprint.rules.get_legal_actions(hypo, action_model=blueprint.action_model)
-    infoset = blueprint.storage.get_or_create_infoset(key, legal)
+    infoset, _, _, _ = blueprint.lookup_infoset(hypo, actor)
     infoset.strategy_sum[:] = 0.0
     infoset.strategy_sum[infoset.legal_actions.index(action)] = 1.0
 

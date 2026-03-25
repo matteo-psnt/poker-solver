@@ -261,7 +261,18 @@ class HUResolver:
 
         source = self._policy_source
         bucket = source.bucket_for(state, state.current_player)
-        infoset = source.infoset_at(state, bucket)
+        try:
+            infoset = source.infoset_at(state, bucket)
+        except KeyError:
+            # OFF-TREE, and legitimately so. The resolver plays real states, and
+            # a real opponent can bet a size the blueprint's action abstraction
+            # never enumerated -- that is the whole point of off-tree evaluation.
+            # The tree raises here by design (an enumerating scorer reaching an
+            # unknown node IS a bug), so the distinction has to be drawn by the
+            # caller: for search, no blueprint prior means a uniform prior, not a
+            # crash. The dynamic backend hid this by inventing an infoset on the
+            # spot, which silently scored a hand the blueprint had never seen.
+            infoset = None
         distribution = blueprint_action_distribution(
             infoset, state, self.rules, actions, use_average=use_average
         )

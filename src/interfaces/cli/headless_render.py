@@ -24,37 +24,6 @@ def _fmt_commit(commit: str | None, dirty: bool | None) -> str:
     return short
 
 
-def _render_train(payload: dict[str, Any]) -> None:
-    print("Training complete.")
-    print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
-    print(f"  Config:      {payload['config_name']}")
-    print(f"  Iterations:  {payload['iterations']:,}")
-    print(f"  Infosets:    {payload['num_infosets']:,}")
-    print(
-        f"  Runtime:     {payload['runtime_seconds']:.2f}s "
-        f"({payload['iterations_per_second']:.1f} it/s)"
-    )
-    print(f"  Status:      {payload['status']}")
-
-
-def _render_resume(payload: dict[str, Any]) -> None:
-    if payload["no_op"]:
-        print(
-            f"Nothing to do: {payload['run_id']} is at "
-            f"{payload['resumed_from_iteration']:,}, target was "
-            f"{payload['target_iteration']:,}."
-        )
-        return
-    print("Resume complete.")
-    print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
-    print(
-        f"  Iterations:  {payload['resumed_from_iteration']:,} -> "
-        f"{payload['iterations']:,}  (target {payload['target_iteration']:,})"
-    )
-    print(f"  Infosets:    {payload['num_infosets']:,}")
-    print(f"  Status:      {payload['status']}")
-
-
 def _render_precompute(payload: dict[str, Any]) -> None:
     print("Precompute complete.")
     print(f"  Abstraction: {payload['abstraction_config']}")
@@ -249,9 +218,7 @@ def _render_train_static(payload: dict[str, Any]) -> None:
 
 
 RENDERERS: dict[str, Callable[[dict[str, Any]], None]] = {
-    "train": _render_train,
     "train-static": _render_train_static,
-    "resume": _render_resume,
     "precompute": _render_precompute,
     "promote": _render_promote,
     "curve": _render_curve,

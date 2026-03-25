@@ -28,7 +28,7 @@ import numpy as np
 from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.agent import BlueprintAgent
-from src.engine.solver.protocols import Blueprint
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.shared.units import pair_mean_mbb
 
@@ -49,7 +49,7 @@ class ResolverMatchResult:
 
 
 def play_resolver_match(
-    solver: Blueprint,
+    solver: ScorableBlueprint,
     *,
     num_deals: int = 1000,
     time_budget_ms: int = 100,
@@ -126,7 +126,7 @@ def play_resolver_match(
 
 
 def _play_game(
-    solver: Blueprint,
+    solver: ScorableBlueprint,
     rules: GameRules,
     *,
     hole_cards,

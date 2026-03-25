@@ -1,6 +1,5 @@
 """Tests for training service-layer orchestration."""
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -8,18 +7,18 @@ import pytest
 
 from src.pipeline import services
 from src.pipeline.evaluation.hunl_local_best_response import HandOutcome, LBRConfig
-from src.pipeline.services import RolloutParams, TrainingOutput
+from src.pipeline.services import RolloutParams
 from src.pipeline.services import abstraction as services_abstraction
 from src.pipeline.services import evaluation as services_evaluation
 from src.pipeline.services import runs as services_runs
-from src.pipeline.services import training as services_training
+from src.pipeline.services import static_training as services_training
 from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.shared.config_loader import load_training_config
 
 
 def _fake_config(runs_dir: str = "data/runs", abstraction: str = "quick_test") -> SimpleNamespace:
     return SimpleNamespace(
-        training=SimpleNamespace(runs_dir=runs_dir),
+        training=SimpleNamespace(runs_dir=runs_dir, num_iterations=2000),
         card_abstraction=SimpleNamespace(config=abstraction),
     )
 
@@ -36,104 +35,45 @@ def _fake_metadata() -> SimpleNamespace:
     )
 
 
-def test_train_builds_output_and_forwards_seed(monkeypatch):
-    """train should apply the seed override and build a portable TrainingOutput."""
-    seen = {}
-    config = _fake_config()
-
-    def _mock_load(config_name, **overrides):
-        seen["config_name"] = config_name
-        seen["overrides"] = overrides
-        return config
-
-    monkeypatch.setattr(services_training, "load_training_config", _mock_load)
-    monkeypatch.setattr(
-        services_training,
-        "create_training_session",
-        lambda cfg, experiment=None: SimpleNamespace(run_dir=Path("data/runs/run-xyz")),
-    )
-    monkeypatch.setattr(
-        services_training, "run_training", lambda sess, **kw: seen.update(run_kwargs=kw)
-    )
-    monkeypatch.setattr(services_training, "load_run_metadata", lambda run_dir: _fake_metadata())
-
-    out = services.train("quick_test", num_workers=4, num_iterations=2000, seed=7)
-
-    assert isinstance(out, TrainingOutput)
-    assert seen["config_name"] == "quick_test"
-    assert seen["overrides"] == {"system__seed": 7}
-    assert seen["run_kwargs"] == {"num_workers": 4, "num_iterations": 2000}
-    assert out.run_id == "run-xyz"
-    assert out.runs_dir == "data/runs"
-    assert out.iterations == 2000
-    assert out.iterations_per_second == pytest.approx(200.0)
-    assert out.status == "completed"
-
-
-def test_train_omits_seed_override_when_absent(monkeypatch):
-    """train should not inject a seed override when seed is None."""
-    seen = {}
+def _patch_abstraction_failure(monkeypatch, tmp_path, exc):
+    """Point train_static at a fresh run dir whose abstraction resolution fails."""
     monkeypatch.setattr(
         services_training,
         "load_training_config",
-        lambda name, **ov: seen.update(overrides=ov) or _fake_config(),
+        lambda name, **ov: _fake_config(runs_dir=str(tmp_path)),
     )
-    monkeypatch.setattr(
-        services_training,
-        "create_training_session",
-        lambda cfg, experiment=None: SimpleNamespace(run_dir=Path("d")),
-    )
-    monkeypatch.setattr(services_training, "run_training", lambda sess, **kw: None)
-    monkeypatch.setattr(services_training, "load_run_metadata", lambda run_dir: _fake_metadata())
+    monkeypatch.setattr(services_training, "ActionModel", lambda cfg: MagicMock())
 
-    services.train("quick_test")
+    def _raise(_cfg):
+        raise exc
 
-    assert seen["overrides"] == {}
+    monkeypatch.setattr(services_training.components, "resolve_card_abstraction_hash", _raise)
 
 
-def test_train_translates_missing_abstraction(monkeypatch):
+def test_train_static_translates_missing_abstraction(monkeypatch, tmp_path):
     """A missing abstraction should surface an actionable precompute message."""
-    monkeypatch.setattr(
-        services_training, "load_training_config", lambda name, **ov: _fake_config()
-    )
-
-    def _raise(cfg, experiment=None):
-        raise FileNotFoundError("no such file")
-
-    monkeypatch.setattr(services_training, "create_training_session", _raise)
+    _patch_abstraction_failure(monkeypatch, tmp_path, FileNotFoundError("no such file"))
 
     with pytest.raises(FileNotFoundError, match="Precompute it"):
-        services.train("quick_test")
+        services.train_static("quick_test")
 
 
-def test_train_translates_stale_abstraction(monkeypatch):
+def test_train_static_translates_stale_abstraction(monkeypatch, tmp_path):
     """A hash mismatch should surface an actionable recompute message."""
-    monkeypatch.setattr(
-        services_training, "load_training_config", lambda name, **ov: _fake_config()
+    _patch_abstraction_failure(
+        monkeypatch, tmp_path, AbstractionHashMismatchError("config hash mismatch")
     )
-
-    def _raise(cfg, experiment=None):
-        raise AbstractionHashMismatchError("config hash mismatch")
-
-    monkeypatch.setattr(services_training, "create_training_session", _raise)
 
     with pytest.raises(AbstractionHashMismatchError, match="stale"):
-        services.train("quick_test")
+        services.train_static("quick_test")
 
 
-def test_train_reraises_unrelated_value_error(monkeypatch):
+def test_train_static_reraises_unrelated_value_error(monkeypatch, tmp_path):
     """Non-abstraction ValueErrors should propagate unchanged."""
-    monkeypatch.setattr(
-        services_training, "load_training_config", lambda name, **ov: _fake_config()
-    )
-
-    def _raise(cfg, experiment=None):
-        raise ValueError("something else entirely")
-
-    monkeypatch.setattr(services_training, "create_training_session", _raise)
+    _patch_abstraction_failure(monkeypatch, tmp_path, ValueError("something else entirely"))
 
     with pytest.raises(ValueError, match="something else entirely"):
-        services.train("quick_test")
+        services.train_static("quick_test")
 
 
 def test_precompute_abstraction_skips_when_present(monkeypatch, tmp_path):
@@ -230,31 +170,6 @@ def test_load_run_metadata_delegates_to_run_tracker(monkeypatch, tmp_path):
     assert actual is metadata
 
 
-def test_create_resumed_session_uses_metadata_iteration(monkeypatch, tmp_path):
-    """create_resumed_session should return resumed session and latest iteration."""
-    metadata = SimpleNamespace(iterations=321)
-    session = MagicMock(name="session")
-
-    monkeypatch.setattr(services_training, "load_run_metadata", lambda run_dir: metadata)
-    monkeypatch.setattr(
-        services_training.TrainingSession, "resume", lambda run_dir, capacity_override=None: session
-    )
-
-    actual_session, latest = services_training.create_resumed_session(tmp_path / "run-1")
-
-    assert actual_session is session
-    assert latest == 321
-
-
-def test_run_training_passes_arguments():
-    """run_training should forward arguments to session.train."""
-    session = MagicMock()
-
-    services_training.run_training(session, num_workers=4, num_iterations=1000)
-
-    session.train.assert_called_once_with(num_workers=4, num_iterations=1000)
-
-
 def test_evaluate_run_rollout_returns_output(monkeypatch, tmp_path):
     """evaluate_run_rollout should build solver, compute exploitability, and return output."""
     config = MagicMock(name="config")
@@ -277,7 +192,7 @@ def test_evaluate_run_rollout_returns_output(monkeypatch, tmp_path):
     monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_evaluation,
-        "build_evaluation_solver",
+        "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir: (FakeSolver(), storage),
     )
     monkeypatch.setattr(
@@ -320,7 +235,7 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
     monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_evaluation,
-        "build_evaluation_solver",
+        "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
@@ -362,7 +277,7 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
     monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_evaluation,
-        "build_evaluation_solver",
+        "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
@@ -421,7 +336,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_evaluation,
-        "build_evaluation_solver",
+        "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
@@ -510,7 +425,7 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
     monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_evaluation,
-        "build_evaluation_solver",
+        "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (object(), storage),
     )
     monkeypatch.setattr(
@@ -530,30 +445,3 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
     assert output.results["scorer"] == "lookahead"
     assert output.results["lookahead_depth"] == 3
     assert output.results["lookahead_top_k"] == 5
-
-
-def test_noop_resume_closes_its_attempt(monkeypatch, tmp_path):
-    """`create_resumed_session` opens an attempt via mark_resumed. On the no-op
-    branch nothing runs and nothing else closes it, so the run would read as live
-    with a dangling attempt -- the exact shape mark_resumed treats as a death.
-    Under a scheduler this is the COMMON case: every retry past target lands here."""
-    from types import SimpleNamespace
-
-    closed = []
-    tracker = SimpleNamespace(mark_completed=lambda: closed.append(True))
-    session = SimpleNamespace(
-        run_tracker=tracker,
-        release_bootstrap_storage=lambda: None,
-    )
-    monkeypatch.setattr(
-        services_training, "create_resumed_session", lambda *a, **kw: (session, 5000)
-    )
-    monkeypatch.setattr(
-        services_training, "run_training", lambda *a, **kw: pytest.fail("must not train")
-    )
-    monkeypatch.setattr(services_training, "load_run_metadata", lambda run_dir: _fake_metadata())
-
-    out = services.resume(tmp_path, to_iteration=1000)  # target already passed
-
-    assert out.no_op
-    assert closed == [True], "the opened attempt must be closed on the no-op path"

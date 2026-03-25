@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE
 from src.pipeline.evaluation import ledger
 
 
@@ -82,16 +83,13 @@ class TestExploitabilityCurve:
         return path
 
     def _manifest(self, run_dir, current, retained):
-        (run_dir / "CHECKPOINT.json").write_text(
+        (run_dir / MANIFEST_FILE).write_text(
             json.dumps(
                 {
                     "iteration": current,
-                    "zarr": f"checkpoint-{current}.zarr",
-                    "key_table": f"keys-{current}",
-                    "retained": [
-                        {"iteration": i, "zarr": f"checkpoint-{i}.zarr", "key_table": f"keys-{i}"}
-                        for i in retained
-                    ],
+                    "zarr": f"static-{current}.zarr",
+                    "fingerprint": "fp",
+                    "retained": [{"iteration": i, "zarr": f"static-{i}.zarr"} for i in retained],
                 }
             )
         )

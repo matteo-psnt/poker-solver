@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.pipeline.training.versioning import REPRESENTATION_VERSION
 from src.shared.config import Config
 from src.shared.gitinfo import get_git_commit, is_git_dirty
 
@@ -121,9 +120,6 @@ class RunMetadata:
     # produces different buckets, so evaluating by name alone silently rebuckets the
     # checkpoint. None on pre-provenance runs, which cannot be evaluated faithfully.
     card_abstraction_hash: str | None = None
-    # Representation/format version this run was produced under. Pre-versioning
-    # (legacy) runs have no field and load as 0.
-    representation_version: int = REPRESENTATION_VERSION
     # Code provenance: the commit that produced this checkpoint, and whether the
     # working tree had uncommitted changes at start. A bare hash cannot be trusted
     # when dirty, so both are recorded. None on runs trained outside a git checkout
@@ -259,7 +255,6 @@ class RunMetadata:
             ),
             config=config,
             # Missing on pre-versioning runs → 0 (legacy), NOT the current default.
-            representation_version=int(data.get("representation_version", 0)),
             git_commit=git_commit,
             git_dirty=git_dirty,
             attempts=attempts,
@@ -296,7 +291,6 @@ class RunMetadata:
             "storage_capacity": self.storage_capacity,
             "action_config_hash": self.action_config_hash,
             "card_abstraction_hash": self.card_abstraction_hash,
-            "representation_version": self.representation_version,
             "git_commit": self.git_commit,
             "git_dirty": self.git_dirty,
             "attempts": [a.to_dict() for a in self.attempts],

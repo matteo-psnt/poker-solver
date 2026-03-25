@@ -12,7 +12,7 @@ from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import (
     LBR_ESTIMATOR_LABEL,
     ROLLOUT_ESTIMATOR_LABEL,
-    TrainingOutput,
+    StaticTrainingOutput,
 )
 from src.pipeline.services import evaluation as services_evaluation
 from src.shared.jsonio import json_default
@@ -50,26 +50,29 @@ def test_resolve_run_dir_missing_raises_system_exit(tmp_path):
 
 def test_write_result_is_namespaced_by_op_and_no_clobber(tmp_path):
     """train and evaluate results must coexist under distinct filenames."""
-    headless._write_result(tmp_path, {"op": "train", "run_id": "r"})
+    headless._write_result(tmp_path, {"op": "train-static", "run_id": "r"})
     headless._write_result(tmp_path, {"op": "evaluate", "run_id": "r"})
 
-    train_json = json.loads((tmp_path / "train_result.json").read_text())
+    train_json = json.loads((tmp_path / "train-static_result.json").read_text())
     eval_json = json.loads((tmp_path / "evaluate_result.json").read_text())
-    assert train_json["op"] == "train"
+    assert train_json["op"] == "train-static"
     assert eval_json["op"] == "evaluate"
 
 
 def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
     """With --json, log noise must go to stderr and stdout must be parseable JSON."""
-    out = TrainingOutput(
+    out = StaticTrainingOutput(
         run_id="run-xyz",
         runs_dir=str(tmp_path),
         config_name="quick_test",
         iterations=2000,
-        num_infosets=10,
+        num_rows=1000,
+        touched_rows=900,
+        coverage=0.9,
+        mean_visits_per_touched=2.5,
         runtime_seconds=5.0,
         iterations_per_second=400.0,
-        storage_capacity=1000,
+        dropped_updates=0,
         status="completed",
     )
 
@@ -77,18 +80,18 @@ def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
         print("noisy training log line")  # must NOT land on stdout under --json
         return out
 
-    monkeypatch.setattr(headless.services, "train", _fake_train)
+    monkeypatch.setattr(headless.services, "train_static", _fake_train)
 
-    rc = headless.main(["train", "--config", "quick_test", "--json"])
+    rc = headless.main(["train-static", "--config", "quick_test", "--json"])
 
     captured = capsys.readouterr()
     assert rc == 0
     assert "noisy training log line" in captured.err
     assert "noisy training log line" not in captured.out
     payload = json.loads(captured.out)  # would raise if stdout were polluted
-    assert payload["op"] == "train"
+    assert payload["op"] == "train-static"
     assert payload["run_id"] == "run-xyz"
-    assert (tmp_path / "run-xyz" / "train_result.json").exists()
+    assert (tmp_path / "run-xyz" / "train-static_result.json").exists()
 
 
 def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
@@ -172,7 +175,6 @@ def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
         config_name="quick_test",
         card_abstraction_hash="hash",
         action_config_hash="beefcafe",
-        representation_version=1,
     )
     record = eval_ledger.build_record(
         provenance=provenance,

@@ -7,13 +7,8 @@ scores one — so this holds the readers and nothing that mutates.
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.engine.solver.storage.helpers import (
-    CHECKPOINT_MANIFEST_FILE,
-    read_checkpoint_manifest,
-)
-from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
+from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE, StaticCheckpointManifest
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
-from src.pipeline.training.versioning import REPRESENTATION_VERSION
 from src.shared.gitinfo import commits_ahead_of
 
 
@@ -31,15 +26,8 @@ def checkpoint_iteration_of(run_dir: Path, at_iteration: int | None = None) -> i
     """
     if at_iteration is not None:
         return at_iteration
-    manifest = read_checkpoint_manifest(run_dir)
-    if manifest is not None:
-        return int(manifest["iteration"])
-    # Static runs carry their own manifest. Falling through to None here left
-    # every static eval unplaceable on an axis -- `curve` drops rows with no
-    # checkpoint_iteration, so the convergence curve the static ladder exists to
-    # produce would have come out empty while the evals looked fine.
-    static = StaticCheckpointManifest.read(run_dir)
-    return static.iteration if static is not None else None
+    manifest = StaticCheckpointManifest.read(run_dir)
+    return manifest.iteration if manifest is not None else None
 
 
 def list_runs(runs_dir: Path) -> list[str]:
@@ -53,16 +41,13 @@ class RunSummary:
 
     ``commits_ago`` is the number of commits HEAD is ahead of the run's train
     commit (0 == trained on the current HEAD, None == commit unknown to this
-    checkout). ``loadable`` is False when the run cannot be opened at HEAD --
-    either it never checkpointed or its on-disk format predates the current
-    ``REPRESENTATION_VERSION`` -- with ``blocker`` naming the reason for the UI.
+    checkout). ``loadable`` is False when the run never checkpointed, with
+    ``blocker`` naming the reason for the UI.
     """
 
     name: str
     commits_ago: int | None
     git_dirty: bool | None
-    representation_version: int | None
-    current_version: int
     has_checkpoint: bool
     loadable: bool
     blocker: str | None
@@ -74,12 +59,8 @@ class RunSummary:
 
 
 def _has_checkpoint(run_dir: Path) -> bool:
-    """Whether ``run_dir`` holds a checkpoint the loader can open.
-
-    Covers both the versioned manifest and the legacy fixed-name/iteration-suffixed
-    zarr layouts (``checkpoint.zarr`` / ``checkpoint-N.zarr``).
-    """
-    return (run_dir / CHECKPOINT_MANIFEST_FILE).exists() or any(run_dir.glob("checkpoint*.zarr"))
+    """Whether ``run_dir`` holds a checkpoint the loader can open."""
+    return (run_dir / MANIFEST_FILE).exists()
 
 
 def _summarize_run(runs_dir: Path, name: str) -> RunSummary:
@@ -91,8 +72,6 @@ def _summarize_run(runs_dir: Path, name: str) -> RunSummary:
             name=name,
             commits_ago=None,
             git_dirty=None,
-            representation_version=None,
-            current_version=REPRESENTATION_VERSION,
             has_checkpoint=_has_checkpoint(run_dir),
             loadable=False,
             blocker="unreadable metadata",
@@ -103,20 +82,12 @@ def _summarize_run(runs_dir: Path, name: str) -> RunSummary:
         )
 
     has_checkpoint = _has_checkpoint(run_dir)
-    version = metadata.representation_version
-    if not has_checkpoint:
-        blocker: str | None = "no checkpoint"
-    elif version != REPRESENTATION_VERSION:
-        blocker = f"format v{version} ≠ v{REPRESENTATION_VERSION}"
-    else:
-        blocker = None
+    blocker = None if has_checkpoint else "no checkpoint"
 
     return RunSummary(
         name=name,
         commits_ago=commits_ahead_of(metadata.git_commit),
         git_dirty=metadata.git_dirty,
-        representation_version=version,
-        current_version=REPRESENTATION_VERSION,
         has_checkpoint=has_checkpoint,
         loadable=blocker is None,
         blocker=blocker,

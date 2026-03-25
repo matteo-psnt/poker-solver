@@ -96,8 +96,16 @@ class StaticCheckpointManifest:
         for entry in [*self.retained, {"iteration": self.iteration, "zarr": self.zarr_name}]:
             if int(entry["iteration"]) == iteration:
                 return entry
-        available = sorted({int(e["iteration"]) for e in self.retained} | {self.iteration})
-        raise KeyError(f"No retained checkpoint at iteration {iteration}; have {available}")
+        raise KeyError(f"No retained checkpoint at iteration {iteration}; have {self.ladder()}")
+
+    def ladder(self) -> list[int]:
+        """Every iteration this run can still be evaluated at, ascending.
+
+        The published snapshot is part of the ladder, not separate from it: a
+        curve that omitted it would stop one rung short of the run's own final
+        score.
+        """
+        return sorted({int(e["iteration"]) for e in self.retained} | {self.iteration})
 
 
 def save_checkpoint(

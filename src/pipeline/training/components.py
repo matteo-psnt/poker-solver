@@ -14,16 +14,12 @@ from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
-from src.engine.solver.storage.base import Storage
-from src.engine.solver.storage.in_memory import InMemoryStorage
-from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
 from src.pipeline.abstraction.base import BucketingStrategy
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 from src.pipeline.evaluation.exploitability import compute_exploitability
 from src.pipeline.training.abstraction_resolver import ComboAbstractionResolver
-from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.config import Config
 
 
@@ -74,127 +70,6 @@ def resolve_card_abstraction_hash(
         loader=PostflopPrecomputer.load,
     )
     return resolver.resolved_hash(abstraction_config=config.card_abstraction.config)
-
-
-def build_storage(
-    config: Config,
-    run_dir: Path | None = None,
-    run_metadata: RunMetadata | None = None,
-) -> Storage:
-    """
-    Build storage backend for training (always returns SharedArrayStorage).
-
-    This function is ONLY for use by TrainingSession during training initialization.
-    For read-only access to checkpoints (charts, analysis, debugging), use
-    InMemoryStorage directly.
-
-    Creates a single-worker SharedArrayStorage instance. The actual training will
-    create the full multi-worker storage when parallel training starts.
-
-    Args:
-        config: Configuration object
-        run_dir: Optional run directory (required if checkpointing is enabled)
-        run_metadata: Optional run metadata for resume capacity
-
-    Returns:
-        SharedArrayStorage instance for coordinator/single-worker use
-
-    Raises:
-        ValueError: If checkpointing is enabled but run_dir is not provided
-
-    Note:
-        This storage instance is primarily for the solver's interface. Actual
-        parallel training creates its own multi-worker shared memory pools.
-    """
-    checkpoint_enabled = config.storage.checkpoint_enabled
-
-    if checkpoint_enabled and run_dir is None:
-        raise ValueError("run_dir is required when checkpoint_enabled is true")
-
-    # Create a minimal storage instance (actual parallel training uses its own)
-    # Using run_dir.name as session_id to avoid conflicts between runs
-    session_id = run_dir.name if run_dir else "default"
-
-    # Determine initial capacity: use run metadata if resuming, else config
-    initial_capacity = config.storage.initial_capacity
-    if run_metadata:
-        initial_capacity = run_metadata.resolve_initial_capacity(initial_capacity)
-
-    return SharedArrayStorage(
-        num_workers=1,
-        worker_id=0,
-        session_id=session_id,
-        initial_capacity=initial_capacity,
-        max_actions=config.storage.max_actions,
-        is_coordinator=True,
-        checkpoint_dir=run_dir if checkpoint_enabled else None,
-        # Never eager-load the checkpoint into this bootstrap storage. At
-        # num_workers=1 that load is single-threaded over the entire key table
-        # (>15 min at ~11M infosets) and is then discarded by
-        # release_bootstrap_storage before training -- the actual workers each
-        # load their own 1/N shard in parallel. Resume verifies the checkpoint
-        # is non-empty via the cheap key-table row count instead.
-        load_checkpoint_on_init=False,
-        zarr_compression_level=config.storage.zarr_compression_level,
-        zarr_chunk_size=config.storage.zarr_chunk_size,
-        checkpoint_retain_every=config.storage.checkpoint_retain_every,
-    )
-
-
-def build_solver(
-    config: Config,
-    action_model: ActionModel,
-    card_abstraction: BucketingStrategy,
-    storage: Storage,
-) -> MCCFRSolver:
-    """
-    Build solver from config and components.
-
-    Args:
-        config: Configuration object
-        action_model: Pre-built action model
-        card_abstraction: Pre-built card abstraction
-        storage: Pre-built storage backend
-
-    Returns:
-        MCCFRSolver instance
-
-    Raises:
-        ValueError: If solver configuration is invalid
-    """
-
-    return MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=card_abstraction,
-        storage=storage,
-        config=config,
-    )
-
-
-def build_evaluation_solver(
-    config: Config,
-    *,
-    checkpoint_dir: Path,
-    abstractions_dir: Path | None = None,
-    abstraction_hash: str | None = None,
-    at_iteration: int | None = None,
-) -> tuple[MCCFRSolver, InMemoryStorage]:
-    """Build solver and storage for read-only checkpoint evaluation.
-
-    ``abstraction_hash`` pins the card abstraction to the one the checkpoint was
-    trained against; without it the config name resolves against current code.
-    ``at_iteration`` scores a retained ladder rung instead of the published
-    snapshot (the within-run convergence curve).
-    """
-    storage = InMemoryStorage(checkpoint_dir=checkpoint_dir, at_iteration=at_iteration)
-    action_model = ActionModel(config)
-    card_abstraction = build_card_abstraction(
-        config,
-        abstractions_dir=abstractions_dir,
-        abstraction_hash=abstraction_hash,
-    )
-    solver = build_solver(config, action_model, card_abstraction, storage)
-    return solver, storage
 
 
 def evaluate_solver_exploitability(

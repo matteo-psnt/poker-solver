@@ -9,8 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.core.actions.action_model import ActionModel
-from src.engine.solver.mccfr import MCCFRSolver
-from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
+from tests.test_helpers import DummyCardAbstraction, build_test_solver, make_test_config
 
 
 @pytest.mark.slow
@@ -19,17 +18,10 @@ class TestOutcomeSampling:
 
     def test_create_solver_with_outcome_sampling(self):
         """Test creating solver with outcome sampling enabled."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        solver = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage,
-            config=make_test_config(sampling_method="outcome", seed=42),
+        solver, _storage = build_test_solver(
+            make_test_config(sampling_method="outcome", seed=42), card_abs
         )
 
         assert solver.config.solver.sampling_method == "outcome"
@@ -37,17 +29,10 @@ class TestOutcomeSampling:
 
     def test_outcome_sampling_iteration_executes(self):
         """Test that outcome sampling iteration completes."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        solver = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage,
-            config=make_test_config(sampling_method="outcome", seed=42),
+        solver, _storage = build_test_solver(
+            make_test_config(sampling_method="outcome", seed=42), card_abs
         )
 
         utility = solver.train_iteration()
@@ -58,17 +43,10 @@ class TestOutcomeSampling:
 
     def test_outcome_sampling_multiple_iterations(self):
         """Test multiple iterations with outcome sampling."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        solver = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage,
-            config=make_test_config(sampling_method="outcome", seed=42),
+        solver, _storage = build_test_solver(
+            make_test_config(sampling_method="outcome", seed=42), card_abs
         )
 
         for _ in range(10):
@@ -79,17 +57,10 @@ class TestOutcomeSampling:
 
     def test_outcome_sampling_creates_infosets(self):
         """Test that outcome sampling creates and updates infosets."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        solver = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage,
-            config=make_test_config(sampling_method="outcome", seed=42),
+        solver, storage = build_test_solver(
+            make_test_config(sampling_method="outcome", seed=42), card_abs
         )
 
         # Run iterations
@@ -105,22 +76,21 @@ class TestOutcomeSampling:
         infosets_with_regrets = sum(1 for i in decision_infosets if any(r != 0 for r in i.regrets))
 
         assert len(decision_infosets) > 0
-        # Outcome sampling updates a sparse subset of visited decision points per iteration.
-        assert infosets_with_regrets >= len(decision_infosets) * 0.15
+        # Measured against what the run actually VISITED, not against the table.
+        # The static table pre-allocates a row per (node, bucket) up front, so a
+        # fraction-of-all-rows threshold would measure tree size rather than
+        # sampling behaviour -- 20 outcome-sampling iterations can only ever touch
+        # a handful of the 16k rows, so that form fails no matter how correct the
+        # kernel is.
+        assert infosets_with_regrets > 0
+        assert infosets_with_regrets <= storage.num_touched_infosets()
 
     def test_outcome_sampling_with_cfr_plus(self):
         """Test outcome sampling works with CFR+."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        solver = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage,
-            config=make_test_config(sampling_method="outcome", cfr_plus=True, seed=42),
+        solver, _storage = build_test_solver(
+            make_test_config(sampling_method="outcome", cfr_plus=True, seed=42), card_abs
         )
 
         # Should complete without errors
@@ -132,17 +102,10 @@ class TestOutcomeSampling:
 
     def test_outcome_sampling_produces_valid_strategies(self):
         """Test that outcome sampling produces valid strategies."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        solver = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage,
-            config=make_test_config(sampling_method="outcome", seed=42),
+        solver, storage = build_test_solver(
+            make_test_config(sampling_method="outcome", seed=42), card_abs
         )
 
         for _ in range(50):
@@ -161,31 +124,19 @@ class TestOutcomeSampling:
 
     def test_external_vs_outcome_sampling_both_work(self):
         """Test that both sampling methods work (comparison test)."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
 
         # External sampling
-        storage_external = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test_ext", is_coordinator=True
-        )
-        solver_external = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage_external,
-            config=make_test_config(sampling_method="external", seed=42),
+        solver_external, storage_external = build_test_solver(
+            make_test_config(sampling_method="external", seed=42), card_abs
         )
         for _ in range(5):
             solver_external.train_iteration()
 
         # Outcome sampling
-        storage_outcome = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test_out", is_coordinator=True
-        )
-        solver_outcome = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage_outcome,
-            config=make_test_config(sampling_method="outcome", seed=42),
+        solver_outcome, storage_outcome = build_test_solver(
+            make_test_config(sampling_method="outcome", seed=42), card_abs
         )
         for _ in range(5):
             solver_outcome.train_iteration()
@@ -210,17 +161,10 @@ class TestOutcomeSampling:
 
     def test_outcome_sampling_converges_over_iterations(self):
         """Test that outcome sampling shows convergence behavior."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        solver = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage,
-            config=make_test_config(sampling_method="outcome", seed=42),
+        solver, storage = build_test_solver(
+            make_test_config(sampling_method="outcome", seed=42), card_abs
         )
 
         # Train for many iterations

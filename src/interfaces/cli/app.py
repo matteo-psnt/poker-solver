@@ -2,7 +2,6 @@
 
 from src.interfaces.cli.flows import training
 from src.interfaces.cli.flows.combo_menu import combo_menu
-from src.interfaces.cli.flows.migrate import migrate_run_flow
 from src.interfaces.cli.ui import ui
 from src.interfaces.cli.ui.context import CliContext
 from src.interfaces.cli.ui.menu import MenuItem, run_menu
@@ -20,7 +19,6 @@ def main() -> None:
         MenuItem("Resume Training", training.resume_training),
         MenuItem("View Past Runs", training.view_runs),
         MenuItem("Evaluate Solver", training.evaluate_solver),
-        MenuItem("Migrate Run To Current Format", migrate_run_flow),
         MenuItem("Combo Abstraction Tools", combo_menu),
     ]
 

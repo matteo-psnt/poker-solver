@@ -12,6 +12,7 @@ row is attached to the wrong hand — silently, with no error anywhere.
 from __future__ import annotations
 
 import random
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -22,17 +23,17 @@ from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.infoset_index import (
     NUM_PREFLOP_HANDS,
+    bucket_of,
     preflop_hand_index,
     preflop_hand_string_at,
 )
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.policy_source import (
-    KeyedPolicySource,
     TreePolicySource,
     policy_source_for,
 )
 from src.engine.solver.storage.static_array import StaticArrayStorage
-from tests.test_helpers import build_test_storage, make_test_config
+from tests.test_helpers import make_test_config
 
 BUCKETS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 4}
 
@@ -165,13 +166,10 @@ class TestSourceSelection:
         finally:
             solver.storage.close()
 
-    def test_dynamic_blueprint_gets_the_keyed_source(self):
-        from src.engine.solver.mccfr import MCCFRSolver
-
-        config = make_test_config(seed=42, small_blind=1, big_blind=2, starting_stack=20)
-        storage = build_test_storage("policy-source-dynamic")
-        solver = MCCFRSolver(ActionModel(config), Buckets(), storage, config=config)
-        assert isinstance(policy_source_for(solver), KeyedPolicySource)
+    def test_a_non_static_blueprint_is_refused(self):
+        """Refusing beats falling back: there is no second backend to fall back to."""
+        with pytest.raises(TypeError, match="static-tree blueprint"):
+            policy_source_for(SimpleNamespace(storage=object(), card_abstraction=Buckets()))
 
 
 class TestExactBROverStaticStorage:
@@ -193,10 +191,14 @@ class TestExactBROverStaticStorage:
             )
             assert np.isfinite(result.exploitability_mbb)
             assert result.exploitability_mbb > 0
-            # 0% fallback proves the bridge resolved every policy lookup; a
-            # broken bridge would silently fall back to uniform and still
-            # produce a plausible-looking score.
-            assert result.missing_policy_mass == pytest.approx(0.0, abs=1e-9)
+            # A BROKEN bridge resolves nothing and falls back everywhere, so it
+            # reads 1.0. What it must NOT be asserted to be is 0.0: the static
+            # table allocates every row up front, so at 400 iterations a large
+            # share of rows is genuinely unvisited and honestly reported as
+            # fallback. Demanding 0.0 here would only pass by treating an
+            # allocated-but-untrained row as a trained one, which is the very
+            # conflation that made this diagnostic meaningless.
+            assert result.missing_policy_mass < 0.9
         finally:
             solver.storage.close()
 
@@ -239,22 +241,23 @@ class TestStaticBlueprintCanPlay:
         finally:
             solver.storage.close()
 
-    def test_keyed_and_tree_sources_agree_on_bucket(self):
-        """Both backends must partition hands identically, or a bridged consumer
-        would silently look up a different hand on one of them."""
+    def test_source_buckets_hands_the_same_way_the_solver_does(self):
+        """The source and the training kernel must partition hands identically.
+
+        They reach it by different routes -- the source through the policy
+        bridge, the kernel through its own lookup -- and a divergence would
+        attach every scored policy row to a different hand than the one trained,
+        silently and with no error anywhere.
+        """
         solver = _solver(iterations=1)
         try:
-            tree_source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
-            # A real key-addressed storage: bucket_for never touches it, but
-            # constructing the source with the wrong backend would be a lie.
-            keyed = KeyedPolicySource(
-                build_test_storage("policy-source-agree"), solver.card_abstraction
-            )
-            for trial in range(20):
+            source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
+            for _ in range(20):
                 state = solver.deal_initial_state()
                 player = state.current_player
-                assert tree_source.bucket_for(state, player) == keyed.bucket_for(state, player)
-                assert trial >= 0
+                assert source.bucket_for(state, player) == bucket_of(
+                    state, player, solver.card_abstraction
+                )
         finally:
             solver.storage.close()
 

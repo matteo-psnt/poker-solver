@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.engine.solver.storage.helpers import retained_checkpoint_iterations
+from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
 
@@ -78,7 +78,8 @@ def exploitability_curve(
     # reads nothing that a legacy or torn .run.json could make it fail on.
     run_id = run_dir.name
     try:
-        retained = retained_checkpoint_iterations(run_dir)
+        manifest = StaticCheckpointManifest.read(run_dir)
+        retained = manifest.ladder() if manifest is not None else []
     except (OSError, ValueError, KeyError):
         # Legacy or torn manifest. A reporting command must still render the
         # evaluations it can find rather than dying on the ladder it cannot.

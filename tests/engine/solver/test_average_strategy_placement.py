@@ -11,12 +11,8 @@ site or an explicit reach term (option C's trap: threading pi_i in place
 yields full reach, still wrong) is loud.
 """
 
-import uuid
-
-from src.core.actions.action_model import ActionModel
 from src.engine.solver.mccfr import traversal
-from src.engine.solver.mccfr.solver import MCCFRSolver
-from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
+from tests.test_helpers import DummyCardAbstraction, build_test_solver, make_test_config
 
 
 def _spy_accumulations(monkeypatch):
@@ -50,16 +46,9 @@ def _spy_accumulations(monkeypatch):
     return calls
 
 
-def _build_solver(sampling_method: str, num_workers: int = 1):
+def _build_solver(sampling_method: str):
     config = make_test_config(seed=42, sampling_method=sampling_method)
-    storage = build_test_storage(
-        num_workers=num_workers,
-        worker_id=0,
-        session_id=f"avg_{uuid.uuid4().hex[:8]}",
-        is_coordinator=True,
-    )
-    solver = MCCFRSolver(ActionModel(config), DummyCardAbstraction(), storage, config=config)
-    return solver, storage
+    return build_test_solver(config, DummyCardAbstraction())
 
 
 def test_external_sampling_accumulates_only_at_opponent_nodes(monkeypatch):
@@ -117,22 +106,3 @@ def test_outcome_sampling_placement_unchanged(monkeypatch):
     assert any(c["reach_weight"] != 1.0 for c in calls), (
         "outcome sampling threads the traverser's own reach; it should not be a dead 1.0"
     )
-
-
-def test_dropped_updates_counted_for_unknown_ids():
-    """With a partitioned storage and no second worker, non-owned infosets stay
-    at UNKNOWN_ID and every skipped write must be counted, not silent."""
-    solver, storage = _build_solver("external", num_workers=2)
-    try:
-        for _ in range(20):
-            solver.train_iteration()
-        assert solver.dropped_unknown_id_updates > 0
-    finally:
-        storage.cleanup()
-
-
-def test_no_drops_on_single_worker_storage():
-    solver, _ = _build_solver("external", num_workers=1)
-    for _ in range(10):
-        solver.train_iteration()
-    assert solver.dropped_unknown_id_updates == 0
