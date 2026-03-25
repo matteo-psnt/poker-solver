@@ -46,7 +46,7 @@ The interactive CLI offers: **Train Solver**, **Resume Training**, **View Past R
 For scripted/remote use there is a headless CLI:
 
 ```bash
-uv run poker-solver-run train --config production
+uv run poker-solver-run train-static --config production
 uv run poker-solver-run evaluate --run <id> --scorer lookahead
 uv run poker-solver-run ledger                 # browse recorded evaluations
 uv run poker-solver-run compare --a <run> --b <run>   # paired comparison with p-value
@@ -193,16 +193,12 @@ uv run ty check
 uv run lint-imports
 ```
 
-### Chart Viewer Backend
-
-The preflop chart viewer serves data through FastAPI (`src/interfaces/api/`): `/health`, `/api/meta`, `/api/chart`, plus the static UI from `ui/dist`.
-
 ### Project Structure
 
 ```
 poker-solver/
 ├── src/
-│   ├── interfaces/      # User-facing entrypoints (CLI, headless CLI, API, charts)
+│   ├── interfaces/      # User-facing entrypoints (interactive CLI, headless CLI)
 │   ├── pipeline/        # Training, evaluation, abstraction workflows
 │   ├── engine/          # Solver/search internals
 │   ├── core/            # Poker domain foundations (game/actions)
@@ -215,8 +211,8 @@ poker-solver/
 │   ├── runs/            # Training runs and checkpoints
 │   ├── combo_abstraction/  # Precomputed card abstractions
 │   └── eval_ledger.jsonl   # Append-only evaluation ledger
-├── modal_app.py         # Modal remote training/eval orchestration
-└── ui/                  # React web interface for charts
+├── infra/               # Azure Batch training substrate (Terraform + justfile)
+└── justfile             # just submit / jobs / fetch / score
 ```
 
 ## License
