@@ -396,7 +396,6 @@ rc=0
 STATIC_RUN="${RUN_ID:-run-${AZ_BATCH_TASK_ID:-local}}"
 STATIC_ARGS=(--run "$STATIC_RUN")
 [ -n "${RUN_CHECKPOINT_EVERY:-}" ] && STATIC_ARGS+=(--checkpoint-every "$RUN_CHECKPOINT_EVERY")
-[ -n "${RUN_WORKERS:-}" ] && STATIC_ARGS+=(--workers "$RUN_WORKERS")
 log "train-static: config=${RUN_CONFIG:-} run=$STATIC_RUN to=$RUN_TO (timeout $RUN_TIMEOUT)"
 set +o pipefail
 "${GUARD[@]}" uv run poker-solver-run train-static \
