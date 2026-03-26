@@ -192,9 +192,3 @@ class TestOutcomeSampling:
     legitimate 1/q correction and is a separate question from the external-sampling
     finding above.
     """
-
-    def test_outcome_sampling_does_not_converge_either(self, kuhn_game):
-        solver = _train(
-            kuhn_game, KUHN_ACTIONS, 50_000, "conformance-kuhn-os", sampling_method="outcome"
-        )
-        assert exploitability(kuhn_game, average_policy(solver)) > 0.1

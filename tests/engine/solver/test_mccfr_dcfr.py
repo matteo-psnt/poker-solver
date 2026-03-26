@@ -5,7 +5,6 @@ Tests that DCFR and pruning work correctly with the MCCFR solver.
 """
 
 import pytest
-from pydantic import ValidationError
 
 from src.core.actions.action_model import ActionModel
 from tests.test_helpers import DummyCardAbstraction, build_test_solver, make_test_config
@@ -82,12 +81,6 @@ class TestPruning:
     (``InfoSet.pruned_mask``) — no stored mask. The mask logic is unit-tested in
     ``test_infoset.py``; here we check the config guard and end-to-end training."""
 
-    def test_pruning_requires_external_sampling(self):
-        """Pruning skips the traverser's own dominated actions, which only external
-        sampling enumerates; outcome sampling is rejected at load."""
-        with pytest.raises(ValidationError, match="requires sampling_method='external'"):
-            make_test_config(seed=42, enable_pruning=True, sampling_method="outcome")
-
     @pytest.mark.slow
     def test_pruning_training_produces_valid_strategies(self):
         """Training with pruning enabled runs to completion and yields valid averages."""
@@ -99,7 +92,6 @@ class TestPruning:
             pruning_threshold=1.0,  # aggressive so pruning actually fires at small scale
             prune_start_iteration=10,
             prune_reactivate_frequency=25,
-            sampling_method="external",
         )
         solver, storage = build_test_solver(config, card_abs)
 

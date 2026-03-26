@@ -46,14 +46,13 @@ def _spy_accumulations(monkeypatch):
     return calls
 
 
-def _build_solver(sampling_method: str):
-    config = make_test_config(seed=42, sampling_method=sampling_method)
-    return build_test_solver(config, DummyCardAbstraction())
+def _build_solver():
+    return build_test_solver(make_test_config(seed=42), DummyCardAbstraction())
 
 
 def test_external_sampling_accumulates_only_at_opponent_nodes(monkeypatch):
     calls = _spy_accumulations(monkeypatch)
-    solver, _ = _build_solver("external")
+    solver, _ = _build_solver()
 
     for _ in range(10):
         solver.train_iteration()
@@ -68,7 +67,7 @@ def test_external_sampling_accumulates_only_at_opponent_nodes(monkeypatch):
 
 def test_external_sampling_accumulation_is_unweighted(monkeypatch):
     calls = _spy_accumulations(monkeypatch)
-    solver, _ = _build_solver("external")
+    solver, _ = _build_solver()
 
     for _ in range(10):
         solver.train_iteration()
@@ -83,26 +82,9 @@ def test_external_sampling_accumulation_is_unweighted(monkeypatch):
 def test_both_players_averages_update_across_iterations(monkeypatch):
     """Alternating traversal still updates both seats' averages."""
     calls = _spy_accumulations(monkeypatch)
-    solver, _ = _build_solver("external")
+    solver, _ = _build_solver()
 
     for _ in range(10):
         solver.train_iteration()
 
     assert {c["traversing_player"] for c in calls} == {0, 1}
-
-
-def test_outcome_sampling_placement_unchanged(monkeypatch):
-    """Outcome sampling keeps its traverser-node update with a live reach weight,
-    pending the outcome-sampling audit — pinned so the external-sampling fix
-    cannot silently leak into this path."""
-    calls = _spy_accumulations(monkeypatch)
-    solver, _ = _build_solver("outcome")
-
-    for _ in range(20):
-        solver.train_iteration()
-
-    assert calls
-    assert all(c["node_player"] == c["traversing_player"] for c in calls)
-    assert any(c["reach_weight"] != 1.0 for c in calls), (
-        "outcome sampling threads the traverser's own reach; it should not be a dead 1.0"
-    )

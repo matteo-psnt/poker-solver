@@ -284,7 +284,6 @@ class ResolverConfig(StrictFrozenModel):
 class SolverConfig(StrictFrozenModel):
     """Solver algorithm configuration."""
 
-    sampling_method: Literal["external", "outcome"] = Field(default="external")
     cfr_plus: bool = Field(default=False)
     iteration_weighting: Literal["none", "linear", "dcfr"] = Field(default="linear")
 
@@ -308,16 +307,6 @@ class SolverConfig(StrictFrozenModel):
     pruning_threshold: NonNegFloat = Field(default=300.0)
     prune_start_iteration: PositiveInt = Field(default=100)
     prune_reactivate_frequency: PositiveInt = Field(default=100)
-
-    @model_validator(mode="after")
-    def pruning_requires_external_sampling(self) -> SolverConfig:
-        if self.enable_pruning and self.sampling_method != "external":
-            raise ValueError(
-                "enable_pruning=True requires sampling_method='external'. Pruning "
-                "skips the traverser's dominated actions, which only external "
-                "sampling enumerates; outcome sampling samples a single action."
-            )
-        return self
 
 
 # ---------------------------------------------------------------------------

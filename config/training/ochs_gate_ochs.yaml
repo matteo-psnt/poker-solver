@@ -32,7 +32,6 @@ resolver:
   max_raises_per_street: 2
 
 solver:
-  sampling_method: external
   iteration_weighting: dcfr
   dcfr_alpha: 1.5
   dcfr_beta: 0.0
