@@ -1,16 +1,18 @@
 """Every command's payload must survive human-mode rendering.
 
-The renderers are pure formatting, so the only failure they can have is a key
-the payload does not carry — which is exactly the failure that shipped:
-``checkpoint-profile`` had no entry in the old if/elif chain and fell through to
-the evaluate branch, dying on ``payload["results"]``. These tests pin the shape
-of each op against its renderer so a new command cannot inherit another's.
+Renderers are pure formatting, so the only failure they can have is a key the
+payload does not carry -- the failure that shipped once, when
+``checkpoint-profile`` fell through to the evaluate branch and died on
+``payload["results"]``. These pin each op's payload shape against its renderer.
+
+"Every subcommand HAS a renderer" is no longer tested: a ``Command`` cannot be
+constructed without one, so it is a property of the type rather than a thing to
+check.
 """
 
-import argparse
 import dataclasses
 
-from src.interfaces.cli import headless, headless_render
+from src.interfaces.cli.commands import COMMANDS
 from src.pipeline import services
 
 PAYLOADS: dict[str, dict] = {
@@ -167,39 +169,22 @@ class TestFixturesMatchTheRealPayloads:
             assert set(PAYLOADS[op]) == expected, op
 
 
+BY_NAME = {command.name: command for command in COMMANDS}
+
+
 class TestEveryOpRenders:
-    def test_no_payload_kind_raises(self, capsys):
-        for op, payload in PAYLOADS.items():
-            headless_render.print_human(payload)
-            assert capsys.readouterr().out, f"'{op}' rendered nothing"
+    def test_every_command_renders_its_payload(self, capsys):
+        for name, command in BY_NAME.items():
+            command.render(PAYLOADS[name])
+            assert capsys.readouterr().out, f"'{name}' rendered nothing"
+
+    def test_every_command_has_a_fixture(self):
+        """A command with no fixture here is a command nothing pins."""
+        assert set(BY_NAME) == set(PAYLOADS)
 
     def test_checkpoint_profile_does_not_borrow_the_evaluate_renderer(self, capsys):
         # The exact regression: it used to fall through and KeyError on "results".
-        headless_render.print_human(PAYLOADS["checkpoint-profile"])
+        BY_NAME["checkpoint-profile"].render(PAYLOADS["checkpoint-profile"])
         out = capsys.readouterr().out
         assert "Checkpoint profile for run-a" in out
         assert "Evaluation complete" not in out
-
-    def test_unknown_op_says_so_instead_of_raising(self, capsys):
-        headless_render.print_human({"op": "not-a-command"})
-        assert "--json" in capsys.readouterr().out
-
-    def test_every_subcommand_has_a_renderer(self):
-        """A command reachable from the CLI but absent from RENDERERS is a gap.
-
-        Builders are discovered rather than listed, so a new subcommand is held to
-        this the moment it is added — which is what would have caught the original.
-        """
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers()
-        common = argparse.ArgumentParser(add_help=False)
-        builders = [
-            value
-            for name, value in vars(headless).items()
-            if name.startswith("_add_") and name.endswith("_parser")
-        ]
-        assert builders, "no subcommand builders found — has headless been restructured?"
-        for build in builders:
-            build(sub, common)
-
-        assert set(sub.choices) == set(headless_render.RENDERERS)
