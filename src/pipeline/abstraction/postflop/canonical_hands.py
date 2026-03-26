@@ -86,11 +86,7 @@ def canonicalize_combo(hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -
 
 def generate_all_cards() -> list[Card]:
     """Generate all 52 cards."""
-    cards = []
-    for rank in RANKS:
-        for suit in SUITS:
-            cards.append(Card.new(f"{rank}{suit}"))
-    return cards
+    return [Card.new(f"{rank}{suit}") for rank in RANKS for suit in SUITS]
 
 
 def enumerate_hand_classes(board: tuple[Card, ...]) -> list[HandClass]:

@@ -249,4 +249,5 @@ class TestBlueprintDistMemo:
         assert memo.get(key) is None
         memo.put(key, {check(): 0.4, bet(66): 0.6}, True)
         assert memo.get(key) == ({check(): 0.4, bet(66): 0.6}, True)
-        assert memo.hits == 1 and memo.misses == 1
+        assert memo.hits == 1
+        assert memo.misses == 1

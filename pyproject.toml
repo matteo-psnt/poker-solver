@@ -38,8 +38,53 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["ARG", "B", "C4", "E", "F", "I", "N", "PIE", "PTH", "RET", "RUF", "SIM", "SLF", "UP", "W"]
-ignore = ["RUF001", "RUF002", "RUF003"]
+select = [
+    "A",    # builtin shadowing
+    "ARG",  # unused arguments
+    "B",    # bugbear: likely bugs (B905 = zip without strict=)
+    "C4",   # comprehension / literal misuse
+    "DTZ",  # naive datetimes -- the ledger already has a naive-local-time era
+    "E",
+    "F",
+    "FLY",  # static join -> f-string
+    "G",    # logging format
+    "I",
+    "ICN",  # import naming conventions
+    "INT",  # gettext
+    "ISC",  # implicit string concat
+    "LOG",  # logging misuse
+    "N",
+    "PERF", # obvious perf smells
+    "PGH",  # blanket noqa / type: ignore with no code
+    "PIE",
+    "PT",   # pytest style
+    "PTH",  # os.path -> pathlib
+    "Q",    # quote style
+    "RET",
+    "RSE",  # raise X() -> raise X
+    "RUF",
+    "SIM",
+    "SLF",
+    "SLOT", # __slots__ misuse
+    "TID",  # tidy imports
+    "UP",
+    "W",
+]
+ignore = [
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # G004 (f-string in a log call) does not pay for itself here: every such
+    # line uses `{n:,}` formatting, which %-style cannot express, so the lazy
+    # form would be `logger.info("%s rows", f"{n:,}")` -- worse to read, and
+    # these are once-per-checkpoint lines, not a hot path. The rest of G still
+    # catches real misuse (string concat / .format() in a log call).
+    "G004",
+    # ERA001 cannot tell a worked example from dead code, and this codebase
+    # explains its arithmetic in comments: "# e_i = (u0 + u1) / 2" reads as
+    # commented-out code to it. All four hits were false positives.
+    "ERA001",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "*.py" = ["E501"]

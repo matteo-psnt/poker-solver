@@ -583,7 +583,7 @@ def tier_mismatches(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
 
     for knob in ("card_abstraction_hash", "action_config_hash"):
         if a.get(knob) != b.get(knob):
-            reasons.append(
+            reasons.append(  # noqa: PERF401 - multi-line message reads worse as a genexp
                 f"{knob} differs ({a.get(knob)!r} vs {b.get(knob)!r}): the two runs are "
                 "bucketed differently, so their exploitability numbers are not on one scale."
             )
@@ -602,14 +602,14 @@ def tier_mismatches(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
 
     for knob in TIER_KNOBS:
         if ka.get(knob) != kb.get(knob):
-            reasons.append(
+            reasons.append(  # noqa: PERF401 - multi-line message reads worse as a genexp
                 f"{knob} differs ({ka.get(knob)!r} vs {kb.get(knob)!r}): mixing tiers "
                 "compares two different exploiters/strategies, not two runs."
             )
 
     for knob in CONDITIONAL_TIER_KNOBS:
         if (knob in ka or knob in kb) and ka.get(knob) != kb.get(knob):
-            reasons.append(
+            reasons.append(  # noqa: PERF401 - multi-line message reads worse as a genexp
                 f"{knob} differs ({ka.get(knob)!r} vs {kb.get(knob)!r}): the exploiter "
                 "searched to a different depth/width, so the two numbers are not comparable."
             )

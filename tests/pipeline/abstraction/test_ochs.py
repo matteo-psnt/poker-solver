@@ -108,7 +108,8 @@ class TestCountingIsExact:
     def test_values_are_probabilities(self, engine, clusters):
         _, ochs = engine.board_ochs(BOARD, clusters, 8)
         assert ochs.shape[1] == 8
-        assert (ochs >= 0.0).all() and (ochs <= 1.0).all()
+        assert (ochs >= 0.0).all()
+        assert (ochs <= 1.0).all()
 
 
 class TestSeparatesWhatEquityCannot:

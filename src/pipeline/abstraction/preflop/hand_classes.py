@@ -119,23 +119,12 @@ class PreflopHandClasses:
         Example:
             ["AA", "KK", "QQ", ..., "22", "AKs", "AQs", ..., "32s", "AKo", "AQo", ..., "32o"]
         """
-        hands = []
-
-        # Pairs
-        for rank in PreflopHandClasses.RANKS:
-            hands.append(f"{rank}{rank}")
-
-        # Suited
-        for i, high in enumerate(PreflopHandClasses.RANKS):
-            for low in PreflopHandClasses.RANKS[i + 1 :]:
-                hands.append(f"{high}{low}s")
-
-        # Offsuit
-        for i, high in enumerate(PreflopHandClasses.RANKS):
-            for low in PreflopHandClasses.RANKS[i + 1 :]:
-                hands.append(f"{high}{low}o")
-
-        return hands
+        ranks = PreflopHandClasses.RANKS
+        pairs = [f"{rank}{rank}" for rank in ranks]
+        suited = [f"{high}{low}s" for i, high in enumerate(ranks) for low in ranks[i + 1 :]]
+        offsuit = [f"{high}{low}o" for i, high in enumerate(ranks) for low in ranks[i + 1 :]]
+        # Concatenation order IS the canonical index order; do not reorder.
+        return pairs + suited + offsuit
 
     def __str__(self) -> str:
         """String representation."""

@@ -112,7 +112,8 @@ class TestParallelTraining:
             session_id="static-par-many",
             abstraction=Buckets(),
         )
-        assert one.touched_rows > 0 and many.touched_rows > 0
+        assert one.touched_rows > 0
+        assert many.touched_rows > 0
         assert one.num_rows == many.num_rows
 
     def test_workers_write_the_same_shared_arrays(self, tmp_path):

@@ -281,7 +281,8 @@ class TestSolverIntegration:
             solver.checkpoint()
             trained = np.array(solver.storage.regrets)
             touched = solver.num_infosets()
-            assert touched > 0 and trained.any()
+            assert touched > 0
+            assert trained.any()
         finally:
             solver.storage.close()
 

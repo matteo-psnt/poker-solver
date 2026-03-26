@@ -80,7 +80,8 @@ class TestWriteAndAppend:
         p1 = ledger.write_payload(tmp_path, {"op": "evaluate", "n": 1}, ledger.eval_slug(knobs))
         p2 = ledger.write_payload(tmp_path, {"op": "evaluate", "n": 2}, ledger.eval_slug(knobs))
         assert p1 != p2
-        assert p1.exists() and p2.exists()
+        assert p1.exists()
+        assert p2.exists()
 
     def test_append_and_read_roundtrip(self, tmp_path):
         led = tmp_path / "eval_ledger.jsonl"

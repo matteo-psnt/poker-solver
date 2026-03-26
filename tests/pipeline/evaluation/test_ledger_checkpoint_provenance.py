@@ -72,7 +72,8 @@ def test_two_checkpoints_of_one_run_are_selectable(tmp_path):
 
     older = eval_ledger.latest_record_for_run("run-abc", ledger_path, 10_000_000)
     newer = eval_ledger.latest_record_for_run("run-abc", ledger_path, 16_160_000)
-    assert older is not None and newer is not None
+    assert older is not None
+    assert newer is not None
     assert older["infosets"] == 10_611_180
     assert newer["infosets"] == 18_090_076
 

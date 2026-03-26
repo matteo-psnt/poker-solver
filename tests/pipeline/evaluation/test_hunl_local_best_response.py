@@ -145,7 +145,8 @@ class TestTerminalValue:
         rng = np.random.default_rng(3)
         for _ in range(3):
             terminal = self._bet_call_to_river(engine, _deal_initial_state(engine, 2000, 0, rng))
-            assert engine._is_showdown(terminal) and len(terminal.board) == 5
+            assert engine._is_showdown(terminal)
+            assert len(terminal.board) == 5
             known = known_mask(terminal, actor=1)
             idx = next(i for i in range(len(ALL_COMBOS)) if not (COMBO_MASKS[i] & known))
             belief = np.zeros(len(ALL_COMBOS))
@@ -173,7 +174,8 @@ class TestTerminalValue:
         state = _deal_initial_state(engine, 2000, 0, rng)
         # SB folds preflop immediately.
         terminal = state.apply_action(fold(), engine.rules)
-        assert terminal.is_terminal and not engine._is_showdown(terminal)
+        assert terminal.is_terminal
+        assert not engine._is_showdown(terminal)
         belief = engine._initial_belief(terminal, opp=1)
         assert engine._terminal_value(terminal, 0, 1, belief) == float(
             terminal.get_payoff(0, engine.rules)
@@ -348,7 +350,8 @@ class TestPerHandRecords:
         for outcome_p0, outcome_p1 in result.hand_outcomes:
             assert outcome_p0.terminal in {"fold", "showdown", "allin"}
             assert outcome_p1.terminal in {"fold", "showdown", "allin"}
-            assert outcome_p0.pot > 0 and outcome_p1.pot > 0
+            assert outcome_p0.pot > 0
+            assert outcome_p1.pot > 0
         # The aggregate is exactly the mean of the recorded per-hand samples.
         samples = [(o0.value + o1.value) / 2.0 for o0, o1 in result.hand_outcomes]
         big_blind = solver.config.game.big_blind

@@ -275,6 +275,7 @@ def test_observe_replays_history_for_both_seats():
     skew_preflop_infoset(solver, faced, actor=responder, combo=kk, action=response)
     resolver.observe(faced, response)
     after_second = resolver._ranges
+    assert after_second is not None
     second_slot = after_second.p0 if responder == 0 else after_second.p1
     second_base = baseline.p0 if responder == 0 else baseline.p1
     assert not np.allclose(second_slot, second_base)

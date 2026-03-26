@@ -336,7 +336,7 @@ class TestGameRules:
         )
 
         # Try to bet more than stack
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Illegal action"):
             rules.apply_action(state, bet(100))
 
     def test_create_initial_state(self):

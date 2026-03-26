@@ -96,7 +96,8 @@ def test_allow_unloadable_keeps_everything_selectable():
 
     old = _by_value(choices, "run-old")
     assert old.disabled is None  # selectable for inspection
-    assert old.title is not None and "no checkpoint" in old.title  # reason surfaced
+    assert old.title is not None
+    assert "no checkpoint" in old.title
     assert run_picker._SHOW_ALL not in _values(choices)  # no toggle in this mode
     assert "Back" in _values(choices)
 

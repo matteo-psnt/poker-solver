@@ -920,7 +920,8 @@ def _init_worker(
 
 
 def _worker_play_hand(hand: int) -> tuple[HandOutcome, HandOutcome]:
-    assert _WORKER_ENGINE is not None and _WORKER_CTX is not None
+    assert _WORKER_ENGINE is not None
+    assert _WORKER_CTX is not None
     base_seed, starting_stack = _WORKER_CTX
     return _play_hand_pair(_WORKER_ENGINE, hand, base_seed, starting_stack)
 

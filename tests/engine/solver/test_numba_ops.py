@@ -154,7 +154,8 @@ class TestApplyRegretUpdates:
             1.5,
             0.0,
         )
-        assert row[0] == 4.0 and row[2] == 4.0  # no DCFR decay on untouched slots
+        assert row[0] == 4.0
+        assert row[2] == 4.0
 
     def test_single_action_delegation_form(self):
         """node_utility=0, reach=1 reduces to a plain regret add (the
@@ -215,7 +216,7 @@ class TestDCFRWeights:
         assert w1 == 1.0
         assert w100 > w10 > w1
 
-    @pytest.mark.parametrize("gamma,expected", [(2.0, 100.0**2.0), (3.0, 100.0**3.0)])
+    @pytest.mark.parametrize(("gamma", "expected"), [(2.0, 100.0**2.0), (3.0, 100.0**3.0)])
     def test_dcfr_strategy_weight_formula(self, gamma, expected):
         assert compute_dcfr_strategy_weight(100, gamma=gamma) == pytest.approx(expected, abs=1e-6)
 

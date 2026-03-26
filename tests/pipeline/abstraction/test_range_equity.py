@@ -143,7 +143,7 @@ class TestHistograms:
 
     def test_histogram_without_bins_raises(self):
         table = RangeEquityEngine().board_equities(RIVER_BOARD)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="without histograms"):
             table.histogram((Card.new("As"), Card.new("Ks")))
 
 
@@ -151,7 +151,7 @@ class TestPreflop:
     """Preflop is supported only via runout sampling."""
 
     def test_requires_max_runouts(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="requires max_runouts"):
             RangeEquityEngine().board_equities(())
 
     @pytest.mark.timeout(15)
@@ -163,7 +163,7 @@ class TestPreflop:
 
 class TestEngineApi:
     def test_invalid_board_size_raises(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Board must have 0, 3, 4, or 5 cards"):
             RangeEquityEngine().board_equities((Card.new("As"), Card.new("Ks")))
 
     def test_hand_equity_uses_cached_table(self):

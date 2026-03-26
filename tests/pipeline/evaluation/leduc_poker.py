@@ -192,7 +192,9 @@ class LeducPoker:
                 return (-float(state.total[0]), float(state.total[0]))
             return (float(state.total[1]), -float(state.total[1]))
 
-        assert state.p0 is not None and state.p1 is not None and state.public is not None
+        assert state.p0 is not None
+        assert state.p1 is not None
+        assert state.public is not None
         winner = _showdown_winner(state.p0, state.p1, state.public)
         if winner is None:
             return (0.0, 0.0)

@@ -23,11 +23,12 @@ class PlayerRanges:
     p1: np.ndarray
 
 
-_ALL_COMBOS: list[tuple[Card, Card]] = []
 _deck = eval7.Deck()
-for i in range(len(_deck.cards)):
-    for j in range(i + 1, len(_deck.cards)):
-        _ALL_COMBOS.append((Card(_deck.cards[i]), Card(_deck.cards[j])))
+_ALL_COMBOS: list[tuple[Card, Card]] = [
+    (Card(_deck.cards[i]), Card(_deck.cards[j]))
+    for i in range(len(_deck.cards))
+    for j in range(i + 1, len(_deck.cards))
+]
 _NUM_COMBOS = len(_ALL_COMBOS)
 
 # Floor for a combo's action likelihood. Distinct from `NORMALIZE_EPS` despite the
