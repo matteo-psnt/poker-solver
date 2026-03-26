@@ -239,8 +239,7 @@ class GameRules:
                 # Without abstraction, just allow all-in
                 actions.append(all_in(current_stack))
 
-        # All-in is always available with chips behind, unless a sizing above
-        # already resolved to the whole stack and added it.
+        # Unless a sizing above already resolved to the whole stack.
         if current_stack > 0 and not any(a.type == ActionType.ALL_IN for a in actions):
             actions.append(all_in(current_stack))
 
@@ -334,8 +333,7 @@ class GameRules:
             )
 
         if action.type in (ActionType.BET, ActionType.RAISE):
-            # A BET's amount IS the chips committed; a RAISE's is the amount ON TOP
-            # of the call, so the call has to be added back in.
+            # A RAISE's amount is ON TOP of the call; a BET's is the whole commit.
             bet_amount = action.amount if action.type == ActionType.BET else to_call + action.amount
 
             if bet_amount <= 0:

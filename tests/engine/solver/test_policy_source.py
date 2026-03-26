@@ -34,10 +34,16 @@ BUCKETS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 4}
 
 
 class Buckets:
+    """Keys on rank, not ``hash()`` -- which is randomised per process.
+
+    With ``hash()`` here, bucket assignment differed between runs of identical
+    code, so which rows training visited differed too.
+    """
+
     def get_bucket(
         self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
     ) -> int:
-        return hash((repr(hole_cards[0]), repr(board[0]))) % BUCKETS[street]
+        return (hole_cards[0].rank_eval7() + board[0].rank_eval7()) % BUCKETS[street]
 
     def num_buckets(self, street: Street) -> int:
         return BUCKETS[street]

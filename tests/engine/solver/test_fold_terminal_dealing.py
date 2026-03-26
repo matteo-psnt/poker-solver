@@ -33,7 +33,7 @@ COUNTS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 4}
 
 class Buckets:
     def get_bucket(self, hole_cards, board, street):
-        return hash((repr(hole_cards[0]), repr(board[0]))) % COUNTS[street]
+        return (hole_cards[0].rank_eval7() + board[0].rank_eval7()) % COUNTS[street]
 
     def num_buckets(self, street):
         return COUNTS[street]

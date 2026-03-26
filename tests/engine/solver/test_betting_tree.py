@@ -317,9 +317,11 @@ class TestInfosetRow:
 
         class FixedBuckets:
             def get_bucket(self, hole_cards, board, street):
-                return (
-                    hash((repr(hole_cards[0]), street.name)) % BUCKETS[street] + BUCKETS[street]
-                ) % BUCKETS[street]
+                # sum(ord(...)), not hash(): hash is randomised per process, so
+                # bucket assignment differed between runs of identical code.
+                # This fuzz passes card STRINGS, so rank_eval7 is unavailable.
+                seed = sum(map(ord, repr(hole_cards[0]))) + street.value
+                return (seed % BUCKETS[street] + BUCKETS[street]) % BUCKETS[street]
 
             def num_buckets(self, street):
                 return BUCKETS[street]

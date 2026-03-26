@@ -5,14 +5,11 @@ built, so storage is a pair of flat arrays sized exactly to the tree and indexed
 by arithmetic. There is no key table, no id allocation, no owner map, no
 capacity estimate and no resize path.
 
-Why that matters beyond line count: the layout this replaced could not answer
-"which row is this infoset?" without cross-worker agreement, and a worker that
-had not yet learned a row's id wrote nothing at all — a measured 39-74% of
-update samples were dropped that way. Here the row is a pure function of the
-tree, identical in every process, so every infoset is writable by every worker
-from the start. The traversal's drop counter still exists (the generic kernel
-can face a non-writable infoset) but is unreachable through this backend, which
-is why a nonzero value is worth asserting on.
+The row is a pure function of the tree, identical in every process, so every
+infoset is writable by every worker from the start. The layout this replaced
+needed cross-worker agreement and dropped a measured 39-74% of update samples.
+The traversal's drop counter is unreachable through this backend — which is why
+a nonzero value is worth asserting on.
 
 Layout (ragged, zero padding):
 
@@ -237,9 +234,8 @@ class StaticArrayStorage:
     def num_infosets(self) -> int:
         """Total rows in the tree.
 
-        A property of the CONFIG, not of training progress: it is the same
-        number before and after a run. Do not read it as "how much has been
-        learned" — :meth:`num_touched_infosets` is that.
+        A property of the CONFIG, not of progress -- same before and after a
+        run. :meth:`num_touched_infosets` is the one that moves.
         """
         return self.tree.num_rows
 

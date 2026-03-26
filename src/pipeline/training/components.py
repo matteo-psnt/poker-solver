@@ -81,9 +81,8 @@ def evaluate_solver_exploitability(
 ) -> dict[str, Any]:
     """Compute exploitability for a solver instance with a shared evaluation path.
 
-    Takes the concrete solver rather than ``ScorableBlueprint``: this estimator
-    walks the table (``storage.iter_infosets``) and deals its own chance
-    outcomes, which is more than a blueprint is asked to expose.
+    Takes the concrete solver, not ``ScorableBlueprint``: it walks the table and
+    deals its own chance outcomes.
     """
     return compute_exploitability(
         solver,

@@ -1,20 +1,9 @@
-"""Exact numbers that must not move without someone deciding they should.
+"""Exact numbers a refactor is not allowed to move.
 
-WHY THIS EXISTS. The rest of the suite asks "does it work". These ask "does it
-give the SAME ANSWER", which is a different question and the one this project
-keeps losing. Nearly every voided result in its history came from a kernel or
-scorer change that kept every test green while shifting the numbers underneath
-a comparison — at which point a convergence curve silently spans two
-instruments and nobody finds out for weeks.
-
-So: a refactor is allowed to change anything except these values. If one moves,
-that is not a test to update — it is a lineage break, and every score recorded
-before it becomes incomparable with every score after. Update the constant only
-together with a note saying what changed and why the shift is correct, and
-expect to re-baseline.
-
-Kept small and seeded so it runs in the fast gate; the point is sensitivity to
-kernel arithmetic, not realism.
+The rest of the suite asks "does it work"; these ask "does it give the SAME
+ANSWER". A failure here is a LINEAGE BREAK, not a stale constant: every score
+recorded before the change is incomparable with every score after. Update a
+value only alongside a note on why the shift is correct, and re-baseline.
 """
 
 from __future__ import annotations
@@ -37,12 +26,7 @@ BUCKETS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 4}
 
 
 class GoldenBuckets:
-    """A deterministic bucketer that does NOT use Python's ``hash()``.
-
-    ``hash()`` on a str is randomised per process, so a bucketer built on it
-    would make these numbers differ between runs of the same code -- which is
-    the exact failure that once silently rebucketed a resume mid-run.
-    """
+    """Keys on rank, not ``hash()`` -- which is randomised per process."""
 
     def get_bucket(
         self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
@@ -79,11 +63,8 @@ def test_tree_shape_is_pinned():
 
 
 def test_training_reaches_the_same_state():
-    """Coverage and visit counts pin the TRAVERSAL, not just the arithmetic.
-
-    A change to action ordering, chance sampling or the traversing-player
-    alternation moves these long before it moves a rounded score.
-    """
+    """Pins the traversal: action ordering and chance sampling move these
+    long before they move a rounded score."""
     solver = _trained_solver(400)
     try:
         assert solver.storage.num_touched_infosets() == 3114

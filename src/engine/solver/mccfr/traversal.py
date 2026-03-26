@@ -51,9 +51,8 @@ def _infoset_context(
     """Resolve the acting infoset, its actions, and its current strategy.
 
     Dispatched through the solver because infoset *identity* is not a property
-    of the CFR math. HUNL indexes a preallocated betting tree; the Kuhn/Leduc
-    conformance harness keys a different game entirely. Everything below this
-    call is identity-agnostic, which is what lets one kernel serve both.
+    of the CFR math: HUNL indexes a betting tree, Kuhn/Leduc keys a different
+    game. Everything below this call is identity-agnostic.
     """
     return self.lookup_infoset(state, current_player)
 
@@ -63,10 +62,9 @@ def keyed_infoset_context(
     state: GameState,
     current_player: int,
 ) -> tuple[InfoSet, Sequence[Action], list[int], np.ndarray]:
-    """Lookup by hashed key: build infoset, filter valid actions, compute strategy.
+    """Lookup by hashed key, for games with no betting tree to index.
 
-    The generic path, for games with no enumerable betting tree to index. HUNL
-    overrides it in ``StaticTreeSolver``; in practice the only caller left is the
+    ``StaticTreeSolver`` overrides it; in practice the only caller left is the
     Kuhn/Leduc conformance harness.
     """
     infoset_key = self.encode_infoset_key(state, current_player)

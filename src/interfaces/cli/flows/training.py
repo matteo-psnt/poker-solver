@@ -279,10 +279,8 @@ def _start_training(config: Config, num_workers: int) -> None:
 def _resume_training(run_dir: Path, additional_iters: int) -> None:
     """Continue a run to an ABSOLUTE target.
 
-    ``train_static`` targets an absolute iteration count rather than an
-    increment, so the prompt's "additional" is added to what the run already
-    has. Re-running past the target is a no-op, which is what makes a retry
-    converge instead of training the increment twice.
+    ``train_static`` takes a total, not an increment, so the prompt's
+    "additional" is added to what the run already has.
     """
     meta = services.load_run_metadata(run_dir)
     target_total = meta.iterations + additional_iters
