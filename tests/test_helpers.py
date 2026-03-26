@@ -49,15 +49,12 @@ def build_trained_test_solver(
     iterations: int,
     *,
     starting_stack: int = 400,
-    session_id: str = "test-solver",
     **config_overrides,
 ) -> StaticTreeSolver:
     """A minimally trained (deliberately weak) blueprint on the static tree.
 
-    Training is seeded (config seed=42) so repeated builds are strategy-identical.
-    ``session_id`` is accepted and ignored: the static table is process-local, so
-    unlike the shared-memory backend it needs no name to avoid collisions between
-    solvers rebuilt inside parallel worker processes.
+    Training is seeded (config seed=42), so repeated builds are
+    strategy-identical and a test can rebuild one instead of sharing it.
     """
     config = make_test_config(
         seed=42,

@@ -56,12 +56,12 @@ HERO_COMBOS = [_combo("As", "Ks"), _combo("7c", "2d"), _combo("Th", "9h")]
 
 @pytest.fixture(scope="module")
 def trained_solver():
-    return build_trained_test_solver(4, starting_stack=STACK, session_id="ptbr-trained")
+    return build_trained_test_solver(4, starting_stack=STACK)
 
 
 @pytest.fixture(scope="module")
 def uniform_solver():
-    return build_trained_test_solver(0, starting_stack=STACK, session_id="ptbr-uniform")
+    return build_trained_test_solver(0, starting_stack=STACK)
 
 
 def _assert_engine_matches_scalar(solver, hero_seat: int, button: int) -> None:

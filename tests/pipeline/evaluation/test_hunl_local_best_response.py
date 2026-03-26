@@ -9,8 +9,6 @@ mapping, determinism, and the end-to-end lower bound on a weak blueprint.
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import pytest
 
@@ -36,21 +34,17 @@ from src.shared.config import ResolverConfig
 from tests.test_helpers import build_trained_test_solver, skew_preflop_infoset
 
 
-def _build_solver(
-    iterations: int, *, starting_stack: int = 2000, session_id: str = "lbr-test"
-) -> StaticTreeSolver:
-    return build_trained_test_solver(
-        iterations, starting_stack=starting_stack, session_id=session_id
-    )
+def _build_solver(iterations: int, *, starting_stack: int = 2000) -> StaticTreeSolver:
+    return build_trained_test_solver(iterations, starting_stack=starting_stack)
 
 
 def _rebuild_parallel_test_blueprint() -> StaticTreeSolver:
     """Picklable factory: rebuild the deterministic test blueprint inside a worker.
 
-    Must match the serial blueprint's params exactly (same seed/stack/iterations) so
-    the strategies are identical; a unique session_id avoids shared-memory collisions.
+    Must match the serial blueprint's params exactly (same seed/stack/iterations)
+    so the strategies are identical.
     """
-    return _build_solver(4, starting_stack=400, session_id=f"lbr-par-{os.getpid()}")
+    return _build_solver(4, starting_stack=400)
 
 
 def _engine(solver: StaticTreeSolver, **cfg) -> _HUNLLocalBestResponse:
@@ -409,7 +403,7 @@ class TestMenuGating:
 
     @pytest.fixture(scope="class")
     def solver(self):
-        return _build_solver(0, session_id="lbr-menu")
+        return _build_solver(0)
 
     def test_menu_matches_legal_when_off_tree_disabled(self, solver):
         engine = _engine(solver)
@@ -473,7 +467,7 @@ class TestShadowSync:
 
     @pytest.mark.timeout(60)
     def test_shadow_survives_off_tree_hands_and_diverges(self):
-        solver = _build_solver(50, session_id="lbr-shadow-sync")
+        solver = _build_solver(50)
         engine = _engine(solver, equity_runouts=2, include_off_tree=True, seed=5)
         # play_hand runs assert_sync at every decision and commit() asserts
         # shadow-legality + non-terminality — a structural break fails loudly.
@@ -493,7 +487,7 @@ class TestZeroLeak:
 
     @pytest.mark.timeout(60)
     def test_off_tree_does_not_increase_uniform_fallback_rate(self):
-        solver = _build_solver(50, session_id="lbr-zero-leak")
+        solver = _build_solver(50)
 
         def fallback_rate(include_off_tree: bool) -> float:
             engine = _engine(solver, equity_runouts=2, include_off_tree=include_off_tree, seed=5)
@@ -561,7 +555,7 @@ class TestExploitability:
     def test_off_tree_parallel_matches_serial_bitwise(self):
         """Off-tree mode must keep the per-hand seeding discipline: the committed
         proxy draws come from the per-hand engine RNG, so parallel == serial."""
-        solver = _build_solver(4, starting_stack=400, session_id="lbr-par-serial-ot")
+        solver = _build_solver(4, starting_stack=400)
         serial = compute_lbr_exploitability(
             solver,
             LBRConfig(
@@ -585,7 +579,7 @@ class TestExploitability:
         """num_workers must not change the result: per-hand seeding + ordered
         aggregation make parallel bitwise-identical to serial. Failure here means a
         global RNG isn't reseeded per-hand or aggregation order leaked."""
-        solver = _build_solver(4, starting_stack=400, session_id="lbr-par-serial")
+        solver = _build_solver(4, starting_stack=400)
         serial = compute_lbr_exploitability(
             solver, LBRConfig(num_hands=16, equity_runouts=2, seed=123, num_workers=1)
         )
@@ -626,7 +620,7 @@ class TestDeployedOpponent:
         belief updates — must reproduce the blueprint eval exactly. Validates all
         plumbing while trusting zero new math. Both arms complete blueprint
         misses with uniform natively, so the completions align by construction."""
-        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-a0")
+        solver = _build_solver(3, starting_stack=400)
         blueprint_result = compute_lbr_exploitability(
             solver, LBRConfig(num_hands=10, equity_runouts=2, seed=99)
         )
@@ -648,7 +642,7 @@ class TestDeployedOpponent:
     def test_pure_resolver_changes_play(self):
         """alpha=1 (pure resolver) must actually change the measured number — the
         guard against the deployed path silently short-circuiting to blueprint."""
-        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-a1")
+        solver = _build_solver(3, starting_stack=400)
         blueprint_result = compute_lbr_exploitability(
             solver, LBRConfig(num_hands=10, equity_runouts=2, seed=99)
         )
@@ -668,7 +662,7 @@ class TestDeployedOpponent:
     def test_deployed_deterministic_under_fixed_seed(self):
         """Pinned iterations + per-hand reseeding keep the deployed eval exactly
         reproducible (the resolver's runout sampling uses global np.random)."""
-        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-det")
+        solver = _build_solver(3, starting_stack=400)
         cfg = LBRConfig(
             num_hands=8,
             equity_runouts=2,
@@ -682,14 +676,14 @@ class TestDeployedOpponent:
         assert first.lbr_utility_p0 == second.lbr_utility_p0
 
     def test_deployed_requires_resolver_config(self):
-        solver = _build_solver(1, starting_stack=400, session_id="lbr-deployed-noresolver")
+        solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match=r"requires LBRConfig\.resolver"):
             compute_lbr_exploitability(
                 solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, opponent="deployed")
             )
 
     def test_deployed_requires_pinned_iterations(self):
-        solver = _build_solver(1, starting_stack=400, session_id="lbr-deployed-noiters")
+        solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match="max_iterations"):
             compute_lbr_exploitability(
                 solver,
@@ -703,7 +697,7 @@ class TestDeployedOpponent:
             )
 
     def test_unknown_opponent_rejected(self):
-        solver = _build_solver(1, starting_stack=400, session_id="lbr-deployed-unknown")
+        solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match=r"Unknown LBRConfig\.opponent"):
             compute_lbr_exploitability(
                 solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, opponent="resolver")
@@ -714,7 +708,7 @@ class TestDeployedOpponent:
         Bayes-update the exploiter's slot in the deployed opponent's ranges
         (they previously never reached range inference — the uniform-opponent
         limitation that made the deployed system measurably exploitable)."""
-        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-histreplay")
+        solver = _build_solver(3, starting_stack=400)
         model = ResolvedOpponent(solver, self._resolver_config())
         engine = _engine(solver)
         state = _deal_initial_state(engine, 400, 0, np.random.default_rng(3))
@@ -739,7 +733,7 @@ class TestDeployedOpponent:
         feeds only the scorer, degrading via the broken-tracker path when an
         opponent action has no structure-preserving mirror. Must run cleanly and
         stay reproducible under a fixed seed."""
-        solver = _build_solver(3, starting_stack=400, session_id="lbr-deployed-ot")
+        solver = _build_solver(3, starting_stack=400)
         cfg = LBRConfig(
             num_hands=6,
             equity_runouts=2,
@@ -758,14 +752,14 @@ class TestLookaheadScorerMode:
     """scorer="lookahead" engine wiring: validation, determinism, effect."""
 
     def test_unknown_scorer_rejected(self):
-        solver = _build_solver(1, starting_stack=400, session_id="lbr-scorer-unknown")
+        solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match=r"Unknown LBRConfig\.scorer"):
             compute_lbr_exploitability(
                 solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, scorer="resolver")
             )
 
     def test_depth_below_one_rejected(self):
-        solver = _build_solver(1, starting_stack=400, session_id="lbr-scorer-depth0")
+        solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match="depth must be >= 1"):
             compute_lbr_exploitability(
                 solver,
@@ -777,7 +771,7 @@ class TestLookaheadScorerMode:
     @pytest.mark.timeout(60)
     def test_lookahead_changes_play(self):
         """Guard against the lookahead path silently short-circuiting to myopic."""
-        solver = _build_solver(3, starting_stack=400, session_id="lbr-scorer-diff")
+        solver = _build_solver(3, starting_stack=400)
         myopic = compute_lbr_exploitability(
             solver, LBRConfig(num_hands=10, equity_runouts=2, seed=99)
         )
@@ -788,7 +782,7 @@ class TestLookaheadScorerMode:
 
     @pytest.mark.timeout(60)
     def test_lookahead_deterministic_under_fixed_seed(self):
-        solver = _build_solver(3, starting_stack=400, session_id="lbr-scorer-det")
+        solver = _build_solver(3, starting_stack=400)
         cfg = LBRConfig(
             num_hands=8, equity_runouts=2, seed=99, scorer="lookahead", include_off_tree=True
         )
@@ -802,7 +796,7 @@ class TestLookaheadScorerMode:
     def test_lookahead_parallel_matches_serial_bitwise(self):
         """The memo is worker-local and value-inert; per-hand seeding must keep
         parallel == serial under the lookahead scorer too."""
-        solver = _build_solver(4, starting_stack=400, session_id="lbr-scorer-par-serial")
+        solver = _build_solver(4, starting_stack=400)
 
         def _cfg(num_workers: int) -> LBRConfig:
             return LBRConfig(
