@@ -101,9 +101,6 @@ class TabularCFRSolver[StateT: Hashable, ActionT: Hashable]:
         for info_key, strat_sum in self.strategy_sum.items():
             total = strat_sum.sum()
             actions = self.actions[info_key]
-            if total > 0.0:
-                probs = strat_sum / total
-            else:
-                probs = np.full(len(actions), 1.0 / len(actions))
-            table[info_key] = dict(zip(actions, probs))
+            probs = strat_sum / total if total > 0.0 else np.full(len(actions), 1.0 / len(actions))
+            table[info_key] = dict(zip(actions, probs, strict=True))
         return TabularStrategy(table)

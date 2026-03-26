@@ -267,14 +267,14 @@ class TestNoConflicts:
         # Verify no conflicts: each canonical should consistently map
         # (Multiple hands can map to same canonical, but each hand maps to one)
         canonical_to_hands = {}
-        for hand, canonical in zip(valid_hands, canonicals):
+        for hand, canonical in zip(valid_hands, canonicals, strict=True):
             if canonical not in canonical_to_hands:
                 canonical_to_hands[canonical] = []
             canonical_to_hands[canonical].append(hand)
 
         # All hands in each group should be suit-isomorphic
         # (This is the key property that eliminates conflicts)
-        for canonical, hands in canonical_to_hands.items():
+        for _canonical, hands in canonical_to_hands.items():
             # Hands mapping to same canonical are strategically equivalent
             assert len(hands) >= 1
 

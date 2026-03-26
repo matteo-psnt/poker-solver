@@ -268,7 +268,7 @@ class LookaheadScorer:
                 posteriors.append(posterior / mass if mass > NORMALIZE_EPS else belief)
 
         value = 0.0
-        for action, weight, posterior in zip(legal, weights, posteriors):
+        for action, weight, posterior in zip(legal, weights, posteriors, strict=True):
             if weight <= 0.0:
                 continue
             if action.type == ActionType.FOLD:

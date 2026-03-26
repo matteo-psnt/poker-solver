@@ -11,7 +11,7 @@ from src.core.game.actions import Action
 from src.core.game.state import Card, GameState
 from src.engine.search.action_translation import translate_action_distribution
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.shared.numeric import NORMALIZE_EPS
 
 
@@ -128,7 +128,7 @@ def _action_likelihood_vector(
     blocked: np.ndarray,
 ) -> np.ndarray:
     likelihood = np.full(_NUM_COMBOS, _LIKELIHOOD_FLOOR, dtype=np.float64)
-    source = policy_source_for(blueprint)
+    source = blueprint.policy_source
     cache: dict = {}
 
     for idx, combo in enumerate(_ALL_COMBOS):

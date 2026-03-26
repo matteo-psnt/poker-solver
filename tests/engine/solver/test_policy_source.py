@@ -12,7 +12,6 @@ row is attached to the wrong hand — silently, with no error anywhere.
 from __future__ import annotations
 
 import random
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -28,10 +27,7 @@ from src.engine.solver.infoset_index import (
     preflop_hand_string_at,
 )
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
-from src.engine.solver.policy_source import (
-    TreePolicySource,
-    policy_source_for,
-)
+from src.engine.solver.policy_source import TreePolicySource
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from tests.test_helpers import make_test_config
 
@@ -159,17 +155,20 @@ class TestTreePolicySource:
 
 
 class TestSourceSelection:
-    def test_static_blueprint_gets_the_tree_source(self):
+    def test_blueprint_exposes_a_tree_source(self):
         solver = _solver(iterations=1)
         try:
-            assert isinstance(policy_source_for(solver), TreePolicySource)
+            assert isinstance(solver.policy_source, TreePolicySource)
         finally:
             solver.storage.close()
 
-    def test_a_non_static_blueprint_is_refused(self):
-        """Refusing beats falling back: there is no second backend to fall back to."""
-        with pytest.raises(TypeError, match="static-tree blueprint"):
-            policy_source_for(SimpleNamespace(storage=object(), card_abstraction=Buckets()))
+    def test_the_source_is_built_once(self):
+        """Cached: it is reached once per decision on the play and search paths."""
+        solver = _solver(iterations=1)
+        try:
+            assert solver.policy_source is solver.policy_source
+        finally:
+            solver.storage.close()
 
 
 class TestExactBROverStaticStorage:

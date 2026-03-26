@@ -35,7 +35,6 @@ class BucketingStrategy(ABC):
         Returns:
             Bucket ID (integer >= 0)
         """
-        pass
 
     @abstractmethod
     def num_buckets(self, street: Street) -> int:
@@ -48,7 +47,6 @@ class BucketingStrategy(ABC):
         Returns:
             Number of buckets
         """
-        pass
 
     def __str__(self) -> str:
         """String representation."""

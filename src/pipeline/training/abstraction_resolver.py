@@ -32,7 +32,7 @@ def _read_metadata(path: Path) -> dict | None:
     if not metadata_file.exists():
         return None
     try:
-        with open(metadata_file) as f:
+        with metadata_file.open() as f:
             return json.load(f)
     except Exception:
         return None

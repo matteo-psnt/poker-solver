@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import functools
 import random
 
 import numpy as np
 
 from src.core.actions.action_model import ActionModel
-from src.core.game.actions import Action
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState
 from src.engine.solver import infoset_encoder
@@ -17,7 +15,7 @@ from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.base import Storage
 from src.shared.config import Config
 
-from . import chance, policy, traversal
+from . import chance, traversal
 
 
 class MCCFRSolver:
@@ -89,13 +87,13 @@ class MCCFRSolver:
         return chance.deal_initial_state(self)
 
     def is_chance_node(self, state: GameState) -> bool:
-        return chance.is_chance_node(self, state)
+        return chance.is_chance_node(state)
 
     def sample_chance_outcome(self, state: GameState) -> GameState:
-        return chance.sample_chance_outcome(self, state)
+        return chance.sample_chance_outcome(state)
 
     def deal_remaining_cards(self, state: GameState) -> GameState:
-        return chance.deal_remaining_cards(self, state)
+        return chance.deal_remaining_cards(state)
 
     def encode_infoset_key(self, state: GameState, player: int) -> InfoSetKey:
         """The key under which ``player``'s decision at ``state`` is stored.
@@ -107,17 +105,6 @@ class MCCFRSolver:
         ``tests/engine/solver/mccfr/extensive_game_solver.py``.
         """
         return infoset_encoder.encode_infoset_key(state, player, self.card_abstraction)
-
-    @functools.cached_property
-    def policy_source(self):
-        """Backend-agnostic policy access for the runtime paths.
-
-        Cached: the storage backend cannot change over a solver's life, and this
-        is reached once per decision during play.
-        """
-        from src.engine.solver.policy_source import policy_source_for
-
-        return policy_source_for(self)
 
     def lookup_infoset(self, state: GameState, current_player: int):
         """Resolve ``current_player``'s infoset at ``state`` for the traversal.
@@ -138,9 +125,6 @@ class MCCFRSolver:
         reach_probs: list[float],
     ) -> float:
         return traversal.cfr_outcome_sampling(self, state, traversing_player, reach_probs)
-
-    def sample_action_from_strategy(self, state: GameState, *, use_average: bool = True) -> Action:
-        return policy.sample_action_from_strategy(self, state, use_average=use_average)
 
     def __str__(self) -> str:
         return (

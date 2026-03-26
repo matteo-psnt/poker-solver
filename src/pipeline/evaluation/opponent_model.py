@@ -37,7 +37,7 @@ from src.engine.search.range_inference import (
 )
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.shared.config import ResolverConfig
 
 
@@ -106,7 +106,7 @@ class BlueprintOpponent:
         self.rules = blueprint.rules
         self.action_model = blueprint.action_model
         self.card_abstraction = blueprint.card_abstraction
-        self._policy_source = policy_source_for(blueprint)
+        self._policy_source = blueprint.policy_source
         self.queries: int = 0
         self.uniform_fallbacks: int = 0
         # Optional cross-call BlueprintDistMemo (lookahead scorer): pure cache,
@@ -205,7 +205,7 @@ class BlueprintOpponent:
 
         self.uniform_fallbacks += 1
         uniform = 1.0 / len(legal)
-        return {action: uniform for action in legal}
+        return dict.fromkeys(legal, uniform)
 
     def _infoset_distribution(
         self, state: GameState, player: int, legal: list[Action]

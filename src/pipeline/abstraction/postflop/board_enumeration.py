@@ -94,12 +94,11 @@ class CanonicalBoardEnumerator:
         """Get number of board cards for a street."""
         if street == Street.FLOP:
             return 3
-        elif street == Street.TURN:
+        if street == Street.TURN:
             return 4
-        elif street == Street.RIVER:
+        if street == Street.RIVER:
             return 5
-        else:
-            raise ValueError(f"Invalid street: {street}")
+        raise ValueError(f"Invalid street: {street}")
 
     def enumerate(self) -> None:
         """

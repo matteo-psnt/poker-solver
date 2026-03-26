@@ -137,7 +137,9 @@ class TestStrategyBridge:
             for card in range(3)
             for history in ("", "p", "b", "pb")
             for a, c in zip(
-                average((card, history), ("p", "b")), current((card, history), ("p", "b"))
+                average((card, history), ("p", "b")),
+                current((card, history), ("p", "b")),
+                strict=True,
             )
         )
 

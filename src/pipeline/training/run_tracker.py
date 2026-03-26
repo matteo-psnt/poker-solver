@@ -269,12 +269,12 @@ class RunMetadata:
 
     @classmethod
     def load(cls, path: Path) -> RunMetadata:
-        with open(path) as f:
+        with path.open() as f:
             data = json.load(f)
         return cls.from_dict(data)
 
     def save(self, path: Path) -> None:
-        with open(path, "w") as f:
+        with path.open("w") as f:
             json.dump(self.to_dict(), f, indent=2)
 
     def to_dict(self) -> dict[str, Any]:
@@ -506,9 +506,8 @@ class RunTracker:
         self._save()
 
         # Optionally cleanup failed runs with no progress
-        if cleanup_if_empty and self.metadata.iterations == 0:
-            if self.run_dir.exists():
-                shutil.rmtree(self.run_dir)
+        if cleanup_if_empty and self.metadata.iterations == 0 and self.run_dir.exists():
+            shutil.rmtree(self.run_dir)
 
     def verify_action_config_hash(self, actual_hash: str) -> None:
         """Ensure action abstraction hash matches run metadata."""
@@ -561,10 +560,8 @@ class RunTracker:
         if not base_path.exists():
             return []
 
-        runs = []
-        for item in base_path.iterdir():
-            if item.is_dir() and not item.name.startswith("."):
-                if (item / ".run.json").exists():
-                    runs.append(item.name)
-
-        return sorted(runs)
+        return sorted(
+            item.name
+            for item in base_path.iterdir()
+            if item.is_dir() and not item.name.startswith(".") and (item / ".run.json").exists()
+        )

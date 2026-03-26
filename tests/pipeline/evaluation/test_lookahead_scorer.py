@@ -171,7 +171,7 @@ class TestTrapSpot:
     lookahead sees that checking induces a jam it can call with the nuts."""
 
     @staticmethod
-    def _script(state: GameState, legal: list[Action]) -> dict[Action, float]:
+    def _script(state: GameState, _legal: list[Action]) -> dict[Action, float]:
         if state.to_call > 0:
             return {fold(): 0.9, call(): 0.1}  # folds out vs a lead
         return {all_in(400): 1.0}  # jams after a check

@@ -39,17 +39,18 @@ from src.shared.config import Config
 class ScorableBlueprint(Protocol):
     """The minimum an evaluator needs from a blueprint.
 
-    Deliberately does NOT declare ``storage``. Policy access goes through
-    :func:`policy_source_for`, and reaching for storage directly is the habit
-    that hard-wired consumers to a particular backend in the first place. This
-    protocol once had a storage-declaring twin so the two backends could both be
-    named; the twin is gone with the backend that needed it.
+    Declares ``policy_source``, not ``storage``. Every consumer here wants to
+    ask "what does the blueprint play at this state", and routing that through
+    the source rather than the table is what keeps them from re-implementing
+    infoset addressing -- the habit that once hard-wired the exact-BR engine to
+    one backend.
     """
 
     action_model: ActionModel
     card_abstraction: BucketingStrategy
     rules: GameRules
     config: Config
+    policy_source: PolicySource
 
     def sample_action_from_strategy(self, state: GameState, *, use_average: bool = True) -> Action:
         """Sample an action from the blueprint policy at ``state``."""
@@ -161,26 +162,8 @@ class TreePolicySource:
         return infoset
 
 
-def policy_source_for(blueprint: object) -> PolicySource:
-    """The policy source over a blueprint's storage.
-
-    Typed ``object`` rather than declaring a ``storage`` attribute: naming it
-    here would reintroduce the very incompatibility ``ScorableBlueprint`` exists
-    to avoid. A non-static storage is a caller error rather than a second
-    branch — the key-addressed backend it would have selected is gone.
-    """
-    storage = getattr(blueprint, "storage")
-    if not isinstance(storage, StaticArrayStorage):
-        raise TypeError(
-            f"Scoring requires a static-tree blueprint; got storage {type(storage).__name__}."
-        )
-    tree = getattr(blueprint, "tree", None) or storage.tree
-    return TreePolicySource(tree, storage, getattr(blueprint, "card_abstraction"))
-
-
 __all__ = (
     "PolicySource",
     "ScorableBlueprint",
     "TreePolicySource",
-    "policy_source_for",
 )

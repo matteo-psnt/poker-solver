@@ -184,7 +184,7 @@ class TestArtifactFormat:
         assert buckets.shape[0] == N_TEST_BOARDS
 
     def test_metadata_has_quality_stats(self, flop_artifact):
-        with open(flop_artifact / "metadata.json") as f:
+        with (flop_artifact / "metadata.json").open() as f:
             metadata = json.load(f)
 
         assert metadata["storage_version"] == 2

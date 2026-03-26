@@ -18,7 +18,7 @@ Layout on disk::
     <dir>/STATIC_CHECKPOINT.json     manifest: current + retained ladder
     <dir>/static-<iteration>.zarr    the five arrays
 
-The manifest is published with an atomic ``os.replace`` after the arrays are
+The manifest is published with an atomic ``Path.replace`` after the arrays are
 fully written, so a snapshot is either current or absent, never half-current.
 The retained ladder keeps at most one snapshot per ``retain_every`` band, which
 is what makes a within-run exploitability curve computable after the fact — the
@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -173,7 +172,7 @@ def save_checkpoint(
     }
     tmp = checkpoint_dir / (MANIFEST_FILE + ".tmp")
     tmp.write_text(json.dumps(manifest, indent=2))
-    os.replace(tmp, checkpoint_dir / MANIFEST_FILE)
+    tmp.replace(checkpoint_dir / MANIFEST_FILE)
 
     _prune(checkpoint_dir, manifest)
     return zarr_path

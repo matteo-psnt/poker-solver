@@ -34,12 +34,12 @@ class TestActionAbstraction:
             street=Street.PREFLOP,
             pot=3,
             stacks=(197, 198),
-            board=tuple(),
+            board=(),
             hole_cards=(
                 (Card.new("As"), Card.new("Kh")),
                 (Card.new("Qd"), Card.new("Jc")),
             ),
-            betting_history=tuple(),
+            betting_history=(),
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -63,7 +63,7 @@ class TestActionAbstraction:
                 (Card.new("Jc"), Card.new("Th")),
                 (Card.new("9s"), Card.new("8h")),
             ),
-            betting_history=tuple(),
+            betting_history=(),
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -131,7 +131,7 @@ class TestActionAbstraction:
                 (Card.new("Jc"), Card.new("Th")),
                 (Card.new("9s"), Card.new("8h")),
             ),
-            betting_history=tuple(),
+            betting_history=(),
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -182,7 +182,7 @@ class TestActionAbstraction:
                 (Card.new("Jc"), Card.new("Th")),
                 (Card.new("9s"), Card.new("8h")),
             ),
-            betting_history=tuple(),
+            betting_history=(),
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -209,7 +209,7 @@ class TestActionAbstraction:
     def test_init_validation_errors(self):
         try:
             ActionModel(config="bad")  # type: ignore[arg-type]
-            assert False, "Expected TypeError"
+            raise AssertionError("Expected TypeError")
         except TypeError:
             pass
 
@@ -245,7 +245,7 @@ class TestActionAbstraction:
                 (Card.new("Jc"), Card.new("Th")),
                 (Card.new("9s"), Card.new("8h")),
             ),
-            betting_history=tuple(),
+            betting_history=(),
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -371,7 +371,7 @@ class TestActionAbstraction:
                 (Card.new("Jc"), Card.new("Th")),
                 (Card.new("9s"), Card.new("8h")),
             ),
-            betting_history=tuple(),
+            betting_history=(),
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -396,7 +396,7 @@ class TestActionAbstraction:
                 (Card.new("2c"), Card.new("3c")),
                 (Card.new("4d"), Card.new("5d")),
             ),
-            betting_history=tuple(),
+            betting_history=(),
             button_position=0,
             current_player=0,
             is_terminal=True,

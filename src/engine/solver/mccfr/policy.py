@@ -11,11 +11,11 @@ from src.core.game.state import GameState
 from src.engine.solver.policy_lookup import blueprint_action_distribution
 
 if TYPE_CHECKING:
-    from .solver import MCCFRSolver
+    from src.engine.solver.policy_source import ScorableBlueprint
 
 
 def sample_action_from_strategy(
-    self: MCCFRSolver,
+    self: ScorableBlueprint,
     state: GameState,
     *,
     use_average: bool = True,

@@ -24,7 +24,7 @@ from src.engine.search.range_inference import (
 from src.engine.search.subgame_cfr import solve_subgame
 from src.engine.search.tree_builder import build_local_tree
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.shared.config import ResolverConfig
 from src.shared.numeric import NORMALIZE_EPS
 
@@ -58,7 +58,7 @@ class HUResolver:
         # tree-addressed one answer 'which infoset is this?' incompatibly.
         # Resolved once: the blueprint's storage backend does not change mid-solve,
         # and range inference hits this per combo.
-        self._policy_source = policy_source_for(blueprint)
+        self._policy_source = blueprint.policy_source
         self.action_model = action_model
         self.rules = rules
         self.config = config

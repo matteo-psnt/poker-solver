@@ -27,7 +27,7 @@ import os
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -109,10 +109,8 @@ def measure_tree(root: Path) -> dict[str, int]:
         for dirpath, _, filenames in os.walk(root):
             for name in filenames:
                 files += 1
-                try:
-                    total_bytes += os.path.getsize(os.path.join(dirpath, name))
-                except OSError:
-                    pass
+                with suppress(OSError):
+                    total_bytes += (Path(dirpath) / name).stat().st_size
     except OSError:
         return {"files": 0, "bytes": 0}
     return {"files": files, "bytes": total_bytes}

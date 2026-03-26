@@ -321,7 +321,7 @@ def append_record(record: dict[str, Any], ledger_path: Path = DEFAULT_LEDGER_PAT
     with ``ledger --rebuild``.
     """
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(ledger_path, "a", encoding="utf-8") as handle:
+    with ledger_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, default=json_default) + "\n")
 
 
@@ -362,7 +362,7 @@ def read_records(ledger_path: Path = DEFAULT_LEDGER_PATH) -> list[dict[str, Any]
     if not ledger_path.exists():
         return []
     records = []
-    with open(ledger_path, encoding="utf-8") as handle:
+    with ledger_path.open(encoding="utf-8") as handle:
         for number, line in enumerate(handle, start=1):
             line = line.strip()
             if not line:
@@ -441,9 +441,11 @@ def latest_record_for_run(
     for record in read_records(ledger_path):
         if record.get("run_id") != run_id:
             continue
-        if checkpoint_iteration is not None:
-            if record.get("checkpoint_iteration") != checkpoint_iteration:
-                continue
+        if (
+            checkpoint_iteration is not None
+            and record.get("checkpoint_iteration") != checkpoint_iteration
+        ):
+            continue
         match = record
     return match
 

@@ -5,12 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.engine.solver.mccfr import MCCFRSolver
+from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.pipeline.evaluation.blueprint_match import play_blueprint_match
 from tests.test_helpers import build_trained_test_solver
 
 
-def _build_solver(iterations: int, session_id: str) -> MCCFRSolver:
+def _build_solver(iterations: int, session_id: str) -> StaticTreeSolver:
     return build_trained_test_solver(iterations, session_id=session_id)
 
 

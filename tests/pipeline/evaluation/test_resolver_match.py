@@ -7,7 +7,7 @@ import pytest
 
 from src.core.game.actions import call
 from src.core.game.state import Card, Street
-from src.engine.solver.mccfr import MCCFRSolver
+from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.pipeline.evaluation.resolver_match import (
     _deal_from_stack,
     play_resolver_match,
@@ -15,7 +15,7 @@ from src.pipeline.evaluation.resolver_match import (
 from tests.test_helpers import build_trained_test_solver
 
 
-def _build_solver(iterations: int) -> MCCFRSolver:
+def _build_solver(iterations: int) -> StaticTreeSolver:
     return build_trained_test_solver(iterations, session_id="resolver-match")
 
 

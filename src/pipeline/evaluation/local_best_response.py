@@ -81,7 +81,7 @@ def local_best_response_value(
                 legal, probs = _actor_strategy(state, player, use_cont=True)
                 result = sum(
                     prob * cont_value(game.next_state(state, action))
-                    for action, prob in zip(legal, probs)
+                    for action, prob in zip(legal, probs, strict=True)
                     if prob > 0.0
                 )
         cont_cache[state] = result
@@ -127,7 +127,7 @@ def local_best_response_value(
                     legal, probs = _actor_strategy(state, player, use_cont=True)
                     result = sum(
                         prob * real_value(game.next_state(state, a))
-                        for a, prob in zip(legal, probs)
+                        for a, prob in zip(legal, probs, strict=True)
                         if prob > 0.0
                     )
                 else:
@@ -136,7 +136,7 @@ def local_best_response_value(
                 legal, probs = _actor_strategy(state, player, use_cont=False)
                 result = sum(
                     prob * real_value(game.next_state(state, action))
-                    for action, prob in zip(legal, probs)
+                    for action, prob in zip(legal, probs, strict=True)
                     if prob > 0.0
                 )
         real_cache[state] = result

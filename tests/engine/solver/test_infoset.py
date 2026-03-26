@@ -125,7 +125,7 @@ class TestInfoSetKey:
         """InfoSetKeys should be immutable (frozen)."""
         key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         with pytest.raises(AttributeError):
-            setattr(key, "postflop_bucket", 30)
+            key.postflop_bucket = 30  # ty: ignore[invalid-assignment]
 
     def test_get_hand_repr(self):
         """Test get_hand_repr method."""

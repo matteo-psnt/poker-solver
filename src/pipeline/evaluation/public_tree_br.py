@@ -53,7 +53,7 @@ from src.engine.search.subgame_cfr import RunoutEvaluator, nonblocking_mass
 from src.engine.solver.infoset_encoder import get_spr_bucket
 from src.engine.solver.infoset_index import preflop_hand_index
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
 
 logger = logging.getLogger(__name__)
@@ -152,14 +152,16 @@ class _BoardPlan:
         counts = np.array([info.raw_count for info in infos], dtype=np.float64)
         probs = counts / counts.sum()
         if config.num_flops >= len(infos):
-            self.flops = [(info.representative, float(p)) for info, p in zip(infos, probs)]
+            self.flops = [
+                (info.representative, float(p)) for info, p in zip(infos, probs, strict=True)
+            ]
         else:
             rng = np.random.default_rng(np.random.SeedSequence([config.board_seed]))
             draws = rng.choice(len(infos), size=config.num_flops, replace=True, p=probs)
             unique, tallies = np.unique(draws, return_counts=True)
             self.flops = [
                 (infos[int(i)].representative, float(n) / config.num_flops)
-                for i, n in zip(unique, tallies)
+                for i, n in zip(unique, tallies, strict=True)
             ]
 
     def deal_options(self, board: tuple[Card, ...]) -> list[tuple[tuple[Card, ...], float]]:
@@ -200,7 +202,7 @@ class PublicTreeBestResponse:
         starting_stack: int,
         blueprint_factory: Callable[[], ScorableBlueprint] | None = None,
     ):
-        self._policy_source = policy_source_for(blueprint)
+        self._policy_source = blueprint.policy_source
         self._factory = blueprint_factory
         self._rules = blueprint.rules
         self._action_model = blueprint.action_model

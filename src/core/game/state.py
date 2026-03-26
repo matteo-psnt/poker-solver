@@ -454,7 +454,7 @@ class GameState:
 
         normalized = [
             action.normalize(initial_pot + pot_before)
-            for action, pot_before in zip(self.betting_history, contributed_before)
+            for action, pot_before in zip(self.betting_history, contributed_before, strict=True)
         ]
 
         sequence = "-".join(normalized)
