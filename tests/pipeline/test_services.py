@@ -7,7 +7,6 @@ import pytest
 
 from src.pipeline import services
 from src.pipeline.evaluation.hunl_local_best_response import HandOutcome, LBRConfig
-from src.pipeline.services import RolloutParams
 from src.pipeline.services import abstraction as services_abstraction
 from src.pipeline.services import evaluation as services_evaluation
 from src.pipeline.services import runs as services_runs
@@ -168,46 +167,6 @@ def test_load_run_metadata_delegates_to_run_tracker(monkeypatch, tmp_path):
     actual = services_runs.load_run_metadata(tmp_path / "run-1")
 
     assert actual is metadata
-
-
-def test_evaluate_run_rollout_returns_output(monkeypatch, tmp_path):
-    """evaluate_run_rollout should build solver, compute exploitability, and return output."""
-    config = MagicMock(name="config")
-    metadata = SimpleNamespace(config=config)
-    storage = MagicMock(name="storage")
-    storage.num_infosets.return_value = 1234
-
-    class FakeSolver:
-        pass
-
-    expected_results = {
-        "exploitability_mbb": 1.23,
-        "std_error_mbb": 0.1,
-        "confidence_95_mbb": (1.0, 1.4),
-        "player_0_br_utility": 0.01,
-        "player_1_br_utility": -0.01,
-        "num_samples": 50,
-    }
-
-    monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
-    monkeypatch.setattr(
-        services_evaluation,
-        "build_static_evaluation_solver",
-        lambda cfg, checkpoint_dir: (FakeSolver(), storage),
-    )
-    monkeypatch.setattr(
-        services_evaluation,
-        "evaluate_solver_exploitability",
-        lambda solver, **kwargs: expected_results,
-    )
-
-    output = services.evaluate_run_rollout(
-        tmp_path / "run-1",
-        RolloutParams(num_samples=50, num_rollouts=7, use_average_strategy=True, seed=42),
-    )
-
-    assert output.infosets == 1234
-    assert output.results == expected_results
 
 
 def test_evaluate_run_lbr_refuses_run_without_recorded_abstraction(monkeypatch, tmp_path):

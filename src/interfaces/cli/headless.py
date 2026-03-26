@@ -29,7 +29,6 @@ from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.evaluation.public_tree_br import PublicBRConfig
 from src.pipeline.evaluation.statistics import compare_paired_samples
-from src.pipeline.services import RolloutParams
 from src.shared import checkpoint_profile
 from src.shared.jsonio import json_default
 from src.shared.log import configure_logging
@@ -165,12 +164,6 @@ def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
             scorer=args.scorer,
             lookahead_depth=args.lookahead_depth,
             lookahead_top_k=args.lookahead_top_k,
-        ),
-        rollout=RolloutParams(
-            num_samples=args.samples,
-            num_rollouts=args.rollouts,
-            use_average_strategy=not args.current,
-            seed=args.seed,
         ),
         exact_br=PublicBRConfig(
             num_flops=args.br_flops,
@@ -425,11 +418,11 @@ def _add_eval_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
     )
     p_eval.add_argument(
         "--method",
-        choices=["lbr", "rollout", "exact_br"],
+        choices=["lbr", "exact_br"],
         default="lbr",
-        help="lbr = Local Best Response (trustworthy, default); rollout = legacy diagnostic; "
-        "exact_br = deterministic exact BR on a sampled public tree (zero eval variance; "
-        "compare within a matched board tier).",
+        help="lbr = Local Best Response (trustworthy, default); exact_br = deterministic "
+        "exact BR on a sampled public tree (zero eval variance; compare within a "
+        "matched board tier).",
     )
     # LBR options (--method lbr).
     p_eval.add_argument("--hands", type=int, default=1000, help="[lbr] Number of hands.")
@@ -499,14 +492,6 @@ def _add_eval_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
     p_eval.add_argument(
         "--br-board-seed", type=int, default=7, help="[exact_br] Seed pinning the board sample."
     )
-    # Rollout options (--method rollout).
-    p_eval.add_argument("--samples", type=int, default=500, help="[rollout] Number of samples.")
-    p_eval.add_argument("--rollouts", type=int, default=50, help="[rollout] Rollouts per infoset.")
-    p_eval.add_argument(
-        "--current",
-        action="store_true",
-        help="[rollout] Evaluate the current strategy instead of the average.",
-    )
     p_eval.add_argument("--seed", type=int, default=None, help="Random seed (default: random).")
     p_eval.set_defaults(func=_cmd_evaluate)
 
@@ -524,7 +509,7 @@ def _add_ledger_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> Non
     p_ledger.add_argument("--run", default=None, help="Filter to a single run id.")
     p_ledger.add_argument("--experiment", default=None, help="Filter to one experiment id.")
     p_ledger.add_argument(
-        "--method", default=None, choices=["lbr", "rollout", "exact_br"], help="Filter by method."
+        "--method", default=None, choices=["lbr", "exact_br"], help="Filter by method."
     )
     p_ledger.add_argument(
         "--since", default=None, metavar="ISO8601", help="Only rows at or after this timestamp."

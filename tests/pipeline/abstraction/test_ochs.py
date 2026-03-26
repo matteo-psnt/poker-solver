@@ -145,7 +145,14 @@ class TestSeparatesWhatEquityCannot:
         )
 
 
+@pytest.mark.timeout(30)
 class TestOpponentClusters:
+    """~1-2s each: each test samples preflop class equities.
+
+    Explicit timeout because the 5s default has no slack for them -- they pass
+    solo and fail on a loaded machine, which reads as a real regression.
+    """
+
     def test_equities_are_plausible(self):
         equities = preflop_class_equities(samples=800, cache_dir=None)
         classes = PreflopHandClasses()
