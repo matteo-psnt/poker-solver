@@ -1,14 +1,14 @@
 """How a consumer asks "what is the blueprint's infoset here?".
 
-The two storage backends answer that question in incompatible ways. The dynamic
-backend is addressed by a hashed :class:`InfoSetKey`; the static backend is
-addressed by ``(node_id, bucket)`` and has no keys at all — deliberately, since
-the string hashing a key exists to support is the cost that design removes.
+A blueprint is addressed by ``(node_id, bucket)`` — an index into the betting
+tree, with no keys anywhere.
 
-Evaluation code should not have to know which. Before this seam, the exact-BR
-engine constructed ``InfoSetKey`` objects inline, which both hard-wired it to
-the dynamic backend and put key construction — a solver concern — inside the
-evaluation layer. A policy source moves that back behind one method.
+Evaluation code should not have to know that. Before this seam the exact-BR
+engine built infoset keys inline, which put a solver concern inside the
+evaluation layer and hard-wired that layer to one storage layout; changing the
+layout meant editing every scorer. A policy source moves it back behind one
+method, and is why the scorers survived the storage layout being replaced
+underneath them.
 
 The seam is deliberately ``(state, bucket) -> InfoSet`` rather than
 ``-> distribution``: consumers already own the filtering and fallback policy via

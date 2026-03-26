@@ -1,8 +1,7 @@
 """The bridge that lets evaluation read a tree-addressed blueprint.
 
-Two backends answer "which infoset is this?" incompatibly — one by hashed key,
-one by ``(node_id, bucket)``. The exact-BR engine used to build keys inline,
-which hard-wired it to the dynamic backend. These tests cover the seam, and in
+The exact-BR engine used to build infoset keys inline, which hard-wired it to
+one storage layout. These tests cover the seam that replaced that, and in
 particular the ordering hazard it exposed: the BR engine enumerates preflop
 buckets by INDEX and gathers policy rows through a combo->index map, so if that
 map and the solver's own preflop ordering ever disagree, every preflop policy

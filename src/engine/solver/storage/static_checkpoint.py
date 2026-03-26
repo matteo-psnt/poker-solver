@@ -1,11 +1,11 @@
 """Checkpointing for :class:`StaticArrayStorage`.
 
-A static checkpoint is just the flat arrays plus the tree fingerprint. There is
-no key table, which is the whole point: in the dynamic backend the key table and
-its stable hash were ~83% of the checkpoint write cost, and they existed only to
-record which infoset each row belonged to. Here the tree already says that, and
-the tree is a pure function of config — so the checkpoint stores numbers and a
-16-byte fingerprint proving which tree those numbers are indexed by.
+A checkpoint is the flat arrays plus a tree fingerprint, and nothing else. It
+stores no record of which infoset each row belongs to because the tree already
+says that, and the tree is a pure function of config — so what is written is
+numbers plus a 16-byte fingerprint proving which tree those numbers index.
+(The layout this replaced carried that mapping explicitly, at ~83% of the
+write cost.)
 
 That fingerprint is load-bearing rather than defensive. A checkpoint carries no
 self-describing row identity, so loading one against a different tree would not

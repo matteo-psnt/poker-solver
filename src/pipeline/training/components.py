@@ -104,12 +104,6 @@ def build_static_evaluation_solver(
 ) -> tuple[StaticTreeSolver, StaticArrayStorage]:
     """Build a read-only blueprint over a STATIC checkpoint.
 
-    The static and dynamic backends are not interchangeable -- one is addressed
-    by a hashed key, the other by ``(node_id, bucket)`` -- so evaluation cannot
-    share a loader. It shares the seam below it instead: both produce something
-    satisfying ``ScorableBlueprint``, and ``policy_source_for`` dispatches on the
-    concrete storage. The scoring engines never learn which they were handed.
-
     ``session_id=None`` allocates process-local arrays rather than shared memory:
     an evaluation is a single read-only process, and taking a named segment would
     collide with a training run of the same id.
