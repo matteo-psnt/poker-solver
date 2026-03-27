@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from datetime import UTC
 from types import SimpleNamespace
 
 import numpy as np
@@ -328,7 +329,7 @@ def test_since_filter_compares_instants_not_strings(tmp_path):
     led = tmp_path / "ledger.jsonl"
     now = datetime.now().astimezone()
     old_naive = (now - timedelta(hours=2)).replace(tzinfo=None).isoformat()
-    new_utc = (now + timedelta(hours=2)).astimezone(eval_ledger.UTC).isoformat()
+    new_utc = (now + timedelta(hours=2)).astimezone(UTC).isoformat()
     for run_id, ts in (("old", old_naive), ("new", new_utc)):
         eval_ledger.append_record({"run_id": run_id, "timestamp": ts}, led)
 

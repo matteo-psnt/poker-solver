@@ -9,6 +9,7 @@ JSONL is a rebuildable cache. These tests pin that property.
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC
 from pathlib import Path
 
 from src.pipeline.evaluation import ledger
@@ -242,7 +243,7 @@ class TestReviewFixes:
         rows = [
             {
                 "run_id": "utc",
-                "timestamp": (local + timedelta(hours=1)).astimezone(ledger.UTC).isoformat(),
+                "timestamp": (local + timedelta(hours=1)).astimezone(UTC).isoformat(),
             },
             {"run_id": "naive", "timestamp": local.replace(tzinfo=None).isoformat()},
         ]
