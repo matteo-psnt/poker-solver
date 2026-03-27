@@ -233,7 +233,7 @@ class TestAllInRunoutAveraging:
         for card in Card.get_full_deck():
             if card.mask & known:
                 continue
-            river_state = engine._with_runout(allin_state, (card,))
+            river_state = engine.showdown._with_runout(allin_state, (card,))
             acc, total = 0.0, 0.0
             for idx in combo_indices:
                 if COMBO_MASKS[idx] & card.mask:
