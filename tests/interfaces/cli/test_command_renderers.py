@@ -31,6 +31,28 @@ PAYLOADS: dict[str, dict] = {
         "dropped_updates": 0,
         "status": "completed",
     },
+    "ab": {
+        "op": "ab",
+        "config_name": "quick_test",
+        "iterations": 200_000,
+        "seed": 42,
+        "determinism_verified": True,
+        # The service preformats the table, so the renderer only has to print it.
+        "table": "A/B  config=quick_test\ncontrol  6283.25\nprune110  11240.00  +79%",
+        "arms": [
+            {
+                "name": "control",
+                "run_id": "run-a",
+                "overrides": {},
+                "iterations": 200_000,
+                "touched_rows": 1_050_124,
+                "num_rows": 2_000_000,
+                "coverage": 0.525,
+                "runtime_seconds": 337.5,
+                "exploitability_mbb": 6283.25,
+            },
+        ],
+    },
     "precompute": {
         "op": "precompute",
         "abstraction_config": "production",

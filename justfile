@@ -204,6 +204,31 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     fi
     echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
 
+# Build a card abstraction ON A NODE and publish it to the share.
+#
+#   just precompute production_ochs_river
+#
+# Precompute was the one step that could not leave a workstation: every other op
+# consumed abstractions built locally and uploaded with `just push-data`. It
+# saturates every core for ~10-40 minutes depending on bucket count, which is
+# what a node is for.
+#
+# The arg is an ABSTRACTION config stem (config/abstraction/<stem>.yaml), not a
+# training config. Idempotent: an abstraction already published, and therefore
+# already pulled down by the node, makes the CLI skip the work.
+#
+# Afterwards `just submit` can train against it immediately -- the leg script
+# refreshes node-local abstractions from the share before every op, so a node
+# that booted before this ran still sees it.
+[doc("Build a card abstraction on a node and publish it. Args: abstraction-config")]
+precompute config:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SNAP=$(just push-code)
+    echo "  code snapshot: $SNAP"
+    RUN_OP=precompute RUN_TIMEOUT="${RUN_TIMEOUT:-4h}" \
+      just _task "$SNAP" "{{config}}" "0" "" "" "" "" ""
+
 # Start a NEW run and train it to an absolute iteration count.
 #
 #   just submit quick_test 3000

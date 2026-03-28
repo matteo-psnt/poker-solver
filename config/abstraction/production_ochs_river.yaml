@@ -1,0 +1,123 @@
+# Production abstraction, OCHS river feature — literature arm F3.
+#
+# Identical to production.yaml in every field except `river_feature`. Same bucket
+# counts, same flop/turn treatment, same k-means settings, same seed, so the
+# infoset count is bit-identical to production and any exploitability difference
+# isolates the river FEATURE. This is the production-scale version of the
+# existing ochs_gate_* pair (which runs at 20/20/20 to be cheap).
+#
+# Why: Johanson, Burch, Valenzano & Bowling (AAMAS 2013) introduced OCHS
+# precisely because scalar equity is degenerate on the river — "After all of the
+# public cards are revealed in the final round, each histogram becomes a single
+# impulse at the corresponding hand strength value, and earth mover's distance
+# and the difference in E[HS] are equivalent." There is no distributional
+# information left for a potential-aware metric to exploit, so they add a
+# feature that carries WHICH part of the opponent's range a hand beats.
+#
+# Their Table 4 isolates exactly this swap (naming is <early>-<river>; river
+# "PHS" is a single partition on E[HS], i.e. our scalar_equity), CFR-BR
+# exploitability in mbb/g:
+#
+#   early streets                     river=PHS   river=OCHS   change
+#   k-means EMD, imperfect recall        80.557      64.820     -19.5%   <- our setting
+#   k-means EMD, perfect recall          90.720      84.039      -7.4%
+#   PHS, imperfect recall                94.841      85.275     -10.1%
+#   OCHS, imperfect recall               88.546      73.091     -17.5%
+#
+# It helps in all four; the largest effect is in the row matching our
+# configuration (imperfect recall + EMD-clustered early streets). Caveat: their
+# domain is two-player LIMIT hold'em.
+#
+# Corroborating in-house measurement: production's own scalar-equity buckets are
+# saturated at 600 (variance explained 0.999999) — the feature, not the bucket
+# count, is the binding constraint. See the note in PrecomputeConfig.
+#
+# ---------------------------------------------------------------------------
+# MEASURED 08-01 AT GATE SCALE (20/20/20): OCHS LOST by 10.5%
+# ---------------------------------------------------------------------------
+#   poker-solver-run ab --config ochs_gate --iterations 100000 --seed 42
+#     control (scalar river)  133.3s  90.2% coverage  5573.76 mbb/g
+#     ochs                    140.8s  91.1% coverage  6161.47 mbb/g  (+10.5%)
+#
+# Predicted before the run, and the reason matters: this arm's whole premise is
+# that at PRODUCTION bucket counts scalar equity is SATURATED (variance
+# explained 0.999999 at 600 river buckets), so the equity fidelity OCHS gives up
+# is worthless. At 20 buckets equity is NOT saturated — measured 0.997670 scalar
+# vs 0.970936 ochs — so OCHS surrenders 2.7 points of real equity fidelity, and
+# its range-structure benefit does not repay that.
+#
+# So the gate result tests OCHS in the one regime where its own premise is
+# false. It does NOT refute this config; it does mean the cheap test cannot
+# clear it either. Settling it needs production bucket counts, where the
+# saturation premise actually holds — which is what this file is for.
+#
+# PREMISE NOW VERIFIED (08-01), cheaply and without training anything. The
+# saturation claim is a property of the ABSTRACTION, so a bucket-count sweep
+# settles it — one equity pass, many k-means fits (services.sweep_bucket_counts,
+# river street, 1500 canonical boards):
+#
+#   buckets   scalar var_expl   ochs var_expl   gap OCHS pays
+#        20          0.998246        0.985235        0.013011
+#        50          0.999740        0.992906        0.006834
+#       100          0.999947        0.995547        0.004400
+#       200          0.999991        0.997562        0.002429
+#       400          0.999999        0.998460        0.001539
+#       600          1.000000        0.999005        0.000995
+#
+# Scalar equity IS saturated at 600 (1.000000), and the fidelity OCHS trades
+# away COLLAPSES 13x from 20 to 600 buckets. So the gate-scale loss above was
+# measured where OCHS pays its highest possible price; at the counts this file
+# uses it pays ~13x less. The premise holds — a production A/B is justified by
+# measurement now, not by citation.
+#
+# What remains unknown is whether the range structure OCHS buys is worth even
+# that reduced price. Only exploitability answers that, and at these bucket
+# counts (32.2M rows) it is a multi-hour training run, not a local probe.
+#
+# ---------------------------------------------------------------------------
+# DO NOT judge this arm by `variance_explained` in metadata.json
+# ---------------------------------------------------------------------------
+# That metric is computed over EQUITY only (see compute_street_quality), so
+# scalar-equity bucketing maximises it BY CONSTRUCTION — it clusters on exactly
+# the quantity being scored. OCHS optimises for something equity cannot express
+# (which part of the opponent's range a hand beats), so it necessarily scores
+# slightly lower and looks worse to a metric that cannot see what it is for.
+#
+# Measured on 400 canonical river boards, both at 600 buckets:
+#   variance_explained   scalar 1.000000   ochs 0.999425
+#   cells assigned a different bucket than scalar:  96.1%
+#
+# The 96.1% is the meaningful number: the swap is emphatically not a no-op. The
+# 0.999425 is the metric measuring the wrong thing. Only exploitability can rank
+# these two — which is the entire reason this ships as an ARM rather than a
+# default. Rejecting it on the quality metric would be a mistake.
+#
+# Precompute cost: comparable to production. Bucket counts are identical, so the
+# k-means fits are the same size; OCHS fills the same per-class feature slot the
+# realization histogram normally occupies (8 clusters vs 8 bins), so the feature
+# computation is the same shape too. Unlike production_flat_buckets, this arm
+# does not change the cost profile.
+#
+# Run as an arm against production, not as a replacement:
+#   uv run poker-solver-run precompute --config production_ochs_river
+#   ... train --config production --set card_abstraction__config=production_ochs_river \
+#       --experiment ochs-river --arm ochs --parent <control-run>
+
+buckets:
+  flop: 100
+  turn: 300
+  river: 600
+
+flop_runouts: null
+
+equity_histogram_bins: 8
+
+river_feature: ochs
+# 8 opponent clusters is the count used in the originating work.
+ochs_clusters: 8
+
+kmeans_max_iter: 500
+kmeans_n_init: 20
+
+num_workers: null
+seed: 42

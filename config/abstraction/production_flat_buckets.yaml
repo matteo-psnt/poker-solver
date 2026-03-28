@@ -1,0 +1,99 @@
+# Production abstraction, bucket budget redistributed flat — literature arm F4.
+#
+# Identical to production.yaml except the per-street bucket counts, which are
+# flattened while holding the TOTAL INFOSET COUNT fixed. Everything else — river
+# feature, histogram bins, k-means settings, seed — matches production, so the
+# comparison isolates the DISTRIBUTION of a fixed budget across streets.
+#
+# Why: Johanson et al. (AAMAS 2013) find that under imperfect recall you should
+# push buckets toward EARLIER streets at fixed total size — "In imperfect recall
+# abstractions it is possible to change the distribution of buckets throughout
+# the game, dramatically increasing the number of buckets in early rounds,
+# without changing the overall number of information sets." Two of their
+# same-size imperfect-recall abstractions, CFR-BR exploitability in mbb/g:
+#
+#   IR KE-KO 10-100-1000-10000  (escalating)                57,330,780 infosets   89.7975
+#   IR KE-KO 169-9000-9000-9000 (lossless first, then flat) 57,331,352 infosets   64.820
+#
+# -28% from redistribution alone, at equal cost. Their winner is defined by a
+# lossless first round plus EQUAL counts on later rounds; we already have the
+# lossless first round (169 exact preflop classes), so the faithful translation
+# of their winning shape is equal flop/turn/river counts, and of their loser is
+# production's escalating 100/300/600.
+#
+# Caveats worth keeping in view: their domain is two-player LIMIT hold'em, whose
+# betting tree branches differently from ours, and production escalates only 6x
+# (100->600) where their loser escalated 1000x (10->10000). This is a direction
+# to test, not evidence that production's shape is the pathological one they
+# measured.
+#
+# ---------------------------------------------------------------------------
+# Sizing arithmetic (do not change one number without redoing this)
+# ---------------------------------------------------------------------------
+# The infoset key is (node_id, bucket) and infosets are laid out node-major, so
+# total infosets = SUM over streets of nodes(street) * buckets(street), with the
+# preflop owning 169 canonical hands rather than buckets.
+#
+# Betting-tree node counts for the production action model (57,604 nodes total):
+#   preflop 32, flop 644, turn 6,620, river 50,308
+#
+# Note how lopsided that is: the river holds 50,308 / 57,604 = 87% of all nodes,
+# so river buckets dominate the budget and flop buckets are nearly free. This is
+# what makes the redistribution favourable here.
+#
+#   production 100/300/600:  32*169 + 644*100 + 6620*300 + 50308*600 = 32,240,608
+#
+# Solving 32*169 + (644 + 6620 + 50308) * n = 32,240,608 gives n = 559.9, so:
+#
+#   flat 560/560/560:        32*169 + 57572*560                      = 32,245,728
+#
+# 0.016% larger than production — matched for practical purposes. The trade is a
+# 5.6x refinement of the flop (100 -> 560) and a 1.9x refinement of the turn
+# (300 -> 560) bought for a 7% coarsening of the river (600 -> 560).
+#
+# ---------------------------------------------------------------------------
+# PRECOMPUTE COST: this arm is NOT as cheap as its sibling configs
+# ---------------------------------------------------------------------------
+# The sibling headers advertise "~10 minutes". That does not hold here. Bucket
+# count does not affect the equity computation (the dominant term, unchanged),
+# but it does affect the k-means fit, and the flop/turn path clusters 8-dim
+# realization CDFs over a fit sample capped at 2M rows with n_init: 20.
+#
+# Extrapolated from a synthetic fit of the same shape (300k rows, n_init=1,
+# scaled to 2M x 20) — NOT an end-to-end measurement of this config:
+#
+#   k=100 (production flop):  ~4 min      k=560 (this arm, flop):  ~20 min
+#   k=300 (production turn): ~11 min      k=560 (this arm, turn):  ~20 min
+#
+# So expect roughly 40 min of k-means where production spends ~15, i.e. this arm
+# costs something like +25 min on top of the shared equity precompute. The river
+# fit is unaffected (k=560 measured at 1.19 s/n_init vs k=600 at 1.27 s, so
+# marginally cheaper than production).
+#
+# Budget for it, or lower kmeans_n_init for a first look — but if you do, lower
+# it in the CONTROL too, or the arms are no longer matched.
+#
+# Validated on 300 canonical flop boards: 560 buckets REQUESTED and 560
+# ACHIEVED (k-means does not collapse at this k), variance explained 0.997992 vs
+# production's 0.995181 at 100, within-bucket equity std 0.009606 vs 0.014883 —
+# a 35% tighter flop partition, which is what the redistribution is buying.
+#
+# Run as an arm against production, not as a replacement:
+#   uv run poker-solver-run precompute --config production_flat_buckets
+#   ... train --config production --set card_abstraction__config=production_flat_buckets \
+#       --experiment bucket-shape --arm flat --parent <control-run>
+
+buckets:
+  flop: 560
+  turn: 560
+  river: 560
+
+flop_runouts: null
+
+equity_histogram_bins: 8
+
+kmeans_max_iter: 500
+kmeans_n_init: 20
+
+num_workers: null
+seed: 42

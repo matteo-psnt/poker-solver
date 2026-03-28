@@ -6,6 +6,7 @@ place that can be forgotten.
 """
 
 from src.interfaces.cli.commands._base import Command
+from src.interfaces.cli.commands.ab import COMMAND as AB
 from src.interfaces.cli.commands.checkpoint_profile import COMMAND as CHECKPOINT_PROFILE
 from src.interfaces.cli.commands.compare import COMMAND as COMPARE
 from src.interfaces.cli.commands.curve import COMMAND as CURVE
@@ -28,6 +29,7 @@ COMMANDS: tuple[Command, ...] = (
     PROMOTE,
     CHECKPOINT_PROFILE,
     COMPARE,
+    AB,
 )
 
 __all__ = ("COMMANDS", "Command")

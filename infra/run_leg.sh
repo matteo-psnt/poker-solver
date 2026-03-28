@@ -31,7 +31,11 @@
 #   RUN_EVAL_FLAGS_HEX  hex-encoded extra evaluate flags
 set -euo pipefail
 
-WORK=/mnt/work
+# Overridable ONLY so this script can be exercised off-node; the default is the
+# node's data disk and nothing in Batch sets it. Without this the publish/refresh
+# logic below could not be tested anywhere but on a live node, which is how a
+# publish ordering bug would reach the share before anyone noticed.
+WORK="${WORK:-/mnt/work}"
 SHARE="${AZ_BATCH_NODE_MOUNTS_DIR:-/mnt/batch/tasks/fsmounts}/shared"
 # Set by the task command line, which extracts there. Task-owned, and unique
 # per task so concurrent legs on one node cannot share a tree.
@@ -190,6 +194,38 @@ ln -sfn "$DATA" "$CODE/data"
 log "syncing dependencies"
 uv sync --quiet
 
+# Refresh node-local abstractions from the share.
+#
+# The pool's START TASK copies `$SHARE/combo_abstraction/.` down, but it runs
+# once, at BOOT. An abstraction published after a node came up is therefore
+# invisible to that node -- so a `precompute` leg followed by a `train` leg would
+# work only if the training happened to land on a node that booted later. This
+# closes that window: without it the new precompute op is usable only after the
+# pool recycles.
+#
+# Cheap in steady state: `-u` copies only what is missing or newer, so a node
+# that already has every abstraction pays a directory walk, not the ~773 MB.
+# Deliberately NOT fatal -- a share hiccup must not kill a leg whose abstraction
+# is already on local disk.
+if [ -d "$SHARE/combo_abstraction" ]; then
+  mkdir -p "$DATA/combo_abstraction"
+  # ONLY directories a completion marker vouches for. An unmarked one is either
+  # mid-publish or was interrupted, and copying it down yields the truncated-mmap
+  # failure the ladder fetch above documents at length.
+  #
+  # Abstractions uploaded by the older `just push-data` carry no marker, and that
+  # is fine: the start task already copied them down at boot, so this refresh
+  # only ever needs to catch what was published SINCE. Requiring the marker keeps
+  # the completeness guarantee absolute instead of trading it for a
+  # backward-compatibility path nothing depends on.
+  for marker in "$SHARE"/combo_abstraction/.complete-*; do
+    [ -f "$marker" ] || continue
+    name=$(basename "$marker"); name="${name#.complete-}"
+    [ -d "$SHARE/combo_abstraction/$name" ] || continue
+    cp -ru "$SHARE/combo_abstraction/$name" "$DATA/combo_abstraction/" 2>/dev/null || true
+  done
+fi
+
 # Fetch ONLY what the manifest names, never the whole archive directory.
 #
 # A task killed mid-publish leaves PARTIALLY-COPIED snapshot directories behind.
@@ -326,6 +362,70 @@ LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
 # actually decompress every chunk. A rung that fails is left unmarked and named,
 # which is a permanently honest record -- corrupt data is discovered here, once,
 # rather than in a scoring leg minutes deep.
+# PRECOMPUTE mode. Builds a card abstraction on the node and publishes it to the
+# share, so an abstraction experiment never needs a laptop.
+#
+# WHY this belongs here at all: every other op consumed abstractions that were
+# built locally and pushed with `just push-data`, which made "precompute" the one
+# step that could not leave a workstation. Precompute saturates every core for
+# ~10-40 minutes depending on bucket count, which is exactly the kind of work a
+# node exists for.
+#
+# RUN_CONFIG names an ABSTRACTION config here (config/abstraction/<stem>.yaml),
+# not a training config. The two namespaces are disjoint, the op is explicit, and
+# reusing the variable keeps `_task`'s signature unchanged.
+#
+# Output lands node-locally for free: `$CODE/data` is symlinked to `$DATA`, so
+# the CLI's own `data/combo_abstraction/<name>` IS `/mnt/work/data/...`. That
+# means a training task landing on THIS node can use it immediately; the copy to
+# the share is what makes it durable and available to every future node, whose
+# start task pulls the share down at boot.
+if [ "${RUN_OP:-train}" = "precompute" ]; then
+  [ -n "${RUN_CONFIG:-}" ] || { log "FATAL precompute needs RUN_CONFIG (abstraction stem)"; exit 1; }
+  log "precompute: abstraction config=$RUN_CONFIG (timeout $RUN_TIMEOUT)"
+  set +o pipefail
+  "${GUARD[@]}" uv run poker-solver-run precompute --config "$RUN_CONFIG" 2>&1 | tee -a "$LEG_LOG"
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
+  if [ "$rc" != 0 ]; then
+    publish_log
+    log "precompute FAILED rc=$rc"
+    exit "$rc"
+  fi
+
+  # Publish every abstraction the node holds that the share does not.
+  #
+  # ORDER IS THE CORRECTNESS ARGUMENT, exactly as for the ladder above: a node's
+  # start task copies `$SHARE/combo_abstraction/.` down wholesale, so a
+  # half-copied directory would be consumed as if complete and fail later inside
+  # a memory-mapped read. Copy into a TEMP name, then rename, then write the
+  # marker. A reader that sees the marker is guaranteed a complete directory.
+  mkdir -p "$SHARE/combo_abstraction"
+  published=0
+  for src in "$DATA"/combo_abstraction/*/; do
+    [ -d "$src" ] || continue
+    name=$(basename "$src")
+    if [ -f "$SHARE/combo_abstraction/.complete-$name" ]; then
+      continue
+    fi
+    log "  publishing $name"
+    staging="$SHARE/combo_abstraction/.staging-$name-${AZ_BATCH_TASK_ID:-local}"
+    rm -rf "$staging" 2>/dev/null || true
+    if cp -r "$src" "$staging" 2>/dev/null; then
+      rm -rf "$SHARE/combo_abstraction/$name" 2>/dev/null || true
+      mv "$staging" "$SHARE/combo_abstraction/$name"
+      : > "$SHARE/combo_abstraction/.complete-$name"
+      published=$((published + 1))
+    else
+      log "  WARN failed to publish $name; leaving the share untouched"
+      rm -rf "$staging" 2>/dev/null || true
+    fi
+  done
+  publish_log
+  log "precompute complete: $published abstraction(s) published"
+  exit 0
+fi
+
 if [ "${RUN_OP:-train}" = "repair-ladder" ]; then
   src="$ARCHIVE/$RUN_ID"
   [ -d "$src" ] || { log "FATAL no such run on the share: $RUN_ID"; exit 1; }

@@ -1,0 +1,42 @@
+# OCHS river-feature gate — training side of the paired abstraction experiment.
+#
+# Defaults to the CONTROL abstraction (scalar-equity river) so the arm is a
+# single override:
+#
+#   uv run poker-solver-run ab --config ochs_gate --iterations 100000 --seed 42 \
+#     --arm 'ochs:card_abstraction__config=ochs_gate_ochs'
+#
+# The A/B harness generates the control from a config's defaults, which is why
+# the control lives here rather than in a CLI flag — the baseline is a named,
+# reviewable artifact instead of something a caller has to remember to pass.
+#
+# The two abstractions (config/abstraction/ochs_gate_scalar.yaml and
+# ochs_gate_ochs.yaml) are byte-identical apart from `river_feature`, so any
+# difference isolates the FEATURE, not the bucket budget: same 20/20/20 counts,
+# same exact flop runouts, same k-means settings, same seed. Identical bucket
+# counts also mean an identical betting-tree row layout, so the two arms train
+# over exactly the same table shape.
+#
+# What is being tested: Johanson et al. (AAMAS 2013) introduced OCHS because on
+# the river EMD degenerates to an E[HS] difference — scalar equity cannot
+# express WHICH part of the opponent's range a hand beats, so a bluff-catcher
+# and a weak made hand of equal equity share a bucket while wanting opposite
+# strategies. Their Table 4, river feature isolated with early streets held at
+# EMD + imperfect recall (our setting): 80.557 -> 64.820 mbb/g CFR-BR.
+#
+# Caveats to carry into the reading: their domain is two-player LIMIT hold'em,
+# and 20 buckets per street is far coarser than the 600 production uses. A null
+# result here does not clear OCHS at production scale — it only says the effect
+# is not large enough to survive this abstraction's coarseness.
+
+solver:
+  # No discounting: keeps regrets accumulating linearly, so the comparison is
+  # not entangled with a weighting schedule.
+  iteration_weighting: none
+
+card_abstraction:
+  config: ochs_gate_scalar
+
+system:
+  seed: 42
+  config_name: "ochs_gate"
