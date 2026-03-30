@@ -14,9 +14,16 @@
 # NOT expected to be decisive; it tests whether the sign moves in the direction
 # the saturation premise predicts as the price drops.
 #
-# Cost: ~5.18M betting-tree rows (32*169 + 644*20 + 6620*20 + 50308*100) versus
-# the gate's 298,472 — the river owns 50,308 of 57,604 nodes, so river buckets
-# drive the table size almost entirely.
+# Cost: 1,365,992 betting-tree rows versus the gate's 298,472, i.e. 4.6x.
+#
+#   8*169 + 112*20 + 1400*20 + 13344*100 = 1,365,992
+#
+# Those are the DEFAULT action model's node counts (8 preflop, 112 flop, 1400
+# turn, 13,344 river; 14,864 total), which is what this config inherits — NOT
+# production's 57,604. An earlier version of this comment used production's
+# numbers and predicted ~5.18M rows, which was wrong by ~4x; the figure above is
+# confirmed against a real run's log. The river still dominates (13,344 of
+# 14,864 nodes), so river bucket count drives table size either way.
 
 buckets:
   flop: 20
