@@ -358,6 +358,55 @@ LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
 # actually decompress every chunk. A rung that fails is left unmarked and named,
 # which is a permanently honest record -- corrupt data is discovered here, once,
 # rather than in a scoring leg minutes deep.
+# PRECOMPUTE mode. Builds a card abstraction on a node and publishes it once.
+#
+# The output path needs no special handling: `$CODE/data` is a symlink to
+# $DATA (set above), and `precompute` writes to <base>/data/combo_abstraction/
+# <name>, so it lands on the node's data disk exactly where a training leg
+# would look for it.
+#
+# THE GUARD IS THE POINT. The invariant is "computed ONCE, never recomputed" --
+# not "computed locally", which is what the local-only workflow confused it
+# with. Bucket ASSIGNMENT is not pinned by card_abstraction_hash, so
+# republishing under the same name can silently change which bucket a hand
+# lands in, and every run trained against the old copy keeps a provenance check
+# that now passes over different buckets. Refusing to overwrite is what makes
+# running this in the cloud as safe as running it on a laptop.
+if [ "${RUN_OP:-train}" = "precompute" ]; then
+  [ -n "${RUN_CONFIG:-}" ] || { log "FATAL precompute needs RUN_CONFIG"; exit 1; }
+  log "precompute: config=$RUN_CONFIG (timeout $RUN_TIMEOUT)"
+  set +o pipefail
+  "${GUARD[@]}" uv run poker-solver-run precompute --config "$RUN_CONFIG" --json \
+    > "$WORK/precompute.json" 2> >(tee -a "$LEG_LOG" >&2)
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
+  if [ "$rc" != 0 ]; then
+    log "precompute failed rc=$rc"; publish_log; exit "$rc"
+  fi
+
+  # The command reports where it wrote; do not re-derive the directory name.
+  OUT_DIR=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["output_dir"])' \
+    "$WORK/precompute.json")
+  NAME=$(basename "$OUT_DIR")
+  DEST="$SHARE/combo_abstraction/$NAME"
+  log "precomputed $NAME -> $OUT_DIR"
+
+  if [ -d "$DEST" ] && [ -z "${RUN_FORCE_PUBLISH:-}" ]; then
+    log "REFUSING to republish: $NAME already exists on the share."
+    log "  Bucket assignment is not pinned by the abstraction hash, so replacing"
+    log "  it would silently invalidate every run trained against the old copy."
+    log "  Set RUN_FORCE_PUBLISH=1 only if no such run matters."
+    publish_log
+    exit 1
+  fi
+
+  mkdir -p "$DEST"
+  cp -ru "$OUT_DIR/." "$DEST/" || { log "FATAL publish failed"; publish_log; exit 1; }
+  log "published $NAME to the share ($(du -sh "$OUT_DIR" | cut -f1))"
+  publish_log
+  exit 0
+fi
+
 if [ "${RUN_OP:-train}" = "repair-ladder" ]; then
   src="$ARCHIVE/$RUN_ID"
   [ -d "$src" ] || { log "FATAL no such run on the share: $RUN_ID"; exit 1; }

@@ -100,6 +100,7 @@ class TestEnvironment:
             "RUN_EVAL_METHOD",
             "RUN_EVAL_AT",
             "RUN_EVAL_FLAGS_JSON",
+            "RUN_FORCE_PUBLISH",
         }
 
     def test_every_value_is_a_string(self):
@@ -143,3 +144,35 @@ class TestValidate:
     def test_an_unknown_op_is_refused(self):
         with pytest.raises(ValueError, match="Unknown op"):
             spec.LegSpec(code_snapshot="s", op="frobnicate", run_id="r").validate()
+
+
+class TestPrecomputeLeg:
+    """Building an abstraction on a node is a first-class op.
+
+    The invariant that kept precompute local was *computed once, never
+    recomputed* -- never *computed locally*. What the node must refuse is a
+    REPUBLISH, since bucket assignment is not pinned by the abstraction hash.
+    """
+
+    def test_it_needs_a_config(self):
+        with pytest.raises(ValueError, match="abstraction config"):
+            spec.LegSpec(code_snapshot="s", op=spec.PRECOMPUTE).validate()
+
+    def test_a_config_is_all_it_needs(self):
+        spec.LegSpec(code_snapshot="s", op=spec.PRECOMPUTE, config="ochs_gate_ochs").validate()
+
+    def test_it_needs_no_iteration_target(self):
+        """Unlike a training leg -- there is nothing to converge to."""
+        leg = spec.LegSpec(code_snapshot="s", op=spec.PRECOMPUTE, config="x", to=0)
+        leg.validate()
+        assert leg.environment()["RUN_TO"] == "0"
+
+    def test_force_publish_is_off_unless_asked(self):
+        env = spec.LegSpec(code_snapshot="s", op=spec.PRECOMPUTE, config="x").environment()
+        assert env["RUN_FORCE_PUBLISH"] == ""
+
+    def test_force_publish_reaches_the_node(self):
+        env = spec.LegSpec(
+            code_snapshot="s", op=spec.PRECOMPUTE, config="x", force_publish=True
+        ).environment()
+        assert env["RUN_FORCE_PUBLISH"] == "1"
