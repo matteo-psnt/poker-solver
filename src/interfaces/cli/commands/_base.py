@@ -17,8 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.shared.jsonio import json_default
-
 
 @dataclass(frozen=True)
 class Command:
@@ -29,14 +27,6 @@ class Command:
     run: Callable[[argparse.Namespace], dict[str, Any]]
     render: Callable[[dict[str, Any]], None]
     help: str = ""
-
-
-def write_result(run_dir: Path, payload: dict[str, Any]) -> None:
-    """Persist a per-operation result file (e.g. ``train-static_result.json``)."""
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / f"{payload['op']}_result.json").write_text(
-        json.dumps(payload, indent=2, default=json_default)
-    )
 
 
 def resolve_run_dir(run: str, runs_dir: str) -> Path:

@@ -10,6 +10,7 @@ from src.interfaces.cli.commands._base import (
     Command,
 )
 from src.pipeline.evaluation import ledger as eval_ledger
+from src.pipeline.training.run_tracker import migrate_run_log
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -32,6 +33,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--runs-dir", default="data/runs", help="Runs dir scanned by --rebuild.")
     parser.add_argument(
+        "--migrate",
+        action="store_true",
+        help=(
+            "Bring on-disk records up to the current layout: one document per "
+            "evaluation, and an event log per run. Non-destructive."
+        ),
+    )
+    parser.add_argument(
         "--rebuild",
         action="store_true",
         help="Regenerate the ledger from the per-run records on disk before listing. "
@@ -43,6 +52,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """List recent eval-ledger rows as a compact table, optionally rebuilding first."""
     ledger_path = Path(args.ledger)
+    migrated = None
+    if args.migrate:
+        migrated = eval_ledger.migrate_eval_files(Path(args.runs_dir), ledger_path)
+        # The run logs too: both are "bring what is on disk up to the current
+        # layout", and doing them separately invites a half-migrated tree.
+        runs_root = Path(args.runs_dir)
+        migrated["run_logs"] = (
+            sum(1 for d in sorted(runs_root.iterdir()) if d.is_dir() and migrate_run_log(d))
+            if runs_root.is_dir()
+            else 0
+        )
     rebuilt = None
     if args.rebuild:
         recovered, preserved = eval_ledger.rebuild_ledger(Path(args.runs_dir), ledger_path)
@@ -68,6 +88,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "op": "ledger",
         "ledger": str(args.ledger),
+        "migrated": migrated,
         "rebuilt": rebuilt,
         "rows": records,
     }
@@ -87,6 +108,16 @@ def render(payload: dict[str, Any]) -> None:
     # without --json, and the recovery counts are the entire point of that call.
     # A rebuild that found nothing and one that recovered 200 rows must not look
     # identical.
+    migrated = payload.get("migrated")
+    if migrated:
+        print(
+            f"Migrated {payload['ledger']}: {migrated['merged']} eval(s) merged from a "
+            f"payload+record pair, {migrated['payload_only']} recovered from a payload "
+            f"alone, {migrated['record_only']} from a record alone."
+        )
+        if migrated.get("run_logs"):
+            print(f"  and {migrated['run_logs']} run(s) converted to an event log.")
+        print("  Originals left in place — delete them once you are satisfied.")
     rebuilt = payload.get("rebuilt")
     if rebuilt:
         print(

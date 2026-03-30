@@ -19,6 +19,7 @@ behaviour rather than SDK awkwardness:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import tarfile
 import tempfile
@@ -114,6 +115,20 @@ def read_text(service: ShareServiceClient, share: str, path: str) -> str | None:
     except ResourceNotFoundError:
         return None
     return bytes(downloader.readall()).decode("utf-8", errors="replace")
+
+
+def write_text(service: ShareServiceClient, share: str, path: str, body: str) -> None:
+    """Write one file to the share, creating its parent directory.
+
+    Azure Files will not create parents implicitly -- a write beneath a missing
+    directory fails with ``ParentNotFound`` rather than making it.
+    """
+    share_client = service.get_share_client(share)
+    parent = path.rsplit("/", 1)[0] if "/" in path else ""
+    if parent:
+        with contextlib.suppress(ResourceExistsError):
+            share_client.get_directory_client(parent).create_directory()
+    share_client.get_file_client(path).upload_file(body.encode("utf-8"))
 
 
 def walk_files(service: ShareServiceClient, share: str, path: str) -> Iterator[str]:

@@ -36,6 +36,7 @@ import numpy as np
 import zarr
 
 from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
+from src.shared import records
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,14 @@ class StaticCheckpointManifest:
 
     @classmethod
     def read(cls, checkpoint_dir: Path) -> StaticCheckpointManifest | None:
+        """Read the manifest, or None when there is none.
+
+        Deliberately NOT tolerant of a malformed one, unlike the other
+        snapshots: the loader resolves which arrays to mmap through this, so a
+        damaged manifest silently read as "absent" would look like a run with no
+        checkpoints rather than one whose pointer needs repair. Callers that can
+        proceed without it catch the error themselves.
+        """
         path = Path(checkpoint_dir) / MANIFEST_FILE
         if not path.exists():
             return None
@@ -168,9 +177,13 @@ def save_checkpoint(
         "format_version": FORMAT_VERSION,
         "retained": _extend_ladder(previous, iteration, zarr_path.name, retain_every),
     }
-    tmp = checkpoint_dir / (MANIFEST_FILE + ".tmp")
-    tmp.write_text(json.dumps(manifest, indent=2))
-    tmp.replace(checkpoint_dir / MANIFEST_FILE)
+    # Through the substrate, which keeps the atomic replace this has always
+    # relied on and adds the envelope's schema_version beside `format_version`
+    # -- the two describe different things: the field set here, and the layout
+    # of the arrays the manifest points at.
+    records.write_snapshot(
+        checkpoint_dir / MANIFEST_FILE, manifest, records.REGISTRY[MANIFEST_FILE]
+    )
 
     _prune(checkpoint_dir, manifest)
     return zarr_path

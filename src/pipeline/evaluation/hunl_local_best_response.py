@@ -94,7 +94,7 @@ from src.pipeline.evaluation.opponent_model import (
 )
 from src.pipeline.evaluation.shadow_state import MenuCandidate, ShadowTracker
 from src.shared.config import ResolverConfig
-from src.shared.log import configure_logging
+from src.shared.log import configure_logging, progress_bars_enabled
 from src.shared.numeric import NORMALIZE_EPS
 from src.shared.units import chips_to_bb, chips_to_mbb
 
@@ -673,7 +673,12 @@ def compute_lbr_exploitability(
         engine = _HUNLLocalBestResponse(blueprint, config, np.random.default_rng(base_seed))
         pairs = [
             _play_hand_pair(engine, hand, base_seed, starting_stack)
-            for hand in tqdm(range(config.num_hands), desc="LBR hands", unit="hand")
+            for hand in tqdm(
+                range(config.num_hands),
+                desc="LBR hands",
+                unit="hand",
+                disable=not progress_bars_enabled(),
+            )
         ]
     else:
         if blueprint_factory is None:
@@ -841,5 +846,6 @@ def _run_hands_parallel(
                 total=config.num_hands,
                 desc="LBR hands",
                 unit="hand",
+                disable=not progress_bars_enabled(),
             )
         )
