@@ -26,12 +26,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _short(state: str | None) -> str:
+def short_state(state: str | None) -> str:
     """``BatchTaskState.RUNNING`` -> ``running``."""
     return (state or "").rsplit(".", 1)[-1].lower()
 
 
-def _is_live(job: dict[str, Any]) -> bool:
+def is_live(job: dict[str, Any]) -> bool:
     """A job worth showing by default: real work, still in flight.
 
     The job's own state is checked FIRST, and it is the load-bearing half. A
@@ -42,16 +42,16 @@ def _is_live(job: dict[str, Any]) -> bool:
     alone reports an idle pool as busy, which is precisely backwards for the
     one question this command exists to answer.
     """
-    if _short(job["state"]) != "active":
+    if short_state(job["state"]) != "active":
         return False
-    return any(_short(task["state"]) in LIVE_TASK_STATES for task in job["tasks"])
+    return any(short_state(task["state"]) in LIVE_TASK_STATES for task in job["tasks"])
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """List jobs and their tasks, newest last."""
     config = CloudConfig.load()
     jobs = batch.list_jobs_with_tasks(batch.client(config))
-    shown = jobs if args.all else [job for job in jobs if _is_live(job)]
+    shown = jobs if args.all else [job for job in jobs if is_live(job)]
     if args.limit > 0:
         shown = shown[-args.limit :]
     return {
@@ -66,9 +66,9 @@ def render(payload: dict[str, Any]) -> None:
     if not payload["jobs"]:
         print("Nothing running.")
     for job in payload["jobs"]:
-        print(f"== {job['job']}  [{_short(job['state'])}]")
+        print(f"== {job['job']}  [{short_state(job['state'])}]")
         for task in job["tasks"]:
-            state = _short(task["state"]) or "?"
+            state = short_state(task["state"]) or "?"
             exit_code = "" if task["exit_code"] is None else f"  exit={task['exit_code']}"
             print(f"   {state:<10} {task['task']}{exit_code}")
     if payload["hidden_jobs"]:

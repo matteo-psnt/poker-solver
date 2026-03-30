@@ -15,6 +15,7 @@ experiment id.
 
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
+from src.interfaces.cli.commands import jobs as jobs_command
 from src.interfaces.cli.commands.evaluate import EVAL_METHODS
 from src.interfaces.cli.flows.combo_precompute import handle_combo_precompute
 from src.interfaces.cli.flows.config_menu import select_config
@@ -160,13 +161,18 @@ def cloud_status(ctx: CliContext) -> None:  # noqa: ARG001
     print(f"  nodes: {status['current_dedicated_nodes']} / {status['target_dedicated_nodes']}")
     print(f"  cost:  {config.hourly_cost} (0 nodes at rest)")
 
-    live = [job for job in jobs if str(job["state"]).rsplit(".", 1)[-1].lower() == "active"]
+    # Filtered on BOTH levels, matching `jobs`. Job state alone is not enough
+    # here: today's job stays active all day, so its finished tasks would be
+    # listed under an "Active" heading -- a screen that answers "is anything
+    # running?" with a wall of things that already stopped.
+    live = [job for job in jobs if jobs_command.is_live(job)]
     print("\nActive jobs:" if live else "\nNothing running.")
     for job in live:
         print(f"  == {job['job']}")
         for task in job["tasks"]:
-            state = str(task["state"]).rsplit(".", 1)[-1].lower()
-            print(f"     {state:<10} {task['task']}")
+            state = jobs_command.short_state(task["state"])
+            if state in jobs_command.LIVE_TASK_STATES:
+                print(f"     {state:<10} {task['task']}")
     ui.pause()
 
 
