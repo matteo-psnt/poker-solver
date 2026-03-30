@@ -81,6 +81,27 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
 - `uv run pre-commit run --all-files` — full quality gate (ruff lint+format,
   ty, import-linter, deptry, vulture). Run before handing off changes.
 
+## Cost & Where Work Runs
+Compute budget is effectively unbounded — **money is not a constraint here.**
+If a bigger box, more nodes, a longer leg, more seeds, or more evaluation deals
+would make a result arrive sooner or land with tighter error bars, propose that;
+don't quietly pick the cheap option. Never trade statistical power or wall-clock
+for dollars, and don't cite a cost estimate as if it were a reason against
+something.
+
+**Real work runs in the cloud, not on the laptop.** Local is for tests, the
+pre-commit gate, and seconds-long probes — no training, precompute, or
+evaluation, not even a shrunken "sanity" version. For a fast signal, run a short
+one-node job on the pool.
+
+That makes the cloud path the critical path: when it is awkward, **fix the infra
+instead of routing around it locally.** Work on `src/interfaces/cloud/` and
+`infra/` is in scope by default.
+
+Still scarce is wall-clock: probe short before committing long, and give an ETA
+plus a go-ahead check before anything multi-hour — a scheduling constraint, not
+a budget one.
+
 ## Code Style
 Python 3.12+. Ruff enforces formatting and import sorting — don't hand-police
 style. What is *not* enforced by tooling:
