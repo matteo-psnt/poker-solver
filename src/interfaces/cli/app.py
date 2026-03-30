@@ -15,10 +15,10 @@ def main() -> None:
     ui.header("POKER SOLVER CLI")
 
     items = [
-        MenuItem("Train Solver", training.train_solver),
-        MenuItem("Resume Training", training.resume_training),
+        MenuItem("Submit Training Leg", training.submit_training_leg),
+        MenuItem("Score a Run", training.score_run),
+        MenuItem("Cloud Status", training.cloud_status),
         MenuItem("View Past Runs", training.view_runs),
-        MenuItem("Evaluate Solver", training.evaluate_solver),
         MenuItem("Combo Abstraction Tools", combo_menu),
     ]
 

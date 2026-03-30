@@ -147,6 +147,91 @@ PAYLOADS: dict[str, dict] = {
         "top_level_phases": {"collect_keys": 5.0, "storage_write": 25.0},
         "write_phases": {"write_key_table": 20.0},
     },
+    "jobs": {
+        "op": "jobs",
+        "jobs": [
+            {
+                "job": "poker-20260802",
+                "state": "BatchJobState.ACTIVE",
+                "tasks": [
+                    {
+                        "task": "production-1",
+                        "state": "BatchTaskState.RUNNING",
+                        "exit_code": None,
+                        "node": "tvmps_x",
+                    }
+                ],
+            }
+        ],
+        "total_jobs": 3,
+        "hidden_jobs": 2,
+    },
+    "logs": {
+        "op": "logs",
+        "listing": None,
+        "task": "production-1",
+        "lines": ["train-static: config=production", "publish complete"],
+    },
+    # A resize error whose real cause is escaped JSON inside a value. This is
+    # the shape the renderer exists to unpack -- Batch reports the generic
+    # `AllocationFailed` and hides the actionable half in here.
+    "pool-status": {
+        "op": "pool-status",
+        "pool_id": "train",
+        "hourly_cost": "$0.80/hr/node",
+        "allocation_state": "AllocationState.STEADY",
+        "current_dedicated_nodes": 0,
+        "target_dedicated_nodes": 0,
+        "vm_size": "standard_d16als_v6",
+        "resize_errors": [
+            {
+                "code": "AllocationFailed",
+                "message": "Desired number of dedicated nodes could not be allocated",
+                "values": {"ErrorJson": '{"code":"AllocationFailed"}', "Plain": "not json"},
+            }
+        ],
+    },
+    "autoscale-check": {
+        "op": "autoscale-check",
+        "pool_id": "train",
+        "variables": ["$TargetDedicatedNodes=0", "pending=0"],
+        "error": None,
+    },
+    "submit": {
+        "op": "submit",
+        "target_iteration": 25_000_000,
+        "code_snapshot": "code-20260802_000000",
+        "job_id": "poker-20260802",
+        "tasks": ["production-000000-1"],
+    },
+    "score": {
+        "op": "score",
+        "run_id": "run-a",
+        "method": "exact_br",
+        "rungs": ["10000000", "20000000"],
+        "code_snapshot": "code-20260802_000000",
+        "job_id": "poker-20260802",
+        "tasks": ["run-a-000000-1", "run-a-000000-2"],
+    },
+    "repair-ladder": {
+        "op": "repair-ladder",
+        "run_id": "run-a",
+        "code_snapshot": "code-20260802_000000",
+        "job_id": "poker-20260802",
+        "tasks": ["run-a-000000-1"],
+    },
+    "cancel": {"op": "cancel", "job_id": "poker-20260802", "task_id": "run-a-000000-1"},
+    "fetch": {
+        "op": "fetch",
+        "runs": ["run-a"],
+        "files": 12,
+        "skipped_unnamed": 3,
+        "mode": "metadata",
+        "ledger_rows": 40,
+        "ledger_preserved": 2,
+    },
+    "push-code": {"op": "push-code", "code_snapshot": "code-20260802_000000"},
+    "push-data": {"op": "push-data", "uploaded": {"buckets-F50T100R200": 9}},
 }
 
 
