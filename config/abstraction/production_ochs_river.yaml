@@ -65,14 +65,35 @@
 #       600          1.000000        0.999005        0.000995
 #
 # Scalar equity IS saturated at 600 (1.000000), and the fidelity OCHS trades
-# away COLLAPSES 13x from 20 to 600 buckets. So the gate-scale loss above was
-# measured where OCHS pays its highest possible price; at the counts this file
-# uses it pays ~13x less. The premise holds — a production A/B is justified by
-# measurement now, not by citation.
+# away COLLAPSES 13x from 20 to 600 buckets. The premise is TRUE.
 #
-# What remains unknown is whether the range structure OCHS buys is worth even
-# that reduced price. Only exploitability answers that, and at these bucket
-# counts (32.2M rows) it is a multi-hour training run, not a local probe.
+# ---------------------------------------------------------------------------
+# BUT THE PREMISE DOES NOT EXPLAIN THE LOSS — measured 08-02, r=100 on Azure
+# ---------------------------------------------------------------------------
+# Cutting the price OCHS pays by 3x did not shrink the penalty; it grew slightly:
+#
+#   river buckets   equity price OCHS pays   exploitability penalty
+#              20                 0.013011                  +10.5%
+#             100                 0.004400                  +12.4%
+#
+#   r=100, 1M iters, seed 42, single worker, exact_br:
+#     control (scalar river)  3002.09 mbb/g   96.4% coverage
+#     ochs                    3372.97 mbb/g   95.9% coverage
+#   Both 0.0% uniform-fallback mass — a clean, well-trained comparison, better
+#   than the gate run, so this is not an under-training artifact.
+#
+# The saturation argument was that OCHS loses because the equity fidelity it
+# surrenders is expensive at low bucket counts. That argument is now falsified:
+# the price fell 3x and the penalty did not follow. OCHS's problem here is not
+# what it gives up, it is that the range structure it substitutes buys nothing
+# in this game at these abstraction sizes.
+#
+# RECOMMENDATION REVERSED. The production A/B was justified on the premise that
+# the penalty would shrink with bucket count. It does not. Two points are not a
+# curve and r=600 could still differ, but there is no longer a measured reason
+# to expect it to — and a production run costs 32.2M rows of training. Do not
+# spend it on this without a new argument for why r=600 behaves differently
+# from r=20 and r=100.
 #
 # ---------------------------------------------------------------------------
 # DO NOT judge this arm by `variance_explained` in metadata.json
