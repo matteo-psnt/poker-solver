@@ -380,6 +380,42 @@ LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
 # means a training task landing on THIS node can use it immediately; the copy to
 # the share is what makes it durable and available to every future node, whose
 # start task pulls the share down at boot.
+# A/B mode. Runs a whole paired comparison — control plus every arm, trained and
+# scored — as ONE task on ONE node.
+#
+# WHY one task rather than a task per arm: the harness's value is that it makes
+# the preconditions impossible to skip (single worker, one fixed seed, zero-
+# variance scoring, an optional determinism check that RAISES on mismatch).
+# Decomposing it into separate Batch tasks would move that enforcement back into
+# whoever writes the submission — which is exactly the hand-rolled protocol this
+# replaces, and how a sloppier comparison gets run and believed.
+#
+# The arms come in hex-encoded and space-separated, same reason as RUN_SETS_HEX:
+# an arm spec is `name:key=value`, and --environment-settings parses KEY=VALUE,
+# so a raw value containing `=` is rejected.
+#
+# Run directories the harness creates land under $RUNS, so the EXIT trap
+# publishes them and their eval records exactly like any training leg.
+if [ "${RUN_OP:-train}" = "ab" ]; then
+  [ -n "${RUN_CONFIG:-}" ] || { log "FATAL ab needs RUN_CONFIG (training config stem)"; exit 1; }
+  [ -n "${RUN_AB_SEED:-}" ] || { log "FATAL ab needs RUN_AB_SEED; the harness refuses to guess"; exit 1; }
+  [ -n "${RUN_AB_ARMS_HEX:-}" ] || { log "FATAL ab needs RUN_AB_ARMS_HEX (at least one arm)"; exit 1; }
+  AB_ARMS=$(python3 -c "import sys; sys.stdout.write(bytes.fromhex(sys.argv[1]).decode())" "$RUN_AB_ARMS_HEX")
+  AB_ARGS=()
+  for spec in $AB_ARMS; do AB_ARGS+=(--arm "$spec"); done
+  [ "${RUN_AB_VERIFY:-}" = "1" ] && AB_ARGS+=(--verify-determinism)
+  log "ab: config=$RUN_CONFIG iters=$RUN_TO seed=$RUN_AB_SEED arms=${#AB_ARGS[@]} (timeout $RUN_TIMEOUT)"
+  set +o pipefail
+  "${GUARD[@]}" uv run poker-solver-run ab \
+    --config "$RUN_CONFIG" --iterations "$RUN_TO" --seed "$RUN_AB_SEED" \
+    --runs-dir "$RUNS" "${AB_ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
+  publish_all
+  log "ab finished rc=$rc"
+  exit "$rc"
+fi
+
 if [ "${RUN_OP:-train}" = "precompute" ]; then
   [ -n "${RUN_CONFIG:-}" ] || { log "FATAL precompute needs RUN_CONFIG (abstraction stem)"; exit 1; }
   log "precompute: abstraction config=$RUN_CONFIG (timeout $RUN_TIMEOUT)"

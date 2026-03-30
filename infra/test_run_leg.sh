@@ -95,6 +95,32 @@ check "legacy dir survives untouched" "$(cat "$SHARE/combo_abstraction/buckets-L
 check "no marker invented for it" "$([ -f "$SHARE/combo_abstraction/.complete-buckets-LEGACY-old111" ] && echo yes || echo no)" "no"
 check "only the NEW abstraction published" "$(grep -c 'precompute complete: 1' "$ROOT/out6.log")" "1"
 
+echo "=== case 7: ab mode refuses to guess its preconditions ==="
+# The harness's whole value is that seed and arms cannot be omitted. If the leg
+# silently defaulted either, a cloud A/B would look identical to a local one and
+# be quietly incomparable.
+rm -rf "$WORK/data/combo_abstraction"; mkdir -p "$WORK/data/combo_abstraction"
+ARMS_HEX=$(printf '%s' "a:solver__cfr_plus=true" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
+
+RUN_OP=ab RUN_TO=100 RUN_AB_ARMS_HEX="$ARMS_HEX" bash "$LEG" >"$ROOT/out7a.log" 2>&1; rc=$?
+check "no seed -> nonzero exit" "$([ "$rc" != 0 ] && echo yes || echo no)" "yes"
+check "no seed -> says so" "$(grep -c 'needs RUN_AB_SEED' "$ROOT/out7a.log")" "1"
+
+RUN_OP=ab RUN_TO=100 RUN_AB_SEED=42 bash "$LEG" >"$ROOT/out7b.log" 2>&1; rc=$?
+check "no arms -> nonzero exit" "$([ "$rc" != 0 ] && echo yes || echo no)" "yes"
+check "no arms -> says so" "$(grep -c 'needs RUN_AB_ARMS_HEX' "$ROOT/out7b.log")" "1"
+
+# And with both present it reaches the CLI with the arms decoded.
+cat > "$BIN/uv" <<'STUB2'
+#!/usr/bin/env bash
+for a in "$@"; do [ "$a" = "ab" ] && { echo "AB-INVOKED: $*"; exit 0; }; done
+exit 0
+STUB2
+chmod +x "$BIN/uv"
+RUN_OP=ab RUN_TO=100 RUN_AB_SEED=42 RUN_AB_ARMS_HEX="$ARMS_HEX" bash "$LEG" >"$ROOT/out7c.log" 2>&1
+check "arms decoded and passed through" "$(grep -c -- '--arm a:solver__cfr_plus=true' "$ROOT/out7c.log")" "1"
+check "seed passed through" "$(grep -c -- '--seed 42' "$ROOT/out7c.log")" "1"
+
 echo "=== case 5: missing RUN_CONFIG fails loudly ==="
 RUN_CONFIG="" bash "$LEG" >"$ROOT/out5.log" 2>&1; rc=$?
 check "nonzero exit" "$([ "$rc" != 0 ] && echo yes || echo no)" "yes"
