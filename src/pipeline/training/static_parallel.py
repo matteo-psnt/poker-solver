@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -166,6 +167,20 @@ def _worker_entry(
             storage.close()
 
 
+def _append_checkpoint_event(checkpoint_dir: Path, **fields: Any) -> None:
+    """Record the mid-flight row, but never at the cost of the leg.
+
+    `records.append_log` propagates on purpose, so its callers can choose. Here
+    the choice is clear: this runs immediately AFTER `save_checkpoint` succeeded,
+    so a full disk or an IO error on `run.jsonl` would throw away a good rung and
+    mark the run failed over telemetry.
+    """
+    try:
+        run_events.append(checkpoint_dir, run_events.CHECKPOINT, **fields)
+    except Exception:
+        logger.warning("Could not record the checkpoint event; training continues.", exc_info=True)
+
+
 def train_static_parallel(
     config: Config,
     *,
@@ -302,9 +317,8 @@ def train_static_parallel(
                 # After save_checkpoint, so a row never describes state the
                 # arrays did not reach.
                 leg_elapsed = time.time() - started
-                run_events.append(
+                _append_checkpoint_event(
                     checkpoint_dir,
-                    run_events.CHECKPOINT,
                     ts=datetime.now(UTC).isoformat(),
                     iteration=done,
                     # Scoped to the LEG: a resumed leg restarts its clock while

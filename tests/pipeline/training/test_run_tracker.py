@@ -497,3 +497,51 @@ class TestReapingSurvivesTheFold:
 
         live = RunTracker.load(tracker.run_dir).metadata.attempts[-1]
         assert live.runtime_seconds == 0.0, "this leg has checkpointed nothing yet"
+
+
+class TestLegacyResumeWithoutMigration:
+    """A Batch retry resumes a `.run.json`-only run without ever running
+    `ledger --migrate`, and `RunMetadata.load` prefers the event log once it
+    exists -- so whatever the replay fails to write is gone for good."""
+
+    def _two_finished_attempts(self, tmp_path):
+        run_dir = tmp_path / "run-legacy-resume"
+        run_dir.mkdir()
+        metadata = RunMetadata.new(
+            "run-legacy-resume", "production", Config.default(), action_config_hash="abc123"
+        )
+        metadata.update_progress(
+            iterations=1000, runtime_seconds=1800.0, num_infosets=10, storage_capacity=100
+        )
+        metadata.mark_completed()
+        metadata.mark_resumed()
+        metadata.update_progress(
+            iterations=2000, runtime_seconds=3000.0, num_infosets=20, storage_capacity=200
+        )
+        metadata.mark_completed()
+        (run_dir / ".run.json").write_text(json.dumps(metadata.to_dict()))
+        return run_dir, metadata
+
+    def test_the_replay_preserves_runtime_and_attempt_outcomes(self, tmp_path):
+        run_dir, before = self._two_finished_attempts(tmp_path)
+
+        RunTracker.load(run_dir).initialize()
+        after = RunMetadata.load(run_dir)
+
+        assert after.runtime_seconds == before.runtime_seconds, "compute time survives the replay"
+        assert [a.status for a in after.attempts] == [a.status for a in before.attempts]
+        assert len(after.attempts) == 2, "no attempt is duplicated or invented"
+
+    def test_an_attempt_killed_mid_flight_stays_open(self, tmp_path):
+        """`status=running` with a null `ended_at` is how a died attempt is
+        recognised; closing it with an invented timestamp erases that."""
+        run_dir, _ = self._two_finished_attempts(tmp_path)
+        payload = json.loads((run_dir / ".run.json").read_text())
+        payload["attempts"][-1].update(status="running", ended_at=None)
+        (run_dir / ".run.json").write_text(json.dumps(payload))
+
+        RunTracker.load(run_dir).initialize()
+        events = run_events.read(run_dir)
+
+        ended = run_events.events_of(events, run_events.ATTEMPT_ENDED)
+        assert [e["index"] for e in ended] == [0], "only the attempt that truly closed"

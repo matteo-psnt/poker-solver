@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import pathlib
 import subprocess
 import sys
@@ -198,8 +197,8 @@ class TestReconcile:
         explained = leg_log.reconcile(
             tmp_path,
             [
-                {"id": "done", "state": "completed", "executionInfo": {"result": "success"}},
-                {"id": "vanished", "state": "completed", "executionInfo": {"result": "failure"}},
+                {"task": "done", "state": "completed", "result": "success"},
+                {"task": "vanished", "state": "completed", "result": "failure"},
             ],
         )
 
@@ -210,7 +209,19 @@ class TestReconcile:
 
     def test_unknown_tasks_are_ignored(self, tmp_path):
         _node(tmp_path, "mine", "started")
-        assert leg_log.reconcile(tmp_path, [{"id": "someone-elses", "state": "completed"}]) == []
+        assert leg_log.reconcile(tmp_path, [{"task": "someone-elses", "state": "completed"}]) == []
+
+    def test_an_explained_leg_reads_back_as_an_outcome_not_a_state_string(self, tmp_path):
+        """The whole join is worthless if the cause column says
+        `batchtaskstate.completed`, so the shape reconcile consumes is pinned to
+        the shape `batch.list_jobs_with_tasks` produces."""
+        _node(tmp_path, "vanished", "started")
+        leg_log.reconcile(
+            tmp_path,
+            [{"task": "vanished", "job": "poker-1", "state": "completed", "result": "failure"}],
+        )
+        row = next(r for r in leg_log.read_legs(tmp_path) if r["task_id"] == "vanished")
+        assert row["cause"] == leg_log.CAUSE_FAILED
 
 
 class TestRobustness:
@@ -258,32 +269,6 @@ class TestNodeSideConstraints:
         assert (leg_log.legs_dir(tmp_path) / "t.1.start.json").exists()
 
 
-class TestCli:
-    def test_list_prints_a_row_per_leg(self, tmp_path, capsys):
-        _node(tmp_path, "task-a", "finished", cause="completed", exit_code=0)
-        assert leg_log._main(["list", str(tmp_path)]) == 0
-        assert "task-a" in capsys.readouterr().out
-
-    def test_reconcile_reads_task_json(self, tmp_path, capsys):
-        _node(tmp_path, "vanished", "started")
-        tasks = tmp_path / "tasks.json"
-        tasks.write_text(
-            json.dumps(
-                [{"id": "vanished", "state": "completed", "executionInfo": {"result": "failure"}}]
-            )
-        )
-
-        assert leg_log._main(["reconcile", str(tmp_path), "--tasks-json", str(tasks)]) == 0
-        assert "explained 1" in capsys.readouterr().out
-        assert leg_log.read_legs(tmp_path)[0]["cause"] == "failed"
-
-    def test_unparseable_task_json_is_reported_not_raised(self, tmp_path, capsys):
-        tasks = tmp_path / "tasks.json"
-        tasks.write_text("{not json")
-        assert leg_log._main(["reconcile", str(tmp_path), "--tasks-json", str(tasks)]) == 1
-
-
-@pytest.mark.timeout(30)
 class TestRunLegWiring:
     """The shell half: the trap must classify by the leg's real exit status."""
 

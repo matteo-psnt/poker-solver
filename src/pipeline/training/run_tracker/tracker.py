@@ -104,6 +104,17 @@ class RunTracker:
         announced = len(run_events.events_of(events, run_events.ATTEMPT_STARTED))
         for attempt in self.metadata.attempts[announced:]:
             self._emit_attempt_started(attempt)
+            # And CLOSE it if it already closed. Replaying a pre-log run emitted
+            # only the openings, so its finished attempts folded back as
+            # `running` with no runtime -- a legacy run resumed by a Batch retry
+            # (which never runs `ledger --migrate` first) lost its whole history
+            # at exactly the moment the log became the sole source of truth.
+            #
+            # An attempt killed mid-flight keeps `status="running"` and a null
+            # `ended_at`; that dangling shape IS the signal it died, so it must
+            # stay open rather than be closed with an invented timestamp.
+            if attempt.ended_at is not None or attempt.status != "running":
+                self._emit_attempt_ended(attempt)
 
     def update(
         self,

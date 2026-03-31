@@ -92,3 +92,38 @@ class TestManifestMembers:
     def test_a_manifest_with_no_ladder_still_names_the_current_snapshot(self, monkeypatch):
         self._stub(monkeypatch, {"zarr": "static-3000.zarr"})
         assert share.manifest_members(MagicMock(), "share", "archive/run-a") == {"static-3000.zarr"}
+
+
+class TestLegReconcileSeam:
+    """`legs` feeds Batch's task records straight into `leg_log.reconcile`.
+
+    The two were written against different shapes -- reconcile against the old
+    `az batch task list` JSON, batch.py against its own vocabulary -- so the
+    reconcile path raised KeyError on the first unresolved leg and, past that,
+    silently matched nothing. Nothing caught it because each side was tested
+    alone.
+    """
+
+    def test_batch_task_records_carry_every_field_reconcile_reads(self):
+        from src.interfaces.cloud import batch
+
+        class _Info:
+            code, message, category = "TaskEnded", "boom", None
+
+        class _Exec:
+            result, exit_code = "BatchTaskExecutionResult.FAILURE", 137
+            start_time = end_time = None
+            failure_info = _Info()
+
+        class _Node:
+            node_id = "tvmps_x"
+
+        class _Task:
+            id, state = "leg-1", "BatchTaskState.COMPLETED"
+            execution_info, node_info = _Exec(), _Node()
+
+        record = batch._task_record(_Task())
+        for field in ("task", "state", "result", "exit_code", "failure", "start_time", "end_time"):
+            assert field in record, f"reconcile reads {field!r}"
+        assert record["exit_code"] == 137
+        assert record["failure"]["code"] == "TaskEnded"

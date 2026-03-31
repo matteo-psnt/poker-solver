@@ -217,7 +217,7 @@ def migrate_eval_files(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) 
     # evaluation twice -- once under the old pointer, once under the new -- which
     # is exactly the silent duplication the ledger exists to prevent. Measured on
     # the real tree: 63 rows became 110.
-    _repoint_ledger(ledger_path)
+    _repoint_ledger(ledger_path, runs_dir)
 
     # Records whose payload is gone still carry provenance and a summary.
     for record_path in sorted(runs_dir.glob("*/evals/record-*.json")):
@@ -236,21 +236,40 @@ def migrate_eval_files(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) 
     return counts
 
 
-def _repoint_ledger(ledger_path: Path) -> None:
+def _repoint_ledger(ledger_path: Path, runs_dir: Path) -> None:
     """Re-point ledger rows at the consolidated document they now live in.
 
     ``<run>/evals/eval-<slug>.json`` becomes ``<run>/evals/<slug>.json``. Written
     through a temporary file and replaced, so a kill cannot leave the ledger
     half-repointed.
+
+    Line-by-line rather than through :func:`read_records`, which SKIPS anything
+    unparseable: rewriting from the parsed rows deleted torn lines outright, and
+    tolerating them is the whole reason ``--rebuild`` preserves rows it cannot
+    regenerate. An unreadable line is carried through untouched.
+
+    Only rows whose consolidated document actually exists are moved. Migration
+    skips a payload it cannot read, and repointing those anyway left the row
+    naming a file that was never written.
     """
-    rows = read_records(ledger_path)
-    if not rows:
+    if not ledger_path.exists():
         return
-    for row in rows:
+    out: list[str] = []
+    for line in ledger_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            out.append(line)
+            continue
         pointer = str(row.get("result_path") or "")
         head, _, name = pointer.rpartition("/")
         if name.startswith("eval-"):
-            row["result_path"] = f"{head}/{name.removeprefix('eval-')}"
+            moved = f"{head}/{name.removeprefix('eval-')}"
+            if (runs_dir / moved).exists():
+                row["result_path"] = moved
+        out.append(json.dumps(row, default=json_default))
     tmp = ledger_path.with_suffix(ledger_path.suffix + ".tmp")
-    tmp.write_text("".join(json.dumps(r, default=json_default) + "\n" for r in rows))
+    tmp.write_text("".join(line + "\n" for line in out))
     tmp.replace(ledger_path)

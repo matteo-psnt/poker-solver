@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -31,6 +32,19 @@ from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
 
 BASELINE_NAME = "baseline.json"
+
+# `<op>_result.json` -- train, evaluate, resume, train-static. The writer was
+# deleted with the clobbering result file it produced; nothing reads them, and
+# they are still on the share as history. `fetch` still syncs them, because that
+# is a copy of the record; this is a question being asked of it.
+DEAD_SUFFIX = "_result.json"
+
+_PARALLEL_DOWNLOADS = 16
+
+
+def _is_snapshot_dir(name: str) -> bool:
+    """A checkpoint directory, never worth descending into to ask a question."""
+    return name.endswith(".zarr")
 
 
 def pull_metadata(
@@ -53,15 +67,34 @@ def pull_metadata(
             )
         published = [run]
 
-    pulled = 0
+    wanted: list[tuple[str, Path]] = []
     for name in published:
-        for remote in share.walk_files(service, share_name, f"{share.ARCHIVE_DIR}/{name}"):
+        for remote in share.walk_files(
+            service,
+            share_name,
+            f"{share.ARCHIVE_DIR}/{name}",
+            skip_dir=_is_snapshot_dir,
+        ):
             relative = remote[len(f"{share.ARCHIVE_DIR}/") :]
-            if share.is_snapshot_path(relative) or not share.is_metadata(Path(relative).name):
+            leaf = Path(relative).name
+            if share.is_snapshot_path(relative) or not share.is_metadata(leaf):
                 continue
-            share.download_file(service, share_name, remote, destination / relative)
-            pulled += 1
-    return pulled
+            if leaf.endswith(DEAD_SUFFIX):
+                continue
+            wanted.append((remote, destination / relative))
+
+    # One round trip per file, and a run's eval documents now carry their full
+    # sample vectors -- so this is latency-bound on a link where latency is the
+    # whole cost. The downloads are independent and `download_file` builds its
+    # own file client, so they overlap.
+    with ThreadPoolExecutor(max_workers=_PARALLEL_DOWNLOADS) as pool:
+        futures = [
+            pool.submit(share.download_file, service, share_name, remote, local)
+            for remote, local in wanted
+        ]
+        for future in futures:
+            future.result()
+    return len(wanted)
 
 
 def read_baseline(service: ShareServiceClient, share_name: str) -> str | None:

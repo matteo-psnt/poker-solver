@@ -36,9 +36,7 @@ the whole feature was silently dead on the only machine that runs it.
 from __future__ import annotations
 
 import glob
-import json
 import os
-import sys
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -343,83 +341,27 @@ def _cell(value: Any) -> str:
 def reconcile(share: str | os.PathLike[str], tasks: Iterable[dict[str, Any]]) -> list[str]:
     """Write observer records for legs the node never explained.
 
-    ``tasks`` is ``az batch task list`` output. Only unresolved legs: otherwise
-    the cost scales with history rather than with open questions. Returns the
-    task ids newly explained.
+    ``tasks`` is `batch.list_jobs_with_tasks` output, flattened so each task
+    carries its `job`. Only unresolved legs: otherwise the cost scales with
+    history rather than with open questions. Returns the ids newly explained.
     """
     open_questions = set(unresolved_task_ids(share))
     explained = []
     for task in tasks:
-        task_id = task.get("id")
+        task_id = task.get("task")
         if not task_id or task_id not in open_questions:
             continue
-        execution = task.get("executionInfo") or {}
         write_observed_record(
             share,
             task_id=task_id,
-            job_id=task.get("jobId", ""),
-            state=task.get("state", ""),
-            result=execution.get("result"),
-            exit_code=execution.get("exitCode"),
-            failure=execution.get("failureInfo"),
-            start_time=execution.get("startTime"),
-            end_time=execution.get("endTime"),
-            node_id=(task.get("nodeInfo") or {}).get("nodeId", ""),
+            job_id=task.get("job", ""),
+            state=task.get("state") or "",
+            result=task.get("result"),
+            exit_code=task.get("exit_code"),
+            failure=task.get("failure"),
+            start_time=task.get("start_time"),
+            end_time=task.get("end_time"),
+            node_id=task.get("node") or "",
         )
         explained.append(task_id)
     return explained
-
-
-def _main(argv: list[str] | None = None) -> int:
-    """Thin CLI so the justfile keeps the ``az`` calls and this keeps the logic.
-
-    Not a ``poker-solver-run`` subcommand: this is cloud bookkeeping, and would
-    put Batch's vocabulary in the training CLI.
-    """
-    import argparse
-
-    parser = argparse.ArgumentParser(prog="leg_log", description=__doc__)
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    p_list = sub.add_parser("list", help="Print one row per leg.")
-    p_list.add_argument("share", help="Directory holding the share's legs/ folder.")
-
-    p_unresolved = sub.add_parser(
-        "unresolved", help="Print the task ids with no terminal record, one per line."
-    )
-    p_unresolved.add_argument("share", help="Directory holding the share's legs/ folder.")
-
-    p_reconcile = sub.add_parser("reconcile", help="Explain unresolved legs from Batch output.")
-    p_reconcile.add_argument("share", help="Directory holding the share's legs/ folder.")
-    p_reconcile.add_argument(
-        "--tasks-json",
-        required=True,
-        help="File of `az batch task list` JSON, or - for stdin.",
-    )
-
-    args = parser.parse_args(argv)
-    if args.command == "list":
-        print(format_table(read_legs(args.share)))
-        return 0
-
-    if args.command == "unresolved":
-        # The justfile asks this rather than grepping the rendered table: one
-        # definition, and the grep both missed `unknown` and false-matched any
-        # run id containing the word.
-        for task_id in unresolved_task_ids(args.share):
-            print(task_id)
-        return 0
-
-    raw = sys.stdin.read() if args.tasks_json == "-" else Path(args.tasks_json).read_text()
-    try:
-        tasks = json.loads(raw) if raw.strip() else []
-    except ValueError:
-        print("  could not parse task JSON; nothing reconciled", file=sys.stderr)
-        return 1
-    explained = reconcile(args.share, tasks if isinstance(tasks, list) else [tasks])
-    print(f"  explained {len(explained)} previously-unresolved leg(s)")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(_main())

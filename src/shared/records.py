@@ -47,6 +47,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from src.shared.jsonio import json_default
+
 SCHEMA_VERSION_KEY = "schema_version"
 UNVERSIONED = 0
 
@@ -173,7 +175,7 @@ def write_snapshot(
     """
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    body = json.dumps(stamp(payload, artifact), indent=2, default=str)
+    body = json.dumps(stamp(payload, artifact), indent=2, default=json_default)
     if not artifact.atomic:
         destination.write_text(body, encoding="utf-8")
         return
@@ -210,7 +212,7 @@ def append_log(path: str | os.PathLike[str], row: dict[str, Any], artifact: Arti
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(stamp(row, artifact), default=str) + "\n")
+        handle.write(json.dumps(stamp(row, artifact), default=json_default) + "\n")
 
 
 def read_log(

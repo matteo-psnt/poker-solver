@@ -53,6 +53,38 @@ def client(config: CloudConfig) -> BatchClient:
     return BatchClient(endpoint=config.batch_endpoint, credential=AzureCliCredential())
 
 
+def _task_record(task: Any) -> dict[str, Any]:
+    """One task, in this project's vocabulary rather than Batch's.
+
+    Everything `leg_log.reconcile` needs to explain a leg the node never got to
+    account for: `result` separates a task that finished from one that merely
+    stopped, and the timestamps bound a death the EXIT trap could not report.
+    """
+    execution = task.execution_info
+    return {
+        "task": task.id,
+        "state": str(task.state) if task.state else None,
+        "result": str(execution.result) if execution is not None and execution.result else None,
+        "exit_code": execution.exit_code if execution is not None else None,
+        "failure": _failure(execution),
+        "start_time": _isoformat(execution.start_time) if execution is not None else None,
+        "end_time": _isoformat(execution.end_time) if execution is not None else None,
+        "node": task.node_info.node_id if task.node_info is not None else None,
+    }
+
+
+def _isoformat(value: Any) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _failure(execution: Any) -> dict[str, Any] | None:
+    """Batch's failure detail, kept as data rather than a stringified object."""
+    info = execution.failure_info if execution is not None else None
+    if info is None:
+        return None
+    return {"code": info.code, "message": info.message, "category": str(info.category or "")}
+
+
 def list_jobs_with_tasks(batch: BatchClient) -> list[dict[str, Any]]:
     """Every job and the state of every task under it.
 
@@ -62,17 +94,7 @@ def list_jobs_with_tasks(batch: BatchClient) -> list[dict[str, Any]]:
     """
     jobs: list[dict[str, Any]] = []
     for job in batch.list_jobs():
-        tasks = [
-            {
-                "task": task.id,
-                "state": str(task.state) if task.state else None,
-                "exit_code": (
-                    task.execution_info.exit_code if task.execution_info is not None else None
-                ),
-                "node": task.node_info.node_id if task.node_info is not None else None,
-            }
-            for task in batch.list_tasks(job.id)
-        ]
+        tasks = [_task_record(task) for task in batch.list_tasks(job.id)]
         jobs.append({"job": job.id, "state": str(job.state) if job.state else None, "tasks": tasks})
     return jobs
 
