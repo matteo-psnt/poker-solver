@@ -45,6 +45,20 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
   in the `COMMANDS` tuple. The `Command` dataclass carries parser, handler AND
   renderer together on purpose: when those lived apart, `checkpoint-profile`
   borrowed evaluate's renderer and died on a missing key.
+- **A command is callable without a command line, and refusals are values.**
+  `Command.invoke(**kwargs)` builds the arguments from the command's own parser
+  — one declaration of what a command accepts, so a second surface cannot drift
+  from it — and returns the payload unrendered. Anything the caller could have
+  got right raises `CommandError` (`src/interfaces/errors.py`); a bug still
+  tracebacks. Only `headless.py` turns a `CommandError` back into a message on
+  stderr and exit 1, so the command line keeps its behaviour without imposing
+  it: a surface that polls several commands greys out one panel instead of
+  dying, which `raise SystemExit` at 16 sites made impossible. A guard test
+  fails if a command module reintroduces it. `render()` is deliberately NOT
+  abstracted — it is the terminal's renderer, and for any other surface the
+  payload is the interface. Still unwrapped: the Azure SDK's
+  `ClientAuthenticationError`/`HttpResponseError`, which have no chokepoint in
+  `batch.py`, so a surface talking to Batch catches those by name too.
 - **Azure dispatch is Python, in `src/interfaces/cloud/`** — `spec.py` (pure,
   the testable core: what a leg IS), `batch.py`, `share.py`, `dispatch.py`,
   `config.py`, `workspace.py` (what `--source share` materialises). It lives

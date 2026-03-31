@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.interfaces.cloud import share, workspace
+from src.interfaces.errors import CommandError
 
 
 class _FakeShare:
@@ -93,7 +94,7 @@ class TestPullMetadata:
         assert not (tmp_path / "run-b").exists()
 
     def test_an_unpublished_run_says_what_is_published(self, fake, tmp_path):
-        with pytest.raises(SystemExit, match="run-a"):
+        with pytest.raises(CommandError, match="run-a"):
             workspace.pull_metadata(fake, "s", tmp_path, run="run-nope")
 
     def test_the_local_tree_mirrors_the_published_one(self, fake, tmp_path):

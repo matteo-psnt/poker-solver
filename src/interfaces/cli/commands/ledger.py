@@ -12,6 +12,7 @@ from src.interfaces.cli.commands._base import (
     ledger_for,
     records_root,
 )
+from src.interfaces.errors import CommandError
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.training.run_tracker import migrate_run_log
 from src.shared.config import DEFAULT_RUNS_DIR
@@ -64,7 +65,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         # -- while printing "Originals left in place", which reads as though the
         # published record had been migrated. Refusing beats a silent no-op that
         # reports success.
-        raise SystemExit(
+        raise CommandError(
             "--migrate rewrites records in place, and --source share reads a temporary "
             "copy that is discarded. Nothing on the share would change.\n"
             "Migrating the published record is not wired up yet; run it against a local "

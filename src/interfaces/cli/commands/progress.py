@@ -11,6 +11,7 @@ from src.interfaces.cli.commands._base import (
     records_root,
     resolve_run_dir,
 )
+from src.interfaces.errors import CommandError
 from src.shared import records, run_events
 from src.shared.config import DEFAULT_RUNS_DIR
 
@@ -37,7 +38,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         run_dir = resolve_run_dir(args.run, str(root))
         rows = run_events.checkpoints(run_events.read(run_dir))
     if not rows:
-        raise SystemExit(
+        raise CommandError(
             f"No checkpoint history in {run_dir}. It is recorded per checkpoint, so "
             "the run must have reached one under a version that records it."
         )

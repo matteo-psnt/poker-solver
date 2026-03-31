@@ -30,6 +30,7 @@ from azure.storage.fileshare import ShareServiceClient
 
 from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.errors import CommandError
 
 BASELINE_NAME = "baseline.json"
 
@@ -62,7 +63,7 @@ def pull_metadata(
     ]
     if run is not None:
         if run not in published:
-            raise SystemExit(
+            raise CommandError(
                 f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
             )
         published = [run]

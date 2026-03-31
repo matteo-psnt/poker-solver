@@ -12,6 +12,7 @@ from src.interfaces.cli.commands._base import (
     ledger_for,
     records_root,
 )
+from src.interfaces.errors import CommandError
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.shared.config import DEFAULT_RUNS_DIR
@@ -65,12 +66,12 @@ def _compare(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     if rec_a is None or rec_b is None:
         missing, at = (args.a, args.a_at) if rec_a is None else (args.b, args.b_at)
         at_note = f" at checkpoint iteration {at}" if at is not None else ""
-        raise SystemExit(f"No ledger entry found for run '{missing}'{at_note} in {ledger_path}")
+        raise CommandError(f"No ledger entry found for run '{missing}'{at_note} in {ledger_path}")
 
     reasons = eval_ledger.tier_mismatches(rec_a, rec_b)
     if reasons and not args.force:
         joined = "\n".join(f"  - {r}" for r in reasons)
-        raise SystemExit(
+        raise CommandError(
             "Refusing to compare: the two evals are not a valid paired comparison:\n"
             f"{joined}\n"
             "Re-run both evals with matching knobs and the same --seed, or pass --force "
@@ -89,7 +90,7 @@ def _compare(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     samples_b = payload_b["results"].get("pair_samples_mbb")
     if not samples_a or not samples_b:
         missing, rec_missing = (args.a, rec_a) if not samples_a else (args.b, rec_b)
-        raise SystemExit(
+        raise CommandError(
             f"Cannot pair: the eval for '{missing}' recorded no per-hand samples "
             f"(method '{rec_missing.get('method')}'). Deterministic estimators like "
             "exact_br have nothing to pair — within a matched board tier compare "

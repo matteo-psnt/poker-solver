@@ -12,6 +12,7 @@ import argparse
 from typing import Any
 
 from src.interfaces.cli.commands._base import Command, parse_overrides
+from src.interfaces.errors import CommandError
 from src.pipeline import services
 from src.shared.config import DEFAULT_RUNS_DIR
 
@@ -24,10 +25,10 @@ def _parse_arm(spec: str) -> services.Arm:
     """
     name, sep, overrides = spec.partition(":")
     if not sep or not name.strip():
-        raise SystemExit(f"--arm expects NAME:key=value[,key=value], got '{spec}'")
+        raise CommandError(f"--arm expects NAME:key=value[,key=value], got '{spec}'")
     pairs = [p for p in overrides.split(",") if p.strip()]
     if not pairs:
-        raise SystemExit(f"--arm '{name}' has no overrides; an arm with none is the control")
+        raise CommandError(f"--arm '{name}' has no overrides; an arm with none is the control")
     return services.Arm(name.strip(), parse_overrides(pairs))
 
 

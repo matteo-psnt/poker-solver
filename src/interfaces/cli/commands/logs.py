@@ -21,6 +21,7 @@ from typing import Any
 from src.interfaces.cli.commands._base import Command
 from src.interfaces.cloud import batch, share
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.errors import CommandError
 
 PROGRESS_PREFIX = "Training batches:"
 
@@ -78,11 +79,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         }
 
     if not args.task:
-        raise SystemExit("logs: --task is required unless --list is given.")
+        raise CommandError("logs: --task is required unless --list is given.")
 
     if args.source == "node":
         if not args.job:
-            raise SystemExit(
+            raise CommandError(
                 "logs --source node needs --job: node-side files are addressed by "
                 "(job, task). Use --source share to read by task id alone."
             )
@@ -90,7 +91,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     else:
         found = share.read_leg_log(share.share_client(config), config.share_name, args.task)
         if found is None:
-            raise SystemExit(
+            raise CommandError(
                 f"No published log for {args.task}. It may still be running before its "
                 "first publish, or the task id may be wrong — list them with --list."
             )

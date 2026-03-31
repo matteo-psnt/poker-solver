@@ -17,6 +17,7 @@ import json
 import sys
 
 from src.interfaces.cli.commands import COMMANDS
+from src.interfaces.errors import CommandError
 from src.shared.jsonio import json_default
 from src.shared.log import configure_logging, pin_level_for_children
 
@@ -58,16 +59,26 @@ def main(argv: list[str] | None = None) -> int:
         # their level from the run config, and the flag must outrank it there.
         pin_level_for_children(args.log_level)
         configure_logging(args.log_level)
-    if args.json:
-        # Library layers log to stderr, but third-party writers (numba, zarr) can
-        # still print to stdout; redirect so the JSON blob is the ONLY thing on
-        # stdout and machine consumers can parse it directly.
-        with contextlib.redirect_stdout(sys.stderr):
+    try:
+        if args.json:
+            # Library layers log to stderr, but third-party writers (numba, zarr)
+            # can still print to stdout; redirect so the JSON blob is the ONLY
+            # thing on stdout and machine consumers can parse it directly.
+            with contextlib.redirect_stdout(sys.stderr):
+                payload = command.run(args)
+            print(json.dumps(payload, indent=2, default=json_default))
+        else:
             payload = command.run(args)
-        print(json.dumps(payload, indent=2, default=json_default))
-    else:
-        payload = command.run(args)
-        command.render(payload)
+            command.render(payload)
+    except CommandError as error:
+        # This is where the command line puts back what the core no longer
+        # assumes. A bad request used to `raise SystemExit(msg)` from wherever
+        # it was detected, which printed to stderr and exited 1; that is
+        # reproduced exactly here, and only here, so no other surface inherits
+        # it. Anything that is NOT a CommandError still tracebacks -- a bug
+        # should look like one.
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

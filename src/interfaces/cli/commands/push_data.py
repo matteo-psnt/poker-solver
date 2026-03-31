@@ -17,6 +17,7 @@ from typing import Any
 from src.interfaces.cli.commands._base import Command
 from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.errors import CommandError
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -39,13 +40,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     service = share.share_client(config)
     source = Path(args.source)
     if not source.is_dir():
-        raise SystemExit(f"No abstractions at {source}. Run `precompute` first.")
+        raise CommandError(f"No abstractions at {source}. Run `precompute` first.")
 
     directories = sorted(entry for entry in source.iterdir() if entry.is_dir())
     if args.name:
         directories = [entry for entry in directories if entry.name == args.name]
         if not directories:
-            raise SystemExit(f"No abstraction named '{args.name}' under {source}.")
+            raise CommandError(f"No abstraction named '{args.name}' under {source}.")
 
     uploaded: dict[str, int] = {}
     for directory in directories:

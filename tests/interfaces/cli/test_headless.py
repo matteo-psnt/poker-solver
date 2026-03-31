@@ -13,6 +13,7 @@ from src.interfaces.cli.commands import _base
 from src.interfaces.cli.commands import compare as compare_cmd
 from src.interfaces.cli.commands import ledger as ledger_cmd
 from src.interfaces.cli.commands import train_static as train_static_cmd
+from src.interfaces.errors import CommandError
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import (
     LBR_ESTIMATOR_LABEL,
@@ -46,9 +47,9 @@ def test_resolve_run_dir_resolves_id_under_runs_dir(tmp_path):
     assert _base.resolve_run_dir("run-b", str(tmp_path)) == tmp_path / "run-b"
 
 
-def test_resolve_run_dir_missing_raises_system_exit(tmp_path):
-    """An unknown run should raise SystemExit with a helpful message."""
-    with pytest.raises(SystemExit, match="Run not found"):
+def test_resolve_run_dir_missing_raises_command_error(tmp_path):
+    """An unknown run is a readable refusal, not a process exit."""
+    with pytest.raises(CommandError, match="Run not found"):
         _base.resolve_run_dir("nope", str(tmp_path))
 
 
@@ -217,7 +218,7 @@ def test_cmd_compare_refuses_seed_mismatch(tmp_path):
     _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
     _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[1.0, 2.0, 3.0])
 
-    with pytest.raises(SystemExit, match="Refusing to compare"):
+    with pytest.raises(CommandError, match="Refusing to compare"):
         compare_cmd.run(
             argparse.Namespace(
                 a="run-a",
@@ -258,7 +259,7 @@ def test_cmd_compare_missing_run_raises(tmp_path):
     (tmp_path / "run-a").mkdir()
     _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=1.0, samples=[1.0, 2.0])
 
-    with pytest.raises(SystemExit, match="No ledger entry"):
+    with pytest.raises(CommandError, match="No ledger entry"):
         compare_cmd.run(
             argparse.Namespace(
                 a="run-a",
@@ -293,7 +294,7 @@ def test_compare_refuses_samples_free_evals_even_under_force(tmp_path):
         }
         eval_ledger.append_record(row, led)
 
-    with pytest.raises(SystemExit, match="no per-hand samples"):
+    with pytest.raises(CommandError, match="no per-hand samples"):
         compare_cmd.run(
             argparse.Namespace(
                 a="run-a",
@@ -374,7 +375,7 @@ def test_missing_samples_error_names_the_right_record(tmp_path):
         led,
     )
 
-    with pytest.raises(SystemExit, match="exact_br"):
+    with pytest.raises(CommandError, match="exact_br"):
         compare_cmd.run(
             argparse.Namespace(
                 a="run-a",

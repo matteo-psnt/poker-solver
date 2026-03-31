@@ -19,6 +19,7 @@ from typing import Any
 from src.interfaces.cli.commands._base import Command
 from src.interfaces.cloud import dispatch, share, spec
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.errors import CommandError
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 
@@ -80,7 +81,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     target = target_name(args.config)
 
     if target in existing and not args.force:
-        raise SystemExit(
+        raise CommandError(
             f"'{target}' is already published, and republishing it would silently "
             "change bucket assignment under an unchanged abstraction hash -- "
             "invalidating the provenance of every run trained against it.\n"

@@ -6,6 +6,15 @@ That is the point of the type: a subcommand used to be assembled from an
 could exist without the other -- which is how ``checkpoint-profile`` came to
 borrow the evaluate renderer and die on a missing key. Here it cannot be
 registered without all three.
+
+``run`` takes an :class:`argparse.Namespace`, which reads like a command line
+leaking into the core, and would be one if the only way to build a Namespace
+were to parse ``sys.argv``. :meth:`Command.invoke` is the other way: the parser
+already carries every flag, its default and whether it is required, so it is a
+usable schema for a caller that has no command line at all. That keeps ONE
+declaration of what a command accepts -- a second surface that re-declared the
+flags could disagree with the first, and the disagreement would show up as a
+missing key at render time.
 """
 
 from __future__ import annotations
@@ -18,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.interfaces.errors import CommandError
 from src.pipeline.evaluation.ledger import rebuild_ledger
 
 
@@ -31,6 +41,44 @@ class Command:
     render: Callable[[dict[str, Any]], None]
     help: str = ""
 
+    def arguments(self, **overrides: Any) -> argparse.Namespace:
+        """Build this command's arguments without a command line.
+
+        Both halves of the check matter and neither is available to a caller
+        assembling a Namespace by hand. An unknown key is rejected rather than
+        ignored, because a silently-dropped ``limit=5`` looks like a command
+        that ignores its own flag; a required flag left out is rejected here
+        rather than surfacing as a ``None`` several frames into ``run``.
+        """
+        parser = argparse.ArgumentParser(prog=self.name, add_help=False)
+        self.add_arguments(parser)
+        # `_actions` is private, and there is no public accessor for "every flag
+        # this parser knows". The alternative is `parse_args([])`, which cannot
+        # be used: it rejects a parser with any required flag, which is most of
+        # them, and it exits the process on failure -- the behaviour this seam
+        # exists to remove.
+        actions = parser._actions  # noqa: SLF001
+        defaults = {action.dest: action.default for action in actions}
+        required = {action.dest for action in actions if action.required}
+
+        unknown = sorted(set(overrides) - set(defaults))
+        if unknown:
+            known = ", ".join(sorted(defaults)) or "(none)"
+            raise CommandError(f"{self.name}: no such argument {unknown}. Accepts: {known}")
+        missing = sorted(required - set(overrides))
+        if missing:
+            raise CommandError(f"{self.name}: missing required argument(s) {missing}")
+        return argparse.Namespace(**{**defaults, **overrides})
+
+    def invoke(self, **overrides: Any) -> dict[str, Any]:
+        """Answer this command's question and return the payload, unrendered.
+
+        The entry point for every surface that is not the command line. It
+        raises :class:`CommandError` where the command line would have exited,
+        so a caller polling several commands survives one of them failing.
+        """
+        return self.run(self.arguments(**overrides))
+
 
 def resolve_run_dir(run: str, runs_dir: str) -> Path:
     """Resolve a run identifier (name under ``runs_dir``) or an explicit path."""
@@ -40,7 +88,7 @@ def resolve_run_dir(run: str, runs_dir: str) -> Path:
     candidate = Path(runs_dir) / run
     if candidate.is_dir():
         return candidate
-    raise SystemExit(f"Run not found: '{run}' (looked at {as_path} and {candidate})")
+    raise CommandError(f"Run not found: '{run}' (looked at {as_path} and {candidate})")
 
 
 def parse_overrides(pairs: list[str]) -> dict[str, Any]:
@@ -52,7 +100,7 @@ def parse_overrides(pairs: list[str]) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     for pair in pairs:
         if "=" not in pair:
-            raise SystemExit(f"--set expects KEY=VALUE, got {pair!r}")
+            raise CommandError(f"--set expects KEY=VALUE, got {pair!r}")
         key, raw = pair.split("=", 1)
         try:
             overrides[key] = json.loads(raw)
