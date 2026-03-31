@@ -35,9 +35,15 @@ variable "pool_vm_size" {
       D32als_v6  32 vCPU / 64 GB  ~$1.60/hr  matches modal_app.py's run_train shape
 
     als_v6 is Gen2-only; the image in main.tf must stay a *-gen2 SKU.
+
+    CHANGING THIS REPLACES THE POOL. vm_size forces replacement, so an apply
+    that disagrees with the deployed pool destroys and rebuilds it -- which is
+    how this default came to be a trap: the live pool had been moved to D16
+    out of band while this still read D8, leaving every `just create` one
+    confirmation away from silently halving the node.
   EOT
   type        = string
-  default     = "Standard_D8als_v6"
+  default     = "Standard_D16als_v6"
 }
 
 variable "max_nodes" {

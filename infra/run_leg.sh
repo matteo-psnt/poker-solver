@@ -16,26 +16,24 @@
 # the absolute target is what makes it correct.
 #
 # Env (set by the justfile's `_task` recipe):
-#   RUN_CONFIG      training config stem, e.g. production  (fresh runs only)
+#   RUN_CONFIG      training config stem, e.g. production. Needed by a CONTINUING
+#                   leg too: the config builds the tree and the solver, and the
+#                   checkpoint stores neither.
 #   RUN_TO          ABSOLUTE target iteration
 #   RUN_ID          run id to resume; empty for a fresh train
 #   CODE_SNAPSHOT   names <share>/code/<snapshot>.tar.gz, pinned by this submission
 #   CODE_DIR        where the task already extracted that tarball
 #   RUN_EXPERIMENT  experiment id      RUN_ARM     arm label
 #   RUN_PARENT      parent run id
-#   RUN_SETS_HEX    hex-encoded, space-separated k=v config overrides
-#   RUN_WORKERS     worker count (empty = all CPUs)
+#   RUN_SETS_JSON   JSON array of k=v config overrides
+#   RUN_WORKERS     worker count (empty = `nproc`, filled in below)
 #   RUN_CHECKPOINT_EVERY  static only: checkpoint every N iterations
 #   RUN_OP          train (default) | evaluate
 #   RUN_EVAL_METHOD lbr | exact_br | rollout      RUN_EVAL_AT  comma-separated rungs
-#   RUN_EVAL_FLAGS_HEX  hex-encoded extra evaluate flags
+#   RUN_EVAL_FLAGS_JSON JSON array of extra evaluate flags
 set -euo pipefail
 
-# Overridable ONLY so this script can be exercised off-node; the default is the
-# node's data disk and nothing in Batch sets it. Without this the publish/refresh
-# logic below could not be tested anywhere but on a live node, which is how a
-# publish ordering bug would reach the share before anyone noticed.
-WORK="${WORK:-/mnt/work}"
+WORK=/mnt/work
 SHARE="${AZ_BATCH_NODE_MOUNTS_DIR:-/mnt/batch/tasks/fsmounts}/shared"
 # Set by the task command line, which extracts there. Task-owned, and unique
 # per task so concurrent legs on one node cannot share a tree.
@@ -44,7 +42,47 @@ DATA="$WORK/data"
 RUNS="$DATA/runs"
 ARCHIVE="$SHARE/archive"
 
-log() { echo "[run_leg $(date -u +%H:%M:%S)] $*"; }
+# Tee'd into the published leg log, not just stdout. Batch keeps a task's
+# stdout ON THE NODE and the pool drains within minutes of a task ending, so
+# anything only echoed here is gone for exactly the legs worth reading later.
+# The wrapper's own lines -- which op ran, how many overrides were applied,
+# what got published -- are the ones that explain a leg, and they were the ones
+# not surviving. `${LEG_LOG:-/dev/null}` because this is defined before it.
+log() { echo "[run_leg $(date -u +%H:%M:%S)] $*" | tee -a "${LEG_LOG:-/dev/null}"; }
+
+# --- leg outcome record ------------------------------------------------------- #
+# .run.json cannot record how an attempt died -- a killed container is gone
+# first. This writes the node's own account to the share: `started` on entry,
+# a terminal event from the EXIT trap. `just legs` fills in the deaths the trap
+# never survives (OOM, SIGKILL, node loss) from Batch's view.
+#
+# SYSTEM python3, and leg_log is stdlib-only: this must work before `uv sync`,
+# so a leg dying during dependency install still leaves a record. Never fatal.
+leg_record() {
+  python3 - "$CODE" "$1" "${2:-}" <<'PY' 2>/dev/null || true
+import sys
+sys.path.insert(0, sys.argv[1])
+import os
+from src.shared.leg_log import write_node_record
+
+event, cause = sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None)
+code = os.environ.get("LEG_EXIT_CODE") or ""
+write_node_record(
+    os.environ["LEG_SHARE"],
+    task_id=os.environ.get("AZ_BATCH_TASK_ID", "local"),
+    job_id=os.environ.get("AZ_BATCH_JOB_ID", ""),
+    node_id=os.environ.get("AZ_BATCH_NODE_ID", ""),
+    run_id=os.environ.get("RUN_ID", ""),
+    op=os.environ.get("RUN_OP") or "train-static",
+    config=os.environ.get("RUN_CONFIG", ""),
+    target_iteration=os.environ.get("RUN_TO", ""),
+    event=event,
+    cause=cause,
+    exit_code=int(code) if code.isdigit() else None,
+)
+PY
+}
+export LEG_SHARE="$SHARE"
 
 # --- publish ----------------------------------------------------------------- #
 # Idempotent and safe to call while training continues. `cp -u` skips rungs
@@ -108,12 +146,20 @@ publish_all() {
         *) cp -ru "$d" "$ARCHIVE/$name/" 2>>/tmp/publish_err || failed=1 ;;
       esac
     done
-    # Loose files (.run.json, metrics.jsonl, result json), manifest excluded.
-    find "$run_dir" -maxdepth 1 -type f ! -name CHECKPOINT.json \
+    # Loose files (.run.json, metrics.jsonl, result json), manifests excluded.
+    # BOTH manifests: the static backend writes STATIC_CHECKPOINT.json, which fell
+    # to this unguarded copy and so was published even when a snapshot copy above
+    # had failed -- a manifest naming a half-copied rung, exactly what publishing
+    # the manifest last exists to prevent. The static ladder was the unguarded one.
+    find "$run_dir" -maxdepth 1 -type f \
+        ! -name CHECKPOINT.json ! -name STATIC_CHECKPOINT.json \
         -exec cp -u {} "$ARCHIVE/$name/" \; 2>>/tmp/publish_err || failed=1
-    if [ "$failed" -eq 0 ] && [ -f "$run_dir/CHECKPOINT.json" ]; then
-      cp -u "$run_dir/CHECKPOINT.json" "$ARCHIVE/$name/" 2>>/tmp/publish_err || failed=1
-    fi
+    local manifest
+    for manifest in CHECKPOINT.json STATIC_CHECKPOINT.json; do
+      if [ "$failed" -eq 0 ] && [ -f "$run_dir/$manifest" ]; then
+        cp -u "$run_dir/$manifest" "$ARCHIVE/$name/" 2>>/tmp/publish_err || failed=1
+      fi
+    done
 
     if [ "$failed" -eq 0 ]; then
       log "published $name"
@@ -146,7 +192,36 @@ publish_log() {
 
 # Publish on ANY exit -- success, failure, or cancellation. An operator-cancelled
 # task still leaves its progress on the share.
-trap publish_all EXIT
+#
+# SIGNAL TRAPS FIRST, not optional. Reading `$?` in the EXIT trap does NOT see a
+# signal death: killed while blocked on a foreground child, the shell reports the
+# last COMPLETED command's status -- zero. Measured: SIGTERM ran the EXIT trap
+# with `$? = 0` and exited 143, so `just cancel` recorded a clean completion and
+# was never reconciled. Re-raising via `exit` sets what the trap reads.
+on_signal() {
+  exit $((128 + $1))
+}
+trap 'on_signal 15' TERM
+trap 'on_signal 2' INT
+
+# `$?` must be read as the trap's FIRST statement: anything before it overwrites
+# the status the leg exited with.
+on_exit() {
+  LEG_EXIT_CODE=$?
+  export LEG_EXIT_CODE
+  kill "${WATCHER:-}" 2>/dev/null || true
+  publish_all
+  case "$LEG_EXIT_CODE" in
+    0)   leg_record finished "${LEG_OUTCOME:-completed}" ;;
+    124) leg_record finished timeout ;;        # RUN_TIMEOUT guard expired: a hang
+    130|143) leg_record finished cancelled ;;  # SIGINT / SIGTERM: operator or Batch
+    137) leg_record finished killed ;;         # SIGKILL from outside: the OOM killer
+    *)   leg_record finished failed ;;
+  esac
+}
+trap on_exit EXIT
+
+leg_record started
 
 # --- watcher ----------------------------------------------------------------- #
 # Polls the checkpoint manifest rather than hooking the trainer, so the training
@@ -194,38 +269,6 @@ ln -sfn "$DATA" "$CODE/data"
 log "syncing dependencies"
 uv sync --quiet
 
-# Refresh node-local abstractions from the share.
-#
-# The pool's START TASK copies `$SHARE/combo_abstraction/.` down, but it runs
-# once, at BOOT. An abstraction published after a node came up is therefore
-# invisible to that node -- so a `precompute` leg followed by a `train` leg would
-# work only if the training happened to land on a node that booted later. This
-# closes that window: without it the new precompute op is usable only after the
-# pool recycles.
-#
-# Cheap in steady state: `-u` copies only what is missing or newer, so a node
-# that already has every abstraction pays a directory walk, not the ~773 MB.
-# Deliberately NOT fatal -- a share hiccup must not kill a leg whose abstraction
-# is already on local disk.
-if [ -d "$SHARE/combo_abstraction" ]; then
-  mkdir -p "$DATA/combo_abstraction"
-  # ONLY directories a completion marker vouches for. An unmarked one is either
-  # mid-publish or was interrupted, and copying it down yields the truncated-mmap
-  # failure the ladder fetch above documents at length.
-  #
-  # Abstractions uploaded by the older `just push-data` carry no marker, and that
-  # is fine: the start task already copied them down at boot, so this refresh
-  # only ever needs to catch what was published SINCE. Requiring the marker keeps
-  # the completeness guarantee absolute instead of trading it for a
-  # backward-compatibility path nothing depends on.
-  for marker in "$SHARE"/combo_abstraction/.complete-*; do
-    [ -f "$marker" ] || continue
-    name=$(basename "$marker"); name="${name#.complete-}"
-    [ -d "$SHARE/combo_abstraction/$name" ] || continue
-    cp -ru "$SHARE/combo_abstraction/$name" "$DATA/combo_abstraction/" 2>/dev/null || true
-  done
-fi
-
 # Fetch ONLY what the manifest names, never the whole archive directory.
 #
 # A task killed mid-publish leaves PARTIALLY-COPIED snapshot directories behind.
@@ -272,6 +315,47 @@ print(chr(10).join(sorted(n for n in names if n)))
     # Manifest last here too, so a torn fetch never claims more than it copied.
     cp -u "$src/CHECKPOINT.json" "$RUNS/$RUN_ID/" 2>/dev/null || true
     log "fetched $kept complete snapshot dir(s)"
+  elif [ "${RUN_OP:-train}" = "train" ] && [ -f "$src/STATIC_CHECKPOINT.json" ]; then
+    # CONTINUING A STATIC RUN NEEDS EXACTLY ONE RUNG: the manifest's current
+    # snapshot. Falling to the catch-all below took the whole retained ladder --
+    # 31 rungs, ~25 GB over SMB, ~40 minutes -- to load the 809 MB the trainer
+    # actually reads.
+    #
+    # Leaving the older rungs on the share is not a loss. `_extend_ladder` builds
+    # the next manifest from the PREVIOUS manifest, not from what is on disk, so
+    # the ladder's history survives; `_prune` only deletes what the manifest does
+    # not name, and absent rungs are simply absent; and publish copies per
+    # directory, so rungs this node never had are neither re-uploaded nor removed.
+    cur=$(python3 -c "
+import json, sys
+print(json.load(open(sys.argv[1]))['zarr'])
+" "$src/STATIC_CHECKPOINT.json" || true)
+    find "$src" -maxdepth 1 -mindepth 1 \
+         ! -name 'static-*' ! -name STATIC_CHECKPOINT.json \
+         -exec cp -ru {} "$RUNS/$RUN_ID/" \; 2>/dev/null || true
+    if [ -z "$cur" ]; then
+      log "FATAL STATIC_CHECKPOINT.json on the share names no current snapshot"
+      exit 1
+    elif [ ! -d "$src/$cur" ]; then
+      log "FATAL manifest names $cur but it is not on the share"
+      exit 1
+    elif [ ! -f "$src/.complete-$cur" ]; then
+      # Same reasoning as the evaluate branch: an unmarked rung is either
+      # pre-marker or interrupted, and resuming from a truncated one would train
+      # on garbage rather than fail. `repair-ladder` is how a rung earns a marker.
+      log "FATAL $cur has no completion marker -- refusing to resume from a"
+      log "      possibly-partial snapshot. Run repair-ladder on this run first."
+      exit 1
+    else
+      # rm first and NO -u, for the reason the evaluate branch documents: a
+      # cancelled task's partial rung on the node would be skipped as present.
+      rm -rf "$RUNS/$RUN_ID/$cur"
+      cp -r "$src/$cur" "$RUNS/$RUN_ID/" 2>/tmp/fetch_err || {
+        log "FATAL fetching $cur failed: $(tail -1 /tmp/fetch_err 2>/dev/null)"; exit 1
+      }
+      cp -u "$src/STATIC_CHECKPOINT.json" "$RUNS/$RUN_ID/" 2>/dev/null || true
+      log "fetched current rung $cur (ladder left on the share)"
+    fi
   elif [ "${RUN_OP:-train}" = "evaluate" ] && [ -n "${RUN_EVAL_AT:-}" ]; then
     # SELECTIVE. A static run has no CHECKPOINT.json, so the copy below would
     # take the WHOLE ladder -- thirty ~540 MB rungs, ~16 GB, to score three of
@@ -313,24 +397,63 @@ fi
 
 watch_rungs &
 WATCHER=$!
-trap 'kill "$WATCHER" 2>/dev/null || true; publish_all' EXIT
 
 # --- run --------------------------------------------------------------------- #
 # Optional flags are appended only when set: passing `--arm ""` would record an
 # arm literally named empty string rather than an unaffiliated run.
 ARGS=()
-[ -n "${RUN_WORKERS:-}" ] && ARGS+=(--workers "$RUN_WORKERS")
+# "Empty means all CPUs" was documented but never implemented: `train-static`
+# defaults --workers to 1, so an omitted worker count trained SINGLE-THREADED on
+# a 16-vCPU node -- a ~16x throughput loss that looks like a slow leg rather than
+# a misconfiguration, and that turns a 1.8h leg into one the 6h ceiling kills.
+# The node is the only place that knows its own core count, so it fills the
+# default in rather than leaving the CLI's local-friendly 1 to stand.
+# `|| echo 1` because a bare failing $(nproc) under `set -e` would abort the leg
+# outright -- a missing core-count utility must degrade, not kill the run.
+ARGS+=(--workers "${RUN_WORKERS:-$(nproc 2>/dev/null || echo 1)}")
 [ -n "${RUN_EXPERIMENT:-}" ] && ARGS+=(--experiment "$RUN_EXPERIMENT")
 [ -n "${RUN_ARM:-}" ] && ARGS+=(--arm "$RUN_ARM")
 [ -n "${RUN_PARENT:-}" ] && ARGS+=(--parent "$RUN_PARENT")
-# Hex-decoded: see the justfile -- a config override's value contains `=`, which
-# Batch's KEY=VALUE environment-setting parser rejects.
-RUN_SETS=""
-if [ -n "${RUN_SETS_HEX:-}" ]; then
-  RUN_SETS=$(python3 -c "import sys; sys.stdout.write(bytes.fromhex(sys.argv[1]).decode())" "$RUN_SETS_HEX")
-fi
-if [ -n "$RUN_SETS" ]; then
-  for kv in $RUN_SETS; do [ -n "$kv" ] && ARGS+=(--set "$kv"); done
+# A JSON ARRAY, not a space-separated string. The submitter passes environment
+# settings as typed name/value pairs, so the old hex encoding (which existed
+# only because the `az` CLI parses `--environment-settings` as KEY=VALUE, and a
+# config override's value contains `=`) is gone. JSON stays because these are
+# LISTS whose elements may contain spaces: the previous `for kv in $RUN_SETS`
+# split on whitespace, silently cutting any such value in half.
+#
+# NUL-separated, read with `read -d ''`, because a newline inside a value would
+# defeat line-splitting the same way a space defeated word-splitting. `read -d`
+# rather than `mapfile -d`: the latter needs bash 4.4+, and a node-side script
+# should not carry a bash-version floor it does not need.
+# Decoded to a FILE first, and a decode failure is FATAL. Reading straight from
+# a process substitution would hide the failure: `set -e` does not see into it,
+# so a malformed payload would yield zero overrides and the leg would train with
+# the BASE config -- an experiment arm silently running as its own control, and
+# recorded that way in .run.json. That exact class of silent rebucketing has
+# already cost one curve.
+if [ -n "${RUN_SETS_JSON:-}" ]; then
+  SETS_FILE="$WORK/sets-${AZ_BATCH_TASK_ID:-local}.nul"
+  python3 -c '
+import json, sys
+for item in json.loads(sys.argv[1]):
+    sys.stdout.write(item + "\0")
+' "$RUN_SETS_JSON" > "$SETS_FILE" || {
+    log "FATAL could not decode RUN_SETS_JSON: $RUN_SETS_JSON"
+    exit 1
+  }
+  n_sets=0
+  while IFS= read -r -d '' kv; do
+    if [ -n "$kv" ]; then
+      ARGS+=(--set "$kv")
+      n_sets=$((n_sets + 1))
+      log "  override: $kv"
+    fi
+  done < "$SETS_FILE"
+  # Count the OVERRIDES, not ${#ARGS[@]} -- ARGS already holds the --workers /
+  # --experiment / --arm / --parent pairs, so a tagged leg with zero overrides
+  # would report eight. The one diagnostic this block exists to emit has to be
+  # the one number that can be trusted.
+  log "overrides: $n_sets from RUN_SETS_JSON"
 fi
 
 # Wall-clock ceiling for the training process itself. The task-level
@@ -362,116 +485,52 @@ LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
 # actually decompress every chunk. A rung that fails is left unmarked and named,
 # which is a permanently honest record -- corrupt data is discovered here, once,
 # rather than in a scoring leg minutes deep.
-# PRECOMPUTE mode. Builds a card abstraction on the node and publishes it to the
-# share, so an abstraction experiment never needs a laptop.
+# PRECOMPUTE mode. Builds a card abstraction on a node and publishes it once.
 #
-# WHY this belongs here at all: every other op consumed abstractions that were
-# built locally and pushed with `just push-data`, which made "precompute" the one
-# step that could not leave a workstation. Precompute saturates every core for
-# ~10-40 minutes depending on bucket count, which is exactly the kind of work a
-# node exists for.
+# The output path needs no special handling: `$CODE/data` is a symlink to
+# $DATA (set above), and `precompute` writes to <base>/data/combo_abstraction/
+# <name>, so it lands on the node's data disk exactly where a training leg
+# would look for it.
 #
-# RUN_CONFIG names an ABSTRACTION config here (config/abstraction/<stem>.yaml),
-# not a training config. The two namespaces are disjoint, the op is explicit, and
-# reusing the variable keeps `_task`'s signature unchanged.
-#
-# Output lands node-locally for free: `$CODE/data` is symlinked to `$DATA`, so
-# the CLI's own `data/combo_abstraction/<name>` IS `/mnt/work/data/...`. That
-# means a training task landing on THIS node can use it immediately; the copy to
-# the share is what makes it durable and available to every future node, whose
-# start task pulls the share down at boot.
-# A/B mode. Runs a whole paired comparison — control plus every arm, trained and
-# scored — as ONE task on ONE node.
-#
-# WHY one task rather than a task per arm: the harness's value is that it makes
-# the preconditions impossible to skip (single worker, one fixed seed, zero-
-# variance scoring, an optional determinism check that RAISES on mismatch).
-# Decomposing it into separate Batch tasks would move that enforcement back into
-# whoever writes the submission — which is exactly the hand-rolled protocol this
-# replaces, and how a sloppier comparison gets run and believed.
-#
-# The arms come in hex-encoded and space-separated, same reason as RUN_SETS_HEX:
-# an arm spec is `name:key=value`, and --environment-settings parses KEY=VALUE,
-# so a raw value containing `=` is rejected.
-#
-# Run directories the harness creates land under $RUNS, so the EXIT trap
-# publishes them and their eval records exactly like any training leg.
-if [ "${RUN_OP:-train}" = "ab" ]; then
-  [ -n "${RUN_CONFIG:-}" ] || { log "FATAL ab needs RUN_CONFIG (training config stem)"; exit 1; }
-  [ -n "${RUN_AB_SEED:-}" ] || { log "FATAL ab needs RUN_AB_SEED; the harness refuses to guess"; exit 1; }
-  [ -n "${RUN_AB_ARMS_HEX:-}" ] || { log "FATAL ab needs RUN_AB_ARMS_HEX (at least one arm)"; exit 1; }
-  AB_ARMS=$(python3 -c "import sys; sys.stdout.write(bytes.fromhex(sys.argv[1]).decode())" "$RUN_AB_ARMS_HEX")
-  AB_ARGS=()
-  for spec in $AB_ARMS; do AB_ARGS+=(--arm "$spec"); done
-  [ "${RUN_AB_VERIFY:-}" = "1" ] && AB_ARGS+=(--verify-determinism)
-  log "ab: config=$RUN_CONFIG iters=$RUN_TO seed=$RUN_AB_SEED arms=${#AB_ARGS[@]} (timeout $RUN_TIMEOUT)"
-  set +o pipefail
-  "${GUARD[@]}" uv run poker-solver-run ab \
-    --config "$RUN_CONFIG" --iterations "$RUN_TO" --seed "$RUN_AB_SEED" \
-    --runs-dir "$RUNS" "${AB_ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
-  rc=${PIPESTATUS[0]}
-  set -o pipefail
-  publish_all
-  log "ab finished rc=$rc"
-  exit "$rc"
-fi
-
+# THE GUARD IS THE POINT. The invariant is "computed ONCE, never recomputed" --
+# not "computed locally", which is what the local-only workflow confused it
+# with. Bucket ASSIGNMENT is not pinned by card_abstraction_hash, so
+# republishing under the same name can silently change which bucket a hand
+# lands in, and every run trained against the old copy keeps a provenance check
+# that now passes over different buckets. Refusing to overwrite is what makes
+# running this in the cloud as safe as running it on a laptop.
 if [ "${RUN_OP:-train}" = "precompute" ]; then
-  [ -n "${RUN_CONFIG:-}" ] || { log "FATAL precompute needs RUN_CONFIG (abstraction stem)"; exit 1; }
-  log "precompute: abstraction config=$RUN_CONFIG (timeout $RUN_TIMEOUT)"
+  [ -n "${RUN_CONFIG:-}" ] || { log "FATAL precompute needs RUN_CONFIG"; exit 1; }
+  log "precompute: config=$RUN_CONFIG (timeout $RUN_TIMEOUT)"
   set +o pipefail
-  "${GUARD[@]}" uv run poker-solver-run precompute --config "$RUN_CONFIG" 2>&1 | tee -a "$LEG_LOG"
+  "${GUARD[@]}" uv run poker-solver-run precompute --config "$RUN_CONFIG" --json \
+    > "$WORK/precompute.json" 2> >(tee -a "$LEG_LOG" >&2)
   rc=${PIPESTATUS[0]}
   set -o pipefail
   if [ "$rc" != 0 ]; then
-    publish_log
-    log "precompute FAILED rc=$rc"
-    exit "$rc"
+    log "precompute failed rc=$rc"; publish_log; exit "$rc"
   fi
 
-  # Publish every abstraction the node holds that the share does not.
-  #
-  # ORDER IS THE CORRECTNESS ARGUMENT, exactly as for the ladder above: a node's
-  # start task copies `$SHARE/combo_abstraction/.` down wholesale, so a
-  # half-copied directory would be consumed as if complete and fail later inside
-  # a memory-mapped read. Copy into a TEMP name, then rename, then write the
-  # marker. A reader that sees the marker is guaranteed a complete directory.
-  mkdir -p "$SHARE/combo_abstraction"
-  published=0
-  for src in "$DATA"/combo_abstraction/*/; do
-    [ -d "$src" ] || continue
-    name=$(basename "$src")
-    # Skip anything the share ALREADY HOLDS, marker or not.
-    #
-    # Keying only on the marker was wrong and shipped once: abstractions
-    # uploaded by the older `just push-data` carry no marker, so the first
-    # precompute leg "re-published" all three of them -- rm -rf'ing live
-    # artifacts another task could have been reading, and re-uploading ~773 MB
-    # to add a marker file. The node holds every abstraction the share had (its
-    # start task copies them down), so without this guard EVERY precompute leg
-    # republishes the entire library.
-    #
-    # A marker-less directory that is already present is left exactly as it is:
-    # the refresh above will not pull it down, but the start task still does, so
-    # nothing that works today stops working.
-    if [ -d "$SHARE/combo_abstraction/$name" ]; then
-      continue
-    fi
-    log "  publishing $name"
-    staging="$SHARE/combo_abstraction/.staging-$name-${AZ_BATCH_TASK_ID:-local}"
-    rm -rf "$staging" 2>/dev/null || true
-    if cp -r "$src" "$staging" 2>/dev/null; then
-      rm -rf "$SHARE/combo_abstraction/$name" 2>/dev/null || true
-      mv "$staging" "$SHARE/combo_abstraction/$name"
-      : > "$SHARE/combo_abstraction/.complete-$name"
-      published=$((published + 1))
-    else
-      log "  WARN failed to publish $name; leaving the share untouched"
-      rm -rf "$staging" 2>/dev/null || true
-    fi
-  done
+  # The command reports where it wrote; do not re-derive the directory name.
+  OUT_DIR=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["output_dir"])' \
+    "$WORK/precompute.json")
+  NAME=$(basename "$OUT_DIR")
+  DEST="$SHARE/combo_abstraction/$NAME"
+  log "precomputed $NAME -> $OUT_DIR"
+
+  if [ -d "$DEST" ] && [ -z "${RUN_FORCE_PUBLISH:-}" ]; then
+    log "REFUSING to republish: $NAME already exists on the share."
+    log "  Bucket assignment is not pinned by the abstraction hash, so replacing"
+    log "  it would silently invalidate every run trained against the old copy."
+    log "  Set RUN_FORCE_PUBLISH=1 only if no such run matters."
+    publish_log
+    exit 1
+  fi
+
+  mkdir -p "$DEST"
+  cp -ru "$OUT_DIR/." "$DEST/" || { log "FATAL publish failed"; publish_log; exit 1; }
+  log "published $NAME to the share ($(du -sh "$OUT_DIR" | cut -f1))"
   publish_log
-  log "precompute complete: $published abstraction(s) published"
   exit 0
 fi
 
@@ -496,12 +555,26 @@ fi
 # RUN_EVAL_AT takes a COMMA-SEPARATED list of rungs, scored in one task. The
 # fetch dominates the cost, so a whole convergence curve for the price of one.
 if [ "${RUN_OP:-train}" = "evaluate" ]; then
-  EVAL_FLAGS=""
-  if [ -n "${RUN_EVAL_FLAGS_HEX:-}" ]; then
-    EVAL_FLAGS=$(python3 -c "import sys; sys.stdout.write(bytes.fromhex(sys.argv[1]).decode())" "$RUN_EVAL_FLAGS_HEX")
+  # A JSON array, decoded exactly like RUN_SETS_JSON above: an eval flag's
+  # value can contain a space, which the old word-split form could not carry.
+  # Same file-first decode as RUN_SETS_JSON, and fatal for the same reason:
+  # scoring with silently-dropped flags produces a number measured by a
+  # different instrument than the one asked for, which is worse than no number.
+  EXTRA=()
+  if [ -n "${RUN_EVAL_FLAGS_JSON:-}" ]; then
+    FLAGS_FILE="$WORK/evalflags-${AZ_BATCH_TASK_ID:-local}.nul"
+    python3 -c '
+import json, sys
+for item in json.loads(sys.argv[1]):
+    sys.stdout.write(item + "\0")
+' "$RUN_EVAL_FLAGS_JSON" > "$FLAGS_FILE" || {
+      log "FATAL could not decode RUN_EVAL_FLAGS_JSON: $RUN_EVAL_FLAGS_JSON"
+      exit 1
+    }
+    while IFS= read -r -d '' flag; do
+      [ -n "$flag" ] && EXTRA+=("$flag")
+    done < "$FLAGS_FILE"
   fi
-  # shellcheck disable=SC2206
-  EXTRA=($EVAL_FLAGS)
   METHOD="${RUN_EVAL_METHOD:-exact_br}"
   ok=0
   bad=0
@@ -530,7 +603,12 @@ if [ "${RUN_OP:-train}" = "evaluate" ]; then
   # twice. A partial result is not a failure to retry; the gap is visible in this
   # log and absent from the ledger. Only a clean sweep of failures is worth a
   # retry, since that is what a transient node fault looks like.
-  [ "$ok" -gt 0 ] && exit 0
+  # "exit 0 so Batch does not retry" is not "this leg succeeded": 1 of 30 rungs
+  # would be recorded as `completed`. LEG_OUTCOME carries what the code drops.
+  if [ "$ok" -gt 0 ]; then
+    [ "$bad" -gt 0 ] && export LEG_OUTCOME=partial
+    exit 0
+  fi
   exit 1
 fi
 
@@ -555,9 +633,18 @@ set -o pipefail
 publish_log
 # 124 is timeout's own "deadline expired"; surface it as itself rather than as a
 # training failure, so `just jobs` distinguishes a hang from a crash.
-if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
-  log "TIMEOUT after $RUN_TIMEOUT -- leg killed; published rungs are on the share"
+# 124 and 137 are DIFFERENT deaths. `timeout` returns 124 whenever its deadline
+# expires, including when its own --kill-after SIGKILL fires, so 124 always means
+# the guard; 137 is SIGKILL from elsewhere -- on a training node, the OOM killer.
+# Calling an OOM a hang would mislead AND, being terminal, stop `just legs` from
+# asking Batch, the only source that can confirm it.
+if [ "$rc" = 124 ]; then
+  log "TIMEOUT after $RUN_TIMEOUT -- guard fired; published rungs are on the share"
   exit 124
+fi
+if [ "$rc" = 137 ]; then
+  log "KILLED (SIGKILL, not the guard -- suspect OOM); published rungs are on the share"
+  exit 137
 fi
 [ "$rc" = 0 ] || exit "$rc"
 

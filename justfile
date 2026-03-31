@@ -1,11 +1,17 @@
-# Fire-and-forget training on Azure Batch. Run `just` to list commands.
+# Terraform lifecycle, the emergency stop, and shorthands for the Python CLI.
 #
-#   Terraform owns what EXISTS   (infra/*.tf)   -> just create
-#   just      owns what HAPPENS  (submissions)  -> just submit / jobs / fetch
+#   Terraform owns what EXISTS   (infra/*.tf)        -> just create
+#   poker-solver-run owns what HAPPENS (submissions) -> just submit / jobs / fetch
+#
+# Dispatch used to live here as ~450 lines of `az` invocations. It is now
+# `src/interfaces/cloud/`, where a leg spec is a typed object a test can look
+# at rather than a shell string -- which is also how the hex-encoding of config
+# overrides disappeared: the SDK takes name/value pairs, so nothing has to
+# survive a `KEY=VALUE` parser. What remains below is what genuinely belongs in
+# a task runner.
 #
 # The pool holds ZERO nodes at rest. You submit legs and walk away; nodes appear
-# while work is queued and disappear when it drains. There is nothing to start,
-# nothing to remember to stop, and no idle compute bill.
+# while work is queued and disappear when it drains.
 #
 # The durable share (infra/store) is a SEPARATE Terraform state in its own
 # resource group: `just destroy` tears down compute and cannot touch the
@@ -17,11 +23,6 @@ tfs := "terraform -chdir=infra/store"
 _default:
     @just --list --unsorted
 
-# Data-plane Batch commands need an AAD login against the account. Shared-key auth
-# is disabled in UserSubscription mode, so this is the only way in.
-_login:
-    @{{tf}} output -json | jq -r '"az batch account login -g \(.resource_group.value) -n \(.batch_account.value) --subscription \(.subscription_id.value)"' | bash
-
 # --------------------------------------------------------------------------- #
 # lifecycle (Terraform)
 # --------------------------------------------------------------------------- #
@@ -31,7 +32,7 @@ plan:
     {{tf}} init -input=false
     {{tf}} plan
 
-# Create the durable share. Separate state, `prevent_destroy` — run once, ever.
+# Create the durable share. Separate state, `prevent_destroy` -- run once, ever.
 store-create:
     {{tfs}} init -input=false
     {{tfs}} apply
@@ -49,301 +50,8 @@ destroy:
     {{tf}} destroy
 
 # --------------------------------------------------------------------------- #
-# staging
+# emergency
 # --------------------------------------------------------------------------- #
-
-# Upload card abstractions to the share (~773 MB, one time).
-#
-# COPIED, never recomputed on a node: a recompute can change bucket assignments
-# without changing card_abstraction_hash, so the provenance check guarding
-# evaluation would pass over silently different buckets.
-[doc("Upload card abstractions to the share (~773 MB, one time).")]
-push-data:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    J=$({{tfs}} output -json)
-    ACCT=$(jq -r '.storage_account.value' <<<"$J")
-    SHARE=$(jq -r '.share_name.value' <<<"$J")
-    KEY=$({{tfs}} output -raw access_key)
-    # Azure Files will NOT create parent directories implicitly: uploading into a
-    # path whose parent is absent fails with `ParentNotFound`, and `upload-batch`
-    # does not make them for you. Every directory has to exist first.
-    for d in combo_abstraction code archive; do
-        az storage directory create --account-name "$ACCT" --account-key "$KEY" \
-            --share-name "$SHARE" --name "$d" -o none 2>/dev/null || true
-    done
-    for src in data/combo_abstraction/*/; do
-        [ -d "$src" ] || continue
-        name=$(basename "$src")
-        az storage directory create --account-name "$ACCT" --account-key "$KEY" \
-            --share-name "$SHARE" --name "combo_abstraction/$name" -o none 2>/dev/null || true
-        echo "  uploading $name"
-        az storage file upload-batch --account-name "$ACCT" --account-key "$KEY" \
-            --destination "$SHARE/combo_abstraction/$name" --source "$src" --no-progress
-    done
-    echo "  abstractions uploaded"
-
-# Upload the working tree as an immutable, timestamped snapshot and echo its id.
-#
-# Pinned per submission on purpose: a push while a job is running must not change
-# what that job is executing.
-[doc("Upload the working tree as an immutable snapshot; echoes its id.")]
-push-code:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    SNAP="code-$(date -u +%Y%m%d_%H%M%S)"
-    J=$({{tfs}} output -json)
-    ACCT=$(jq -r '.storage_account.value' <<<"$J")
-    SHARE=$(jq -r '.share_name.value' <<<"$J")
-    KEY=$({{tfs}} output -raw access_key)
-    # ONE TARBALL, not a directory tree. Azure Files does not create parent
-    # directories implicitly, so uploading a repo would mean pre-creating every
-    # nested path (`ParentNotFound` otherwise) and paying a round-trip per file.
-    # A sealed archive is one PUT, and it is atomic: a half-uploaded tarball is
-    # simply absent rather than a partially-populated tree a node might run.
-    TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-    # COPYFILE_DISABLE/--no-xattrs: macOS tar embeds xattrs and fflags that GNU
-    # tar on the node only warns about, but the warnings bury real errors.
-    COPYFILE_DISABLE=1 tar czf "$TMP/$SNAP.tar.gz" --no-xattrs \
-        --exclude '.git' --exclude 'data' --exclude '.venv' --exclude '__pycache__' \
-        --exclude 'node_modules' --exclude '.pytest_cache' --exclude '.ruff_cache' \
-        --exclude '.mypy_cache' --exclude '.terraform' .
-    az storage directory create --account-name "$ACCT" --account-key "$KEY" \
-        --share-name "$SHARE" --name code -o none 2>/dev/null || true
-    az storage file upload --account-name "$ACCT" --account-key "$KEY" \
-        --share-name "$SHARE" --path "code/$SNAP.tar.gz" \
-        --source "$TMP/$SNAP.tar.gz" --no-progress >/dev/null
-    echo "$SNAP"
-
-# --------------------------------------------------------------------------- #
-# submission
-# --------------------------------------------------------------------------- #
-
-# Queue one task. Shared by `submit` (fresh) and `resume` (continue a run) so
-# both go through identical staging and identical env wiring — the resume path
-# being reachable is what makes Batch's automatic retry meaningful, and having it
-# diverge from the fresh path is how it silently stops being exercised.
-_task snap config to run="" experiment="" arm="" parent="" sets="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _login
-    POOL=$({{tf}} output -raw pool_id)
-    # One job per day, holding that day's tasks. Created on demand; the `|| true`
-    # is the second and later submissions finding it already there.
-    JOB="poker-$(date -u +%Y%m%d)"
-    # A job that has been STOPPED cannot take new tasks: `az batch task create`
-    # answers JobCompleted. Since the id is per-day, one `just panic` -- or one
-    # stranded task that had to be cleared at job level -- would otherwise block
-    # every further submission until midnight UTC. Fall back to a suffixed id.
-    STATE=$(az batch job show --job-id "$JOB" --query state -o tsv 2>/dev/null || echo absent)
-    if [ "$STATE" != "absent" ] && [ "$STATE" != "active" ]; then
-        JOB="$JOB-$(date -u +%H%M%S)"
-        echo "  previous job is $STATE; using $JOB"
-    fi
-    # Explicit, not defaulted: these are billing controls, and a billing control
-    # that depends on a service default is one upgrade away from not existing.
-    #   retry 0  -- a task that fails deterministically must not re-burn a node
-    #   P2D      -- bounds a whole day's submissions, not just one task
-    az batch job create --id "$JOB" --pool-id "$POOL" \
-        --job-max-task-retry-count 0 --job-max-wall-clock-time "P2D" 2>/dev/null || true
-    LABEL="{{ if run == '' { config } else { run } }}"
-    TASK="${LABEL//[^A-Za-z0-9_-]/-}-$(date -u +%H%M%S)-$RANDOM"
-    # The wrapper lives INSIDE the code tarball, so the task command line has to
-    # bootstrap it: extract, then run. Keep this to the bare minimum.
-    #
-    # Extract into a directory the TASK creates, so the task owns it. The start
-    # task runs elevated, so anything it made is root-owned, and tar restoring
-    # the archive root's mode onto it fails with `Cannot change mode`. Keying on
-    # AZ_BATCH_TASK_ID also stops two tasks on one node sharing a tree.
-    LEG='CODE_DIR=/mnt/work/code-$AZ_BATCH_TASK_ID && mkdir -p $CODE_DIR && tar xzf $AZ_BATCH_NODE_MOUNTS_DIR/shared/code/{{snap}}.tar.gz -C $CODE_DIR --no-same-owner --no-same-permissions && CODE_DIR=$CODE_DIR bash $CODE_DIR/infra/run_leg.sh'
-    # maxWallClockTime is the ONLY thing standing between a hung task and
-    # indefinite billing: the pool scales down on pending-task count, so a task
-    # that never exits keeps its node alive forever. 24h is far above any real
-    # leg and far below a month of compute.
-    # HEX, not the raw string: `--environment-settings` parses KEY=VALUE, and a
-    # config override IS a key=value pair, so the value contains `=` and the CLI
-    # rejects it. Base64 would reintroduce the problem via its `=` padding; hex
-    # has no special characters at all.
-    SETS_HEX=$(printf '%s' "{{sets}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
-    # Two nested ceilings, deliberately different:
-    #   RUN_TIMEOUT  kills the TRAINING process and still runs the publish trap,
-    #                so a wedged leg loses at most one rung interval.
-    #   maxWallClock kills the TASK, losing whatever the trap did not reach.
-    # RUN_TIMEOUT must stay comfortably below it or the cheap stop never fires.
-    RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
-    MAX_WALL="${MAX_WALL:-P1D}"
-    # Retries are ALWAYS safe now. `--iterations` is absolute and no-ops once
-    # reached, and run_leg.sh derives a stable run id from the task id, so a
-    # retry continues the same run rather than starting a second one from zero
-    # -- true even for a fresh submit. That was the one case the dynamic path
-    # could not make idempotent, which is why retries used to be conditional.
-    # Two nodes have gone `unusable` mid-leg with MountConfigurationError;
-    # without retries, each costs a manual restart.
-    RETRIES="${RUN_RETRIES:-2}"
-    # RUN_WORKERS empty = all CPUs. Worth setting BELOW the core count on a big
-    # abstraction: every worker pickle.loads its own copy (385 MB for production),
-    # so 16 workers cost 6.2 GB in duplicates alone before any training state.
-    az batch task create --job-id "$JOB" --task-id "$TASK" \
-        --max-wall-clock-time "$MAX_WALL" \
-        --max-task-retry-count "$RETRIES" \
-        --command-line "/bin/bash -c '$LEG'" \
-        --environment-settings \
-            CODE_SNAPSHOT="{{snap}}" RUN_CONFIG="{{config}}" RUN_TO="{{to}}" \
-            RUN_ID="{{run}}" RUN_EXPERIMENT="{{experiment}}" RUN_ARM="{{arm}}" \
-            RUN_PARENT="{{parent}}" RUN_SETS_HEX="$SETS_HEX" \
-            RUN_TIMEOUT="$RUN_TIMEOUT" RUN_WORKERS="${RUN_WORKERS:-}" \
-            RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-1000000}" \
-            RUN_OP="${RUN_OP:-}" RUN_EVAL_METHOD="${RUN_EVAL_METHOD:-}" \
-            RUN_EVAL_AT="${RUN_EVAL_AT:-}" RUN_EVAL_FLAGS_HEX="${RUN_EVAL_FLAGS_HEX:-}" \
-            RUN_AB_SEED="${RUN_AB_SEED:-}" RUN_AB_ARMS_HEX="${RUN_AB_ARMS_HEX:-}" \
-            RUN_AB_VERIFY="${RUN_AB_VERIFY:-}" \
-        -o none
-    echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
-    if [ "${RUN_OP:-}" = "evaluate" ]; then
-        echo "  retries:  $RETRIES (scoring is idempotent: re-scoring rewrites the same record)"
-    else
-        echo "  retries:  $RETRIES (stable run id + absolute target, so a retry continues)"
-    fi
-    echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
-
-# Run a paired knob A/B ON A NODE: control plus every arm, trained and scored.
-#
-#   just ab quick_test 200000 42 'prune110:solver__enable_pruning=true,solver__pruning_threshold=110.0'
-#   just ab ochs_gate 100000 42 'ochs:card_abstraction__config=ochs_gate_ochs'
-#
-# Args: config iterations seed, then one or more NAME:key=value[,key=value] arms.
-# The control is generated from the config's defaults -- do not pass it.
-#
-# ONE task, not one per arm. The harness exists to make the preconditions
-# impossible to skip (single worker, one fixed seed, zero-variance exact_br
-# scoring), and splitting it across tasks would put that back on whoever writes
-# the submission -- the hand-rolled protocol this replaces.
-#
-# RUN_AB_VERIFY=1 trains and scores the control TWICE and fails the leg unless
-# they match exactly. Worth it the first time a config or code version is used.
-[doc("Paired A/B on a node. Args: config iterations seed NAME:k=v [NAME:k=v...]")]
-ab config iterations seed *arms:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    [ -n "{{arms}}" ] || { echo "error: at least one --arm is required"; exit 1; }
-    SNAP=$(just push-code)
-    echo "  code snapshot: $SNAP"
-    ARMS_HEX=$(printf '%s' "{{arms}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
-    RUN_OP=ab RUN_AB_SEED="{{seed}}" RUN_AB_ARMS_HEX="$ARMS_HEX" \
-      RUN_AB_VERIFY="${RUN_AB_VERIFY:-}" RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
-      just _task "$SNAP" "{{config}}" "{{iterations}}" "" "" "" "" ""
-
-# Build a card abstraction ON A NODE and publish it to the share.
-#
-#   just precompute production_ochs_river
-#
-# Precompute was the one step that could not leave a workstation: every other op
-# consumed abstractions built locally and uploaded with `just push-data`. It
-# saturates every core for ~10-40 minutes depending on bucket count, which is
-# what a node is for.
-#
-# The arg is an ABSTRACTION config stem (config/abstraction/<stem>.yaml), not a
-# training config. Idempotent: an abstraction already published, and therefore
-# already pulled down by the node, makes the CLI skip the work.
-#
-# Afterwards `just submit` can train against it immediately -- the leg script
-# refreshes node-local abstractions from the share before every op, so a node
-# that booted before this ran still sees it.
-[doc("Build a card abstraction on a node and publish it. Args: abstraction-config")]
-precompute config:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    SNAP=$(just push-code)
-    echo "  code snapshot: $SNAP"
-    RUN_OP=precompute RUN_TIMEOUT="${RUN_TIMEOUT:-4h}" \
-      just _task "$SNAP" "{{config}}" "0" "" "" "" "" ""
-
-# Start a NEW run and train it to an absolute iteration count.
-#
-#   just submit quick_test 3000
-#   just submit production 25000000 exp-7 control
-#   just submit production 25000000 exp-7 variant:pruning "" solver__pruning=true
-#   just submit production 25000000 exp-7 variant:x run-base-id      # fork lineage
-[doc("Start a NEW run. Args: config to [experiment] [arm] [parent] [k=v...]")]
-submit config to experiment="" arm="" parent="" *sets:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    SNAP=$(just push-code)
-    echo "  code snapshot: $SNAP"
-    just _task "$SNAP" "{{config}}" "{{to}}" "" "{{experiment}}" "{{arm}}" \
-        "{{parent}}" "$(printf '%s\n' {{sets}})"
-
-# Continue an EXISTING run to an absolute iteration target.
-#
-#   just resume run-20260728_011716-ca70cf 50000000
-#
-# Absolute, not "train N more": a retried task re-reads a newer checkpoint, so a
-# relative target would compound. The run is fetched from the share's archive on
-# the node, so this works against any published run — including one whose
-# previous leg was killed partway.
-[doc("Continue an EXISTING run to an absolute iteration target. Args: run to")]
-resume run to:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    SNAP=$(just push-code)
-    echo "  code snapshot: $SNAP"
-    just _task "$SNAP" "" "{{to}}" "{{run}}" "" "" "" ""
-
-# Every task and its state. The pool scales up on its own within ~5 minutes.
-[doc("List every task and its state.")]
-jobs:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _login
-    for job in $(az batch job list --query "[].id" -o tsv); do
-        echo "== $job"
-        az batch task list --job-id "$job" \
-            --query "[].{task:id, state:state, exit:executionInfo.exitCode, node:nodeInfo.nodeId}" \
-            -o table 2>/dev/null | sed 's/^/  /'
-    done
-
-# stdout of one task (add `err` as the second arg for stderr).
-job-log job task stream="out":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _login
-    az batch task file download --job-id "{{job}}" --task-id "{{task}}" \
-        --file-path "std{{stream}}.txt" --destination /dev/stdout 2>/dev/null
-
-# Cancel a task. Its wrapper publishes what it has before exiting, so progress
-# up to the last retained rung survives on the share.
-[doc("Cancel a task; its partial progress is published first.")]
-cancel job task:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _login
-    az batch task stop --job-id "{{job}}" --task-id "{{task}}"
-    echo "  terminated {{task}} — partial progress is on the share"
-
-# --------------------------------------------------------------------------- #
-# status + results
-# --------------------------------------------------------------------------- #
-
-# Node counts, and — critically — the REAL reason behind any allocation failure.
-#
-# Batch reports every allocation problem as a generic `AllocationFailed`; the
-# actual cause (Gen1-vs-Gen2 image, a policy denial, quota) is escaped JSON inside
-# resizeErrors. Reading it is the difference between a one-line fix and an
-# afternoon — it is how the Gen2 requirement was found.
-[doc("Pool node counts, and the REAL cause of any allocation failure.")]
-pool-status:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _login
-    POOL=$({{tf}} output -raw pool_id)
-    az batch pool show --pool-id "$POOL" \
-        --query "{state:allocationState, current:currentDedicatedNodes, target:targetDedicatedNodes}" -o table
-    ERR=$(az batch pool show --pool-id "$POOL" --query "resizeErrors" -o json)
-    if [ "$ERR" != "[]" ] && [ -n "$ERR" ]; then
-        echo "  RESIZE ERRORS — the real cause is inside valuesProperty:"
-        jq -r '.[] | "   code: \(.code)\n   \(.valuesProperty[]? | select(.name|test("Json$")) | .value)"' <<<"$ERR"
-    fi
-    echo "  cost: $({{tf}} output -raw hourly_cost) (pool is 0 nodes at rest)"
 
 # STOP EVERYTHING. Terminates every job and forces the pool to zero nodes.
 #
@@ -351,54 +59,34 @@ pool-status:
 # what. Deliberately blunt: it kills running tasks rather than waiting for them,
 # because the situation where you need this is the one where waiting is the
 # problem. Anything a leg had published up to its last retained rung survives on
-# the share, and `just resume <run> <to>` picks it back up.
+# the share, and `just submit <config> <to> --run <id>` picks it back up.
 #
-# Runs from a phone via Azure Cloud Shell; nothing here needs this repo.
-[doc("STOP EVERYTHING: terminate all jobs and force the pool to zero nodes.")]
-panic:
+# THE ONLY RECIPE THAT DELIBERATELY DOES NOT USE THE PYTHON CLI, and the only
+# one that reads no Terraform state. It must work when the checkout is broken,
+# the venv is missing, or you are on a phone in Azure Cloud Shell -- so it takes
+# its coordinates as arguments and shells `az` directly. It previously claimed
+# that property while calling `just _login` and `terraform output -raw pool_id`,
+# neither of which exists in Cloud Shell.
+#
+#   just panic poker-batch-rg pokerbatchus31321 train
+[doc("STOP EVERYTHING. Args: resource-group batch-account pool-id")]
+panic rg account pool:
     #!/usr/bin/env bash
     set -euo pipefail
-    just _login
-    POOL=$({{tf}} output -raw pool_id)
+    az batch account login -g "{{rg}}" -n "{{account}}"
     # `stop`, not `terminate`: there is no `az batch job terminate`, and the CLI
-    # answers an unknown verb by printing help and exiting 1 -- which the `|| true`
-    # then swallowed, so panic reported success while stopping nothing. Found the
-    # hard way on a task stranded by an unusable node.
+    # answers an unknown verb by printing help and exiting 1 -- which a `|| true`
+    # then swallows, so panic reports success while stopping nothing.
     for job in $(az batch job list --query "[?state!='completed'].id" -o tsv); do
         echo "  stopping job $job"
         az batch job stop --job-id "$job" --terminate-reason "panic" || true
     done
-    # Replace the formula outright rather than disabling autoscale: disabling it
-    # leaves targetDedicatedNodes wherever it was.
-    az batch pool autoscale disable --pool-id "$POOL" 2>/dev/null || true
-    az batch pool resize --pool-id "$POOL" --target-dedicated-nodes 0 \
+    # Replace the target outright rather than only disabling autoscale:
+    # disabling it leaves targetDedicatedNodes wherever it was.
+    az batch pool autoscale disable --pool-id "{{pool}}" 2>/dev/null || true
+    az batch pool resize --pool-id "{{pool}}" --target-dedicated-nodes 0 \
         --node-deallocation-option terminate
-    echo "  pool $POOL resizing to 0. Re-arm autoscale with: just create"
-
-# Evaluate the deployed autoscale formula server-side and print BOTH its
-# variables and any error.
-#
-# The error half is the point. An invalid or throwing formula still returns
-# partial `results`, so printing results alone makes a broken formula look
-# healthy -- which is exactly how a `#` comment (Batch wants `//`) and a
-# one-argument GetSample both went unnoticed while the pool quietly stopped
-# scaling. Run this after every formula change.
-[doc("Evaluate the deployed autoscale formula on the live pool, errors included.")]
-autoscale-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _login
-    POOL=$({{tf}} output -raw pool_id)
-    OUT=$(mktemp); trap 'rm -f "$OUT"' EXIT
-    az batch pool autoscale evaluate --pool-id "$POOL" \
-        --auto-scale-formula "$({{tf}} output -raw autoscale_formula)" -o json > "$OUT"
-    if jq -e '.error' "$OUT" >/dev/null; then
-        jq -r '"  ERROR: \(.error.code)", (.error.values[]? | "    \(.value)")' "$OUT"
-        echo "  (results below are PARTIAL — the formula did not fully evaluate)"
-    else
-        echo "  no error"
-    fi
-    jq -r '(.results // "") | split(";")[] | select(length > 0) | "    " + .' "$OUT"
+    echo "  pool {{pool}} resizing to 0. Re-arm autoscale with: just create"
 
 # Alert before Azure charges can ever reach the credit card.
 #
@@ -429,102 +117,64 @@ autoscale-check:
 credit-check *flags:
     @python3 infra/credit_watch.py {{flags}}
 
-# Bring published runs and eval records back, then rebuild the ledger.
+# --------------------------------------------------------------------------- #
+# shorthands for `poker-solver-run`
+# --------------------------------------------------------------------------- #
 #
-# `ledger --rebuild` is what makes this safe with several legs finishing at once:
-# each eval wrote its complete row into its own run directory, so the index is
-# derived rather than appended to by competing writers.
-[doc("Bring published runs back and rebuild the ledger.")]
-fetch:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    J=$({{tfs}} output -json)
-    ACCT=$(jq -r '.storage_account.value' <<<"$J")
-    SHARE=$(jq -r '.share_name.value' <<<"$J")
-    KEY=$({{tfs}} output -raw access_key)
-    mkdir -p data/runs
-    az storage file download-batch --account-name "$ACCT" --account-key "$KEY" \
-        --source "$SHARE/archive" --destination data/runs --no-progress >/dev/null 2>&1 || {
-        echo "  nothing published yet"; exit 0; }
-    echo "  fetched into data/runs"
-    uv run poker-solver-run ledger --rebuild --limit 10
+# Aliases, not logic. Every one of these is reachable directly as
+# `uv run poker-solver-run <cmd>`; they exist so `just --list` still answers
+# "what can I do here?" and so muscle memory keeps working. Anything that needs
+# a flag not listed here should be run against the CLI directly.
 
-# Print a leg's published log. Unlike `job-log`, this survives the node.
+# Start or continue a run, to an ABSOLUTE iteration target.
 #
-# Batch keeps task stdout/stderr ON THE NODE, and the pool scales to zero within
-# minutes of a task ending -- so `job-log` returns NodeNotFound for exactly the
-# failed legs you most need to read. run_leg.sh copies its log to the share on
-# every publish; this reads that copy.
-[doc("Print a leg's log from the share (survives node teardown). Args: task")]
-leg-log task:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    J=$({{tfs}} output -json)
-    ACCT=$(jq -r '.storage_account.value' <<<"$J")
-    SHARE=$(jq -r '.share_name.value' <<<"$J")
-    KEY=$({{tfs}} output -raw access_key)
-    TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
-    az storage file download --account-name "$ACCT" --account-key "$KEY" \
-        --share-name "$SHARE" --path "logs/{{task}}.log" --dest "$TMP" \
-        --no-progress -o none 2>/dev/null || { echo "  no published log for {{task}}"; exit 0; }
-    tr '\r' '\n' < "$TMP" | grep -v "Training batches:" | tail -80
+#   just submit quick_test 3000
+#   just submit production 25000000 --experiment exp-7 --arm control
+#   just submit "" 50000000 --run run-20260728_011716-ca70cf
+[doc("Start/continue a run to an ABSOLUTE target. Args: config to [flags...]")]
+submit config to *flags:
+    uv run poker-solver-run submit --config "{{config}}" --to "{{to}}" {{flags}}
 
-# Every leg log on the share, newest last.
-[doc("List published leg logs.")]
-leg-logs:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    J=$({{tfs}} output -json)
-    ACCT=$(jq -r '.storage_account.value' <<<"$J")
-    SHARE=$(jq -r '.share_name.value' <<<"$J")
-    KEY=$({{tfs}} output -raw access_key)
-    az storage file list --account-name "$ACCT" --account-key "$KEY" \
-        --share-name "$SHARE" --path logs -o tsv --query "[].name" 2>/dev/null || echo "  none"
+# Score a published run on the pool, one task per rung.
+[doc("Score a published run. Args: run [flags...]")]
+score run *flags:
+    uv run poker-solver-run score --run "{{run}}" {{flags}}
 
-# Score a published run ON A NODE. Args: run [method] [rungs] [flags...]
-#
-#   just score run-production-025433-1095
-#   just score run-... exact_br 10000000,20000000,30000000
-#   just score run-... exact_br "" --br-flops 8
-#
-# On a node because the share is a LOCAL mount there: one checkpoint is ~540 MB
-# of small zarr chunks, ~20 minutes to pull over SMB, which makes scoring a
-# ladder from a laptop impractical.
-#
-# ONE TASK PER RUNG, not one task looping over them. Rungs are independent, so
-# Batch is the scheduler: it spreads them across nodes up to max_nodes and
-# queues the rest. A single looping task pinned the whole curve to one node no
-# matter how much pool was available. Each task also parallelises its own four
-# BR walks internally, so a rung uses ~4 cores and a node can hold one comfortably.
-[doc("Score a published run on a node, one task per rung. Args: run [method] [rungs] [flags...]")]
-score run method="exact_br" rungs="" *flags:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    SNAP=$(just push-code)
-    echo "  code snapshot: $SNAP"
-    HEX=$(printf '%s' "{{flags}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
-    IFS=',' read -ra RUNGS <<< "{{rungs}}"
-    [ "${#RUNGS[@]}" -eq 0 ] && RUNGS=("")
-    for rung in "${RUNGS[@]}"; do
-        RUN_OP=evaluate RUN_EVAL_METHOD="{{method}}" RUN_EVAL_AT="$rung" \
-          RUN_EVAL_FLAGS_HEX="$HEX" RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
-          just _task "$SNAP" "" "0" "{{run}}" "" "" "" ""
-    done
-    echo "  ${#RUNGS[@]} rung(s) queued — Batch runs them across the pool"
+# Every queued/running task on the pool.
+jobs *flags:
+    uv run poker-solver-run jobs {{flags}}
 
-# Verify a published static ladder and mark the rungs that actually load.
-#
-#   just repair-ladder run-production-025433-1095 production
-#
-# Rungs published before completion markers covered `static-*` are refused by
-# the fetch, since an unmarked rung and an interrupted one are indistinguishable.
-# This PROVES each one by loading it on a node and marks only those that read
-# cleanly, so a corrupt rung is found once, here, instead of inside a scoring leg.
-[doc("Verify a published static ladder, marking rungs that load. Args: run config")]
+# Pool node counts, and the real cause of any allocation failure.
+pool-status:
+    uv run poker-solver-run pool-status
+
+# Evaluate the deployed autoscale formula, errors included.
+autoscale-check:
+    uv run poker-solver-run autoscale-check
+
+# What happened to every leg, including the ones that died without saying so.
+[doc("Per-leg outcomes from the share, reconciled against Batch.")]
+legs *flags:
+    uv run poker-solver-run legs {{flags}}
+
+# A leg's log, from the share by default (survives node teardown).
+[doc("Read a leg's log. Args: [flags...] e.g. --task <id> or --list")]
+leg-log *flags:
+    uv run poker-solver-run logs {{flags}}
+
+# Bring published runs back. JSON only unless --full is passed.
+fetch *flags:
+    uv run poker-solver-run fetch {{flags}}
+
+# Upload card abstractions to the share (~773 MB, one time).
+push-data *flags:
+    uv run poker-solver-run push-data {{flags}}
+
+# Publish an immutable snapshot of the tree; echoes its id.
+push-code:
+    @uv run poker-solver-run push-code
+
+# Verify a published static ladder, marking the rungs that load.
+[doc("Verify a published ladder. Args: run config")]
 repair-ladder run config:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    SNAP=$(just push-code)
-    echo "  code snapshot: $SNAP"
-    RUN_OP=repair-ladder RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
-      just _task "$SNAP" "{{config}}" "0" "{{run}}" "" "" "" ""
+    uv run poker-solver-run repair-ladder --run "{{run}}" --config "{{config}}"

@@ -131,16 +131,56 @@ class StaticArrayStorage:
         ).hexdigest()[:12]
         return f"sts_{array[:4]}_{digest}"
 
+    def _create_segment(self, array: str, size: int) -> shared_memory.SharedMemory:
+        """Create this session's segment, reclaiming one an earlier leg abandoned.
+
+        POSIX shared memory outlives the process that made it. A coordinator
+        killed without reaching :meth:`close` -- SIGKILL, an OOM, the wall-clock
+        guard -- leaves its segments in ``/dev/shm``, and because the session id
+        IS the run id, the NEXT leg for that run computes the same names and dies
+        on ``FileExistsError`` before doing any work. That breaks retry-safety
+        exactly where the design leans on it hardest: a leg is meant to be
+        re-runnable to an absolute target, and a Batch retry lands on the same
+        node by preference.
+
+        Reclaiming is safe because the name encodes the run: another leg holding
+        it is another leg training the SAME run, which is already incoherent --
+        two coordinators would interleave writes into one table and checkpoint
+        over each other. So a name that is already taken means a dead predecessor,
+        not a live peer. Legs for different runs, or against a different tree,
+        hash to different names and are untouched.
+        """
+        name = self._shm_name(array)
+        try:
+            return shared_memory.SharedMemory(name=name, create=True, size=size)
+        except FileExistsError:
+            logger.warning(
+                "Reclaiming shared segment %s left behind by an earlier leg of session %r.",
+                name,
+                self.session_id,
+            )
+            # Attaching registers the name with this interpreter's resource
+            # tracker and unlink() unregisters it again, so the pair balances and
+            # no tracker entry outlives the reclaim. (`track=False` would say that
+            # directly, but it is 3.13+ and this project supports 3.12.)
+            #
+            # FileNotFoundError is not an error here: it means the segment vanished
+            # between the failed create and this attach (the dead leg's resource
+            # tracker getting there first), which is the outcome we wanted.
+            try:
+                stale = shared_memory.SharedMemory(name=name, create=False)
+                stale.close()
+                stale.unlink()
+            except FileNotFoundError:
+                pass
+            return shared_memory.SharedMemory(name=name, create=True, size=size)
+
     def _map_shared(self, *, create: bool) -> None:
         """Create or attach the shared segments and bind them as array views."""
         self._owns_shm = create
         for name, (length, dtype) in self._spec().items():
             if create:
-                shm = shared_memory.SharedMemory(
-                    name=self._shm_name(name),
-                    create=True,
-                    size=max(1, length * dtype.itemsize),
-                )
+                shm = self._create_segment(name, max(1, length * dtype.itemsize))
             else:
                 try:
                     shm = shared_memory.SharedMemory(name=self._shm_name(name), create=False)

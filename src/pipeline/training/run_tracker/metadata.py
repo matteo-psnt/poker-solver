@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +11,7 @@ from src.pipeline.training.run_tracker.attempts import (
     AttemptRecord,
     _opt_str,
 )
+from src.shared import records, run_events
 from src.shared.config import Config
 from src.shared.gitinfo import get_git_commit, is_git_dirty
 
@@ -57,6 +57,29 @@ class RunMetadata:
     # from system.config_name inside the YAML, so a run and its override-variant
     # record the same name. None on pre-hash runs.
     config_hash: str | None = None
+
+    def creation_facts(self) -> dict[str, Any]:
+        """Everything fixed when the run was created, for the ``created`` event.
+
+        Deliberately the FIRST event: a run listing answers identity, config and
+        provenance from one line rather than folding the whole log.
+        """
+        return {
+            "ts": self.started_at,
+            "run_id": self.run_id,
+            "config_name": self.config_name,
+            "started_at": self.started_at,
+            "action_config_hash": self.action_config_hash,
+            "card_abstraction_hash": self.card_abstraction_hash,
+            "git_commit": self.git_commit,
+            "git_dirty": self.git_dirty,
+            "experiment_id": self.experiment_id,
+            "arm": self.arm,
+            "parent_run_id": self.parent_run_id,
+            "config_hash": self.config_hash,
+            "storage_capacity": self.storage_capacity,
+            "config": self.config.to_dict(),
+        }
 
     @property
     def current_attempt(self) -> AttemptRecord:
@@ -184,14 +207,103 @@ class RunMetadata:
         )
 
     @classmethod
-    def load(cls, path: Path) -> RunMetadata:
-        with path.open() as f:
-            data = json.load(f)
-        return cls.from_dict(data)
+    def from_events(cls, events: list[dict[str, Any]]) -> RunMetadata:
+        """Fold a run's event log into its current state.
 
-    def save(self, path: Path) -> None:
-        with path.open("w") as f:
-            json.dump(self.to_dict(), f, indent=2)
+        ``created`` carries everything fixed at construction; the mutable fields
+        are whatever the most recent event carrying them said. Attempts are
+        rebuilt by pairing ``attempt_started`` with its ``attempt_ended``.
+        """
+        created = run_events.head(events)
+        if not created:
+            raise ValueError("run log has no `created` event")
+
+        attempts: list[AttemptRecord] = []
+        for started in run_events.events_of(events, run_events.ATTEMPT_STARTED):
+            attempts.append(
+                AttemptRecord(
+                    index=int(started.get("index", len(attempts))),
+                    kind=started.get("kind", "fresh"),
+                    started_at=started.get("ts", ""),
+                    start_iter=int(started.get("start_iter", 0)),
+                    git_commit=started.get("git_commit"),
+                    git_dirty=started.get("git_dirty"),
+                )
+            )
+        for ended in run_events.events_of(events, run_events.ATTEMPT_ENDED):
+            index = int(ended.get("index", -1))
+            for attempt in attempts:
+                if attempt.index == index:
+                    attempt.ended_at = ended.get("ts")
+                    attempt.end_iter = ended.get("end_iter")
+                    attempt.runtime_seconds = float(ended.get("runtime_seconds", 0.0))
+                    attempt.status = ended.get("status", "completed")
+
+        # The live attempt's runtime is reported by `progress`, which lands more
+        # often than `attempt_ended` and is the only account a killed leg leaves.
+        if attempts and attempts[-1].status == "running":
+            # Only the progress events belonging to THIS attempt: an unscoped
+            # scan hands a leg that died before its first checkpoint the
+            # PREVIOUS leg's runtime.
+            since_last_start = events
+            for position, event in enumerate(events):
+                if event.get(run_events.EVENT_KEY) == run_events.ATTEMPT_STARTED:
+                    since_last_start = events[position:]
+            attempts[-1].runtime_seconds = float(
+                run_events.tail_value(
+                    since_last_start, "attempt_runtime_seconds", 0.0, kind=run_events.PROGRESS
+                )
+            )
+
+        payload = {
+            **created,
+            "iterations": run_events.tail_value(events, "iterations", 0, kind=run_events.PROGRESS),
+            "num_infosets": run_events.tail_value(
+                events, "num_infosets", 0, kind=run_events.PROGRESS
+            ),
+            "storage_capacity": run_events.tail_value(
+                events,
+                "storage_capacity",
+                created.get("storage_capacity", 0),
+                kind=run_events.PROGRESS,
+            ),
+            # Scoped to STATUS: `attempt_ended` carries the ATTEMPT's status,
+            # which is a different fact and was being read as the run's.
+            # Cumulative across attempts, the same sum _sync_cumulative_runtime
+            # keeps live -- it is not a field any single event carries.
+            "runtime_seconds": sum(a.runtime_seconds for a in attempts),
+            "status": run_events.tail_value(events, "status", "running", kind=run_events.STATUS),
+            "completed_at": run_events.tail_value(events, "completed_at", kind=run_events.STATUS),
+            "attempts": [a.to_dict() for a in attempts],
+        }
+        return cls.from_dict(payload)
+
+    @classmethod
+    def load(cls, run_dir: Path) -> RunMetadata:
+        """Read a run's state by folding its event log.
+
+        Takes the run DIRECTORY, not a file: which files a run keeps is this
+        module's business, not its callers'.
+        """
+        directory = Path(run_dir)
+        events = run_events.read(directory)
+        if events:
+            return cls.from_events(events)
+
+        # Every run directory that existed before the log holds a .run.json and
+        # nothing else, and they are still read on every resume, evaluate, curve
+        # and report. Reading them here rather than demanding a migration first
+        # is not a second format to maintain: it is the input side of the
+        # conversion, and it goes when the last snapshot does. Read-only on
+        # purpose -- a listing must not rewrite 43 directories as a side effect.
+        snapshot = records.read_snapshot(directory / ".run.json")
+        if snapshot is not None:
+            return cls.from_dict(snapshot)
+
+        raise ValueError(
+            f"No run record in {directory}. Any checkpoints there are unaffected -- "
+            "the manifest and snapshots are written separately."
+        )
 
     def to_dict(self) -> dict[str, Any]:
         config_dict = self.config.to_dict()

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-from pathlib import Path
 from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
+    add_source_argument,
+    ledger_for,
+    records_root,
     resolve_run_dir,
 )
 from src.pipeline import services
@@ -17,6 +19,7 @@ from src.pipeline.evaluation import ledger as eval_ledger
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run curve`."""
+    add_source_argument(parser)
     parser.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
     parser.add_argument("--runs-dir", default="data/runs", help="Base runs dir for id resolution.")
     parser.add_argument(
@@ -35,12 +38,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Argparse transport around :func:`services.exploitability_curve`."""
-    run_dir = resolve_run_dir(args.run, args.runs_dir)
-    out = services.exploitability_curve(
-        run_dir,
-        ledger_path=Path(args.ledger),
-        tier_index=args.tier,
-    )
+    with records_root(args) as root:
+        out = services.exploitability_curve(
+            resolve_run_dir(args.run, str(root)),
+            ledger_path=ledger_for(args, root),
+            tier_index=args.tier,
+        )
     return {"op": "curve", "decay_ratio": out.decay_ratio, **dataclasses.asdict(out)}
 
 

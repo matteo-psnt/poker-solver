@@ -20,6 +20,9 @@ dependencies = [
     "numcodecs<0.16",
     "eval7>=0.1.10",
     "pydantic>=2.0",
+    "azure-batch>=15.1.0",
+    "azure-identity>=1.25.3",
+    "azure-storage-file-share>=12.26.0",
 ]
 
 [project.scripts]
@@ -91,6 +94,11 @@ ignore = [
 # Tests are full of deliberately-unused arguments: monkeypatch stand-ins that
 # must match a real signature, and fixtures requested for their side effect.
 "tests/**/*.py" = ["SLF001", "ARG001", "ARG002", "ARG005"]
+# leg_log is imported by run_leg.sh with the BATCH NODE's system python3, which
+# on the pinned Ubuntu 22.04 image is 3.10 -- not the target above. UP017
+# rewrites `timezone.utc` to `datetime.UTC`, which is 3.11+, and the call site
+# swallows the resulting ImportError: the leg records simply stop appearing.
+"src/shared/leg_log.py" = ["UP017"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,230 @@
+"""The Batch data plane: jobs, tasks and the pool.
+
+Every function here returns plain data rather than SDK objects, so the headless
+commands can render it and ``--json`` can serialise it without knowing that
+Azure exists.
+
+Authentication is the ``az login`` session, and **explicitly
+``AzureCliCredential`` rather than ``DefaultAzureCredential``** -- see
+:func:`client` for why that distinction is load-bearing here. Shared-key auth
+is disabled on this account (the pool runs in UserSubscription mode, where
+Entra ID is the only way in), so there is no fallback to configure.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from typing import Any
+
+from azure.batch import BatchClient
+from azure.batch.models import (
+    BatchJobConstraints,
+    BatchJobCreateOptions,
+    BatchPoolEvaluateAutoScaleOptions,
+    BatchPoolInfo,
+    BatchTaskConstraints,
+    BatchTaskCreateOptions,
+    EnvironmentSetting,
+)
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+from azure.identity import AzureCliCredential
+
+from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.spec import LegSpec, daily_job_id, leg_command, suffixed_job_id
+
+JOB_MAX_WALL_CLOCK = timedelta(days=2)
+TASK_MAX_WALL_CLOCK = timedelta(days=1)
+TASK_RETRIES = 2
+
+
+def client(config: CloudConfig) -> BatchClient:
+    """Build an authenticated data-plane client.
+
+    ``AzureCliCredential``, NOT ``DefaultAzureCredential``. The default chain
+    probes for a managed identity before it reaches the CLI credential, and on
+    a laptop that probe is a request to the link-local IMDS address
+    ``169.254.169.254`` -- which on this machine does not refuse the connection,
+    it simply never answers. Measured: every data-plane call hung past 120s with
+    the default chain and returned in 1.3s with this one, while
+    ``az account get-access-token`` was healthy throughout. A credential chain
+    that silently depends on how the network treats an unroutable address is not
+    a credential chain worth having when the intended source is known.
+    """
+    return BatchClient(endpoint=config.batch_endpoint, credential=AzureCliCredential())
+
+
+def list_jobs_with_tasks(batch: BatchClient) -> list[dict[str, Any]]:
+    """Every job and the state of every task under it.
+
+    ``exit_code`` is surfaced beside ``state`` because a task that completed is
+    not necessarily a task that succeeded, and the two together are what tells
+    a drained pool from a failed leg.
+    """
+    jobs: list[dict[str, Any]] = []
+    for job in batch.list_jobs():
+        tasks = [
+            {
+                "task": task.id,
+                "state": str(task.state) if task.state else None,
+                "exit_code": (
+                    task.execution_info.exit_code if task.execution_info is not None else None
+                ),
+                "node": task.node_info.node_id if task.node_info is not None else None,
+            }
+            for task in batch.list_tasks(job.id)
+        ]
+        jobs.append({"job": job.id, "state": str(job.state) if job.state else None, "tasks": tasks})
+    return jobs
+
+
+def pool_status(batch: BatchClient, pool_id: str) -> dict[str, Any]:
+    """Node counts, and -- the point of the command -- why a resize failed.
+
+    Batch reports every allocation problem as a generic ``AllocationFailed``.
+    The actual cause (a Gen1-vs-Gen2 image, a policy denial, quota) is escaped
+    JSON inside a resize error's values, and reading it is the difference
+    between a one-line fix and an afternoon: it is how the Gen2-only
+    requirement on ``als_v6`` was found. Every value is kept rather than only
+    the ``*Json`` ones, since a cause that arrives under an unfamiliar name is
+    exactly the one worth seeing.
+    """
+    pool = batch.get_pool(pool_id)
+    errors = [
+        {
+            "code": error.code,
+            "message": error.message,
+            "values": {value.name: value.value for value in (error.error_values or [])},
+        }
+        for error in (pool.resize_errors or [])
+    ]
+    return {
+        "pool_id": pool.id,
+        "allocation_state": str(pool.allocation_state) if pool.allocation_state else None,
+        "current_dedicated_nodes": pool.current_dedicated_nodes,
+        "target_dedicated_nodes": pool.target_dedicated_nodes,
+        "vm_size": pool.vm_size,
+        "resize_errors": errors,
+    }
+
+
+def evaluate_autoscale(batch: BatchClient, pool_id: str, formula: str) -> dict[str, Any]:
+    """Evaluate a formula server-side, returning BOTH its variables and its error.
+
+    The error half is the reason this exists. An invalid or throwing formula
+    still returns partial ``results``, so reporting results alone makes a broken
+    formula look healthy -- which is how a ``#`` comment (Batch wants ``//``)
+    and a one-argument ``GetSample`` both went unnoticed while the pool quietly
+    stopped scaling.
+    """
+    run = batch.evaluate_pool_auto_scale(
+        pool_id, BatchPoolEvaluateAutoScaleOptions(auto_scale_formula=formula)
+    )
+    variables = [part.strip() for part in (run.results or "").split(";") if part.strip()]
+    error = None
+    if run.error is not None:
+        error = {
+            "code": run.error.code,
+            "message": run.error.message,
+            "values": {value.name: value.value for value in (run.error.error_values or [])},
+        }
+    return {"variables": variables, "error": error}
+
+
+def ensure_job(batch: BatchClient, pool_id: str, now: datetime) -> str:
+    """Return an id for a job that can accept tasks, creating it if needed.
+
+    One job per UTC day, created on demand. The fallback matters more than it
+    looks: a job that has been stopped answers ``JobCompleted`` to every task
+    creation, so without a second id one ``panic`` would block all submissions
+    until midnight UTC.
+
+    The two constraints are set explicitly rather than left to service
+    defaults, because they are billing controls and a billing control that
+    depends on a default is one upgrade away from not existing.
+    ``max_task_retry_count=0`` at the JOB level is deliberate -- per-task
+    retries are set per task, and a job-wide retry would re-burn a node on a
+    deterministic failure.
+    """
+    daily = daily_job_id(now)
+    try:
+        existing = batch.get_job(daily)
+    except ResourceNotFoundError:
+        _create_job(batch, daily, pool_id)
+        return daily
+
+    if str(existing.state).rsplit(".", 1)[-1].lower() == "active":
+        return daily
+
+    fallback = suffixed_job_id(now)
+    _create_job(batch, fallback, pool_id)
+    return fallback
+
+
+def _create_job(batch: BatchClient, job_id: str, pool_id: str) -> None:
+    """Create a job, tolerating a concurrent submission that got there first."""
+    try:
+        batch.create_job(
+            BatchJobCreateOptions(
+                id=job_id,
+                pool_info=BatchPoolInfo(pool_id=pool_id),
+                constraints=BatchJobConstraints(
+                    max_wall_clock_time=JOB_MAX_WALL_CLOCK, max_task_retry_count=0
+                ),
+            )
+        )
+    except ResourceExistsError:
+        return
+
+
+def submit_leg(
+    batch: BatchClient,
+    job_id: str,
+    task_id: str,
+    spec: LegSpec,
+    *,
+    max_wall_clock: timedelta = TASK_MAX_WALL_CLOCK,
+    retries: int = TASK_RETRIES,
+) -> None:
+    """Queue one leg as a Batch task.
+
+    ``max_wall_clock`` is the only thing standing between a hung task and
+    indefinite billing: the pool scales down on pending-task count, so a task
+    that never exits keeps its node alive forever. It is deliberately far above
+    any real leg and far below a month of compute, and it is the outer of two
+    nested ceilings -- ``RUN_TIMEOUT`` kills the training process first and
+    still runs the wrapper's publish trap, losing at most one rung interval.
+
+    Retries are always safe: the iteration target is absolute and the wrapper
+    derives a stable run id from the task id, so a retry continues the same run
+    rather than starting a second one from zero.
+    """
+    batch.create_task(
+        job_id,
+        BatchTaskCreateOptions(
+            id=task_id,
+            command_line=f"/bin/bash -c '{leg_command(spec.code_snapshot)}'",
+            environment_settings=[
+                EnvironmentSetting(name=name, value=value)
+                for name, value in spec.environment().items()
+            ],
+            constraints=BatchTaskConstraints(
+                max_wall_clock_time=max_wall_clock, max_task_retry_count=retries
+            ),
+        ),
+    )
+
+
+def cancel_task(batch: BatchClient, job_id: str, task_id: str) -> None:
+    """Terminate one task. Its wrapper publishes what it has before exiting."""
+    batch.terminate_task(job_id, task_id)
+
+
+def task_file(batch: BatchClient, job_id: str, task_id: str, file_path: str) -> str:
+    """Read one of a task's node-side files (``stdout.txt`` / ``stderr.txt``).
+
+    Node-side, so this only works while the node still exists. The pool scales
+    to zero within minutes of a task ending, which is why the published copy on
+    the share is the durable path and this one is the live-debugging path.
+    """
+    stream = batch.download_task_file(job_id, task_id, file_path)
+    return b"".join(stream).decode("utf-8", errors="replace")

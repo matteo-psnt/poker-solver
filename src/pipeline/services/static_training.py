@@ -42,8 +42,10 @@ from src.pipeline.training import components
 from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.static_parallel import train_static_parallel
+from src.shared import run_events
 from src.shared.config import Config
 from src.shared.config_loader import load_training_config
+from src.shared.log import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,9 @@ def train_static(
     if seed is not None:
         overrides["system__seed"] = seed
     config: Config = load_training_config(config_name, **overrides)
+    # The run's own verbosity. Workers repeat this from the same field, so all
+    # processes agree; --log-level still outranks it via the environment.
+    configure_logging(config.system.log_level)
     iterations = num_iterations or config.training.num_iterations
 
     base_dir = Path(runs_dir) if runs_dir is not None else Path(config.training.runs_dir)
@@ -123,7 +128,12 @@ def train_static(
     run_dir = base_dir / run_id
     # A named run that does not exist yet is a fresh start, not an error --
     # that is what makes a scheduler retry continue rather than restart.
-    resuming = (run_dir / ".run.json").exists()
+    # BOTH layouts. A run written before the event log has a .run.json and no
+    # log, and missing it here is not a cosmetic bug: `resuming` False mints
+    # fresh metadata over a live run, skips verify_action_config_hash, and
+    # restarts training from zero into a directory holding a real ladder --
+    # which save_checkpoint then extends with mixed-lineage rungs and prunes.
+    resuming = run_events.log_path(run_dir).exists() or (run_dir / ".run.json").exists()
 
     action_model = ActionModel(config)
     if resuming:
@@ -159,6 +169,9 @@ def train_static(
             parent_run_id=tag.parent_run_id,
         )
     run_dir.mkdir(parents=True, exist_ok=True)
+    # Before training, so `created` is genuinely the log's first event -- a run
+    # listing reads identity from that one line rather than folding.
+    tracker.initialize()
 
     started = time.time()
     try:

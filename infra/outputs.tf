@@ -30,11 +30,15 @@ output "subscription_id" {
 
 output "hourly_cost" {
   description = "USD/hr PER NODE while running. The pool is 0 nodes at rest."
+  # Both sides lowercased. Batch echoes the SKU back in its own casing --
+  # `STANDARD_D16als_v6`, not the `Standard_D16als_v6` written in variables.tf --
+  # so a literal-keyed lookup silently fell through to the default and this
+  # output read "see the Azure price list" for the SKU actually deployed.
   value = lookup({
-    "Standard_D8als_v6"  = "$0.40/hr/node"
-    "Standard_D16als_v6" = "$0.80/hr/node"
-    "Standard_D32als_v6" = "$1.60/hr/node"
-  }, azurerm_batch_pool.train.vm_size, "see the Azure price list")
+    "standard_d8als_v6"  = "$0.40/hr/node"
+    "standard_d16als_v6" = "$0.80/hr/node"
+    "standard_d32als_v6" = "$1.60/hr/node"
+  }, lower(azurerm_batch_pool.train.vm_size), "see the Azure price list")
 }
 
 output "autoscale_formula" {

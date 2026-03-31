@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.ledger.tiers import _knob_hash
+from src.shared import records as record_store
 from src.shared.gitinfo import get_git_commit, is_git_dirty
-from src.shared.jsonio import json_default
 
-LEDGER_SCHEMA_VERSION = 1
+LEDGER_SCHEMA_VERSION = record_store.REGISTRY["eval_ledger.jsonl"].version
 DEFAULT_LEDGER_PATH = Path("data/eval_ledger.jsonl")
 
 logger = logging.getLogger(__name__)
@@ -61,10 +61,19 @@ def build_record(
     timestamp: str,
     checkpoint_iteration: int | None = None,
 ) -> dict[str, Any]:
-    """Compose the compact ledger row (no per-hand samples — those live in the payload)."""
-    samples = results.get("pair_samples_mbb") or []
+    """Compose one evaluation entire: provenance, knobs, and full results.
+
+    One document, not the three shapes this replaced. An evaluation used to be a
+    180K payload, a 4K record summarising it, and a ledger row identical to the
+    record -- the same measurement stored three times. Provenance lived only in
+    the record and the samples only in the payload, so neither could be rebuilt
+    from the other: 59 of the 78 evals on disk had no matching record and were
+    unrecoverable.
+
+    The ledger row is DERIVED from this by :func:`ledger_row`, and that
+    derivability is what makes every eval file rebuildable.
+    """
     return {
-        "schema_version": LEDGER_SCHEMA_VERSION,
         "timestamp": timestamp,
         "run_id": provenance.run_id,
         "method": method,
@@ -90,12 +99,7 @@ def build_record(
         "checkpoint_iteration": checkpoint_iteration,
         "infosets": infosets,
         "knobs": knobs,
-        "results": {
-            "exploitability_mbb": results.get("exploitability_mbb"),
-            "std_error_mbb": results.get("std_error_mbb"),
-            "num_hands": results.get("num_hands"),
-            "n": len(samples),
-        },
+        "results": results,
         "result_path": payload_pointer(result_path, provenance.run_id),
     }
 
@@ -120,23 +124,21 @@ def record_evaluation(
     ``payload`` must carry ``results`` (with the per-hand ``pair_samples_mbb``) and
     ``infosets``. Returns the payload path and the appended record.
     """
-    results = payload["results"]
     slug = eval_slug(knobs)
-    result_path = write_payload(run_dir, payload, slug)
-    record = build_record(
+    document = build_record(
         provenance=provenance,
         method=method,
         estimator=estimator,
         infosets=payload["infosets"],
         knobs=knobs,
-        results=results,
-        result_path=result_path,
+        results=payload["results"],
+        result_path=run_dir / "evals" / f"{slug}.json",
         timestamp=timestamp or datetime.now(UTC).isoformat(),
         checkpoint_iteration=payload.get("checkpoint_iteration"),
     )
-    write_record(run_dir, record, slug)
-    append_record(record, ledger_path)
-    return result_path, record
+    path = write_eval(run_dir, document, slug)
+    append_record(ledger_row(document), ledger_path)
+    return path, document
 
 
 def eval_slug(knobs: dict[str, Any]) -> str:
@@ -152,37 +154,37 @@ def eval_slug(knobs: dict[str, Any]) -> str:
     return f"{stamp}-{_knob_hash(knobs)}-{uuid.uuid4().hex[:6]}"
 
 
-def write_payload(run_dir: Path, payload: dict[str, Any], slug: str) -> Path:
-    """Write the full eval payload to a non-overwriting per-eval file under the run dir.
+def ledger_row(document: dict[str, Any]) -> dict[str, Any]:
+    """The compact index row derived from one evaluation document.
 
-    Named by timestamp + knob hash + random suffix so re-evaluating a run under
-    different (or the same) settings never clobbers a prior result — the pre-ledger
-    ``evaluate_result.json`` was overwritten on every eval, discarding history.
+    Everything except the bulk results, which stay in the document. The ledger is
+    an index over the documents, so this must be derivable from any of them --
+    that derivability is what makes `ledger --rebuild` able to regenerate a row
+    it has lost.
+    """
+    results = document.get("results") or {}
+    samples = results.get("pair_samples_mbb") or []
+    row = {k: v for k, v in document.items() if k != "results"}
+    row["results"] = {
+        "exploitability_mbb": results.get("exploitability_mbb"),
+        "std_error_mbb": results.get("std_error_mbb"),
+        "num_hands": results.get("num_hands"),
+        "n": len(samples),
+    }
+    return row
+
+
+def write_eval(run_dir: Path, document: dict[str, Any], slug: str) -> Path:
+    """Write one evaluation to ``evals/<slug>.json``. Never overwrites.
+
+    The slug is timestamp + knob hash + random suffix, so re-evaluating a run
+    under the same settings cannot clobber a prior result and concurrent writers
+    on several boxes cannot collide.
     """
     evals_dir = run_dir / "evals"
     evals_dir.mkdir(parents=True, exist_ok=True)
-    path = evals_dir / f"eval-{slug}.json"
-    path.write_text(json.dumps(payload, indent=2, default=json_default))
-    return path
-
-
-def write_record(run_dir: Path, record: dict[str, Any], slug: str) -> Path:
-    """Write the complete ledger row beside its payload, under the run directory.
-
-    This is the durable copy. The shared ``eval_ledger.jsonl`` is an append to a
-    file every writer shares, which is the one shared-mutable-state in the system
-    and the one thing that has actually lost data (12/14 rows in a parallel sweep).
-    A uniquely-named file under the run being evaluated has no such contention: a
-    run directory has a single writer, so this write cannot race anything.
-
-    The full row is written, not just the payload -- ``eval_git_commit``, ``knobs``
-    and ``timestamp`` are captured at record time and exist nowhere else, so a
-    payload alone cannot reconstruct a row.
-    """
-    records_dir = run_dir / "evals"
-    records_dir.mkdir(parents=True, exist_ok=True)
-    path = records_dir / f"record-{slug}.json"
-    path.write_text(json.dumps(record, indent=2, default=json_default))
+    path = evals_dir / f"{slug}.json"
+    record_store.write_snapshot(path, document, record_store.REGISTRY["evals/*.json"])
     return path
 
 
@@ -193,9 +195,7 @@ def append_record(record: dict[str, Any], ledger_path: Path = DEFAULT_LEDGER_PAT
     The durable copy is :func:`write_record`; anything lost here is recoverable
     with ``ledger --rebuild``.
     """
-    ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    with ledger_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, default=json_default) + "\n")
+    record_store.append_log(ledger_path, record, record_store.REGISTRY["eval_ledger.jsonl"])
 
 
 def record_instant(record: dict[str, Any]) -> datetime:

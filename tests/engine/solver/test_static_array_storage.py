@@ -242,3 +242,44 @@ class TestSharedNamesAreTreeKeyed:
                 assert len(storage._shm_name(array)) <= 30
         finally:
             storage.close()
+
+
+class TestAbandonedSegmentsAreReclaimed:
+    """A leg killed before close() must not lock the next leg out of its own run.
+
+    POSIX shared memory outlives its creator, and the session id IS the run id,
+    so a coordinator lost to SIGKILL/OOM/the wall-clock guard leaves segments
+    that the retry then collides with. That killed a real leg on the pool: the
+    next task died on FileExistsError before doing any work, which is precisely
+    the retry the absolute-iteration design promises is safe.
+    """
+
+    def test_create_reclaims_a_segment_left_by_a_dead_coordinator(self, tree):
+        abandoned = StaticArrayStorage(tree, session_id="orphaned-leg")
+        abandoned.regrets[0] = 123.0
+        # Drop the mappings WITHOUT unlinking, which is what a killed process
+        # leaves behind. close() would unlink and defeat the point.
+        for shm in abandoned._shm:
+            shm.close()
+        abandoned._shm = []
+
+        successor = StaticArrayStorage(tree, session_id="orphaned-leg")
+        try:
+            assert successor.regrets[0] == 0.0, "reclaimed segment must start zeroed"
+        finally:
+            successor.close()
+
+    def test_reclaim_leaves_other_sessions_alone(self, tree):
+        neighbour = StaticArrayStorage(tree, session_id="other-run")
+        neighbour.regrets[0] = 7.0
+        orphan = StaticArrayStorage(tree, session_id="reclaimed-run")
+        for shm in orphan._shm:
+            shm.close()
+        orphan._shm = []
+
+        successor = StaticArrayStorage(tree, session_id="reclaimed-run")
+        try:
+            assert neighbour.regrets[0] == 7.0
+        finally:
+            successor.close()
+            neighbour.close()

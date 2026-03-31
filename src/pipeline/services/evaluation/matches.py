@@ -170,7 +170,7 @@ def record_blueprint_match(
     }
     knobs = {"run_b": metadata_b.run_id, "num_deals": num_deals, "base_seed": seed}
     try:
-        result_path = eval_ledger.write_payload(run_dir_a, payload, eval_ledger.eval_slug(knobs))
+        result_path = eval_ledger.write_eval(run_dir_a, payload, eval_ledger.eval_slug(knobs))
         payload["result_path"] = str(result_path)
     except OSError as exc:  # recording is a research convenience; never fail the match
         logger.warning("Blueprint-match payload not written: %s", exc)

@@ -63,14 +63,15 @@ class TestUniqueNaming:
         slugs = {ledger.eval_slug({"a": 1}) for _ in range(200)}
         assert len(slugs) == 200
 
-    def test_record_and_payload_are_written_side_by_side(self, tmp_path):
+    def test_an_evaluation_is_one_file(self, tmp_path):
+        """Was two -- a payload and a record summarising it -- plus a ledger row."""
         run_dir = tmp_path / "run-a"
         run_dir.mkdir()
-        result_path, record = _record_one(run_dir, tmp_path / "led.jsonl", 0)
+        result_path, document = _record_one(run_dir, tmp_path / "led.jsonl", 0)
         assert result_path.exists()
-        records = list((run_dir / "evals").glob("record-*.json"))
-        assert len(records) == 1
-        assert json.loads(records[0].read_text())["result_path"] == record["result_path"]
+        written = list((run_dir / "evals").glob("*.json"))
+        assert len(written) == 1
+        assert json.loads(written[0].read_text())["result_path"] == document["result_path"]
 
 
 class TestConcurrentWriters:
@@ -82,7 +83,7 @@ class TestConcurrentWriters:
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(lambda i: _record_one(run_dir, ledger_path, i), range(24)))
 
-        durable = list((run_dir / "evals").glob("record-*.json"))
+        durable = list((run_dir / "evals").glob("*.json"))
         assert len(durable) == 24, "every writer's durable record must survive"
 
     def test_rebuild_recovers_rows_a_clobbered_cache_lost(self, tmp_path):
