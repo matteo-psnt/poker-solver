@@ -179,21 +179,30 @@ def _render_once(payload: dict[str, Any]) -> None:
 
 
 def render(payload: dict[str, Any]) -> None:
-    """Print the snapshot, then keep printing if it asked to be followed."""
+    """Print the snapshot, then keep printing if it asked to be followed.
+
+    Ctrl-C is the DOCUMENTED way out of the loop, so it has to be an ordinary
+    exit rather than an escaping ``KeyboardInterrupt``: uncaught it unwinds
+    through ``headless.main``, which only translates ``CommandError``, and
+    prints a traceback every single time the user stops watching.
+    """
     _render_once(payload)
     interval = payload.get("watch") or 0
     if not interval:
         return
     if interval != payload.get("requested_watch", interval):
         print(f"\nnote: interval raised to {interval}s — a full cycle takes longer than that.")
-    while True:
-        print(f"\nrefreshing every {interval}s — Ctrl-C to stop")
-        time.sleep(interval)
-        snapshot = gather(limit=payload["limit"], with_legs=payload["with_legs"])
-        # Home the cursor and clear, rather than scrolling: this is meant to be
-        # watched, and a scrolling log of identical tables is not.
-        print("\033[H\033[J", end="")
-        _render_once(snapshot)
+    try:
+        while True:
+            print(f"\nrefreshing every {interval}s — Ctrl-C to stop")
+            time.sleep(interval)
+            snapshot = gather(limit=payload["limit"], with_legs=payload["with_legs"])
+            # Home the cursor and clear, rather than scrolling: this is meant to
+            # be watched, and a scrolling log of identical tables is not.
+            print("\033[H\033[J", end="")
+            _render_once(snapshot)
+    except KeyboardInterrupt:
+        print()
 
 
 COMMAND = Command(

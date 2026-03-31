@@ -18,6 +18,7 @@ import functools
 import json
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -26,6 +27,9 @@ from src.interfaces.errors import CommandError
 
 INFRA_DIR = Path("infra")
 STORE_DIR = Path("infra/store")
+
+# Guards the cold-cache computation in `_outputs`, not the cache itself.
+_OUTPUTS_LOCK = threading.Lock()
 
 _TERRAFORM_MISSING = (
     "terraform is not on PATH. The cloud commands read the deployed pool and "
@@ -47,14 +51,25 @@ class CloudConfigError(CommandError):
     """
 
 
-@functools.cache
 def _outputs(chdir: str) -> dict[str, Any]:
     """Read one Terraform state's outputs, once per process.
 
-    Cached because a single command can want several values from both states
-    and ``terraform output`` is a slow way to ask twice. Keyed by ``str``
-    rather than ``Path`` so the cache is hashable and stable.
+    ``functools.cache`` alone does not give "once": it makes the LOOKUP atomic,
+    not the computation, so callers arriving together on a cold cache each miss
+    and each shell out. Measured on the first concurrent reader (`status`, whose
+    panels run on three threads): ``terraform output`` ran twice against
+    ``infra`` and twice against ``infra/store``. The lock costs a dict-lookup's
+    worth of contention once warm, and a future poller with more panels would
+    have multiplied the cold cost further.
     """
+    with _OUTPUTS_LOCK:
+        return _read_outputs(chdir)
+
+
+@functools.cache
+def _read_outputs(chdir: str) -> dict[str, Any]:
+    """The uncached read. Keyed by ``str`` rather than ``Path`` so the cache is
+    hashable and stable."""
     if shutil.which("terraform") is None:
         raise CloudConfigError(_TERRAFORM_MISSING)
     try:
