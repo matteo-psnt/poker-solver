@@ -21,17 +21,14 @@ valid work, and the node refuses the leg if the abstraction is genuinely
 missing.
 """
 
-from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
-
-from src.interfaces.cli.commands import jobs as jobs_command
+from src.interfaces.cli.commands import status
 from src.interfaces.cli.commands.evaluate import EVAL_METHODS
 from src.interfaces.cli.flows.config_menu import select_config
 from src.interfaces.cli.flows.queueing import queue_legs
 from src.interfaces.cli.flows.run_picker import select_run
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
-from src.interfaces.cloud import batch, spec
-from src.interfaces.cloud.config import CloudConfig, CloudConfigError
+from src.interfaces.cloud import spec
 from src.pipeline import services
 
 MENU_EVAL_METHODS = ("exact_br", *(m for m in EVAL_METHODS if m != "exact_br"))
@@ -118,35 +115,20 @@ def _prompt_experiment_tags(ctx: CliContext) -> tuple[str, str, str] | None:
 
 
 def cloud_status(ctx: CliContext) -> None:  # noqa: ARG001
-    """Show what the pool is doing right now."""
+    """Show what the pool is doing right now.
+
+    This used to read Batch itself and print its own tables, which made it a
+    second renderer for payloads that already had one -- free to disagree with
+    `jobs` about what a task looks like, and blind to the leg log entirely, so
+    the menu could not answer why a leg died. It now shows the same three
+    panels `poker-solver-run status` shows, from the same call.
+
+    No error clause of its own, either: a panel that fails renders as
+    unavailable beside the ones that did not, which is the behaviour a status
+    screen wants and the reason `gather` isolates per panel.
+    """
     ui.header("Cloud Status")
-    try:
-        config = CloudConfig.load()
-        client = batch.client(config)
-        status = batch.pool_status(client, config.pool_id)
-        jobs = batch.list_jobs_with_tasks(client)
-    except (CloudConfigError, ClientAuthenticationError, HttpResponseError) as error:
-        ui.error(str(error))
-        ui.pause()
-        return
-
-    print(f"Pool {status['pool_id']} ({status['vm_size']})")
-    print(f"  state: {status['allocation_state']}")
-    print(f"  nodes: {status['current_dedicated_nodes']} / {status['target_dedicated_nodes']}")
-    print(f"  cost:  {config.hourly_cost} (0 nodes at rest)")
-
-    # Filtered on BOTH levels, matching `jobs`. Job state alone is not enough
-    # here: today's job stays active all day, so its finished tasks would be
-    # listed under an "Active" heading -- a screen that answers "is anything
-    # running?" with a wall of things that already stopped.
-    live = [job for job in jobs if jobs_command.is_live(job)]
-    print("\nActive jobs:" if live else "\nNothing running.")
-    for job in live:
-        print(f"  == {job['job']}")
-        for task in job["tasks"]:
-            state = jobs_command.short_state(task["state"])
-            if state in jobs_command.LIVE_TASK_STATES:
-                print(f"     {state:<10} {task['task']}")
+    status.render(status.gather())
     ui.pause()
 
 

@@ -29,9 +29,18 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
   irrelevant). It also has no config *editor*: a leg carries a config name plus
   `LegSpec.sets`, so overrides go through `--set k=v` and nothing else.
 - `uv run poker-solver-run` — the single entrypoint, in three groups:
-  - **dispatch to the pool** — `ab`, `submit`, `score`, `submit-precompute`,
-    `jobs`, `logs`, `legs`, `cancel`, `pool-status`, `autoscale-check`,
-    `repair-ladder`, `fetch`, `push-code`, `push-data`
+  - **see and dispatch** — `status`, `ab`, `submit`, `score`,
+    `submit-precompute`, `jobs`, `logs`, `legs`, `cancel`, `pool-status`,
+    `autoscale-check`, `repair-ladder`, `fetch`, `push-code`, `push-data`.
+    **`status` is the one screen for "what is the pool doing right now"** —
+    it composes `pool-status` + `jobs` + `legs` through `invoke()` and renders
+    each with the command that owns it. Panels are fetched CONCURRENTLY and
+    fail INDEPENDENTLY: measured warm, `pool-status` is 0.9s, `jobs` ~11s (an
+    N+1 — one `list_tasks` per job), `legs` 23s with unresolved legs to
+    reconcile and 9.3s without, so serial would be a ~35s screen. `--watch N`
+    has a 30s floor for the same reason. The interactive menu's "Cloud Status"
+    is the same call; it used to be a second renderer that could disagree with
+    `jobs` and could not see the leg log at all.
   - **run here** (what a node invokes) — `train-static`, `precompute`,
     `evaluate`
   - **read the record** — `ledger`, `curve`, `progress`, `runinfo`, `report`,

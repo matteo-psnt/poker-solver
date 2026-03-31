@@ -362,6 +362,28 @@ class TestFixturesMatchTheRealPayloads:
             assert set(PAYLOADS[op]) == expected, op
 
 
+# Composed from the panels' own fixtures, which is the point of the command:
+# it renders each panel with the renderer that owns it rather than formatting
+# anything itself. Built after the literal so it can reuse them by key.
+#
+# `legs` is deliberately the FAILED panel here. A status screen's whole value is
+# that it still shows the other two when one is unavailable, and that path only
+# runs when something is already wrong -- so it is the one worth pinning.
+PAYLOADS["status"] = {
+    "op": "status",
+    "at": "2026-08-03T00:24:48-07:00",
+    "elapsed_seconds": 22.1,
+    "watch": 0,
+    "requested_watch": 0,
+    "limit": 10,
+    "with_legs": True,
+    "panels": {
+        "pool": {"payload": PAYLOADS["pool-status"], "error": None},
+        "jobs": {"payload": PAYLOADS["jobs"], "error": None},
+        "legs": {"payload": None, "error": "Azure rejected the credential — try `az login`."},
+    },
+}
+
 BY_NAME = {command.name: command for command in COMMANDS}
 
 
