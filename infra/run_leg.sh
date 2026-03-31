@@ -238,12 +238,23 @@ watch_rungs() {
     rungs=$(python3 - "$RUNS" <<'PY' 2>/dev/null || true
 import json, pathlib, sys
 out = []
-for m in sorted(pathlib.Path(sys.argv[1]).glob("*/CHECKPOINT.json")):
+# BOTH manifest names. Globbing only CHECKPOINT.json meant the static backend --
+# the only backend -- was never watched, so mid-run publishing silently never
+# fired and the exit trap was the sole publisher. A 50M leg reached 38,000,000
+# with nothing on the share past 30,000,000: eight rungs and ~45 minutes riding
+# entirely on a trap that a SIGKILL or a lost node does not run.
+root = pathlib.Path(sys.argv[1])
+for m in sorted([*root.glob("*/CHECKPOINT.json"), *root.glob("*/STATIC_CHECKPOINT.json")]):
     try:
         d = json.loads(m.read_text())
     except Exception:
         continue
-    out.append(f"{m.parent.name}:{','.join(str(r['iteration']) for r in d.get('retained', []))}")
+    rungs = ",".join(str(r["iteration"]) for r in d.get("retained", []))
+    # `iteration` too, not just the retained ladder: with checkpoint_every below
+    # the retain interval the current snapshot advances while the ladder does
+    # not, and watching only the ladder would sit idle through exactly those
+    # chunks.
+    out.append(f"{m.parent.name}:{d.get('iteration', '')}:{rungs}")
 print("|".join(out))
 PY
     )
