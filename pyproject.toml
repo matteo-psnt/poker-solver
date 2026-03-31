@@ -23,6 +23,8 @@ dependencies = [
     "azure-batch>=15.1.0",
     "azure-identity>=1.25.3",
     "azure-storage-file-share>=12.26.0",
+    "fastapi>=0.129.0",
+    "uvicorn>=0.41.0",
 ]
 
 [project.scripts]

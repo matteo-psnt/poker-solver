@@ -86,3 +86,7 @@ infra/store/.terraform/
 infra/store/terraform.tfstate
 infra/store/terraform.tfstate.*
 infra/store/*.tfvars
+
+# console build output
+console/dist/
+console/node_modules/

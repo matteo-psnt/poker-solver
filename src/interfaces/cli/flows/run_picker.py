@@ -16,9 +16,10 @@ from collections.abc import Sequence
 import questionary
 from questionary import Choice
 
+from src.interfaces.cli.commands import runs as runs_command
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
-from src.pipeline import services
+from src.interfaces.errors import CommandError
 from src.pipeline.services import RunSummary
 
 # Sentinel choice values; the NUL prefix cannot collide with a run directory name.
@@ -130,9 +131,19 @@ def select_run(
     default), runs that cannot be opened at HEAD are hidden behind a toggle and
     greyed out when shown; with True, all runs stay selectable for inspection.
     """
-    summaries = services.describe_runs(ctx.runs_dir)
+    # The PUBLISHED runs, via the command that owns that question. This used to
+    # read `ctx.runs_dir`, which stopped existing when local runs were deleted --
+    # the picker did not fail, it reported "no trained runs found" against a path
+    # nothing writes to any more, which is the worse of the two outcomes.
+    try:
+        payload = runs_command.COMMAND.invoke()
+    except CommandError as error:
+        ui.error(str(error))
+        ui.pause()
+        return None
+    summaries = [RunSummary(**row) for row in payload["runs"]]
     if not summaries:
-        ui.error(f"No trained runs found in {ctx.runs_dir}")
+        ui.error("No published runs. Submit one with Train, or check `az login`.")
         ui.pause()
         return None
 

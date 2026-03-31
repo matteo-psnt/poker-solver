@@ -183,6 +183,44 @@ PAYLOADS: dict[str, dict] = {
         "legs": [{"task_id": "prod-101010-1", "attempt": 1, "cause": "killed"}],
         "gaps": ["unscored ladder rungs: 5,000,000, 20,000,000"],
     },
+    "serve": {
+        "op": "serve",
+        "url": "http://127.0.0.1:8765",
+        "host": "127.0.0.1",
+        "port": 8765,
+        "reload": False,
+    },
+    "runs": {
+        "op": "runs",
+        "runs": [
+            {
+                "name": "run-production-025433-1095",
+                "commits_ago": None,
+                "git_dirty": False,
+                "has_checkpoint": True,
+                "loadable": True,
+                "blocker": None,
+                "iterations": 76_000_000,
+                "num_infosets": 32_240_608,
+                "config_name": "production",
+                "status": "completed",
+            },
+            # A run that never checkpointed: still listed, with the reason, because
+            # it is exactly the one someone is looking for when asking what happened.
+            {
+                "name": "run-20260802_203312-8c4a2c",
+                "commits_ago": 3,
+                "git_dirty": True,
+                "has_checkpoint": False,
+                "loadable": False,
+                "blocker": "never checkpointed",
+                "iterations": None,
+                "num_infosets": None,
+                "config_name": "quick_test",
+                "status": "failed",
+            },
+        ],
+    },
     "legs": {
         "op": "legs",
         "reconciled": 1,
@@ -356,9 +394,17 @@ PAYLOADS["status"] = {
 BY_NAME = {command.name: command for command in COMMANDS}
 
 
+# `serve`'s renderer IS the server: calling it blocks on uvicorn. It is the one
+# command whose render has a side effect rather than being pure formatting, so it
+# is excluded here by name and covered by `tests/interfaces/web/` instead.
+SIDE_EFFECTING = {"serve"}
+
+
 class TestEveryOpRenders:
     def test_every_command_renders_its_payload(self, capsys):
         for name, command in BY_NAME.items():
+            if name in SIDE_EFFECTING:
+                continue
             command.render(PAYLOADS[name])
             assert capsys.readouterr().out, f"'{name}' rendered nothing"
 
