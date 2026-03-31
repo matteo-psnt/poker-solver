@@ -41,7 +41,7 @@ def test_combo_menu_builds_expected_entries(tmp_path, monkeypatch):
     assert captured["prompt"] == "Combo Abstraction Tools:"
     assert captured["exit_label"] == "Back"
     assert captured["items"] == [
-        "Precompute Abstraction",
+        "Precompute Abstraction (on the pool)",
         "View Abstraction Info",
         "Test Bucket Lookup",
         "Analyze Bucketing Patterns",

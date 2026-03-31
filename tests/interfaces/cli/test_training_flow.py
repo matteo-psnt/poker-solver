@@ -11,6 +11,8 @@ speaking a relative-target dialect and left its runs permanently invisible to
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.interfaces.cli.flows import training
 from src.interfaces.cli.ui.context import CliContext
 from src.interfaces.cloud import spec
@@ -32,13 +34,14 @@ def _stub_flow(monkeypatch, config, *, target=1000, tags=("", "", ""), continuin
     captured: list[list[spec.LegSpec]] = []
 
     monkeypatch.setattr(training, "select_config", lambda _ctx: config)
-    monkeypatch.setattr(training, "_ensure_combo_abstraction", lambda _ctx, _config: True)
     monkeypatch.setattr(training, "_prompt_experiment_tags", lambda _ctx: tags)
     monkeypatch.setattr(training.prompts, "confirm", lambda *a, **k: continuing)
     monkeypatch.setattr(training.prompts, "prompt_int", lambda *a, **k: target)
     monkeypatch.setattr(training.ui, "header", lambda _title: None)
     monkeypatch.setattr(training.ui, "pause", lambda: None)
-    monkeypatch.setattr(training, "_queue", lambda make_legs: captured.append(make_legs("snap-1")))
+    monkeypatch.setattr(
+        training, "queue_legs", lambda make_legs: captured.append(make_legs("snap-1"))
+    )
     return captured
 
 
@@ -119,3 +122,31 @@ class TestNoLocalComputeDoorRemains:
         """Their removal is the point of the rewiring, not a side effect."""
         for name in ("_start_training", "_resume_training", "_prompt_num_workers"):
             assert not hasattr(training, name), name
+
+    def test_the_local_abstraction_gate_is_gone(self):
+        """Submitting must not touch a card abstraction on this machine.
+
+        ``_ensure_combo_abstraction`` called ``build_card_abstraction`` on the
+        happy path, which is not an existence check -- it loads ~773 MB. It also
+        gated the submission on whether the LAPTOP had the artifact, when the
+        machine that needs it is the node, which mounts the share.
+        """
+        for name in ("_ensure_combo_abstraction", "_run_precompute_and_verify"):
+            assert not hasattr(training, name), name
+        assert not hasattr(training, "build_card_abstraction")
+
+    def test_submitting_never_loads_an_abstraction(self, tmp_path, monkeypatch):
+        """The end-to-end version: a laptop with no abstraction still submits."""
+        import src.pipeline.training.components as components
+
+        ctx = _make_ctx(tmp_path)
+        captured = _stub_flow(monkeypatch, Config.default())
+        monkeypatch.setattr(
+            components,
+            "build_card_abstraction",
+            lambda *a, **k: pytest.fail("submitting must not load a card abstraction"),
+        )
+
+        training.submit_training_leg(ctx)
+
+        assert len(captured) == 1

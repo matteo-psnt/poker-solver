@@ -53,7 +53,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _published(config: CloudConfig) -> list[str]:
+def published_abstractions(config: CloudConfig) -> list[str]:
     """Abstraction directories already on the share."""
     service = share.share_client(config)
     return [
@@ -63,7 +63,7 @@ def _published(config: CloudConfig) -> list[str]:
     ]
 
 
-def _target_name(abstraction_config: str) -> str:
+def target_name(abstraction_config: str) -> str:
     """The directory this config will produce, derived without computing it.
 
     The name is a pure function of the config -- bucket counts, runout mode and
@@ -76,8 +76,8 @@ def _target_name(abstraction_config: str) -> str:
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Stage the tree and queue one precompute leg."""
     config = CloudConfig.load()
-    existing = _published(config)
-    target = _target_name(args.config)
+    existing = published_abstractions(config)
+    target = target_name(args.config)
 
     if target in existing and not args.force:
         raise SystemExit(

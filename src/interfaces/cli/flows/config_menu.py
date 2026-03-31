@@ -1,38 +1,27 @@
-"""Configuration selection and menu orchestration for CLI."""
+"""Configuration selection for the interactive CLI.
 
-from collections.abc import Callable
+Selection only -- there is deliberately no editor here. One used to live in
+``flows/config_editors/``: eight modules that walked the user through every
+knob and returned a modified :class:`Config`. The caller read one field off it
+(``system.config_name``) and dropped the rest on the floor, and nothing wrote
+to disk, so every edit was discarded the moment the function returned.
 
-from src.interfaces.cli.flows.config_editors import (
-    edit_action_model,
-    edit_card_abstraction,
-    edit_game_settings,
-    edit_pruning,
-    edit_solver_settings,
-    edit_storage_settings,
-    edit_system_settings,
-    edit_training_params,
-)
+It could not have worked as written either. A leg carries a config NAME plus
+``LegSpec.sets``; the node loads the YAML out of the code snapshot. An in-memory
+``Config`` has no way to reach a node. Overrides go through ``--set k=v``, which
+is one dialect for the thing the editor was a second, silent dialect of.
+"""
+
 from src.interfaces.cli.flows.config_helpers import list_config_names
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
 from src.shared.config import Config
 from src.shared.config_loader import load_config
 
-CATEGORY_EDITORS: dict[str, Callable[[CliContext, Config], Config]] = {
-    "Training Parameters": edit_training_params,
-    "Game Settings": edit_game_settings,
-    "Solver Settings": edit_solver_settings,
-    "Pruning": edit_pruning,
-    "Action Model & Resolver": edit_action_model,
-    "Card Abstraction": edit_card_abstraction,
-    "Storage Settings": edit_storage_settings,
-    "System Settings": edit_system_settings,
-}
-
 
 def select_config(ctx: CliContext) -> Config | None:
     """
-    Select and optionally edit a config file.
+    Select a config file from ``config/training/``.
 
     Returns:
         Loaded Config object or None if cancelled.
@@ -50,37 +39,4 @@ def select_config(ctx: CliContext) -> Config | None:
     if selected is None or selected == "Cancel":
         return None
 
-    config_path = training_config_dir / f"{selected}.yaml"
-    config = load_config(config_path)
-
-    edit = prompts.confirm(ctx, "Edit configuration before running?", default=False)
-    if edit:
-        config = edit_config(ctx, config)
-
-    return config
-
-
-def edit_config(ctx: CliContext, config: Config) -> Config:
-    """
-    Interactive config editor with multiple categories.
-
-    Returns:
-        Modified config (original is returned unchanged on cancel).
-    """
-    ui.header("Edit Configuration")
-
-    choices = [*list(CATEGORY_EDITORS.keys()), "Done"]
-
-    while True:
-        category = prompts.select(ctx, "What would you like to edit?", choices=choices)
-
-        if category == "Done" or category is None:
-            break
-
-        print()
-        handler = CATEGORY_EDITORS.get(category)
-        if handler is not None:
-            config = handler(ctx, config)
-        print()
-
-    return config
+    return load_config(training_config_dir / f"{selected}.yaml")

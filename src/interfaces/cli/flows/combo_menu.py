@@ -14,7 +14,7 @@ from src.interfaces.cli.ui.menu import MenuItem, run_menu
 def combo_menu(ctx: CliContext) -> None:
     """Show combo abstraction tools submenu."""
     items = [
-        MenuItem("Precompute Abstraction", handle_combo_precompute),
+        MenuItem("Precompute Abstraction (on the pool)", handle_combo_precompute),
         MenuItem("View Abstraction Info", handle_combo_info),
         MenuItem("Test Bucket Lookup", handle_combo_test_lookup),
         MenuItem("Analyze Bucketing Patterns", handle_combo_analyze_bucketing),

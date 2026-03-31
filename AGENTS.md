@@ -21,19 +21,34 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
 ## Commands
 - `uv sync --group dev` — install dependencies.
 - `uv run poker-solver` — interactive CLI. **It is a cloud client**: its
-  Train/Score items build the same `LegSpec` the headless commands build and
-  submit it to the pool. There is no local-training door in the menu.
+  Train/Score/Precompute items build the same `LegSpec` the headless commands
+  build and submit it to the pool. There is no local-compute door in the menu,
+  and nothing in it reads a card abstraction — submitting used to call
+  `build_card_abstraction` first, which loads ~773 MB and answered the question
+  about the wrong machine (the node mounts the share; the laptop's copy is
+  irrelevant). It also has no config *editor*: a leg carries a config name plus
+  `LegSpec.sets`, so overrides go through `--set k=v` and nothing else.
 - `uv run poker-solver-run` — the single entrypoint, in three groups:
-  - **dispatch to the pool** — `submit`, `score`, `jobs`, `logs`, `cancel`,
-    `pool-status`, `autoscale-check`, `repair-ladder`, `fetch`, `push-code`,
-    `push-data`
+  - **dispatch to the pool** — `ab`, `submit`, `score`, `submit-precompute`,
+    `jobs`, `logs`, `legs`, `cancel`, `pool-status`, `autoscale-check`,
+    `repair-ladder`, `fetch`, `push-code`, `push-data`
   - **run here** (what a node invokes) — `train-static`, `precompute`,
     `evaluate`
-  - **read the record** — `ledger`, `curve`, `report`, `promote`, `compare`,
-    `checkpoint-profile`
+  - **read the record** — `ledger`, `curve`, `progress`, `runinfo`, `report`,
+    `compare`, `promote`. Every one takes `--source local|share`: `local` reads
+    the copy `fetch` left in `--runs-dir`, `share` answers against the published
+    record without keeping one — the eval index is rebuilt from the per-run
+    documents rather than read from a second writable file on a share that has
+    no atomic append.
+
+  A subcommand is one module under `src/interfaces/cli/commands/`, listed once
+  in the `COMMANDS` tuple. The `Command` dataclass carries parser, handler AND
+  renderer together on purpose: when those lived apart, `checkpoint-profile`
+  borrowed evaluate's renderer and died on a missing key.
 - **Azure dispatch is Python, in `src/interfaces/cloud/`** — `spec.py` (pure,
   the testable core: what a leg IS), `batch.py`, `share.py`, `dispatch.py`,
-  `config.py`. It lives under `interfaces` so nothing in
+  `config.py`, `workspace.py` (what `--source share` materialises). It lives
+  under `interfaces` so nothing in
   `pipeline`/`engine`/`core` can reach Azure. **Auth is `AzureCliCredential`,
   never `DefaultAzureCredential`** — the default chain probes the link-local
   IMDS address, which on a laptop hangs rather than refusing (measured: >120s
