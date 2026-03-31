@@ -40,6 +40,18 @@ def _echo(args: argparse.Namespace) -> dict[str, Any]:
 ECHO = Command(name="echo", add_arguments=_add, run=_echo, render=lambda _p: None, help="")
 
 
+def _placeholder(action: argparse.Action) -> Any:
+    """A value a required flag will actually accept.
+
+    Type-aware because the comparison below has to survive the parser's own
+    coercion: handing `"x"` to `--to`, which is `type=int`, makes argparse exit
+    2 and proves nothing about the seam.
+    """
+    if action.choices:
+        return next(iter(action.choices))
+    return action.type("1") if callable(action.type) else "x"
+
+
 class TestInvokeBuildsArgumentsFromTheParser:
     """One declaration of what a command accepts, reused rather than restated.
 
@@ -65,12 +77,32 @@ class TestInvokeBuildsArgumentsFromTheParser:
         with pytest.raises(CommandError, match="missing required"):
             ECHO.invoke(limit=3)
 
-    def test_every_registered_command_can_be_introspected(self):
-        """`invoke` is only usable if this holds for all of them, not just one."""
-        for command in COMMANDS:
-            assert isinstance(command.arguments.__self__, Command)
-            with pytest.raises(CommandError, match="no such argument"):
-                command.invoke(definitely_not_a_flag=1)
+    @pytest.mark.parametrize("command", COMMANDS, ids=lambda c: c.name)
+    def test_invoke_and_the_command_line_agree_for_every_command(self, command: Command):
+        """The contract, stated exactly: the two paths must build the SAME args.
+
+        Reading the parser's declared defaults is not the same as letting
+        argparse parse, and where they disagree the command line is right and
+        the other surfaces are silently wrong. `score` was: it declares `flags`
+        as a positional REMAINDER, whose declared default is `None` while
+        argparse hands the CLI `[]`, and `_passthrough(None)` raises TypeError.
+        Only a comparison against the real parse can catch that class.
+        """
+        parser = argparse.ArgumentParser(prog=command.name, add_help=False)
+        command.add_arguments(parser)
+        required = [action for action in parser._actions if action.required]
+        argv: list[str] = []
+        for action in required:
+            argv += [action.option_strings[0], str(_placeholder(action))]
+
+        expected = parser.parse_args(argv)
+        # The supplied values come from the real parse rather than being guessed
+        # again here: `--arm` is an `append`, so argparse yields `['x']` where a
+        # hand-built `'x'` would differ for reasons that say nothing about the
+        # seam. What is under test is every dest NOT supplied -- the defaults
+        # `arguments` fills in, which is exactly where `score` diverged.
+        actual = command.arguments(**{a.dest: getattr(expected, a.dest) for a in required})
+        assert vars(actual) == vars(expected)
 
 
 class TestARefusalIsAValue:
@@ -111,11 +143,19 @@ def test_no_command_signals_a_refusal_by_exiting_the_process():
     command copied from an old one reintroduces it silently -- it would still
     pass on the command line, and only break the surfaces that are not one.
     """
-    roots = [Path("src/interfaces/cli/commands"), Path("src/interfaces/cloud")]
+    # `rglob`, not `glob`: `commands/` is flat today, but a guard that silently
+    # stops covering a package the moment someone adds a subdirectory is worse
+    # than no guard, because it still reads as coverage. `flows/` is included
+    # for the same reason -- it is the surface that had to catch the SystemExit.
+    roots = [
+        Path("src/interfaces/cli/commands"),
+        Path("src/interfaces/cli/flows"),
+        Path("src/interfaces/cloud"),
+    ]
     offenders = [
         str(path)
         for root in roots
-        for path in root.glob("*.py")
+        for path in root.rglob("*.py")
         if "raise SystemExit" in path.read_text()
     ]
     assert offenders == [], f"raise CommandError instead: {offenders}"

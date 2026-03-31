@@ -47,6 +47,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "flags",
         nargs=argparse.REMAINDER,
+        # Declared, though argparse supplies `[]` for an unmatched REMAINDER on
+        # the command line whatever this says. It is the parser that
+        # `Command.arguments` reads to answer "what does this command accept",
+        # so an undeclared default means the schema says `None` where the CLI
+        # produces `[]` -- and `_passthrough(None)` raises TypeError.
+        default=[],
         help="Extra flags for `evaluate` on the node, AFTER a `--` separator: "
         "`score --run r -- --br-flops 8`. The separator is required — argparse "
         "will not hand a bare `--br-flops` to a passthrough, it rejects it as "
