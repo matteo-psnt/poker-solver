@@ -35,7 +35,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Iterator
-from multiprocessing import shared_memory
+from multiprocessing import resource_tracker, shared_memory
 
 import numpy as np
 
@@ -43,6 +43,40 @@ from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.infoset import InfoSet
 
 logger = logging.getLogger(__name__)
+
+
+def _detach_from_tracker(shm: shared_memory.SharedMemory) -> None:
+    """Stop this process's resource tracker from owning a segment it only ATTACHED to.
+
+    On POSIX, ``SharedMemory`` registers every segment it opens -- including one
+    it merely attaches to -- with the interpreter's resource tracker, and a
+    tracker UNLINKS what it holds when its process dies. An attacher that dies
+    therefore destroys arrays the coordinator is still training on. Measured, and
+    the distinction is what makes this subtle:
+
+        spawned child (shares the parent's tracker), SIGKILLed  -> SURVIVES
+        SEPARATE interpreter, SIGTERM or SIGKILL               -> DESTROYED
+
+    So an ordinary worker is safe and anything holding its own tracker is not: a
+    second leg on the node, a probe, or a worker re-parented onto a fresh
+    tracker. A 50M leg died at 38,000,000 with all 16 workers of the next chunk
+    raising FileNotFoundError on segments that existed moments earlier -- this
+    class of failure, however it was seeded. Unregistering makes attaching
+    incapable of destroying, so who is attached stops mattering.
+
+    ``SharedMemory(track=False)`` says this directly but is 3.13+, and this
+    project supports 3.12. ``resource_tracker`` is private but stable, and the
+    reclaim path above already depends on the same register/unregister pairing.
+    Never fatal: failing to unregister is the status quo ante, not a new hazard.
+    """
+    name = getattr(shm, "_name", None)
+    if not name:  # pragma: no cover - non-POSIX has no tracker to leave
+        return
+    try:
+        resource_tracker.unregister(name, "shared_memory")
+    except Exception:  # pragma: no cover - tracker already gone
+        logger.debug("Could not unregister %s from the resource tracker.", name)
+
 
 # float32 halves the footprint of the two hot arrays at a measured relative error
 # of 5.95e-8, comfortably inside f32 epsilon (see the m0002 downcast measurement).
@@ -184,6 +218,7 @@ class StaticArrayStorage:
             else:
                 try:
                     shm = shared_memory.SharedMemory(name=self._shm_name(name), create=False)
+                    _detach_from_tracker(shm)
                 except FileNotFoundError as exc:
                     raise FileNotFoundError(
                         f"No shared segment for array {name!r} in session "
