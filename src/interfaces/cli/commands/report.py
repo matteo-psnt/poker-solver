@@ -4,41 +4,28 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-from pathlib import Path
 from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
-    add_source_argument,
     ledger_for,
     records_root,
 )
 from src.pipeline import services
-from src.pipeline.evaluation import ledger as eval_ledger
-from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run report`."""
-    add_source_argument(parser)
     parser.add_argument("--experiment", required=True, help="Experiment id to report on.")
-    parser.add_argument(
-        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Runs dir, for resolving eval payloads."
-    )
-    parser.add_argument(
-        "--ledger", default=str(eval_ledger.DEFAULT_LEDGER_PATH), help="Eval ledger path."
-    )
-    parser.add_argument(
-        "--baseline", default=str(services.DEFAULT_BASELINE_PATH), help="Baseline pointer file."
-    )
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Argparse transport around :func:`services.experiment_report`."""
     with records_root(args) as root:
-        # The baseline travels with the record under --source share: it is the
-        # conclusion of the experiment this command reports on.
-        baseline = root / "baseline.json" if args.source == "share" else Path(args.baseline)
+        # The baseline travels WITH the record: it is the conclusion of the
+        # experiment this command reports on, so it is materialised alongside
+        # the runs rather than read from a path on this machine.
+        baseline = root / "baseline.json"
         out = services.experiment_report(
             args.experiment,
             ledger_path=ledger_for(args, root),

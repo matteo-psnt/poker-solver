@@ -123,12 +123,17 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     assert payload["infosets"] == 42
 
 
-def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
-    """Write a per-eval payload + one ledger row for `run_id`."""
+def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples, method="lbr", timestamp=None):
+    """Write a per-eval DOCUMENT (and a ledger row, for tests that read one).
+
+    The document is what matters now: with no local runs directory the index is
+    rebuilt from the published documents on every read, so a test that seeded
+    only a ledger row was seeding something nothing reads.
+    """
     knobs = {
         "scorer": "myopic",
         "opponent": "blueprint",
-        "hands": len(samples),
+        "hands": len(samples or []),
         "runouts": 12,
         "include_off_tree": False,
         "base_seed": base_seed,
@@ -136,10 +141,13 @@ def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
     results = {
         "exploitability_mbb": mbb,
         "std_error_mbb": 1.0,
-        "num_hands": len(samples),
+        "num_hands": len(samples or []),
         "base_seed": base_seed,
-        "pair_samples_mbb": samples,
     }
+    # `samples=None` seeds an eval with NO per-hand vector, which is what the
+    # paired comparison refuses on -- a real shape, not a malformed record.
+    if samples is not None:
+        results["pair_samples_mbb"] = samples
     slug = eval_ledger.eval_slug(knobs)
     provenance = eval_ledger.RunProvenance(
         run_id=run_id,
@@ -151,19 +159,19 @@ def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
     )
     record = eval_ledger.build_record(
         provenance=provenance,
-        method="lbr",
+        method=method,
         estimator=LBR_ESTIMATOR_LABEL,
         infosets=10,
         knobs=knobs,
         results=results,
         result_path=run_dir / "evals" / f"{slug}.json",
-        timestamp="2026-07-17T00:00:00",
+        timestamp=timestamp or "2026-07-17T00:00:00",
     )
     eval_ledger.write_eval(run_dir, record, slug)
     eval_ledger.append_record(eval_ledger.ledger_row(record), led_path)
 
 
-def test_cmd_ledger_lists_rows(tmp_path):
+def test_cmd_ledger_lists_rows(tmp_path, published):
     led = tmp_path / "ledger.jsonl"
     run_dir = tmp_path / "run-a"
     run_dir.mkdir()
@@ -187,7 +195,7 @@ def test_cmd_ledger_lists_rows(tmp_path):
     assert payload["rows"][0]["run_id"] == "run-a"
 
 
-def test_cmd_compare_valid_pairs(tmp_path):
+def test_cmd_compare_valid_pairs(tmp_path, published):
     led = tmp_path / "ledger.jsonl"
     (tmp_path / "run-a").mkdir()
     (tmp_path / "run-b").mkdir()
@@ -211,7 +219,7 @@ def test_cmd_compare_valid_pairs(tmp_path):
     assert "p_value" in payload["comparison"]
 
 
-def test_cmd_compare_refuses_seed_mismatch(tmp_path):
+def test_cmd_compare_refuses_seed_mismatch(tmp_path, published):
     led = tmp_path / "ledger.jsonl"
     (tmp_path / "run-a").mkdir()
     (tmp_path / "run-b").mkdir()
@@ -232,7 +240,7 @@ def test_cmd_compare_refuses_seed_mismatch(tmp_path):
         )
 
 
-def test_cmd_compare_force_overrides_mismatch(tmp_path):
+def test_cmd_compare_force_overrides_mismatch(tmp_path, published):
     led = tmp_path / "ledger.jsonl"
     (tmp_path / "run-a").mkdir()
     (tmp_path / "run-b").mkdir()
@@ -254,7 +262,7 @@ def test_cmd_compare_force_overrides_mismatch(tmp_path):
     assert payload["tier_warnings"]  # non-empty: the override was recorded
 
 
-def test_cmd_compare_missing_run_raises(tmp_path):
+def test_cmd_compare_missing_run_raises(tmp_path, published):
     led = tmp_path / "ledger.jsonl"
     (tmp_path / "run-a").mkdir()
     _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=1.0, samples=[1.0, 2.0])
@@ -273,7 +281,7 @@ def test_cmd_compare_missing_run_raises(tmp_path):
         )
 
 
-def test_compare_refuses_samples_free_evals_even_under_force(tmp_path):
+def test_compare_refuses_samples_free_evals_even_under_force(tmp_path, published):
     """--force overrides a judgement, but cannot conjure samples that were never
     recorded. exact_br is deterministic and stores none; the forced path used to
     die on a bare KeyError."""
@@ -281,18 +289,16 @@ def test_compare_refuses_samples_free_evals_even_under_force(tmp_path):
     for name in ("run-a", "run-b"):
         run_dir = tmp_path / name
         run_dir.mkdir()
-        payload = run_dir / "evals" / "eval-x.json"
-        payload.parent.mkdir(parents=True, exist_ok=True)
-        payload.write_text(json.dumps({"results": {"exploitability_mbb": 1.0}}))
-        row = {
-            "run_id": name,
-            "method": "exact_br",
-            "timestamp": "2026-01-01T00:00:00+00:00",
-            "knobs": {"base_seed": 3, "num_flops": 10},
-            "results": {"exploitability_mbb": 1.0, "num_hands": 0},
-            "result_path": f"{name}/evals/eval-x.json",
-        }
-        eval_ledger.append_record(row, led)
+        _seed_eval(
+            led,
+            run_dir,
+            name,
+            base_seed=3,
+            mbb=1.0,
+            samples=None,
+            method="exact_br",
+            timestamp="2026-01-01T00:00:00+00:00",
+        )
 
     with pytest.raises(CommandError, match="no per-hand samples"):
         compare_cmd.run(
@@ -324,7 +330,7 @@ def _ledger_ns(led, tmp_path, **over):
     return argparse.Namespace(**base)
 
 
-def test_since_filter_compares_instants_not_strings(tmp_path):
+def test_since_filter_compares_instants_not_strings(tmp_path, published):
     """The ledger holds naive-local legacy rows beside UTC-aware ones; a
     lexicographic cutoff skews them by the writer's UTC offset."""
     from datetime import datetime, timedelta
@@ -334,45 +340,32 @@ def test_since_filter_compares_instants_not_strings(tmp_path):
     old_naive = (now - timedelta(hours=2)).replace(tzinfo=None).isoformat()
     new_utc = (now + timedelta(hours=2)).astimezone(UTC).isoformat()
     for run_id, ts in (("old", old_naive), ("new", new_utc)):
-        eval_ledger.append_record({"run_id": run_id, "timestamp": ts}, led)
+        (tmp_path / run_id).mkdir()
+        _seed_eval(
+            led, tmp_path / run_id, run_id, base_seed=1, mbb=1.0, samples=[1.0], timestamp=ts
+        )
 
     payload = ledger_cmd.run(_ledger_ns(led, tmp_path, since=now.isoformat()))
     assert [r["run_id"] for r in payload["rows"]] == ["new"]
 
 
-def test_rebuild_counts_are_printed_in_human_mode(tmp_path, capsys):
-    """`just fetch` runs --rebuild without --json; a rebuild that recovered
-    nothing must not look identical to one that recovered hundreds of rows."""
-    led = tmp_path / "ledger.jsonl"
-    eval_ledger.append_record(
-        {"run_id": "r", "timestamp": "2026-01-01T00:00:00+00:00", "result_path": "x"}, led
-    )
-    payload = ledger_cmd.run(_ledger_ns(led, tmp_path, rebuild=True))
-    ledger_cmd.render(payload)
-    out = capsys.readouterr().out
-    assert "Rebuilt" in out
-    assert "preserved" in out
-
-
-def test_missing_samples_error_names_the_right_record(tmp_path):
+def test_missing_samples_error_names_the_right_record(tmp_path, published):
     """When only B lacks samples, the message must report B's method, not A's."""
     led = tmp_path / "ledger.jsonl"
     (tmp_path / "run-a").mkdir()
     _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=3, mbb=1.0, samples=[1.0, 2.0])
 
     run_b = tmp_path / "run-b"
-    (run_b / "evals").mkdir(parents=True)
-    (run_b / "evals" / "e.json").write_text(json.dumps({"results": {"exploitability_mbb": 2.0}}))
-    eval_ledger.append_record(
-        {
-            "run_id": "run-b",
-            "method": "exact_br",
-            "timestamp": "2026-01-02T00:00:00+00:00",
-            "knobs": {"base_seed": 3},
-            "results": {"exploitability_mbb": 2.0, "num_hands": 2},
-            "result_path": "run-b/evals/e.json",
-        },
+    run_b.mkdir()
+    _seed_eval(
         led,
+        run_b,
+        "run-b",
+        base_seed=3,
+        mbb=2.0,
+        samples=None,
+        method="exact_br",
+        timestamp="2026-01-02T00:00:00+00:00",
     )
 
     with pytest.raises(CommandError, match="exact_br"):

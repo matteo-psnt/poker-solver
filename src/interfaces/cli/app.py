@@ -18,7 +18,6 @@ def main() -> None:
         MenuItem("Submit Training Leg", training.submit_training_leg),
         MenuItem("Score a Run", training.score_run),
         MenuItem("Cloud Status", training.cloud_status),
-        MenuItem("View Past Runs", training.view_runs),
         MenuItem("Combo Abstraction Tools", combo_menu),
     ]
 

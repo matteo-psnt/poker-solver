@@ -9,23 +9,17 @@ from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
-    add_source_argument,
     ledger_for,
     records_root,
     resolve_run_dir,
 )
 from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
-from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run runinfo`."""
-    add_source_argument(parser)
     parser.add_argument("--run", required=True, help="Run id (dir name) or path.")
-    parser.add_argument(
-        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Directory containing run directories."
-    )
     parser.add_argument("--ledger", default=str(eval_ledger.DEFAULT_LEDGER_PATH))
     parser.add_argument(
         "--tier", type=int, default=0, help="Which comparison tier's curve to show."

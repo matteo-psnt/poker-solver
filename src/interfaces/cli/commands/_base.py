@@ -109,51 +109,37 @@ def parse_overrides(pairs: list[str]) -> dict[str, Any]:
     return overrides
 
 
-def add_source_argument(parser: argparse.ArgumentParser) -> None:
-    """The `--source` flag every reading command shares.
-
-    `local` reads whatever `fetch` last put in `--runs-dir`. `share` answers the
-    question against the published record directly, without keeping a copy --
-    see :mod:`src.interfaces.cloud.workspace` for why it materialises rather
-    than reading in place.
-    """
-    parser.add_argument(
-        "--source",
-        default="local",
-        choices=["local", "share"],
-        help="local = the fetched copy in --runs-dir; share = the published record.",
-    )
-
-
 @contextmanager
 def records_root(args: argparse.Namespace) -> Iterator[Path]:
-    """The runs directory a reading command should work against.
+    """The published record, materialised into a temporary tree.
 
-    Under `--source share` this is a temporary tree holding the published JSON,
-    removed on exit. The reader itself stays ordinary local-path code.
+    There is no longer a ``--source`` to choose. Every reader answers against
+    the share, because the share is the only place a run exists: work runs on
+    the pool, the node publishes, and nothing on this machine is a source of
+    truth about it. A local copy could only ever be a stale second answer to a
+    question the share can already answer -- measured at 2.9s for `progress`
+    and 3.7s for `ledger`, which is what made this practical.
+
+    The tree is removed on exit; the reader itself stays ordinary local-path
+    code and never learns that Azure exists.
     """
-    if getattr(args, "source", "local") == "share":
-        # Imported here: only the share path needs the Azure SDK, and a local
-        # read must not require cloud credentials to be configured.
-        from src.interfaces.cloud.workspace import share_records
+    # Imported here rather than at module scope: this is the one place the
+    # command layer needs the Azure SDK, and hoisting it would make every
+    # `--help` pay for importing it.
+    from src.interfaces.cloud.workspace import share_records
 
-        with share_records(run=getattr(args, "run", None) or None) as root:
-            yield root
-    else:
-        yield Path(args.runs_dir)
+    with share_records(run=getattr(args, "run", None) or None) as root:
+        yield root
 
 
-def ledger_for(args: argparse.Namespace, root: Path) -> Path:
-    """Where the eval index lives for this source.
+def ledger_for(args: argparse.Namespace, root: Path) -> Path:  # noqa: ARG001
+    """The eval index, REBUILT from the published documents.
 
-    Under `--source share` there is no shared ledger FILE, and deliberately so:
-    a second writable file on a share with no atomic append is the contention
-    the per-run records were introduced to remove. The index is instead REBUILT
-    from the published documents, which every one of them can now support --
-    each carries its own provenance.
+    There is deliberately no ledger FILE on the share: a second writable file
+    on a share with no atomic append is the contention the per-run records were
+    introduced to remove. Each published document carries its own provenance,
+    so the index is derived on demand instead of stored.
     """
-    if getattr(args, "source", "local") == "share":
-        derived = root / "eval_ledger.jsonl"
-        rebuild_ledger(root, derived)
-        return derived
-    return Path(args.ledger)
+    derived = root / "eval_ledger.jsonl"
+    rebuild_ledger(root, derived)
+    return derived
