@@ -15,13 +15,16 @@ from src.interfaces.cli.commands._base import (
 )
 from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
+from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run curve`."""
     add_source_argument(parser)
     parser.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
-    parser.add_argument("--runs-dir", default="data/runs", help="Base runs dir for id resolution.")
+    parser.add_argument(
+        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Base runs dir for id resolution."
+    )
     parser.add_argument(
         "--ledger",
         default=str(eval_ledger.DEFAULT_LEDGER_PATH),

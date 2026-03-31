@@ -15,6 +15,7 @@ from src.interfaces.cli.commands._base import (
 )
 from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
+from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -22,7 +23,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     add_source_argument(parser)
     parser.add_argument("--experiment", required=True, help="Experiment id to report on.")
     parser.add_argument(
-        "--runs-dir", default="data/runs", help="Runs dir, for resolving eval payloads."
+        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Runs dir, for resolving eval payloads."
     )
     parser.add_argument(
         "--ledger", default=str(eval_ledger.DEFAULT_LEDGER_PATH), help="Eval ledger path."

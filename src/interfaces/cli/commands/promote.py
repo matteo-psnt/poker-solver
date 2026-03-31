@@ -12,6 +12,7 @@ from src.interfaces.cli.commands._base import (
     resolve_run_dir,
 )
 from src.pipeline import services
+from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -28,7 +29,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Why this run becomes the baseline. Required — a lineage that moved for "
         "an unrecorded reason cannot be audited later.",
     )
-    parser.add_argument("--runs-dir", default="data/runs", help="Base runs dir for id resolution.")
+    parser.add_argument(
+        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Base runs dir for id resolution."
+    )
     parser.add_argument(
         "--baseline", default=str(services.DEFAULT_BASELINE_PATH), help="Baseline pointer file."
     )

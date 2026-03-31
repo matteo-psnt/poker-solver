@@ -25,6 +25,7 @@ from src.interfaces.cli.commands._base import Command
 from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
 from src.pipeline.evaluation import ledger as eval_ledger
+from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -36,7 +37,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--run", default="", help="Fetch only this run id.")
     parser.add_argument(
-        "--runs-dir", default="data/runs", help="Local destination for published runs."
+        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Local destination for published runs."
     )
     parser.add_argument(
         "--ledger", default=str(eval_ledger.DEFAULT_LEDGER_PATH), help="Eval ledger path."

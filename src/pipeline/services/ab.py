@@ -56,6 +56,7 @@ from typing import Any
 
 from src.pipeline.services.evaluation import evaluate_and_record
 from src.pipeline.services.static_training import train_static
+from src.shared.config import DEFAULT_RUNS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ def run_ab(
     *,
     iterations: int,
     seed: int,
-    runs_dir: Path = Path("data/runs"),
+    runs_dir: Path = Path(DEFAULT_RUNS_DIR),
     verify_determinism: bool = False,
 ) -> AbResult:
     """Train and score a control plus ``arms``, all single-worker at one seed.
