@@ -303,12 +303,21 @@ def read_legs(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
     return joined
 
 
+def unresolved_legs(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
+    """The rows whose node record never reached a terminal event.
+
+    Returned whole, not as ids, so a caller can ask Batch about exactly these
+    ``(job_id, task_id)`` pairs. Enumerating every job in the account to find
+    the one or two open questions cost ~0.39s per job -- the answer scaled with
+    history rather than with what was actually unexplained.
+    """
+    return [row for row in read_legs(share) if row["cause"] not in TERMINAL_CAUSES]
+
+
 def unresolved_task_ids(share: str | os.PathLike[str]) -> list[str]:
     """Tasks whose node record never reached a terminal event -- exactly the
     ones worth asking Batch about."""
-    return sorted(
-        {row["task_id"] for row in read_legs(share) if row["cause"] not in TERMINAL_CAUSES}
-    )
+    return sorted({row["task_id"] for row in unresolved_legs(share)})
 
 
 def _first_not_none(*values: Any) -> Any:

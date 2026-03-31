@@ -35,10 +35,15 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
     **`status` is the one screen for "what is the pool doing right now"** —
     it composes `pool-status` + `jobs` + `legs` through `invoke()` and renders
     each with the command that owns it. Panels are fetched CONCURRENTLY and
-    fail INDEPENDENTLY: measured warm, `pool-status` is 0.9s, `jobs` ~11s (an
-    N+1 — one `list_tasks` per job), `legs` 23s with unresolved legs to
-    reconcile and 9.3s without, so serial would be a ~35s screen. `--watch N`
-    has a 30s floor for the same reason. The interactive menu's "Cloud Status"
+    fail INDEPENDENTLY. **Read cost is a maintained property, not an accident**
+    — `tests/interfaces/cloud/test_read_cost.py` pins it as call counts, since
+    latency is invisible in a test and enormous in practice. Three rules:
+    never list tasks for a job you will discard (`jobs` fetched all 44 to render
+    2); issue independent round trips together (47 leg records serially was
+    9.1s); and never sync `keys-*` key tables, which are the deleted dynamic
+    backend's and were 37 of the 38 MB a `--source share` read pulled. Measured
+    warm before → after: `jobs` 11s → 2.5s, `legs` 23s → 2.0s,
+    `ledger --source share` 20s → 4.5s, the whole status screen 22s → 2.0s. The interactive menu's "Cloud Status"
     is the same call; it used to be a second renderer that could disagree with
     `jobs` and could not see the leg log at all.
   - **run here** (what a node invokes) — `train-static`, `precompute`,
