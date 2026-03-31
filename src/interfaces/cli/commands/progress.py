@@ -5,12 +5,18 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from src.interfaces.cli.commands._base import Command, resolve_run_dir
+from src.interfaces.cli.commands._base import (
+    Command,
+    add_source_argument,
+    records_root,
+    resolve_run_dir,
+)
 from src.shared import records, run_events
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run progress`."""
+    add_source_argument(parser)
     parser.add_argument("--run", required=True, help="Run id (dir name) or path.")
     parser.add_argument(
         "--runs-dir", default="data/runs", help="Directory containing run directories."
@@ -26,8 +32,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     The run record holds a start and an end; this is the only thing that can say
     where coverage plateaued or whether throughput decayed over wall clock.
     """
-    run_dir = resolve_run_dir(args.run, args.runs_dir)
-    rows = run_events.checkpoints(run_events.read(run_dir))
+    with records_root(args) as root:
+        run_dir = resolve_run_dir(args.run, str(root))
+        rows = run_events.checkpoints(run_events.read(run_dir))
     if not rows:
         raise SystemExit(
             f"No checkpoint history in {run_dir}. It is recorded per checkpoint, so "

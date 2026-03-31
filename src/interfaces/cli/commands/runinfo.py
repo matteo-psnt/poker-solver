@@ -7,13 +7,20 @@ import dataclasses
 from pathlib import Path
 from typing import Any
 
-from src.interfaces.cli.commands._base import Command, resolve_run_dir
+from src.interfaces.cli.commands._base import (
+    Command,
+    add_source_argument,
+    ledger_for,
+    records_root,
+    resolve_run_dir,
+)
 from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run runinfo`."""
+    add_source_argument(parser)
     parser.add_argument("--run", required=True, help="Run id (dir name) or path.")
     parser.add_argument(
         "--runs-dir", default="data/runs", help="Directory containing run directories."
@@ -39,13 +46,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     The evidence is spread across artifacts written by four subsystems; this is
     the one place that holds the joins so you do not have to.
     """
-    run_dir = resolve_run_dir(args.run, args.runs_dir)
-    digest = services.run_digest(
-        run_dir,
-        ledger_path=Path(args.ledger),
-        tier_index=args.tier,
-        legs_dir=Path(args.legs_dir) if args.legs_dir else None,
-    )
+    with records_root(args) as root:
+        digest = services.run_digest(
+            resolve_run_dir(args.run, str(root)),
+            ledger_path=ledger_for(args, root),
+            tier_index=args.tier,
+            legs_dir=Path(args.legs_dir) if args.legs_dir else None,
+        )
     payload = dataclasses.asdict(digest)
     payload["op"] = "runinfo"
     # Trimmed to the tail: a 30M run has thirty checkpoints and the reader wants

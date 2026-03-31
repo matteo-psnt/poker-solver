@@ -110,3 +110,33 @@ class TestEstimatorNamesAgree:
     def test_a_deleted_estimator_is_rejected_before_a_node_is_allocated(self):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["score", "--run", "r", "--method", "rollout"])
+
+
+class TestReportedLedgerPath:
+    """`ledger` must name the file it read, not the one it was asked for.
+
+    Under `--source share` the index is derived into a temp dir, so echoing
+    `--ledger` had an empty share blaming a local file nothing had opened.
+    """
+
+    def test_it_names_the_derived_path_not_the_requested_one(self, tmp_path, monkeypatch):
+        import argparse
+
+        from src.interfaces.cli.commands import ledger as ledger_cmd
+
+        derived = tmp_path / "derived.jsonl"
+        derived.write_text("")
+        monkeypatch.setattr(ledger_cmd, "ledger_for", lambda args, root: derived)
+        args = argparse.Namespace(
+            source="local",
+            runs_dir=str(tmp_path),
+            ledger="data/eval_ledger.jsonl",
+            run=None,
+            experiment=None,
+            method=None,
+            since=None,
+            limit=25,
+            migrate=False,
+            rebuild=False,
+        )
+        assert ledger_cmd.run(args)["ledger"] == str(derived)

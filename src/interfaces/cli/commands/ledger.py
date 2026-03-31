@@ -8,6 +8,9 @@ from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
+    add_source_argument,
+    ledger_for,
+    records_root,
 )
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.training.run_tracker import migrate_run_log
@@ -15,6 +18,7 @@ from src.pipeline.training.run_tracker import migrate_run_log
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run ledger`."""
+    add_source_argument(parser)
     parser.add_argument(
         "--ledger",
         default=str(eval_ledger.DEFAULT_LEDGER_PATH),
@@ -51,13 +55,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """List recent eval-ledger rows as a compact table, optionally rebuilding first."""
-    ledger_path = Path(args.ledger)
+    with records_root(args) as root:
+        return _list(args, root)
+
+
+def _list(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    ledger_path = ledger_for(args, root)
     migrated = None
     if args.migrate:
-        migrated = eval_ledger.migrate_eval_files(Path(args.runs_dir), ledger_path)
+        migrated = eval_ledger.migrate_eval_files(root, ledger_path)
         # The run logs too: both are "bring what is on disk up to the current
         # layout", and doing them separately invites a half-migrated tree.
-        runs_root = Path(args.runs_dir)
+        runs_root = root
         migrated["run_logs"] = (
             sum(1 for d in sorted(runs_root.iterdir()) if d.is_dir() and migrate_run_log(d))
             if runs_root.is_dir()
@@ -65,7 +74,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     rebuilt = None
     if args.rebuild:
-        recovered, preserved = eval_ledger.rebuild_ledger(Path(args.runs_dir), ledger_path)
+        recovered, preserved = eval_ledger.rebuild_ledger(root, ledger_path)
         rebuilt = {"recovered": recovered, "preserved": preserved}
 
     records = eval_ledger.read_records(ledger_path)
@@ -87,7 +96,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         records = records[-args.limit :]
     return {
         "op": "ledger",
-        "ledger": str(args.ledger),
+        # The path read, not the one asked for: under `--source share` the index
+        # is derived into a temp dir.
+        "ledger": str(ledger_path),
         "migrated": migrated,
         "rebuilt": rebuilt,
         "rows": records,

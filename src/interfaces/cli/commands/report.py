@@ -9,6 +9,9 @@ from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
+    add_source_argument,
+    ledger_for,
+    records_root,
 )
 from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
@@ -16,6 +19,7 @@ from src.pipeline.evaluation import ledger as eval_ledger
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run report`."""
+    add_source_argument(parser)
     parser.add_argument("--experiment", required=True, help="Experiment id to report on.")
     parser.add_argument(
         "--runs-dir", default="data/runs", help="Runs dir, for resolving eval payloads."
@@ -30,12 +34,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Argparse transport around :func:`services.experiment_report`."""
-    out = services.experiment_report(
-        args.experiment,
-        ledger_path=Path(args.ledger),
-        runs_dir=Path(args.runs_dir),
-        baseline_path=Path(args.baseline),
-    )
+    with records_root(args) as root:
+        # The baseline travels with the record under --source share: it is the
+        # conclusion of the experiment this command reports on.
+        baseline = root / "baseline.json" if args.source == "share" else Path(args.baseline)
+        out = services.experiment_report(
+            args.experiment,
+            ledger_path=ledger_for(args, root),
+            runs_dir=root,
+            baseline_path=baseline,
+        )
     return {"op": "report", **dataclasses.asdict(out)}
 
 

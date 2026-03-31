@@ -1,0 +1,148 @@
+"""Answering a question against the published record, without keeping a copy."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from src.interfaces.cloud import share, workspace
+
+
+class _FakeShare:
+    """A share as a dict of path -> bytes.
+
+    Stands in for ShareServiceClient at the two seams workspace uses --
+    ``list_entries``/``walk_files`` to discover and ``download_file`` to pull --
+    so the materialiser is tested without an Azure account.
+    """
+
+    def __init__(self, files: dict[str, str]):
+        self.files = files
+        self.written: dict[str, str] = {}
+
+
+@pytest.fixture
+def fake(monkeypatch):
+    store = _FakeShare(
+        {
+            "archive/run-a/run.jsonl": json.dumps({"event": "created", "run_id": "run-a"}) + "\n",
+            "archive/run-a/STATIC_CHECKPOINT.json": json.dumps({"iteration": 1000}),
+            "archive/run-a/evals/slug1.json": json.dumps({"run_id": "run-a"}),
+            "archive/run-a/static-1000.zarr/0.0": "BULK",
+            "archive/run-b/run.jsonl": json.dumps({"event": "created", "run_id": "run-b"}) + "\n",
+        }
+    )
+
+    def walk_files(service, share_name, path):
+        prefix = f"{path}/"
+        return [p for p in service.files if p.startswith(prefix)]
+
+    def list_entries(service, share_name, path):
+        names = set()
+        prefix = f"{path}/"
+        for p in service.files:
+            if p.startswith(prefix):
+                rest = p[len(prefix) :]
+                names.add((rest.split("/")[0], "/" in rest))
+        return [share.ShareEntry(name=n, is_directory=d, size=0) for n, d in sorted(names)]
+
+    def download_file(service, share_name, path, destination):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(service.files[path])
+
+    def read_text(service, share_name, path):
+        return service.files.get(path)
+
+    def write_text(service, share_name, path, body):
+        service.written[path] = body
+        service.files[path] = body
+
+    monkeypatch.setattr(share, "walk_files", walk_files)
+    monkeypatch.setattr(share, "list_entries", list_entries)
+    monkeypatch.setattr(share, "download_file", download_file)
+    monkeypatch.setattr(share, "read_text", read_text)
+    monkeypatch.setattr(share, "write_text", write_text)
+    return store
+
+
+class TestPullMetadata:
+    def test_pulls_the_json_record(self, fake, tmp_path):
+        workspace.pull_metadata(fake, "s", tmp_path)
+        assert (tmp_path / "run-a" / "run.jsonl").is_file()
+        assert (tmp_path / "run-a" / "evals" / "slug1.json").is_file()
+        assert (tmp_path / "run-b" / "run.jsonl").is_file()
+
+    def test_never_pulls_checkpoint_data(self, fake, tmp_path):
+        """~540 MB of zarr chunks that no reading command opens."""
+        workspace.pull_metadata(fake, "s", tmp_path)
+        assert not list(tmp_path.rglob("*.zarr*"))
+
+    def test_one_run_pulls_only_that_run(self, fake, tmp_path):
+        workspace.pull_metadata(fake, "s", tmp_path, run="run-a")
+        assert (tmp_path / "run-a").is_dir()
+        assert not (tmp_path / "run-b").exists()
+
+    def test_an_unpublished_run_says_what_is_published(self, fake, tmp_path):
+        with pytest.raises(SystemExit, match="run-a"):
+            workspace.pull_metadata(fake, "s", tmp_path, run="run-nope")
+
+    def test_the_local_tree_mirrors_the_published_one(self, fake, tmp_path):
+        """The readers are ordinary local-path code; the layout must match."""
+        workspace.pull_metadata(fake, "s", tmp_path)
+        loaded = json.loads((tmp_path / "run-a" / "run.jsonl").read_text())
+        assert loaded["run_id"] == "run-a"
+
+
+class TestBaseline:
+    def test_round_trips_through_the_share(self, fake):
+        workspace.write_baseline(fake, "s", json.dumps({"run_id": "run-a"}))
+        body = workspace.read_baseline(fake, "s")
+        assert body is not None
+        assert json.loads(body)["run_id"] == "run-a"
+
+    def test_absent_baseline_reads_as_none(self, fake):
+        assert workspace.read_baseline(fake, "s") is None
+
+    def test_it_lands_at_the_share_root_beside_the_archive(self, fake):
+        workspace.write_baseline(fake, "s", "{}")
+        assert workspace.BASELINE_NAME in fake.written
+        assert "/" not in workspace.BASELINE_NAME
+
+
+class TestSourceSeam:
+    """`--source local` must not require the cloud to be configured at all."""
+
+    def test_local_yields_the_runs_dir_without_touching_azure(self, tmp_path, monkeypatch):
+        import argparse
+
+        from src.interfaces.cli.commands import _base
+
+        def _explode(*a, **k):
+            raise AssertionError("--source local must not build a cloud client")
+
+        monkeypatch.setattr(share, "share_client", _explode)
+        args = argparse.Namespace(source="local", runs_dir=str(tmp_path), ledger="led.jsonl")
+        with _base.records_root(args) as root:
+            assert root == Path(tmp_path)
+
+    def test_local_uses_the_ledger_it_was_given(self, tmp_path):
+        import argparse
+
+        from src.interfaces.cli.commands import _base
+
+        args = argparse.Namespace(source="local", runs_dir=str(tmp_path), ledger="given.jsonl")
+        assert _base.ledger_for(args, tmp_path) == Path("given.jsonl")
+
+    def test_share_derives_the_index_rather_than_reading_a_shared_file(self, tmp_path):
+        """A second writable file on a share with no atomic append is the
+        contention the per-run records exist to remove."""
+        import argparse
+
+        from src.interfaces.cli.commands import _base
+
+        args = argparse.Namespace(source="share", runs_dir="unused", ledger="unused.jsonl")
+        derived = _base.ledger_for(args, tmp_path)
+        assert derived.parent == tmp_path, "derived inside the materialised tree"
+        assert derived.is_file(), "rebuild_ledger ran"
