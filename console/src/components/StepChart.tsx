@@ -43,16 +43,22 @@ export function StepChart({
           cursor: { y: false },
           legend: { show: false },
           scales: { x: { time: true } },
+          // `stroke` is the TICK LABEL colour, and uPlot passes it straight to
+          // `ctx.fillStyle`. A `var(--…)` there is not an error: the assignment
+          // is ignored and uPlot's default `#000` stands, which is how these
+          // rendered black on a near-black panel.
           axes: [
             {
-              stroke: "var(--fg-faint)",
-              grid: { stroke: "var(--border)", width: 1 },
-              ticks: { show: false },
+              stroke: theme.axis,
+              grid: { stroke: theme.grid, width: 1 },
+              ticks: { stroke: theme.grid, show: true, size: 4 },
+              font: "10px ui-monospace, monospace",
             },
             {
-              stroke: "var(--fg-faint)",
-              grid: { stroke: "var(--border)", width: 1 },
+              stroke: theme.axis,
+              grid: { stroke: theme.grid, width: 1 },
               ticks: { show: false },
+              font: "10px ui-monospace, monospace",
               size: 44,
             },
           ],
