@@ -80,7 +80,7 @@ def prune(path: Path = DEFAULT_PATH, *, retention: timedelta = RETENTION) -> int
     if not rows:
         return 0
     cutoff = datetime.now(UTC) - retention
-    kept = [row for row in rows if _instant(row) is not None and _instant(row) >= cutoff]  # type: ignore[operator]
+    kept = [row for row in rows if instant(row) is not None and instant(row) >= cutoff]  # type: ignore[operator]
     removed = len(rows) - len(kept)
     if removed:
         tmp = path.with_suffix(".jsonl.tmp")
@@ -89,7 +89,7 @@ def prune(path: Path = DEFAULT_PATH, *, retention: timedelta = RETENTION) -> int
     return removed
 
 
-def _instant(row: dict[str, Any]) -> datetime | None:
+def instant(row: dict[str, Any]) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(row["at"]))
     except (KeyError, TypeError, ValueError):
@@ -118,12 +118,13 @@ def integrate(rows: list[dict[str, Any]], *, max_gap: float = MAX_GAP_SECONDS) -
     ``unobserved_seconds``: the console shows it, because a total that silently
     omits a downtime gap reads as a complete accounting and is not one.
     """
-    instants = [(_instant(row), row) for row in rows]
+    instants = [(instant(row), row) for row in rows]
     usable = [(when, row) for when, row in instants if when is not None]
     usable.sort(key=lambda pair: pair[0])
 
     node_hours = 0.0
     unobserved = 0.0
+    observed = 0.0
     for (start, row), (end, _) in pairwise(usable):
         seconds = (end - start).total_seconds()
         if seconds <= 0:
@@ -131,10 +132,15 @@ def integrate(rows: list[dict[str, Any]], *, max_gap: float = MAX_GAP_SECONDS) -
         if seconds > max_gap:
             unobserved += seconds
             continue
+        observed += seconds
         node_hours += float(row.get("nodes") or 0) * seconds / 3600.0
 
     return {
         "node_hours": node_hours,
+        # Reported rather than derived from the window: the time BEFORE the
+        # first sample is unobserved too, so `window - unobserved` would
+        # overstate coverage by however long the recorder was not running.
+        "observed_seconds": observed,
         "unobserved_seconds": unobserved,
         "samples": len(usable),
         "first_at": usable[0][0].isoformat() if usable else None,
