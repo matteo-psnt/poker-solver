@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import questionary
+from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 from questionary import Choice
 
 from src.interfaces.cli.commands import runs as runs_command
@@ -135,10 +136,22 @@ def select_run(
     # read `ctx.runs_dir`, which stopped existing when local runs were deleted --
     # the picker did not fail, it reported "no trained runs found" against a path
     # nothing writes to any more, which is the worse of the two outcomes.
+    #
+    # Said before the call, not after: this is a share read of a few seconds
+    # where the old local glob was instant, and an unexplained pause in a menu
+    # reads as a hang.
+    ui.info("Reading the published runs from the share...")
     try:
         payload = runs_command.COMMAND.invoke()
     except CommandError as error:
         ui.error(str(error))
+        ui.pause()
+        return None
+    except (ClientAuthenticationError, HttpResponseError) as error:
+        # By name, because the Azure SDK has no chokepoint in `batch.py` to wrap
+        # them at. Without this the most ordinary failure there is -- a stale
+        # `az login` -- leaves the menu as a traceback.
+        ui.error(f"Could not reach the share: {error}")
         ui.pause()
         return None
     summaries = [RunSummary(**row) for row in payload["runs"]]

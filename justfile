@@ -178,3 +178,31 @@ push-code:
 [doc("Verify a published ladder. Args: run config")]
 repair-ladder run config:
     uv run poker-solver-run repair-ladder --run "{{run}}" --config "{{config}}"
+
+# --- console ---------------------------------------------------------------- #
+# The web console. Its toolchain is npm and lives entirely under `console/`;
+# nothing here touches the Python environment.
+
+# Install the console's dependencies (once, and after a dependency change).
+console-install:
+    npm --prefix console ci
+
+# Build the console into console/dist, which `serve` looks for.
+console-build:
+    npm --prefix console run build
+
+# Build, then serve on http://127.0.0.1:8765.
+console: console-build
+    uv run poker-solver-run serve
+
+# Dev: Vite on :5173 with hot reload, proxying /api to a real server on :8765.
+console-dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run poker-solver-run serve --port 8765 &
+    trap 'kill $! 2>/dev/null || true' EXIT
+    npm --prefix console run dev
+
+# The console's own gate: biome, tsc, vitest.
+console-check:
+    cd console && npm run ci

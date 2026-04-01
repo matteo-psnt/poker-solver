@@ -8,6 +8,7 @@ the web code and nothing else.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,7 +22,11 @@ from src.interfaces.web import app as web_app
 
 @pytest.fixture
 def client() -> TestClient:
-    web_app._cache.clear()
+    """A fresh application, and therefore a fresh memo.
+
+    Nothing to reset: the cache belongs to the app `create_app` built, so it
+    cannot outlive this fixture or be seen by the next test.
+    """
     return TestClient(web_app.create_app())
 
 
@@ -118,14 +123,49 @@ class TestTheMemo:
         client.get("/api/runs")
         assert [name for name, _ in invoked] == ["pool-status", "runs"]
 
+    def test_the_memo_belongs_to_the_application(self, client, invoked):
+        """A second app must not be born holding the first one's answers.
+
+        Module-level state would make this pass by accident and make every test
+        above depend on the order it ran in.
+        """
+        client.get("/api/pool")
+        assert TestClient(web_app.create_app()).get("/api/pool").status_code == 200
+        assert len(invoked) == 2
+
 
 class TestServingTheConsole:
-    def test_a_missing_build_is_reported_not_served_blank(self, client):
-        """`console/dist` is gitignored, so this is what a fresh checkout sees.
-        A blank page reads as a broken app rather than a skipped build step."""
+    """Both branches, driven explicitly.
+
+    These used to assert whichever state the working tree happened to be in,
+    which meant the "not built" test passed until someone built the console and
+    then failed for a reason that had nothing to do with the code. `dist/` is
+    gitignored, so its presence is never a property a test can rely on.
+    """
+
+    def _app_with_dist(self, monkeypatch, dist: Path) -> TestClient:
+        monkeypatch.setattr(web_app, "CONSOLE_DIST", dist)
+        return TestClient(web_app.create_app())
+
+    def test_a_missing_build_is_reported_not_served_blank(self, tmp_path, monkeypatch):
+        """A blank page reads as a broken app rather than a skipped build step."""
+        client = self._app_with_dist(monkeypatch, tmp_path / "absent")
         response = client.get("/legs")
         assert response.status_code == 503
         assert "not built" in response.json()["error"]
+
+    def test_a_client_routed_path_gets_the_shell(self, tmp_path, monkeypatch):
+        """`/legs` and `/runs/abc` are routes, not files. Returning 404 for them
+        is the classic SPA deployment bug: the app works until it is reloaded."""
+        dist = tmp_path / "dist"
+        (dist / "assets").mkdir(parents=True)
+        (dist / "index.html").write_text("<!doctype html><div id=root></div>")
+        client = self._app_with_dist(monkeypatch, dist)
+
+        for path in ("/", "/legs", "/runs/run-production-025433-1095"):
+            response = client.get(path)
+            assert response.status_code == 200, path
+            assert "id=root" in response.text
 
     def test_the_fallback_does_not_swallow_the_api(self, client, invoked):
         """The catch-all route is registered last and matches `/{path:path}`;

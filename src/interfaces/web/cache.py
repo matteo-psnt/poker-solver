@@ -8,6 +8,8 @@ alive, so a dead refresher cannot silently serve yesterday's numbers forever.
 
 Entries expire; they are never invalidated. The freshest thing this can serve is
 ``ttl`` seconds old, which is the honest bound and is what the UI displays.
+Expired entries are also dropped, not merely ignored -- a per-run and per-task
+key space in front of a server that stays up for days is otherwise a slow leak.
 """
 
 from __future__ import annotations
@@ -44,10 +46,30 @@ class TtlCache:
         value = produce()
 
         with self._lock:
-            self._entries[key] = (time.monotonic(), value)
+            # Drop what has expired before inserting. Otherwise the dict only
+            # ever grows: `/api/runs/{id}` and `/api/logs/{task}` put an
+            # unbounded key space in front of a server that stays up for days,
+            # and an entry nobody will read again is still held here with its
+            # whole payload.
+            stored_at = time.monotonic()
+            self._entries = {
+                other: cached
+                for other, cached in self._entries.items()
+                if stored_at - cached[0] < self._ttl
+            }
+            self._entries[key] = (stored_at, value)
         return value
 
     def clear(self) -> None:
         """Drop everything. For a forced refresh, and for tests."""
         with self._lock:
             self._entries.clear()
+
+    def __len__(self) -> int:
+        """How many entries are held, expired ones included.
+
+        The number a leak shows up in: correctness only needs expired entries to
+        be ignored, so nothing else would notice them still being here.
+        """
+        with self._lock:
+            return len(self._entries)

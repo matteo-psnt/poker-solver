@@ -53,3 +53,13 @@ repos:
         language: system
         pass_filenames: false
         args: [src, --min-confidence, "70"]
+      # The console's gate. Its own toolchain -- ruff/ty/deptry/vulture never
+      # see JavaScript -- but it runs beside them so one command still answers
+      # "is this repo clean". Skipped when the console has no dependencies
+      # installed, so a Python-only checkout is not blocked by an npm install.
+      - id: console
+        name: console (biome + tsc + vitest)
+        entry: bash console/check.sh
+        language: system
+        pass_filenames: false
+        files: ^console/

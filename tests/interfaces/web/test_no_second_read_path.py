@@ -7,8 +7,13 @@ answered. They drifted from it, then rotted, and nothing failed until someone
 looked.
 
 Nothing here prevents that by good intentions. Every endpoint body must be a
-`Command.invoke`, and the web package must not be able to reach past the command
-layer at all.
+`Command.invoke`.
+
+The other half of the rule -- that the package cannot reach past the command
+layer at all -- is the `web_reads_through_the_command_layer` contract in
+`.importlinter`, not an AST walk here. It is the same property, declared once in
+the tool the repo already runs over every module, which sees import forms a walk
+of this package would not.
 """
 
 from __future__ import annotations
@@ -16,44 +21,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
-WEB = Path("src/interfaces/web")
-
-FORBIDDEN_ROOTS = ("src.pipeline", "src.engine", "src.core")
-
-
-def _modules() -> list[Path]:
-    return sorted(WEB.rglob("*.py"))
-
-
-def test_the_package_exists_and_is_scanned():
-    """A glob that matches nothing would pass every assertion below."""
-    assert _modules(), f"no modules under {WEB} — this guard is checking nothing"
-
-
-@pytest.mark.parametrize("module", _modules(), ids=lambda p: p.name)
-def test_it_cannot_reach_past_the_command_layer(module: Path):
-    """No direct import of pipeline/engine/core.
-
-    Those are where a second read path would come from: the moment this layer
-    can call `eval_ledger` or `services` itself, it can answer a question
-    differently from the command that owns it.
-    """
-    tree = ast.parse(module.read_text())
-    imported: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported += [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.append(node.module)
-
-    reaching = [name for name in imported if name.startswith(FORBIDDEN_ROOTS)]
-    assert not reaching, (
-        f"{module} imports {reaching}. The console reads through "
-        "`Command.invoke` or not at all — that is what `fbcf9a8` deleted 4,776 "
-        "lines for."
-    )
+WEB = Path(__file__).resolve().parents[3] / "src" / "interfaces" / "web"
 
 
 def test_every_endpoint_answers_through_a_command():
