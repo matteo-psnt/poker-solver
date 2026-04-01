@@ -12,6 +12,9 @@ from src.interfaces.cli.commands._base import (
     records_root,
     resolve_run_dir,
 )
+from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.share import share_client
+from src.interfaces.cloud.workspace import write_baseline
 from src.interfaces.errors import CommandError
 from src.pipeline import services
 
@@ -48,34 +51,37 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             path=local,
             checkpoint_iteration=services.checkpoint_iteration_of(run_dir),
         )
-        published = _publish(local)
-    if not published:
+        refused = _publish(local)
+    if refused is not None:
         raise CommandError(
             "The baseline was composed but NOT published, so nothing has moved. "
             "The share is the only copy now that local runs are gone — check "
-            "`az login` and Terraform state, then run this again."
+            f"`az login` and Terraform state, then run this again.\n  Cause: {refused}"
         )
-    return {"op": "promote", "published": published, **dataclasses.asdict(baseline)}
+    return {"op": "promote", **dataclasses.asdict(baseline)}
 
 
-def _publish(local: Path) -> bool | None:
-    """Copy the pointer to the share. None when the cloud is not configured.
+def _publish(local: Path) -> str | None:
+    """Copy the pointer to the share. Returns None on success, else why it failed.
 
     The baseline is the conclusion of every experiment -- which run the next one
     forks from -- and it was the only artifact that never left the machine that
-    wrote it. Best-effort: a promotion that succeeded locally must not be
-    reported as failed because the share was unreachable, but it must say so.
+    wrote it.
+
+    Why the reason is returned rather than discarded:
+        This used to answer a bare ``False``, so the caller's advice ("check
+        `az login` and Terraform state") was a GUESS at a cause it had thrown
+        away -- and unreachable-share, bad-credential and no-such-container all
+        arrived looking identical. The handler still refuses rather than raising
+        the SDK's own error, because a promotion is not the place to meet a
+        forty-line Azure traceback.
     """
     try:
-        from src.interfaces.cloud.config import CloudConfig
-        from src.interfaces.cloud.share import share_client
-        from src.interfaces.cloud.workspace import write_baseline
-
         config = CloudConfig.load()
         write_baseline(share_client(config), config.share_name, local.read_text())
-    except Exception:
-        return False
-    return True
+    except Exception as error:
+        return f"{type(error).__name__}: {error}"
+    return None
 
 
 def render(payload: dict[str, Any]) -> None:
@@ -84,14 +90,7 @@ def render(payload: dict[str, Any]) -> None:
         print(f"  Checkpoint:  {payload['checkpoint_iteration']:,}")
     print(f"  Rationale:   {payload['rationale']}")
     print(f"  Recorded in: {payload['baseline']}")
-    published = payload.get("published")
-    if published is True:
-        print("  Published:   yes — the share carries it, so a fresh checkout finds it")
-    elif published is False:
-        print(
-            "  Published:   NO — the share was unreachable, so this pointer exists only "
-            "here. Re-run once the cloud is configured."
-        )
+    print("  Published:   yes — the share carries it, so a fresh checkout finds it")
 
 
 COMMAND = Command(
