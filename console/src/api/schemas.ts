@@ -160,15 +160,14 @@ export const costSchema = z
   .object({
     op: z.literal("cost"),
     hours: z.number(),
-    node_hours: z.number(),
-    observed_seconds: z.number(),
-    unobserved_seconds: z.number(),
-    samples: z.number(),
+    task_hours: z.number(),
+    legs: z.number(),
+    peak_concurrency: z.number(),
     first_at: z.string().nullable(),
     last_at: z.string().nullable(),
     rate_per_node_hour: z.number().nullable(),
     dollars: z.number().nullable(),
-    series: z.array(z.object({ at: z.string(), nodes: z.number().nullable() })),
+    series: z.array(z.object({ at: z.string(), running: z.number() })),
   })
   .passthrough();
 

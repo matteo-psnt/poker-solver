@@ -192,20 +192,18 @@ PAYLOADS: dict[str, dict] = {
     },
     "cost": {
         "op": "cost",
-        "hours": 24.0,
-        "node_hours": 12.5,
-        "observed_seconds": 46800.0,
-        # A window with a hole in it: the renderer must SAY so rather than fold
-        # the gap into the total, which would read as a complete accounting.
-        "unobserved_seconds": 3600.0,
-        "samples": 4200,
-        "first_at": "2026-08-02T12:00:00+00:00",
-        "last_at": "2026-08-03T12:00:00+00:00",
+        "hours": 0.0,
+        "task_hours": 68.87,
+        "legs": 47,
+        "peak_concurrency": 4,
+        "first_at": "2026-08-02T22:06:18+00:00",
+        "last_at": "2026-08-03T16:58:59+00:00",
         "rate_per_node_hour": 0.8,
-        "dollars": 10.0,
+        "dollars": 55.1,
         "series": [
-            {"at": "2026-08-03T11:59:45+00:00", "nodes": 4},
-            {"at": "2026-08-03T12:00:00+00:00", "nodes": 0},
+            {"at": "2026-08-02T22:06:18+00:00", "running": 1},
+            {"at": "2026-08-02T22:08:22+00:00", "running": 3},
+            {"at": "2026-08-03T16:58:59+00:00", "running": 0},
         ],
     },
     "runs": {

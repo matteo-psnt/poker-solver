@@ -44,16 +44,11 @@ from src.interfaces.cli.commands import (
 )
 from src.interfaces.errors import CommandError
 from src.interfaces.web.cache import TtlCache
-from src.interfaces.web.sampler import PoolSampler
 
 # Long enough that several open tabs (or a remount) share one cloud sweep,
 # short enough that a manual refresh feels live. A sweep is 2-4s per panel.
 CACHE_TTL_SECONDS = 15.0
 
-# Anchored like CONSOLE_DIST, and for the same reason: `serve` runs from
-# wherever the operator happens to be, and a CWD-relative path would start a
-# second, empty series beside the real one.
-SAMPLES_PATH = str(Path(__file__).resolve().parents[3] / "data" / "pool_samples.jsonl")
 
 # Anchored to the repo, not to the working directory: `serve` is run from
 # wherever the operator happens to be, and a CWD-relative path would report a
@@ -91,7 +86,7 @@ def answer(cache: TtlCache, command: Command, **kwargs: Any) -> JSONResponse:
         return JSONResponse({"error": f"Azure did not answer: {error}"}, status_code=503)
 
 
-def create_app(*, sample: bool = True) -> FastAPI:
+def create_app() -> FastAPI:
     """Build the application, with a memo of its own.
 
     A function rather than a module-level app, so a test gets a genuinely fresh
@@ -132,8 +127,8 @@ def create_app(*, sample: bool = True) -> FastAPI:
         return answer(cache, curve.COMMAND, run=run_id)
 
     @app.get("/api/cost")
-    def _cost(hours: float = 24.0) -> JSONResponse:
-        return answer(cache, cost.COMMAND, hours=hours, samples_path=SAMPLES_PATH, rate="")
+    def _cost(hours: float = 0.0) -> JSONResponse:
+        return answer(cache, cost.COMMAND, hours=hours, rate="")
 
     @app.get("/api/evals")
     def _evals(limit: int = 50) -> JSONResponse:
@@ -144,17 +139,6 @@ def create_app(*, sample: bool = True) -> FastAPI:
     @app.get("/api/logs/{task_id}")
     def _log(task_id: str, lines: int = 200) -> JSONResponse:
         return answer(cache, logs.COMMAND, task=task_id, lines=lines)
-
-    # The sampler is the ONE thing this process WRITES, which is why it is opt
-    # -out rather than unconditional: `create_app()` is called by every test of
-    # this module, and an unconditional sampler had each of them start a thread
-    # that appended to the real `data/pool_samples.jsonl` and asked the live
-    # pool. A test suite must not record production telemetry.
-    app.state.sampler = None
-    if sample:
-        sampler = PoolSampler(path=Path(SAMPLES_PATH))
-        sampler.start()
-        app.state.sampler = sampler
 
     _mount_console(app)
     return app
