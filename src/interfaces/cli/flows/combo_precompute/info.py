@@ -1,5 +1,6 @@
 """Inspection/info flows for combo abstractions."""
 
+from pydantic import ValidationError
 from questionary import Choice
 
 from src.core.game.state import Street
@@ -15,13 +16,20 @@ from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 
 def _parse_metadata_config(metadata: dict) -> PrecomputeConfig | None:
-    """Parse metadata config as PrecomputeConfig."""
+    """Parse metadata config as PrecomputeConfig, or None if its schema drifted.
+
+    Drift is expected, not exceptional: an abstraction saved under an older
+    schema is still a usable abstraction, and the resolver matches it by name
+    for exactly that reason -- so this screen degrades to the fields it can
+    read. Only `ValidationError` means that; a wider catch here would have
+    turned any other bug in this path into a blank panel.
+    """
     config_data = metadata.get("config")
     if not isinstance(config_data, dict):
         return None
     try:
         return PrecomputeConfig.model_validate(config_data)
-    except Exception:
+    except ValidationError:
         return None
 
 

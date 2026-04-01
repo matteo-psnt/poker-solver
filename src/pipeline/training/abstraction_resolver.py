@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,18 @@ from pathlib import Path
 from src.pipeline.abstraction.base import BucketingStrategy
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
+
+logger = logging.getLogger(__name__)
+
+
+class AbstractionMetadataError(ValueError):
+    """An abstraction's ``metadata.json`` exists but cannot be read.
+
+    Distinct from absence on purpose. A damaged metadata file used to read as
+    "no metadata", which drops the ``config_hash`` a checkpoint is pinned to --
+    so evaluation would proceed against buckets it could no longer prove were
+    the ones the checkpoint trained on.
+    """
 
 
 class AbstractionHashMismatchError(ValueError):
@@ -27,15 +40,23 @@ class _AbstractionCandidate:
 
 
 def _read_metadata(path: Path) -> dict | None:
-    """Read abstraction metadata.json; return None for unreadable files."""
+    """Read an abstraction's metadata.json. None means absent, never unreadable.
+
+    Raises:
+        AbstractionMetadataError: the file is present but not parseable JSON.
+    """
     metadata_file = path / "metadata.json"
     if not metadata_file.exists():
         return None
     try:
         with metadata_file.open() as f:
             return json.load(f)
-    except Exception:
-        return None
+    except (OSError, json.JSONDecodeError) as error:
+        raise AbstractionMetadataError(
+            f"{metadata_file} exists but could not be read: {error}. "
+            "Recompute the abstraction; resolving past it would drop the "
+            "config_hash a checkpoint is pinned to."
+        ) from error
 
 
 class ComboAbstractionResolver:
@@ -149,7 +170,14 @@ class ComboAbstractionResolver:
         for path in self.abstractions_dir.iterdir():
             if not path.is_dir():
                 continue
-            metadata = _read_metadata(path)
+            try:
+                metadata = _read_metadata(path)
+            except AbstractionMetadataError:
+                # One damaged directory must not hide every other abstraction from
+                # discovery -- but it is said out loud, because the alternative is
+                # a "no abstraction named X" that is really "X is corrupt".
+                logger.warning("Skipping %s during discovery.", path, exc_info=True)
+                continue
             if not metadata:
                 continue
             config_data = metadata.get("config", {})

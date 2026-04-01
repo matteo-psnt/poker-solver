@@ -6,7 +6,11 @@ import json
 
 import pytest
 
-from src.pipeline.training.abstraction_resolver import ComboAbstractionResolver
+from src.pipeline.training.abstraction_resolver import (
+    AbstractionMetadataError,
+    ComboAbstractionResolver,
+    _read_metadata,
+)
 
 
 def _write_abstraction(base_dir, name: str, config: dict) -> None:
@@ -62,3 +66,45 @@ def test_missing_abstraction_still_raises(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         resolver.load(abstraction_config="quick_test")
+
+
+def test_corrupt_metadata_is_not_read_as_absent(tmp_path):
+    """A truncated metadata.json must raise, not degrade to "no metadata".
+
+    The distinction is a provenance one. `config_hash_for` reads this file to
+    learn which buckets a checkpoint was pinned to; when unreadable collapsed
+    into absent, the pin was silently dropped and evaluation proceeded against
+    buckets it could no longer prove were the trained ones.
+    """
+    path = tmp_path / "buckets-quick"
+    path.mkdir()
+    (path / "metadata.json").write_text('{"config": {"config_name": "quick_te')
+
+    with pytest.raises(AbstractionMetadataError, match="could not be read"):
+        _read_metadata(path)
+
+
+def test_absent_metadata_is_still_none(tmp_path):
+    """Absence is the one case that stays None."""
+    path = tmp_path / "buckets-quick"
+    path.mkdir()
+
+    assert _read_metadata(path) is None
+
+
+def test_one_corrupt_directory_does_not_hide_the_others(tmp_path):
+    """Discovery skips a damaged sibling rather than failing the whole scan."""
+    abstractions_dir = tmp_path / "combo_abstraction"
+    abstractions_dir.mkdir()
+    broken = abstractions_dir / "buckets-broken"
+    broken.mkdir()
+    (broken / "metadata.json").write_text("{not json")
+    _write_abstraction(abstractions_dir, "quick", {"config_name": "quick_test"})
+
+    loaded = object()
+    resolver = ComboAbstractionResolver(
+        abstractions_dir=abstractions_dir,
+        loader=lambda path: loaded,
+    )
+
+    assert resolver.load(abstraction_config="quick_test") is loaded
