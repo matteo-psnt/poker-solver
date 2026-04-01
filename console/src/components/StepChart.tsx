@@ -1,3 +1,4 @@
+import { chartTheme } from "@/lib/theme";
 import { useEffect, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -30,6 +31,9 @@ export function StepChart({
     if (!element) return;
 
     const build = () => {
+      // Resolved HERE, not written as `var(--…)`: these reach a canvas, which
+      // ignores custom properties and falls back to black.
+      const theme = chartTheme();
       plot.current?.destroy();
       plot.current = new uPlot(
         {
@@ -56,8 +60,8 @@ export function StepChart({
             {},
             {
               label,
-              stroke: "#3b82f6",
-              fill: "rgba(59,130,246,0.12)",
+              stroke: theme.series,
+              fill: theme.seriesFill,
               width: 1.5,
               paths: uPlot.paths.stepped?.({ align: 1 }),
               points: { show: false },
