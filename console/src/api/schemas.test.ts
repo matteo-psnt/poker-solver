@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fixture from "./payloads.fixture.json";
 import {
+  costSchema,
   curveSchema,
   jobsSchema,
   ledgerSchema,
@@ -27,6 +28,7 @@ const CASES = [
   ["runinfo", runinfoSchema],
   ["curve", curveSchema],
   ["ledger", ledgerSchema],
+  ["cost", costSchema],
 ] as const;
 
 describe("schemas parse the payloads Python actually emits", () => {

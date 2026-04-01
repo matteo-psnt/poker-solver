@@ -34,6 +34,27 @@
       "base_seed differs"
     ]
   },
+  "cost": {
+    "dollars": 10.0,
+    "first_at": "2026-08-02T12:00:00+00:00",
+    "hours": 24.0,
+    "last_at": "2026-08-03T12:00:00+00:00",
+    "node_hours": 12.5,
+    "op": "cost",
+    "rate_per_node_hour": 0.8,
+    "samples": 4200,
+    "series": [
+      {
+        "at": "2026-08-03T11:59:45+00:00",
+        "nodes": 4
+      },
+      {
+        "at": "2026-08-03T12:00:00+00:00",
+        "nodes": 0
+      }
+    ],
+    "unobserved_seconds": 3600.0
+  },
   "curve": {
     "decay_ratio": 2.0,
     "missing_iterations": [

@@ -1,4 +1,5 @@
 import { Shell } from "@/components/Shell";
+import { Cost } from "@/routes/Cost";
 import { Evals } from "@/routes/Evals";
 import { Legs } from "@/routes/Legs";
 import { Overview } from "@/routes/Overview";
@@ -25,6 +26,7 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/runs", component: Runs }),
   createRoute({ getParentRoute: () => rootRoute, path: "/runs/$runId", component: RunDetail }),
   createRoute({ getParentRoute: () => rootRoute, path: "/evals", component: Evals }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cost", component: Cost }),
 ];
 
 const router = createRouter({ routeTree: rootRoute.addChildren(routes) });

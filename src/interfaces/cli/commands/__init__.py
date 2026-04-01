@@ -9,6 +9,7 @@ from src.interfaces.cli.commands._base import Command
 from src.interfaces.cli.commands.autoscale_check import COMMAND as AUTOSCALE_CHECK
 from src.interfaces.cli.commands.cancel import COMMAND as CANCEL
 from src.interfaces.cli.commands.compare import COMMAND as COMPARE
+from src.interfaces.cli.commands.cost import COMMAND as COST
 from src.interfaces.cli.commands.curve import COMMAND as CURVE
 from src.interfaces.cli.commands.evaluate import COMMAND as EVALUATE
 from src.interfaces.cli.commands.jobs import COMMAND as JOBS
@@ -54,6 +55,7 @@ COMMANDS: tuple[Command, ...] = (
     EVALUATE,
     LEDGER,
     CURVE,
+    COST,
     PROGRESS,
     RUNS,
     RUNINFO,
