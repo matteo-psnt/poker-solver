@@ -92,6 +92,7 @@ class TestCrossStreetInvariance:
         """The catastrophic bug rendered every first postflop bet as b0.00 /
         r0.00. Distinct real sizes must now produce non-zero fractions."""
         sequences = self._drive_full_street_bets()
+        assert sequences, "no sequences driven — this test would prove nothing"
         for seq in sequences:
             for token in seq.split("-"):
                 if token and token[0] in "br":
