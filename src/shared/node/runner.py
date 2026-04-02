@@ -540,8 +540,13 @@ def _stage(paths: NodePaths, log: LegLogger) -> int:
     # published leg log. Left on inherited stdout it went only to Batch's
     # node-local capture, which the pool destroys within minutes of the task
     # ending -- the one window where the reason still exists.
+    # `--quiet` still writes FAILURES to stderr, and run_guarded merges stderr
+    # into the tee -- so the leg log keeps the diagnostic without the ~100 lines
+    # of resolved-package listing that a successful sync prints on every leg.
     log("syncing dependencies")
-    return run_guarded(["uv", "sync"], cwd=paths.code, timeout=SYNC_TIMEOUT_SECONDS, log=log)
+    return run_guarded(
+        ["uv", "sync", "--quiet"], cwd=paths.code, timeout=SYNC_TIMEOUT_SECONDS, log=log
+    )
 
 
 def _install_signal_handlers() -> None:
