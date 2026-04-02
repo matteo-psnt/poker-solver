@@ -79,7 +79,7 @@ def _publish(local: Path) -> str | None:
     try:
         config = CloudConfig.load()
         write_baseline(share_client(config), config.share_name, local.read_text())
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 -- the reason is returned to the caller, not discarded
         return f"{type(error).__name__}: {error}"
     return None
 

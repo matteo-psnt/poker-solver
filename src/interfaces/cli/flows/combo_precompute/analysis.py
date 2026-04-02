@@ -31,7 +31,7 @@ def handle_combo_analyze_bucketing(ctx: CliContext) -> None:
     try:
         abstraction = PostflopPrecomputer.load(abstraction_path)
         print("✓ Loaded successfully\n")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- interactive flow: report and return
         print(f"✗ Failed to load: {exc}")
         return
 
@@ -117,7 +117,7 @@ def _analyze_premium_vs_weak(abstraction: DenseBucketer, street: Street) -> None
 
             bucket = abstraction.get_bucket(hole_cards, board_cards, street)
             results[category].append((description, bucket))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- interactive flow: report and continue
             print(f"✗ Error testing '{description}': {exc}")
 
     for category in ["STRONG", "MEDIUM", "WEAK"]:
@@ -155,7 +155,7 @@ def _analyze_random_sample(abstraction: DenseBucketer, street: Street) -> None:
             bucket = abstraction.get_bucket(hole_cards, board_cards, street)
             bucket_counts[bucket] += 1
             results.append((hole_str, board_str, bucket))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- interactive flow: report and continue
             print(f"✗ Error in sample {i}: {exc}")
 
     print("\nSample results (first 20):")
@@ -231,7 +231,7 @@ def _analyze_hand_strength_correlation(abstraction: DenseBucketer, street: Stree
             hole_cards = (Card.new(hole_str[0]), Card.new(hole_str[1]))
             bucket = abstraction.get_bucket(hole_cards, board_cards, street)
             results.append((description, bucket))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- interactive flow: report and continue
             print(f"✗ Error testing '{description}': {exc}")
 
     print(f"\nBoard: {' '.join(board_str)}\n")

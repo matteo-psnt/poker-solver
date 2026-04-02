@@ -47,6 +47,7 @@ select = [
     "A",    # builtin shadowing
     "ARG",  # unused arguments
     "B",    # bugbear: likely bugs (B905 = zip without strict=)
+    "BLE",  # blind except -- deliberate ones carry `# noqa: BLE001 -- <why>`
     "C4",   # comprehension / literal misuse
     "DTZ",  # naive datetimes -- the ledger already has a naive-local-time era
     "E",

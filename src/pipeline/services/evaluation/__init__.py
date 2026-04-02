@@ -121,7 +121,7 @@ def evaluate_and_record(
         )
         payload["ledger_result_path"] = str(result_path)
         logger.info(f"  Ledger:        appended to {ledger_path} (payload: {result_path})")
-    except Exception as exc:  # recording must never break the eval
+    except Exception as exc:  # recording must never break the eval  # noqa: BLE001 -- recording must never break the eval it records
         logger.warning(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
     return payload
 

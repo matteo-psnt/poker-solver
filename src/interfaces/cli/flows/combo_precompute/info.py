@@ -147,5 +147,5 @@ def _show_detailed_info(ctx: CliContext, abstractions: list[AbstractionEntry]) -
                     bar = "█" * max(1, round(40 * count / max_count))
                     print(f"    {bucket_id:3d}: {bar} {count:,}")
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- interactive flow: report and continue
             print(f"\n✗ Error loading abstraction: {exc}")

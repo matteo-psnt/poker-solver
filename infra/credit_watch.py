@@ -453,7 +453,7 @@ def main() -> int:
         check_charge_shape(report, found.account, found.profile, since)
     except UnevaluableError as exc:
         return unevaluable(str(exc))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- a crash must not read as a real alert; see below
         # Anything unexpected is COULD-NOT-EVALUATE, not ALERT. Letting it
         # propagate would exit 1, which this script defines as "alert" -- so a
         # crash would be indistinguishable from a real finding, and a caller

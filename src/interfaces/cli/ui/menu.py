@@ -24,7 +24,7 @@ def run_action(ctx: CliContext, handler: Callable[[CliContext], None]) -> None:
         handler(ctx)
     except KeyboardInterrupt:
         ui.warn("Operation cancelled by user")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- the menu's guard: one action must not end the session
         ui.error(str(exc))
         traceback.print_exc()
         ui.pause()
