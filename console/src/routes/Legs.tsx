@@ -1,6 +1,6 @@
 import { useLegs } from "@/api/queries";
 import { Panel } from "@/components/Panel";
-import { StatusBadge, toneFor } from "@/components/StatusBadge";
+import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { since } from "@/lib/format";
@@ -50,7 +50,7 @@ export function Legs() {
         </Chip>
         {causes.map((c) => (
           <Chip key={c} active={cause === c} onClick={() => navigate({ search: { cause: c } })}>
-            {c}
+            {displayName(c)}
           </Chip>
         ))}
       </div>
@@ -89,7 +89,14 @@ export function Legs() {
                     {row.run_id || "—"}
                   </Td>
                   <Td>
-                    <StatusBadge state={row.cause} />
+                    {/* Tone from the WIRE value, label from the display name:
+                        `toneFor` keys off what the leg log recorded, so passing
+                        it a renamed word would silently mute every badge. */}
+                    <StatusBadge
+                      state={displayName(row.cause)}
+                      tone={tone}
+                      title={`recorded as "${row.cause}"`}
+                    />
                   </Td>
                   <Td right>{row.exit_code ?? "—"}</Td>
                   <Td right className="text-[var(--fg-faint)]">

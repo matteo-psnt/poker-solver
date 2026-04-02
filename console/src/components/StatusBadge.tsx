@@ -56,6 +56,44 @@ export function toneFor(state: string | null | undefined): Tone {
   return BY_CAUSE[(state ?? "").toLowerCase()] ?? "muted";
 }
 
+/**
+ * The word to SHOW, which is not always the word on the wire.
+ *
+ * Azure calls a queued task `active`, which reads as the opposite of what it
+ * means, and `completed` for anything that stopped — success or not. Those are
+ * Batch's names and cannot be changed; what is shown can. Our own leg causes
+ * are renamed here too rather than at the source, because they are already
+ * written into records on the share and `TERMINAL_CAUSES` gates reconciliation
+ * against them: a renamed cause would make every historical leg look
+ * unresolved.
+ */
+const DISPLAY: Record<string, string> = {
+  active: "queued",
+  started: "unresolved",
+  killed: "killed (oom)",
+};
+
+export function displayName(word: string | null | undefined): string {
+  const short = shortState(word);
+  return DISPLAY[short] ?? short;
+}
+
+/**
+ * A Batch task's OUTCOME as a word, rather than its state plus a number.
+ *
+ * `completed` says only that it stopped; the exit code says what happened. One
+ * word carries both, and it uses the same vocabulary as the leg log so the two
+ * panels can be read the same way.
+ */
+export function taskOutcome(state: string | null | undefined, exitCode: number | null): string {
+  const short = shortState(state);
+  if (short !== "completed") return displayName(short);
+  if (exitCode === 0 || exitCode === null) return "done";
+  if (exitCode === 124) return "timed out";
+  if (exitCode === -9) return "cancelled";
+  return "failed";
+}
+
 /** `BatchTaskState.RUNNING` -> `running`. */
 export function shortState(raw: string | null | undefined): string {
   return (raw ?? "").split(".").pop()?.toLowerCase() ?? "";

@@ -40,7 +40,7 @@ export function RunDetail() {
             <Stat label="config" value={run.data.config_name ?? "—"} />
             <Stat label="iterations" value={count(run.data.iterations)} />
             <Stat label="attempts" value={count(run.data.attempts)} />
-            <Stat label="compute" value={duration(run.data.runtime_seconds)} />
+            <Stat label="compute time" value={duration(run.data.runtime_seconds)} />
             <div>
               <Label>status</Label>
               <StatusBadge state={run.data.status} />

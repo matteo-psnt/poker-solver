@@ -1,6 +1,12 @@
 import { useJobs, useLegs, usePool } from "@/api/queries";
 import { Panel } from "@/components/Panel";
-import { StatusBadge, exitMeaning, shortState, taskTone } from "@/components/StatusBadge";
+import {
+  StatusBadge,
+  exitMeaning,
+  shortState,
+  taskOutcome,
+  taskTone,
+} from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { count, since } from "@/lib/format";
@@ -14,7 +20,7 @@ export function Overview() {
   return (
     <div className="space-y-3">
       <Panel
-        title="Pool — VMs allocated (scales 0→N→0 on its own)"
+        title="Pool"
         updatedAt={pool.dataUpdatedAt}
         staleAfterMs={30_000}
         error={errorOf(pool.error)}
@@ -31,8 +37,8 @@ export function Overview() {
                 pool.data.target_dedicated_nodes,
               )}`}
             />
-            <Stat label="state" value={pool.data.allocation_state?.split(".").pop() ?? "—"} />
-            <Stat label="vm" value={pool.data.vm_size ?? "—"} mono />
+            <Stat label="allocation" value={pool.data.allocation_state?.split(".").pop() ?? "—"} />
+            <Stat label="vm size" value={pool.data.vm_size ?? "—"} mono />
             {pool.data.resize_errors.map((e) => (
               <p key={e.code} className="col-span-full font-mono text-[12px] text-red-400">
                 {e.code}: {e.message}
@@ -45,7 +51,7 @@ export function Overview() {
       {/* Batch and the leg log answer DIFFERENT questions; the panels sit
           together because neither is sufficient alone. */}
       <Panel
-        title="Batch — what Azure thinks is running now"
+        title="Batch"
         updatedAt={jobs.dataUpdatedAt}
         staleAfterMs={30_000}
         error={errorOf(jobs.error)}
@@ -80,15 +86,9 @@ export function Overview() {
                             means finished, not succeeded — badging it green made
                             a cancelled task look like a clean one. */}
                         <StatusBadge
-                          state={state}
+                          state={taskOutcome(task.state, task.exit_code)}
                           tone={taskTone(task.state, task.exit_code)}
-                          title={
-                            state === "active"
-                              ? "queued, waiting for a node — not running"
-                              : state === "completed"
-                                ? "finished; success is in the exit code"
-                                : undefined
-                          }
+                          title={`Batch reports state "${state}"`}
                         />
                       </Td>
                       <Td right title={meaning ?? undefined}>
@@ -107,7 +107,7 @@ export function Overview() {
       </Panel>
 
       <Panel
-        title="Legs — what the nodes reported, durably"
+        title="Legs"
         updatedAt={legs.dataUpdatedAt}
         staleAfterMs={120_000}
         error={errorOf(legs.error)}

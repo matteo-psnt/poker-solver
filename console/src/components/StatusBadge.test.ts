@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { exitMeaning, shortState, taskTone, toneFor } from "./StatusBadge";
+import {
+  displayName,
+  exitMeaning,
+  shortState,
+  taskOutcome,
+  taskTone,
+  toneFor,
+} from "./StatusBadge";
 
 /**
  * The console shows three state vocabularies with one colour scheme, and the
@@ -80,5 +87,37 @@ describe("shortState", () => {
   it("strips Batch's enum prefix", () => {
     expect(shortState("BatchTaskState.RUNNING")).toBe("running");
     expect(shortState(null)).toBe("");
+  });
+});
+
+describe("displayed names are not always the names on the wire", () => {
+  it("shows a queued task as queued, not 'active'", () => {
+    // Azure's word reads as the opposite of what it means.
+    expect(taskOutcome("BatchTaskState.ACTIVE", null)).toBe("queued");
+  });
+
+  it("turns a stopped task into its outcome, one word", () => {
+    expect(taskOutcome("BatchTaskState.COMPLETED", 0)).toBe("done");
+    expect(taskOutcome("BatchTaskState.COMPLETED", 124)).toBe("timed out");
+    expect(taskOutcome("BatchTaskState.COMPLETED", -9)).toBe("cancelled");
+    expect(taskOutcome("BatchTaskState.COMPLETED", 137)).toBe("failed");
+  });
+
+  it("renames the leg causes that hid what they meant", () => {
+    expect(displayName("started")).toBe("unresolved");
+    expect(displayName("killed")).toBe("killed (oom)");
+  });
+
+  it("leaves the wire value alone where it is already clear", () => {
+    for (const word of ["running", "completed", "failed", "timeout", "cancelled"]) {
+      expect(displayName(word)).toBe(word);
+    }
+  });
+
+  it("colours still key off the WIRE value, not the display name", () => {
+    // The trap in this change: pass a renamed word to `toneFor` and every badge
+    // silently falls through to muted.
+    expect(toneFor("started")).toBe("pending");
+    expect(toneFor(displayName("started"))).not.toBe("pending");
   });
 });
