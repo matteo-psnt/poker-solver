@@ -80,7 +80,7 @@ class RunTracker:
     def metadata_path(self) -> Path:
         return self.metadata_file
 
-    def initialize(self):
+    def initialize(self) -> None:
         """Create run directory and initial metadata file.
 
         Called when training actually starts, not during construction.
@@ -122,7 +122,7 @@ class RunTracker:
         runtime_seconds: float,
         num_infosets: int,
         storage_capacity: int,
-    ):
+    ) -> None:
         """Update training progress."""
         self.initialize()  # Ensure directory exists
         self.metadata.update_progress(
@@ -141,7 +141,7 @@ class RunTracker:
             attempt_runtime_seconds=runtime_seconds,
         )
 
-    def mark_resumed(self):
+    def mark_resumed(self) -> None:
         """Open a new attempt: this process is continuing an existing run.
 
         ``metadata.mark_resumed`` REAPS a still-"running" previous attempt as
@@ -166,19 +166,19 @@ class RunTracker:
         # which on a run converted from the old layout is all of them.
         self.initialize()
 
-    def mark_completed(self):
+    def mark_completed(self) -> None:
         """Mark run as completed."""
         self.initialize()  # Ensure directory exists
         self.metadata.mark_completed()
         self._emit_status("completed")
 
-    def mark_interrupted(self):
+    def mark_interrupted(self) -> None:
         """Mark run as interrupted by user."""
         self.initialize()  # Ensure directory exists
         self.metadata.mark_interrupted()
         self._emit_status("interrupted")
 
-    def mark_failed(self, cleanup_if_empty: bool = True):
+    def mark_failed(self, cleanup_if_empty: bool = True) -> None:
         """Mark run as failed.
 
         Args:
