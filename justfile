@@ -221,11 +221,54 @@ console: console-build
     uv run poker-solver-run serve
 
 # Dev: Vite on :5173 with hot reload, proxying /api to a real server on :8765.
+#
+# The server is SUPERVISED, not merely backgrounded. `serve &` plus a trap threw
+# away its exit status and interleaved its stderr into vite's, so a dead server
+# was observable only as a vite `ECONNREFUSED` on /api -- with no way to tell an
+# OOM kill (137) from a stray Ctrl-C reaching the shared process group (130)
+# from a traceback from an `[Errno 48] Address already in use` two seconds after
+# startup. Same lesson `src/shared/node/runner.py` learned on the cloud side: a
+# death the log cannot record needs its own account.
 console-dev:
     #!/usr/bin/env bash
-    set -euo pipefail
-    uv run poker-solver-run serve --port 8765 &
-    trap 'kill $! 2>/dev/null || true' EXIT
+    set -uo pipefail
+
+    port=8765
+    log=/tmp/poker-console-server.log
+    : >"$log"
+    echo "[console-dev] server log: $log"
+
+    # A subshell, because only a parent can `wait` on the server and read its
+    # status. It keeps the pid so its own TERM handler can pass the signal on --
+    # without that, the EXIT trap below kills the supervisor and leaves the
+    # server holding :8765.
+    (
+      trap 'kill "${child:-}" 2>/dev/null; exit 0' TERM INT
+      consecutive=0
+      while :; do
+        started=$SECONDS
+        uv run poker-solver-run serve --port "$port" >>"$log" 2>&1 &
+        child=$!
+        rc=0; wait "$child" || rc=$?
+        lived=$(( SECONDS - started ))
+        printf '\n[console-dev] server exited rc=%d after %ds\n' "$rc" "$lived" >&2
+        tail -n 20 "$log" | sed 's/^/[server] /' >&2
+        # A server that cannot bind dies in the same second every time, so
+        # respawning forever would only scroll the reason off the screen.
+        if [ "$lived" -lt 10 ]; then consecutive=$(( consecutive + 1 )); else consecutive=0; fi
+        if [ "$consecutive" -ge 3 ]; then
+          printf '[console-dev] died %d times in a row -- stopping. Full log: %s\n' "$consecutive" "$log" >&2
+          # This process group is the `just` job and nothing else, so it takes
+          # vite down too and hands the terminal back, rather than leaving a
+          # console that can only render proxy errors.
+          kill 0
+        fi
+        printf '[console-dev] restarting in 2s\n' >&2
+        sleep 2
+      done
+    ) &
+    supervisor=$!
+    trap 'kill "$supervisor" 2>/dev/null || true' EXIT
     npm --prefix console run dev
 
 # The console's own gate: biome, tsc, vitest.
