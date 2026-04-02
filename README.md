@@ -225,7 +225,7 @@ poker-solver/
 │   ├── runs/            # Training runs and checkpoints
 │   ├── combo_abstraction/  # Precomputed card abstractions
 │   └── eval_ledger.jsonl   # Append-only evaluation ledger
-├── infra/               # Azure Batch substrate (Terraform) + run_leg.sh node wrapper
+├── infra/               # Azure Batch substrate (Terraform) + run_leg.py node wrapper
 └── justfile             # Terraform lifecycle, `panic`, and aliases for the CLI
 ```
 

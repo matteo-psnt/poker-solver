@@ -96,11 +96,13 @@ ignore = [
 # Tests are full of deliberately-unused arguments: monkeypatch stand-ins that
 # must match a real signature, and fixtures requested for their side effect.
 "tests/**/*.py" = ["SLF001", "ARG001", "ARG002", "ARG005"]
-# leg_log is imported by run_leg.sh with the BATCH NODE's system python3, which
-# on the pinned Ubuntu 22.04 image is 3.10 -- not the target above. UP017
+# The node-side wrapper and leg_log are run by the BATCH NODE's system python3,
+# which on the pinned Ubuntu 22.04 image is 3.10 -- not the target above. UP017
 # rewrites `timezone.utc` to `datetime.UTC`, which is 3.11+, and the call site
 # swallows the resulting ImportError: the leg records simply stop appearing.
+# tests/shared/node/test_node_interpreter.py imports both on a real 3.10.
 "src/shared/leg_log.py" = ["UP017"]
+"src/shared/node/*.py" = ["UP017"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

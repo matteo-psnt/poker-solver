@@ -4,7 +4,7 @@ Derived, not recorded. An earlier version sampled the pool's node count every
 15s from inside the console's server -- which meant it only recorded while that
 server happened to be running, so a 24h window was typically 3% observed and
 the totals were worthless. The leg log has no such hole: every attempt is
-written to the share by ``run_leg.sh`` with its own start and end, whether or
+written to the share by the node wrapper with its own start and end, whether or
 not anything is watching, so the history is complete back to the first leg.
 """
 

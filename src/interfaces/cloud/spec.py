@@ -9,7 +9,9 @@ to a service.
 
 The node contract
 -----------------
-``infra/run_leg.sh`` reads every value below out of the task's environment. Two
+``infra/run_leg.py`` reads every value below out of the task's environment --
+see :mod:`src.shared.node.plan`, which is the same contract from the node's
+end and is pinned against this one by ``tests/shared/node/test_plan.py``. Two
 of them are JSON-encoded rather than passed raw, and the reason is not the one
 the old shell had. The ``az`` CLI needed hex because
 ``--environment-settings`` parses ``KEY=VALUE`` and a config override's value
@@ -39,7 +41,11 @@ LEG_COMMAND_TEMPLATE = (
     "CODE_DIR=/mnt/work/code-$AZ_BATCH_TASK_ID && mkdir -p $CODE_DIR && "
     "tar xzf $AZ_BATCH_NODE_MOUNTS_DIR/shared/code/{snapshot}.tar.gz -C $CODE_DIR "
     "--no-same-owner --no-same-permissions && "
-    "CODE_DIR=$CODE_DIR bash $CODE_DIR/infra/run_leg.sh"
+    # The node's SYSTEM python3 -- 3.10 on the pinned image, and the only
+    # interpreter that exists before `uv sync`. `-u` because the wrapper's own
+    # lines are the ones that explain a leg, and a buffered stdout would hold
+    # them until the process that is being diagnosed has already ended.
+    "CODE_DIR=$CODE_DIR python3 -u $CODE_DIR/infra/run_leg.py"
 )
 
 
@@ -122,10 +128,10 @@ class LegSpec:
     def environment(self) -> dict[str, str]:
         """The full RUN_* environment the node wrapper reads.
 
-        Every key is emitted even when empty. ``run_leg.sh`` tests each with
-        ``-n``, and an absent variable and an empty one are the same thing to
-        it -- but emitting them all keeps the contract visible in one place
-        rather than implied by which branch happened to set what.
+        Every key is emitted even when empty. An absent variable and an empty
+        one are the same thing to the node, but emitting them all keeps the
+        contract visible in one place rather than implied by which branch
+        happened to set what.
         """
         return {
             "CODE_SNAPSHOT": self.code_snapshot,
@@ -150,9 +156,17 @@ class LegSpec:
         """Reject the submissions that would waste a node rather than fail fast."""
         if self.op not in (TRAIN, EVALUATE, REPAIR_LADDER, PRECOMPUTE):
             raise ValueError(f"Unknown op '{self.op}'.")
-        if self.op == TRAIN and not self.config and not self.run_id:
+        if self.op == TRAIN and not self.config:
+            # A CONTINUING leg needs it too. The config builds the tree and the
+            # solver and the checkpoint stores neither, so `--run x` without a
+            # config reached the node and died on
+            # `Config file not found: config/training/.yaml` -- after a snapshot
+            # upload, a ~3-minute pool spin-up and every Batch retry. This used
+            # to accept it, and the justfile documented it as the way to
+            # continue a run.
             raise ValueError(
-                "A training leg needs --config (fresh run) or --run (continue an existing one)."
+                "A training leg needs --config, a CONTINUING one included: the config "
+                "builds the tree and the solver, and the checkpoint stores neither."
             )
         if self.op == TRAIN and self.to <= 0:
             raise ValueError("--to must be a positive ABSOLUTE iteration target, not an increment.")

@@ -48,7 +48,7 @@ live on the share and nowhere else.
     is the same call; it used to be a second renderer that could disagree with
     `jobs` and could not see the leg log at all.
   - **run on a node** — `train-static`, `precompute`, `evaluate`. These are
-    invoked BY `run_leg.sh`, on whichever box executes the leg; they are not a
+    invoked BY the node wrapper, on whichever box executes the leg; not a
     local-compute door, and they keep `--runs-dir` because a node writes to
     `/mnt/work` before publishing.
   - **read the record** — `ledger`, `curve`, `progress`, `runinfo`, `report`,
@@ -86,10 +86,14 @@ live on the share and nowhere else.
   never `DefaultAzureCredential`** — the default chain probes the link-local
   IMDS address, which on a laptop hangs rather than refusing (measured: >120s
   vs 1.3s).
-- `just` is now **Terraform lifecycle + `panic` + thin aliases**, ~175 lines.
+- `just` is **Terraform lifecycle + `panic` + `credit-check` + a few aliases**.
   `just panic <rg> <account> <pool>` is the one recipe that deliberately avoids
   the Python CLI and reads no Terraform state, so it works from a phone in Azure
-  Cloud Shell.
+  Cloud Shell. The aliases are passthroughs and nothing else — a guard test
+  (`tests/interfaces/cli/test_justfile_aliases.py`) fails if one names a
+  subcommand that does not exist, which is how a `just fetch` recipe outlived
+  the command it called by weeks. Anything needing a flag that is not aliased
+  goes through `uv run poker-solver-run <cmd>`, or `just cli <cmd> [flags...]`.
 - **`train-static` covers both starting and continuing a run.** `--iterations`
   is an ABSOLUTE target and `--run <id>` continues an existing directory, so
   re-running past the target is a no-op. That is what makes a scheduler retry
@@ -120,11 +124,22 @@ live on the share and nowhere else.
   `poker-solver-run submit --config <c> --to <absolute-iteration>` queues a leg
   and returns; the pool scales 0→N→0 on its own. Terraform owns the account and
   pool; jobs and tasks are created at runtime by `src/interfaces/cloud/`, never
-  in HCL. `infra/run_leg.sh` stays shell on purpose — it does disk discovery,
-  mount handling and publish-on-exit traps *around* the Python process, and it
-  reads the leg's `RUN_*` environment (overrides arrive as `RUN_SETS_JSON`, a
-  JSON array, decoded with `read -d ''` so a value containing `=`, a space or a
-  newline survives). `infra/store/` is a **separate**
+  in HCL. **The node-side wrapper is Python, in `src/shared/node/`** —
+  `archive.py` (publish/fetch between the node disk and the SMB share),
+  `plan.py` (the `RUN_*` environment → the argv), `runner.py` (the timeout
+  guard, the tee, the mid-run publisher, the exit accounting), with
+  `infra/run_leg.py` as the entry point the task command line names. It lives
+  under `shared` because it runs on the node BEFORE `uv sync`, under the node's
+  system `python3` — **3.10 on the pinned Ubuntu 22.04 image, and stdlib
+  only**. Both constraints are enforced by
+  `tests/shared/node/test_node_interpreter.py`, which imports the whole package
+  on a real 3.10 via `uv run --python 3.10 --no-project`; ruff's
+  `target-version` is `py312`, so `pyproject.toml` disables `UP017` for these
+  files or the formatter rewrites them into something the node cannot import.
+  Two shell things REMAIN shell and should stay that way: `just panic` (must
+  work from a phone in Cloud Shell, with no venv and no Terraform state) and
+  `main.tf`'s `start_task` (disk discovery, `mkfs`, mount — it runs before any
+  code snapshot exists on the node). `infra/store/` is a **separate**
   Terraform state holding the durable share, so `just destroy` cannot reach the
   experiment record. Active runs live on the node's `/mnt/work` data disk and are
   *published* to the share — never point `runs_dir` at the share. Constraints that
@@ -132,9 +147,11 @@ live on the share and nowhere else.
   `Dalds_v6`, Gen2-only images, the SKU policy) are documented in
   `infra/README.md`; read it before changing pool config.
   **`just legs` is how you find out why a leg died** — the run log cannot
-  record a death (the container is gone first), so `run_leg.sh` writes its own
-  account to `<share>/legs/` and `legs` reconciles the ones whose trap never ran
-  against Batch's view.
+  record a death (the container is gone first), so the wrapper writes its own
+  account to `<share>/legs/` and `legs` reconciles the ones whose exit record
+  never landed against Batch's view. 124 (the guard's deadline — a hang) and
+  137 (SIGKILL from outside — the OOM killer) are DIFFERENT causes, and a wrong
+  terminal one is permanent: it suppresses reconciliation.
 - `uv run pytest -m "not slow"` — fast gate; `uv run pytest` — full suite.
 - `uv run pre-commit run --all-files` — full quality gate (ruff lint+format,
   ty, import-linter, deptry, vulture). Run before handing off changes.

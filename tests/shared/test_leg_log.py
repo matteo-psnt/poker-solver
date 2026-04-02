@@ -11,7 +11,6 @@ import pytest
 from src.shared import leg_log
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-LEG_LOG_SOURCE = REPO_ROOT / "src" / "shared" / "leg_log.py"
 
 
 def _node(share, task_id, event, cause=None, **kw):
@@ -241,17 +240,10 @@ class TestRobustness:
 
 
 class TestNodeSideConstraints:
-    def test_module_imports_only_the_stdlib(self):
-        """run_leg.sh imports this with system python3, before `uv sync`.
-
-        A third-party import here would make the record unavailable for exactly
-        the early failures (dependency install, staging) that leave nothing else
-        behind.
-        """
-        source = LEG_LOG_SOURCE.read_text()
-        third_party = ("numpy", "pydantic", "zarr", "yaml", "xxhash", "tqdm")
-        for name in third_party:
-            assert f"import {name}" not in source, f"leg_log must not import {name}"
+    """The interpreter and dependency floor this module must clear is checked
+    for the whole node package in tests/shared/node/test_node_interpreter.py --
+    including a real 3.10 run, which this file could only approximate by
+    grepping for names."""
 
     def test_importable_without_the_project_environment(self, tmp_path):
         """Proves the node-side contract on a bare interpreter, not just in-suite."""
@@ -267,68 +259,3 @@ class TestNodeSideConstraints:
         assert result.returncode == 0, result.stderr
         assert "ok" in result.stdout
         assert (leg_log.legs_dir(tmp_path) / "t.1.start.json").exists()
-
-
-class TestRunLegWiring:
-    """The shell half: the trap must classify by the leg's real exit status."""
-
-    def _run_leg_source(self) -> str:
-        return (REPO_ROOT / "infra" / "run_leg.sh").read_text()
-
-    def test_exit_trap_reads_status_first(self):
-        source = self._run_leg_source()
-        body = source.split("on_exit() {", 1)[1]
-        assert body.lstrip().startswith("LEG_EXIT_CODE=$?"), (
-            "anything before `$?` overwrites the status the leg exited with"
-        )
-
-    def test_trap_maps_the_timeout_guard_to_its_own_cause(self):
-        source = self._run_leg_source()
-        assert "124) leg_record finished timeout" in source
-
-    def test_a_started_record_is_written_before_any_work(self):
-        source = self._run_leg_source()
-        assert "leg_record started" in source
-        assert source.index("leg_record started") < source.index("syncing dependencies"), (
-            "a leg that dies during dependency sync must still leave a record"
-        )
-
-
-class TestNodeInterpreterCompatibility:
-    """The node's python3 is OLDER than this project's.
-
-    infra/main.tf pins `batch.node.ubuntu 22.04`, whose system python3 is 3.10.
-    run_leg.sh imports this module with THAT interpreter, before `uv sync`, and
-    swallows the result -- so a 3.11+ construct here is not an error anyone
-    sees: the leg records simply never appear, and `just legs` reports "no leg
-    records", indistinguishable from "no legs ran". The stdlib-only test above
-    cannot catch it, because it runs under this project's interpreter.
-    """
-
-    # Names that do not exist on 3.10. Extend when the floor moves.
-    FORBIDDEN = (
-        ("datetime import UTC", "datetime.UTC is 3.11+; use timezone.utc"),
-        ("from typing import Self", "typing.Self is 3.11+"),
-        ("ExceptionGroup", "ExceptionGroup is 3.11+"),
-        ("tomllib", "tomllib is 3.11+"),
-        ("itertools.batched", "itertools.batched is 3.12+"),
-        ("@override", "typing.override is 3.12+"),
-    )
-
-    def test_no_construct_newer_than_the_node_interpreter(self):
-        source = LEG_LOG_SOURCE.read_text()
-        # Prose in the docstring names the hazard; only code may not use it.
-        code = "\n".join(
-            line for line in source.splitlines() if not line.lstrip().startswith(("#", "*"))
-        )
-        body = code.split('"""', 2)[-1]
-        for needle, why in self.FORBIDDEN:
-            assert needle not in body, f"{needle} in leg_log: {why}"
-
-    def test_the_pinned_node_image_is_still_what_this_assumes(self):
-        """If the image moves, the floor above moves with it."""
-        main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
-        assert "batch.node.ubuntu 22.04" in main_tf, (
-            "the node image changed; re-check the system python3 version this "
-            "module must import under"
-        )

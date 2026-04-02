@@ -3,7 +3,7 @@
 This replaces a sampler. Polling the pool's node count only records while
 something is polling, and the only thing that polled was the console's own
 server -- so a 24h window was routinely 3% observed and the totals meant
-nothing. The leg log has none of that problem: ``run_leg.sh`` writes a record
+nothing. The leg log has none of that problem: the node wrapper writes a record
 per attempt with its own start and end, on the share, for every leg ever run.
 The history is complete by construction and needs nothing running to collect it.
 

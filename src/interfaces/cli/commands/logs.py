@@ -4,7 +4,7 @@ Replaces three separate recipes (`job-log`, `leg-log`, `leg-logs`) because
 they differ only in where they read from, and the choice between them is the
 one thing a caller actually has to think about:
 
-* ``--source share`` (default) reads the copy ``run_leg.sh`` publishes on every
+* ``--source share`` (default) reads the copy the node wrapper publishes on every
   checkpoint. It **survives node teardown**, which matters because the pool
   scales to zero within minutes of a task ending -- so the node copy is already
   gone for exactly the failed legs most worth reading.

@@ -5,7 +5,7 @@ task's record ages out while the run it belonged to lives on. This reads the
 durable copy on the share instead, then asks Batch about the legs the share
 cannot explain.
 
-Neither side can answer alone. ``run_leg.sh`` writes its own account on entry and
+Neither side can answer alone. The node wrapper writes its own account on entry and
 from its EXIT trap, covering every death the shell survives and distinguishing a
 hang from an OOM from a cancellation -- Batch reports all three as ``failure``.
 The deaths it cannot cover (OOM-kill, SIGKILL, node loss, task-level wall clock)

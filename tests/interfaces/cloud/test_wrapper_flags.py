@@ -1,4 +1,4 @@
-"""Every flag `run_leg.sh` passes must be one the command actually declares.
+"""Every flag the node wrapper passes must be one the command actually declares.
 
 This is the cheapest possible check for the most expensive possible typo. A
 flag the node's CLI does not recognise is an argparse exit 2, and argparse
@@ -7,71 +7,36 @@ exits *before* doing any work -- so the failure costs a code snapshot upload, a
 something a string comparison could have found. `score.py` documents that cost
 in a comment about `--method`; it then happened for real to a sibling command.
 
-The case that motivated this: the wrapper builds one shared `ARGS` array that
-unconditionally carries `--workers` -- correct for `train-static`, which
+The case that motivated it: the wrapper built one shared `ARGS` array that
+unconditionally carried `--workers` -- correct for `train-static`, which
 defaults to 1 and once trained single-threaded on a 16-vCPU node -- and a newer
-`train-vector` branch splatted that same array into a command that declares no
+`train-vector` branch splatted that same array into a command declaring no
 `--workers`. Three identical attempts, each dead about four seconds in.
 
-What this can and cannot see: it reads the LITERAL flags the wrapper writes.
-Passthrough arrays carry flags chosen by the submitter at runtime and are
-skipped by name (see PASSTHROUGH_ARRAYS) -- those are checked where they are
-built, in `spec.py`, not here.
+It used to regex `run_leg.sh` for `uv run poker-solver-run` call sites and
+trace shell array splats, because the argv existed only as shell. Now
+`plan.LegPlan` BUILDS the argv, so this asks the real parser to accept the real
+list -- which also removes the regex's blind spot: a flag assembled from a
+variable was invisible to it.
+
+The wrapper lives in `src.shared`, which `.importlinter` forbids from importing
+`src.interfaces`. That is the right way round: the node must not need the
+command registry at runtime, and the check belongs here, on the client, where
+the registry already is.
 """
 
 from __future__ import annotations
 
 import argparse
-import re
-from pathlib import Path
 
 import pytest
 
 from src.interfaces.cli.commands import COMMANDS
-
-WRAPPER = Path("infra/run_leg.sh")
+from src.shared.node import plan as node_plan
 
 # Added by `headless.build_parser` to every subcommand, so they are legal
 # everywhere and appear in no command's own `add_arguments`.
 COMMON_FLAGS = {"--json", "--log-level"}
-
-# Arrays holding flags the SUBMITTER chose, not ones the wrapper wrote. `EXTRA`
-# is `evaluate`'s passthrough (`score --run r -- --br-flops 8`); its contents
-# are unknowable here and are validated against `evaluate` by `score`'s own
-# method/flag plumbing.
-PASSTHROUGH_ARRAYS = {"EXTRA"}
-
-INVOCATION = re.compile(r"uv run poker-solver-run\s+([a-z-]+)(.*)")
-ARRAY_DEF = re.compile(r"^\s*([A-Z_]+)\+?=\((.*)\)\s*$")
-ARRAY_REF = re.compile(r'"\$\{([A-Z_]+)\[@\]\}"')
-FLAG = re.compile(r"(?<![\w-])(--[a-z][a-z0-9-]*)")
-
-
-def _logical_lines(text: str) -> list[str]:
-    """Join backslash continuations, so one shell command is one string."""
-    joined: list[str] = []
-    buffer = ""
-    for raw in text.splitlines():
-        stripped = raw.rstrip()
-        if stripped.endswith("\\"):
-            buffer += stripped[:-1] + " "
-            continue
-        joined.append(buffer + stripped)
-        buffer = ""
-    if buffer:
-        joined.append(buffer)
-    return joined
-
-
-def _array_flags(lines: list[str]) -> dict[str, set[str]]:
-    """Literal flags contributed to each array, anywhere in the file."""
-    arrays: dict[str, set[str]] = {}
-    for line in lines:
-        match = ARRAY_DEF.match(line)
-        if match:
-            name, body = match.group(1), match.group(2)
-            arrays.setdefault(name, set()).update(FLAG.findall(body))
-    return arrays
 
 
 def _declared(command_name: str) -> set[str]:
@@ -83,78 +48,83 @@ def _declared(command_name: str) -> set[str]:
     return {option for action in parser._actions for option in action.option_strings}
 
 
-def _invocations(text: str | None = None) -> list[tuple[str, set[str]]]:
-    """(command, flags it is invoked with) for every wrapper call site."""
-    lines = _logical_lines(WRAPPER.read_text() if text is None else text)
-    arrays = _array_flags(lines)
-
-    found: list[tuple[str, set[str]]] = []
-    for line in lines:
-        match = INVOCATION.search(line)
-        if not match:
-            continue
-        name, rest = match.group(1), match.group(2)
-        flags = set(FLAG.findall(rest))
-        for array in ARRAY_REF.findall(rest):
-            if array not in PASSTHROUGH_ARRAYS:
-                flags |= arrays.get(array, set())
-        found.append((name, flags - COMMON_FLAGS))
-    return found
+def _flags(argv: list[str]) -> set[str]:
+    return {token for token in argv if token.startswith("--")} - COMMON_FLAGS
 
 
-def test_the_wrapper_actually_invokes_something():
-    """A parser that silently matches nothing would pass every test below."""
-    invocations = _invocations()
-    assert invocations, "found no `uv run poker-solver-run` call sites — parser is broken"
-    assert {name for name, _ in invocations} <= {command.name for command in COMMANDS}
+def _undeclared(argv: list[str]) -> list[str]:
+    return sorted(_flags(argv) - _declared(argv[0]))
 
 
-def _undeclared(command_name: str, flags: set[str]) -> list[str]:
-    """The flags `command_name` is passed but does not accept."""
-    return sorted(flags - _declared(command_name))
+def _plan(**overrides) -> node_plan.LegPlan:
+    defaults: dict = {"op": node_plan.TRAIN, "config": "production", "to": 1}
+    return node_plan.LegPlan(**{**defaults, **overrides})
 
 
-@pytest.mark.parametrize(("command_name", "flags"), _invocations(), ids=lambda v: str(v))
-def test_every_flag_the_wrapper_passes_is_declared(command_name: str, flags: set[str]):
-    declared = _declared(command_name)
-    assert declared, f"`{command_name}` is invoked by the wrapper but is not a registered command"
-    unknown = _undeclared(command_name, flags)
-    assert not unknown, (
-        f"run_leg.sh passes {unknown} to `{command_name}`, which does not declare it. "
-        f"argparse exits 2 before doing any work, so this costs a snapshot upload, a "
-        f"pool spin-up and every Batch retry to discover. Declared: {sorted(declared)}"
+# Every optional field, present and absent. The old regex saw flags on
+# conditional branches because it read the whole file; a pure-function check
+# only sees the argv it is handed, so the matrix has to supply the branches.
+TRAIN_CASES = {
+    "bare": _plan(),
+    "tagged": _plan(experiment="exp-7", arm="control", parent="run-x"),
+    "with-overrides": _plan(sets=("solver__dcfr=1.5", "system__note=two words")),
+    "with-checkpoint-every": _plan(checkpoint_every=250_000),
+    "continuing": _plan(run_id="run-a", checkpoint_every=1_000_000, experiment="e", arm="a"),
+}
+
+EVAL_CASES = {
+    "at-a-rung": (_plan(op=node_plan.EVALUATE, run_id="run-a"), "1000000"),
+    "latest": (_plan(op=node_plan.EVALUATE, run_id="run-a"), ""),
+    "explicit-method": (
+        _plan(op=node_plan.EVALUATE, run_id="run-a", eval_method="lookahead"),
+        "500000",
+    ),
+}
+
+
+@pytest.mark.parametrize("leg", TRAIN_CASES.values(), ids=list(TRAIN_CASES))
+def test_every_flag_a_training_leg_passes_is_declared(leg):
+    argv = leg.train_argv()
+    assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
+    assert not _undeclared(argv), _message(argv)
+
+
+@pytest.mark.parametrize(("leg", "rung"), EVAL_CASES.values(), ids=list(EVAL_CASES))
+def test_every_flag_an_evaluate_leg_passes_is_declared(leg, rung):
+    # `eval_flags` is the SUBMITTER's passthrough (`score --run r --
+    # --br-flops 8`); its contents are unknowable here and are validated
+    # against `evaluate` by `score`'s own method/flag plumbing.
+    argv = leg.evaluate_argv(rung)
+    assert not _undeclared(argv), _message(argv)
+
+
+def test_every_flag_a_precompute_leg_passes_is_declared():
+    argv = _plan(op=node_plan.PRECOMPUTE).precompute_argv()
+    assert not _undeclared(argv), _message(argv)
+
+
+def _message(argv: list[str]) -> str:
+    return (
+        f"the node wrapper passes {_undeclared(argv)} to `{argv[0]}`, which does not "
+        f"declare it. argparse exits 2 before doing any work, so this costs a snapshot "
+        f"upload, a pool spin-up and every Batch retry to discover. "
+        f"Declared: {sorted(_declared(argv[0]))}"
     )
 
 
-# The defect this exists for, in miniature: a shared array carrying `--workers`
-# splatted into a command that declares no such flag. `progress` stands in for
-# the vector trainer -- it is a registered command that genuinely lacks it, so
-# the fixture cannot rot into a tautology the way naming a real branch would.
-BROKEN_WRAPPER = """
-ARGS=()
-ARGS+=(--workers "${RUN_WORKERS:-1}")
-"${GUARD[@]}" uv run poker-solver-run progress \\
-  --run "$RUN_ID" \\
-  "${ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
-"""
-
-
 class TestTheCheckCatchesTheRealDefect:
-    """A check that cannot fail is worse than none: it reads as coverage."""
+    """A check that cannot fail is worse than none: it reads as coverage.
 
-    def test_the_flag_is_traced_through_the_shared_array(self):
-        ((name, flags),) = _invocations(BROKEN_WRAPPER)
-        assert name == "progress"
-        assert "--workers" in flags, "the array splat was not followed"
-        assert "--run" in flags, "flags on the invocation line itself were missed"
+    `progress` stands in for the vector trainer -- a registered command that
+    genuinely lacks `--workers`, so the fixture cannot rot into a tautology the
+    way naming a real branch would.
+    """
 
-    def test_and_is_reported_as_undeclared(self):
-        ((_, flags),) = _invocations(BROKEN_WRAPPER)
-        assert _undeclared("progress", flags) == ["--workers"]
+    def test_an_undeclared_flag_is_reported(self):
+        assert _undeclared(["progress", "--run", "run-a", "--workers", "16"]) == ["--workers"]
 
-    def test_a_passthrough_array_is_not_blamed(self):
-        """`EXTRA` holds submitter-chosen flags; guessing about them would make
-        this fail on legitimate `score --run r -- --br-flops 8` usage."""
-        wrapper = 'EXTRA+=(--not-a-real-flag)\nuv run poker-solver-run progress "${EXTRA[@]}"\n'
-        ((_, flags),) = _invocations(wrapper)
-        assert flags == set()
+    def test_a_declared_flag_is_not(self):
+        assert _undeclared(["progress", "--run", "run-a"]) == []
+
+    def test_the_common_flags_are_legal_everywhere(self):
+        assert _undeclared(["progress", "--run", "run-a", "--json"]) == []
