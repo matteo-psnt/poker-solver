@@ -97,6 +97,8 @@ class TestEnvironment:
             "RUN_TIMEOUT",
             "RUN_WORKERS",
             "RUN_CHECKPOINT_EVERY",
+            "RUN_GIT_COMMIT",
+            "RUN_GIT_DIRTY",
             "RUN_EVAL_METHOD",
             "RUN_EVAL_AT",
             "RUN_EVAL_FLAGS_JSON",

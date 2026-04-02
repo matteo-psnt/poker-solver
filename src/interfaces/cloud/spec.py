@@ -119,6 +119,12 @@ class LegSpec:
     eval_at: str = ""
     eval_flags: tuple[str, ...] = field(default_factory=tuple)
     force_publish: bool = False
+    # Stamped by `dispatch.stage_and_queue`, never by a caller: the node has no
+    # `.git` (the snapshot excludes it), so the submitting machine is the only
+    # witness to what code this leg runs. Left empty a leg still runs -- it just
+    # records a null commit, which is what every cloud run did before this.
+    git_commit: str = ""
+    git_dirty: str = ""
 
     @property
     def label(self) -> str:
@@ -150,6 +156,11 @@ class LegSpec:
             "RUN_EVAL_AT": self.eval_at,
             "RUN_EVAL_FLAGS_JSON": json.dumps(list(self.eval_flags)),
             "RUN_FORCE_PUBLISH": "1" if self.force_publish else "",
+            "RUN_GIT_COMMIT": self.git_commit,
+            # Three-state ("1"/"0"/""), unlike the booleans above: `gitinfo`
+            # distinguishes "verified clean" from "unknown", and that
+            # distinction is what makes a bare hash worth recording.
+            "RUN_GIT_DIRTY": self.git_dirty,
         }
 
     def validate(self) -> None:
