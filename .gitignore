@@ -98,3 +98,9 @@ console/*.tsbuildinfo
 
 # pyscn analysis output (local audit tool, regenerable)
 .pyscn/
+
+# coverage data (regenerable)
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
