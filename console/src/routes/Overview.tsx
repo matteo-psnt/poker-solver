@@ -1,6 +1,6 @@
 import { useJobs, useLegs, usePool } from "@/api/queries";
 import { Panel } from "@/components/Panel";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, exitMeaning, shortState, taskTone } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { count, since } from "@/lib/format";
@@ -14,7 +14,7 @@ export function Overview() {
   return (
     <div className="space-y-3">
       <Panel
-        title="Pool"
+        title="Pool — VMs allocated (scales 0→N→0 on its own)"
         updatedAt={pool.dataUpdatedAt}
         staleAfterMs={30_000}
         error={errorOf(pool.error)}
@@ -42,8 +42,10 @@ export function Overview() {
         )}
       </Panel>
 
+      {/* Batch and the leg log answer DIFFERENT questions; the panels sit
+          together because neither is sufficient alone. */}
       <Panel
-        title="Batch"
+        title="Batch — what Azure thinks is running now"
         updatedAt={jobs.dataUpdatedAt}
         staleAfterMs={30_000}
         error={errorOf(jobs.error)}
@@ -64,18 +66,40 @@ export function Overview() {
             </thead>
             <tbody>
               {jobs.data.jobs.flatMap((job) =>
-                job.tasks.map((task) => (
-                  <tr key={`${job.job}/${task.task}`}>
-                    <Td mono>{task.task}</Td>
-                    <Td mono className="text-[var(--fg-muted)]">
-                      {job.job}
-                    </Td>
-                    <Td>
-                      <StatusBadge state={task.state?.split(".").pop()?.toLowerCase() ?? null} />
-                    </Td>
-                    <Td right>{task.exit_code ?? "—"}</Td>
-                  </tr>
-                )),
+                job.tasks.map((task) => {
+                  const state = shortState(task.state);
+                  const meaning = exitMeaning(task.exit_code);
+                  return (
+                    <tr key={`${job.job}/${task.task}`}>
+                      <Td mono>{task.task}</Td>
+                      <Td mono className="text-[var(--fg-muted)]">
+                        {job.job}
+                      </Td>
+                      <Td>
+                        {/* Coloured on state AND exit code. Batch's `completed`
+                            means finished, not succeeded — badging it green made
+                            a cancelled task look like a clean one. */}
+                        <StatusBadge
+                          state={state}
+                          tone={taskTone(task.state, task.exit_code)}
+                          title={
+                            state === "active"
+                              ? "queued, waiting for a node — not running"
+                              : state === "completed"
+                                ? "finished; success is in the exit code"
+                                : undefined
+                          }
+                        />
+                      </Td>
+                      <Td right title={meaning ?? undefined}>
+                        {task.exit_code ?? "—"}
+                        {meaning && task.exit_code !== 0 && (
+                          <span className="ml-1 text-[var(--fg-faint)]">ⓘ</span>
+                        )}
+                      </Td>
+                    </tr>
+                  );
+                }),
               )}
             </tbody>
           </Table>
@@ -83,7 +107,7 @@ export function Overview() {
       </Panel>
 
       <Panel
-        title="Legs"
+        title="Legs — what the nodes reported, durably"
         updatedAt={legs.dataUpdatedAt}
         staleAfterMs={120_000}
         error={errorOf(legs.error)}
