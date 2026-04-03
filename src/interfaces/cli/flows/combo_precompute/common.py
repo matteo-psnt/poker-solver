@@ -55,7 +55,16 @@ def _list_existing_abstractions(base_path: Path) -> list[AbstractionEntry]:
 
 
 def _select_abstraction(ctx: CliContext) -> AbstractionEntry | None:
-    """Prompt the user to select an existing abstraction; None if cancelled or none found."""
+    """Prompt the user to select an existing abstraction; None if cancelled or none found.
+
+    Why the answer is narrowed rather than returned as-is:
+        ``Choice(title="Cancel", value=None)`` does NOT carry ``None`` -- questionary
+        falls back to the title when a value is None, so cancelling handed every
+        caller the string ``"Cancel"``. Each one checks ``is None``, so the check
+        never fired and the next line reached ``"Cancel".path``: cancelling any of
+        these flows printed an AttributeError traceback. Ctrl-C, which makes
+        ``.ask()`` answer None, comes back through the same narrowing.
+    """
     base_path = ctx.base_dir / "data" / "combo_abstraction"
 
     if not base_path.exists():
@@ -71,11 +80,12 @@ def _select_abstraction(ctx: CliContext) -> AbstractionEntry | None:
     choices: list[Choice] = [Choice(title=entry.label, value=entry) for entry in abstractions]
     choices.append(Choice(title="Cancel", value=None))
 
-    return prompts.select(
+    chosen = prompts.select(
         ctx,
         "Select abstraction to examine:",
         choices=choices,
     )
+    return chosen if isinstance(chosen, AbstractionEntry) else None
 
 
 def _parse_cards(card_str: str, expected: int) -> list:
