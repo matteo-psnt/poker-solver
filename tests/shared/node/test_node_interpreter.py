@@ -35,7 +35,13 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 NODE_PACKAGE = REPO_ROOT / "src" / "shared" / "node"
-GUARDED_SOURCES = [*sorted(NODE_PACKAGE.glob("*.py")), REPO_ROOT / "src" / "shared" / "leg_log.py"]
+# `cache` and `leg_log` are not IN the package but are imported by it, before
+# `uv sync`, so they carry the same stdlib-only and 3.10 floor.
+GUARDED_SOURCES = [
+    *sorted(NODE_PACKAGE.glob("*.py")),
+    REPO_ROOT / "src" / "shared" / "leg_log.py",
+    REPO_ROOT / "src" / "shared" / "cache.py",
+]
 
 NODE_PYTHON = "3.10"
 

@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 
-from src.shared import leg_log
+from src.shared import cache, leg_log
 from src.shared.node import archive
 from src.shared.node.plan import (
     EVALUATE,
@@ -524,7 +524,8 @@ def _stage(paths: NodePaths, log: LegLogger) -> int:
 
     ``$CODE/data`` is symlinked to the node's data disk so that anything
     writing under ``<base>/data/`` lands there rather than in the throwaway
-    code tree.
+    code tree -- which is where ``precompute`` puts an abstraction, and where
+    ``runs_dir`` resolves to.
     """
     log(f"code snapshot '{os.environ.get('CODE_SNAPSHOT', '?')}' staged at {paths.code}")
     paths.runs.mkdir(parents=True, exist_ok=True)
@@ -535,6 +536,15 @@ def _stage(paths: NodePaths, log: LegLogger) -> int:
         else:
             shutil.rmtree(link, ignore_errors=True)
     link.symlink_to(paths.data)
+
+    # ON THE DATA DISK, not in the task's home. The regenerable caches left the
+    # working tree so a checkout holds no runtime artifact, and their default is
+    # `~/.cache` -- but a Batch task's HOME is its own working directory, wiped
+    # with the task. Without this every leg would re-canonicalise the river's
+    # 2.6M boards (~1 min) before doing any work. `/mnt/work` is node-scoped, so
+    # the second leg on a node pays nothing.
+    os.environ[cache.ENV_OVERRIDE] = str(paths.work / "cache")
+    log(f"cache: {os.environ[cache.ENV_OVERRIDE]}")
 
     # Through the guard, so a dependency-install failure explains ITSELF in the
     # published leg log. Left on inherited stdout it went only to Batch's
