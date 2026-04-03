@@ -8,11 +8,12 @@ expensive was the exit trap reading `$?` as zero on a signal death, which made
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 import pytest
 
-from src.shared import leg_log
+from src.shared import cache, leg_log
 from src.shared.node import plan as node_plan
 from src.shared.node import runner
 
@@ -469,3 +470,66 @@ class TestRepairLadder:
         leg = node_plan.LegPlan(op=node_plan.REPAIR_LADDER, run_id="ghost", config="quick_test")
         assert runner._repair_ladder(leg, paths, log) == (1, None)
         assert "no such run on the share" in log.path.read_text()
+
+
+class TestTheCacheSurvivesBetweenLegs:
+    """Sharing the board cache across legs on a node is the whole reason it
+    lives on the data disk rather than in the task's HOME, which is wiped."""
+
+    def _stage(self, paths, monkeypatch):
+        paths.code.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
+        logger = runner.LegLogger(paths.work / "leg.log", paths.share)
+        try:
+            assert runner._stage(paths, logger) == 0
+        finally:
+            logger.close()
+
+    def test_the_cache_points_at_the_data_disk_not_the_task_home(self, paths, monkeypatch):
+        """A Batch task's HOME is its own working directory, wiped with the
+        task, so the ~/.cache default would rebuild the river's 2.6M-board
+        cache on every single leg."""
+        monkeypatch.delenv(cache.ENV_OVERRIDE, raising=False)
+        self._stage(paths, monkeypatch)
+        assert os.environ[cache.ENV_OVERRIDE] == str(paths.work / "cache")
+
+    def test_the_child_process_inherits_it(self, paths, monkeypatch):
+        """`run_guarded` passes no `env=`, so the training subprocess -- and its
+        16 workers -- see what the wrapper set. Checked against the REAL
+        run_guarded, not the stub the other cases use."""
+        monkeypatch.setenv(cache.ENV_OVERRIDE, "/mnt/work/cache")
+        paths.work.mkdir(parents=True, exist_ok=True)
+        logger = runner.LegLogger(paths.work / "child.log", paths.share)
+        try:
+            runner.run_guarded(
+                _python("import os", f"print(os.environ['{cache.ENV_OVERRIDE}'])"),
+                cwd=paths.work,
+                timeout=10,
+                log=logger,
+            )
+            assert "/mnt/work/cache" in logger.path.read_text()
+        finally:
+            logger.close()
+
+    def test_it_is_writable_by_a_later_task(self, paths, monkeypatch):
+        """`submit_leg` sets no `user_identity`, so leg tasks run as Batch's
+        default auto-user. A directory left with the first task's ownership and
+        umask is one the SECOND leg cannot write into -- which would silently
+        undo the sharing this exists for."""
+        monkeypatch.delenv(cache.ENV_OVERRIDE, raising=False)
+        self._stage(paths, monkeypatch)
+        mode = (paths.work / "cache").stat().st_mode & 0o777
+        assert mode == 0o777, f"cache dir is {oct(mode)}, not shareable across task users"
+
+    def test_a_cache_that_cannot_be_prepared_does_not_kill_the_leg(self, paths, monkeypatch):
+        monkeypatch.delenv(cache.ENV_OVERRIDE, raising=False)
+
+        real = runner.Path.chmod
+
+        def refuse(self, *a, **k):
+            if self.name == "cache":
+                raise OSError("read-only")
+            return real(self, *a, **k)
+
+        monkeypatch.setattr(runner.Path, "chmod", refuse)
+        self._stage(paths, monkeypatch)  # must still return 0

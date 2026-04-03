@@ -543,8 +543,21 @@ def _stage(paths: NodePaths, log: LegLogger) -> int:
     # with the task. Without this every leg would re-canonicalise the river's
     # 2.6M boards (~1 min) before doing any work. `/mnt/work` is node-scoped, so
     # the second leg on a node pays nothing.
-    os.environ[cache.ENV_OVERRIDE] = str(paths.work / "cache")
-    log(f"cache: {os.environ[cache.ENV_OVERRIDE]}")
+    shared_cache = paths.work / "cache"
+    os.environ[cache.ENV_OVERRIDE] = str(shared_cache)
+    # CREATED AND OPENED UP HERE, for the same reason the start task chmods
+    # /mnt/work: `submit_leg` sets no `user_identity`, so leg tasks run as
+    # Batch's DEFAULT auto-user. Left to whichever task got there first, the
+    # directory carries that task's ownership and umask, and the next leg on the
+    # node cannot write into it. Sharing the cache is the entire point of
+    # putting it on the data disk, so it has to be shared with every task and
+    # not merely with the one that created it.
+    try:
+        shared_cache.mkdir(parents=True, exist_ok=True)
+        shared_cache.chmod(0o777)
+    except OSError as error:
+        log(f"WARN could not prepare {shared_cache} ({error}); each leg will recompute")
+    log(f"cache: {shared_cache}")
 
     # Through the guard, so a dependency-install failure explains ITSELF in the
     # published leg log. Left on inherited stdout it went only to Batch's

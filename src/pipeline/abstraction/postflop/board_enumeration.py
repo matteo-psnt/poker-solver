@@ -19,6 +19,7 @@ OUTSIDE the working tree (see :mod:`src.shared.cache`); it used to be
 ``data/cache/canonical_boards`` and was the last thing recreating ``data/``.
 """
 
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import combinations
@@ -33,6 +34,8 @@ from src.pipeline.abstraction.postflop.suit_isomorphism import (
     get_canonical_board_id,
 )
 from src.shared.cache import cache_dir
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CACHE_DIR = cache_dir("canonical_boards")
 _CACHE_FORMAT_VERSION = 1
@@ -172,14 +175,29 @@ class CanonicalBoardEnumerator:
             for j, canonical_card in enumerate(info.canonical_board):
                 canon_codes[i, j] = canonical_card.rank_idx * 4 + canonical_card.suit_label
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            path,
-            board_ids=board_ids,
-            raw_counts=raw_counts,
-            rep_codes=rep_codes,
-            canon_codes=canon_codes,
-        )
+        # A CACHE MUST NEVER BE FATAL. Writing it can fail for reasons that have
+        # nothing to do with the work just completed -- a read-only mount, a full
+        # disk, or a directory another Batch task created under a different
+        # auto-user. Raising here would throw away a minute of finished
+        # enumeration and kill the leg, at the one moment the result is in hand.
+        # The cost of swallowing it is that the next process enumerates again.
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(
+                path,
+                board_ids=board_ids,
+                raw_counts=raw_counts,
+                rep_codes=rep_codes,
+                canon_codes=canon_codes,
+            )
+        except OSError as error:
+            logger.warning(
+                "Could not cache %s board enumeration to %s (%s). "
+                "The result is still correct; the next process will recompute it.",
+                self.street.name.lower(),
+                path,
+                error,
+            )
 
     def _load_from_disk(self) -> bool:
         path = self._cache_path()
