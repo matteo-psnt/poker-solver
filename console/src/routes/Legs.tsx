@@ -5,7 +5,7 @@ import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { since } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { getRouteApi, useNavigate } from "@tanstack/react-router";
+import { Link, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 
 const route = getRouteApi("/legs");
@@ -80,13 +80,33 @@ export function Legs() {
                     tone === "warn" && "bg-amber-500/[0.04]",
                   )}
                 >
-                  <Td mono>{row.task_id}</Td>
+                  <Td mono>
+                    <Link
+                      to="/legs/$taskId"
+                      params={{ taskId: row.task_id }}
+                      className="hover:underline"
+                    >
+                      {row.task_id}
+                    </Link>
+                  </Td>
                   <Td right className="text-[var(--fg-faint)]">
                     {row.attempt ?? "—"}
                   </Td>
                   <Td className="text-[var(--fg-muted)]">{row.op ?? "—"}</Td>
+                  {/* Not every leg has a run: a `vector-sweep` is a measurement
+                      that produces none, so this is blank rather than broken. */}
                   <Td mono className="text-[var(--fg-muted)]">
-                    {row.run_id || "—"}
+                    {row.run_id ? (
+                      <Link
+                        to="/runs/$runId"
+                        params={{ runId: row.run_id }}
+                        className="hover:underline"
+                      >
+                        {row.run_id}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
                   </Td>
                   <Td>
                     {/* Tone from the WIRE value, label from the display name:
