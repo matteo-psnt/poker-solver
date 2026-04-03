@@ -4,6 +4,7 @@ import random
 from collections import Counter, defaultdict
 
 from src.core.game.state import Card, Street
+from src.engine.solver.protocols import BucketingStrategy
 from src.interfaces.cli.flows.combo_precompute.common import (
     ALL_CARDS,
     BOARD_CARDS_BY_STREET,
@@ -11,7 +12,6 @@ from src.interfaces.cli.flows.combo_precompute.common import (
 )
 from src.interfaces.cli.ui import prompts
 from src.interfaces.cli.ui.context import CliContext
-from src.pipeline.abstraction.postflop.bucketer import DenseBucketer
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 
@@ -69,7 +69,7 @@ def handle_combo_analyze_bucketing(ctx: CliContext) -> None:
         _analyze_hand_strength_correlation(abstraction, street)
 
 
-def _analyze_premium_vs_weak(abstraction: DenseBucketer, street: Street) -> None:
+def _analyze_premium_vs_weak(abstraction: BucketingStrategy, street: Street) -> None:
     """Analyze bucketing for premium vs weak hands."""
     print("\nTesting predefined hand scenarios...")
     print("-" * 60)
@@ -134,7 +134,7 @@ def _analyze_premium_vs_weak(abstraction: DenseBucketer, street: Street) -> None
         )
 
 
-def _analyze_random_sample(abstraction: DenseBucketer, street: Street) -> None:
+def _analyze_random_sample(abstraction: BucketingStrategy, street: Street) -> None:
     """Analyze bucketing for random hand/board combinations."""
     print("\nGenerating 50 random hand/board combinations...")
     print("-" * 60)
@@ -175,7 +175,7 @@ def _analyze_random_sample(abstraction: DenseBucketer, street: Street) -> None:
         print(f"    Bucket {bucket:3d}: {bar} {count}")
 
 
-def _analyze_hand_strength_correlation(abstraction: DenseBucketer, street: Street) -> None:
+def _analyze_hand_strength_correlation(abstraction: BucketingStrategy, street: Street) -> None:
     """Analyze whether hand strength correlates with bucket assignment."""
     print("\nAnalyzing hand strength vs bucket assignment...")
     print("Testing various hand strengths on the same board texture...")
