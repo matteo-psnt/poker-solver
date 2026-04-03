@@ -139,6 +139,36 @@ export const curveSchema = z
   })
   .passthrough();
 
+export const progressSchema = z
+  .object({
+    op: z.literal("progress"),
+    run_id: z.string(),
+    total_rows: z.number(),
+    coverage_plateau_iteration: z.number().nullable(),
+    rows: z.array(
+      z
+        .object({
+          iteration: z.number(),
+          coverage: z.number().nullable(),
+          // THE convergence diagnostic. Compare against the 1e3-1e4 CFR needs
+          // before a regret average carries signal; coverage saturates early
+          // and says nothing about it.
+          mean_visits_per_touched: z.number().nullable().optional(),
+          iters_per_sec: z.number().nullable().optional(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+export const logSchema = z
+  .object({
+    op: z.literal("logs"),
+    task: z.string().nullable(),
+    lines: z.array(z.string()).nullable(),
+  })
+  .passthrough();
+
 export const ledgerSchema = z
   .object({
     op: z.literal("ledger"),
@@ -181,3 +211,5 @@ export type RunInfo = z.infer<typeof runinfoSchema>;
 export type Curve = z.infer<typeof curveSchema>;
 export type Ledger = z.infer<typeof ledgerSchema>;
 export type Cost = z.infer<typeof costSchema>;
+export type Progress = z.infer<typeof progressSchema>;
+export type LogLines = z.infer<typeof logSchema>;
