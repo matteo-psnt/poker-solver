@@ -207,10 +207,11 @@ ledger *flags:
 # --- console ---------------------------------------------------------------- #
 # The web console. Its toolchain is npm and lives entirely under `console/`;
 # nothing here touches the Python environment.
-
-# Install the console's dependencies (once, and after a dependency change).
-console-install:
-    npm --prefix console ci
+#
+# Only the recipes that DO something npm cannot are here. Installing is
+# `npm --prefix console ci` and checking is `npm --prefix console run ci`;
+# wrapping either in a recipe saves no typing and gives the same command a
+# second name to drift from.
 
 # Build the console into console/dist, which `serve` looks for.
 console-build:
@@ -220,8 +221,6 @@ console-build:
 console: console-build
     uv run poker-solver-run serve
 
-# Dev: Vite on :5173 with hot reload, proxying /api to a real server on :8765.
-#
 # The server is SUPERVISED, not merely backgrounded. `serve &` plus a trap threw
 # away its exit status and interleaved its stderr into vite's, so a dead server
 # was observable only as a vite `ECONNREFUSED` on /api -- with no way to tell an
@@ -229,6 +228,12 @@ console: console-build
 # from a traceback from an `[Errno 48] Address already in use` two seconds after
 # startup. Same lesson `src/shared/node/runner.py` learned on the cloud side: a
 # death the log cannot record needs its own account.
+#
+# (The blank line below is load-bearing: `just --list` takes the LAST contiguous
+# comment block as a recipe's summary, so without it the list reads "death the
+# log cannot record needs its own account".)
+
+# Dev: Vite on :5173 with hot reload, proxying /api to a real server on :8765.
 console-dev:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -270,7 +275,3 @@ console-dev:
     supervisor=$!
     trap 'kill "$supervisor" 2>/dev/null || true' EXIT
     npm --prefix console run dev
-
-# The console's own gate: biome, tsc, vitest.
-console-check:
-    cd console && npm run ci
