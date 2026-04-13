@@ -5,7 +5,7 @@ nodes appear while work is queued and disappear when it drains. There is nothing
 to start, nothing to remember to stop, and no idle compute bill.
 
 **Terraform owns what exists** (Batch account, pool, guardrails) — `infra/*.tf`.
-**`just` owns what happens** (submissions) — `justfile` at the repo root. Jobs and
+**`poker-solver-run` owns what happens** (submissions) — `src/interfaces/cloud/`. Jobs and
 tasks are deliberately *not* in Terraform: `azurerm_batch_job` exposes no useful
 properties and tasks have no resource at all. A submission is a runtime act.
 
@@ -60,15 +60,15 @@ Needs `terraform`, `az` and `just` locally, plus `az login` for the credential.
 az login
 just store-create   # the durable share — once, ever
 just create         # Batch account, pool, guardrails
-just push-data      # card abstractions to the share (~773 MB, one time)
+just cli push-data  # card abstractions to the share (~773 MB, one time)
 ```
 
 ## Daily use
 
 Dispatch is `poker-solver-run`, a Python CLI over the Batch SDK
-(`src/interfaces/cloud/`). The `just` recipes below are one-line aliases kept
-for discoverability; anything needing a flag they do not forward should be run
-against the CLI directly.
+(`src/interfaces/cloud/`). It is THE surface: `just` keeps only Terraform,
+`panic`, `credit-check` and the three recipes that reshape positionals into
+flags. Prefix with `uv run`, or go through `just cli <cmd> [flags...]`.
 
 ```bash
 poker-solver-run submit --config quick_test --to 3000                  # smoke
@@ -84,8 +84,9 @@ poker-solver-run logs --task <task>   # the published leg log; --list to enumera
 poker-solver-run logs --task <task> --source node --job <job>   # live, node-side
 poker-solver-run cancel --job <job> --task <task>
 poker-solver-run score --run <id> --at 10000000,20000000 -- --br-flops 8
-poker-solver-run fetch                # JSON record back + `ledger --rebuild`
-poker-solver-run fetch --run <id> --full   # ...including checkpoint data
+
+poker-solver-run ledger               # every evaluation, derived from the share
+poker-solver-run runs                 # every published run, newest first
 
 poker-solver-run report --experiment exp-7
 poker-solver-run curve --run <id>
@@ -97,11 +98,13 @@ Two things worth knowing at the seams:
 - **`score` passthrough needs a `--` separator.** `-- --br-flops 8`, not
   `--br-flops 8`: argparse rejects a bare unknown option as an argument of
   `score` itself rather than handing it to the passthrough.
-- **`fetch` is metadata-only by default.** Analysis commands read nothing but
-  small JSON, and the checkpoints beside them are ~540 MB each. `--full` obeys
-  `CHECKPOINT.json`: a snapshot directory the manifest does not name is
-  unfinished by construction and is skipped, which is what stops a killed
-  task's orphans from being pulled down and then cached forever.
+- **Readers pull metadata only, and there is no local copy.** `ledger`, `curve`,
+  `report` and friends materialise `*.json`/`*.jsonl` from the share into a temp
+  tree and discard it — never `*.zarr`, never the `keys-*` tables of the deleted
+  dynamic backend. There is no `--source` and no `--runs-dir`: nothing on a
+  laptop is a source of truth about a run, so a local copy could only be a stale
+  second answer. (`fetch` and `ledger --rebuild` were how this used to work.
+  Both are gone: every read is a rebuild.)
 
 `to` is an **absolute** iteration target. That is what makes Batch's automatic
 retry safe: a retried task re-reads a newer checkpoint and converges on the same
@@ -120,7 +123,7 @@ published rung.
 
 ## How you find out *why* a leg died
 
-`just legs`.
+`poker-solver-run legs`.
 
 A run's `.run.json` records what a *living* process did. It structurally cannot
 record how an attempt died: a container killed by the OOM killer, by
@@ -135,9 +138,9 @@ So the record is written from both sides, into `<share>/legs/`:
   (`RUN_TIMEOUT`, exit 124) from an *OOM* (exit 137) from a *cancel* (SIGTERM,
   143). Batch reports all three as `failure`. The signal handler *raises*, which
   is what the bash version could not do: its EXIT trap read `$?` as zero when the
-  shell was killed while blocked on a child, so `just cancel` recorded clean
+  shell was killed while blocked on a child, so `cancel` recorded clean
   completions that were never reconciled.
-- **Batch's account.** `just legs` asks about legs still stuck at `started` —
+- **Batch's account.** `poker-solver-run legs` asks about legs still stuck at `started` —
   precisely the ones whose exit record never landed — and writes
   `<task>.observed.json`.
 
@@ -156,8 +159,9 @@ importing the whole package on a real 3.10 (`uv run --python 3.10
 `datetime.UTC`: it passed every test and silently disabled leg records on the
 only machine that runs them.
 
-`just legs --skip-reconcile` reads the share without querying Batch, and
-`just logs --task <task>` prints a published log. There is no severity flag —
+`poker-solver-run legs --skip-reconcile` reads the share without querying Batch,
+and `poker-solver-run logs --task <task>` prints a published log. There is no
+severity flag —
 the format is greppable on purpose, so `| grep -E ' (WARN|ERROR|CRIT) '`
 narrows it to the failures.
 
@@ -216,7 +220,7 @@ work. Read them that way — most of them do not stop anything by themselves.
    coverage before acting, so a freshly-created pool with no CPU history cannot
    scale itself down before it starts.
 
-   **Verify it before trusting it:** `just autoscale-check` evaluates the live
+   **Verify it before trusting it:** `poker-solver-run autoscale-check` evaluates the live
    formula server-side and prints `cpuAvg` and `stalled`. The clause assumes
    `$CPUPercent` is a 0-1 fraction; if it is not, the threshold never fires and
    the backstop is silently absent.

@@ -28,14 +28,25 @@ INVOCATION = re.compile(r"uv run poker-solver-run\s+([a-z][a-z-]*)")
 
 NAMES = sorted(command.name for command in COMMANDS)
 
+"""Why an exact set and not a floor.
+
+A recipe earns a place only by doing something the bare command does not:
+`submit`, `score` and `repair-ladder` reshape positionals into flags, and
+`serve` is invoked by the `console` recipes as the second half of build-then-
+serve. Nine pure passthroughs were removed because they retyped a command
+unchanged. A `>= n` floor caught a broken regex but not a passthrough creeping
+back -- the failure that actually happens -- so the guard names all four.
+"""
+INVOKED_SUBCOMMANDS = ["repair-ladder", "score", "serve", "submit"]
+
 
 def _invoked() -> list[str]:
     return sorted(set(INVOCATION.findall(JUSTFILE.read_text())))
 
 
-def test_the_parser_finds_the_aliases():
-    """A regex that silently matched nothing would pass every test below."""
-    assert len(_invoked()) >= 5, "found almost no aliases -- the parser is broken"
+def test_the_justfile_invokes_exactly_the_subcommands_it_should():
+    """Catches a silently-broken regex AND a passthrough added back."""
+    assert _invoked() == INVOKED_SUBCOMMANDS
 
 
 @pytest.mark.parametrize("name", _invoked())

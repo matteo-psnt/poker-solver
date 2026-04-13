@@ -7,7 +7,7 @@ What a Batch task actually runs. The shape is::
 
 Four things replaced a shell construct that had already failed in production,
 each argued where it happens: the signal handler RAISES (bash's EXIT trap read
-``$?`` as zero on a signal death, so ``just cancel`` logged clean completions);
+``$?`` as zero on a signal death, so ``cancel`` logged clean completions);
 124 and 137 are different deaths; the tee reads chunks because tqdm emits no
 newlines; and the watcher is joined before the final publish.
 """

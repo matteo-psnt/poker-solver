@@ -53,17 +53,18 @@ entrypoint:
 uv run poker-solver-run submit --config production --to 25000000   # queue a leg
 uv run poker-solver-run jobs                                       # what is running
 uv run poker-solver-run score --run <id> --at 10000000,20000000    # one task per rung
-uv run poker-solver-run fetch                                      # bring the JSON record back
+uv run poker-solver-run ledger                                     # every evaluation, from the share
 uv run poker-solver-run compare --a <run> --b <run>                # paired comparison with p-value
 ```
 
 ### Training Your First Solver
 
-1. `just create` once, then `just push-data` to publish the card abstractions.
+1. `just create` once, then `just cli push-data` to publish the card abstractions.
 2. `uv run poker-solver-run submit --config quick_test --to 3000`
 3. Watch with `poker-solver-run jobs`; read the leg with
    `poker-solver-run logs --task <id>`.
-4. `poker-solver-run fetch` brings the record back and rebuilds the ledger.
+4. `poker-solver-run ledger` shows the evaluations. It reads the share and
+   derives the index on every call — there is nothing to fetch and no local copy.
 
 The iteration target is **absolute**: re-submitting the same run with the same
 number is a no-op, which is what makes a retry converge instead of training

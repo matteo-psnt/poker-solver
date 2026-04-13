@@ -9,7 +9,7 @@ Under ``<share>/legs/``, per task and per attempt::
 
     <task>.<attempt>.start.json   run_leg.py, at entry
     <task>.<attempt>.exit.json    run_leg.py, from its exit accounting
-    <task>.observed.json          just legs, from Batch's executionInfo
+    <task>.observed.json          poker-solver-run legs, from Batch's executionInfo
 
 One writer per file, because the share is SMB: no atomic rename, no atomic
 append, so a read-modify-write from two sides would interleave. Start and exit
@@ -69,7 +69,7 @@ _OBSERVED_CAUSE_BY_RESULT: dict[str, str] = {
 #   timeout    the RUN_TIMEOUT guard expired (124) -- a hang, not a crash
 #   killed     SIGKILL from outside (137) -- the OOM killer. `timeout` returns
 #              124 even when its own --kill-after fires, so 137 is never it
-#   cancelled  the wrapper took SIGTERM -- `just cancel`, or maxWallClockTime
+#   cancelled  the wrapper took SIGTERM -- `cancel`, or maxWallClockTime
 #   partial    an evaluate leg scored some rungs and failed others; it exits 0
 #              for Batch's retry economics, which is not a claim of success
 CAUSE_COMPLETED = "completed"
