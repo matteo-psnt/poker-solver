@@ -157,7 +157,9 @@ importing the whole package on a real 3.10 (`uv run --python 3.10
 only machine that runs them.
 
 `just legs --skip-reconcile` reads the share without querying Batch, and
-`just leg-log <task> errors` filters a published log to WARN/ERROR.
+`just logs --task <task>` prints a published log. There is no severity flag —
+the format is greppable on purpose, so `| grep -E ' (WARN|ERROR|CRIT) '`
+narrows it to the failures.
 
 ## What must never go on the share
 

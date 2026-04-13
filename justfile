@@ -183,8 +183,12 @@ legs *flags:
     uv run poker-solver-run legs {{flags}}
 
 # A leg's log, from the share by default (survives node teardown).
+#
+# Named `logs`, like the subcommand. It was `leg-log`, which made the task
+# runner and the CLI disagree about what one command is called -- a passthrough
+# that renames is worse than no passthrough at all.
 [doc("Read a leg's log. Args: [flags...] e.g. --task <id> or --list")]
-leg-log *flags:
+logs *flags:
     uv run poker-solver-run logs {{flags}}
 
 # Upload card abstractions to the share (~773 MB, one time).

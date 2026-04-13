@@ -36,11 +36,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Checkpoint iteration to select for --b (see --a-at).",
     )
     parser.add_argument(
-        "--ledger",
-        default=str(eval_ledger.DEFAULT_LEDGER_PATH),
-        help="Eval ledger path to read.",
-    )
-    parser.add_argument(
         "--force",
         action="store_true",
         help="Compare even if seeds/knob tiers differ (p-value will not be trustworthy).",

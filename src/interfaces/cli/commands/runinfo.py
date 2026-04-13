@@ -14,13 +14,11 @@ from src.interfaces.cli.commands._base import (
     resolve_run_dir,
 )
 from src.pipeline import services
-from src.pipeline.evaluation import ledger as eval_ledger
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run runinfo`."""
     parser.add_argument("--run", required=True, help="Run id (dir name) or path.")
-    parser.add_argument("--ledger", default=str(eval_ledger.DEFAULT_LEDGER_PATH))
     parser.add_argument(
         "--tier", type=int, default=0, help="Which comparison tier's curve to show."
     )
@@ -28,8 +26,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--legs-dir",
         default=None,
         help=(
-            "Directory CONTAINING a local legs/ -- `--legs-dir data`, not "
-            "`data/legs` (see `just fetch`). Omit for a purely local run."
+            "Directory CONTAINING a legs/ -- `--legs-dir data`, not `data/legs`. "
+            "Omit to read the legs published to the share, which is the normal case."
         ),
     )
     parser.add_argument("--last", type=int, default=8, help="Checkpoints to show (0 = all).")
