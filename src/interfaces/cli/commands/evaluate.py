@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 from typing import Any
 
 from src.interfaces.cli.commands._base import (
@@ -11,7 +10,6 @@ from src.interfaces.cli.commands._base import (
     resolve_run_dir,
 )
 from src.pipeline import services
-from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.evaluation.public_tree_br import PublicBRConfig
 from src.shared.config import DEFAULT_RUNS_DIR
@@ -28,11 +26,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
     parser.add_argument(
         "--runs-dir", default=DEFAULT_RUNS_DIR, help="Base runs dir for id resolution."
-    )
-    parser.add_argument(
-        "--ledger",
-        default=str(eval_ledger.DEFAULT_LEDGER_PATH),
-        help="Append-only eval ledger path (records provenance + knobs + result).",
     )
     parser.add_argument(
         "--at",
@@ -157,7 +150,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         resolver_iterations=args.resolver_iterations,
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
-        ledger_path=Path(args.ledger),
     )
 
 
