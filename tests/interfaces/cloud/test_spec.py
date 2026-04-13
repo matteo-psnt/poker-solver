@@ -40,6 +40,21 @@ class TestTaskIds:
     def test_empty_label_still_yields_a_usable_id(self):
         assert spec.task_id("", NOW, 3).startswith("leg-")
 
+    def test_an_over_long_label_is_trimmed_not_rejected(self):
+        """Batch caps an id at 64 characters and refuses a longer one.
+
+        The nonce suffix is what keeps two submissions in one second apart, so
+        it has to survive the trim -- otherwise the fix for unreadable ids
+        would reintroduce collisions.
+        """
+        got = spec.task_id("x" * 200, NOW, 7)
+        assert len(got) == spec.TASK_ID_LIMIT
+        assert got.endswith("-213805-7")
+
+    def test_trimming_never_leaves_a_dangling_separator(self):
+        label = "a" * (spec.TASK_ID_LIMIT - len("-213805-7") - 1) + "-tail"
+        assert "--" not in spec.task_id(label, NOW, 7)
+
 
 class TestLegCommand:
     def test_node_side_variables_are_not_expanded_locally(self):
@@ -116,11 +131,48 @@ class TestEnvironment:
 
 
 class TestLabel:
-    def test_continuing_a_run_labels_by_run_id(self):
-        assert spec.LegSpec(code_snapshot="s", config="production", run_id="run-a").label == "run-a"
+    """A label says what the leg DOES. See ``LegSpec.label`` for why."""
+
+    def test_continuing_a_run_labels_by_run_and_target(self):
+        leg = spec.LegSpec(code_snapshot="s", config="production", run_id="run-a", to=200_000_000)
+        assert leg.label == "train-a-to200M"
 
     def test_a_fresh_run_labels_by_config(self):
-        assert spec.LegSpec(code_snapshot="s", config="production").label == "production"
+        assert spec.LegSpec(code_snapshot="s", config="production").label == "train-production"
+
+    def test_evaluations_differing_only_by_board_seed_get_different_labels(self):
+        """The case that motivated this: three seeds on ONE checkpoint.
+
+        Before, all three were `run-production-025433-1095` and the ids differed
+        only in a timestamp and a nonce, so the seed lived nowhere but the
+        submitter's memory.
+        """
+
+        def score(seed: str) -> str:
+            return spec.LegSpec(
+                code_snapshot="s",
+                op=spec.EVALUATE,
+                run_id="run-production-025433-1095",
+                eval_at="150000000",
+                eval_flags=("--br-flops", "4", "--br-board-seed", seed),
+            ).label
+
+        assert score("7") == "score-production-1095-150M-seed7"
+        assert len({score("7"), score("13"), score("29")}) == 3
+
+    def test_an_arm_is_kept_because_it_is_what_distinguishes_two_arms(self):
+        leg = spec.LegSpec(
+            code_snapshot="s", config="ochs_gate", to=1_000_000, experiment="ochs", arm="river"
+        )
+        assert leg.label == "train-ochs_gate-to1M-river"
+
+
+class TestRunToken:
+    def test_the_unread_timestamp_in_the_middle_is_dropped(self):
+        assert spec.run_token("run-production-025433-1095") == "production-1095"
+
+    def test_a_two_segment_id_is_left_alone(self):
+        assert spec.run_token("run-20260802_201939-ee77cb") == "20260802_201939-ee77cb"
 
 
 class TestValidate:

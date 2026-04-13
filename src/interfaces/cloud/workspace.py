@@ -31,6 +31,7 @@ from azure.storage.fileshare import ShareServiceClient
 from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.errors import CommandError
+from src.shared import run_names
 
 BASELINE_NAME = "baseline.json"
 
@@ -67,11 +68,18 @@ def pull_metadata(
         if entry.is_directory
     ]
     if run is not None:
-        if run not in published:
+        # Resolved HERE, against the share's own listing, because this decides
+        # what gets downloaded -- a fragment rejected at this point never
+        # reaches `resolve_run_dir`, and the reader would refuse a run that
+        # exists. Same rule on both sides: `src.shared.run_names`.
+        matches = run_names.matching(run, published)
+        if len(matches) > 1:
+            raise CommandError(run_names.ambiguous_message(run, matches))
+        if not matches:
             raise CommandError(
                 f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
             )
-        published = [run]
+        published = matches
 
     # The WALK, not only the downloads. Each run is an independent traversal of
     # directory listings, and a listing is a round trip like any other: 18 runs

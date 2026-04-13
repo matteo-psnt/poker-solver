@@ -3,7 +3,7 @@ import { Panel } from "@/components/Panel";
 import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { since } from "@/lib/format";
+import { legLabel, runLabel, since } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Link, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
@@ -84,9 +84,10 @@ export function Legs() {
                     <Link
                       to="/legs/$taskId"
                       params={{ taskId: row.task_id }}
+                      title={row.task_id}
                       className="hover:underline"
                     >
-                      {row.task_id}
+                      {legLabel(row.task_id)}
                     </Link>
                   </Td>
                   <Td right className="text-[var(--fg-faint)]">
@@ -100,9 +101,10 @@ export function Legs() {
                       <Link
                         to="/runs/$runId"
                         params={{ runId: row.run_id }}
+                        title={row.run_id}
                         className="hover:underline"
                       >
-                        {row.run_id}
+                        {runLabel(row.run_id)}
                       </Link>
                     ) : (
                       "—"

@@ -27,6 +27,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from src.shared.describe import compact_count, flag_value
+
 TRAIN = "train"
 EVALUATE = "evaluate"
 REPAIR_LADDER = "repair-ladder"
@@ -34,6 +36,14 @@ PRECOMPUTE = "precompute"
 
 DEFAULT_TIMEOUT = "6h"
 DEFAULT_CHECKPOINT_EVERY = 1_000_000
+
+"""Task ids
+--------
+``TASK_ID_LIMIT`` is Batch's, not ours. ``_OP_WORDS`` shortens the op for the
+one place length is scarce; the op itself stays the long form everywhere else.
+"""
+TASK_ID_LIMIT = 64
+_OP_WORDS = {TRAIN: "train", EVALUATE: "score", REPAIR_LADDER: "repair", PRECOMPUTE: "precompute"}
 
 _UNSAFE_TASK_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
@@ -71,9 +81,30 @@ def task_id(label: str, now: datetime, nonce: int) -> str:
     config name can carry neither. ``nonce`` keeps two submissions inside the
     same second apart; it is a parameter rather than a call to ``random`` so
     the id is a pure function and a test can pin it.
+
+    Batch also REJECTS an id over 64 characters, and a rejection costs a
+    snapshot upload before it is discovered. The label is what gives: the
+    suffix is what keeps two submissions in one second apart, so it cannot be
+    the part that gets trimmed.
     """
     safe = _UNSAFE_TASK_CHARS.sub("-", label) or "leg"
-    return f"{safe}-{now:%H%M%S}-{nonce}"
+    suffix = f"-{now:%H%M%S}-{nonce}"
+    head = safe[: TASK_ID_LIMIT - len(suffix)].rstrip("-") or "leg"
+    return f"{head}{suffix}"
+
+
+def run_token(run_id: str) -> str:
+    """A short but still recognisable form of a run id, for use inside a task id.
+
+    Run ids are themselves built from task ids (``plan.train_run_id``), so
+    pasting one in whole would grow every id by the length of the last one.
+    The first and last segments carry the config and the discriminator --
+    ``run-production-025433-1095`` -> ``production-1095``. The timestamp in the
+    middle is the part nobody reads and the part that makes ids look alike.
+    """
+    stem = run_id.removeprefix("run-")
+    parts = [part for part in stem.split("-") if part]
+    return f"{parts[0]}-{parts[-1]}" if len(parts) > 2 else stem
 
 
 def leg_command(snapshot: str) -> str:
@@ -128,8 +159,34 @@ class LegSpec:
 
     @property
     def label(self) -> str:
-        """What the task id is built from: the run being continued, else the config."""
-        return self.run_id or self.config
+        """What the task id is built from: what this leg DOES, not when it ran.
+
+        Every discriminating field is already on this spec, and returning the
+        bare run id threw all of them away. Three evaluations of ONE checkpoint
+        at three board seeds became three ids differing only in a timestamp and
+        a nonce, so nothing downstream -- the console, `legs`, the log viewer --
+        could say which was which; the mapping lived only in the head of
+        whoever submitted them.
+
+        Uniqueness is ``task_id``'s nonce to guarantee. This only has to be
+        readable, which is why it carries the knob that usually differs rather
+        than every knob that could.
+        """
+        words = [
+            _OP_WORDS.get(self.op, self.op),
+            run_token(self.run_id) if self.run_id else self.config,
+        ]
+        if self.op == TRAIN and self.to:
+            words.append(f"to{compact_count(self.to)}")
+        if self.op == EVALUATE:
+            if self.eval_at.isdigit():
+                words.append(compact_count(int(self.eval_at)))
+            seed = flag_value(self.eval_flags, "--br-board-seed")
+            if seed:
+                words.append(f"seed{seed}")
+        if self.arm:
+            words.append(self.arm)
+        return "-".join(word for word in words if word)
 
     def environment(self) -> dict[str, str]:
         """The full RUN_* environment the node wrapper reads.
