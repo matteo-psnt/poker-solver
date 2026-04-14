@@ -262,11 +262,9 @@ Unset fields fall back to defaults in `src/shared/config.py`.
 
 ## CLI Integration
 
-**Interactive** (`uv run poker-solver`, flows in
-`src/interfaces/cli/flows/training.py`): train, resume, evaluate, and view
-runs; flows delegate to `src/pipeline/services.py`.
-
-**Headless** (`poker-solver-run`, `src/interfaces/cli/headless.py`):
+**`poker-solver-run`** (`src/interfaces/cli/headless.py`) is the only CLI; the
+interactive menu that used to sit beside it is deleted. Commands delegate to
+`src/pipeline/services.py`.
 
 ```bash
 poker-solver-run train --config production

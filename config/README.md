@@ -129,8 +129,8 @@ seed: 42
 Workflow:
 
 1. Add a YAML under `config/abstraction/`.
-2. Precompute: `uv run poker-solver` → "Combo Abstraction Tools" →
-   "Precompute Abstraction".
+2. Precompute on the pool:
+   `uv run poker-solver-run submit-precompute --config <name>`.
 3. Reference it from a training config: `card_abstraction.config: "<name>"`.
 
 The abstraction identity hash (`get_config_hash`) covers `buckets`,

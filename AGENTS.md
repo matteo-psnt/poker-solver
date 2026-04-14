@@ -36,14 +36,22 @@ definition: never a source of truth, never worth backing up.
 
 ## Commands
 - `uv sync --group dev` — install dependencies.
-- `uv run poker-solver` — interactive CLI. **It is a cloud client**: its
-  Train/Score/Precompute items build the same `LegSpec` the headless commands
-  build and submit it to the pool. There is no local-compute door in the menu,
-  and nothing in it reads a card abstraction — submitting used to call
-  `build_card_abstraction` first, which loads ~773 MB and answered the question
-  about the wrong machine (the node mounts the share; the laptop's copy is
-  irrelevant). It also has no config *editor*: a leg carries a config name plus
-  `LegSpec.sets`, so overrides go through `--set k=v` and nothing else.
+- **There are TWO surfaces, split by who is asking.** `poker-solver-run` is the
+  scriptable one — what a cloud job, a shell, and an AI agent drive. The web
+  console is the one a human reads. The console does not reimplement anything:
+  every endpoint is a single `Command.invoke`, so the two cannot drift. The
+  console is expected to GROW toward what the commands can do; the commands stay
+  the complete surface, and anything the console gains it gains by calling one.
+- **There is no interactive CLI.** `uv run poker-solver` — a questionary menu —
+  was deleted (`src/interfaces/cli/{app,flows,ui}`, plus the `questionary`
+  dependency). It had been hollowed out over time until every item was a wizard
+  around flags `poker-solver-run` already accepted, and four abstraction-browsing
+  items too specific to keep. Its one non-obvious rule survives and still binds
+  anything that submits: **nothing on the laptop reads a card abstraction.**
+  Submitting used to call `build_card_abstraction` first, loading ~773 MB to
+  answer a question about the wrong machine — the node mounts the share, and the
+  laptop's copy is irrelevant. Config overrides likewise go through `--set k=v`
+  and nothing else: a leg carries a config name plus `LegSpec.sets`.
 - `uv run poker-solver-run` — the single entrypoint, in three groups:
   - **see and dispatch** — `status`, `submit`, `score`, `submit-precompute`,
     `jobs`, `logs`, `legs`, `cancel`, `pool-status`, `autoscale-check`,

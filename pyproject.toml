@@ -15,7 +15,6 @@ dependencies = [
     "scikit-learn==1.7.2",
     "numba>=0.63.1",
     "xxhash>=3.6.0",
-    "questionary>=2.1.1",
     "zarr<3",
     "numcodecs<0.16",
     "eval7>=0.1.10",
@@ -28,7 +27,6 @@ dependencies = [
 ]
 
 [project.scripts]
-poker-solver = "src.interfaces.cli.app:main"
 poker-solver-run = "src.interfaces.cli.headless:main"
 
 [build-system]
