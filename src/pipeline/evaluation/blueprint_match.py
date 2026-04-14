@@ -31,7 +31,7 @@ from src.pipeline.evaluation.resolver_match import (
     deal_for,
 )
 from src.pipeline.evaluation.statistics import summarize_samples
-from src.shared.units import pair_mean_mbb
+from src.pipeline.evaluation.units import pair_mean_mbb
 
 
 @dataclass(frozen=True)

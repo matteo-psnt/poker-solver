@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any
 
-from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
+from src.pipeline.evaluation.lbr.hunl_local_best_response import LBRConfig
 
 logger = logging.getLogger(__name__)
 

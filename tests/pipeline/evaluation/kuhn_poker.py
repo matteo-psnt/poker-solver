@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from src.pipeline.evaluation.game_tree import CHANCE
+from src.pipeline.evaluation.reference.game_tree import CHANCE
 
 # State is (cards, history):
 #   cards: tuple[int, int] | None  -- None before the deal (chance root)

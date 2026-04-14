@@ -1,6 +1,6 @@
 """Tests for chip -> bb/mbb conversions."""
 
-from src.shared.units import chips_to_bb, chips_to_mbb, pair_mean_mbb
+from src.pipeline.evaluation.units import chips_to_bb, chips_to_mbb, pair_mean_mbb
 
 
 def test_chips_to_bb():

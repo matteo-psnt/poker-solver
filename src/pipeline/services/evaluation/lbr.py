@@ -6,13 +6,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from src.pipeline.evaluation.hunl_local_best_response import (
+from src.pipeline.evaluation.lbr.hunl_local_best_response import (
     LBRConfig,
     LBRResult,
     compute_lbr_exploitability,
     dominant_terminal,
 )
 from src.pipeline.evaluation.statistics import variance_decomposition
+from src.pipeline.evaluation.units import pair_mean_mbb
 from src.pipeline.services.evaluation._shared import (
     EvaluationOutput,
     _effective_abstraction_hash,
@@ -20,7 +21,6 @@ from src.pipeline.services.evaluation._shared import (
     build_blueprint_for,
 )
 from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
-from src.shared.units import pair_mean_mbb
 
 logger = logging.getLogger(__name__)
 

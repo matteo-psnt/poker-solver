@@ -21,14 +21,14 @@ from src.engine.search.range_inference import (
     replace_actor_hole_cards,
 )
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
-from src.pipeline.evaluation.hunl_local_best_response import (
+from src.pipeline.evaluation.lbr.hunl_local_best_response import (
     LBRConfig,
     _deal_initial_state,
     _HUNLLocalBestResponse,
     _play_hand_pair,
     compute_lbr_exploitability,
 )
-from src.pipeline.evaluation.opponent_model import ResolvedOpponent, known_mask
+from src.pipeline.evaluation.lbr.opponent_model import ResolvedOpponent, known_mask
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.shared.config import ResolverConfig
 from tests.test_helpers import build_trained_test_solver, skew_preflop_infoset

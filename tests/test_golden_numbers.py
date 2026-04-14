@@ -29,7 +29,7 @@ from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
-from src.pipeline.evaluation.hunl_local_best_response import (
+from src.pipeline.evaluation.lbr.hunl_local_best_response import (
     LBRConfig,
     compute_lbr_exploitability,
 )

@@ -2,8 +2,8 @@
 
 This is a small, full-tree Counterfactual Regret Minimization solver used to
 validate the evaluation harness end-to-end: on any small game implementing
-:class:`~src.pipeline.evaluation.game_tree.ExtensiveGame`, running enough
-iterations should drive :func:`~src.pipeline.evaluation.best_response.exploitability`
+:class:`~src.pipeline.evaluation.reference.game_tree.ExtensiveGame`, running enough
+iterations should drive :func:`~src.pipeline.evaluation.reference.best_response.exploitability`
 toward zero and the on-policy value toward the game's known value.
 
 It is deliberately simple (no sampling, no CFR variants) and is not intended for
@@ -16,7 +16,7 @@ from collections.abc import Hashable
 
 import numpy as np
 
-from src.pipeline.evaluation.game_tree import (
+from src.pipeline.evaluation.reference.game_tree import (
     CHANCE,
     Action,
     ExtensiveGame,

@@ -4,7 +4,7 @@ The regret math, the update placement, the averaging scheme and the sampling
 scheme in ``src/engine/solver/mccfr`` are game-agnostic; only the state machine,
 the infoset encoding and the board-dealing above them are HUNL's. This module
 supplies the HUNL-shaped pieces from an
-:class:`~src.pipeline.evaluation.game_tree.ExtensiveGame` instead, so the *real*
+:class:`~src.pipeline.evaluation.reference.game_tree.ExtensiveGame` instead, so the *real*
 ``MCCFRSolver`` -- not a reimplementation of it -- can be trained on Kuhn or
 Leduc and scored against a known equilibrium.
 
@@ -36,7 +36,7 @@ from src.core.game.state import GameState, Street
 from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.base import Storage
-from src.pipeline.evaluation.game_tree import CHANCE, ExtensiveGame, InfoKey
+from src.pipeline.evaluation.reference.game_tree import CHANCE, ExtensiveGame, InfoKey
 from src.shared.config import Config
 
 # InfoSetKey demands a preflop hand string on PREFLOP; the adapted games carry

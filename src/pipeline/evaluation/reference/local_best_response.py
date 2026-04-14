@@ -26,8 +26,8 @@ References:
 
 from __future__ import annotations
 
-from src.pipeline.evaluation.best_response import on_policy_value
-from src.pipeline.evaluation.game_tree import (
+from src.pipeline.evaluation.reference.best_response import on_policy_value
+from src.pipeline.evaluation.reference.game_tree import (
     CHANCE,
     ActionT,
     ExtensiveGame,
@@ -50,7 +50,7 @@ def local_best_response_value(
     the expected value under the ``continuation`` policy; it then re-decides at
     the next information set. The returned value is the realized value of that
     strategy against ``policy``, which is a lower bound on
-    :func:`~src.pipeline.evaluation.best_response.best_response_value`.
+    :func:`~src.pipeline.evaluation.reference.best_response.best_response_value`.
     """
     cont = continuation if continuation is not None else policy
 
@@ -153,7 +153,7 @@ def local_exploitability(
     """Return the LBR-based exploitability lower bound (NashConv per player).
 
     Non-negative, and never exceeds the exact
-    :func:`~src.pipeline.evaluation.best_response.exploitability`.
+    :func:`~src.pipeline.evaluation.reference.best_response.exploitability`.
     """
     nash_conv = 0.0
     for player in range(game.num_players):

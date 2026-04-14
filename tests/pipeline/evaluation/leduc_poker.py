@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from src.pipeline.evaluation.game_tree import CHANCE
+from src.pipeline.evaluation.reference.game_tree import CHANCE
 
 MAX_RAISES = 2
 _BET_SIZE = {0: 2, 1: 4}

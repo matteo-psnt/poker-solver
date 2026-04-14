@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from src.shared import node_time
+from src.interfaces.cloud import node_time
 
 NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
 

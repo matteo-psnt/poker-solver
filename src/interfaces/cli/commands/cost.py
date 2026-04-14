@@ -16,7 +16,7 @@ from typing import Any
 
 from src.interfaces.cli.commands import legs as legs_command
 from src.interfaces.cli.commands._base import Command
-from src.shared import node_time
+from src.interfaces.cloud import node_time
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
