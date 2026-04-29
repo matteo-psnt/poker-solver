@@ -1,4 +1,4 @@
-"""Per-leg outcome records: the node's account, Batch's, and their join."""
+"""Per-task outcome records: the node's account, Batch's, and their join."""
 
 from __future__ import annotations
 
@@ -8,25 +8,25 @@ import sys
 
 import pytest
 
-from src.shared import leg_log
+from src.shared import task_log
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def _node(share, task_id, event, cause=None, **kw):
-    return leg_log.write_node_record(share, task_id=task_id, event=event, cause=cause, **kw)
+    return task_log.write_node_record(share, task_id=task_id, event=event, cause=cause, **kw)
 
 
 class TestNodeRecord:
     def test_started_record_is_not_terminal(self, tmp_path):
         _node(tmp_path, "task-a", "started")
-        assert leg_log.read_legs(tmp_path)[0]["cause"] == "unresolved"
+        assert task_log.read_tasks(tmp_path)[0]["cause"] == "unresolved"
 
     def test_terminal_record_supersedes_started(self, tmp_path):
         _node(tmp_path, "task-a", "started")
         _node(tmp_path, "task-a", "finished", cause="completed", exit_code=0)
 
-        rows = leg_log.read_legs(tmp_path)
+        rows = task_log.read_tasks(tmp_path)
         assert len(rows) == 1, "start + exit are one attempt, not two rows"
         assert rows[0]["cause"] == "completed"
         assert rows[0]["exit_code"] == 0
@@ -38,7 +38,7 @@ class TestNodeRecord:
         _node(
             tmp_path, "task-a", "started", run_id="run-xyz", op="train-static", config="production"
         )
-        row = leg_log.read_legs(tmp_path)[0]
+        row = task_log.read_tasks(tmp_path)[0]
         assert (row["run_id"], row["op"], row["config"]) == (
             "run-xyz",
             "train-static",
@@ -50,16 +50,16 @@ class TestNodeRecord:
         _node(tmp_path, "hung", "finished", cause="timeout", exit_code=124)
         _node(tmp_path, "crashed", "finished", cause="failed", exit_code=1)
 
-        causes = {r["task_id"]: r["cause"] for r in leg_log.read_legs(tmp_path)}
+        causes = {r["task_id"]: r["cause"] for r in task_log.read_tasks(tmp_path)}
         assert causes == {"hung": "timeout", "crashed": "failed"}
 
 
 class TestJoin:
-    """The case the module exists for: a leg killed before its trap could run."""
+    """The case the module exists for: a task killed before its trap could run."""
 
-    def test_observer_explains_a_leg_the_node_never_finished(self, tmp_path):
+    def test_observer_explains_a_task_the_node_never_finished(self, tmp_path):
         _node(tmp_path, "task-oom", "started", run_id="run-xyz")
-        leg_log.write_observed_record(
+        task_log.write_observed_record(
             tmp_path,
             task_id="task-oom",
             job_id="poker-20260801",
@@ -70,49 +70,49 @@ class TestJoin:
             end_time="2026-08-01T10:00:00Z",
         )
 
-        row = leg_log.read_legs(tmp_path)[0]
+        row = task_log.read_tasks(tmp_path)[0]
         assert row["cause"] == "failed"
         assert row["cause_source"] == "batch"
         assert row["run_id"] == "run-xyz", "the run identity comes from the node half"
         assert row["failure"]["code"] == "TaskEnded"
         assert row["exit_code"] == 137, (
             "the node's record carries a null exit_code, which must not shadow "
-            "the only code that exists for a leg killed before its trap ran"
+            "the only code that exists for a task killed before its trap ran"
         )
 
     def test_node_account_wins_when_it_reached_a_terminal_event(self, tmp_path):
-        """Batch calls a timed-out leg 'failure'; the node knows it was a hang."""
+        """Batch calls a timed-out task 'failure'; the node knows it was a hang."""
         _node(tmp_path, "task-hang", "finished", cause="timeout", exit_code=124)
-        leg_log.write_observed_record(
+        task_log.write_observed_record(
             tmp_path, task_id="task-hang", job_id="j", state="completed", result="failure"
         )
 
-        row = leg_log.read_legs(tmp_path)[0]
+        row = task_log.read_tasks(tmp_path)[0]
         assert row["cause"] == "timeout"
         assert row["cause_source"] == "node"
 
-    def test_observer_only_leg_still_appears(self, tmp_path):
+    def test_observer_only_task_still_appears(self, tmp_path):
         """A task killed before the node wrote anything must not vanish."""
-        leg_log.write_observed_record(
+        task_log.write_observed_record(
             tmp_path, task_id="task-ghost", job_id="j", state="completed", result="failure"
         )
-        assert leg_log.read_legs(tmp_path)[0]["task_id"] == "task-ghost"
+        assert task_log.read_tasks(tmp_path)[0]["task_id"] == "task-ghost"
 
     def test_running_task_is_not_called_dead(self, tmp_path):
-        leg_log.write_observed_record(tmp_path, task_id="t", job_id="j", state="running")
-        assert leg_log.read_legs(tmp_path)[0]["cause"] == "running"
+        task_log.write_observed_record(tmp_path, task_id="t", job_id="j", state="running")
+        assert task_log.read_tasks(tmp_path)[0]["cause"] == "running"
 
 
 class TestBatchRetry:
     """A retry reuses the task id; the failed attempt must survive it."""
 
     def test_a_retry_does_not_erase_the_failed_attempt(self, tmp_path):
-        _node(tmp_path, "leg-1", "started")
-        _node(tmp_path, "leg-1", "finished", cause="killed", exit_code=137)
-        _node(tmp_path, "leg-1", "started")  # Batch retries with the SAME id
-        _node(tmp_path, "leg-1", "finished", cause="completed", exit_code=0)
+        _node(tmp_path, "task-1", "started")
+        _node(tmp_path, "task-1", "finished", cause="killed", exit_code=137)
+        _node(tmp_path, "task-1", "started")  # Batch retries with the SAME id
+        _node(tmp_path, "task-1", "finished", cause="completed", exit_code=0)
 
-        rows = sorted(leg_log.read_legs(tmp_path), key=lambda r: r["attempt"])
+        rows = sorted(task_log.read_tasks(tmp_path), key=lambda r: r["attempt"])
         assert [r["attempt"] for r in rows] == [1, 2]
         assert [r["cause"] for r in rows] == ["killed", "completed"], (
             "the OOM that caused the retry is the whole point of the record"
@@ -121,37 +121,37 @@ class TestBatchRetry:
     def test_the_observer_explains_only_the_latest_attempt(self, tmp_path):
         """Batch's executionInfo describes no earlier attempt, so it must not
         be attached to one -- that would explain the wrong death."""
-        _node(tmp_path, "leg-1", "started")
-        _node(tmp_path, "leg-1", "finished", cause="killed", exit_code=137)
-        _node(tmp_path, "leg-1", "started")
-        leg_log.write_observed_record(tmp_path, task_id="leg-1", job_id="j", state="running")
+        _node(tmp_path, "task-1", "started")
+        _node(tmp_path, "task-1", "finished", cause="killed", exit_code=137)
+        _node(tmp_path, "task-1", "started")
+        task_log.write_observed_record(tmp_path, task_id="task-1", job_id="j", state="running")
 
-        rows = {r["attempt"]: r for r in leg_log.read_legs(tmp_path)}
+        rows = {r["attempt"]: r for r in task_log.read_tasks(tmp_path)}
         assert rows[1]["cause"] == "killed"
         assert rows[2]["cause"] == "running"
 
     def test_unresolved_reports_each_task_once(self, tmp_path):
-        _node(tmp_path, "leg-1", "started")
-        _node(tmp_path, "leg-1", "finished", cause="failed", exit_code=1)
-        _node(tmp_path, "leg-1", "started")
+        _node(tmp_path, "task-1", "started")
+        _node(tmp_path, "task-1", "finished", cause="failed", exit_code=1)
+        _node(tmp_path, "task-1", "started")
 
-        assert leg_log.unresolved_task_ids(tmp_path) == ["leg-1"]
+        assert task_log.unresolved_task_ids(tmp_path) == ["task-1"]
 
 
 class TestTornTerminalWrite:
-    def test_a_torn_exit_record_leaves_the_leg_unresolved_not_absent(self, tmp_path):
+    def test_a_torn_exit_record_leaves_the_task_unresolved_not_absent(self, tmp_path):
         """write_text truncates, so the SIGKILL window can tear the exit file.
 
-        The leg must still appear -- and as unresolved, so reconciliation asks
+        The task must still appear -- and as unresolved, so reconciliation asks
         Batch. Vanishing would be worse than never having written anything.
         """
-        _node(tmp_path, "leg-torn", "started")
-        (leg_log.legs_dir(tmp_path) / "leg-torn.1.exit.json").write_text('{"task_id": "leg')
+        _node(tmp_path, "task-torn", "started")
+        (task_log.tasks_dir(tmp_path) / "task-torn.1.exit.json").write_text('{"task_id": "task')
 
-        rows = leg_log.read_legs(tmp_path)
-        assert [r["task_id"] for r in rows] == ["leg-torn"]
+        rows = task_log.read_tasks(tmp_path)
+        assert [r["task_id"] for r in rows] == ["task-torn"]
         assert rows[0]["cause"] == "unresolved"
-        assert leg_log.unresolved_task_ids(tmp_path) == ["leg-torn"]
+        assert task_log.unresolved_task_ids(tmp_path) == ["task-torn"]
 
 
 class TestCauseVocabulary:
@@ -160,40 +160,40 @@ class TestCauseVocabulary:
     @pytest.mark.parametrize(
         "cause",
         [
-            leg_log.CAUSE_COMPLETED,
-            leg_log.CAUSE_FAILED,
-            leg_log.CAUSE_TIMEOUT,
-            leg_log.CAUSE_KILLED,
-            leg_log.CAUSE_CANCELLED,
-            leg_log.CAUSE_PARTIAL,
+            task_log.CAUSE_COMPLETED,
+            task_log.CAUSE_FAILED,
+            task_log.CAUSE_TIMEOUT,
+            task_log.CAUSE_KILLED,
+            task_log.CAUSE_CANCELLED,
+            task_log.CAUSE_PARTIAL,
         ],
     )
     def test_every_node_cause_is_terminal(self, tmp_path, cause):
         _node(tmp_path, "t", "started")
         _node(tmp_path, "t", "finished", cause=cause)
-        assert leg_log.read_legs(tmp_path)[0]["cause"] == cause
-        assert leg_log.unresolved_task_ids(tmp_path) == []
+        assert task_log.read_tasks(tmp_path)[0]["cause"] == cause
+        assert task_log.unresolved_task_ids(tmp_path) == []
 
     def test_an_oom_is_not_recorded_as_a_hang(self, tmp_path):
         """137 is SIGKILL from outside; `timeout` returns 124 even after its
         own --kill-after fires, so 137 never means the guard."""
-        _node(tmp_path, "oom", "finished", cause=leg_log.CAUSE_KILLED, exit_code=137)
-        _node(tmp_path, "hang", "finished", cause=leg_log.CAUSE_TIMEOUT, exit_code=124)
+        _node(tmp_path, "oom", "finished", cause=task_log.CAUSE_KILLED, exit_code=137)
+        _node(tmp_path, "hang", "finished", cause=task_log.CAUSE_TIMEOUT, exit_code=124)
 
-        causes = {r["task_id"]: r["cause"] for r in leg_log.read_legs(tmp_path)}
+        causes = {r["task_id"]: r["cause"] for r in task_log.read_tasks(tmp_path)}
         assert causes == {"oom": "killed", "hang": "timeout"}
 
-    def test_a_cancelled_leg_is_not_a_clean_completion(self, tmp_path):
-        _node(tmp_path, "c", "finished", cause=leg_log.CAUSE_CANCELLED, exit_code=143)
-        assert leg_log.read_legs(tmp_path)[0]["cause"] == "cancelled"
+    def test_a_cancelled_task_is_not_a_clean_completion(self, tmp_path):
+        _node(tmp_path, "c", "finished", cause=task_log.CAUSE_CANCELLED, exit_code=143)
+        assert task_log.read_tasks(tmp_path)[0]["cause"] == "cancelled"
 
 
 class TestReconcile:
-    def test_only_unresolved_legs_are_written(self, tmp_path):
+    def test_only_unresolved_tasks_are_written(self, tmp_path):
         _node(tmp_path, "done", "finished", cause="completed", exit_code=0)
         _node(tmp_path, "vanished", "started")
 
-        explained = leg_log.reconcile(
+        explained = task_log.reconcile(
             tmp_path,
             [
                 {"task": "done", "state": "completed", "result": "success"},
@@ -202,41 +202,41 @@ class TestReconcile:
         )
 
         assert explained == ["vanished"]
-        assert not (leg_log.legs_dir(tmp_path) / "done.observed.json").exists(), (
-            "a leg that reported its own exit needs no external explanation"
+        assert not (task_log.tasks_dir(tmp_path) / "done.observed.json").exists(), (
+            "a task that reported its own exit needs no external explanation"
         )
 
     def test_unknown_tasks_are_ignored(self, tmp_path):
         _node(tmp_path, "mine", "started")
-        assert leg_log.reconcile(tmp_path, [{"task": "someone-elses", "state": "completed"}]) == []
+        assert task_log.reconcile(tmp_path, [{"task": "someone-elses", "state": "completed"}]) == []
 
-    def test_an_explained_leg_reads_back_as_an_outcome_not_a_state_string(self, tmp_path):
+    def test_an_explained_task_reads_back_as_an_outcome_not_a_state_string(self, tmp_path):
         """The whole join is worthless if the cause column says
         `batchtaskstate.completed`, so the shape reconcile consumes is pinned to
         the shape `batch.list_jobs_with_tasks` produces."""
         _node(tmp_path, "vanished", "started")
-        leg_log.reconcile(
+        task_log.reconcile(
             tmp_path,
             [{"task": "vanished", "job": "poker-1", "state": "completed", "result": "failure"}],
         )
-        row = next(r for r in leg_log.read_legs(tmp_path) if r["task_id"] == "vanished")
-        assert row["cause"] == leg_log.CAUSE_FAILED
+        row = next(r for r in task_log.read_tasks(tmp_path) if r["task_id"] == "vanished")
+        assert row["cause"] == task_log.CAUSE_FAILED
 
 
 class TestRobustness:
     def test_a_half_written_record_does_not_break_the_listing(self, tmp_path):
         """Truncated files are the expected residue of the kills this explains."""
         _node(tmp_path, "good", "finished", cause="completed", exit_code=0)
-        (leg_log.legs_dir(tmp_path) / "torn.1.exit.json").write_text('{"task_id": "torn"')
+        (task_log.tasks_dir(tmp_path) / "torn.1.exit.json").write_text('{"task_id": "torn"')
 
-        rows = leg_log.read_legs(tmp_path)
+        rows = task_log.read_tasks(tmp_path)
         assert [r["task_id"] for r in rows] == ["good"]
 
     def test_missing_directory_reads_as_empty(self, tmp_path):
-        assert leg_log.read_legs(tmp_path / "nothing-here") == []
+        assert task_log.read_tasks(tmp_path / "nothing-here") == []
 
-    def test_format_table_handles_no_legs(self, tmp_path):
-        assert "no leg records" in leg_log.format_table([])
+    def test_format_table_handles_no_tasks(self, tmp_path):
+        assert "no task records" in task_log.format_table([])
 
 
 class TestNodeSideConstraints:
@@ -249,7 +249,7 @@ class TestNodeSideConstraints:
         """Proves the node-side contract on a bare interpreter, not just in-suite."""
         script = (
             f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-            "from src.shared.leg_log import write_node_record;"
+            "from src.shared.task_log import write_node_record;"
             f"write_node_record({str(tmp_path)!r}, task_id='t', event='started');"
             "print('ok')"
         )
@@ -258,61 +258,65 @@ class TestNodeSideConstraints:
         )
         assert result.returncode == 0, result.stderr
         assert "ok" in result.stdout
-        assert (leg_log.legs_dir(tmp_path) / "t.1.start.json").exists()
+        assert (task_log.tasks_dir(tmp_path) / "t.1.start.json").exists()
 
 
-class TestWhatALegDid:
-    """`target_iteration` is RUN_TO, which an evaluate leg never sets.
+class TestWhatATaskDid:
+    """`target_iteration` is RUN_TO, which an evaluate task never sets.
 
-    38 evaluate legs on the share therefore recorded a target of `0`, and their
+    38 evaluate tasks on the share therefore recorded a target of `0`, and their
     rung and board seed were written down nowhere — while the eval documents
     they produced carry no task reference to join back on. This is what stops
     the next set going the same way.
     """
 
     def test_an_evaluation_records_the_rung_and_the_seed_it_scored(self, tmp_path):
-        leg_log.write_node_record(
+        task_log.write_node_record(
             tmp_path,
             task_id="t1",
-            event=leg_log.EVENT_STARTED,
+            event=task_log.EVENT_STARTED,
             run_id="run-production-025433-1095",
             op="evaluate",
             eval_at="150000000",
             eval_flags=("--br-flops", "4", "--br-board-seed", "7"),
         )
-        (row,) = leg_log.read_legs(tmp_path)
+        (row,) = task_log.read_tasks(tmp_path)
         assert row["eval_at"] == "150000000"
         assert row["what"] == "evaluate @150M seed7"
 
     def test_three_seeds_on_one_checkpoint_are_now_distinguishable(self, tmp_path):
         """The exact case that had to be kept in a scratchpad file."""
         for index, seed in enumerate(("7", "13", "29")):
-            leg_log.write_node_record(
+            task_log.write_node_record(
                 tmp_path,
                 task_id=f"t{index}",
-                event=leg_log.EVENT_STARTED,
+                event=task_log.EVENT_STARTED,
                 run_id="run-production-025433-1095",
                 op="evaluate",
                 eval_at="150000000",
                 eval_flags=("--br-board-seed", seed),
             )
-        assert len({row["what"] for row in leg_log.read_legs(tmp_path)}) == 3
+        assert len({row["what"] for row in task_log.read_tasks(tmp_path)}) == 3
 
-    def test_a_training_leg_says_what_it_was_aiming_at(self, tmp_path):
-        leg_log.write_node_record(
+    def test_a_training_task_says_what_it_was_aiming_at(self, tmp_path):
+        task_log.write_node_record(
             tmp_path,
             task_id="t1",
-            event=leg_log.EVENT_STARTED,
+            event=task_log.EVENT_STARTED,
             op="train",
             target_iteration="5000000",
         )
-        (row,) = leg_log.read_legs(tmp_path)
+        (row,) = task_log.read_tasks(tmp_path)
         assert row["what"] == "train ->5M"
 
-    def test_a_leg_from_before_these_fields_degrades_to_its_op(self, tmp_path):
+    def test_a_task_from_before_these_fields_degrades_to_its_op(self, tmp_path):
         """Honest: those records genuinely hold nothing more to show."""
-        leg_log.write_node_record(
-            tmp_path, task_id="t1", event=leg_log.EVENT_STARTED, op="evaluate", target_iteration="0"
+        task_log.write_node_record(
+            tmp_path,
+            task_id="t1",
+            event=task_log.EVENT_STARTED,
+            op="evaluate",
+            target_iteration="0",
         )
-        (row,) = leg_log.read_legs(tmp_path)
+        (row,) = task_log.read_tasks(tmp_path)
         assert row["what"] == "evaluate"

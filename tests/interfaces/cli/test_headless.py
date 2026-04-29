@@ -58,7 +58,7 @@ def test_no_command_writes_a_self_overwriting_result_file():
     """The run dir must not accumulate ``<op>_result.json``.
 
     It namespaced by op but not by invocation, so a repeated op overwrote
-    itself -- a thirty-leg run kept one summary. The durable records are the
+    itself -- a thirty-task run kept one summary. The durable records are the
     run's event log and evals/ + the ledger.
     """
     from src.interfaces.commands import _base

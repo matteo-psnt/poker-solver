@@ -24,10 +24,10 @@ def test_run_git_returns_none_on_failure():
 class TestTheStampedProvenance:
     """A cloud node has no `.git`: the code snapshot excludes it.
 
-    Until the submitter started stamping its own HEAD into the leg environment,
+    Until the submitter started stamping its own HEAD into the task environment,
     `git rev-parse` on a node had nothing to answer from -- so EVERY
     cloud-trained run and EVERY cloud-run evaluation recorded a null commit,
-    for as long as training has been in the cloud. Measured on a probe leg
+    for as long as training has been in the cloud. Measured on a probe task
     2026-08-04: `ledger` showed the commit column empty.
     """
 
@@ -56,7 +56,7 @@ class TestTheStampedProvenance:
         assert gitinfo.get_git_commit() == "a" * 40
 
     def test_an_empty_stamp_falls_back_to_git(self):
-        """Every RUN_* key is emitted even when empty, so an unstamped leg sets
+        """Every RUN_* key is emitted even when empty, so an unstamped task sets
         this to "" rather than leaving it absent."""
         with pytest.MonkeyPatch.context() as patch:
             patch.setenv(gitinfo.COMMIT_ENV, "")

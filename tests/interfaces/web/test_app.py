@@ -62,7 +62,7 @@ class TestItAnswersThroughTheCommand:
         assert [name for name, _ in invoked] == ["pool-status"]
 
     def test_query_parameters_reach_the_command(self, client, invoked):
-        client.get("/api/legs?limit=7")
+        client.get("/api/tasks?limit=7")
         (_, kwargs) = invoked[0]
         assert kwargs["limit"] == 7
 
@@ -150,19 +150,19 @@ class TestServingTheConsole:
     def test_a_missing_build_is_reported_not_served_blank(self, tmp_path, monkeypatch):
         """A blank page reads as a broken app rather than a skipped build step."""
         client = self._app_with_dist(monkeypatch, tmp_path / "absent")
-        response = client.get("/legs")
+        response = client.get("/tasks")
         assert response.status_code == 503
         assert "not built" in response.json()["error"]
 
     def test_a_client_routed_path_gets_the_shell(self, tmp_path, monkeypatch):
-        """`/legs` and `/runs/abc` are routes, not files. Returning 404 for them
+        """`/tasks` and `/runs/abc` are routes, not files. Returning 404 for them
         is the classic SPA deployment bug: the app works until it is reloaded."""
         dist = tmp_path / "dist"
         (dist / "assets").mkdir(parents=True)
         (dist / "index.html").write_text("<!doctype html><div id=root></div>")
         client = self._app_with_dist(monkeypatch, dist)
 
-        for path in ("/", "/legs", "/runs/run-production-025433-1095"):
+        for path in ("/", "/tasks", "/runs/run-production-025433-1095"):
             response = client.get(path)
             assert response.status_code == 200, path
             assert "id=root" in response.text

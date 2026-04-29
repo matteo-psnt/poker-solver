@@ -13,22 +13,22 @@ import {
   type Curve,
   type Jobs,
   type Ledger,
-  type Legs,
   type LogLines,
   type Pool,
   type Progress,
   type RunInfo,
   type Runs,
+  type Tasks,
   costSchema,
   curveSchema,
   jobsSchema,
   ledgerSchema,
-  legsSchema,
   logSchema,
   poolSchema,
   progressSchema,
   runinfoSchema,
   runsSchema,
+  tasksSchema,
 } from "./schemas";
 
 /** Cheap reads (~2s) can be frequent; the share reads (~5s) should not be. */
@@ -49,10 +49,10 @@ export const useJobs = (limit = 20) =>
     refetchInterval: FAST,
   });
 
-export const useLegs = (limit = 0) =>
-  useQuery<Legs>({
-    queryKey: ["legs", limit],
-    queryFn: () => get(`/api/legs?limit=${limit}`, legsSchema),
+export const useTasks = (limit = 0) =>
+  useQuery<Tasks>({
+    queryKey: ["tasks", limit],
+    queryFn: () => get(`/api/tasks?limit=${limit}`, tasksSchema),
     refetchInterval: SLOW,
   });
 
@@ -81,7 +81,7 @@ export const useCost = (hours = 0) =>
   useQuery<Cost>({
     queryKey: ["cost", hours],
     queryFn: () => get(`/api/cost?hours=${hours}`, costSchema),
-    // Derived from the leg log, so it costs what `legs` costs.
+    // Derived from the task log, so it costs what `tasks` costs.
     refetchInterval: SLOW,
   });
 
@@ -93,7 +93,7 @@ export const useProgress = (runId: string) =>
   });
 
 /**
- * A leg's published log. `enabled` so the query does not fire until a task is
+ * A task's published log. `enabled` so the query does not fire until a task is
  * actually selected — this is the slowest read in the console and there is no
  * reason to pay for it on a page nobody has opened.
  */
@@ -102,7 +102,7 @@ export const useLog = (taskId: string | null, lines = 400) =>
     queryKey: ["log", taskId, lines],
     queryFn: () => get(`/api/logs/${encodeURIComponent(taskId ?? "")}?lines=${lines}`, logSchema),
     enabled: Boolean(taskId),
-    // A published log for a finished leg does not change. Refetching it would
+    // A published log for a finished task does not change. Refetching it would
     // be a cloud read for an answer that cannot have moved.
     refetchInterval: false,
     staleTime: 5 * 60_000,

@@ -148,7 +148,7 @@ class RunTracker:
         died -- its process is gone or we would not be resuming. That closure is
         a fact the log has to carry: emitted only as `attempt_started`, the fold
         left every reaped attempt "running" forever, which is the exact symptom
-        the reaping exists to fix, and dropped its runtime so a run whose legs
+        the reaping exists to fix, and dropped its runtime so a run whose tasks
         were all OOM-killed reported ~0s of compute.
         """
         before = len(self.metadata.attempts)

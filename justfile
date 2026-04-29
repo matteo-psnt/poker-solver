@@ -4,14 +4,14 @@
 #   poker-solver owns what HAPPENS (submissions)  -> just submit / just cli status
 #
 # Dispatch used to live here as ~450 lines of `az` invocations. It is now
-# `src/interfaces/cloud/`, where a leg spec is a typed object a test can look
+# `src/interfaces/cloud/`, where a task spec is a typed object a test can look
 # at rather than a shell string -- which is also how the hex-encoding of config
 # overrides disappeared: the SDK takes name/value pairs, so nothing has to
 # survive a `KEY=VALUE` parser. The node-side wrapper went the same way, to
 # `src/shared/node/`. What remains below is what genuinely belongs in a task
 # runner: Terraform lifecycle, the emergency stop, and passthrough aliases.
 #
-# The pool holds ZERO nodes at rest. You submit legs and walk away; nodes appear
+# The pool holds ZERO nodes at rest. You submit tasks and walk away; nodes appear
 # while work is queued and disappear when it drains.
 #
 # The durable share (infra/store) is a SEPARATE Terraform state in its own
@@ -59,7 +59,7 @@ destroy:
 # The one command to reach for when something is wrong and you do not yet know
 # what. Deliberately blunt: it kills running tasks rather than waiting for them,
 # because the situation where you need this is the one where waiting is the
-# problem. Anything a leg had published up to its last retained rung survives on
+# problem. Anything a task had published up to its last retained rung survives on
 # the share, and `just submit <config> <to> --run <id>` picks it back up.
 #
 # THE ONLY RECIPE THAT DELIBERATELY DOES NOT USE THE PYTHON CLI, and the only
@@ -126,7 +126,7 @@ credit-check *flags:
 # `repair-ladder` turn positionals into flags, which is a real saving; `cli` is
 # the escape hatch for everything else.
 #
-# The nine pure passthroughs that used to sit here (`status`, `jobs`, `legs`,
+# The nine pure passthroughs that used to sit here (`status`, `jobs`, `tasks`,
 # `logs`, `cancel`, `pool-status`, `autoscale-check`, `push-code`, `push-data`,
 # `ledger`) are gone. They retyped a command without changing it, and they
 # answered "what can I do here?" with 13 of 26 -- a hand-maintained subset that

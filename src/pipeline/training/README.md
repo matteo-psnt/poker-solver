@@ -111,7 +111,7 @@ Checkpoints from the deleted dynamic backend are unreadable at HEAD by design.
 
 ## Running one
 
-Training runs **on the pool**, never on a laptop. `submit` queues a leg;
+Training runs **on the pool**, never on a laptop. `submit` queues a task;
 `train-static` is what the node then executes.
 
 ```bash

@@ -39,7 +39,6 @@
     "first_at": "2026-08-02T22:06:18+00:00",
     "hours": 0.0,
     "last_at": "2026-08-03T16:58:59+00:00",
-    "legs": 47,
     "op": "cost",
     "peak_concurrency": 4,
     "rate_per_node_hour": 0.8,
@@ -57,7 +56,8 @@
         "running": 0
       }
     ],
-    "task_hours": 68.87
+    "task_hours": 68.87,
+    "tasks": 47
   },
   "curve": {
     "decay_ratio": 2.0,
@@ -152,21 +152,6 @@
           "std_error_mbb": 12.0
         },
         "run_id": "run-a"
-      }
-    ]
-  },
-  "legs": {
-    "op": "legs",
-    "reconciled": 1,
-    "rows": [
-      {
-        "attempt": 1,
-        "cause": "killed",
-        "ended_at": "2026-08-02T10:00:00Z",
-        "exit_code": 137,
-        "op": "train-static",
-        "run_id": "run-a",
-        "task_id": "prod-101010-1"
       }
     ]
   },
@@ -292,7 +277,6 @@
   },
   "runinfo": {
     "arm": "control",
-    "attempts": 4,
     "card_abstraction_hash": "ae5a7e6648d7cd02",
     "config_name": "production",
     "coverage_flat_from": 20000000,
@@ -320,13 +304,6 @@
     "git_commit": "cafebabecafebabecafebabecafebabecafebabe",
     "git_dirty": false,
     "iterations": 30000000,
-    "legs": [
-      {
-        "attempt": 1,
-        "cause": "killed",
-        "task_id": "prod-101010-1"
-      }
-    ],
     "op": "runinfo",
     "parent_run_id": null,
     "progress": [
@@ -346,7 +323,15 @@
     "run_id": "run-a",
     "runtime_seconds": 9000.0,
     "status": "completed",
-    "total_progress_rows": 2
+    "tasks": [
+      {
+        "attempt": 1,
+        "cause": "killed",
+        "task_id": "prod-101010-1"
+      }
+    ],
+    "total_progress_rows": 2,
+    "training_tasks": 4
   },
   "runs": {
     "op": "runs",
@@ -437,10 +422,6 @@
           "total_jobs": 3
         }
       },
-      "legs": {
-        "error": "Azure rejected the credential \u2014 try `az login`.",
-        "payload": null
-      },
       "pool": {
         "error": null,
         "payload": {
@@ -462,11 +443,15 @@
           "target_dedicated_nodes": 0,
           "vm_size": "standard_d16als_v6"
         }
+      },
+      "tasks": {
+        "error": "Azure rejected the credential \u2014 try `az login`.",
+        "payload": null
       }
     },
     "requested_watch": 0,
     "watch": 0,
-    "with_legs": true
+    "with_tasks": true
   },
   "submit": {
     "code_snapshot": "code-20260802_000000",
@@ -489,6 +474,21 @@
     "target_name": "buckets-F20T20R20-rexact-deadbeef",
     "tasks": [
       "ochs_gate_ochs-000000-1"
+    ]
+  },
+  "tasks": {
+    "op": "tasks",
+    "reconciled": 1,
+    "rows": [
+      {
+        "attempt": 1,
+        "cause": "killed",
+        "ended_at": "2026-08-02T10:00:00Z",
+        "exit_code": 137,
+        "op": "train-static",
+        "run_id": "run-a",
+        "task_id": "prod-101010-1"
+      }
     ]
   },
   "train-static": {

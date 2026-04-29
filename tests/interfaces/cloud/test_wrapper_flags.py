@@ -13,9 +13,9 @@ defaults to 1 and once trained single-threaded on a 16-vCPU node -- and a newer
 `train-vector` branch splatted that same array into a command declaring no
 `--workers`. Three identical attempts, each dead about four seconds in.
 
-It used to regex `run_leg.sh` for `uv run poker-solver` call sites and
+It used to regex `run_task.sh` for `uv run poker-solver` call sites and
 trace shell array splats, because the argv existed only as shell. Now
-`plan.LegPlan` BUILDS the argv, so this asks the real parser to accept the real
+`plan.TaskPlan` BUILDS the argv, so this asks the real parser to accept the real
 list -- which also removes the regex's blind spot: a flag assembled from a
 variable was invisible to it.
 
@@ -59,9 +59,9 @@ def _undeclared(argv: list[str]) -> list[str]:
     return sorted(_flags(argv) - _declared(argv[0]))
 
 
-def _plan(**overrides) -> node_plan.LegPlan:
+def _plan(**overrides) -> node_plan.TaskPlan:
     defaults: dict = {"op": node_plan.TRAIN, "config": "production", "to": 1}
-    return node_plan.LegPlan(**{**defaults, **overrides})
+    return node_plan.TaskPlan(**{**defaults, **overrides})
 
 
 # Every optional field, present and absent. The old regex saw flags on
@@ -85,23 +85,23 @@ EVAL_CASES = {
 }
 
 
-@pytest.mark.parametrize("leg", TRAIN_CASES.values(), ids=list(TRAIN_CASES))
-def test_every_flag_a_training_leg_passes_is_declared(leg):
-    argv = leg.train_argv()
+@pytest.mark.parametrize("task", TRAIN_CASES.values(), ids=list(TRAIN_CASES))
+def test_every_flag_a_training_task_passes_is_declared(task):
+    argv = task.train_argv()
     assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
     assert not _undeclared(argv), _message(argv)
 
 
-@pytest.mark.parametrize(("leg", "rung"), EVAL_CASES.values(), ids=list(EVAL_CASES))
-def test_every_flag_an_evaluate_leg_passes_is_declared(leg, rung):
+@pytest.mark.parametrize(("task", "rung"), EVAL_CASES.values(), ids=list(EVAL_CASES))
+def test_every_flag_an_evaluate_task_passes_is_declared(task, rung):
     # `eval_flags` is the SUBMITTER's passthrough (`score --run r --
     # --br-flops 8`); its contents are unknowable here and are validated
     # against `evaluate` by `score`'s own method/flag plumbing.
-    argv = leg.evaluate_argv(rung)
+    argv = task.evaluate_argv(rung)
     assert not _undeclared(argv), _message(argv)
 
 
-def test_every_flag_a_precompute_leg_passes_is_declared():
+def test_every_flag_a_precompute_task_passes_is_declared():
     argv = _plan(op=node_plan.PRECOMPUTE).precompute_argv()
     assert not _undeclared(argv), _message(argv)
 
@@ -143,7 +143,7 @@ class TestTheWrapperInvokesACommandThatExists:
 
     That failure is invisible locally and expensive remotely: `uv run` on an
     unknown script fails after the code snapshot upload and the pool spin-up,
-    with an error about the launcher rather than about the leg. Same shape as
+    with an error about the launcher rather than about the task. Same shape as
     the undeclared-flag defect this module was written for, one level up.
     """
 

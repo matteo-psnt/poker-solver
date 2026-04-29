@@ -103,7 +103,7 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
 
     Idempotent and safe to call while training continues, which is what lets
     the mid-run watcher use it. Never raises: a failed publish must not kill a
-    leg that is still making progress on local disk.
+    task that is still making progress on local disk.
     """
     destination.mkdir(parents=True, exist_ok=True)
     children = sorted(run_dir.iterdir())
@@ -119,7 +119,7 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
         marker = destination / marker_for(child.name)
         # ALREADY COMPLETE => NOTHING TO DO. Not just an optimisation: the
         # republish below drops the marker first, so re-copying a known-good
-        # rung leaves it briefly unmarked and a leg dying in that window makes
+        # rung leaves it briefly unmarked and a task dying in that window makes
         # the manifest name a rung the next fetch refuses. Nor is it rare --
         # measured at 6.6 minutes re-uploading 809 MB already on the share.
         if marker.exists():
@@ -201,7 +201,7 @@ def _touch(path: Path) -> None:
 
 
 class FetchRefusedError(Exception):
-    """The share cannot supply what this leg needs, and guessing would be worse.
+    """The share cannot supply what this task needs, and guessing would be worse.
 
     Raised rather than logged because every case is one where continuing means
     training or scoring against data that is absent, truncated, or written by a
@@ -283,7 +283,7 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet) -> st
         )
     manifest = read_manifest(source / MANIFEST)
     if not manifest:
-        # An absent manifest is not an error: a leg that died before its first
+        # An absent manifest is not an error: a task that died before its first
         # checkpoint publishes .run.json and nothing else, and the right thing
         # is to start the ladder rather than refuse.
         log(f"no published checkpoint for {source.name}")

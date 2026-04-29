@@ -80,7 +80,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     rungs = _rungs(args.at)
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
-            spec.LegSpec(
+            spec.TaskSpec(
                 code_snapshot=snapshot,
                 op=spec.EVALUATE,
                 run_id=args.run,

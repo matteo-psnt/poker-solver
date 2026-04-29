@@ -6,8 +6,8 @@ instead: how many round trips a read is allowed to make, and which ones it must
 not make at all. Every number below was a measured defect.
 
 * `jobs` listed tasks for all 44 jobs at ~0.39s each to render the 2 that were
-  active -- ~11s, and `legs` paid it again for its reconcile.
-* `legs` downloaded 47 tiny leg records one at a time: 9.1s of round trip.
+  active -- ~11s, and `tasks` paid it again for its reconcile.
+* `tasks` downloaded 47 tiny task records one at a time: 9.1s of round trip.
 * `--source share` fetched 37.17 MB of `keys-*/vocab.json` -- key tables from
   the DELETED dynamic backend, which nothing reads -- to answer questions that
   needed 0.06 MB of eval documents.
@@ -104,7 +104,7 @@ class TestJobsDoesNotPayForHistory:
 
 
 class TestReconcileAsksAboutOpenQuestionsOnly:
-    def test_one_targeted_call_per_unresolved_leg(self):
+    def test_one_targeted_call_per_unresolved_task(self):
         """Not one call per job in the account's history."""
         client = FakeBatch(ACCOUNT)
         record = batch.task_record(_as_client(client), "job-live", "t3")

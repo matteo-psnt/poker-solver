@@ -20,7 +20,7 @@ class TestResolution:
     def test_an_explicit_override_wins(self, monkeypatch):
         """The node wrapper sets this to /mnt/work/cache: a Batch task's HOME is
         its own working directory, wiped with the task, so the default would
-        re-canonicalise the river's 2.6M boards (~1 min) on every leg."""
+        re-canonicalise the river's 2.6M boards (~1 min) on every task."""
         monkeypatch.setenv(cache.ENV_OVERRIDE, "/mnt/work/cache")
         assert cache.cache_root() == Path("/mnt/work/cache")
 

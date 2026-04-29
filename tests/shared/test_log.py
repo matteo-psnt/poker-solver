@@ -291,7 +291,7 @@ class TestEveryProgressBarIsGuarded:
     """Re-homed from the deleted test_memory_telemetry.py.
 
     A bar that forgets to opt out is the cloud-log failure again: a multi-hour
-    leg once wrote a stderr file too large to download.
+    task once wrote a stderr file too large to download.
     """
 
     def test_every_tqdm_site_consults_the_predicate(self):

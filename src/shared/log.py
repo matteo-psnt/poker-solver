@@ -9,8 +9,8 @@ Records go to stderr, keeping stdout for payloads. That split is what makes
 ``poker-solver --json | jq`` work.
 
 TWO READERS, TWO FORMATS. Interactively the bare message is right. Captured --
-a cloud leg's log, a ``tee``, CI -- it is not: every severity renders
-identically, so a 2 MB leg log cannot be grepped for the failure it exists to
+a cloud task's log, a ``tee``, CI -- it is not: every severity renders
+identically, so a 2 MB task log cannot be grepped for the failure it exists to
 explain. The format keys on ``stderr_is_terminal()``, the same predicate that
 gates progress bars. Interactive output is unchanged; captured output gains a
 UTC timestamp, a level and the logger name.
@@ -78,7 +78,7 @@ class _AdaptiveFormatter(logging.Formatter):
             f"%(asctime)s %(levelname)-5s %(name)-{_NAME_WIDTH}s  %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%SZ",
         )
-        self.converter = time.gmtime  # legs run in whatever region had capacity
+        self.converter = time.gmtime  # tasks run in whatever region had capacity
         self._bare = logging.Formatter("%(message)s")
 
     def format(self, record: logging.LogRecord) -> str:
@@ -160,7 +160,7 @@ def progress_bars_enabled() -> bool:
     """Whether tqdm bars should render.
 
     A bar repaints its whole line on every update, which is invisible
-    interactively and catastrophic in a captured log: a multi-hour cloud leg
+    interactively and catastrophic in a captured log: a multi-hour cloud task
     once wrote a stderr file too large to download, destroying the one artifact
     needed to diagnose a stalled run.
     """

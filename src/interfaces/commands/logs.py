@@ -1,13 +1,13 @@
-"""The `logs` subcommand: a leg's output, from the share or from the node.
+"""The `logs` subcommand: a task's output, from the share or from the node.
 
-Replaces three separate recipes (`job-log`, `leg-log`, `leg-logs`) because
+Replaces three separate recipes (`job-log`, `task-log`, `task-logs`) because
 they differ only in where they read from, and the choice between them is the
 one thing a caller actually has to think about:
 
 * ``--source share`` (default) reads the copy the node wrapper publishes on every
   checkpoint. It **survives node teardown**, which matters because the pool
   scales to zero within minutes of a task ending -- so the node copy is already
-  gone for exactly the failed legs most worth reading.
+  gone for exactly the failed tasks most worth reading.
 * ``--source node`` reads the live ``stdout.txt``/``stderr.txt`` while the task
   is still running. Fresher, but it answers ``NodeNotFound`` once the node is
   released.
@@ -32,7 +32,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver logs`."""
     parser.add_argument("--task", default=None, help="Task id to read.")
     parser.add_argument(
-        "--list", action="store_true", help="List published leg logs instead of reading one."
+        "--list", action="store_true", help="List published task logs instead of reading one."
     )
     parser.add_argument(
         "--source",
@@ -69,7 +69,7 @@ def _clean(text: str, *, raw: bool, lines: int) -> list[str]:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    """Read one leg's log, or list what is published.
+    """Read one task's log, or list what is published.
 
     Ordering:
         Everything the caller could have got right is refused first. `CloudConfig.load()`
@@ -91,7 +91,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         service = share.share_client(config)
         return {
             "op": "logs",
-            "listing": share.leg_log_names(service, config.share_name),
+            "listing": share.task_log_names(service, config.share_name),
             "lines": None,
             "task": None,
         }
@@ -104,7 +104,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             # within minutes of a task ending, and Batch then answers "The
             # specified node does not exist." Uncaught it was a 40-line Azure
             # traceback at the exact moment someone was trying to find out why a
-            # leg died -- and it buried the fact that the answer is one flag
+            # task died -- and it buried the fact that the answer is one flag
             # away, on the share, which is what the publish-on-exit trap is for.
             raise CommandError(
                 f"No node-side files for {args.task}: {error.message.strip()}\n"
@@ -113,7 +113,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 f"Read the published copy instead: logs --task {args.task}"
             ) from error
     else:
-        found = share.read_leg_log(share.share_client(config), config.share_name, args.task)
+        found = share.read_task_log(share.share_client(config), config.share_name, args.task)
         if found is None:
             raise CommandError(
                 f"No published log for {args.task}. It may still be running before its "
@@ -142,7 +142,7 @@ def render(payload: dict[str, Any]) -> None:
 
 COMMAND = Command(
     name="logs",
-    help="Read a leg's log from the share (default) or live from its node.",
+    help="Read a task's log from the share (default) or live from its node.",
     add_arguments=add_arguments,
     run=run,
     render=render,

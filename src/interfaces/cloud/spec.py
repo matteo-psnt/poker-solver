@@ -1,4 +1,4 @@
-"""What a leg IS, separated from how it gets dispatched.
+"""What a task IS, separated from how it gets dispatched.
 
 This module is deliberately free of the Azure SDK. Everything here is a pure
 function of its arguments -- which is the point: the parts of a submission that
@@ -9,7 +9,7 @@ to a service.
 
 The node contract
 -----------------
-``infra/run_leg.py`` reads every value below out of the task's environment --
+``infra/run_task.py`` reads every value below out of the task's environment --
 see :mod:`src.shared.node.plan`, which is the same contract from the node's
 end and is pinned against this one by ``tests/shared/node/test_plan.py``. Two
 of them are JSON-encoded rather than passed raw, and the reason is not the one
@@ -42,20 +42,39 @@ DEFAULT_CHECKPOINT_EVERY = 1_000_000
 ``TASK_ID_LIMIT`` is Batch's, not ours. ``_OP_WORDS`` shortens the op for the
 one place length is scarce; the op itself stays the long form everywhere else.
 """
+"""The node's interpreter
+------------------------
+NOT the OS python3, which is 3.10 on the pinned 22.04 image. The start task
+installs this one and links it into a system bin directory, so the wrapper runs
+a plain interpreter at a fixed absolute path -- no uv at task time.
+
+That indirection is the point. `uv run` here needed uv to resolve a managed
+interpreter, and uv resolves it under HOME: the start task runs as an elevated
+POOL-scoped auto-user and a task runs as a different, non-elevated one whose
+HOME is its own working directory, so the install was invisible to the task.
+Measured -- the probe died in 208ms having written nothing, which is the worst
+shape of failure available here, since the wrapper is what explains failures.
+
+Pinned against `infra/main.tf` by ``tests/interfaces/cloud/test_spec.py``.
+"""
+NODE_PYTHON = "3.13"
+NODE_PYTHON_BIN = f"/usr/local/bin/python{NODE_PYTHON}"
+
 TASK_ID_LIMIT = 64
 _OP_WORDS = {TRAIN: "train", EVALUATE: "score", REPAIR_LADDER: "repair", PRECOMPUTE: "precompute"}
 
 _UNSAFE_TASK_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
-LEG_COMMAND_TEMPLATE = (
+TASK_COMMAND_TEMPLATE = (
     "CODE_DIR=/mnt/work/code-$AZ_BATCH_TASK_ID && mkdir -p $CODE_DIR && "
     "tar xzf $AZ_BATCH_NODE_MOUNTS_DIR/shared/code/{snapshot}.tar.gz -C $CODE_DIR "
     "--no-same-owner --no-same-permissions && "
-    # The node's SYSTEM python3 -- 3.10 on the pinned image, and the only
-    # interpreter that exists before `uv sync`. `-u` because the wrapper's own
-    # lines are the ones that explain a leg, and a buffered stdout would hold
-    # them until the process that is being diagnosed has already ended.
-    "CODE_DIR=$CODE_DIR python3 -u $CODE_DIR/infra/run_leg.py"
+    # NOT the system python3, which is 3.10 on the pinned 22.04 image. The start
+    # task installs this one and links it onto PATH; see NODE_PYTHON_BIN.
+    #
+    # `-u` because the wrapper's own lines are what explain a task, and a
+    # buffered stdout would hold them until the process being diagnosed is gone.
+    f"CODE_DIR=$CODE_DIR {NODE_PYTHON_BIN} -u $CODE_DIR/infra/run_task.py"
 )
 
 
@@ -87,9 +106,9 @@ def task_id(label: str, now: datetime, nonce: int) -> str:
     suffix is what keeps two submissions in one second apart, so it cannot be
     the part that gets trimmed.
     """
-    safe = _UNSAFE_TASK_CHARS.sub("-", label) or "leg"
+    safe = _UNSAFE_TASK_CHARS.sub("-", label) or "task"
     suffix = f"-{now:%H%M%S}-{nonce}"
-    head = safe[: TASK_ID_LIMIT - len(suffix)].rstrip("-") or "leg"
+    head = safe[: TASK_ID_LIMIT - len(suffix)].rstrip("-") or "task"
     return f"{head}{suffix}"
 
 
@@ -107,7 +126,7 @@ def run_token(run_id: str) -> str:
     return f"{parts[0]}-{parts[-1]}" if len(parts) > 2 else stem
 
 
-def leg_command(snapshot: str) -> str:
+def task_command(snapshot: str) -> str:
     """The task command line: extract the pinned snapshot, then run the wrapper.
 
     The wrapper lives INSIDE the tarball, so the command line has to bootstrap
@@ -120,17 +139,17 @@ def leg_command(snapshot: str) -> str:
     The ``$``-prefixed names must survive into the node's shell unexpanded;
     only ``snapshot`` is substituted here.
     """
-    return LEG_COMMAND_TEMPLATE.format(snapshot=snapshot)
+    return TASK_COMMAND_TEMPLATE.format(snapshot=snapshot)
 
 
 @dataclass(frozen=True)
-class LegSpec:
+class TaskSpec:
     """One unit of work for a node, as the wrapper will read it.
 
     ``to`` is an ABSOLUTE iteration target, never an increment. That single
     property is what makes a Batch retry converge instead of training twice:
     ``train-static --iterations`` no-ops once the target is reached, so running
-    the same leg any number of times lands on the same endpoint. A relative
+    the same task any number of times lands on the same endpoint. A relative
     target would compound on every retry.
     """
 
@@ -152,19 +171,19 @@ class LegSpec:
     force_publish: bool = False
     # Stamped by `dispatch.stage_and_queue`, never by a caller: the node has no
     # `.git` (the snapshot excludes it), so the submitting machine is the only
-    # witness to what code this leg runs. Left empty a leg still runs -- it just
+    # witness to what code this task runs. Left empty a task still runs -- it just
     # records a null commit, which is what every cloud run did before this.
     git_commit: str = ""
     git_dirty: str = ""
 
     @property
     def label(self) -> str:
-        """What the task id is built from: what this leg DOES, not when it ran.
+        """What the task id is built from: what this task DOES, not when it ran.
 
         Every discriminating field is already on this spec, and returning the
         bare run id threw all of them away. Three evaluations of ONE checkpoint
         at three board seeds became three ids differing only in a timestamp and
-        a nonce, so nothing downstream -- the console, `legs`, the log viewer --
+        a nonce, so nothing downstream -- the console, `tasks`, the log viewer --
         could say which was which; the mapping lived only in the head of
         whoever submitted them.
 
@@ -225,7 +244,7 @@ class LegSpec:
         if self.op not in (TRAIN, EVALUATE, REPAIR_LADDER, PRECOMPUTE):
             raise ValueError(f"Unknown op '{self.op}'.")
         if self.op == TRAIN and not self.config:
-            # A CONTINUING leg needs it too. The config builds the tree and the
+            # A CONTINUING task needs it too. The config builds the tree and the
             # solver and the checkpoint stores neither, so `--run x` without a
             # config reached the node and died on
             # `Config file not found: config/training/.yaml` -- after a snapshot
@@ -233,7 +252,7 @@ class LegSpec:
             # to accept it, and the justfile documented it as the way to
             # continue a run.
             raise ValueError(
-                "A training leg needs --config, a CONTINUING one included: the config "
+                "A training task needs --config, a CONTINUING one included: the config "
                 "builds the tree and the solver, and the checkpoint stores neither."
             )
         if self.op == TRAIN and self.to <= 0:
@@ -241,7 +260,7 @@ class LegSpec:
         if self.op in (EVALUATE, REPAIR_LADDER) and not self.run_id:
             raise ValueError(f"op '{self.op}' scores an existing run, so --run is required.")
         if self.op == PRECOMPUTE and not self.config:
-            raise ValueError("A precompute leg needs --config (an abstraction config stem).")
+            raise ValueError("A precompute task needs --config (an abstraction config stem).")
         for override in self.sets:
             if "=" not in override:
                 raise ValueError(f"--set expects key=value, got '{override}'.")

@@ -24,7 +24,7 @@ module names a `data/cache` path again — which is how the directory came back
 after each of the two previous prunes. The node wrapper sets
 `POKER_SOLVER_CACHE=/mnt/work/cache`, because a Batch task's `HOME` is its own
 working directory and the default would re-canonicalise the river's 2.6M boards
-(~1 min) on every leg. `$CODE/data` is still symlinked on a node — that is
+(~1 min) on every task. `$CODE/data` is still symlinked on a node — that is
 where `precompute` writes and where `runs_dir` resolves — but it is a runtime
 path on `/mnt/work`, never a directory in the checkout. The 194 MB
 `combo_abstraction` that survived earlier prunes was a fixture for exactly ONE
@@ -52,7 +52,7 @@ definition: never a source of truth, never worth backing up.
   Submitting used to call `build_card_abstraction` first, loading ~773 MB to
   answer a question about the wrong machine — the node mounts the share, and the
   laptop's copy is irrelevant. Config overrides likewise go through `--set k=v`
-  and nothing else: a leg carries a config name plus `LegSpec.sets`.
+  and nothing else: a task carries a config name plus `LegSpec.sets`.
 - `uv run poker-solver` — the single entrypoint, in three groups:
   - **see and dispatch** — `status`, `submit`, `score`, `submit-precompute`,
     `jobs`, `logs`, `legs`, `cancel`, `pool-status`, `autoscale-check`,
@@ -64,15 +64,15 @@ definition: never a source of truth, never worth backing up.
     — `tests/interfaces/cloud/test_read_cost.py` pins it as call counts, since
     latency is invisible in a test and enormous in practice. Three rules:
     never list tasks for a job you will discard (`jobs` fetched all 44 to render
-    2); issue independent round trips together (47 leg records serially was
+    2); issue independent round trips together (47 task records serially was
     9.1s); and never sync `keys-*` key tables, which are the deleted dynamic
     backend's and were 37 of the 38 MB a share read pulled. Measured warm
     before → after: `jobs` 11s → 2.5s, `legs` 23s → 2.0s, `ledger` 20s → 4.5s,
     the whole status screen 22s → 2.0s. The interactive menu's "Cloud Status"
     is the same call; it used to be a second renderer that could disagree with
-    `jobs` and could not see the leg log at all.
+    `jobs` and could not see the task log at all.
   - **run on a node** — `train-static`, `precompute`, `evaluate`. These are
-    invoked BY the node wrapper, on whichever box executes the leg; not a
+    invoked BY the node wrapper, on whichever box executes the task; not a
     local-compute door, and they keep `--runs-dir` because a node writes to
     `/mnt/work` before publishing.
   - **read the record** — `ledger`, `curve`, `progress`, `runinfo`, `report`,
@@ -108,7 +108,7 @@ definition: never a source of truth, never worth backing up.
   `ClientAuthenticationError`/`HttpResponseError`, which have no chokepoint in
   `batch.py`, so a surface talking to Batch catches those by name too.
 - **Azure dispatch is Python, in `src/interfaces/cloud/`** — `spec.py` (pure,
-  the testable core: what a leg IS), `batch.py`, `share.py`, `dispatch.py`,
+  the testable core: what a task IS), `batch.py`, `share.py`, `dispatch.py`,
   `config.py`, `workspace.py` (what `--source share` materialises). It lives
   under `interfaces` so nothing in
   `pipeline`/`engine`/`core` can reach Azure. **Auth is `AzureCliCredential`,
@@ -150,14 +150,14 @@ definition: never a source of truth, never worth backing up.
   `*.jsonl`, never `*.zarr` and never `keys-*` (the deleted dynamic backend's
   key tables, which were 37 of the 38 MB a share read used to fetch).
 - `infra/` — **fire-and-forget cloud training on Azure Batch**.
-  `poker-solver submit --config <c> --to <absolute-iteration>` queues a leg
+  `poker-solver submit --config <c> --to <absolute-iteration>` queues a task
   and returns; the pool scales 0→N→0 on its own. Terraform owns the account and
   pool; jobs and tasks are created at runtime by `src/interfaces/cloud/`, never
   in HCL. **The node-side wrapper is Python, in `src/shared/node/`** —
   `archive.py` (publish/fetch between the node disk and the SMB share),
   `plan.py` (the `RUN_*` environment → the argv), `runner.py` (the timeout
   guard, the tee, the mid-run publisher, the exit accounting), with
-  `infra/run_leg.py` as the entry point the task command line names. It lives
+  `infra/run_task.py` as the entry point the task command line names. It lives
   under `shared` because it runs on the node BEFORE `uv sync`, under the node's
   system `python3` — **3.10 on the pinned Ubuntu 22.04 image, and stdlib
   only**. Both constraints are enforced by
@@ -175,7 +175,7 @@ definition: never a source of truth, never worth backing up.
   look arbitrary but are measured (UserSubscription mode, `Dals_v6` not
   `Dalds_v6`, Gen2-only images, the SKU policy) are documented in
   `infra/README.md`; read it before changing pool config.
-  **`poker-solver legs` is how you find out why a leg died** — the run log cannot
+  **`poker-solver tasks` is how you find out why a task died** — the run log cannot
   record a death (the container is gone first), so the wrapper writes its own
   account to `<share>/legs/` and `legs` reconciles the ones whose exit record
   never landed against Batch's view. 124 (the guard's deadline — a hang) and
@@ -187,7 +187,7 @@ definition: never a source of truth, never worth backing up.
 
 ## Cost & Where Work Runs
 Compute budget is effectively unbounded — **money is not a constraint here.**
-If a bigger box, more nodes, a longer leg, more seeds, or more evaluation deals
+If a bigger box, more nodes, a longer task, more seeds, or more evaluation deals
 would make a result arrive sooner or land with tighter error bars, propose that;
 don't quietly pick the cheap option. Never trade statistical power or wall-clock
 for dollars, and don't cite a cost estimate as if it were a reason against

@@ -252,9 +252,9 @@ class TestAttachingCannotDestroy:
     POSIX SharedMemory registers with the attaching process's resource tracker by
     default, and a tracker unlinks what it holds when its process dies. Measured:
     a spawned child shares the coordinator's tracker and is harmless, but a
-    SEPARATE interpreter that attaches and then dies — a second leg on the node, a
+    SEPARATE interpreter that attaches and then dies — a second task on the node, a
     probe, a worker re-parented onto a fresh tracker — destroys the segments the
-    coordinator is still training on. A 50M leg died at 38,000,000 exactly this
+    coordinator is still training on. A 50M task died at 38,000,000 exactly this
     way, mid-run, with no error until the next chunk failed to attach.
     """
 
@@ -298,17 +298,17 @@ class TestAttachingCannotDestroy:
 
 
 class TestAbandonedSegmentsAreReclaimed:
-    """A leg killed before close() must not lock the next leg out of its own run.
+    """A task killed before close() must not lock the next task out of its own run.
 
     POSIX shared memory outlives its creator, and the session id IS the run id,
     so a coordinator lost to SIGKILL/OOM/the wall-clock guard leaves segments
-    that the retry then collides with. That killed a real leg on the pool: the
+    that the retry then collides with. That killed a real task on the pool: the
     next task died on FileExistsError before doing any work, which is precisely
     the retry the absolute-iteration design promises is safe.
     """
 
     def test_create_reclaims_a_segment_left_by_a_dead_coordinator(self, tree):
-        abandoned = StaticArrayStorage(tree, session_id="orphaned-leg")
+        abandoned = StaticArrayStorage(tree, session_id="orphaned-task")
         abandoned.regrets[0] = 123.0
         # Drop the mappings WITHOUT unlinking, which is what a killed process
         # leaves behind. close() would unlink and defeat the point.
@@ -316,7 +316,7 @@ class TestAbandonedSegmentsAreReclaimed:
             shm.close()
         abandoned._shm = []
 
-        successor = StaticArrayStorage(tree, session_id="orphaned-leg")
+        successor = StaticArrayStorage(tree, session_id="orphaned-task")
         try:
             assert successor.regrets[0] == 0.0, "reclaimed segment must start zeroed"
         finally:

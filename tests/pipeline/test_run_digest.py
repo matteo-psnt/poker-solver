@@ -9,7 +9,7 @@ import pytest
 
 from src.pipeline.services import run_digest
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
-from src.shared import leg_log, run_events
+from src.shared import run_events, task_log
 from src.shared.config import Config
 
 
@@ -98,39 +98,39 @@ class TestGaps:
         assert not any("status is" in g for g in digest.gaps)
 
 
-class TestLegs:
-    def test_legs_are_omitted_without_a_directory(self, tmp_path):
+class TestTasks:
+    def test_tasks_are_omitted_without_a_directory(self, tmp_path):
         """A purely local run has none, and asking for them must not fail."""
-        assert _digest(_run(tmp_path), tmp_path).legs == []
+        assert _digest(_run(tmp_path), tmp_path).tasks == []
 
-    def test_only_this_run_s_legs_are_joined(self, tmp_path):
-        """The share holds every run's legs; a digest must not borrow another's."""
+    def test_only_this_run_s_tasks_are_joined(self, tmp_path):
+        """The share holds every run's tasks; a digest must not borrow another's."""
         share = tmp_path / "share"
         for task, run_id in (("t-1", "run-a"), ("t-2", "run-other")):
-            leg_log.write_node_record(share, task_id=task, event="started", run_id=run_id)
-            leg_log.write_node_record(
+            task_log.write_node_record(share, task_id=task, event="started", run_id=run_id)
+            task_log.write_node_record(
                 share, task_id=task, event="finished", run_id=run_id, cause="completed"
             )
 
-        digest = _digest(_run(tmp_path), tmp_path, legs_dir=share)
-        assert [leg["task_id"] for leg in digest.legs] == ["t-1"]
+        digest = _digest(_run(tmp_path), tmp_path, tasks_dir=share)
+        assert [task["task_id"] for task in digest.tasks] == ["t-1"]
 
-    def test_an_unresolved_leg_becomes_a_gap(self, tmp_path):
+    def test_an_unresolved_task_becomes_a_gap(self, tmp_path):
         share = tmp_path / "share"
-        leg_log.write_node_record(share, task_id="t-1", event="started", run_id="run-a")
+        task_log.write_node_record(share, task_id="t-1", event="started", run_id="run-a")
 
-        digest = _digest(_run(tmp_path), tmp_path, legs_dir=share)
+        digest = _digest(_run(tmp_path), tmp_path, tasks_dir=share)
         assert any("no terminal record" in g for g in digest.gaps)
 
-    def test_a_finished_leg_is_not_a_gap(self, tmp_path):
+    def test_a_finished_task_is_not_a_gap(self, tmp_path):
         share = tmp_path / "share"
-        leg_log.write_node_record(share, task_id="t-1", event="started", run_id="run-a")
-        leg_log.write_node_record(
+        task_log.write_node_record(share, task_id="t-1", event="started", run_id="run-a")
+        task_log.write_node_record(
             share, task_id="t-1", event="finished", run_id="run-a", cause="killed"
         )
 
-        digest = _digest(_run(tmp_path), tmp_path, legs_dir=share)
-        assert digest.legs[0]["cause"] == "killed"
+        digest = _digest(_run(tmp_path), tmp_path, tasks_dir=share)
+        assert digest.tasks[0]["cause"] == "killed"
         assert not any("no terminal record" in g for g in digest.gaps)
 
 

@@ -14,7 +14,7 @@ behind it. FastAPI runs sync handlers in a threadpool, which is exactly right --
 and is the single detail about this file most likely to be "tidied" into a bug.
 
 One endpoint per command rather than one aggregate: a page fetches only what it
-shows, `/legs` does not pay for `ledger`, and each panel fails alone. The client
+shows, `/tasks` does not pay for `ledger`, and each panel fails alone. The client
 owns cadence (TanStack Query's ``refetchInterval``), so there is no poller here
 and nothing depends on a background thread staying alive.
 """
@@ -35,12 +35,12 @@ from src.interfaces.commands import (
     curve,
     jobs,
     ledger,
-    legs,
     logs,
     pool_status,
     progress,
     runinfo,
     runs,
+    tasks,
 )
 from src.interfaces.errors import CommandError
 from src.interfaces.web.cache import TtlCache
@@ -104,10 +104,10 @@ def create_app() -> FastAPI:
     def _jobs(limit: int = 20, all: bool = False) -> JSONResponse:  # noqa: A002
         return answer(cache, jobs.COMMAND, limit=limit, all=all)
 
-    @app.get("/api/legs")
-    def _legs(limit: int = 0, skip_reconcile: bool = False) -> JSONResponse:
+    @app.get("/api/tasks")
+    def _tasks(limit: int = 0, skip_reconcile: bool = False) -> JSONResponse:
         return answer(
-            cache, legs.COMMAND, limit=limit, skip_reconcile=skip_reconcile, legs_dir=None
+            cache, tasks.COMMAND, limit=limit, skip_reconcile=skip_reconcile, tasks_dir=None
         )
 
     @app.get("/api/runs")
@@ -147,7 +147,7 @@ def create_app() -> FastAPI:
 def _mount_console(app: FastAPI) -> None:
     """Serve the built console, with SPA fallback.
 
-    Client-side routing means `/legs` and `/runs/abc` are not files: the server
+    Client-side routing means `/tasks` and `/runs/abc` are not files: the server
     must return `index.html` and let the router decide. Anything under `/api`
     has already matched above, so the fallback cannot swallow a real endpoint.
 

@@ -1,10 +1,10 @@
-"""Reading a dead leg's log must not be the moment the tooling breaks.
+"""Reading a dead task's log must not be the moment the tooling breaks.
 
 `--source node` reads files that live on the node, and the pool scales to zero
-within minutes of a task ending -- so for exactly the failed legs most worth
+within minutes of a task ending -- so for exactly the failed tasks most worth
 reading, the node is already gone and Batch answers "The specified node does not
 exist." That surfaced as a forty-line ``azure.core`` traceback, at the moment
-someone was trying to find out why a leg died, and it buried the fact that the
+someone was trying to find out why a task died, and it buried the fact that the
 answer is one flag away on the share.
 """
 

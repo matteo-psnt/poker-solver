@@ -16,7 +16,7 @@ The code snapshot excludes ``.git`` (``share.SNAPSHOT_EXCLUDES``), so on a Batch
 node ``git rev-parse`` has nothing to answer from -- and **every cloud-trained
 run and every cloud-run evaluation recorded a null commit** for as long as
 training has been in the cloud. The submitter therefore stamps its own HEAD into
-the leg environment, and the values below are read from there FIRST.
+the task environment, and the values below are read from there FIRST.
 
 That precedence is not a compromise. The tree on a node is an extracted tarball
 whose provenance was decided when the snapshot was sealed; git's upward search
@@ -34,8 +34,8 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-"""Set by ``LegSpec.environment()`` on the submitting machine, and inherited all
-the way down: Batch sets it on the task, ``infra/run_leg.py`` inherits it, and
+"""Set by ``TaskSpec.environment()`` on the submitting machine, and inherited all
+the way down: Batch sets it on the task, ``infra/run_task.py`` inherits it, and
 the ``uv run poker-solver`` child inherits it in turn. Nothing has to thread
 it through a command line."""
 COMMIT_ENV = "RUN_GIT_COMMIT"

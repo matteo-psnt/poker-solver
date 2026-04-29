@@ -1,15 +1,15 @@
-"""The `legs` subcommand: what happened to every leg, including the silent deaths.
+"""The `tasks` subcommand: what happened to every task, including the silent deaths.
 
 ``jobs`` reads Batch directly, so it shows only what Batch still retains -- and a
 task's record ages out while the run it belonged to lives on. This reads the
-durable copy on the share instead, then asks Batch about the legs the share
+durable copy on the share instead, then asks Batch about the tasks the share
 cannot explain.
 
 Neither side can answer alone. The node wrapper writes its own account on entry and
 from its EXIT trap, covering every death the shell survives and distinguishing a
 hang from an OOM from a cancellation -- Batch reports all three as ``failure``.
 The deaths it cannot cover (OOM-kill, SIGKILL, node loss, task-level wall clock)
-leave a leg stuck at ``started``, because the trap never ran; only Batch can
+leave a task stuck at ``started``, because the trap never ran; only Batch can
 explain those.
 """
 
@@ -25,18 +25,18 @@ from src.interfaces.cloud import batch, share
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.commands import jobs
 from src.interfaces.commands._base import Command
-from src.shared import leg_log
+from src.shared import task_log
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver legs`."""
+    """Flags for `poker-solver tasks`."""
     parser.add_argument(
         "--skip-reconcile",
         action="store_true",
-        help="Read the share without asking Batch about unresolved legs.",
+        help="Read the share without asking Batch about unresolved tasks.",
     )
     parser.add_argument(
-        "--legs-dir",
+        "--tasks-dir",
         default=None,
         help="Read a local copy instead of the share (see `fetch`). Implies --skip-reconcile.",
     )
@@ -54,7 +54,7 @@ def _result(rows: list[dict[str, Any]], reconciled: int | None, limit: int) -> d
     """One payload shape for both sources, newest last."""
     shown = rows[-limit:] if limit > 0 else rows
     return {
-        "op": "legs",
+        "op": "tasks",
         "rows": shown,
         "reconciled": reconciled,
         "hidden_rows": len(rows) - len(shown),
@@ -63,35 +63,35 @@ def _result(rows: list[dict[str, Any]], reconciled: int | None, limit: int) -> d
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Join the node's account with Batch's, and report one row per attempt."""
-    if args.legs_dir:
-        return _result(leg_log.read_legs(Path(args.legs_dir)), None, args.limit)
+    if args.tasks_dir:
+        return _result(task_log.read_tasks(Path(args.tasks_dir)), None, args.limit)
 
     config = CloudConfig.load()
     service = share.share_client(config)
     with tempfile.TemporaryDirectory() as tmp:
         local = Path(tmp)
-        _download_legs(service, config.share_name, local)
+        _download_tasks(service, config.share_name, local)
 
         reconciled = None
-        # Only the legs with no terminal record are worth asking about; the module
+        # Only the tasks with no terminal record are worth asking about; the module
         # decides which those are, so the criterion lives in one place rather than
         # being re-derived from a rendered table.
-        open_legs = leg_log.unresolved_legs(local)
-        if not args.skip_reconcile and open_legs:
-            explained = leg_log.reconcile(local, _ask_batch(config, open_legs))
+        open_tasks = task_log.unresolved_tasks(local)
+        if not args.skip_reconcile and open_tasks:
+            explained = task_log.reconcile(local, _ask_batch(config, open_tasks))
             _upload_observed(service, config.share_name, local, explained)
             reconciled = len(explained)
 
-        return _result(leg_log.read_legs(local), reconciled, args.limit)
+        return _result(task_log.read_tasks(local), reconciled, args.limit)
 
 
 def _translate(task: dict[str, Any]) -> dict[str, Any]:
     """Batch's vocabulary into this project's.
 
-    Done HERE, not in leg_log: the record module is stdlib-only shared code
+    Done HERE, not in task_log: the record module is stdlib-only shared code
     that the node imports, and `observed_cause` compares against bare
     `completed`/`success`. A raw `BatchTaskState.COMPLETED` matches neither, so
-    every reconciled leg would read as its own state string instead of an
+    every reconciled task would read as its own state string instead of an
     outcome.
     """
     return {
@@ -101,12 +101,12 @@ def _translate(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ask_batch(config: CloudConfig, open_legs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Ask Batch about exactly the legs the share could not explain.
+def _ask_batch(config: CloudConfig, open_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ask Batch about exactly the tasks the share could not explain.
 
     One ``get_task`` per open question, concurrently, rather than listing every
     task of every job in the account -- which cost ~0.39s per job and scaled
-    with history rather than with what was unexplained. A leg record carries
+    with history rather than with what was unexplained. A task record carries
     its own ``job_id``, so the pair is already known.
 
     A row with no ``job_id`` cannot be addressed this way and falls back to the
@@ -114,8 +114,8 @@ def _ask_batch(config: CloudConfig, open_legs: list[dict[str, Any]]) -> list[dic
     the field existed, and losing the explanation would be worse than the cost.
     """
     client = batch.client(config)
-    pairs = {(row["job_id"], row["task_id"]) for row in open_legs if row.get("job_id")}
-    if len(pairs) < len({row["task_id"] for row in open_legs}):
+    pairs = {(row["job_id"], row["task_id"]) for row in open_tasks if row.get("job_id")}
+    if len(pairs) < len({row["task_id"] for row in open_tasks}):
         listed = batch.attach_tasks(client, batch.list_jobs(client))
         return [_translate(task) for job in listed for task in job["tasks"]]
 
@@ -124,16 +124,16 @@ def _ask_batch(config: CloudConfig, open_legs: list[dict[str, Any]]) -> list[dic
     return [_translate(task) for task in fetched if task]
 
 
-def _download_legs(service: Any, share_name: str, local: Path) -> None:
+def _download_tasks(service: Any, share_name: str, local: Path) -> None:
     """Pull the whole legs/ directory: the join needs every record.
 
     Concurrently -- these are ~47 tiny JSON files at ~0.195s of round trip
     each, so serially they were 9.1s of almost pure latency against 1.1s
     parallel.
     """
-    target = leg_log.legs_dir(local)
+    target = task_log.tasks_dir(local)
     target.mkdir(parents=True, exist_ok=True)
-    paths = list(share.walk_files(service, share_name, leg_log.LEGS_DIRNAME))
+    paths = list(share.walk_files(service, share_name, task_log.RECORDS_DIRNAME))
     if not paths:
         return
     with ThreadPoolExecutor(max_workers=min(16, len(paths))) as pool:
@@ -154,25 +154,25 @@ def _upload_observed(service: Any, share_name: str, local: Path, explained: list
     writer per file is what makes this safe on a share with no atomic rename.
     """
     for task_id in explained:
-        name = f"{task_id}{leg_log.OBSERVED_SUFFIX}"
-        body = (leg_log.legs_dir(local) / name).read_text()
-        share.write_text(service, share_name, f"{leg_log.LEGS_DIRNAME}/{name}", body)
+        name = f"{task_id}{task_log.OBSERVED_SUFFIX}"
+        body = (task_log.tasks_dir(local) / name).read_text()
+        share.write_text(service, share_name, f"{task_log.RECORDS_DIRNAME}/{name}", body)
 
 
 def render(payload: dict[str, Any]) -> None:
     rows = payload["rows"]
     reconciled = payload.get("reconciled")
     if reconciled:
-        print(f"Asked Batch about {reconciled} leg(s) the share could not explain.")
-    print(leg_log.format_table(rows))
+        print(f"Asked Batch about {reconciled} task(s) the share could not explain.")
+    print(task_log.format_table(rows))
     if payload.get("hidden_rows"):
         print(f"  {payload['hidden_rows']} earlier attempt(s) hidden — show with --limit 0")
 
 
 COMMAND = Command(
-    name="legs",
+    name="tasks",
     add_arguments=add_arguments,
     run=run,
     render=render,
-    help="Per-leg outcomes from the share, reconciled against Batch.",
+    help="Per-task outcomes from the share, reconciled against Batch.",
 )

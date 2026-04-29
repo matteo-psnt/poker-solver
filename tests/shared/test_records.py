@@ -83,8 +83,8 @@ class TestAtomicityFollowsTheDestination:
 
     def test_a_share_snapshot_is_written_directly(self, tmp_path):
         """No temp file: a rename it cannot rely on would be worse than none."""
-        records.write_snapshot(tmp_path / "leg.json", {"task_id": "t"}, SHARE_SNAPSHOT)
-        assert (tmp_path / "leg.json").is_file()
+        records.write_snapshot(tmp_path / "task.json", {"task_id": "t"}, SHARE_SNAPSHOT)
+        assert (tmp_path / "task.json").is_file()
         assert not list(tmp_path.glob("*.tmp"))
 
 

@@ -27,7 +27,6 @@ from src.interfaces.commands.curve import COMMAND as CURVE
 from src.interfaces.commands.evaluate import COMMAND as EVALUATE
 from src.interfaces.commands.jobs import COMMAND as JOBS
 from src.interfaces.commands.ledger import COMMAND as LEDGER
-from src.interfaces.commands.legs import COMMAND as LEGS
 from src.interfaces.commands.logs import COMMAND as LOGS
 from src.interfaces.commands.pool_status import COMMAND as POOL_STATUS
 from src.interfaces.commands.precompute import COMMAND as PRECOMPUTE
@@ -44,6 +43,7 @@ from src.interfaces.commands.serve import COMMAND as SERVE
 from src.interfaces.commands.status import COMMAND as STATUS
 from src.interfaces.commands.submit import COMMAND as SUBMIT
 from src.interfaces.commands.submit_precompute import COMMAND as SUBMIT_PRECOMPUTE
+from src.interfaces.commands.tasks import COMMAND as TASKS
 from src.interfaces.commands.train_static import COMMAND as TRAIN_STATIC
 
 # Order is the order they appear in `--help`, in three groups: dispatch work to
@@ -56,7 +56,7 @@ COMMANDS: tuple[Command, ...] = (
     SUBMIT_PRECOMPUTE,
     JOBS,
     LOGS,
-    LEGS,
+    TASKS,
     CANCEL,
     POOL_STATUS,
     AUTOSCALE_CHECK,

@@ -20,7 +20,7 @@ import pytest
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
 from src.interfaces.cli import headless
-from src.interfaces.commands import legs, status
+from src.interfaces.commands import status, tasks
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 
@@ -45,7 +45,7 @@ def _raising(name: str, error: BaseException) -> Command:
 
 class TestOnePanelCannotTakeOutTheOthers:
     def test_a_command_error_becomes_an_unavailable_panel(self):
-        panel = status._panel(_raising("legs", CommandError("share unreachable")))
+        panel = status._panel(_raising("tasks", CommandError("share unreachable")))
         assert panel == {"payload": None, "error": "share unreachable"}
 
     def test_an_expired_login_reads_as_itself(self):
@@ -72,35 +72,35 @@ class TestOnePanelCannotTakeOutTheOthers:
             (
                 ("pool", _ok("pool")),
                 ("jobs", _raising("jobs", ClientAuthenticationError("nope"))),
-                ("legs", _ok("legs")),
+                ("tasks", _ok("tasks")),
             ),
         )
         payload = status.gather()
 
-        assert set(payload["panels"]) == {"pool", "jobs", "legs"}
+        assert set(payload["panels"]) == {"pool", "jobs", "tasks"}
         assert payload["panels"]["jobs"]["payload"] is None
         assert payload["panels"]["pool"]["payload"]["op"] == "pool"
-        assert payload["panels"]["legs"]["payload"]["op"] == "legs"
+        assert payload["panels"]["tasks"]["payload"]["op"] == "tasks"
 
 
 class TestGatherComposesRatherThanReads:
     def test_panel_arguments_reach_the_commands(self, monkeypatch):
-        monkeypatch.setattr(status, "PANELS", (("jobs", _ok("jobs")), ("legs", _ok("legs"))))
+        monkeypatch.setattr(status, "PANELS", (("jobs", _ok("jobs")), ("tasks", _ok("tasks"))))
         payload = status.gather(limit=3)
         assert payload["panels"]["jobs"]["payload"]["limit"] == 3
-        # `legs` is limited too: it defaults to the whole history on purpose, and
+        # `tasks` is limited too: it defaults to the whole history on purpose, and
         # a glanceable screen cannot carry it.
-        assert payload["panels"]["legs"]["payload"]["limit"] == 3
+        assert payload["panels"]["tasks"]["payload"]["limit"] == 3
 
-    def test_legs_can_be_skipped(self, monkeypatch):
+    def test_tasks_can_be_skipped(self, monkeypatch):
         """It is the slowest panel by a wide margin (measured: 23s vs 0.9s)."""
-        monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")), ("legs", _ok("legs"))))
-        assert set(status.gather(with_legs=False)["panels"]) == {"pool"}
+        monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")), ("tasks", _ok("tasks"))))
+        assert set(status.gather(with_tasks=False)["panels"]) == {"pool"}
 
 
 class TestWatch:
     def _args(self, watch: int) -> argparse.Namespace:
-        return argparse.Namespace(watch=watch, limit=5, no_legs=True)
+        return argparse.Namespace(watch=watch, limit=5, no_tasks=True)
 
     def test_an_interval_below_a_full_cycle_is_raised(self, monkeypatch):
         """A tick that cannot finish before the next is due is not a refresh
@@ -134,7 +134,7 @@ class TestWatch:
             raise KeyboardInterrupt
 
         monkeypatch.setattr(status.time, "sleep", _interrupt)
-        assert headless.main(["status", "--watch", "30", "--no-legs"]) == 0
+        assert headless.main(["status", "--watch", "30", "--no-tasks"]) == 0
 
 
 class TestRenderDelegates:
@@ -165,18 +165,18 @@ class TestRenderDelegates:
         assert "unavailable: boom" in capsys.readouterr().out
 
 
-class TestLegsLimit:
-    """Added for the status screen, but `legs` keeps its own default of ALL.
+class TestTasksLimit:
+    """Added for the status screen, but `tasks` keeps its own default of ALL.
 
     Truncating a death log by default would hide the row being looked for.
     """
 
     def test_the_default_hides_nothing(self):
         rows = [{"n": i} for i in range(30)]
-        assert legs._result(rows, None, 0)["rows"] == rows
+        assert tasks._result(rows, None, 0)["rows"] == rows
 
     def test_a_limit_keeps_the_most_recent_and_counts_the_rest(self):
         rows = [{"n": i} for i in range(30)]
-        result = legs._result(rows, None, 4)
+        result = tasks._result(rows, None, 4)
         assert [row["n"] for row in result["rows"]] == [26, 27, 28, 29]
         assert result["hidden_rows"] == 26

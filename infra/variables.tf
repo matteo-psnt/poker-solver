@@ -56,7 +56,7 @@ variable "max_nodes" {
       4 x D8als_v6  ~$1.60/hr  ~$38/day   (blows a $250 budget in ~6 days)
       4 x D16als_v6 ~$3.20/hr  ~$77/day   (~3 days)
 
-    Raised to 4 once a real leg completed end to end (30M iterations, 2.64 h,
+    Raised to 4 once a real task completed end to end (30M iterations, 2.64 h,
     no failures), which was the stated condition. 4 x D16als_v6 = 64 vCPU
     against a 65 vCPU regional quota, so this is the ceiling the subscription
     allows at this size -- going higher needs a quota increase, not a variable.

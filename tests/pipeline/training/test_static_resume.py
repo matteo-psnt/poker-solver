@@ -122,7 +122,7 @@ class TestCheckpointAndResume:
         assert first.iterations == 200
         assert second.iterations == 400
         # Continued, not restarted: more of the tree is touched after the second
-        # leg than the first banked.
+        # task than the first banked.
         assert second.touched_rows >= first.touched_rows
 
     def test_retry_past_the_target_is_a_noop(self, tmp_path):
@@ -145,12 +145,12 @@ class TestCheckpointAndResume:
             abstraction=Buckets(),
         )
         # This is what makes an automatic scheduler retry safe rather than
-        # destructive: past the absolute target, the leg does nothing.
+        # destructive: past the absolute target, the task does nothing.
         assert again.iterations == 200
         assert again.elapsed_s == 0.0
 
     def test_resume_without_a_checkpoint_starts_fresh(self, tmp_path):
-        # A first leg asked to resume must not die on the missing manifest.
+        # A first task asked to resume must not die on the missing manifest.
         result = train_static_parallel(
             _config(),
             num_iterations=100,

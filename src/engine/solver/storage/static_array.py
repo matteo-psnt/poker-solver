@@ -58,8 +58,8 @@ def _detach_from_tracker(shm: shared_memory.SharedMemory) -> None:
         SEPARATE interpreter, SIGTERM or SIGKILL               -> DESTROYED
 
     So an ordinary worker is safe and anything holding its own tracker is not: a
-    second leg on the node, a probe, or a worker re-parented onto a fresh
-    tracker. A 50M leg died at 38,000,000 with all 16 workers of the next chunk
+    second task on the node, a probe, or a worker re-parented onto a fresh
+    tracker. A 50M task died at 38,000,000 with all 16 workers of the next chunk
     raising FileNotFoundError on segments that existed moments earlier -- this
     class of failure, however it was seeded. Unregistering makes attaching
     incapable of destroying, so who is attached stops mattering.
@@ -166,22 +166,22 @@ class StaticArrayStorage:
         return f"sts_{array[:4]}_{digest}"
 
     def _create_segment(self, array: str, size: int) -> shared_memory.SharedMemory:
-        """Create this session's segment, reclaiming one an earlier leg abandoned.
+        """Create this session's segment, reclaiming one an earlier task abandoned.
 
         POSIX shared memory outlives the process that made it. A coordinator
         killed without reaching :meth:`close` -- SIGKILL, an OOM, the wall-clock
         guard -- leaves its segments in ``/dev/shm``, and because the session id
-        IS the run id, the NEXT leg for that run computes the same names and dies
+        IS the run id, the NEXT task for that run computes the same names and dies
         on ``FileExistsError`` before doing any work. That breaks retry-safety
-        exactly where the design leans on it hardest: a leg is meant to be
+        exactly where the design leans on it hardest: a task is meant to be
         re-runnable to an absolute target, and a Batch retry lands on the same
         node by preference.
 
-        Reclaiming is safe because the name encodes the run: another leg holding
-        it is another leg training the SAME run, which is already incoherent --
+        Reclaiming is safe because the name encodes the run: another task holding
+        it is another task training the SAME run, which is already incoherent --
         two coordinators would interleave writes into one table and checkpoint
         over each other. So a name that is already taken means a dead predecessor,
-        not a live peer. Legs for different runs, or against a different tree,
+        not a live peer. Tasks for different runs, or against a different tree,
         hash to different names and are untouched.
         """
         name = self._shm_name(array)
@@ -189,7 +189,7 @@ class StaticArrayStorage:
             return shared_memory.SharedMemory(name=name, create=True, size=size)
         except FileExistsError:
             logger.warning(
-                "Reclaiming shared segment %s left behind by an earlier leg of session %r.",
+                "Reclaiming shared segment %s left behind by an earlier task of session %r.",
                 name,
                 self.session_id,
             )
@@ -199,7 +199,7 @@ class StaticArrayStorage:
             # directly, but it is 3.13+ and this project supports 3.12.)
             #
             # FileNotFoundError is not an error here: it means the segment vanished
-            # between the failed create and this attach (the dead leg's resource
+            # between the failed create and this attach (the dead task's resource
             # tracker getting there first), which is the outcome we wanted.
             try:
                 stale = shared_memory.SharedMemory(name=name, create=False)

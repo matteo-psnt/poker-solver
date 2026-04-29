@@ -1,6 +1,6 @@
 # Fire-and-forget training on Azure Batch
 
-Submit experiment legs and walk away. The pool holds **zero nodes at rest** —
+Submit experiment tasks and walk away. The pool holds **zero nodes at rest** —
 nodes appear while work is queued and disappear when it drains. There is nothing
 to start, nothing to remember to stop, and no idle compute bill.
 
@@ -80,7 +80,7 @@ poker-solver submit --run run-20260728_011716-ca70cf --to 50000000  # continue
 
 poker-solver jobs                 # live tasks (--all for finished jobs)
 poker-solver pool-status          # nodes + the REAL cause of any allocation failure
-poker-solver logs --task <task>   # the published leg log; --list to enumerate
+poker-solver logs --task <task>   # the published task log; --list to enumerate
 poker-solver logs --task <task> --source node --job <job>   # live, node-side
 poker-solver cancel --job <job> --task <task>
 poker-solver score --run <id> --at 10000000,20000000 -- --br-flops 8
@@ -110,20 +110,20 @@ Two things worth knowing at the seams:
 retry safe: a retried task re-reads a newer checkpoint and converges on the same
 endpoint instead of compounding an increment.
 
-## How a leg survives being killed
+## How a task survives being killed
 
-`infra/run_leg.py` publishes to the share **every time a retained checkpoint rung
+`infra/run_task.py` publishes to the share **every time a retained checkpoint rung
 appears**, and again on any exit — success, failure, or cancellation.
 
 The node's disk is ephemeral. Publishing only at the end would mean an OOM or a
-`maxWallClockTime` kill destroys a multi-hour leg entirely, which is the same
+`maxWallClockTime` kill destroys a multi-hour task entirely, which is the same
 failure as `REBUILD.md` Decision 5 in a new form. With rung publishing, a killed
 task loses at most one rung interval and the next attempt resumes from the last
 published rung.
 
-## How you find out *why* a leg died
+## How you find out *why* a task died
 
-`poker-solver legs`.
+`poker-solver tasks`.
 
 A run's `.run.json` records what a *living* process did. It structurally cannot
 record how an attempt died: a container killed by the OOM killer, by
@@ -132,7 +132,7 @@ Batch sees those deaths — but retains them for far less time than the run live
 
 So the record is written from both sides, into `<share>/legs/`:
 
-- **The node's own account.** `run_leg.py` writes `<task>.<attempt>.start.json`
+- **The node's own account.** `run_task.py` writes `<task>.<attempt>.start.json`
   at entry and `<task>.<attempt>.exit.json` from its `finally`. This covers every
   death the wrapper survives, and is the only side that can tell a *hang*
   (`RUN_TIMEOUT`, exit 124) from an *OOM* (exit 137) from a *cancel* (SIGTERM,
@@ -140,26 +140,26 @@ So the record is written from both sides, into `<share>/legs/`:
   is what the bash version could not do: its EXIT trap read `$?` as zero when the
   shell was killed while blocked on a child, so `cancel` recorded clean
   completions that were never reconciled.
-- **Batch's account.** `poker-solver legs` asks about legs still stuck at `started` —
+- **Batch's account.** `poker-solver tasks` asks about tasks still stuck at `started` —
   precisely the ones whose exit record never landed — and writes
   `<task>.observed.json`.
 
 Numbered by attempt because a Batch retry reuses the task id and Batch describes
 only the latest attempt; without the number the retry would erase the failed
 attempt that caused it. Separate start/exit files because `write_text` truncates,
-so a kill mid-write would otherwise make the leg vanish from the listing
+so a kill mid-write would otherwise make the task vanish from the listing
 entirely — in exactly the SIGKILL window this exists for.
 
-`src/shared/leg_log.py` and all of `src/shared/node/` import **only the standard
+`src/shared/task_log.py` and all of `src/shared/node/` import **only the standard
 library** and stay **Python 3.10 compatible**, on purpose: the node runs them
 with its system `python3` — 3.10 on the pinned Ubuntu 22.04 image — before
 `uv sync` has run. `tests/shared/node/test_node_interpreter.py` enforces both by
 importing the whole package on a real 3.10 (`uv run --python 3.10
 --no-project`), because the substring scan that preceded it could not catch
-`datetime.UTC`: it passed every test and silently disabled leg records on the
+`datetime.UTC`: it passed every test and silently disabled task records on the
 only machine that runs them.
 
-`poker-solver legs --skip-reconcile` reads the share without querying Batch,
+`poker-solver tasks --skip-reconcile` reads the share without querying Batch,
 and `poker-solver logs --task <task>` prints a published log. There is no
 severity flag —
 the format is greppable on purpose, so `| grep -E ' (WARN|ERROR|CRIT) '`
@@ -192,7 +192,7 @@ work. Read them that way — most of them do not stop anything by themselves.
 1. **`max_nodes`.** Nothing can burn faster than `max_nodes` x the per-node rate.
    At the default 2 x D8als_v6 that is ~$0.80/hr, ~$19/day. This is the control
    that makes the worst case finite, and it is why the default is deliberately
-   low until a real leg has run end to end.
+   low until a real task has run end to end.
 2. **Policy denials — preventive, zero lag.** A VM outside the SKU or region
    whitelist is rejected at request time.
 
@@ -232,7 +232,7 @@ work. Read them that way — most of them do not stop anything by themselves.
    $250 budget is about two weeks of a total runaway.
 
 **When something is wrong:** `just panic <rg> <account> <pool>` terminates every job and forces the
-pool to zero, killing running tasks rather than waiting. Whatever a leg published
+pool to zero, killing running tasks rather than waiting. Whatever a task published
 up to its last retained rung survives, and
 `poker-solver submit --run <id> --to <n>` picks it up.
 

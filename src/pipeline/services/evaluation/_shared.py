@@ -38,7 +38,7 @@ class EvaluationOutput:
     results: dict[str, Any]
     # Which checkpoint was actually scored, from the manifest committed atomically
     # with the arrays. Without it a stale read -- evaluating a checkpoint written
-    # before a still-running leg's newer one -- is indistinguishable from a real
+    # before a still-running task's newer one -- is indistinguishable from a real
     # result, which is exactly how a 10M-iteration checkpoint was once silently
     # reported as the score of a 16M-iteration run. None only for pre-manifest runs.
     checkpoint_iteration: int | None = None

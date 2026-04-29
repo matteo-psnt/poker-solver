@@ -2,7 +2,7 @@
 
 Three commands already answer a third of the question each, and answering it
 meant running all three and holding the join in your head: ``pool-status`` says
-how many nodes exist, ``jobs`` says what Batch is running, and ``legs`` is the
+how many nodes exist, ``jobs`` says what Batch is running, and ``tasks`` is the
 only one that can say why something DIED -- the run log cannot record a death
 because the container is gone first.
 
@@ -17,8 +17,8 @@ blank the board.
 
 **Panels are fetched concurrently**, because they are not equally cheap.
 Measured against the live pool: ``pool-status`` 0.9s warm, ``jobs`` ~11s (it
-issues one ``list_tasks`` call per job), ``legs`` 23s when it has unresolved
-legs to reconcile against Batch and 9.3s when it does not. Serially that is a
+issues one ``list_tasks`` call per job), ``tasks`` 23s when it has unresolved
+tasks to reconcile against Batch and 9.3s when it does not. Serially that is a
 ~35s screen; concurrently it is however long the slowest panel takes. This is
 also why ``--watch`` has a floor: a tick that cannot finish before the next one
 starts is not a refresh interval, it is a queue.
@@ -40,14 +40,14 @@ from typing import Any
 
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
-from src.interfaces.commands import jobs, legs, pool_status
+from src.interfaces.commands import jobs, pool_status, tasks
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 
 PANELS: tuple[tuple[str, Command], ...] = (
     ("pool", pool_status.COMMAND),
     ("jobs", jobs.COMMAND),
-    ("legs", legs.COMMAND),
+    ("tasks", tasks.COMMAND),
 )
 
 # Below the measured cost of a full cycle, a tick cannot finish before the next
@@ -70,10 +70,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--limit", type=int, default=10, help="Show only the last N jobs (0 = all)."
     )
     parser.add_argument(
-        "--no-legs",
+        "--no-tasks",
         action="store_true",
-        help="Skip the leg history. It is the slowest panel by a wide margin -- it "
-        "downloads the share's account and reconciles unresolved legs against "
+        help="Skip the task history. It is the slowest panel by a wide margin -- it "
+        "downloads the share's account and reconciles unresolved tasks against "
         "Batch -- and the only one that can explain a death.",
     )
 
@@ -98,7 +98,7 @@ def _panel(command: Command, **kwargs: Any) -> dict[str, Any]:
         return {"payload": None, "error": f"Azure did not answer: {error}"}
 
 
-def gather(*, limit: int = 10, with_legs: bool = True) -> dict[str, Any]:
+def gather(*, limit: int = 10, with_tasks: bool = True) -> dict[str, Any]:
     """Fetch every panel concurrently and return them keyed by name.
 
     The entry point for any surface that is not this command. Each panel builds
@@ -106,10 +106,10 @@ def gather(*, limit: int = 10, with_legs: bool = True) -> dict[str, Any]:
     threads; the concurrency is here rather than inside the panels because it
     is a property of showing them together, not of any one of them.
     """
-    wanted = [(name, command) for name, command in PANELS if with_legs or name != "legs"]
-    # `legs` defaults to the whole history on purpose (a death is the row worth
+    wanted = [(name, command) for name, command in PANELS if with_tasks or name != "tasks"]
+    # `tasks` defaults to the whole history on purpose (a death is the row worth
     # finding), but a screen meant to be glanced at cannot carry 200 rows.
-    arguments: dict[str, dict[str, Any]] = {"jobs": {"limit": limit}, "legs": {"limit": limit}}
+    arguments: dict[str, dict[str, Any]] = {"jobs": {"limit": limit}, "tasks": {"limit": limit}}
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
         futures = {
@@ -138,26 +138,26 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     never runs, which is right: a machine consumer polls on its own schedule.
     """
     interval = max(args.watch, MIN_INTERVAL) if args.watch else 0
-    snapshot = gather(limit=args.limit, with_legs=not args.no_legs)
+    snapshot = gather(limit=args.limit, with_tasks=not args.no_tasks)
     return {
         **snapshot,
         "watch": interval,
         "requested_watch": args.watch,
         "limit": args.limit,
-        "with_legs": not args.no_legs,
+        "with_tasks": not args.no_tasks,
     }
 
 
 PANEL_RENDERERS: dict[str, Any] = {
     "pool": pool_status.render,
     "jobs": jobs.render,
-    "legs": legs.render,
+    "tasks": tasks.render,
 }
 
 PANEL_TITLES: dict[str, str] = {
     "pool": "POOL",
     "jobs": "BATCH",
-    "legs": "LEGS",
+    "tasks": "TASKS",
 }
 
 
@@ -196,7 +196,7 @@ def render(payload: dict[str, Any]) -> None:
         while True:
             print(f"\nrefreshing every {interval}s — Ctrl-C to stop")
             time.sleep(interval)
-            snapshot = gather(limit=payload["limit"], with_legs=payload["with_legs"])
+            snapshot = gather(limit=payload["limit"], with_tasks=payload["with_tasks"])
             # Home the cursor and clear, rather than scrolling: this is meant to
             # be watched, and a scrolling log of identical tables is not.
             print("\033[H\033[J", end="")
@@ -207,7 +207,7 @@ def render(payload: dict[str, Any]) -> None:
 
 COMMAND = Command(
     name="status",
-    help="Pool, Batch and leg history on one screen (--watch to follow).",
+    help="Pool, Batch and task history on one screen (--watch to follow).",
     add_arguments=add_arguments,
     run=run,
     render=render,

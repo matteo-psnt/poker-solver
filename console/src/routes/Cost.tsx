@@ -6,13 +6,13 @@ import { count, since } from "@/lib/format";
 import { useMemo } from "react";
 
 /**
- * Node time, DERIVED from the leg log rather than recorded.
+ * Node time, DERIVED from the task log rather than recorded.
  *
  * The first version sampled the pool from inside this server, which meant it
  * only recorded while the server ran — 3% of a 24h window in practice, so the
- * totals were worthless however honestly they were labelled. Every leg already
+ * totals were worthless however honestly they were labelled. Every task already
  * writes its own start and end to the share, whether or not anything is
- * watching, so the history is complete back to the first leg and there is no
+ * watching, so the history is complete back to the first task and there is no
  * coverage caveat to make.
  */
 export function Cost() {
@@ -27,7 +27,7 @@ export function Cost() {
   }, [cost.data]);
 
   const data = cost.data;
-  const any = (data?.legs ?? 0) > 0;
+  const any = (data?.tasks ?? 0) > 0;
 
   return (
     <div className="space-y-3">
@@ -37,7 +37,7 @@ export function Cost() {
         staleAfterMs={180_000}
         error={errorOf(cost.error)}
         loading={cost.isLoading}
-        empty={data && !any ? "No legs have run yet." : null}
+        empty={data && !any ? "No tasks have run yet." : null}
         onRefresh={() => cost.refetch()}
         refreshing={cost.isFetching}
       >
@@ -47,7 +47,7 @@ export function Cost() {
               <Stat
                 label="node-hours"
                 value={data.task_hours.toFixed(1)}
-                note="time legs spent executing"
+                note="time tasks spent executing"
               />
               <Stat
                 label="estimated spend"
@@ -59,18 +59,18 @@ export function Cost() {
                 }
               />
               <Stat
-                label="legs"
-                value={count(data.legs)}
+                label="tasks"
+                value={count(data.tasks)}
                 note={`peak ${data.peak_concurrency} at once`}
               />
-              <Stat label="first leg" value={since(data.first_at)} note="start of the record" />
+              <Stat label="first task" value={since(data.first_at)} note="start of the record" />
             </div>
 
             <div className="px-2 pb-1">
-              <StepChart times={times} values={values} label="legs running" />
+              <StepChart times={times} values={values} label="tasks running" />
             </div>
             <p className="px-3 pb-3 text-[11px] text-[var(--fg-faint)]">
-              Legs running concurrently. The area under this curve is the node-hours above.
+              Tasks running concurrently. The area under this curve is the node-hours above.
             </p>
           </>
         )}
@@ -78,9 +78,9 @@ export function Cost() {
 
       <p className="max-w-[70ch] px-1 text-[12px] leading-relaxed text-[var(--fg-muted)]">
         A <strong className="font-medium text-[var(--fg)]">lower bound</strong>, not billed cost. It
-        counts the time legs were executing, taken from the leg log — so it is complete, but a node
-        is allocated a little before its task starts and released after it ends, and pool spin-up is
-        not free. The real allocation is somewhat higher, and{" "}
+        counts the time tasks were executing, taken from the task log — so it is complete, but a
+        node is allocated a little before its task starts and released after it ends, and pool
+        spin-up is not free. The real allocation is somewhat higher, and{" "}
         <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono text-[var(--fg)]">
           just credit-check
         </code>{" "}

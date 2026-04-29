@@ -94,12 +94,12 @@ class TestManifestMembers:
         assert share.manifest_members(MagicMock(), "share", "archive/run-a") == {"static-3000.zarr"}
 
 
-class TestLegReconcileSeam:
-    """`legs` feeds Batch's task records straight into `leg_log.reconcile`.
+class TestTaskReconcileSeam:
+    """`tasks` feeds Batch's task records straight into `task_log.reconcile`.
 
     The two were written against different shapes -- reconcile against the old
     `az batch task list` JSON, batch.py against its own vocabulary -- so the
-    reconcile path raised KeyError on the first unresolved leg and, past that,
+    reconcile path raised KeyError on the first unresolved task and, past that,
     silently matched nothing. Nothing caught it because each side was tested
     alone.
     """
@@ -119,7 +119,7 @@ class TestLegReconcileSeam:
             node_id = "tvmps_x"
 
         class _Task:
-            id, state = "leg-1", "BatchTaskState.COMPLETED"
+            id, state = "task-1", "BatchTaskState.COMPLETED"
             creation_time = None
             execution_info, node_info = _Exec(), _Node()
 

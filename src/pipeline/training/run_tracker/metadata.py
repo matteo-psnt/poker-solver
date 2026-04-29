@@ -240,11 +240,11 @@ class RunMetadata:
                     attempt.status = ended.get("status", "completed")
 
         # The live attempt's runtime is reported by `progress`, which lands more
-        # often than `attempt_ended` and is the only account a killed leg leaves.
+        # often than `attempt_ended` and is the only account a killed task leaves.
         if attempts and attempts[-1].status == "running":
             # Only the progress events belonging to THIS attempt: an unscoped
-            # scan hands a leg that died before its first checkpoint the
-            # PREVIOUS leg's runtime.
+            # scan hands a task that died before its first checkpoint the
+            # PREVIOUS task's runtime.
             since_last_start = events
             for position, event in enumerate(events):
                 if event.get(run_events.EVENT_KEY) == run_events.ATTEMPT_STARTED:

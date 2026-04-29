@@ -199,7 +199,7 @@ def _extend_ladder(
 
     Append-only, and preserved even when a later call passes ``retain_every=0``:
     a resume whose caller forgot the knob must not delete measurement points an
-    earlier leg was told to keep.
+    earlier task was told to keep.
     """
     ladder: list[dict] = list(previous.retained) if previous else []
     if retain_every <= 0:

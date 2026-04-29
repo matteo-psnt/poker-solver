@@ -32,7 +32,7 @@ from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.identity import AzureCliCredential
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.spec import LegSpec, daily_job_id, leg_command, suffixed_job_id
+from src.interfaces.cloud.spec import TaskSpec, daily_job_id, suffixed_job_id, task_command
 
 # Batch calls are latency-bound round trips, not work, so independent ones are
 # worth issuing together. 16 matches the share downloader.
@@ -62,7 +62,7 @@ def client(config: CloudConfig) -> BatchClient:
 def _task_record(task: Any) -> dict[str, Any]:
     """One task, in this project's vocabulary rather than Batch's.
 
-    Everything `leg_log.reconcile` needs to explain a leg the node never got to
+    Everything `task_log.reconcile` needs to explain a task the node never got to
     account for: `result` separates a task that finished from one that merely
     stopped, and the timestamps bound a death the EXIT trap could not report.
     """
@@ -70,10 +70,6 @@ def _task_record(task: Any) -> dict[str, Any]:
     return {
         "task": task.id,
         "state": str(task.state) if task.state else None,
-        # When it was SUBMITTED, which is the only thing that can order a queue:
-        # a task waiting for a node has no start time, so without this the
-        # pending half of the pool cannot be put in the order it will run.
-        # Free -- it is already in the response being parsed.
         "created": _isoformat(task.creation_time),
         "result": str(execution.result) if execution is not None and execution.result else None,
         "exit_code": execution.exit_code if execution is not None else None,
@@ -124,7 +120,7 @@ def attach_tasks(
 
     ``exit_code`` is surfaced beside ``state`` because a task that completed is
     not necessarily a task that succeeded, and the two together are what tells
-    a drained pool from a failed leg.
+    a drained pool from a failed task.
     """
     wanted = [job for job in jobs if want is None or want(job)]
     if not wanted:
@@ -250,21 +246,21 @@ def _create_job(batch: BatchClient, job_id: str, pool_id: str) -> None:
         return
 
 
-def submit_leg(
+def submit_task(
     batch: BatchClient,
     job_id: str,
     task_id: str,
-    spec: LegSpec,
+    spec: TaskSpec,
     *,
     max_wall_clock: timedelta = TASK_MAX_WALL_CLOCK,
     retries: int = TASK_RETRIES,
 ) -> None:
-    """Queue one leg as a Batch task.
+    """Queue one task as a Batch task.
 
     ``max_wall_clock`` is the only thing standing between a hung task and
     indefinite billing: the pool scales down on pending-task count, so a task
     that never exits keeps its node alive forever. It is deliberately far above
-    any real leg and far below a month of compute, and it is the outer of two
+    any real task and far below a month of compute, and it is the outer of two
     nested ceilings -- ``RUN_TIMEOUT`` kills the training process first and
     still runs the wrapper's publish trap, losing at most one rung interval.
 
@@ -276,7 +272,7 @@ def submit_leg(
         job_id,
         BatchTaskCreateOptions(
             id=task_id,
-            command_line=f"/bin/bash -c '{leg_command(spec.code_snapshot)}'",
+            command_line=f"/bin/bash -c '{task_command(spec.code_snapshot)}'",
             environment_settings=[
                 EnvironmentSetting(name=name, value=value)
                 for name, value in spec.environment().items()

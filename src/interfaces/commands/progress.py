@@ -54,10 +54,10 @@ def render(payload: dict[str, Any]) -> None:
     version = f"v{span[0]}" if span[0] == span[1] else f"v{span[0]}-v{span[1]} (mixed)"
     print(f"Progress for {payload['run_id']}")
     print(f"  {payload['total_rows']} checkpoints, schema {version}; showing {len(rows)}")
-    # it/s and leg time are per LEG: a resumed leg restarts its clock, so these
-    # compare within a leg, not across the run.
+    # it/s and task time are per LEG: a resumed task restarts its clock, so these
+    # compare within a task, not across the run.
     print(
-        f"    {'iteration':>12}{'coverage':>10}{'visits':>9}{'it/s':>8}{'leg time':>10}{'ckpt s':>8}"
+        f"    {'iteration':>12}{'coverage':>10}{'visits':>9}{'it/s':>8}{'task time':>10}{'ckpt s':>8}"
     )
     for row in rows:
         print(
@@ -65,7 +65,7 @@ def render(payload: dict[str, Any]) -> None:
             f"{_pct(row.get('coverage')):>10}"
             f"{_num(row.get('mean_visits_per_touched'), '{:.1f}'):>9}"
             f"{_num(row.get('iters_per_sec'), '{:.0f}'):>8}"
-            f"{_num(row.get('leg_elapsed_s'), '{:.0f}s'):>10}"
+            f"{_num(row.get('task_elapsed_s'), '{:.0f}s'):>10}"
             f"{_num(row.get('checkpoint_seconds'), '{:.1f}'):>8}"
         )
     plateau = payload.get("coverage_plateau_iteration")

@@ -1,4 +1,4 @@
-import { useCurve, useLegs, useProgress, useRun } from "@/api/queries";
+import { useCurve, useProgress, useRun, useTasks } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
@@ -7,13 +7,13 @@ import {
   clock,
   count,
   duration,
-  legLabel,
   mbb,
   percent,
   rate,
   runLabel,
   since,
   span,
+  taskLabel,
 } from "@/lib/format";
 import { timelineBars } from "@/lib/timeline";
 import { cn } from "@/lib/utils";
@@ -64,7 +64,7 @@ export function RunDetail() {
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 p-3 sm:grid-cols-3 lg:grid-cols-5">
             <Stat label="config" value={run.data.config_name ?? "—"} />
             <Stat label="iterations" value={count(run.data.iterations)} />
-            <Stat label="attempts" value={count(run.data.attempts)} />
+            <Stat label="training tasks" value={count(run.data.training_tasks)} />
             <Stat label="compute time" value={duration(run.data.runtime_seconds)} />
             <div>
               <Label>status</Label>
@@ -121,7 +121,7 @@ export function RunDetail() {
         </Panel>
       </div>
 
-      <RunLegs runId={runId} />
+      <RunTasks runId={runId} />
     </div>
   );
 }
@@ -273,14 +273,14 @@ const BAR_TONE: Record<string, string> = {
 };
 
 /**
- * The run's legs against one shared time axis.
+ * The run's tasks against one shared time axis.
  *
- * The table below says what each leg did; this says how they relate. Gaps
+ * The table below says what each task did; this says how they relate. Gaps
  * between bars are days nothing touched the run, overlapping bars are attempts
- * that ran at once, and a short red bar is a leg that died early — none of
+ * that ran at once, and a short red bar is a task that died early — none of
  * which is visible reading down a column of timestamps.
  */
-function LegTimeline({ timeline }: { timeline: ReturnType<typeof timelineBars> }) {
+function TaskTimeline({ timeline }: { timeline: ReturnType<typeof timelineBars> }) {
   if (!timeline) return null;
   return (
     <div className="space-y-1 px-3 py-2">
@@ -294,7 +294,7 @@ function LegTimeline({ timeline }: { timeline: ReturnType<typeof timelineBars> }
               className={cn(
                 "absolute inset-y-0 rounded-sm",
                 BAR_TONE[bar.tone] ?? BAR_TONE.muted,
-                // A running leg has no right edge yet, so it is striped rather
+                // A running task has no right edge yet, so it is striped rather
                 // than drawn as if it had finished at this instant.
                 bar.running && "animate-pulse",
               )}
@@ -313,34 +313,34 @@ function LegTimeline({ timeline }: { timeline: ReturnType<typeof timelineBars> }
 }
 
 /**
- * The legs that built this run.
+ * The tasks that built this run.
  *
- * Filtered client-side from the full leg log rather than read from
- * `runinfo.legs`, which comes back EMPTY for runs whose records predate that
- * field — including the production run. The leg log is the durable account, so
+ * Filtered client-side from the full task log rather than read from
+ * `runinfo.tasks`, which comes back EMPTY for runs whose records predate that
+ * field — including the production run. The task log is the durable account, so
  * it is the one to join against.
  *
- * The join is `leg.run_id`, and it crosses daily jobs: a run outlives the job
- * its legs happen to land in, so grouping by job here would split one lineage
+ * The join is `task.run_id`, and it crosses daily jobs: a run outlives the job
+ * its tasks happen to land in, so grouping by job here would split one lineage
  * across three headings for a reason that is purely about scheduling.
  */
-function RunLegs({ runId }: { runId: string }) {
-  const legs = useLegs(0);
+function RunTasks({ runId }: { runId: string }) {
+  const tasks = useTasks(0);
   const now = Date.now();
-  const mine = (legs.data?.rows ?? []).filter((row) => row.run_id === runId).reverse();
+  const mine = (tasks.data?.rows ?? []).filter((row) => row.run_id === runId).reverse();
   const ops = [...new Set(mine.map((row) => row.op).filter(Boolean))];
   const timeline = useMemo(() => timelineBars(mine, now), [mine, now]);
 
   return (
     <Panel
-      title="Legs"
-      updatedAt={legs.dataUpdatedAt}
+      title="Tasks"
+      updatedAt={tasks.dataUpdatedAt}
       staleAfterMs={180_000}
-      error={errorOf(legs.error)}
-      loading={legs.isLoading}
-      empty={legs.data && mine.length === 0 ? "No legs recorded for this run." : null}
-      onRefresh={() => legs.refetch()}
-      refreshing={legs.isFetching}
+      error={errorOf(tasks.error)}
+      loading={tasks.isLoading}
+      empty={tasks.data && mine.length === 0 ? "No tasks recorded for this run." : null}
+      onRefresh={() => tasks.refetch()}
+      refreshing={tasks.isFetching}
     >
       {mine.length > 0 && (
         <>
@@ -350,7 +350,7 @@ function RunLegs({ runId }: { runId: string }) {
             {timeline &&
               ` · over ${span(new Date(timeline.from).toISOString(), null, timeline.to)}`}
           </p>
-          <LegTimeline timeline={timeline} />
+          <TaskTimeline timeline={timeline} />
           <Table>
             <thead>
               <tr>
@@ -368,12 +368,12 @@ function RunLegs({ runId }: { runId: string }) {
                 <tr key={`${row.task_id}-${row.attempt}`}>
                   <Td mono>
                     <Link
-                      to="/legs/$taskId"
+                      to="/tasks/$taskId"
                       params={{ taskId: row.task_id }}
                       title={row.task_id}
                       className="hover:underline"
                     >
-                      {legLabel(row.task_id)}
+                      {taskLabel(row.task_id)}
                     </Link>
                   </Td>
                   <Td right className="text-[var(--fg-faint)]">

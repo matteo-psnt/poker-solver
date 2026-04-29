@@ -94,7 +94,7 @@ def train_static(
             shared and there are no per-worker maps, so raising it does not
             raise memory.
         num_iterations: ABSOLUTE iteration target. Continuing past it is a
-            no-op, so a retried leg converges rather than repeating.
+            no-op, so a retried task converges rather than repeating.
         checkpoint_every: Checkpoint every N iterations (0 = only at the end).
             The bound on what a killed run loses, traded against disk and write
             time: a full table is written each time. At 250k the writes were

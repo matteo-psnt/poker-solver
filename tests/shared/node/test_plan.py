@@ -2,7 +2,7 @@
 
 The shell version of this was untestable in principle: the decoding lived in a
 `python3 -c` heredoc feeding a NUL-separated temp file feeding `read -d ''`,
-and the only way to know whether an override survived was to run a leg.
+and the only way to know whether an override survived was to run a task.
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ class TestTrainArgv:
 
     def test_workers_is_always_passed(self):
         """Omitting it trained single-threaded on a 16-vCPU node: `train-static`
-        defaults to 1, so the miss reads as a slow leg, not a misconfiguration."""
+        defaults to 1, so the miss reads as a slow task, not a misconfiguration."""
         assert "--workers" in _plan().train_argv()
 
     def test_an_empty_worker_count_falls_back_to_the_node_cpus(self, monkeypatch):
@@ -113,32 +113,32 @@ class TestTrainArgv:
     def test_a_fresh_run_id_is_derived_from_the_task(self, monkeypatch):
         """A Batch retry keeps the task id, so it continues this run rather
         than starting a second one from zero."""
-        monkeypatch.setenv("AZ_BATCH_TASK_ID", "leg-120000-7")
-        assert _plan(RUN_ID="").train_run_id == "run-leg-120000-7"
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "task-120000-7")
+        assert _plan(RUN_ID="").train_run_id == "run-task-120000-7"
 
 
 class TestEvaluateArgv:
     def test_each_rung_is_its_own_command(self):
-        leg = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_AT="1000,2000")
-        assert leg.eval_rungs == ("1000", "2000")
-        assert leg.evaluate_argv("1000")[-2:] == ["--at", "1000"]
+        task = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_AT="1000,2000")
+        assert task.eval_rungs == ("1000", "2000")
+        assert task.evaluate_argv("1000")[-2:] == ["--at", "1000"]
 
     def test_no_rung_means_the_latest_checkpoint(self):
-        leg = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_AT="")
-        assert leg.eval_rungs == ()
-        assert "--at" not in leg.evaluate_argv("")
+        task = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_AT="")
+        assert task.eval_rungs == ()
+        assert "--at" not in task.evaluate_argv("")
 
     def test_the_method_defaults_to_the_zero_variance_gate(self):
-        leg = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_METHOD="")
-        assert leg.evaluate_argv("")[-1] == "exact_br"
+        task = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_METHOD="")
+        assert task.evaluate_argv("")[-1] == "exact_br"
 
     def test_passthrough_flags_survive_a_space(self):
-        leg = _plan(
+        task = _plan(
             RUN_OP="evaluate",
             RUN_ID="run-a",
             RUN_EVAL_FLAGS_JSON=json.dumps(["--opponent", "always call"]),
         )
-        assert leg.evaluate_argv("")[-2:] == ["--opponent", "always call"]
+        assert task.evaluate_argv("")[-2:] == ["--opponent", "always call"]
 
     def test_trailing_commas_do_not_become_an_empty_rung(self):
         assert _plan(RUN_OP="evaluate", RUN_ID="r", RUN_EVAL_AT="1000,").eval_rungs == ("1000",)
@@ -149,9 +149,9 @@ class TestValidation:
         with pytest.raises(node_plan.BadEnvironmentError, match="unknown RUN_OP"):
             _plan(RUN_OP="trian")
 
-    def test_a_training_leg_without_a_config_is_refused(self):
+    def test_a_training_task_without_a_config_is_refused(self):
         """The config builds the tree and the solver; the checkpoint stores
-        neither, so a CONTINUING leg needs it too."""
+        neither, so a CONTINUING task needs it too."""
         with pytest.raises(node_plan.BadEnvironmentError, match="RUN_CONFIG"):
             _plan(RUN_CONFIG="")
 
@@ -183,17 +183,17 @@ class TestDuration:
 
     @pytest.mark.parametrize("raw", ["", None, "garbage", "0h", "-1"])
     def test_anything_unreadable_falls_back_to_the_default_ceiling(self, raw):
-        """A leg with no guard bills a full node-day before Batch acts."""
+        """A task with no guard bills a full node-day before Batch acts."""
         assert node_plan.parse_duration(raw) == node_plan.DEFAULT_TIMEOUT_SECONDS
 
 
 class TestTheSubmitterContract:
-    """`spec.LegSpec.environment` writes exactly what this reads."""
+    """`spec.TaskSpec.environment` writes exactly what this reads."""
 
     def test_every_key_the_submitter_emits_is_consumed(self):
         from src.interfaces.cloud import spec
 
-        emitted = set(spec.LegSpec(code_snapshot="s", config="p", to=1).environment())
+        emitted = set(spec.TaskSpec(code_snapshot="s", config="p", to=1).environment())
         source = pathlib.Path(str(node_plan.__file__)).read_text()
         unread = {key for key in emitted if key.startswith("RUN_") and key not in source}
         assert not unread, f"the submitter sets {sorted(unread)} and the node never reads it"
@@ -201,7 +201,7 @@ class TestTheSubmitterContract:
     def test_a_full_submission_round_trips(self):
         from src.interfaces.cloud import spec
 
-        leg = spec.LegSpec(
+        task = spec.TaskSpec(
             code_snapshot="snap",
             config="production",
             to=25_000_000,
@@ -211,7 +211,7 @@ class TestTheSubmitterContract:
             sets=("solver__dcfr=1.5", "system__note=two words"),
             workers=16,
         )
-        parsed = node_plan.parse_environment(leg.environment())
+        parsed = node_plan.parse_environment(task.environment())
         assert parsed.config == "production"
         assert parsed.to == 25_000_000
         assert parsed.run_id == "run-a"

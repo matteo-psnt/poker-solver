@@ -7,7 +7,7 @@ import pytest
 
 from src.pipeline.evaluation import ledger
 from src.pipeline.evaluation.lbr.hunl_local_best_response import LBRConfig
-from src.shared import leg_log
+from src.shared import task_log
 from tests.test_helpers import seed_ledger
 
 
@@ -278,12 +278,12 @@ class TestRebuildSkipsLegacyShapes:
         assert recovered == 0
 
 
-class TestEvalDocumentNamesItsLeg:
-    """Without a task id there is no key joining a number to the leg that made it.
+class TestEvalDocumentNamesItsTask:
+    """Without a task id there is no key joining a number to the task that made it.
 
     Correlating by timestamp is what fails here specifically: concurrent
     evaluations of ONE run have completely overlapping intervals, so every
-    document falls inside every leg's window.
+    document falls inside every task's window.
     """
 
     def _build(self, tmp_path):
@@ -300,15 +300,15 @@ class TestEvalDocumentNamesItsLeg:
         )
 
     def test_it_records_the_batch_task_that_produced_it(self, tmp_path, monkeypatch):
-        monkeypatch.setenv(leg_log.TASK_ID_ENV, "score-production-1095-150M-seed7-090456-18475")
+        monkeypatch.setenv(task_log.TASK_ID_ENV, "score-production-1095-150M-seed7-090456-18475")
         assert self._build(tmp_path)["task_id"].endswith("seed7-090456-18475")
 
     def test_off_a_node_it_is_empty_rather_than_a_placeholder(self, tmp_path, monkeypatch):
-        """An evaluation run anywhere else genuinely has no leg to point at."""
-        monkeypatch.delenv(leg_log.TASK_ID_ENV, raising=False)
+        """An evaluation run anywhere else genuinely has no task to point at."""
+        monkeypatch.delenv(task_log.TASK_ID_ENV, raising=False)
         assert self._build(tmp_path)["task_id"] == ""
 
     def test_the_ledger_row_carries_it_through(self, tmp_path, monkeypatch):
         """The index is derived from the document; a field it drops is unqueryable."""
-        monkeypatch.setenv(leg_log.TASK_ID_ENV, "t-1")
+        monkeypatch.setenv(task_log.TASK_ID_ENV, "t-1")
         assert ledger.ledger_row(self._build(tmp_path))["task_id"] == "t-1"

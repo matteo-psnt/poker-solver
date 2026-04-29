@@ -41,7 +41,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--timeout",
         default=PRECOMPUTE_TIMEOUT,
         help="Wall-clock ceiling on the precompute process. Longer than a training "
-        "leg's default: an exact-runout abstraction enumerates every canonical "
+        "task's default: an exact-runout abstraction enumerates every canonical "
         "board, which is the dominant cost and is independent of bucket count.",
     )
     parser.add_argument(
@@ -75,7 +75,7 @@ def target_name(abstraction_config: str) -> str:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    """Stage the tree and queue one precompute leg."""
+    """Stage the tree and queue one precompute task."""
     config = CloudConfig.load()
     existing = published_abstractions(config)
     target = target_name(args.config)
@@ -91,7 +91,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
-            spec.LegSpec(
+            spec.TaskSpec(
                 code_snapshot=snapshot,
                 op=spec.PRECOMPUTE,
                 config=args.config,

@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.ledger.tiers import _knob_hash
-from src.shared import leg_log
 from src.shared import records as record_store
+from src.shared import task_log
 from src.shared.gitinfo import get_git_commit, is_git_dirty
 
 LEDGER_SCHEMA_VERSION = record_store.REGISTRY["eval_ledger.jsonl"].version
@@ -103,14 +103,14 @@ def build_record(
         # real result. ``infosets`` was already being passed in and silently dropped.
         "checkpoint_iteration": checkpoint_iteration,
         "infosets": infosets,
-        # WHICH leg produced this number. Ambient, like the git commits above.
-        # Without it there is no key joining an eval document to the leg that
+        # WHICH task produced this number. Ambient, like the git commits above.
+        # Without it there is no key joining an eval document to the task that
         # wrote it: three evaluations of one checkpoint at three board seeds
-        # produced three documents and three legs with nothing connecting the
+        # produced three documents and three tasks with nothing connecting the
         # pairs, and correlating them by timestamp is exactly what fails here --
         # concurrent evals of one run have completely overlapping intervals.
-        # Empty off a node, where there is no leg to point at.
-        "task_id": leg_log.current_task_id(),
+        # Empty off a node, where there is no task to point at.
+        "task_id": task_log.current_task_id(),
         "knobs": knobs,
         "results": results,
         "result_path": payload_pointer(result_path, provenance.run_id),

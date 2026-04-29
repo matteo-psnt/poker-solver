@@ -1,4 +1,4 @@
-import { useJobs, useLegs, useRuns } from "@/api/queries";
+import { useJobs, useRuns, useTasks } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, shortState } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
@@ -15,12 +15,12 @@ const LIVE = new Set(["running", "preparing", "active"]);
  *
  * It lives in the run's own event log, written by the training process itself
  * — so it records what a LIVING process did and cannot record how an attempt
- * died. A leg killed by OOM, `maxWallClockTime`, SIGKILL or node loss is gone
+ * died. A task killed by OOM, `maxWallClockTime`, SIGKILL or node loss is gone
  * before it can write `finished`, and the run then claims `running` forever.
  * Four runs on this share have claimed it since 07-31.
  *
  * So the claim is cross-checked against Batch, which is the authority on what
- * is executing: a run is only `running` if one of its legs is a task Batch has
+ * is executing: a run is only `running` if one of its tasks is a task Batch has
  * live right now.
  */
 type Verdict = { label: string; tone: "live" | "warn" | "muted"; title: string } | null;
@@ -29,22 +29,22 @@ export function verdictFor(
   status: string | null,
   runName: string,
   liveRuns: Set<string>,
-  runsWithLegs: Set<string>,
+  runsWithTasks: Set<string>,
 ): Verdict {
   if ((status ?? "") !== "running") return null;
   if (liveRuns.has(runName)) {
-    return { label: "running", tone: "live", title: "a leg for this run is live in Batch" };
+    return { label: "running", tone: "live", title: "a task for this run is live in Batch" };
   }
-  if (runsWithLegs.has(runName)) {
+  if (runsWithTasks.has(runName)) {
     return {
       label: "abandoned",
       tone: "warn",
       title:
-        "the run log says running, nothing is executing, and none of its legs " +
+        "the run log says running, nothing is executing, and none of its tasks " +
         "reported a terminal cause — it died without cleanup",
     };
   }
-  // No leg records at all. Runs from before the leg log existed (its earliest
+  // No task records at all. Runs from before the task log existed (its earliest
   // record is 2026-08-02) have no observer half to reconcile against, so this
   // is an inference rather than a finding — hence the question mark.
   return {
@@ -52,17 +52,17 @@ export function verdictFor(
     tone: "muted",
     title:
       "the run log says running and nothing is executing, but this run predates " +
-      "the leg log so there is no record of how it ended",
+      "the task log so there is no record of how it ended",
   };
 }
 
 export function Runs() {
   const runs = useRuns();
   const jobs = useJobs(50);
-  const legs = useLegs(0);
+  const tasks = useTasks(0);
 
-  const { liveRuns, runsWithLegs } = useMemo(() => {
-    // Join on task id: Batch knows which TASKS are live, the leg log knows
+  const { liveRuns, runsWithTasks } = useMemo(() => {
+    // Join on task id: Batch knows which TASKS are live, the task log knows
     // which run each task belonged to. Neither can answer alone.
     const liveTasks = new Set(
       (jobs.data?.jobs ?? []).flatMap((job) =>
@@ -70,19 +70,19 @@ export function Runs() {
       ),
     );
     const live = new Set<string>();
-    const withLegs = new Set<string>();
-    for (const leg of legs.data?.rows ?? []) {
-      if (!leg.run_id) continue;
-      withLegs.add(leg.run_id);
-      if (liveTasks.has(leg.task_id)) live.add(leg.run_id);
+    const withTasks = new Set<string>();
+    for (const task of tasks.data?.rows ?? []) {
+      if (!task.run_id) continue;
+      withTasks.add(task.run_id);
+      if (liveTasks.has(task.task_id)) live.add(task.run_id);
     }
-    return { liveRuns: live, runsWithLegs: withLegs };
-  }, [jobs.data, legs.data]);
+    return { liveRuns: live, runsWithTasks: withTasks };
+  }, [jobs.data, tasks.data]);
 
   // Only claim a run is abandoned once BOTH cross-check sources have answered.
   // Before that every run would look abandoned, which is worse than saying
   // nothing: the page would cry wolf on every load.
-  const checked = Boolean(jobs.data && legs.data);
+  const checked = Boolean(jobs.data && tasks.data);
 
   return (
     <Panel
@@ -109,7 +109,7 @@ export function Runs() {
           <tbody>
             {runs.data.runs.map((run) => {
               const verdict = checked
-                ? verdictFor(run.status, run.name, liveRuns, runsWithLegs)
+                ? verdictFor(run.status, run.name, liveRuns, runsWithTasks)
                 : null;
               return (
                 <tr key={run.name}>

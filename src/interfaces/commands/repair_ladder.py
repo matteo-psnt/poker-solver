@@ -7,7 +7,7 @@ markers prevent, and deleting a multi-hour run whose data is mostly fine is
 absurd. So each rung is PROVEN instead: copied, loaded, and marked only if zarr
 can decompress every chunk. A rung that fails is left unmarked and named --
 corrupt data is then discovered once, here, rather than minutes deep into a
-scoring leg.
+scoring task.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     """Stage the tree and queue one ladder-verification task."""
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
-            spec.LegSpec(
+            spec.TaskSpec(
                 code_snapshot=snapshot,
                 op=spec.REPAIR_LADDER,
                 run_id=args.run,
