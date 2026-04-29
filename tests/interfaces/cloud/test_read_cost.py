@@ -19,8 +19,8 @@ from typing import Any, cast
 
 from azure.batch import BatchClient
 
-from src.interfaces.cli.commands import jobs
 from src.interfaces.cloud import batch, share
+from src.interfaces.commands import jobs
 
 
 def _as_client(fake: object) -> BatchClient:

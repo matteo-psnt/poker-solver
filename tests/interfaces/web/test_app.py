@@ -15,7 +15,7 @@ import pytest
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 from fastapi.testclient import TestClient
 
-from src.interfaces.cli.commands._base import Command
+from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.interfaces.web import app as web_app
 

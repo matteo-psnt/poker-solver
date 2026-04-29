@@ -12,7 +12,7 @@ a provider-specific reimplementation, and an agent drives it the same way. The
 web console is for a human reading, and it reaches these same commands through
 ``Command.invoke`` rather than reimplementing them.
 
-The subcommands live in :mod:`src.interfaces.cli.commands`, one module each.
+The subcommands live in :mod:`src.interfaces.commands`, one module each.
 This file only wires them up and decides how output is printed.
 """
 
@@ -23,7 +23,7 @@ import contextlib
 import json
 import sys
 
-from src.interfaces.cli.commands import COMMANDS
+from src.interfaces.commands import COMMANDS
 from src.interfaces.errors import CommandError
 from src.shared.jsonio import json_default
 from src.shared.log import configure_logging, pin_level_for_children

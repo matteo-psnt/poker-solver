@@ -29,7 +29,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.interfaces.cli.commands import (
+from src.interfaces.commands import (
     Command,
     cost,
     curve,

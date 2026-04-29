@@ -9,10 +9,10 @@ import numpy as np
 import pytest
 
 from src.interfaces.cli import headless
-from src.interfaces.cli.commands import _base
-from src.interfaces.cli.commands import compare as compare_cmd
-from src.interfaces.cli.commands import ledger as ledger_cmd
-from src.interfaces.cli.commands import train_static as train_static_cmd
+from src.interfaces.commands import _base
+from src.interfaces.commands import compare as compare_cmd
+from src.interfaces.commands import ledger as ledger_cmd
+from src.interfaces.commands import train_static as train_static_cmd
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import (
@@ -61,7 +61,7 @@ def test_no_command_writes_a_self_overwriting_result_file():
     itself -- a thirty-leg run kept one summary. The durable records are the
     run's event log and evals/ + the ledger.
     """
-    from src.interfaces.cli.commands import _base
+    from src.interfaces.commands import _base
 
     assert not hasattr(_base, "write_result")
 

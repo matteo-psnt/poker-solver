@@ -1,0 +1,45 @@
+"""The `push-code` subcommand: publish an immutable snapshot of the tree.
+
+Rarely needed directly. ``submit``, ``score`` and ``repair-ladder`` each
+snapshot the tree themselves, because pinning per submission is not optional --
+a push while a job is running must not change what that job is executing. This
+command exists for staging a snapshot deliberately, and for confirming what a
+snapshot would contain.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Any
+
+from src.interfaces.cloud import share, spec
+from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.commands._base import Command
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Flags for `poker-solver push-code`."""
+    parser.add_argument("--root", default=".", help="Tree to snapshot.")
+
+
+def run(args: argparse.Namespace) -> dict[str, Any]:
+    """Build and upload one snapshot; return its id."""
+    config = CloudConfig.load()
+    snapshot = share.publish_code_snapshot(
+        share.share_client(config), config.share_name, Path(args.root), spec.utcnow()
+    )
+    return {"op": "push-code", "code_snapshot": snapshot}
+
+
+def render(payload: dict[str, Any]) -> None:
+    print(payload["code_snapshot"])
+
+
+COMMAND = Command(
+    name="push-code",
+    help="Publish an immutable snapshot of the working tree; echoes its id.",
+    add_arguments=add_arguments,
+    run=run,
+    render=render,
+)
