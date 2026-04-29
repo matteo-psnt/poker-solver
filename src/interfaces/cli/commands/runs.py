@@ -21,7 +21,7 @@ from src.pipeline import services
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run runs`."""
+    """Flags for `poker-solver runs`."""
     parser.add_argument(
         "--limit", type=int, default=0, help="Show only the newest N runs (0 = all)."
     )

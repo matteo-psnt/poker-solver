@@ -57,7 +57,7 @@ MIN_INTERVAL = 30
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run status`."""
+    """Flags for `poker-solver status`."""
     parser.add_argument(
         "--watch",
         type=int,

@@ -27,7 +27,7 @@ PRECOMPUTE_TIMEOUT = "12h"
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run submit-precompute`."""
+    """Flags for `poker-solver submit-precompute`."""
     parser.add_argument(
         "--config", required=True, help="Abstraction config stem (e.g. ochs_gate_ochs)."
     )

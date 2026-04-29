@@ -12,7 +12,7 @@ from src.pipeline import services
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run precompute`."""
+    """Flags for `poker-solver precompute`."""
     parser.add_argument(
         "--config", required=True, help="Abstraction config stem (e.g. production)."
     )

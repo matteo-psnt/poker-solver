@@ -119,4 +119,4 @@ def render_queued(payload: dict[str, Any]) -> None:
     for task in payload["tasks"]:
         print(f"  queued:        {task}")
     count = len(payload["tasks"])
-    print(f"\n  {count} task(s) queued — walk away; watch with: poker-solver-run jobs")
+    print(f"\n  {count} task(s) queued — walk away; watch with: poker-solver jobs")

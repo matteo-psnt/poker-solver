@@ -1,7 +1,7 @@
 # Terraform lifecycle, the emergency stop, and shorthands for the Python CLI.
 #
-#   Terraform owns what EXISTS   (infra/*.tf)        -> just create
-#   poker-solver-run owns what HAPPENS (submissions) -> just submit / cli status
+#   Terraform owns what EXISTS   (infra/*.tf)     -> just create
+#   poker-solver owns what HAPPENS (submissions)  -> just submit / just cli status
 #
 # Dispatch used to live here as ~450 lines of `az` invocations. It is now
 # `src/interfaces/cloud/`, where a leg spec is a typed object a test can look
@@ -119,7 +119,7 @@ credit-check *flags:
     @python3 infra/credit_watch.py {{flags}}
 
 # --------------------------------------------------------------------------- #
-# shorthands for `poker-solver-run`
+# shorthands for `poker-solver`
 # --------------------------------------------------------------------------- #
 #
 # ONLY recipes that RESHAPE the call survive here. `submit`, `score` and
@@ -130,15 +130,15 @@ credit-check *flags:
 # `logs`, `cancel`, `pool-status`, `autoscale-check`, `push-code`, `push-data`,
 # `ledger`) are gone. They retyped a command without changing it, and they
 # answered "what can I do here?" with 13 of 26 -- a hand-maintained subset that
-# `poker-solver-run --help` already answers in full and cannot drift from.
+# `poker-solver --help` already answers in full and cannot drift from.
 # `just fetch` outlived the command it called by weeks for exactly that reason;
 # `tests/interfaces/cli/test_justfile_aliases.py` still guards what is left.
 
 # Any subcommand, with any flags. The escape hatch, so the list above does not
 # have to grow a recipe per flag: `just cli ledger --experiment exp-7`.
-[doc("Run any poker-solver-run subcommand. Args: cmd [flags...]")]
+[doc("Run any poker-solver subcommand. Args: cmd [flags...]")]
 cli *args:
-    uv run poker-solver-run {{args}}
+    uv run poker-solver {{args}}
 
 # Start or continue a run, to an ABSOLUTE iteration target.
 #
@@ -150,17 +150,17 @@ cli *args:
 #   just submit production 50000000 --run run-20260728_011716-ca70cf
 [doc("Start/continue a run to an ABSOLUTE target. Args: config to [flags...]")]
 submit config to *flags:
-    uv run poker-solver-run submit --config "{{config}}" --to "{{to}}" {{flags}}
+    uv run poker-solver submit --config "{{config}}" --to "{{to}}" {{flags}}
 
 # Score a published run on the pool, one task per rung.
 [doc("Score a published run. Args: run [flags...]")]
 score run *flags:
-    uv run poker-solver-run score --run "{{run}}" {{flags}}
+    uv run poker-solver score --run "{{run}}" {{flags}}
 
 # Verify a published static ladder, marking the rungs that load.
 [doc("Verify a published ladder. Args: run config")]
 repair-ladder run config:
-    uv run poker-solver-run repair-ladder --run "{{run}}" --config "{{config}}"
+    uv run poker-solver repair-ladder --run "{{run}}" --config "{{config}}"
 
 # --- console ---------------------------------------------------------------- #
 # The web console. Its toolchain is npm and lives entirely under `console/`;
@@ -177,7 +177,7 @@ console-build:
 
 # Build, then serve on http://127.0.0.1:8765.
 console: console-build
-    uv run poker-solver-run serve
+    uv run poker-solver serve
 
 # The server is SUPERVISED, not merely backgrounded. `serve &` plus a trap threw
 # away its exit status and interleaved its stderr into vite's, so a dead server
@@ -210,7 +210,7 @@ console-dev:
       consecutive=0
       while :; do
         started=$SECONDS
-        uv run poker-solver-run serve --port "$port" >>"$log" 2>&1 &
+        uv run poker-solver serve --port "$port" >>"$log" 2>&1 &
         child=$!
         rc=0; wait "$child" || rc=$?
         lived=$(( SECONDS - started ))

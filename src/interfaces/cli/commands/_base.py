@@ -34,7 +34,7 @@ from src.pipeline.evaluation.ledger import rebuild_ledger
 
 @dataclass(frozen=True)
 class Command:
-    """One `poker-solver-run` subcommand."""
+    """One `poker-solver` subcommand."""
 
     name: str
     add_arguments: Callable[[argparse.ArgumentParser], None]

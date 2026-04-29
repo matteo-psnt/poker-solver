@@ -22,7 +22,7 @@ from src.interfaces.cloud import dispatch, spec
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run score`."""
+    """Flags for `poker-solver score`."""
     parser.add_argument("--run", required=True, help="Published run id to score.")
     parser.add_argument(
         "--method",

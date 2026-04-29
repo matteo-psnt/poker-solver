@@ -19,7 +19,7 @@ from src.interfaces.cloud.config import CloudConfig
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run autoscale-check`. It takes none."""
+    """Flags for `poker-solver autoscale-check`. It takes none."""
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:  # noqa: ARG001

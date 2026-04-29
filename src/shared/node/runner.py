@@ -309,7 +309,7 @@ def _signal_group(process: subprocess.Popen, signum: int) -> None:
 
 
 def _cli(argv: list[str]) -> list[str]:
-    return ["uv", "run", "poker-solver-run", *argv]
+    return ["uv", "run", "poker-solver", *argv]
 
 
 def _train(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, str | None]:

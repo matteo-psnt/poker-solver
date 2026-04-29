@@ -1,12 +1,12 @@
 """Bare-format logging for the library layers (pipeline/engine).
 
 Library code must not ``print()``: it pollutes stdout that machine consumers
-(``poker-solver-run --json``) need clean. Modules log via
+(``poker-solver --json``) need clean. Modules log via
 ``logging.getLogger(__name__)`` instead, and every process entrypoint calls
 ``configure_logging()`` once.
 
 Records go to stderr, keeping stdout for payloads. That split is what makes
-``poker-solver-run --json | jq`` work.
+``poker-solver --json | jq`` work.
 
 TWO READERS, TWO FORMATS. Interactively the bare message is right. Captured --
 a cloud leg's log, a ``tee``, CI -- it is not: every severity renders

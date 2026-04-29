@@ -20,7 +20,7 @@ from src.interfaces.cloud import node_time
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run cost`."""
+    """Flags for `poker-solver cost`."""
     parser.add_argument(
         "--hours",
         type=float,

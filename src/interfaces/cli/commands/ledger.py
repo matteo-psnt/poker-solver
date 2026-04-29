@@ -15,7 +15,7 @@ from src.pipeline.evaluation import ledger as eval_ledger
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run ledger`."""
+    """Flags for `poker-solver ledger`."""
     parser.add_argument("--run", default=None, help="Filter to a single run id.")
     parser.add_argument("--experiment", default=None, help="Filter to one experiment id.")
     parser.add_argument(

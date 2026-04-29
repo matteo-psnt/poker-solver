@@ -29,7 +29,7 @@ from src.shared import leg_log
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run legs`."""
+    """Flags for `poker-solver legs`."""
     parser.add_argument(
         "--skip-reconcile",
         action="store_true",

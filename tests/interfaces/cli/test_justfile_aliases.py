@@ -1,6 +1,6 @@
 """The justfile's aliases are passthroughs, so they can silently outlive a command.
 
-`just fetch` called `poker-solver-run fetch`, which was deleted along with the
+`just fetch` called `poker-solver fetch`, which was deleted along with the
 local-storage path. Nothing noticed: a passthrough recipe is just a string, so
 it kept appearing in `just --list` as though it were a thing you could do, and
 failed only when someone typed it.
@@ -21,10 +21,10 @@ from src.interfaces.cli.commands import COMMANDS
 
 JUSTFILE = pathlib.Path(__file__).resolve().parents[3] / "justfile"
 
-# The passthrough form: `uv run poker-solver-run <cmd>`. `{{args}}` is the
+# The passthrough form: `uv run poker-solver <cmd>`. `{{args}}` is the
 # `cli` escape hatch, whose subcommand comes from the caller and cannot be
 # checked here.
-INVOCATION = re.compile(r"uv run poker-solver-run\s+([a-z][a-z-]*)")
+INVOCATION = re.compile(r"uv run poker-solver\s+([a-z][a-z-]*)")
 
 NAMES = sorted(command.name for command in COMMANDS)
 

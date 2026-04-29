@@ -22,7 +22,7 @@ EVAL_METHODS = ("lbr", "exact_br")
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run evaluate`."""
+    """Flags for `poker-solver evaluate`."""
     parser.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
     parser.add_argument(
         "--runs-dir", default=DEFAULT_RUNS_DIR, help="Base runs dir for id resolution."
