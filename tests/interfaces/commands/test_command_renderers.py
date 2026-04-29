@@ -242,6 +242,24 @@ PAYLOADS: dict[str, dict] = {
         "reconciled": 1,
         "rows": [
             {
+                "task_id": "train-production-1095-to150M-090456-1",
+                "attempt": 1,
+                "op": "train",
+                "what": "train ->150M",
+                "run_id": "run-production-025433-1095",
+                "cause": "running",
+                "exit_code": None,
+                "started_at": "2026-08-05T09:04:56+00:00",
+                "ended_at": None,
+                # A running task's bar. Absent on a finished one -- see below.
+                "progress": {"done": 38000000.0, "total": 150000000.0, "unit": "iterations"},
+                "workers": 16,
+                "units": 0.0,
+                # Seconds left, derived at read time from this task's own rate
+                # and the history of tasks that ran at the same width.
+                "eta_seconds": 9540.0,
+            },
+            {
                 "task_id": "prod-101010-1",
                 "attempt": 1,
                 "op": "train-static",
@@ -249,7 +267,7 @@ PAYLOADS: dict[str, dict] = {
                 "cause": "killed",
                 "exit_code": 137,
                 "ended_at": "2026-08-02T10:00:00Z",
-            }
+            },
         ],
     },
     "progress": {

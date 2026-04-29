@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Any
 
 from src.interfaces.commands._base import (
@@ -22,6 +23,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--overwrite", action="store_true", help="Recompute even if a complete abstraction exists."
     )
+    parser.add_argument(
+        "--progress-file",
+        default=None,
+        help="Write street completion here as it goes. Nothing reaches the output "
+        "directory until the build succeeds, so this is the only way a caller can "
+        "see the work advance.",
+    )
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -30,6 +38,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         args.config,
         num_workers=args.workers,
         overwrite=args.overwrite,
+        progress_file=Path(args.progress_file) if args.progress_file else None,
     )
     return {
         "op": "precompute",

@@ -17,6 +17,7 @@ there is no board clustering, no representative sampling, and no fallback.
 
 import logging
 import multiprocessing as mp
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -413,13 +414,25 @@ class PostflopPrecomputer:
 
         return labels, centers.shape[0], round(dispersion, 6)
 
-    def precompute_all(self, streets: list[Street] | None = None) -> DenseBucketer:
-        """Precompute all (or the given) postflop streets and return the bucketer."""
+    def precompute_all(
+        self,
+        streets: list[Street] | None = None,
+        on_street_done: Callable[[int, int], None] | None = None,
+    ) -> DenseBucketer:
+        """Precompute all (or the given) postflop streets and return the bucketer.
+
+        ``on_street_done`` is called with (completed, total) after each street.
+        Nothing is written to the output directory until :meth:`save`, so a
+        street boundary is the only moment this work becomes observable from
+        outside the process.
+        """
         if streets is None:
             streets = list(POSTFLOP_STREETS)
 
-        for street in streets:
+        for index, street in enumerate(streets, start=1):
             self.precompute_street(street)
+            if on_street_done is not None:
+                on_street_done(index, len(streets))
 
         return self.build_bucketer()
 

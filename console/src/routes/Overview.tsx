@@ -1,9 +1,10 @@
 import { useJobs, usePool, useTasks } from "@/api/queries";
+import type { TaskRow } from "@/api/schemas";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, exitMeaning, taskOutcome, taskTone } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { clock, count, since, span, taskLabel } from "@/lib/format";
+import { clock, count, duration, since, span, taskLabel } from "@/lib/format";
 import { type PoolShape, type Task, elapsed, poolShape } from "@/lib/pool";
 import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
@@ -24,6 +25,15 @@ export function Overview() {
     [jobs.data, pool.data],
   );
   const busy = shape.slots.filter((slot) => slot.task !== null).length;
+  // Batch knows which task holds a node; only the task log knows how far along
+  // it is. Neither can draw the bar alone.
+  const progress = useMemo(() => {
+    const byTask = new Map<string, TaskRow>();
+    for (const row of tasks.data?.rows ?? []) {
+      if (row.progress || row.eta_seconds != null) byTask.set(row.task_id, row);
+    }
+    return byTask;
+  }, [tasks.data]);
 
   return (
     <div className="space-y-3">
@@ -39,11 +49,14 @@ export function Overview() {
         {pool.data && (
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 p-3 sm:grid-cols-4">
             <Stat label="pool" value={pool.data.pool_id} mono />
+            {/* ALLOCATED against wanted -- machines that exist. The panel below
+                counts how many of them hold a task, which is a different fact
+                that used to be written the same way and read as a contradiction. */}
             <Stat
               label="nodes"
-              value={`${count(pool.data.current_dedicated_nodes)} / ${count(
+              value={`${count(pool.data.current_dedicated_nodes)} of ${count(
                 pool.data.target_dedicated_nodes,
-              )}`}
+              )} wanted`}
             />
             <Stat label="allocation" value={pool.data.allocation_state?.split(".").pop() ?? "—"} />
             <Stat label="vm size" value={pool.data.vm_size ?? "—"} mono />
@@ -59,9 +72,9 @@ export function Overview() {
       {/* Batch and the task log answer DIFFERENT questions; the panels sit
           together because neither is sufficient alone. */}
       <Panel
-        title={`Batch — ${busy} of ${shape.slots.length} node${
-          shape.slots.length === 1 ? "" : "s"
-        } busy${shape.queue.length > 0 ? `, ${shape.queue.length} queued` : ""}`}
+        title={`Tasks — ${busy} running${
+          shape.queue.length > 0 ? `, ${shape.queue.length} queued` : ""
+        }`}
         updatedAt={jobs.dataUpdatedAt}
         staleAfterMs={30_000}
         error={errorOf(jobs.error)}
@@ -72,7 +85,7 @@ export function Overview() {
       >
         {jobs.data && (shape.slots.length > 0 || shape.queue.length > 0) && (
           <>
-            <Pipeline shape={shape} busy={busy} now={now} />
+            <Pipeline shape={shape} busy={busy} now={now} progress={progress} />
             <History history={shape.history} />
           </>
         )}
@@ -152,10 +165,20 @@ const ROW = "grid grid-cols-[1.5rem_1fr_auto] items-center gap-3 px-3 py-1.5";
  * slot carries that at a fraction of the weight: a column of hollow dots is an
  * idle pool without a single filled rectangle.
  */
-function Pipeline({ shape, busy, now }: { shape: PoolShape; busy: number; now: number }) {
+function Pipeline({
+  shape,
+  busy,
+  now,
+  progress,
+}: {
+  shape: PoolShape;
+  busy: number;
+  now: number;
+  progress: Map<string, TaskRow>;
+}) {
   return (
     <div>
-      <SectionRow label="nodes" aside={`${busy}/${shape.slots.length} busy`} />
+      <SectionRow label="nodes" aside={`${busy} of ${shape.slots.length} busy`} />
       {shape.slots.map((slot) => (
         <div key={slot.index} className={cn(ROW, "border-b border-[var(--border)]/60")}>
           <Dot filled={slot.task !== null} />
@@ -166,7 +189,8 @@ function Pipeline({ shape, busy, now }: { shape: PoolShape; busy: number; now: n
               </span>
               {/* Elapsed answers "is this stuck"; the wall clock is what
                   correlates a slot with a line in a log or a task row. */}
-              <span className="tnum shrink-0 text-[11px] text-[var(--fg-faint)]">
+              <span className="tnum flex shrink-0 items-center gap-2 text-[11px] text-[var(--fg-faint)]">
+                <Bar row={progress.get(slot.task.task)} />
                 {elapsed(slot.task.start_time, now) || "—"}
                 {slot.task.start_time && ` · since ${clock(slot.task.start_time)}`}
               </span>
@@ -221,6 +245,43 @@ function Pipeline({ shape, busy, now }: { shape: PoolShape; busy: number; now: n
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * How far along a running task is, when its kind can say.
+ *
+ * Absent for a kind that cannot answer -- scoring one rung is opaque from
+ * outside it -- and absent is drawn as nothing rather than as an empty bar,
+ * because an empty bar reads as a task that is stuck rather than one that
+ * simply does not report.
+ *
+ * The phrase is in the tooltip rather than beside it: the unit is what makes
+ * the number mean something, but a row of them would crowd out the task name.
+ */
+function Bar({ row }: { row?: TaskRow }) {
+  const of = row?.progress;
+  const eta = row?.eta_seconds;
+  if (!of || of.total <= 0) {
+    // An ETA without a bar is still worth saying: a kind can know roughly how
+    // long its work takes without being able to report where it is inside one.
+    return eta != null ? <span className="tnum">{duration(eta)} left</span> : null;
+  }
+  const fraction = Math.max(0, Math.min(1, of.done / of.total));
+  return (
+    <span
+      className="flex items-center gap-1.5"
+      title={`${count(of.done)} / ${count(of.total)} ${of.unit}`}
+    >
+      <span className="h-1 w-16 overflow-hidden rounded-full bg-[var(--border)]">
+        <span
+          className="block h-full rounded-full bg-emerald-500/70"
+          style={{ width: `${fraction * 100}%` }}
+        />
+      </span>
+      <span className="tnum">{Math.round(fraction * 100)}%</span>
+      {eta != null && <span className="tnum">· {duration(eta)} left</span>}
+    </span>
   );
 }
 

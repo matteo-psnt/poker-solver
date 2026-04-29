@@ -53,6 +53,7 @@ EVENT_FINISHED = "finished"
 START_SUFFIX = ".start.json"
 EXIT_SUFFIX = ".exit.json"
 OBSERVED_SUFFIX = ".observed.json"
+PROGRESS_SUFFIX = ".progress.json"
 
 # Batch ``executionInfo.result`` / task state -> coarse exit cause. The dead
 # process cannot report these; Batch can. Note that FAILURE conflates an
@@ -128,6 +129,8 @@ def write_node_record(
     target_iteration: str = "",
     eval_at: str = "",
     eval_flags: tuple[str, ...] = (),
+    workers: int = 0,
+    units: float = 0.0,
     node_id: str = "",
     exit_code: int | None = None,
     cause: str | None = None,
@@ -163,6 +166,12 @@ def write_node_record(
         "target_iteration": target_iteration,
         "eval_at": eval_at,
         "eval_flags": list(eval_flags),
+        # What this task ACHIEVED and how wide it ran -- the two things an
+        # estimate for the next one needs. `units` is work done BY THIS TASK,
+        # not the counter's value: a task resuming at 140M and reaching 150M did
+        # 10M, and recording 150M would claim fifteen times its real throughput.
+        "workers": workers,
+        "units": units,
         "node_id": node_id,
         "event": event,
         "ts": _utcnow(),
@@ -172,6 +181,36 @@ def write_node_record(
     suffix = START_SUFFIX if event == EVENT_STARTED else EXIT_SUFFIX
     path = directory / f"{task_id}.{attempt}{suffix}"
     records.write_snapshot(path, record, records.REGISTRY[f"legs/*{suffix}"])
+    return path
+
+
+def write_progress_record(
+    share: str | os.PathLike[str],
+    *,
+    task_id: str,
+    progress: tasks.Progress,
+) -> Path:
+    """How far along a RUNNING task is. Overwritten, unlike start and exit.
+
+    Current state, not history: only the latest matters, and keeping every
+    sample would put one file per tick per task on a share where file COUNT is
+    what makes every read slow.
+
+    Torn writes are expected and tolerated rather than prevented -- SMB has no
+    atomic rename, and this is refreshed every couple of minutes anyway, so a
+    reader that cannot parse one sample simply shows the task with no bar.
+    Never worth failing a task over: see the caller, which swallows everything.
+    """
+    directory = tasks_dir(share)
+    directory.mkdir(parents=True, exist_ok=True)
+    record = {
+        "task_id": task_id,
+        "attempt": _latest_attempt(directory, task_id),
+        "progress": progress.as_record(),
+        "ts": _utcnow(),
+    }
+    path = directory / f"{task_id}{PROGRESS_SUFFIX}"
+    records.write_snapshot(path, record, records.REGISTRY[f"legs/*{PROGRESS_SUFFIX}"])
     return path
 
 
@@ -276,6 +315,14 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
         record = _load(path)
         if record and record.get("task_id"):
             observed[record["task_id"]] = record
+    # Progress is per TASK, not per attempt: a retry starts over and overwrites
+    # it, and a stale sample from a dead attempt would show a bar that cannot move.
+    running: dict[str, dict[str, Any]] = {}
+    for path in sorted(directory.glob(f"*{PROGRESS_SUFFIX}")):
+        record = _load(path)
+        if record and record.get("task_id"):
+            running[record["task_id"]] = record
+
     latest = {task: max(a for t, a in attempts if t == task) for task, _ in attempts}
 
     # Known to Batch but never recorded by the node -- killed before its first
@@ -314,11 +361,21 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "target_iteration": node.get("target_iteration", ""),
                 "eval_at": node.get("eval_at", ""),
                 "eval_flags": node.get("eval_flags", []),
+                "workers": node.get("workers", 0),
+                "units": (exit_record or {}).get("units", 0.0),
                 # One phrase saying what this task DID, derived here so the
                 # terminal and the console cannot word it differently.
                 "what": tasks.describe(node),
                 "cause": cause,
                 "cause_source": cause_source,
+                # Only for the attempt Batch is describing, and only while the
+                # task has not ended: a finished task showing "62%" is a sample
+                # that stopped arriving, not a task stuck at 62%.
+                "progress": (
+                    (running.get(task_id) or {}).get("progress")
+                    if attempt == latest.get(task_id) and cause not in TERMINAL_CAUSES
+                    else None
+                ),
                 # Not dict.get's default: the node record always carries the
                 # key and leaves it null, so a default would never be reached
                 # and the observer's code -- the only one a killed task has --
@@ -336,6 +393,9 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
     # ended_at then started_at, so a still-running task sorts beside the one it
     # followed rather than at the front.
     joined.sort(key=lambda r: (r.get("ended_at") or r.get("started_at") or "", r["task_id"]))
+    now = _utcnow()
+    for row in joined:
+        row["eta_seconds"] = tasks.remaining(row, joined, now)
     return joined
 
 
@@ -370,8 +430,11 @@ def format_table(rows: Iterable[dict[str, Any]]) -> str:
     """Compact fixed-width listing, one row per task."""
     # `what` rather than `op`: it IS the op for a task that recorded nothing more,
     # and the op plus what it was aimed at for one that did.
-    columns = ("task_id", "attempt", "what", "run_id", "cause", "exit_code", "ended_at")
-    materialised = [{c: _cell(r.get(c)) for c in columns} for r in rows]
+    columns = ("task_id", "attempt", "what", "run_id", "cause", "done", "left", "ended_at")
+    # `done` is the running task's bar in a terminal: a phrase, since a
+    # fixed-width table has nowhere to draw one, and it says what is being
+    # counted rather than only how much of it.
+    materialised = [{c: _cell(_derived(r, c)) for c in columns} for r in rows]
     if not materialised:
         return "  no task records on the share"
     widths = {c: max(len(c), *(len(r[c]) for r in materialised)) for c in columns}
@@ -379,6 +442,32 @@ def format_table(rows: Iterable[dict[str, Any]]) -> str:
     lines.append("  " + "  ".join("-" * widths[c] for c in columns))
     lines += ["  " + "  ".join(r[c].ljust(widths[c]) for c in columns) for r in materialised]
     return "\n".join(lines)
+
+
+def _derived(row: dict[str, Any], column: str) -> Any:
+    if column == "done":
+        progress = tasks.Progress.from_record(row.get("progress"))
+        return f"{progress.fraction:.0%} {progress.phrase}" if progress is not None else ""
+    if column == "left":
+        return _duration(row.get("eta_seconds"))
+    return row.get(column)
+
+
+def _duration(seconds: Any) -> str:
+    """`2h 14m`, `3m`, `40s`.
+
+    Seconds below a minute rather than `~0m`, which reads as "no estimate"
+    when it means "nearly done" -- the first probe finished in under a minute
+    and reported exactly that.
+    """
+    if not isinstance(seconds, int | float):
+        return ""
+    if seconds < 60:
+        return f"~{int(seconds)}s"
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return f"~{minutes}m"
+    return f"~{minutes // 60}h {minutes % 60}m"
 
 
 def _cell(value: Any) -> str:

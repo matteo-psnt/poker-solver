@@ -25,6 +25,7 @@ import abc
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar
 
@@ -105,6 +106,42 @@ def compact(value: float) -> str:
     return f"{value:g}"
 
 
+@dataclass(frozen=True)
+class Sample:
+    """What one finished task achieved, for predicting the next one.
+
+    A RATE, not a duration. A task training to 200M is not predicted by the
+    median duration of tasks that trained to 5M -- but their rate predicts it
+    fine, which is the whole reason this carries units as well as seconds.
+
+    ``workers`` because throughput scales with them, so a history that mixes
+    counts predicts nothing. Samples are MATCHED on it rather than divided by
+    it: scaling is sublinear and saturates -- 16 workers and 32 measured within
+    noise of each other past 10M iterations -- so normalising by dividing would
+    be confidently wrong in the range that matters.
+    """
+
+    units: float
+    seconds: float
+    workers: int = 0
+
+    @property
+    def rate(self) -> float:
+        return self.units / self.seconds if self.seconds > 0 else 0.0
+
+
+def comparable(history: Sequence[Sample], workers: int) -> list[Sample]:
+    """Past tasks worth predicting from: the same worker count if any ran at it.
+
+    Falling back to the whole history rather than refusing is deliberate. A
+    rough estimate beats none, and the first task at a new worker count would
+    otherwise never get one.
+    """
+    usable = [sample for sample in history if sample.seconds > 0]
+    matched = [sample for sample in usable if sample.workers == workers]
+    return matched or usable
+
+
 class TaskKind(abc.ABC):
     """One kind of work, and every way it differs from the others."""
 
@@ -112,6 +149,11 @@ class TaskKind(abc.ABC):
 
     name: ClassVar[TaskName]
     unit: ClassVar[str]
+    """A file this kind writes its own progress into, relative to the node's
+    scratch. Empty when the work is observable some other way -- training
+    through its checkpoint manifest -- and it is what the wrapper branches on,
+    so no caller has to know one kind's name."""
+    progress_file: ClassVar[str] = ""
     """Batch retries. Work cheap to repeat wants them -- training resumes from
     its last published rung, scoring is idempotent. Work with no
     partial-progress marker does not."""
@@ -151,24 +193,40 @@ class TaskKind(abc.ABC):
         """
 
     def estimate(
-        self, progress: Progress | None, elapsed: float, history: Sequence[float]
+        self,
+        progress: Progress | None,
+        elapsed: float,
+        history: Sequence[Sample] = (),
+        workers: int = 0,
     ) -> float | None:
         """Seconds remaining, or ``None`` when there is nothing to go on.
 
-        Two sources, preferring the task's own rate: once it has reported
-        progress it is measuring ITSELF, which beats any prior. Before that, the
-        median of past tasks of this kind -- which needs no tuning and sharpens
-        as history accumulates, unlike a hand-set constant.
+        Four sources, best first:
 
-        The 2% floor is not arbitrary: extrapolating from the first fraction of
-        a percent turns startup cost into a wildly wrong total.
+        1. The task's OWN rate. Once it has reported progress it is measuring
+           itself on the machine it is actually running on, at the worker count
+           it actually got -- which beats any prior, and needs no history.
+        2. The rate of comparable past tasks, against the work remaining. This
+           is why a sample carries units: it transfers across tasks of different
+           SIZE, where a median duration does not.
+        3. Their median duration, for a kind that cannot report progress at all
+           and so has no "remaining" to scale.
+        4. Nothing, said as ``None`` rather than guessed.
+
+        The 2% floor on (1) is not arbitrary: extrapolating from the first
+        fraction of a percent turns startup cost into a wildly wrong total.
         """
         if progress is not None and progress.fraction > 0.02 and elapsed > 0:
             return elapsed * (1.0 - progress.fraction) / progress.fraction
-        usable = [value for value in history if value > 0]
-        if not usable:
-            return None
-        return max(0.0, statistics.median(usable) - elapsed)
+
+        usable = comparable(history, workers)
+        rates = [sample.rate for sample in usable if sample.rate > 0]
+        if progress is not None and rates:
+            remaining = max(0.0, progress.total - progress.done)
+            return remaining / statistics.median(rates)
+        if usable:
+            return max(0.0, statistics.median([sample.seconds for sample in usable]) - elapsed)
+        return None
 
 
 class TrainTask(TaskKind):
@@ -285,16 +343,23 @@ class EvaluateTask(TaskKind):
     def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:
         """Rungs scored against rungs requested.
 
-        Reports only BETWEEN rungs, so a single-rung evaluation shows nothing
-        until it finishes -- which is most of them. Making the inside of one
-        rung legible needs the evaluator to count its own sampled boards; the
-        seam is here for when it does.
+        Counted from ZERO rather than reported only once the first rung lands.
+        A bar at 0 of 1 looks like nothing is happening, and for a single-rung
+        evaluation it will sit there until the end -- but it is what carries the
+        TOTAL, and the total is what lets an estimate scale a known rate to the
+        work actually asked for. Without it an evaluation can only be predicted
+        by the median duration of past ones, which is wrong the moment somebody
+        scores ten rungs instead of one.
+
+        Inside a single rung is still opaque. The exact-BR walk is recursive
+        over a public tree rather than a flat loop over sampled flops, so a
+        counter would have to live in the hot path -- a real cost for a bar.
         """
-        scored = state.get("scored")
         total = len(plan.eval_rungs)
-        if not isinstance(scored, int) or total <= 0:
+        if total <= 0:
             return None
-        return Progress(float(scored), float(total), self.unit)
+        scored = state.get("scored")
+        return Progress(float(scored if isinstance(scored, int) else 0), float(total), self.unit)
 
 
 class PrecomputeTask(TaskKind):
@@ -311,8 +376,14 @@ class PrecomputeTask(TaskKind):
         if not task.config:
             raise BadTaskError("a precompute task needs an abstraction config")
 
+    progress_file = "precompute-progress.json"
+
     def commands(self, plan: Any) -> list[list[str]]:
-        return [["precompute", "--config", plan.config, "--json"]]
+        argv = ["precompute", "--config", plan.config, "--json"]
+        # Where the build reports street completion, and where `sample` reads it
+        # back. Node-local: it is a heartbeat, not a record.
+        work = getattr(plan, "progress_path", "")
+        return [[*argv, "--progress-file", str(work)] if work else argv]
 
     def label(self, task: Any) -> str:
         return f"precompute-{task.config}"
@@ -321,12 +392,18 @@ class PrecomputeTask(TaskKind):
         return f"precompute {record.get('config') or ''}".strip()
 
     def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:  # noqa: ARG002
-        """Silent, and saying so is the point.
+        """Streets clustered, against streets to cluster.
 
-        Clustering runs street by street and could report each, but nothing
-        emits that yet. `None` renders as no bar; a bar frozen at zero looks
-        like a stuck task."""
-        return None
+        Coarse -- three streets means the bar moves twice -- but the river is
+        far the largest, so "2 of 3" is genuinely most of the way. Nothing
+        reaches the output directory until the build succeeds, so a street
+        boundary is the only moment this work is observable from outside the
+        process at all.
+        """
+        done, total = state.get("done"), state.get("total")
+        if not isinstance(done, int | float) or not isinstance(total, int | float) or total <= 0:
+            return None
+        return Progress(float(done), float(total), self.unit)
 
 
 def _subject(task: Any) -> str:
@@ -351,6 +428,61 @@ def _flag(flags: Any, name: str) -> str:
         if isinstance(item, str) and item.startswith(f"{name}="):
             return item.split("=", 1)[1]
     return ""
+
+
+def samples(rows: Sequence[Mapping[str, Any]], name: str) -> list[Sample]:
+    """Finished tasks of one kind, as throughput observations.
+
+    Only tasks that COMPLETED: a task killed at 40% took the wall clock of a
+    partial job and would drag every later estimate down. Only tasks that
+    recorded units, which excludes everything written before the record carried
+    them -- there is no way to reconstruct what those achieved.
+    """
+    found = []
+    for row in rows:
+        if row.get("op") != name or row.get("cause") != "completed":
+            continue
+        seconds = _seconds_between(row.get("started_at"), row.get("ended_at"))
+        units = row.get("units") or 0
+        if seconds > 0 and units > 0:
+            found.append(Sample(float(units), seconds, int(row.get("workers") or 0)))
+    return found
+
+
+def _seconds_between(start: Any, end: Any) -> float:
+    """Two ISO stamps to a duration, or 0 for anything unreadable."""
+    try:
+        return (
+            datetime.fromisoformat(str(end)) - datetime.fromisoformat(str(start))
+        ).total_seconds()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def remaining(
+    row: Mapping[str, Any], history: Sequence[Mapping[str, Any]], now: Any
+) -> float | None:
+    """Seconds left on a RUNNING task, or None when nothing can say.
+
+    The one place a caller needs: it finds the kind, reads the task's own
+    progress, builds the history that kind ran at this width, and asks.
+    """
+    found = kind_of(row.get("op"))
+    if found is None or row.get("cause") in {
+        "completed",
+        "failed",
+        "timeout",
+        "killed",
+        "cancelled",
+    }:
+        return None
+    elapsed = _seconds_between(row.get("started_at"), now)
+    return found.estimate(
+        Progress.from_record(row.get("progress")),
+        elapsed,
+        samples(history, str(row.get("op") or "")),
+        int(row.get("workers") or 0),
+    )
 
 
 def kind(name: Any) -> TaskKind:

@@ -75,6 +75,13 @@ export const taskRowSchema = z
     node_id: z.string().nullable().optional(),
     /** Derived server-side so the terminal and the console word it identically. */
     what: z.string().nullable().optional(),
+    /** Seconds left, derived server-side so both surfaces agree. */
+    eta_seconds: z.number().nullable().optional(),
+    /** Present only while a task is running and only if its kind can say. */
+    progress: z
+      .object({ done: z.number(), total: z.number(), unit: z.string() })
+      .nullable()
+      .optional(),
   })
   .passthrough();
 

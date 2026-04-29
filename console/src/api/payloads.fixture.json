@@ -473,6 +473,25 @@
     "rows": [
       {
         "attempt": 1,
+        "cause": "running",
+        "ended_at": null,
+        "eta_seconds": 9540.0,
+        "exit_code": null,
+        "op": "train",
+        "progress": {
+          "done": 38000000.0,
+          "total": 150000000.0,
+          "unit": "iterations"
+        },
+        "run_id": "run-production-025433-1095",
+        "started_at": "2026-08-05T09:04:56+00:00",
+        "task_id": "train-production-1095-to150M-090456-1",
+        "units": 0.0,
+        "what": "train ->150M",
+        "workers": 16
+      },
+      {
+        "attempt": 1,
         "cause": "killed",
         "ended_at": "2026-08-02T10:00:00Z",
         "exit_code": 137,

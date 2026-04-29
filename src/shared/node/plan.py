@@ -66,6 +66,9 @@ class TaskPlan:
     # answer appears while the task is alive.
     git_commit: str = ""
     git_dirty: str = ""
+    """Where a build writes its own progress, filled in by the wrapper because
+    only the node knows its scratch directory."""
+    progress_path: str = ""
 
     @property
     def train_run_id(self) -> str:

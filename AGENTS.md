@@ -55,10 +55,10 @@ definition: never a source of truth, never worth backing up.
   and nothing else: a task carries a config name plus `LegSpec.sets`.
 - `uv run poker-solver` — the single entrypoint, in three groups:
   - **see and dispatch** — `status`, `submit`, `score`, `submit-precompute`,
-    `jobs`, `logs`, `legs`, `cancel`, `pool-status`, `autoscale-check`,
+    `jobs`, `logs`, `tasks`, `cancel`, `pool-status`, `autoscale-check`,
     `push-code`, `push-data`.
     **`status` is the one screen for "what is the pool doing right now"** —
-    it composes `pool-status` + `jobs` + `legs` through `invoke()` and renders
+    it composes `pool-status` + `jobs` + `tasks` through `invoke()` and renders
     each with the command that owns it. Panels are fetched CONCURRENTLY and
     fail INDEPENDENTLY. **Read cost is a maintained property, not an accident**
     — `tests/interfaces/cloud/test_read_cost.py` pins it as call counts, since
@@ -67,7 +67,7 @@ definition: never a source of truth, never worth backing up.
     2); issue independent round trips together (47 task records serially was
     9.1s); and never sync `keys-*` key tables, which are the deleted dynamic
     backend's and were 37 of the 38 MB a share read pulled. Measured warm
-    before → after: `jobs` 11s → 2.5s, `legs` 23s → 2.0s, `ledger` 20s → 4.5s,
+    before → after: `jobs` 11s → 2.5s, `tasks` 23s → 2.0s, `ledger` 20s → 4.5s,
     the whole status screen 22s → 2.0s. The interactive menu's "Cloud Status"
     is the same call; it used to be a second renderer that could disagree with
     `jobs` and could not see the task log at all.
@@ -177,7 +177,7 @@ definition: never a source of truth, never worth backing up.
   `infra/README.md`; read it before changing pool config.
   **`poker-solver tasks` is how you find out why a task died** — the run log cannot
   record a death (the container is gone first), so the wrapper writes its own
-  account to `<share>/legs/` and `legs` reconciles the ones whose exit record
+  account to `<share>/legs/` and `tasks` reconciles the ones whose exit record
   never landed against Batch's view. 124 (the guard's deadline — a hang) and
   137 (SIGKILL from outside — the OOM killer) are DIFFERENT causes, and a wrong
   terminal one is permanent: it suppresses reconciliation.
