@@ -22,6 +22,7 @@ from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
+from src.shared.tasks import TaskName
 
 PRECOMPUTE_TIMEOUT = "12h"
 
@@ -93,7 +94,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         lambda snapshot: [
             spec.TaskSpec(
                 code_snapshot=snapshot,
-                op=spec.PRECOMPUTE,
+                op=TaskName.PRECOMPUTE,
                 config=args.config,
                 workers=args.workers,
                 timeout=args.timeout,

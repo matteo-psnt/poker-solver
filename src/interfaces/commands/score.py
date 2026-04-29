@@ -19,6 +19,7 @@ from typing import Any
 from src.interfaces.cloud import dispatch, spec
 from src.interfaces.commands._base import Command
 from src.interfaces.commands.evaluate import EVAL_METHODS
+from src.shared.tasks import TaskName
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -82,7 +83,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         lambda snapshot: [
             spec.TaskSpec(
                 code_snapshot=snapshot,
-                op=spec.EVALUATE,
+                op=TaskName.EVALUATE,
                 run_id=args.run,
                 eval_method=args.method,
                 eval_at=rung,

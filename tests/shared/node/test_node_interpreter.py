@@ -111,7 +111,7 @@ def test_the_guarded_set_is_discovered_and_not_empty():
         "src/shared/node/plan.py",
         "src/shared/task_log.py",
         "src/shared/cache.py",
-        "src/shared/describe.py",
+        "src/shared/tasks.py",
         "src/shared/records.py",
         "src/shared/jsonio.py",
     } <= found, f"the node closure lost members; found {sorted(found)}"
@@ -160,7 +160,7 @@ def test_the_whole_package_imports_on_the_node_interpreter():
         "from src.shared.node.runner import main;"
         "from src.shared.node.plan import parse_environment;"
         "plan = parse_environment({'RUN_OP': 'train', 'RUN_CONFIG': 'c', 'RUN_TO': '5'});"
-        "assert plan.train_argv()[0] == 'train-static';"
+        "assert plan.commands[0][0] == 'train-static';"
         "print('ok')"
     )
     result = subprocess.run(

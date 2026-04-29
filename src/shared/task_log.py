@@ -43,8 +43,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.shared import records
-from src.shared.describe import compact_count, flag_value
+from src.shared import records, tasks
 
 RECORDS_DIRNAME = "legs"
 
@@ -115,28 +114,6 @@ def current_task_id(default: str = "") -> str:
     task that could be looked up.
     """
     return os.environ.get(TASK_ID_ENV, default)
-
-
-def _what(node: dict[str, Any]) -> str:
-    """What this task DID, in a few characters: ``train ->5M``, ``score @150M seed7``.
-
-    Degrades to the bare op for a task recorded before these fields existed, and
-    that is the honest answer -- an evaluate task from before this change wrote
-    down neither its rung nor its seed, so there is nothing to recover.
-    """
-    op = node.get("op") or ""
-    # Which FIELD is populated, not which op string: the op constants already
-    # live in two places (`spec` and `node.plan`, pinned against each other by
-    # test_plan) and a third copy here would be one more thing to keep in step.
-    rung = str(node.get("eval_at") or "")
-    if rung.isdigit():
-        seed = flag_value(node.get("eval_flags") or [], "--br-board-seed")
-        detail = "@" + compact_count(int(rung))
-        return f"{op} {detail} seed{seed}" if seed else f"{op} {detail}"
-    target = str(node.get("target_iteration") or "")
-    if target.isdigit() and target != "0":
-        return f"{op} ->{compact_count(int(target))}"
-    return op
 
 
 def write_node_record(
@@ -339,7 +316,7 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "eval_flags": node.get("eval_flags", []),
                 # One phrase saying what this task DID, derived here so the
                 # terminal and the console cannot word it differently.
-                "what": _what(node),
+                "what": tasks.describe(node),
                 "cause": cause,
                 "cause_source": cause_source,
                 # Not dict.get's default: the node record always carries the

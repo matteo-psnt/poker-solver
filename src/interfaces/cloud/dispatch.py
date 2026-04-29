@@ -18,7 +18,7 @@ from src.interfaces.cloud import batch, share, spec
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.spec import TaskSpec
 from src.interfaces.errors import CommandError
-from src.shared import gitinfo
+from src.shared import gitinfo, tasks
 
 NONCE_CEILING = 32768
 
@@ -60,8 +60,8 @@ def stage_and_queue(
         task.validate()
 
     snapshot = share.publish_code_snapshot(share.share_client(config), config.share_name, root, now)
-    tasks = [_stamped(task) for task in make_tasks(snapshot)]
-    if not tasks:
+    specs = [_stamped(task) for task in make_tasks(snapshot)]
+    if not specs:
         raise CommandError("Nothing to submit.")
 
     client = batch.client(config)
@@ -72,17 +72,12 @@ def stage_and_queue(
     # on 30 draws from a 32k space avoiding a collision (~1.4%) -- and a
     # collision raises mid-loop, after some rungs are already queued and with
     # no record of which.
-    for index, task in enumerate(tasks):
+    for index, task in enumerate(specs):
         nonce = index * NONCE_CEILING + secrets.randbelow(NONCE_CEILING)
         identifier = spec.task_id(task.label, now, nonce)
-        # A precompute is NOT retried. Everything else here is cheap to repeat --
-        # training resumes from its last published rung, scoring is idempotent --
-        # but a precompute has no partial-progress marker (`metadata.json` is
-        # written only on success), so a retry restarts the whole enumeration.
-        # A deterministic failure would then bill three full runs to fail three
-        # times, which is the one shape where the default retry is a liability.
-        retries = 0 if task.op == spec.PRECOMPUTE else batch.TASK_RETRIES
-        batch.submit_task(client, job_id, identifier, task, retries=retries)
+        # The KIND decides: work cheap to repeat wants retries, work with no
+        # partial-progress marker does not. See `src.shared.tasks`.
+        batch.submit_task(client, job_id, identifier, task, retries=tasks.kind(task.op).retries)
         queued.append(Queued(task_id=identifier, job_id=job_id, label=task.label))
 
     return {

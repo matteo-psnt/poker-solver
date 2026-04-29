@@ -15,6 +15,7 @@ from typing import Any
 
 from src.interfaces.cloud import dispatch, spec
 from src.interfaces.commands._base import Command
+from src.shared.tasks import TaskName
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -65,7 +66,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         lambda snapshot: [
             spec.TaskSpec(
                 code_snapshot=snapshot,
-                op=spec.TRAIN,
+                op=TaskName.TRAIN,
                 config=args.config,
                 to=args.to,
                 run_id=args.run,
