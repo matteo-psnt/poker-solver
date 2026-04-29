@@ -26,7 +26,7 @@ SNAPSHOTs in :mod:`src.shared.records` terms, share-scoped -- which is why they
 are written directly rather than through a temporary file: SMB has no atomic
 rename, so the per-file layout carries the safety instead.
 
-Stdlib-only AND 3.10-compatible, both enforced by
+Stdlib-only -- the wrapper imports this before `uv sync`. Enforced by
 ``tests/shared/node/test_node_interpreter.py``: the node wrapper imports this
 with the NODE's system ``python3``, which on the pinned Ubuntu 22.04 image
 is 3.10 -- not the 3.12+ this project is developed against. ``datetime.UTC`` is
@@ -39,7 +39,7 @@ from __future__ import annotations
 import glob
 import os
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +92,7 @@ TERMINAL_CAUSES = frozenset(
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def tasks_dir(share: str | os.PathLike[str]) -> Path:

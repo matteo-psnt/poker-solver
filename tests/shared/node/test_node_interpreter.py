@@ -1,37 +1,20 @@
-"""The node runs OLDER Python than this project, and runs it before `uv sync`.
+"""The node runs the wrapper before `uv sync`, so it runs it on stdlib alone.
 
-`infra/main.tf` pins `batch.node.ubuntu 22.04`, whose system `python3` is 3.10,
-not the 3.12+ developed against here -- and `infra/run_task.py` is executed by
-that interpreter, with no third-party package installed. A 3.11+ construct or a
-non-stdlib import anywhere it REACHES does not fail visibly: the task dies before
-it can say why, and `tasks` reports "no task records", indistinguishable from
-"no tasks ran".
+`infra/run_task.py` is executed by the interpreter the pool's START TASK
+installs -- not the OS's, which is 3.10 on the pinned 22.04 image -- with no
+third-party package present. A non-stdlib import anywhere it REACHES does not
+fail visibly: the task dies before it can say why, and `tasks` reports no
+record, indistinguishable from "nothing ran".
 
 **What carries the floor is derived, not listed.** It used to be a literal of
 four paths, and a literal is only correct on the day it is written: the entry
 point's real closure is eleven files, so `jsonio` and `records` were reached on
-the node and checked by nothing. Neither happens to violate the floor today,
-which is exactly why a list drifts quietly -- the cost of an import added to
-`runner` is paid on the one machine that has no way to report it. `_closure`
-below walks first-party imports from `infra/run_task.py`, so the guarded set is
-whatever the node actually loads, and a new import extends it with no edit here.
+the node and checked by nothing. `_closure` below walks first-party imports
+from the entry point, so the guarded set is whatever the node actually loads.
 
-Two checks, deliberately at different costs:
-
-* a substring scan, in the fast gate, that catches the constructs already known
-  to bite. It runs under THIS interpreter, so it can only look for names.
-* a real 3.10 import of the whole package, via `uv run --python 3.10
-  --no-project`. This is the one that actually proves the contract --
-  `datetime.UTC` was added, passed every test, and silently disabled task
-  records on the only machine that runs them. It is in the FAST gate despite
-  spawning an interpreter: measured at ~85ms warm, which is less than the
-  substring scan costs to justify. The generous timeout covers the one cold
-  run that downloads the interpreter.
-
-Ruff's `target-version` is py312, so `UP017` and friends would happily rewrite
-these modules into something the node cannot import. `pyproject.toml` disables
-those rules for exactly these files; if that per-file ignore is dropped, the
-3.10 run below is what notices.
+Two checks, deliberately at different costs: a substring scan for third-party
+imports, and a real import of the whole closure on the node's interpreter --
+the one that actually proves the contract.
 """
 
 from __future__ import annotations
@@ -98,19 +81,9 @@ def _closure(entry: pathlib.Path) -> list[pathlib.Path]:
 
 GUARDED_SOURCES = _closure(ENTRY_POINT)
 
-NODE_PYTHON = "3.10"
+NODE_PYTHON = "3.13"
 
 THIRD_PARTY = ("numpy", "pydantic", "zarr", "yaml", "xxhash", "tqdm", "rich", "azure")
-
-# Names that do not exist on 3.10. Extend when the floor moves.
-FORBIDDEN = (
-    ("datetime import UTC", "datetime.UTC is 3.11+; use timezone.utc"),
-    ("from typing import Self", "typing.Self is 3.11+"),
-    ("ExceptionGroup", "ExceptionGroup is 3.11+"),
-    ("tomllib", "tomllib is 3.11+"),
-    ("itertools.batched", "itertools.batched is 3.12+"),
-    ("@override", "typing.override is 3.12+"),
-)
 
 
 def _code(source: pathlib.Path) -> str:
@@ -152,19 +125,18 @@ def test_no_third_party_import(source):
         assert f"import {name}" not in text, f"{source.name} must not import {name}"
 
 
-@pytest.mark.parametrize("source", GUARDED_SOURCES, ids=lambda p: p.name)
-def test_no_construct_newer_than_the_node_interpreter(source):
-    body = _code(source)
-    for needle, why in FORBIDDEN:
-        assert needle not in body, f"{needle} in {source.name}: {why}"
+def test_the_interpreter_is_installed_by_the_pool_not_the_image():
+    """The floor is no longer the OS's.
 
-
-def test_the_pinned_node_image_is_still_what_this_assumes():
-    """If the image moves, the floor above moves with it."""
+    It was 3.10, because the wrapper ran the system python3 on a pinned 22.04
+    image, and that cost a scan for 3.11+ constructs plus per-file ruff ignores
+    -- which still bit twice: `datetime.UTC` inside a call whose errors are
+    swallowed, and again when renaming a module moved it out from under its
+    ignore. The start task installs the interpreter now, so what has to stay
+    true is that Terraform installs the version this asserts against.
+    """
     main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
-    assert "batch.node.ubuntu 22.04" in main_tf, (
-        "the node image changed; re-check the system python3 version this package must import under"
-    )
+    assert f"uv python install {NODE_PYTHON}" in main_tf
 
 
 def test_the_entry_point_adds_the_repo_to_the_path_before_importing():
@@ -175,12 +147,12 @@ def test_the_entry_point_adds_the_repo_to_the_path_before_importing():
 
 
 @pytest.mark.timeout(300)
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to provide a 3.10 interpreter")
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to provide the node interpreter")
 def test_the_whole_package_imports_on_the_node_interpreter():
     """The check the substring scan cannot make.
 
     Imports the entry point's whole chain -- runner, archive, plan, task_log,
-    records -- on a real 3.10, with `--no-project` so not one project
+    records -- on the node's real interpreter, with `--no-project` so not one project
     dependency is installed. That is the node, before `uv sync`.
     """
     script = (
@@ -205,7 +177,7 @@ def test_the_whole_package_imports_on_the_node_interpreter():
 
 
 @pytest.mark.timeout(300)
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to provide a 3.10 interpreter")
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to provide the node interpreter")
 def test_a_task_record_can_be_written_on_the_node_interpreter(tmp_path):
     """The one thing that must work even when everything else has failed."""
     script = (
