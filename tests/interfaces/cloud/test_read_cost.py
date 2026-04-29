@@ -62,6 +62,7 @@ def _task(task_id: str) -> _Obj:
     return _Obj(
         id=task_id,
         state="BatchTaskState.COMPLETED",
+        creation_time=None,
         execution_info=_Obj(
             result=None, exit_code=0, failure_info=None, start_time=None, end_time=None
         ),

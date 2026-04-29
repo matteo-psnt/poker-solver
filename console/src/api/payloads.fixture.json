@@ -109,10 +109,20 @@
         "state": "BatchJobState.ACTIVE",
         "tasks": [
           {
+            "created": "2026-08-04T09:04:56+00:00",
             "exit_code": null,
             "node": "tvmps_x",
+            "start_time": "2026-08-04T09:07:12+00:00",
             "state": "BatchTaskState.RUNNING",
-            "task": "production-1"
+            "task": "train-production-to150M-090456-1"
+          },
+          {
+            "created": "2026-08-04T09:05:01+00:00",
+            "exit_code": null,
+            "node": null,
+            "start_time": null,
+            "state": "BatchTaskState.ACTIVE",
+            "task": "score-production-1095-150M-seed7-090501-2"
           }
         ]
       }
@@ -405,10 +415,20 @@
               "state": "BatchJobState.ACTIVE",
               "tasks": [
                 {
+                  "created": "2026-08-04T09:04:56+00:00",
                   "exit_code": null,
                   "node": "tvmps_x",
+                  "start_time": "2026-08-04T09:07:12+00:00",
                   "state": "BatchTaskState.RUNNING",
-                  "task": "production-1"
+                  "task": "train-production-to150M-090456-1"
+                },
+                {
+                  "created": "2026-08-04T09:05:01+00:00",
+                  "exit_code": null,
+                  "node": null,
+                  "start_time": null,
+                  "state": "BatchTaskState.ACTIVE",
+                  "task": "score-production-1095-150M-seed7-090501-2"
                 }
               ]
             }

@@ -42,6 +42,15 @@ const taskSchema = z
     task: z.string(),
     state: z.string().nullable(),
     exit_code: z.number().nullable(),
+    // What the pool looks like as a pool rather than a list. `node` is which
+    // machine a task OCCUPIES; `created` is the only thing that can order the
+    // waiting half, since a task that has not started has no start_time.
+    // Optional: legacy payloads predate them, and a missing one must not blank
+    // the panel.
+    node: z.string().nullable().optional(),
+    created: z.string().nullable().optional(),
+    start_time: z.string().nullable().optional(),
+    end_time: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -65,6 +74,14 @@ export const legRowSchema = z
     cause: z.string().nullable(),
     exit_code: z.number().nullable(),
     ended_at: z.string().nullable(),
+    // All carried by the payload already, and all previously undeclared — so
+    // the UI could show a leg's outcome but never when it ran, how long it
+    // took, or what it shared a job or a machine with.
+    started_at: z.string().nullable().optional(),
+    job_id: z.string().nullable().optional(),
+    node_id: z.string().nullable().optional(),
+    /** Derived server-side so the terminal and the console word it identically. */
+    what: z.string().nullable().optional(),
   })
   .passthrough();
 

@@ -70,6 +70,11 @@ def _task_record(task: Any) -> dict[str, Any]:
     return {
         "task": task.id,
         "state": str(task.state) if task.state else None,
+        # When it was SUBMITTED, which is the only thing that can order a queue:
+        # a task waiting for a node has no start time, so without this the
+        # pending half of the pool cannot be put in the order it will run.
+        # Free -- it is already in the response being parsed.
+        "created": _isoformat(task.creation_time),
         "result": str(execution.result) if execution is not None and execution.result else None,
         "exit_code": execution.exit_code if execution is not None else None,
         "failure": _failure(execution),

@@ -120,6 +120,7 @@ class TestLegReconcileSeam:
 
         class _Task:
             id, state = "leg-1", "BatchTaskState.COMPLETED"
+            creation_time = None
             execution_info, node_info = _Exec(), _Node()
 
         record = batch._task_record(_Task())
@@ -127,3 +128,7 @@ class TestLegReconcileSeam:
             assert field in record, f"reconcile reads {field!r}"
         assert record["exit_code"] == 137
         assert record["failure"]["code"] == "TaskEnded"
+        # Not read by reconcile, but by the console: a task WAITING for a node
+        # has no start_time, so submission order is the only thing that can put
+        # the queue in the order Batch will dispatch it.
+        assert "created" in record

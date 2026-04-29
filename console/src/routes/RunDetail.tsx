@@ -3,8 +3,22 @@ import { Panel } from "@/components/Panel";
 import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { count, duration, legLabel, mbb, percent, rate, runLabel, since } from "@/lib/format";
+import {
+  clock,
+  count,
+  duration,
+  legLabel,
+  mbb,
+  percent,
+  rate,
+  runLabel,
+  since,
+  span,
+} from "@/lib/format";
+import { timelineBars } from "@/lib/timeline";
+import { cn } from "@/lib/utils";
 import { Link, getRouteApi } from "@tanstack/react-router";
+import { useMemo } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -249,6 +263,55 @@ function ProgressPanel({ runId }: { runId: string }) {
   );
 }
 
+const BAR_TONE: Record<string, string> = {
+  ok: "bg-emerald-500/60",
+  live: "bg-emerald-400/70",
+  bad: "bg-red-500/60",
+  warn: "bg-amber-500/60",
+  pending: "bg-sky-500/50",
+  muted: "bg-white/20",
+};
+
+/**
+ * The run's legs against one shared time axis.
+ *
+ * The table below says what each leg did; this says how they relate. Gaps
+ * between bars are days nothing touched the run, overlapping bars are attempts
+ * that ran at once, and a short red bar is a leg that died early — none of
+ * which is visible reading down a column of timestamps.
+ */
+function LegTimeline({ timeline }: { timeline: ReturnType<typeof timelineBars> }) {
+  if (!timeline) return null;
+  return (
+    <div className="space-y-1 px-3 py-2">
+      {timeline.bars.map((bar) => (
+        <div key={bar.key} className="flex items-center gap-2">
+          <div className="w-40 shrink-0 truncate text-[11px] text-[var(--fg-muted)]">
+            {bar.label}
+          </div>
+          <div className="relative h-3 flex-1 rounded-sm bg-[var(--border)]/40">
+            <div
+              className={cn(
+                "absolute inset-y-0 rounded-sm",
+                BAR_TONE[bar.tone] ?? BAR_TONE.muted,
+                // A running leg has no right edge yet, so it is striped rather
+                // than drawn as if it had finished at this instant.
+                bar.running && "animate-pulse",
+              )}
+              style={{ left: `${bar.leftPct}%`, width: `${bar.widthPct}%` }}
+              title={`${bar.taskId} — ${bar.label}${bar.running ? " (running)" : ""}`}
+            />
+          </div>
+        </div>
+      ))}
+      <div className="flex justify-between pt-0.5 pl-42 text-[10px] text-[var(--fg-faint)]">
+        <span>{new Date(timeline.from).toLocaleString()}</span>
+        <span>{new Date(timeline.to).toLocaleString()}</span>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The legs that built this run.
  *
@@ -263,8 +326,10 @@ function ProgressPanel({ runId }: { runId: string }) {
  */
 function RunLegs({ runId }: { runId: string }) {
   const legs = useLegs(0);
+  const now = Date.now();
   const mine = (legs.data?.rows ?? []).filter((row) => row.run_id === runId).reverse();
   const ops = [...new Set(mine.map((row) => row.op).filter(Boolean))];
+  const timeline = useMemo(() => timelineBars(mine, now), [mine, now]);
 
   return (
     <Panel
@@ -282,15 +347,19 @@ function RunLegs({ runId }: { runId: string }) {
           <p className="px-3 pt-2 text-[11px] text-[var(--fg-faint)]">
             {mine.length} attempt{mine.length === 1 ? "" : "s"} built this run
             {ops.length > 0 && ` — ${ops.join(", ")}`}
+            {timeline &&
+              ` · over ${span(new Date(timeline.from).toISOString(), null, timeline.to)}`}
           </p>
+          <LegTimeline timeline={timeline} />
           <Table>
             <thead>
               <tr>
                 <Th>task</Th>
                 <Th right>#</Th>
-                <Th>op</Th>
+                <Th>what</Th>
                 <Th>cause</Th>
-                <Th right>exit</Th>
+                <Th right>started</Th>
+                <Th right>took</Th>
                 <Th right>ended</Th>
               </tr>
             </thead>
@@ -310,17 +379,24 @@ function RunLegs({ runId }: { runId: string }) {
                   <Td right className="text-[var(--fg-faint)]">
                     {row.attempt ?? "—"}
                   </Td>
-                  <Td className="text-[var(--fg-muted)]">{row.op ?? "—"}</Td>
+                  <Td className="text-[var(--fg-muted)]">{row.what || row.op || "—"}</Td>
                   <Td>
                     <StatusBadge
                       state={displayName(row.cause)}
                       tone={toneFor(row.cause)}
-                      title={`recorded as "${row.cause}"`}
+                      title={`recorded as "${row.cause}"${
+                        row.exit_code == null ? "" : `, exit ${row.exit_code}`
+                      }`}
                     />
                   </Td>
-                  <Td right>{row.exit_code ?? "—"}</Td>
-                  <Td right className="text-[var(--fg-faint)]">
-                    {since(row.ended_at)}
+                  <Td right className="text-[var(--fg-faint)]" title={row.started_at ?? undefined}>
+                    {clock(row.started_at)}
+                  </Td>
+                  <Td right className="tnum text-[var(--fg-muted)]">
+                    {span(row.started_at, row.ended_at, now)}
+                  </Td>
+                  <Td right className="text-[var(--fg-faint)]" title={row.ended_at ?? undefined}>
+                    {row.ended_at ? since(row.ended_at) : "—"}
                   </Td>
                 </tr>
               ))}

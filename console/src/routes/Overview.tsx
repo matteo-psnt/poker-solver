@@ -1,22 +1,29 @@
 import { useJobs, useLegs, usePool } from "@/api/queries";
 import { Panel } from "@/components/Panel";
-import {
-  StatusBadge,
-  exitMeaning,
-  shortState,
-  taskOutcome,
-  taskTone,
-} from "@/components/StatusBadge";
+import { StatusBadge, exitMeaning, taskOutcome, taskTone } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { count, since } from "@/lib/format";
+import { clock, count, legLabel, since, span } from "@/lib/format";
+import { type PoolShape, type Task, elapsed, poolShape } from "@/lib/pool";
+import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
+import { useMemo } from "react";
 
 /** The page the console exists for: what is happening, and did anything die. */
 export function Overview() {
   const pool = usePool();
   const jobs = useJobs(10);
   const legs = useLegs(10);
+
+  // Recomputed each render rather than ticked: the panel already re-renders on
+  // the 15s poll, and a second timer would redraw it between polls to move one
+  // "2h 14m" by a minute.
+  const now = Date.now();
+  const shape = useMemo(
+    () => poolShape(jobs.data, pool.data?.target_dedicated_nodes),
+    [jobs.data, pool.data],
+  );
+  const busy = shape.slots.filter((slot) => slot.task !== null).length;
 
   return (
     <div className="space-y-3">
@@ -52,58 +59,22 @@ export function Overview() {
       {/* Batch and the leg log answer DIFFERENT questions; the panels sit
           together because neither is sufficient alone. */}
       <Panel
-        title="Batch"
+        title={`Batch — ${busy} of ${shape.slots.length} node${
+          shape.slots.length === 1 ? "" : "s"
+        } busy${shape.queue.length > 0 ? `, ${shape.queue.length} queued` : ""}`}
         updatedAt={jobs.dataUpdatedAt}
         staleAfterMs={30_000}
         error={errorOf(jobs.error)}
         loading={jobs.isLoading}
-        empty={jobs.data && jobs.data.jobs.length === 0 ? "Nothing running." : null}
+        empty={jobs.data && shape.slots.length === 0 && shape.queue.length === 0 ? "Idle." : null}
         onRefresh={() => jobs.refetch()}
         refreshing={jobs.isFetching}
       >
-        {jobs.data && jobs.data.jobs.length > 0 && (
-          <Table>
-            <thead>
-              <tr>
-                <Th>task</Th>
-                <Th>job</Th>
-                <Th>state</Th>
-                <Th right>exit</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.data.jobs.flatMap((job) =>
-                job.tasks.map((task) => {
-                  const state = shortState(task.state);
-                  const meaning = exitMeaning(task.exit_code);
-                  return (
-                    <tr key={`${job.job}/${task.task}`}>
-                      <Td mono>{task.task}</Td>
-                      <Td mono className="text-[var(--fg-muted)]">
-                        {job.job}
-                      </Td>
-                      <Td>
-                        {/* Coloured on state AND exit code. Batch's `completed`
-                            means finished, not succeeded — badging it green made
-                            a cancelled task look like a clean one. */}
-                        <StatusBadge
-                          state={taskOutcome(task.state, task.exit_code)}
-                          tone={taskTone(task.state, task.exit_code)}
-                          title={`Batch reports state "${state}"`}
-                        />
-                      </Td>
-                      <Td right title={meaning ?? undefined}>
-                        {task.exit_code ?? "—"}
-                        {meaning && task.exit_code !== 0 && (
-                          <span className="ml-1 text-[var(--fg-faint)]">ⓘ</span>
-                        )}
-                      </Td>
-                    </tr>
-                  );
-                }),
-              )}
-            </tbody>
-          </Table>
+        {jobs.data && (shape.slots.length > 0 || shape.queue.length > 0) && (
+          <>
+            <Pipeline shape={shape} busy={busy} now={now} />
+            <History history={shape.history} />
+          </>
         )}
       </Panel>
 
@@ -122,31 +93,33 @@ export function Overview() {
             <thead>
               <tr>
                 <Th>task</Th>
-                <Th>op</Th>
+                <Th>what</Th>
                 <Th>cause</Th>
-                <Th right>exit</Th>
+                <Th right>took</Th>
                 <Th right>ended</Th>
               </tr>
             </thead>
             <tbody>
               {[...legs.data.rows].reverse().map((row) => (
                 <tr key={`${row.task_id}-${row.attempt}`}>
-                  <Td mono>
+                  <Td mono title={row.task_id}>
                     <Link
                       to="/legs/$taskId"
                       params={{ taskId: row.task_id }}
                       className="hover:underline"
                     >
-                      {row.task_id}
+                      {legLabel(row.task_id)}
                     </Link>
                   </Td>
-                  <Td className="text-[var(--fg-muted)]">{row.op ?? "—"}</Td>
+                  <Td className="text-[var(--fg-muted)]">{row.what || row.op || "—"}</Td>
                   <Td>
                     <StatusBadge state={row.cause} />
                   </Td>
-                  <Td right>{row.exit_code ?? "—"}</Td>
-                  <Td right className="text-[var(--fg-faint)]">
-                    {since(row.ended_at)}
+                  <Td right className="text-[var(--fg-muted)]">
+                    {span(row.started_at, row.ended_at, now)}
+                  </Td>
+                  <Td right className="text-[var(--fg-faint)]" title={row.ended_at ?? undefined}>
+                    {row.ended_at ? since(row.ended_at) : "—"}
                   </Td>
                 </tr>
               ))}
@@ -154,6 +127,173 @@ export function Overview() {
           </Table>
         )}
       </Panel>
+    </div>
+  );
+}
+
+/**
+ * Every row on this panel shares one grid, so the columns line up down the
+ * whole thing — marker, what it is, when. That alignment IS the relation: the
+ * queue reads as the continuation of the nodes rather than a second widget
+ * that happens to sit underneath.
+ */
+const ROW = "grid grid-cols-[1.5rem_1fr_auto] items-center gap-3 px-3 py-1.5";
+
+/**
+ * The pool as one pipeline: what is on a node, then what is waiting for one.
+ *
+ * Drawn as rows rather than cards. The rest of this console is dense bordered
+ * rows at one type size, and tinted boxes in the middle of it read as a
+ * different application — while also making occupied and idle slots different
+ * heights, so the grid jumped as the pool filled.
+ *
+ * Occupancy still has to be visible at a glance, since a list of two running
+ * tasks looks identical whether the pool holds two nodes or eight. A dot per
+ * slot carries that at a fraction of the weight: a column of hollow dots is an
+ * idle pool without a single filled rectangle.
+ */
+function Pipeline({ shape, busy, now }: { shape: PoolShape; busy: number; now: number }) {
+  return (
+    <div>
+      <SectionRow label="nodes" aside={`${busy}/${shape.slots.length} busy`} />
+      {shape.slots.map((slot) => (
+        <div key={slot.index} className={cn(ROW, "border-b border-[var(--border)]/60")}>
+          <Dot filled={slot.task !== null} />
+          {slot.task ? (
+            <>
+              <span className="truncate font-mono text-[12px]" title={slot.task.task}>
+                {legLabel(slot.task.task)}
+              </span>
+              {/* Elapsed answers "is this stuck"; the wall clock is what
+                  correlates a slot with a line in a log or a leg row. */}
+              <span className="tnum shrink-0 text-[11px] text-[var(--fg-faint)]">
+                {elapsed(slot.task.start_time, now) || "—"}
+                {slot.task.start_time && ` · since ${clock(slot.task.start_time)}`}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-[12px] text-[var(--fg-faint)]">idle</span>
+              <span />
+            </>
+          )}
+        </div>
+      ))}
+
+      {shape.queue.length > 0 && (
+        <>
+          <SectionRow
+            label="queue"
+            aside={
+              shape.starved > 0 ? (
+                <span
+                  className="text-amber-400"
+                  title="more waiting than there are free nodes — these wait for the pool to grow, not for a task to end"
+                >
+                  {shape.queue.length} waiting · {shape.starved} beyond capacity
+                </span>
+              ) : (
+                `${shape.queue.length} waiting`
+              )
+            }
+          />
+          {shape.queue.map((task, index) => (
+            <div
+              key={`${task.job}/${task.task}`}
+              className={cn(ROW, "border-b border-[var(--border)]/60")}
+            >
+              {/* Position, not a badge: "3rd in line" is the question, and a
+                  column of identical `queued` badges cannot answer it. */}
+              <span className="text-right font-mono text-[11px] text-[var(--fg-faint)]">
+                {index + 1}
+              </span>
+              <span
+                className="truncate font-mono text-[12px] text-[var(--fg-muted)]"
+                title={task.task}
+              >
+                {legLabel(task.task)}
+              </span>
+              <span className="tnum shrink-0 text-[11px] text-[var(--fg-faint)]">
+                waiting {elapsed(task.created, now) || "—"}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Filled = a node is committed. A column of hollow dots is an idle pool. */
+function Dot({ filled }: { filled: boolean }) {
+  return (
+    <span className="flex justify-center">
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          filled ? "bg-emerald-500" : "ring-1 ring-[var(--fg-faint)]/50",
+        )}
+      />
+    </span>
+  );
+}
+
+/** A heading on the same grid as the rows it introduces, so nothing shifts. */
+function SectionRow({ label, aside }: { label: string; aside?: React.ReactNode }) {
+  return (
+    <div
+      className={cn(
+        ROW,
+        "border-b border-[var(--border)] text-[11px] text-[var(--fg-faint)] uppercase tracking-wider",
+      )}
+    >
+      <span />
+      <span>{label}</span>
+      <span className="normal-case tracking-normal">{aside}</span>
+    </div>
+  );
+}
+
+/** Finished work, newest first — the half that used to be mixed in with the rest. */
+function History({ history }: { history: Task[] }) {
+  if (history.length === 0) return null;
+  return (
+    <div>
+      <SectionRow label="recently finished" />
+      <Table>
+        <tbody>
+          {history.slice(0, 6).map((task) => (
+            <tr key={`${task.job}/${task.task}`}>
+              <Td mono title={task.task}>
+                {legLabel(task.task)}
+              </Td>
+              <Td>
+                {/* Coloured on state AND exit code, and the code's MEANING is
+                    the badge — 124 is the guard's deadline, 137 the OOM killer.
+                    The number itself sat in its own column saying less than the
+                    word beside it, so it is a tooltip now. */}
+                <StatusBadge
+                  state={taskOutcome(task.state, task.exit_code)}
+                  tone={taskTone(task.state, task.exit_code)}
+                  title={[
+                    `Batch reports state "${task.state}"`,
+                    task.exit_code == null ? null : `exit ${task.exit_code}`,
+                    exitMeaning(task.exit_code),
+                  ]
+                    .filter(Boolean)
+                    .join(" — ")}
+                />
+              </Td>
+              <Td right className="tnum text-[var(--fg-muted)]">
+                {span(task.start_time, task.end_time)}
+              </Td>
+              <Td right className="text-[var(--fg-faint)]" title={task.end_time ?? undefined}>
+                {since(task.end_time)}
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
     </div>
   );
 }

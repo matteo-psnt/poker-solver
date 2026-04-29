@@ -283,13 +283,27 @@ PAYLOADS: dict[str, dict] = {
             {
                 "job": "poker-20260802",
                 "state": "BatchJobState.ACTIVE",
+                # One of each half the pool has: a task OCCUPYING a node, and
+                # one waiting for one. The queued shape is the one that carries
+                # no node and no start time, so a sample without it would let a
+                # reader assume both are always present.
                 "tasks": [
                     {
-                        "task": "production-1",
+                        "task": "train-production-to150M-090456-1",
                         "state": "BatchTaskState.RUNNING",
                         "exit_code": None,
                         "node": "tvmps_x",
-                    }
+                        "created": "2026-08-04T09:04:56+00:00",
+                        "start_time": "2026-08-04T09:07:12+00:00",
+                    },
+                    {
+                        "task": "score-production-1095-150M-seed7-090501-2",
+                        "state": "BatchTaskState.ACTIVE",
+                        "exit_code": None,
+                        "node": None,
+                        "created": "2026-08-04T09:05:01+00:00",
+                        "start_time": None,
+                    },
                 ],
             }
         ],
