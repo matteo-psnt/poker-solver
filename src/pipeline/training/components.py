@@ -1,9 +1,8 @@
-"""
-Shared builder functions for training components.
+"""Shared builder functions for training components.
 
-Provides centralized, reusable functions for building solver components
-(abstractions, storage, solver) from configuration. Used by TrainingSession
-to eliminate code duplication.
+Centralized, reusable construction of solver components (abstraction, betting
+tree, storage, solver) from configuration, so training and evaluation build the
+same objects the same way rather than each assembling their own.
 """
 
 from pathlib import Path
