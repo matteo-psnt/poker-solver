@@ -31,17 +31,11 @@ from src.shared.describe import compact_count, flag_value
 
 TRAIN = "train"
 EVALUATE = "evaluate"
-REPAIR_LADDER = "repair-ladder"
 PRECOMPUTE = "precompute"
 
 DEFAULT_TIMEOUT = "6h"
 DEFAULT_CHECKPOINT_EVERY = 1_000_000
 
-"""Task ids
---------
-``TASK_ID_LIMIT`` is Batch's, not ours. ``_OP_WORDS`` shortens the op for the
-one place length is scarce; the op itself stays the long form everywhere else.
-"""
 """The node's interpreter
 ------------------------
 NOT the OS python3, which is 3.10 on the pinned 22.04 image. The start task
@@ -61,7 +55,7 @@ NODE_PYTHON = "3.13"
 NODE_PYTHON_BIN = f"/usr/local/bin/python{NODE_PYTHON}"
 
 TASK_ID_LIMIT = 64
-_OP_WORDS = {TRAIN: "train", EVALUATE: "score", REPAIR_LADDER: "repair", PRECOMPUTE: "precompute"}
+_OP_WORDS = {TRAIN: "train", EVALUATE: "score", PRECOMPUTE: "precompute"}
 
 _UNSAFE_TASK_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
@@ -241,7 +235,7 @@ class TaskSpec:
 
     def validate(self) -> None:
         """Reject the submissions that would waste a node rather than fail fast."""
-        if self.op not in (TRAIN, EVALUATE, REPAIR_LADDER, PRECOMPUTE):
+        if self.op not in (TRAIN, EVALUATE, PRECOMPUTE):
             raise ValueError(f"Unknown op '{self.op}'.")
         if self.op == TRAIN and not self.config:
             # A CONTINUING task needs it too. The config builds the tree and the
@@ -257,7 +251,7 @@ class TaskSpec:
             )
         if self.op == TRAIN and self.to <= 0:
             raise ValueError("--to must be a positive ABSOLUTE iteration target, not an increment.")
-        if self.op in (EVALUATE, REPAIR_LADDER) and not self.run_id:
+        if self.op == EVALUATE and not self.run_id:
             raise ValueError(f"op '{self.op}' scores an existing run, so --run is required.")
         if self.op == PRECOMPUTE and not self.config:
             raise ValueError("A precompute task needs --config (an abstraction config stem).")

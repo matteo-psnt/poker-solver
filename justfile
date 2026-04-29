@@ -123,7 +123,7 @@ credit-check *flags:
 # --------------------------------------------------------------------------- #
 #
 # ONLY recipes that RESHAPE the call survive here. `submit`, `score` and
-# `repair-ladder` turn positionals into flags, which is a real saving; `cli` is
+# `score` turns positionals into flags, which is a real saving; `cli` is
 # the escape hatch for everything else.
 #
 # The nine pure passthroughs that used to sit here (`status`, `jobs`, `tasks`,
@@ -159,8 +159,6 @@ score run *flags:
 
 # Verify a published static ladder, marking the rungs that load.
 [doc("Verify a published ladder. Args: run config")]
-repair-ladder run config:
-    uv run poker-solver repair-ladder --run "{{run}}" --config "{{config}}"
 
 # --- console ---------------------------------------------------------------- #
 # The web console. Its toolchain is npm and lives entirely under `console/`;

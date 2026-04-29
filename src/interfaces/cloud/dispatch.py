@@ -1,6 +1,6 @@
 """Staging and queueing: the one path every submission takes.
 
-``submit``, ``score`` and ``repair-ladder`` differ only in the tasks they build.
+``submit`` and ``score`` differ only in the tasks they build.
 They share this module so they cannot drift apart in how they stage code or
 wire the environment -- the fresh and continuing paths diverging is exactly how
 one of them silently stops being exercised.

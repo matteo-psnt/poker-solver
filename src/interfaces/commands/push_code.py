@@ -1,6 +1,6 @@
 """The `push-code` subcommand: publish an immutable snapshot of the tree.
 
-Rarely needed directly. ``submit``, ``score`` and ``repair-ladder`` each
+Rarely needed directly. ``submit`` and ``score`` each
 snapshot the tree themselves, because pinning per submission is not optional --
 a push while a job is running must not change what that job is executing. This
 command exists for staging a snapshot deliberately, and for confirming what a

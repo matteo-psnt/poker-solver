@@ -233,15 +233,6 @@
       "buckets-F50T100R200": 9
     }
   },
-  "repair-ladder": {
-    "code_snapshot": "code-20260802_000000",
-    "job_id": "poker-20260802",
-    "op": "repair-ladder",
-    "run_id": "run-a",
-    "tasks": [
-      "run-a-000000-1"
-    ]
-  },
   "report": {
     "arms": [
       {

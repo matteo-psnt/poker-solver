@@ -7,7 +7,7 @@ consequence went unnoticed for as long as training has been in the cloud:
 2026-08-04 on a probe task, where `ledger` printed an empty commit column.
 
 The stamp goes on in `stage_and_queue` and not in any caller, because that is
-what the module exists for -- `submit`, `score` and `repair-ladder` differ only
+what the module exists for -- `submit` and `score` differ only
 in the tasks they build, and a property every submission must have cannot be a
 step three callers have to remember.
 """
