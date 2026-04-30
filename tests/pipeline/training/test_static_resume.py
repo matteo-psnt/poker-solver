@@ -19,7 +19,7 @@ from src.pipeline.training.static_parallel import (
     worker_iteration_indices,
     worker_seed,
 )
-from tests.pipeline.training.test_static_parallel import Buckets, _config
+from tests.pipeline.training.test_static_parallel import Buckets, _config, session
 
 
 class TestChunkIndicesTileTheRange:
@@ -76,7 +76,7 @@ class TestCheckpointAndResume:
             _config(),
             num_iterations=400,
             num_workers=2,
-            session_id="static-chunked",
+            session_id=session("static-chunked"),
             checkpoint_dir=tmp_path,
             checkpoint_every=100,
             abstraction=Buckets(),
@@ -90,7 +90,7 @@ class TestCheckpointAndResume:
             _config(),
             num_iterations=300,
             num_workers=2,
-            session_id="static-midrun",
+            session_id=session("static-midrun"),
             checkpoint_dir=tmp_path,
             checkpoint_every=100,
             abstraction=Buckets(),
@@ -104,7 +104,7 @@ class TestCheckpointAndResume:
             _config(),
             num_iterations=200,
             num_workers=2,
-            session_id="static-resume-a",
+            session_id=session("static-resume-a"),
             checkpoint_dir=tmp_path,
             checkpoint_every=100,
             abstraction=Buckets(),
@@ -113,7 +113,7 @@ class TestCheckpointAndResume:
             _config(),
             num_iterations=400,
             num_workers=2,
-            session_id="static-resume-b",
+            session_id=session("static-resume-b"),
             checkpoint_dir=tmp_path,
             checkpoint_every=100,
             resume=True,
@@ -130,7 +130,7 @@ class TestCheckpointAndResume:
             _config(),
             num_iterations=200,
             num_workers=2,
-            session_id="static-noop-a",
+            session_id=session("static-noop-a"),
             checkpoint_dir=tmp_path,
             checkpoint_every=100,
             abstraction=Buckets(),
@@ -139,7 +139,7 @@ class TestCheckpointAndResume:
             _config(),
             num_iterations=200,
             num_workers=2,
-            session_id="static-noop-b",
+            session_id=session("static-noop-b"),
             checkpoint_dir=tmp_path,
             resume=True,
             abstraction=Buckets(),
@@ -155,7 +155,7 @@ class TestCheckpointAndResume:
             _config(),
             num_iterations=100,
             num_workers=2,
-            session_id="static-resume-empty",
+            session_id=session("static-resume-empty"),
             checkpoint_dir=tmp_path,
             resume=True,
             abstraction=Buckets(),
