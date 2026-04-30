@@ -10,6 +10,7 @@ constructed without one, so it is a property of the type rather than a thing to
 check.
 """
 
+import copy
 import dataclasses
 
 from src.interfaces.commands import COMMANDS
@@ -81,6 +82,7 @@ PAYLOADS: dict[str, dict] = {
                 "checkpoint_iteration": 1000,
                 "exploitability_mbb": 900.0,
                 "std_error_mbb": 1.0,
+                "git_branch": "main",
                 "vs_control_mbb": None,
                 "vs_control_p_value": None,
                 "vs_control_blocked": [],
@@ -91,6 +93,7 @@ PAYLOADS: dict[str, dict] = {
                 "checkpoint_iteration": 1000,
                 "exploitability_mbb": 880.0,
                 "std_error_mbb": 1.0,
+                "git_branch": "worktree-hybrid-kernels",
                 "vs_control_mbb": -20.0,
                 "vs_control_p_value": 0.01,
                 "vs_control_blocked": ["payload missing, cannot pair"],
@@ -467,3 +470,31 @@ class TestEveryOpRenders:
         out = capsys.readouterr().out
         assert "2,000,000" in out, "the legacy row must still be shown"
         assert "10.1%" in out, "and the fields it does carry must render"
+
+
+class TestReportNamesTheWorktree:
+    """`report --experiment` pairs arms; it has to say which arm each row IS.
+
+    Arms are developed in parallel worktrees that share a commit and differ only
+    in what is uncommitted, so the branch is the only thing distinguishing two
+    rows whose provenance is otherwise identical.
+    """
+
+    def test_the_branch_is_printed_beside_the_arm(self, capsys):
+        BY_NAME["report"].render(PAYLOADS["report"])
+        out = capsys.readouterr().out
+        assert "worktree-hybrid-kernels" in out
+        assert "from" in out
+
+    def test_a_report_of_legacy_arms_drops_the_column(self, capsys):
+        """Not a column of em-dashes: those are wide enough to push the numbers
+        off a terminal, to say nothing."""
+        payload = copy.deepcopy(PAYLOADS["report"])
+        for arm in payload["arms"]:
+            arm["git_branch"] = ""
+
+        BY_NAME["report"].render(payload)
+        out = capsys.readouterr().out
+
+        assert "from" not in out
+        assert "900.0" in out, "the numbers must still be there"

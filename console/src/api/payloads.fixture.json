@@ -239,6 +239,7 @@
         "arm": "control",
         "checkpoint_iteration": 1000,
         "exploitability_mbb": 900.0,
+        "git_branch": "main",
         "run_id": "run-c",
         "std_error_mbb": 1.0,
         "vs_control_blocked": [],
@@ -249,6 +250,7 @@
         "arm": "variant:pruning",
         "checkpoint_iteration": 1000,
         "exploitability_mbb": 880.0,
+        "git_branch": "worktree-hybrid-kernels",
         "run_id": "run-v",
         "std_error_mbb": 1.0,
         "vs_control_blocked": [

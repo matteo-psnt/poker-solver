@@ -498,3 +498,100 @@ class TestIncrementalBettingSequence:
                 state = rules.apply_action(state, rng.choice(actions))
                 assert state._cached_betting_sequence is not None
                 assert state._cached_betting_sequence == self._from_scratch(state)
+
+
+class TestOfferedActionsAreApplicable:
+    """Everything `get_legal_actions` offers, `apply_action` must accept.
+
+    They are separate functions over the same rules, and `_apply_action_impl`
+    validates through `is_action_valid` — so a disagreement between them is a
+    crash mid-traversal, arbitrarily deep, with a stack the caller cannot
+    recover from. A cloud task died exactly that way:
+
+        ValueError: Illegal action ALL_IN(13) (to_call=4) for state
+
+    That task ran a command that no longer exists, and the sweep below found the
+    two functions to agree on 500,000+ decision states — so the defect was NOT
+    here. This exists to keep it that way: the check is exhaustive rather than
+    exemplary, because the disagreement that matters is the one nobody wrote a
+    case for.
+
+    Memo left ON deliberately. `get_legal_actions` is keyed on
+    (action_model, street, normalized sequence, pot, current stack, to_call,
+    button) and returns a SHARED tuple, so a key too coarse for the legality it
+    caches would surface here and nowhere else. The `seen` key below is
+    deliberately FINER than the memo's — it also carries both stacks and the
+    board length — so states that collapse onto one memo entry are each checked
+    against it.
+    """
+
+    @staticmethod
+    def _hole() -> tuple[tuple[Card, Card], tuple[Card, Card]]:
+        import eval7
+
+        cards = [Card(eval7.Card(c)) for c in ("Ah", "Kd", "Qc", "Js")]
+        return ((cards[0], cards[1]), (cards[2], cards[3]))
+
+    def _sweep(self, stack: int) -> tuple[int, list[str]]:
+        from collections import deque
+
+        from src.engine.solver.mccfr.chance import is_chance_node, sample_chance_outcome
+
+        config = Config.default()
+        rules = GameRules(small_blind=config.game.small_blind, big_blind=config.game.big_blind)
+        model = ActionModel(config)
+        # Both buttons: legality is seat-relative, and the button is part of the key.
+        queue = deque(rules.create_initial_state(stack, self._hole(), button=b) for b in (0, 1))
+        seen: set = set()
+        bad: list[str] = []
+
+        while queue:
+            state = queue.popleft()
+            if state.is_terminal:
+                continue
+            if is_chance_node(state):
+                queue.append(sample_chance_outcome(state))
+                continue
+            key = (
+                state.street,
+                state.normalized_betting_sequence(),
+                state.pot,
+                tuple(state.stacks),
+                state.to_call,
+                state.current_player,
+                len(state.board),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+
+            for action in rules.get_legal_actions(state, action_model=model):
+                if not rules.is_action_valid(state, action):
+                    bad.append(f"offered {action} but rejected it (to_call={state.to_call})")
+                    continue
+                try:
+                    queue.append(rules.apply_action(state, action))
+                except ValueError as exc:
+                    bad.append(f"offered {action} and then raised: {exc}")
+        return len(seen), bad
+
+    @pytest.mark.parametrize("stack", [4, 5, 6, 7, 9, 13, 20, 40])
+    def test_short_stacks_never_offer_an_inapplicable_action(self, stack):
+        """Short stacks first: every all-in edge lives where the stack runs out,
+        and the reported crash was a stack near 13 facing a bet of 4."""
+        visited, bad = self._sweep(stack)
+        assert visited > 0, "the sweep reached no decision state — it is testing nothing"
+        assert bad == []
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_the_whole_sweep_agrees(self):
+        """Every stack from 4 to 60, plus deep ones. ~500k states, ~8s."""
+        total = 0
+        bad: list[str] = []
+        for stack in [*range(4, 61), 100, 200, 400]:
+            visited, found = self._sweep(stack)
+            total += visited
+            bad.extend(found)
+        assert total > 100_000, f"only {total} states — the sweep stopped early"
+        assert bad == []

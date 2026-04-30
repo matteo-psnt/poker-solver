@@ -15,6 +15,7 @@ from typing import Any
 
 from src.interfaces.cloud import dispatch, spec
 from src.interfaces.commands._base import Command
+from src.shared import gitinfo
 from src.shared.cloudtask.kinds import TaskName
 
 
@@ -29,7 +30,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--run", default="", help="Continue this existing run id.")
     parser.add_argument("--experiment", default="", help="Experiment id to tag the run with.")
-    parser.add_argument("--arm", default="", help="Arm label within the experiment.")
+    parser.add_argument(
+        "--arm",
+        default="",
+        help="Arm label within the experiment. Defaults to the branch when "
+        "--experiment is given, since that is already the name the work has.",
+    )
     parser.add_argument("--parent", default="", help="Parent run id, for a fork lineage.")
     parser.add_argument(
         "--set",
@@ -60,6 +66,27 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _arm(args: argparse.Namespace) -> str:
+    """The arm label, defaulting to the branch this was submitted from.
+
+    An arm IS a worktree here — the whole reason for a branch is that it holds
+    one idea — so retyping the name as `--arm` is a step that adds nothing and
+    can be forgotten. Forgetting it is not a small mistake: an untagged run is
+    unaffiliated, `report --experiment` never sees it, and the omission shows up
+    as a missing row rather than as an error.
+
+    Only under `--experiment`. Outside one an arm label means nothing, and
+    stamping every ordinary run with its branch would turn a field that says
+    "this is part of a comparison" into one that is always set.
+
+    An explicit `--arm` always wins, and a detached checkout has no branch to
+    fall back on, so both leave this exactly as it was.
+    """
+    if args.arm or not args.experiment:
+        return args.arm
+    return gitinfo.get_git_branch() or ""
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Stage the tree and queue one training task."""
     payload = dispatch.stage_and_queue(
@@ -71,7 +98,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 to=args.to,
                 run_id=args.run,
                 experiment=args.experiment,
-                arm=args.arm,
+                arm=_arm(args),
                 parent=args.parent,
                 sets=tuple(args.sets),
                 workers=args.workers,
