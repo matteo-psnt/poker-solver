@@ -59,6 +59,7 @@ def _list(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         records = [r for r in records if eval_ledger.record_instant(r) >= cutoff]
     # `records[-0:]` is the whole list, so a 0 limit already meant "all" by
     # accident. Made deliberate: `--limit 0` is how to see the whole history.
+    matched = len(records)
     if args.limit > 0:
         records = records[-args.limit :]
     return {
@@ -67,6 +68,11 @@ def _list(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         # reported rather than hidden, so an empty listing names something the
         # reader can go and look at.
         "ledger": str(ledger_path),
+        # How many rows the FILTERS matched, before `--limit` paged them. The
+        # header read "25 row(s)" off a 37-row ledger, so a migration that
+        # recovered 18 evaluations looked like it had recovered 6 -- silent
+        # truncation reporting itself as a total.
+        "matched": matched,
         "rows": records,
     }
 
@@ -85,7 +91,13 @@ def render(payload: dict[str, Any]) -> None:
     if not rows:
         print(f"No eval-ledger entries in {payload['ledger']}.")
         return
-    print(f"Eval ledger ({payload['ledger']}): {len(rows)} row(s)")
+    matched = payload.get("matched", len(rows))
+    shown = (
+        f"{len(rows)} row(s)"
+        if matched <= len(rows)
+        else f"{len(rows)} of {matched} row(s) (--limit 0 for all)"
+    )
+    print(f"Eval ledger ({payload['ledger']}): {shown}")
     header = (
         f"{'run_id':<26} {'commit':<14} {'scorer':<10} {'opp':<10} "
         f"{'seed':>12} {'hands':>6} {'mbb/g':>12}"

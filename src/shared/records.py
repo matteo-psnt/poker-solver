@@ -36,6 +36,16 @@ cannot get this wrong by accident. That is the only axis: ``local`` or
 
 Every artifact is declared in :data:`REGISTRY`. A test asserts nothing writes
 outside it, so "what does this project store" is answerable by reading one list.
+
+WHERE it lives and HOW IT GROWS are declared there too, and for the same
+reason. The registry used to say only how a file was *written*, so answering
+"where does a leg record live" meant reading ``task_log`` and ``share`` and
+``archive`` and hoping they agreed -- and no single place said which of these
+accumulate forever. Two do: ``legs/*`` gains four files per task-attempt and is
+read by joining ALL of them, and code snapshots gain a tarball per submit.
+Neither is pruned by anything. ``growth`` is prose because it is read by a
+person deciding what to compact, not by code -- the alternative, a machine
+-checkable bound, would be a number nobody could honestly supply.
 """
 
 from __future__ import annotations
@@ -71,6 +81,8 @@ class Artifact:
     scope: Scope
     version: int
     what: str
+    where: str
+    growth: str
 
     @property
     def atomic(self) -> bool:
@@ -84,6 +96,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="local",
         version=2,
         what="everything that happened to a run: creation, attempts, checkpoints, status",
+        where="<run_dir>/run.jsonl",
+        growth="one row per event; one file per run, read whole",
     ),
     "STATIC_CHECKPOINT.json": Artifact(
         name="STATIC_CHECKPOINT.json",
@@ -91,6 +105,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="local",
         version=1,
         what="current snapshot plus the retained ladder",
+        where="<run_dir>/STATIC_CHECKPOINT.json",
+        growth="rewritten in place; the ladder it names is what actually grows",
     ),
     "eval_ledger.jsonl": Artifact(
         name="eval_ledger.jsonl",
@@ -98,6 +114,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="local",
         version=1,
         what="every recorded evaluation; a rebuildable cache of the per-run records",
+        where="<runs_dir>/eval_ledger.jsonl, in the throwaway tree a reader materialises",
+        growth="DERIVED on every read and discarded; never accumulates",
     ),
     "evals/*.json": Artifact(
         name="evals/*.json",
@@ -105,6 +123,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="local",
         version=3,
         what="one evaluation entire: provenance, knobs, and full results with samples",
+        where="<run_dir>/evals/<timestamp>-<config>-<slug>.json",
+        growth="one file per evaluation, all of them read to rebuild the ledger",
     ),
     "metadata.json": Artifact(
         name="metadata.json",
@@ -112,6 +132,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="local",
         version=1,
         what="a precomputed card abstraction's config, hash and per-street shape",
+        where="<abstraction_dir>/metadata.json",
+        growth="one per abstraction; rewritten in place",
     ),
     "baseline.json": Artifact(
         name="baseline.json",
@@ -119,6 +141,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="local",
         version=1,
         what="which run is the current baseline, and why it was promoted",
+        where="<runs_dir>/../baseline.json",
+        growth="a single pointer, rewritten by promote",
     ),
     "legs/*.start.json": Artifact(
         name="legs/*.start.json",
@@ -126,6 +150,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="share",
         version=3,
         what="a cloud task's own account of starting, per task and attempt",
+        where="<share>/legs/<task_id>.<attempt>.start.json",
+        growth="UNBOUNDED -- one per task attempt, forever, and `tasks` joins ALL of them",
     ),
     "legs/*.exit.json": Artifact(
         name="legs/*.exit.json",
@@ -133,6 +159,9 @@ REGISTRY: dict[str, Artifact] = {
         scope="share",
         version=3,
         what="a cloud task's own account of how it ended",
+        where="<share>/legs/<task_id>.<attempt>.exit.json",
+        growth="UNBOUNDED, as above. Its PRESENCE is what makes an attempt sealed, "
+        "so it is also the only safe test for what could be compacted away",
     ),
     "evaluate-progress.json": Artifact(
         name="evaluate-progress.json",
@@ -140,6 +169,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="local",
         version=1,
         what="flop branches walked so far, while a checkpoint is being scored",
+        where="<run_dir>/evaluate-progress.json",
+        growth="live-only; overwritten while a task runs and meaningless after it",
     ),
     "precompute-progress.json": Artifact(
         name="precompute-progress.json",
@@ -147,6 +178,9 @@ REGISTRY: dict[str, Artifact] = {
         scope="local",
         version=1,
         what="streets clustered so far, while a card abstraction is being built",
+        where="<abstraction_dir>/precompute-progress.json",
+        growth="live-only, as above. Separate from evaluate's only because the two "
+        "are written by different services into different trees; the SHAPE is identical",
     ),
     "legs/*.progress.json": Artifact(
         name="legs/*.progress.json",
@@ -154,6 +188,9 @@ REGISTRY: dict[str, Artifact] = {
         scope="share",
         version=1,
         what="how far along a running task is, refreshed while it runs",
+        where="<share>/legs/<task_id>.progress.json",
+        growth="one per task, overwritten as it runs; NOT per attempt, so it is "
+        "stale rather than absent once the task ends",
     ),
     "legs/*.observed.json": Artifact(
         name="legs/*.observed.json",
@@ -161,6 +198,8 @@ REGISTRY: dict[str, Artifact] = {
         scope="share",
         version=1,
         what="what Batch says became of a task whose own record never arrived",
+        where="<share>/legs/<task_id>.observed.json",
+        growth="one per unreconciled task; written by the READER, not the node",
     ),
 }
 
