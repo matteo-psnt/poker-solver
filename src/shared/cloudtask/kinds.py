@@ -401,6 +401,15 @@ class EvaluateTask(TaskKind):
             argv = ["evaluate", "--run", plan.run_id, "--method", plan.eval_method]
             if rung:
                 argv += ["--at", rung]
+            # THE NODE'S CORES. `--workers` defaults to 1 and nothing here passed
+            # it, so every evaluation ever run on the pool used ONE core of a
+            # 16-core box: `exact_br` took its serial path and `lbr` its
+            # single-process one. Ahead of `eval_flags`, so an explicit
+            # `--workers` in the passthrough still wins -- argparse takes the last.
+            if plan.workers > 0:
+                argv += ["--workers", str(plan.workers)]
+            if work := plan.progress_path:
+                argv += ["--progress-file", work]
             commands.append(argv + list(plan.eval_flags))
         return commands
 

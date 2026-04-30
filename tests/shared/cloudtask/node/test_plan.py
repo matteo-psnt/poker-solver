@@ -130,7 +130,8 @@ class TestEvaluateArgv:
 
     def test_the_method_defaults_to_the_zero_variance_gate(self):
         task = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_METHOD="")
-        assert task.commands[0][-1] == "exact_br"
+        argv = task.commands[0]
+        assert argv[argv.index("--method") + 1] == "exact_br"
 
     def test_passthrough_flags_survive_a_space(self):
         task = _plan(
@@ -215,3 +216,33 @@ class TestTheSubmitterContract:
         assert parsed.arm == "variant"
         assert parsed.sets == ("solver__dcfr=1.5", "system__note=two words")
         assert parsed.workers == 16
+
+
+class TestAnEvaluationGetsTheNodesCores:
+    """`--workers` defaults to 1 and nothing passed it.
+
+    So every evaluation ever run on the pool used ONE core of a 16-core box:
+    `exact_br` took its serial path and `lbr` its single-process one. The box was
+    already paid for and idle for the whole score.
+    """
+
+    def test_the_resolved_core_count_is_passed(self):
+        argv = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_WORKERS="16").commands[0]
+        assert argv[argv.index("--workers") + 1] == "16"
+
+    def test_an_explicit_workers_flag_still_wins(self):
+        """Ours goes first and the passthrough last; argparse takes the last."""
+        argv = _plan(
+            RUN_OP="evaluate",
+            RUN_ID="run-a",
+            RUN_WORKERS="16",
+            RUN_EVAL_FLAGS_JSON='["--workers", "2"]',
+        ).commands[0]
+        assert argv[-2:] == ["--workers", "2"]
+
+    def test_every_rung_of_a_ladder_gets_them(self):
+        commands = _plan(
+            RUN_OP="evaluate", RUN_ID="run-a", RUN_WORKERS="8", RUN_EVAL_AT="1000,2000"
+        ).commands
+        assert len(commands) == 2
+        assert all("--workers" in argv for argv in commands)
