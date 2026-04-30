@@ -10,8 +10,8 @@ to a service.
 The node contract
 -----------------
 ``infra/run_task.py`` reads every value below out of the task's environment --
-see :mod:`src.shared.node.plan`, which is the same contract from the node's
-end and is pinned against this one by ``tests/shared/node/test_plan.py``. Two
+see :mod:`src.shared.cloudtask.node.plan`, which is the same contract from the node's
+end and is pinned against this one by ``tests/shared/cloudtask/node/test_plan.py``. Two
 of them are JSON-encoded rather than passed raw, and the reason is not the one
 the old shell had. The ``az`` CLI needed hex because
 ``--environment-settings`` parses ``KEY=VALUE`` and a config override's value
@@ -27,8 +27,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from src.shared import tasks
-from src.shared.tasks import BadTaskError, TaskName
+from src.shared.cloudtask import kinds
+from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
 DEFAULT_TIMEOUT = "6h"
 DEFAULT_CHECKPOINT_EVERY = 1_000_000
@@ -156,10 +156,10 @@ class TaskSpec:
     def label(self) -> str:
         """What the task id is built from: what this task DOES, not when it ran.
 
-        The words are the KIND's -- see `src.shared.tasks`. Uniqueness is
+        The words are the KIND's -- see `src.shared.cloudtask.kinds`. Uniqueness is
         ``task_id``'s nonce to guarantee; this only has to be readable.
         """
-        return tasks.kind(self.op).label(self)
+        return kinds.kind(self.op).label(self)
 
     def environment(self) -> dict[str, str]:
         """The full RUN_* environment the node wrapper reads.
@@ -199,7 +199,7 @@ class TaskSpec:
         The kind-specific half lives with the kind; an unknown op is refused by
         the lookup itself, so a spec the node could not run cannot be built.
         """
-        tasks.kind(self.op).validate(self)
+        kinds.kind(self.op).validate(self)
         for override in self.sets:
             if "=" not in override:
                 raise BadTaskError(f"--set expects key=value, got '{override}'.")

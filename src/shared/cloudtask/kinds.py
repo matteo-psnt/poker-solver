@@ -27,7 +27,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol, cast
 
 
 class TaskName(StrEnum):
@@ -56,6 +56,82 @@ class BadTaskError(ValueError):
     A ``ValueError`` because that is what it is, and because the submit path
     already treats one as a refusal rather than a crash.
     """
+
+
+class TaskFields(Protocol):
+    """What a kind's :meth:`TaskKind.validate` reads, from EITHER end of the wire.
+
+    Structural on purpose. The submit end passes
+    ``interfaces.cloud.spec.TaskSpec`` and the node end passes
+    ``shared.node.plan.TaskPlan``, and ``.importlinter`` forbids
+    ``src.shared -> src.interfaces`` -- so this module cannot name either class,
+    not even under ``TYPE_CHECKING``. A Protocol is how the seam gets a type
+    without the import that would invert the layering.
+
+    The INTERSECTION of the two shapes, deliberately. Both ends validate through
+    the same kind -- that is what stops the node accepting what the submitter
+    would have refused -- so a field only one of them carries cannot be part of
+    the check.
+
+    Read-only properties rather than plain attributes, because both
+    implementations are frozen dataclasses and a mutable protocol member would
+    refuse them.
+    """
+
+    @property
+    def config(self) -> str: ...
+    @property
+    def to(self) -> int: ...
+    @property
+    def run_id(self) -> str: ...
+
+
+class Submission(TaskFields, Protocol):
+    """A task as the SUBMITTER holds it: what a label is built from.
+
+    ``eval_at`` is a single rung here and ``eval_rungs`` a tuple on the node,
+    which is the one place the two shapes genuinely differ rather than merely
+    overlap -- one task scores the ladder the submitter named.
+    """
+
+    @property
+    def arm(self) -> str: ...
+    @property
+    def eval_at(self) -> str: ...
+    @property
+    def eval_flags(self) -> Sequence[str]: ...
+
+
+class NodePlan(TaskFields, Protocol):
+    """A task as the NODE holds it: what an argv and a progress sample are built from.
+
+    Wider than :class:`Submission` because this end has resolved what the
+    submitter left open -- the worker count the node actually has, the run id a
+    retry must continue, the scratch path a build reports progress into.
+    """
+
+    @property
+    def train_run_id(self) -> str: ...
+    @property
+    def workers(self) -> int: ...
+    @property
+    def checkpoint_every(self) -> int: ...
+    @property
+    def experiment(self) -> str: ...
+    @property
+    def arm(self) -> str: ...
+    @property
+    def parent(self) -> str: ...
+    @property
+    def sets(self) -> Sequence[str]: ...
+    @property
+    def eval_method(self) -> str: ...
+    @property
+    def eval_rungs(self) -> Sequence[str]: ...
+    @property
+    def eval_flags(self) -> Sequence[str]: ...
+    @property
+    def progress_path(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -87,13 +163,18 @@ class Progress:
         return {"done": self.done, "total": self.total, "unit": self.unit}
 
     @staticmethod
-    def from_record(raw: Any) -> Progress | None:
+    def from_record(raw: object) -> Progress | None:
         """Tolerant: read back from a share record an older wrapper may not have
         written, or may have been killed halfway through writing."""
         if not isinstance(raw, Mapping):
             return None
+        # All the narrowing on offer: the record is untyped JSON off an SMB
+        # share, so the KEYS are checked by the try below, not by the checker.
+        record = cast("Mapping[str, Any]", raw)
         try:
-            return Progress(float(raw["done"]), float(raw["total"]), str(raw.get("unit") or ""))
+            return Progress(
+                float(record["done"]), float(record["total"]), str(record.get("unit") or "")
+            )
         except (KeyError, TypeError, ValueError):
             return None
 
@@ -165,11 +246,11 @@ class TaskKind(abc.ABC):
             TaskKind.KINDS[str(cls.name)] = cls()
 
     @abc.abstractmethod
-    def validate(self, task: Any) -> None:
+    def validate(self, task: TaskFields) -> None:
         """Reject a submission that cannot run, before it reaches a node."""
 
     @abc.abstractmethod
-    def commands(self, plan: Any) -> list[list[str]]:
+    def commands(self, plan: NodePlan) -> list[list[str]]:
         """The `poker-solver` argv(s) this task runs, in order.
 
         A list because scoring a ladder is one command per rung; the node runs
@@ -177,7 +258,7 @@ class TaskKind(abc.ABC):
         """
 
     @abc.abstractmethod
-    def label(self, task: Any) -> str:
+    def label(self, task: Submission) -> str:
         """The words a task id is built from -- what this task DOES."""
 
     @abc.abstractmethod
@@ -185,7 +266,7 @@ class TaskKind(abc.ABC):
         """One phrase saying what this task did, from its recorded fields."""
 
     @abc.abstractmethod
-    def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:
+    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:
         """How far along, from state the node has already gathered.
 
         ``None`` when the kind cannot yet say -- honest, and renders as no bar
@@ -235,7 +316,7 @@ class TrainTask(TaskKind):
     name = TaskName.TRAIN
     unit = "iterations"
 
-    def validate(self, task: Any) -> None:
+    def validate(self, task: TaskFields) -> None:
         if not task.config:
             # A CONTINUING task needs it too: the config builds the tree and the
             # solver, and the checkpoint stores neither. `--run x` without one
@@ -245,7 +326,7 @@ class TrainTask(TaskKind):
         if task.to <= 0:
             raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
 
-    def commands(self, plan: Any) -> list[list[str]]:
+    def commands(self, plan: NodePlan) -> list[list[str]]:
         argv = [
             "train-static",
             "--config",
@@ -276,7 +357,7 @@ class TrainTask(TaskKind):
             argv += ["--set", override]
         return [argv]
 
-    def label(self, task: Any) -> str:
+    def label(self, task: Submission) -> str:
         words = ["train", _subject(task)]
         if task.to:
             words.append(f"to{compact(task.to)}")
@@ -288,7 +369,7 @@ class TrainTask(TaskKind):
         target = str(record.get("target_iteration") or "")
         return f"train ->{compact(int(target))}" if target.isdigit() and target != "0" else "train"
 
-    def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:
+    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:
         """Iterations done against the target, from the checkpoint manifest.
 
         The one kind that can already answer, because training writes a
@@ -306,11 +387,11 @@ class EvaluateTask(TaskKind):
     name = TaskName.EVALUATE
     unit = "rungs"
 
-    def validate(self, task: Any) -> None:
+    def validate(self, task: TaskFields) -> None:
         if not task.run_id:
             raise BadTaskError("an evaluation works on an existing run, so it needs a run id")
 
-    def commands(self, plan: Any) -> list[list[str]]:
+    def commands(self, plan: NodePlan) -> list[list[str]]:
         """One command per rung. ``eval_flags`` is the submitter's passthrough
         (``score --run r -- --br-flops 8``), validated where it is built because
         its contents are unknowable here."""
@@ -322,12 +403,12 @@ class EvaluateTask(TaskKind):
             commands.append(argv + list(plan.eval_flags))
         return commands
 
-    def label(self, task: Any) -> str:
+    def label(self, task: Submission) -> str:
         words = ["score", _subject(task)]
-        rung = str(getattr(task, "eval_at", "") or "")
+        rung = str(task.eval_at or "")
         if rung.isdigit():
             words.append(compact(int(rung)))
-        seed = _flag(getattr(task, "eval_flags", ()), "--br-board-seed")
+        seed = _flag(task.eval_flags, "--br-board-seed")
         if seed:
             words.append(f"seed{seed}")
         return "-".join(word for word in words if word)
@@ -340,7 +421,7 @@ class EvaluateTask(TaskKind):
         detail = f"evaluate @{compact(int(rung))}"
         return f"{detail} seed{seed}" if seed else detail
 
-    def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:
+    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:
         """Rungs scored against rungs requested.
 
         Counted from ZERO rather than reported only once the first rung lands.
@@ -372,26 +453,26 @@ class PrecomputeTask(TaskKind):
     a deterministic failure would bill three full runs to fail three times."""
     retries = 0
 
-    def validate(self, task: Any) -> None:
+    def validate(self, task: TaskFields) -> None:
         if not task.config:
             raise BadTaskError("a precompute task needs an abstraction config")
 
     progress_file = "precompute-progress.json"
 
-    def commands(self, plan: Any) -> list[list[str]]:
+    def commands(self, plan: NodePlan) -> list[list[str]]:
         argv = ["precompute", "--config", plan.config, "--json"]
         # Where the build reports street completion, and where `sample` reads it
         # back. Node-local: it is a heartbeat, not a record.
-        work = getattr(plan, "progress_path", "")
-        return [[*argv, "--progress-file", str(work)] if work else argv]
+        work = plan.progress_path
+        return [[*argv, "--progress-file", work] if work else argv]
 
-    def label(self, task: Any) -> str:
+    def label(self, task: Submission) -> str:
         return f"precompute-{task.config}"
 
     def describe(self, record: Mapping[str, Any]) -> str:
         return f"precompute {record.get('config') or ''}".strip()
 
-    def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:  # noqa: ARG002
+    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
         """Streets clustered, against streets to cluster.
 
         Coarse -- three streets means the bar moves twice -- but the river is
@@ -406,21 +487,25 @@ class PrecomputeTask(TaskKind):
         return Progress(float(done), float(total), self.unit)
 
 
-def _subject(task: Any) -> str:
+def _subject(task: Submission) -> str:
     """What a label names: the run being continued, else the config.
 
     Run ids are long, share a prefix and differ only at the END, so the middle
     timestamp is dropped -- ``run-production-025433-1095`` -> ``production-1095``.
     """
-    run_id = getattr(task, "run_id", "") or ""
-    if not run_id:
-        return getattr(task, "config", "") or ""
-    parts = [part for part in run_id.removeprefix("run-").split("-") if part]
+    if not task.run_id:
+        return task.config
+    parts = [part for part in task.run_id.removeprefix("run-").split("-") if part]
     return f"{parts[0]}-{parts[-1]}" if len(parts) > 2 else "-".join(parts)
 
 
-def _flag(flags: Any, name: str) -> str:
-    """The value of ``--name v`` or ``--name=v`` in a passthrough flag list."""
+def _flag(flags: object, name: str) -> str:
+    """The value of ``--name v`` or ``--name=v`` in a passthrough flag list.
+
+    ``object`` rather than a sequence type: one caller passes a task's own
+    flags, the other whatever a task RECORD holds under ``eval_flags``, and a
+    record on the share is only ever a claim about its own shape.
+    """
     items = list(flags) if isinstance(flags, list | tuple) else []
     for index, item in enumerate(items):
         if item == name:
@@ -449,7 +534,7 @@ def samples(rows: Sequence[Mapping[str, Any]], name: str) -> list[Sample]:
     return found
 
 
-def _seconds_between(start: Any, end: Any) -> float:
+def _seconds_between(start: object, end: object) -> float:
     """Two ISO stamps to a duration, or 0 for anything unreadable."""
     try:
         return (
@@ -460,7 +545,7 @@ def _seconds_between(start: Any, end: Any) -> float:
 
 
 def remaining(
-    row: Mapping[str, Any], history: Sequence[Mapping[str, Any]], now: Any
+    row: Mapping[str, Any], history: Sequence[Mapping[str, Any]], now: str
 ) -> float | None:
     """Seconds left on a RUNNING task, or None when nothing can say.
 
@@ -485,7 +570,7 @@ def remaining(
     )
 
 
-def kind(name: Any) -> TaskKind:
+def kind(name: object) -> TaskKind:
     """The kind by name, refusing anything the submit path cannot run."""
     found = TaskKind.KINDS.get(str(name or ""))
     if found is None:
@@ -494,7 +579,7 @@ def kind(name: Any) -> TaskKind:
     return found
 
 
-def kind_of(name: Any) -> TaskKind | None:
+def kind_of(name: object) -> TaskKind | None:
     """The kind, or ``None`` for one this code no longer defines.
 
     The READ path. The task log holds `vector-sweep` and `train-vector` from

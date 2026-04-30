@@ -150,14 +150,18 @@ attempt that caused it. Separate start/exit files because `write_text` truncates
 so a kill mid-write would otherwise make the task vanish from the listing
 entirely — in exactly the SIGKILL window this exists for.
 
-`src/shared/task_log.py` and all of `src/shared/node/` import **only the standard
-library** and stay **Python 3.10 compatible**, on purpose: the node runs them
-with its system `python3` — 3.10 on the pinned Ubuntu 22.04 image — before
-`uv sync` has run. `tests/shared/node/test_node_interpreter.py` enforces both by
-importing the whole package on a real 3.10 (`uv run --python 3.10
---no-project`), because the substring scan that preceded it could not catch
-`datetime.UTC`: it passed every test and silently disabled task records on the
-only machine that runs them.
+All of `src/shared/cloudtask/` imports **only the standard library**, on purpose:
+the node runs it before `uv sync`. The floor used to be the image's `python3`
+(3.10 on the pinned 22.04), which cost a scan for 3.11+ constructs; the start
+task installs the interpreter now, so what has to stay true is that Terraform
+installs the version the tests assert against.
+`tests/shared/cloudtask/node/test_node_interpreter.py` enforces it by importing
+the entry point's whole closure on that interpreter with `--no-project`, because
+the substring scan that preceded it could not catch `datetime.UTC`: it passed
+every test and silently disabled task records on the only machine that runs
+them. `tests/shared/cloudtask/test_imports.py` is the fail-closed half — nothing
+outside `records`/`jsonio`/`cache` may be reached, so a new module in
+`src/shared/` is denied by default rather than by a list somebody has to update.
 
 `poker-solver tasks --skip-reconcile` reads the share without querying Batch,
 and `poker-solver logs --task <task>` prints a published log. There is no

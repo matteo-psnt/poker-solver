@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from src.shared import task_log
+from src.shared.cloudtask import task_log
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -249,7 +249,7 @@ class TestNodeSideConstraints:
         """Proves the node-side contract on a bare interpreter, not just in-suite."""
         script = (
             f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-            "from src.shared.task_log import write_node_record;"
+            "from src.shared.cloudtask.task_log import write_node_record;"
             f"write_node_record({str(tmp_path)!r}, task_id='t', event='started');"
             "print('ok')"
         )

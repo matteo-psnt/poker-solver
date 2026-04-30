@@ -25,7 +25,7 @@ from src.interfaces.cloud import batch, share
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.commands import jobs
 from src.interfaces.commands._base import Command
-from src.shared import task_log
+from src.shared.cloudtask import task_log
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

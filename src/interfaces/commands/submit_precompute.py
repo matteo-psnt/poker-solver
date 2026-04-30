@@ -22,7 +22,7 @@ from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
-from src.shared.tasks import TaskName
+from src.shared.cloudtask.kinds import TaskName
 
 PRECOMPUTE_TIMEOUT = "12h"
 

@@ -12,7 +12,7 @@ import pathlib
 
 import pytest
 
-from src.shared.node import plan as node_plan
+from src.shared.cloudtask.node import plan as node_plan
 
 BASE = {
     "RUN_OP": "train",

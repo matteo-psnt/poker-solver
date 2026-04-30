@@ -153,18 +153,21 @@ definition: never a source of truth, never worth backing up.
   `poker-solver submit --config <c> --to <absolute-iteration>` queues a task
   and returns; the pool scales 0→N→0 on its own. Terraform owns the account and
   pool; jobs and tasks are created at runtime by `src/interfaces/cloud/`, never
-  in HCL. **The node-side wrapper is Python, in `src/shared/node/`** —
-  `archive.py` (publish/fetch between the node disk and the SMB share),
-  `plan.py` (the `RUN_*` environment → the argv), `runner.py` (the timeout
-  guard, the tee, the mid-run publisher, the exit accounting), with
-  `infra/run_task.py` as the entry point the task command line names. It lives
-  under `shared` because it runs on the node BEFORE `uv sync`, under the node's
-  system `python3` — **3.10 on the pinned Ubuntu 22.04 image, and stdlib
-  only**. Both constraints are enforced by
-  `tests/shared/node/test_node_interpreter.py`, which imports the whole package
-  on a real 3.10 via `uv run --python 3.10 --no-project`; ruff's
-  `target-version` is `py312`, so `pyproject.toml` disables `UP017` for these
-  files or the formatter rewrites them into something the node cannot import.
+  in HCL. **The cloud task is one subsystem, in `src/shared/cloudtask/`** —
+  `kinds.py` (what KIND of work a task is, read from BOTH ends of the wire),
+  `task_log.py` (the durable per-task account), and `node/`, the wrapper:
+  `paths.py`, `process.py` (the timeout guard and the tee), `plan.py` (the
+  `RUN_*` environment → the argv), `archive.py` (publish/fetch between the node
+  disk and the SMB share), `progress.py` (the heartbeat and what a task
+  achieved), `handlers.py` (what each kind DOES), `lifecycle.py` (one task start
+  to finish, and the exit accounting), with `infra/run_task.py` as the entry
+  point the task command line names. It lives under `shared` for two reasons:
+  `pipeline` reads the task log, and `pipeline → interfaces` is forbidden; and
+  the node runs it BEFORE `uv sync`, so **stdlib only** — a constraint enforced
+  twice, by `tests/shared/cloudtask/node/test_node_interpreter.py` (which
+  imports the node's whole closure on the interpreter `main.tf` installs) and by
+  `tests/shared/cloudtask/test_imports.py` (fail-closed: nothing outside
+  `records`/`jsonio`/`cache` may be reached).
   Two shell things REMAIN shell and should stay that way: `just panic` (must
   work from a phone in Cloud Shell, with no venv and no Terraform state) and
   `main.tf`'s `start_task` (disk discovery, `mkfs`, mount — it runs before any

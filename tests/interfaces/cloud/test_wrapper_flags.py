@@ -34,9 +34,9 @@ import tomllib
 import pytest
 
 from src.interfaces.commands import COMMANDS
-from src.shared.node import plan as node_plan
-from src.shared.node import runner as node_runner
-from src.shared.tasks import TaskName
+from src.shared.cloudtask.kinds import TaskName
+from src.shared.cloudtask.node import handlers as node_handlers
+from src.shared.cloudtask.node import plan as node_plan
 
 # Added by `headless.build_parser` to every subcommand, so they are legal
 # everywhere and appear in no command's own `add_arguments`.
@@ -137,7 +137,7 @@ class TestTheCheckCatchesTheRealDefect:
 class TestTheWrapperInvokesACommandThatExists:
     """The flags are checked above; this checks the BINARY they are passed to.
 
-    `runner.py` hardcodes `["uv", "run", "<name>", *argv]` and `pyproject.toml`
+    `handlers.py` hardcodes `["uv", "run", "<name>", *argv]` and `pyproject.toml`
     declares what `<name>` installs. Nothing tied them together, so renaming the
     script -- which is exactly what happened when `poker-solver-run` lost its
     suffix -- could leave the node calling a binary that no longer exists.
@@ -153,7 +153,7 @@ class TestTheWrapperInvokesACommandThatExists:
         return set(tomllib.loads(pyproject.read_text())["project"]["scripts"])
 
     def test_the_node_calls_a_script_the_project_installs(self):
-        argv = node_runner._cli(["progress", "--run", "run-a"])
+        argv = node_handlers._cli(["progress", "--run", "run-a"])
         assert argv[:2] == ["uv", "run"], argv
         assert argv[2] in self._script_names(), (
             f"the node invokes `{argv[2]}`, which pyproject.toml does not install. "

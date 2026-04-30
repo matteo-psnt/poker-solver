@@ -18,7 +18,8 @@ from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
-from src.shared import records, run_events, task_log
+from src.shared import records, run_events
+from src.shared.cloudtask import task_log
 from src.shared.config import DEFAULT_RUNS_DIR
 
 

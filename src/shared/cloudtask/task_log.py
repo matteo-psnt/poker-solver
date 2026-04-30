@@ -43,7 +43,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.shared import records, tasks
+from src.shared import records
+from src.shared.cloudtask import kinds
 
 RECORDS_DIRNAME = "legs"
 
@@ -188,7 +189,7 @@ def write_progress_record(
     share: str | os.PathLike[str],
     *,
     task_id: str,
-    progress: tasks.Progress,
+    progress: kinds.Progress,
 ) -> Path:
     """How far along a RUNNING task is. Overwritten, unlike start and exit.
 
@@ -365,7 +366,7 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "units": (exit_record or {}).get("units", 0.0),
                 # One phrase saying what this task DID, derived here so the
                 # terminal and the console cannot word it differently.
-                "what": tasks.describe(node),
+                "what": kinds.describe(node),
                 "cause": cause,
                 "cause_source": cause_source,
                 # Only for the attempt Batch is describing, and only while the
@@ -395,7 +396,7 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
     joined.sort(key=lambda r: (r.get("ended_at") or r.get("started_at") or "", r["task_id"]))
     now = _utcnow()
     for row in joined:
-        row["eta_seconds"] = tasks.remaining(row, joined, now)
+        row["eta_seconds"] = kinds.remaining(row, joined, now)
     return joined
 
 
@@ -446,7 +447,7 @@ def format_table(rows: Iterable[dict[str, Any]]) -> str:
 
 def _derived(row: dict[str, Any], column: str) -> Any:
     if column == "done":
-        progress = tasks.Progress.from_record(row.get("progress"))
+        progress = kinds.Progress.from_record(row.get("progress"))
         return f"{progress.fraction:.0%} {progress.phrase}" if progress is not None else ""
     if column == "left":
         return _duration(row.get("eta_seconds"))

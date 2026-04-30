@@ -1,0 +1,213 @@
+"""What each KIND of task actually does on the node.
+
+One executor per kind, and a registry keyed by the kind's own name -- so a kind
+with no executor is a ``KeyError`` naming it rather than a task that silently
+does nothing. The lifecycle around them (the guard, the tee, the exit account)
+is deliberately not here: it is identical for all three, and mixing the two is
+what made the shell version impossible to reason about.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
+
+from src.shared.cloudtask import kinds, task_log
+from src.shared.cloudtask.kinds import TaskName
+from src.shared.cloudtask.node import archive, progress
+from src.shared.cloudtask.node.paths import NodePaths
+from src.shared.cloudtask.node.plan import TaskPlan
+from src.shared.cloudtask.node.process import TaskLogger, run_guarded
+
+"""An executor: what a task of one kind does, and how it ended.
+
+The second element is the OUTCOME the exit code cannot carry -- an evaluation
+that scored some rungs and failed others exits 0 for Batch's retry economics,
+which is not a claim of success.
+"""
+Handler = Callable[[TaskPlan, NodePaths, TaskLogger], tuple[int, str | None]]
+
+
+def _cli(argv: list[str]) -> list[str]:
+    return ["uv", "run", "poker-solver", *argv]
+
+
+def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
+    run_id = plan.train_run_id
+    published = paths.archive / run_id
+    if published.is_dir():
+        log(f"fetching published checkpoint for {run_id}")
+        archive.fetch_current_rung(published, paths.runs / run_id, log)
+
+    progress.note_baseline(paths, plan)
+    watcher = progress.LadderWatcher(paths, log, plan=plan)
+    watcher.start()
+    try:
+        log(
+            f"train-static: config={plan.config} run={run_id} to={plan.to} "
+            f"(timeout {plan.timeout_seconds}s)"
+        )
+        code = run_guarded(
+            _cli(plan.commands[0]),
+            cwd=paths.code,
+            timeout=plan.timeout_seconds,
+            log=log,
+        )
+    finally:
+        watcher.stop()
+    if code == 137:
+        log("KILLED (SIGKILL, not the guard -- suspect OOM); published rungs are on the share")
+    return code, None
+
+
+def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
+    """Scoring belongs on the node, not on a laptop: the share is a local mount
+    here and a WAN download away from anywhere else -- one checkpoint is
+    ~540 MB of small zarr chunks, ~20 minutes to pull over SMB.
+
+    Rungs are scored in ONE task because the fetch dominates the cost: a whole
+    convergence curve for the price of one.
+    """
+    published = paths.archive / plan.run_id
+    if not published.is_dir():
+        log(f"FATAL no such run on the share: {plan.run_id}")
+        return 1, None
+    rungs = _fetch_rungs(plan, paths, published, log)
+    if rungs is None:
+        return 1, None
+
+    progress.note_baseline(paths, plan)
+    ok, bad = 0, 0
+    # Built from the rungs that FETCHED, not the ones requested: `fetch_for_evaluation`
+    # drops what is not on the share, and a command list built from the request
+    # would score the wrong rung for every drop before it.
+    commands = replace(plan, eval_rungs=tuple(rungs)).commands
+    for rung, argv in zip(rungs or [""], commands, strict=True):
+        log(
+            f"evaluate: run={plan.run_id} method={plan.eval_method}"
+            + (f" at={rung}" if rung else "")
+        )
+        code = run_guarded(_cli(argv), cwd=paths.code, timeout=plan.timeout_seconds, log=log)
+        # One bad rung must not abandon the rest: a partial curve beats none,
+        # and the failure is visible in this log and absent from the ledger.
+        if code == 0:
+            ok += 1
+        else:
+            bad += 1
+            log(f"WARN rung {rung or 'latest'} failed (rc={code})")
+        # Between rungs, not on a timer: scoring one rung is opaque from out
+        # here, so this is the only moment the count actually changes.
+        progress.publish(paths, plan, {"scored": ok + bad})
+        log.publish()
+
+    log(f"evaluate complete: {ok} scored, {bad} failed")
+    # Exit 0 when ANYTHING scored: a non-zero exit retries the WHOLE task, and
+    # one bad rung once turned a 30-minute job into nearly four hours of
+    # re-scoring, writing every record twice. Only a clean sweep is worth a
+    # retry. But exit 0 is not a claim of success -- 1 of 30 rungs would read
+    # as `completed`, so the outcome carries what the code drops.
+    if ok:
+        return 0, (task_log.CAUSE_PARTIAL if bad else None)
+    return 1, None
+
+
+def _fetch_rungs(
+    plan: TaskPlan, paths: NodePaths, published: Path, log: TaskLogger
+) -> list[str] | None:
+    """The rungs to score, pulled down; ``None`` when there is nothing to score.
+
+    An empty request means "the latest checkpoint", so the manifest's current
+    rung is exactly what has to come down. The shell had no branch for this and
+    fell to a catch-all that copied the WHOLE published directory -- the entire
+    ladder, to score one rung of it.
+    """
+    requested = list(plan.eval_rungs)
+    if not requested:
+        if archive.fetch_current_rung(published, paths.runs / plan.run_id, log):
+            return []
+        log(f"FATAL {plan.run_id} has no published checkpoint to score")
+        return None
+    fetched = archive.fetch_for_evaluation(published, paths.runs / plan.run_id, requested, log)
+    if not fetched:
+        log("FATAL none of the requested rungs could be fetched")
+        return None
+    return fetched
+
+
+def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
+    """Build a card abstraction on a node and publish it once.
+
+    THE GUARD IS THE POINT. The invariant is "computed ONCE, never
+    recomputed" -- not "computed locally", which is what the old local-only
+    workflow confused it with. Bucket ASSIGNMENT is not pinned by
+    ``card_abstraction_hash``, so republishing under the same name can silently
+    change which bucket a hand lands in, while every run trained against the
+    old copy keeps a provenance check that now passes over different buckets.
+    Refusing to overwrite is what makes running this in the cloud as safe as
+    running it on a laptop.
+    """
+    payload = paths.work / "precompute.json"
+    # Only the node knows its scratch directory, so the path is filled in here
+    # and the KIND puts it on the command line.
+    plan = replace(plan, progress_path=str(paths.work / kinds.kind(plan.op).progress_file))
+    log(f"precompute: config={plan.config} (timeout {plan.timeout_seconds}s)")
+    progress.note_baseline(paths, plan)
+    watcher = progress.LadderWatcher(paths, log, plan=plan)
+    watcher.start()
+    try:
+        code = run_guarded(
+            _cli(plan.commands[0]),
+            cwd=paths.code,
+            timeout=plan.timeout_seconds,
+            log=log,
+            stdout_to=payload,
+        )
+    finally:
+        watcher.stop()
+    if code != 0:
+        log(f"precompute failed rc={code}")
+        return code, None
+
+    # The command reports where it wrote; do not re-derive the directory name.
+    try:
+        output = Path(json.loads(payload.read_text())["output_dir"])
+    except (OSError, ValueError, KeyError) as error:
+        log(f"FATAL precompute wrote no usable output_dir: {error}")
+        return 1, None
+    destination = paths.share / "combo_abstraction" / output.name
+    log(f"precomputed {output.name} -> {output}")
+
+    if destination.is_dir() and not plan.force_publish:
+        log(f"REFUSING to republish: {output.name} already exists on the share.")
+        log("  Bucket assignment is not pinned by the abstraction hash, so replacing")
+        log("  it would silently invalidate every run trained against the old copy.")
+        log("  Set RUN_FORCE_PUBLISH=1 only if no such run matters.")
+        return 1, None
+
+    try:
+        # UNCONDITIONAL. Either the name is new or RUN_FORCE_PUBLISH asked to
+        # replace it, and the update rule would skip every file the existing
+        # copy has newer -- which is all of them. `cp -ru` had the same hole:
+        # "force" left the old abstraction in place.
+        archive.copy_tree(output, destination, update=False)
+    except OSError as error:
+        log(f"FATAL publish failed: {error}")
+        return 1, None
+    log(f"published {output.name} to the share")
+    return 0, None
+
+
+"""Which executor runs a task, by kind.
+
+Keyed by the kind's own name -- so a kind with no executor is a KeyError naming
+it rather than a task that silently does nothing. Declared ``str`` rather than
+``TaskName`` for the same reason ``TaskKind.KINDS`` is: what arrives from the
+environment is the wire string, and a member of a ``StrEnum`` IS that string.
+"""
+HANDLERS: dict[str, Handler] = {
+    TaskName.TRAIN: _train,
+    TaskName.EVALUATE: _evaluate,
+    TaskName.PRECOMPUTE: _precompute,
+}

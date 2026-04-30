@@ -48,10 +48,26 @@ def test_something_still_takes_a_ledger_path():
     assert takers, f"nothing takes `{PARAM}` any more -- this guard needs rewriting"
 
 
+CASES = list(_functions())
+
+
 @pytest.mark.parametrize(
-    ("module_name", "name", "fn"), list(_functions()), ids=lambda x: str(x)[:40]
+    ("module_name", "name", "fn"),
+    CASES,
+    ids=[f"{module_name}.{name}" for module_name, name, _ in CASES],
 )
 def test_no_function_defaults_the_ledger_path(module_name, name, fn):
+    """No function may default `ledger_path`.
+
+    WHY THE IDS ARE SPELLED OUT. They used to be `str(x)[:40]` applied to each
+    tuple element, and for the function element that is `<function f at 0x...>`
+    -- a heap address, different in every interpreter. A test whose ID changes
+    per process cannot be named: `-k`, `--last-failed` and any distributed run
+    address a case that no longer exists under that name. Under `pytest -n`
+    the workers collected mutually different suites and the whole run errored
+    out before executing a single test. Module-qualified name is stable and
+    is what the failure message quotes anyway.
+    """
     parameter = inspect.signature(fn).parameters.get(PARAM)
     if parameter is None:
         return

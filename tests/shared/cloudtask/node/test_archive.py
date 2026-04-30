@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from src.shared.node import archive
+from src.shared.cloudtask.node import archive
 
 
 def _snapshot(run_dir, name: str, *files: str) -> None:
