@@ -132,6 +132,7 @@ def write_node_record(
     eval_flags: tuple[str, ...] = (),
     workers: int = 0,
     units: float = 0.0,
+    units_unit: str = "",
     node_id: str = "",
     code_snapshot: str = "",
     git_commit: str = "",
@@ -184,6 +185,11 @@ def write_node_record(
         # 10M, and recording 150M would claim fifteen times its real throughput.
         "workers": workers,
         "units": units,
+        # A count is not a measurement without its unit. `evaluate` moved from
+        # rungs to flop branches, and a rung-rate mixed into a branch-rate
+        # would not fail -- it would quietly predict ~30x wrong. Recorded so a
+        # reader can tell the lineages apart instead of averaging them.
+        "units_unit": units_unit,
         "node_id": node_id,
         "code_snapshot": code_snapshot,
         "git_commit": git_commit,
@@ -379,6 +385,7 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "eval_flags": node.get("eval_flags", []),
                 "workers": node.get("workers", 0),
                 "units": (exit_record or {}).get("units", 0.0),
+                "units_unit": (exit_record or {}).get("units_unit", ""),
                 # WHAT CODE RAN. Both node records carry it, so `node` --
                 # already exit-or-start -- answers for a task that died before
                 # its exit record too, which is when the question is asked most.

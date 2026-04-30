@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Any
 
 from src.interfaces.commands._base import (
@@ -103,6 +104,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--br-flops", type=int, default=8, help="[exact_br] Sampled canonical flops (>=1755: all)."
     )
     parser.add_argument(
+        "--progress-file",
+        default="",
+        help="[exact_br] Write {done,total} flop branches here as they finish. Node-local: "
+        "a heartbeat for the task bar, not a record.",
+    )
+    parser.add_argument(
         "--br-turns", type=int, default=2, help="[exact_br] Turn cards per board node."
     )
     parser.add_argument(
@@ -150,6 +157,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         resolver_iterations=args.resolver_iterations,
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
+        progress_file=Path(args.progress_file) if args.progress_file else None,
     )
 
 

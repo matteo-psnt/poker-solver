@@ -134,6 +134,13 @@ REGISTRY: dict[str, Artifact] = {
         version=3,
         what="a cloud task's own account of how it ended",
     ),
+    "evaluate-progress.json": Artifact(
+        name="evaluate-progress.json",
+        kind="snapshot",
+        scope="local",
+        version=1,
+        what="flop branches walked so far, while a checkpoint is being scored",
+    ),
     "precompute-progress.json": Artifact(
         name="precompute-progress.json",
         kind="snapshot",

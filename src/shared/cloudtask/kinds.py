@@ -385,7 +385,8 @@ class EvaluateTask(TaskKind):
     """Score published rungs of an existing run."""
 
     name = TaskName.EVALUATE
-    unit = "rungs"
+    unit = "board branches"
+    progress_file = "evaluate-progress.json"
 
     def validate(self, task: TaskFields) -> None:
         if not task.run_id:
@@ -422,25 +423,35 @@ class EvaluateTask(TaskKind):
         return f"{detail} seed{seed}" if seed else detail
 
     def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:
-        """Rungs scored against rungs requested.
+        """Top-level flop branches walked, against the branches this score needs.
 
-        Counted from ZERO rather than reported only once the first rung lands.
-        A bar at 0 of 1 looks like nothing is happening, and for a single-rung
-        evaluation it will sit there until the end -- but it is what carries the
-        TOTAL, and the total is what lets an estimate scale a known rate to the
-        work actually asked for. Without it an evaluation can only be predicted
-        by the median duration of past ones, which is wrong the moment somebody
-        scores ten rungs instead of one.
+        RUNGS WERE THE WRONG UNIT. `score` submits one task per rung, so the
+        denominator was 1 and the bar read 0% from the first second to the last
+        of a ~10-minute score -- a long evaluation and a hung one looked
+        identical, which is the single thing a bar exists to distinguish.
 
-        Inside a single rung is still opaque. The exact-BR walk is recursive
-        over a public tree rather than a flat loop over sampled flops, so a
-        counter would have to live in the hot path -- a real cost for a bar.
+        Flop branches are the outermost thing the walk counts: four walks
+        (responder seat x button) of `--br-flops` each, so the default 8 gives 32
+        where there was 1, and `--br-flops 64` gives 256. Deeper than that is
+        genuinely off limits -- the turn and river deals are the walk's inner
+        loops and a counter there WOULD be in the hot path.
+
+        Two state shapes reach here and both are wanted. The watcher publishes
+        `{done, total}` from the file the evaluator writes, which is the bar
+        while it runs; the handler publishes `{scored}` after each rung, which
+        closes it at the end and is all there is before the first branch lands.
         """
-        total = len(plan.eval_rungs)
-        if total <= 0:
+        walked, branches = state.get("done"), state.get("total")
+        if isinstance(walked, int | float) and isinstance(branches, int | float) and branches > 0:
+            return Progress(float(walked), float(branches), self.unit)
+        # Nothing walked yet, or a method that does not report branches at all:
+        # fall back to the rung count, which is what this reported before.
+        rungs = len(plan.eval_rungs)
+        if rungs <= 0:
             return None
         scored = state.get("scored")
-        return Progress(float(scored if isinstance(scored, int) else 0), float(total), self.unit)
+        done = float(scored if isinstance(scored, int) else 0)
+        return Progress(done, float(rungs), "rungs")
 
 
 class PrecomputeTask(TaskKind):
@@ -523,9 +534,19 @@ def samples(rows: Sequence[Mapping[str, Any]], name: str) -> list[Sample]:
     recorded units, which excludes everything written before the record carried
     them -- there is no way to reconstruct what those achieved.
     """
+    known = kind_of(name)
     found = []
     for row in rows:
         if row.get("op") != name or row.get("cause") != "completed":
+            continue
+        # A row counted in a unit this kind no longer uses is a DIFFERENT
+        # measurement, not an old one. `evaluate` moved from rungs to flop
+        # branches; averaging a rung-rate into a branch-rate predicts ~30x wrong
+        # and never fails. An absent unit is legacy and taken at face value --
+        # those rows predate the field, and no kind whose unit has changed has
+        # any of them.
+        recorded = row.get("units_unit") or ""
+        if known is not None and recorded and recorded != known.unit:
             continue
         seconds = _seconds_between(row.get("started_at"), row.get("ended_at"))
         units = row.get("units") or 0

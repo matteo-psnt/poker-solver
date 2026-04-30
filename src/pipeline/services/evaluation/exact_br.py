@@ -2,6 +2,7 @@
 
 import functools
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ def evaluate_run_exact_br(
     *,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
+    on_branch: Callable[[int, int], None] | None = None,
 ) -> EvaluationOutput:
     """Exact best response on the sampled public tree (deterministic point value).
 
@@ -64,6 +66,11 @@ def evaluate_run_exact_br(
         config,
         starting_stack=metadata.config.game.starting_stack,
         blueprint_factory=factory,
+        # Serial walks only. The parallel path runs each walk in its own process
+        # against a rebuilt engine, so there is no shared counter to report and
+        # nothing here would be reached -- correct by construction rather than by
+        # a guard, and the reader treats a missing sample as "no bar".
+        on_branch=on_branch if factory is None else None,
     )
     results: dict[str, Any] = {
         "exploitability_mbb": result.exploitability_mbb,
