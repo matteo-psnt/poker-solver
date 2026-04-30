@@ -151,6 +151,11 @@ class TaskSpec:
     # records a null commit, which is what every cloud run did before this.
     git_commit: str = ""
     git_dirty: str = ""
+    # The branch, because a commit does not identify an EXPERIMENT here. Work
+    # runs in several worktrees at once and each carries its change uncommitted
+    # while it is being iterated on, so two arms are routinely the same hash
+    # with the same dirty bit. See `shared.gitinfo.BRANCH_ENV`.
+    git_branch: str = ""
 
     @property
     def label(self) -> str:
@@ -191,6 +196,7 @@ class TaskSpec:
             # distinguishes "verified clean" from "unknown", and that
             # distinction is what makes a bare hash worth recording.
             "RUN_GIT_DIRTY": self.git_dirty,
+            "RUN_GIT_BRANCH": self.git_branch,
         }
 
     def validate(self) -> None:

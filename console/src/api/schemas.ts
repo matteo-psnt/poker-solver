@@ -81,6 +81,15 @@ export const taskRowSchema = z
         estimate for the next one is built from. */
     units: z.number().nullable().optional(),
     workers: z.number().nullable().optional(),
+    /** WHICH CODE RAN. Three answers that do not replace one another: the
+        commit names a history, the branch names the line of work (several
+        worktrees share a commit and differ only in what is uncommitted), and
+        the snapshot names the exact bytes. Absent on every task recorded before
+        this existed. */
+    code_snapshot: z.string().nullable().optional(),
+    git_commit: z.string().nullable().optional(),
+    git_dirty: z.string().nullable().optional(),
+    git_branch: z.string().nullable().optional(),
     /** Present only while a task is running and only if its kind can say. */
     progress: z
       .object({ done: z.number(), total: z.number(), unit: z.string() })

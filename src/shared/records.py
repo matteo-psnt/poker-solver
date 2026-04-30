@@ -124,14 +124,14 @@ REGISTRY: dict[str, Artifact] = {
         name="legs/*.start.json",
         kind="snapshot",
         scope="share",
-        version=2,
+        version=3,
         what="a cloud task's own account of starting, per task and attempt",
     ),
     "legs/*.exit.json": Artifact(
         name="legs/*.exit.json",
         kind="snapshot",
         scope="share",
-        version=2,
+        version=3,
         what="a cloud task's own account of how it ended",
     ),
     "precompute-progress.json": Artifact(

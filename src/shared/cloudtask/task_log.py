@@ -133,6 +133,10 @@ def write_node_record(
     workers: int = 0,
     units: float = 0.0,
     node_id: str = "",
+    code_snapshot: str = "",
+    git_commit: str = "",
+    git_dirty: str = "",
+    git_branch: str = "",
     exit_code: int | None = None,
     cause: str | None = None,
 ) -> Path:
@@ -148,6 +152,13 @@ def write_node_record(
     seeds were indistinguishable in the record, and the eval documents they
     produced carry no task reference to join back on. Nothing can recover those;
     this is what stops the next set going the same way.
+
+    ``code_snapshot`` is the same shape of omission, one level up: it names the
+    exact bytes a task ran -- uncommitted changes and all -- and it travelled all
+    the way to the node as a fetch instruction while being recorded nowhere. The
+    commit alone does not identify a program here, because experiments live in
+    parallel worktrees that share a hash and differ only in what is uncommitted;
+    the branch narrows that and the snapshot closes it.
     """
     directory = tasks_dir(share)
     directory.mkdir(parents=True, exist_ok=True)
@@ -174,6 +185,10 @@ def write_node_record(
         "workers": workers,
         "units": units,
         "node_id": node_id,
+        "code_snapshot": code_snapshot,
+        "git_commit": git_commit,
+        "git_dirty": git_dirty,
+        "git_branch": git_branch,
         "event": event,
         "ts": _utcnow(),
         "exit_code": exit_code,
@@ -364,6 +379,13 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "eval_flags": node.get("eval_flags", []),
                 "workers": node.get("workers", 0),
                 "units": (exit_record or {}).get("units", 0.0),
+                # WHAT CODE RAN. Both node records carry it, so `node` --
+                # already exit-or-start -- answers for a task that died before
+                # its exit record too, which is when the question is asked most.
+                "code_snapshot": node.get("code_snapshot", ""),
+                "git_commit": node.get("git_commit", ""),
+                "git_dirty": node.get("git_dirty", ""),
+                "git_branch": node.get("git_branch", ""),
                 # One phrase saying what this task DID, derived here so the
                 # terminal and the console cannot word it differently.
                 "what": kinds.describe(node),
@@ -431,7 +453,22 @@ def format_table(rows: Iterable[dict[str, Any]]) -> str:
     """Compact fixed-width listing, one row per task."""
     # `what` rather than `op`: it IS the op for a task that recorded nothing more,
     # and the op plus what it was aimed at for one that did.
-    columns = ("task_id", "attempt", "what", "run_id", "cause", "done", "left", "ended_at")
+    # `code` is the branch, not the snapshot id: the id is exact but twenty
+    # characters of timestamp, and this table is for scanning. The exact answer
+    # is one `--limit 0` payload or one console click away, and both carry all
+    # three. A column here at all because comparing two arms means first knowing
+    # which arm each row IS, and every row used to look identical.
+    columns = (
+        "task_id",
+        "attempt",
+        "what",
+        "run_id",
+        "code",
+        "cause",
+        "done",
+        "left",
+        "ended_at",
+    )
     # `done` is the running task's bar in a terminal: a phrase, since a
     # fixed-width table has nowhere to draw one, and it says what is being
     # counted rather than only how much of it.
@@ -446,12 +483,35 @@ def format_table(rows: Iterable[dict[str, Any]]) -> str:
 
 
 def _derived(row: dict[str, Any], column: str) -> Any:
+    if column == "code":
+        return code_label(row)
     if column == "done":
         progress = kinds.Progress.from_record(row.get("progress"))
         return f"{progress.fraction:.0%} {progress.phrase}" if progress is not None else ""
     if column == "left":
         return _duration(row.get("eta_seconds"))
     return row.get(column)
+
+
+def code_label(row: dict[str, Any]) -> str:
+    """One short phrase for which code a task ran, for a column or a chip.
+
+    The branch when there is one, because that is the name the work has while it
+    is being done -- `worktree-hybrid-kernels` says what the arm IS, where
+    `c13dcb7` says only which history it forked from and is shared by every
+    worktree that has not committed yet. A short commit when the checkout was
+    detached, and `+` when the tree was dirty on top of it.
+
+    Empty for the tasks that pre-date this being recorded, which is most of the
+    ones on the share: a blank column reads as "not known" where a plausible
+    filler would read as an answer.
+    """
+    branch = row.get("git_branch") or ""
+    commit = row.get("git_commit") or ""
+    base = branch or commit[:7]
+    if not base:
+        return ""
+    return f"{base}+" if row.get("git_dirty") == "1" else base
 
 
 def _duration(seconds: Any) -> str:

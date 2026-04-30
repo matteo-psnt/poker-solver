@@ -73,6 +73,27 @@ export function TaskLog() {
             <Fact label="node" value={row.node_id ? row.node_id.slice(6, 18) : "—"} mono />
           </div>
         )}
+        {/* Its own row, because "which code" is a different question from "what
+            happened" and it is the one asked when two arms disagree. Hidden
+            entirely for tasks recorded before this existed: three em-dashes read
+            as a task with no provenance rather than as a record predating it. */}
+        {row && (row.code_snapshot || row.git_commit || row.git_branch) && (
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3 border-t border-[var(--border)] p-3 sm:grid-cols-3 lg:grid-cols-4">
+            <Fact label="branch" value={row.git_branch || "—"} mono />
+            <Fact
+              label="commit"
+              value={
+                row.git_commit
+                  ? `${row.git_commit.slice(0, 12)}${row.git_dirty === "1" ? " (dirty)" : ""}`
+                  : "—"
+              }
+              mono
+            />
+            {/* Last and widest: the only one that stays exact when the tree was
+                dirty, which is the normal state of an experiment worktree. */}
+            <Fact label="snapshot" value={row.code_snapshot || "—"} mono />
+          </div>
+        )}
       </Panel>
 
       <Panel

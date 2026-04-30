@@ -320,3 +320,76 @@ class TestWhatATaskDid:
         )
         (row,) = task_log.read_tasks(tmp_path)
         assert row["what"] == "evaluate"
+
+
+class TestWhichCodeRan:
+    """The record has to distinguish two arms of the same experiment.
+
+    Work here runs in several git worktrees at once, and a worktree carries its
+    change UNCOMMITTED for as long as it is being iterated on — so the arms
+    routinely share a commit and a dirty bit, and `c13dcb7-dirty` has described
+    four different programs. The snapshot id names the actual bytes and had been
+    travelling to the node as a fetch instruction, recorded nowhere.
+    """
+
+    def test_the_snapshot_that_ran_is_recorded(self, tmp_path):
+        task_log.write_node_record(
+            tmp_path,
+            task_id="t1",
+            event=task_log.EVENT_STARTED,
+            op="train",
+            code_snapshot="code-20260805_111229",
+            git_commit="c13dcb7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            git_dirty="1",
+            git_branch="worktree-hybrid-kernels",
+        )
+        (row,) = task_log.read_tasks(tmp_path)
+        assert row["code_snapshot"] == "code-20260805_111229"
+        assert row["git_branch"] == "worktree-hybrid-kernels"
+
+    def test_two_worktrees_on_one_dirty_commit_are_distinguishable(self, tmp_path):
+        """The case the commit alone cannot answer, which is the normal one."""
+        for index, branch in enumerate(("worktree-hybrid-kernels", "worktree-vector-cfr")):
+            task_log.write_node_record(
+                tmp_path,
+                task_id=f"t{index}",
+                event=task_log.EVENT_STARTED,
+                op="train",
+                code_snapshot=f"code-2026080{index}_000000",
+                git_commit="c13dcb7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                git_dirty="1",
+                git_branch=branch,
+            )
+        rows = task_log.read_tasks(tmp_path)
+        assert len({row["git_commit"] for row in rows}) == 1, "same commit — that is the premise"
+        assert len({task_log.code_label(row) for row in rows}) == 2
+        assert len({row["code_snapshot"] for row in rows}) == 2
+
+    def test_a_dirty_tree_is_marked_on_the_label(self, tmp_path):
+        clean = {"git_branch": "main", "git_dirty": "0"}
+        dirty = {"git_branch": "main", "git_dirty": "1"}
+        assert task_log.code_label(clean) == "main"
+        assert task_log.code_label(dirty) == "main+"
+
+    def test_a_detached_checkout_falls_back_to_the_commit(self, tmp_path):
+        assert task_log.code_label({"git_commit": "c13dcb7aaaa", "git_dirty": "0"}) == "c13dcb7"
+
+    def test_a_task_recorded_before_this_existed_says_nothing(self, tmp_path):
+        """Blank, not a plausible filler: those records genuinely do not know."""
+        task_log.write_node_record(tmp_path, task_id="t1", event=task_log.EVENT_STARTED, op="train")
+        (row,) = task_log.read_tasks(tmp_path)
+        assert task_log.code_label(row) == ""
+
+    def test_provenance_survives_a_task_that_died_before_finishing(self, tmp_path):
+        """The start record carries it, and that is the only record such a task has."""
+        task_log.write_node_record(
+            tmp_path,
+            task_id="t1",
+            event=task_log.EVENT_STARTED,
+            op="train",
+            code_snapshot="code-20260805_111229",
+            git_branch="worktree-vector-cfr",
+        )
+        (row,) = task_log.read_tasks(tmp_path)
+        assert row["cause"] == "unresolved", "died before its exit record — the case under test"
+        assert row["code_snapshot"] == "code-20260805_111229"

@@ -66,6 +66,13 @@ class TaskPlan:
     # answer appears while the task is alive.
     git_commit: str = ""
     git_dirty: str = ""
+    git_branch: str = ""
+    """The snapshot this task extracted, which is the EXACT answer to "what code
+    is this" -- it names the bytes, uncommitted changes included, where a commit
+    names a history the tree may have diverged from. It reached the node as a
+    fetch instruction long before it was carried here; what it lacked was
+    anywhere to be recorded."""
+    code_snapshot: str = ""
     """Where a build writes its own progress, filled in by the wrapper because
     only the node knows its scratch directory."""
     progress_path: str = ""
@@ -97,13 +104,24 @@ class TaskPlan:
         the submitter's answer, passed down. Until it existed, every
         cloud-trained run and every cloud-run evaluation recorded a null
         commit.
+
+        The branch and the snapshot are named alongside it because the commit
+        alone is not an identity here: several worktrees investigate different
+        things off the same hash, each carrying its change uncommitted, so
+        "c13dcb7 (DIRTY tree)" has described four different programs. The
+        snapshot is the exact one.
         """
         if not self.git_commit:
-            return "unknown (nothing stamped this task)"
-        state = {"1": " (DIRTY tree)", "0": " (clean tree)"}.get(
-            self.git_dirty, " (tree state unknown)"
-        )
-        return self.git_commit[:12] + state
+            described = "unknown (nothing stamped this task)"
+        else:
+            state = {"1": " (DIRTY tree)", "0": " (clean tree)"}.get(
+                self.git_dirty, " (tree state unknown)"
+            )
+            branch = f" on {self.git_branch}" if self.git_branch else ""
+            described = self.git_commit[:12] + branch + state
+        # Last, and unconditional: it is the only part that stays exact when the
+        # tree was dirty, which is the normal state of an experiment worktree.
+        return f"{described}, snapshot {self.code_snapshot or '?'}"
 
 
 def parse_environment(environ: dict[str, str] | None = None) -> TaskPlan:
@@ -134,6 +152,8 @@ def parse_environment(environ: dict[str, str] | None = None) -> TaskPlan:
         force_publish=bool(env.get("RUN_FORCE_PUBLISH")),
         git_commit=env.get("RUN_GIT_COMMIT", ""),
         git_dirty=env.get("RUN_GIT_DIRTY", ""),
+        git_branch=env.get("RUN_GIT_BRANCH", ""),
+        code_snapshot=env.get("CODE_SNAPSHOT", ""),
     )
     _validate(plan)
     return plan

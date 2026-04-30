@@ -23,6 +23,17 @@ from src.shared.cloudtask import kinds
 
 NONCE_CEILING = 32768
 
+"""The tree that gets sealed into a snapshot: THIS checkout, not the working
+directory.
+
+`Path()` -- the previous default -- is wherever the shell happened to be, and no
+caller has ever passed anything else. Submitting from `src/` would have tarred
+`src/`'s children as the tree root, and from a sibling worktree's directory it
+would have shipped that worktree's code under this one's provenance stamp. The
+package's own location is the one answer that cannot be wrong, and it is the
+same one `gitinfo` already resolves its git questions against."""
+CHECKOUT_ROOT = Path(__file__).resolve().parents[3]
+
 
 @dataclass(frozen=True)
 class Queued:
@@ -34,7 +45,7 @@ class Queued:
 
 
 def stage_and_queue(
-    make_tasks: Callable[[str], list[TaskSpec]], *, root: Path = Path()
+    make_tasks: Callable[[str], list[TaskSpec]], *, root: Path = CHECKOUT_ROOT
 ) -> dict[str, Any]:
     """Snapshot the tree, open a job, and queue every task against that snapshot.
 
@@ -96,15 +107,19 @@ def _stamped(task: TaskSpec) -> TaskSpec:
     have to remember. It is applied after ``make_tasks`` so a caller cannot
     forget it, and cannot get it wrong either.
 
-    The snapshot id above is strictly MORE precise -- it names the actual bytes,
-    dirty tree and all -- but nothing in the record has a field for it, while
-    `train_git_commit`/`eval_git_commit` have had columns since the ledger
-    existed and have been null on every cloud row.
+    Three answers, none of which replaces another. The commit says which
+    history; the branch says which line of work, which is what a commit cannot
+    say when several worktrees sit on the same one with uncommitted changes; and
+    the snapshot id names the actual BYTES -- dirty tree and all -- so it is the
+    only one of the three that is exact. The snapshot already travelled to the
+    node as a fetch instruction and was recorded nowhere, which left the exact
+    answer available and unasked for.
     """
     return replace(
         task,
         git_commit=gitinfo.get_git_commit() or "",
         git_dirty=gitinfo.encode_dirty(gitinfo.is_git_dirty()),
+        git_branch=gitinfo.get_git_branch() or "",
     )
 
 
