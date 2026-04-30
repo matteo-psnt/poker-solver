@@ -77,6 +77,10 @@ export const taskRowSchema = z
     what: z.string().nullable().optional(),
     /** Seconds left, derived server-side so both surfaces agree. */
     eta_seconds: z.number().nullable().optional(),
+    /** What a FINISHED task achieved, and how wide it ran — the two things an
+        estimate for the next one is built from. */
+    units: z.number().nullable().optional(),
+    workers: z.number().nullable().optional(),
     /** Present only while a task is running and only if its kind can say. */
     progress: z
       .object({ done: z.number(), total: z.number(), unit: z.string() })

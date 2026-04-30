@@ -8,7 +8,7 @@
 # at rather than a shell string -- which is also how the hex-encoding of config
 # overrides disappeared: the SDK takes name/value pairs, so nothing has to
 # survive a `KEY=VALUE` parser. The node-side wrapper went the same way, to
-# `src/shared/node/`. What remains below is what genuinely belongs in a task
+# `src/shared/cloudtask/node/`. What remains below is what genuinely belongs in a task
 # runner: Terraform lifecycle, the emergency stop, and passthrough aliases.
 #
 # The pool holds ZERO nodes at rest. You submit tasks and walk away; nodes appear
@@ -157,9 +157,6 @@ submit config to *flags:
 score run *flags:
     uv run poker-solver score --run "{{run}}" {{flags}}
 
-# Verify a published static ladder, marking the rungs that load.
-[doc("Verify a published ladder. Args: run config")]
-
 # --- console ---------------------------------------------------------------- #
 # The web console. Its toolchain is npm and lives entirely under `console/`;
 # nothing here touches the Python environment.
@@ -182,7 +179,7 @@ console: console-build
 # was observable only as a vite `ECONNREFUSED` on /api -- with no way to tell an
 # OOM kill (137) from a stray Ctrl-C reaching the shared process group (130)
 # from a traceback from an `[Errno 48] Address already in use` two seconds after
-# startup. Same lesson `src/shared/node/runner.py` learned on the cloud side: a
+# startup. Same lesson `src/shared/cloudtask/node/process.py` learned on the cloud side: a
 # death the log cannot record needs its own account.
 #
 # (The blank line below is load-bearing: `just --list` takes the LAST contiguous

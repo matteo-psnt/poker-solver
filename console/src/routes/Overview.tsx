@@ -1,11 +1,11 @@
 import { useJobs, usePool, useTasks } from "@/api/queries";
 import type { TaskRow } from "@/api/schemas";
 import { Panel } from "@/components/Panel";
-import { StatusBadge, exitMeaning, taskOutcome, taskTone } from "@/components/StatusBadge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { clock, count, duration, since, span, taskLabel } from "@/lib/format";
-import { type PoolShape, type Task, elapsed, poolShape } from "@/lib/pool";
+import { type PoolShape, elapsed, poolShape } from "@/lib/pool";
 import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
@@ -72,7 +72,7 @@ export function Overview() {
       {/* Batch and the task log answer DIFFERENT questions; the panels sit
           together because neither is sufficient alone. */}
       <Panel
-        title={`Tasks — ${busy} running${
+        title={`In flight — ${busy} running${
           shape.queue.length > 0 ? `, ${shape.queue.length} queued` : ""
         }`}
         updatedAt={jobs.dataUpdatedAt}
@@ -84,15 +84,12 @@ export function Overview() {
         refreshing={jobs.isFetching}
       >
         {jobs.data && (shape.slots.length > 0 || shape.queue.length > 0) && (
-          <>
-            <Pipeline shape={shape} busy={busy} now={now} progress={progress} />
-            <History history={shape.history} />
-          </>
+          <Pipeline shape={shape} busy={busy} now={now} progress={progress} />
         )}
       </Panel>
 
       <Panel
-        title="Tasks"
+        title="Recent tasks"
         updatedAt={tasks.dataUpdatedAt}
         staleAfterMs={120_000}
         error={errorOf(tasks.error)}
@@ -184,9 +181,14 @@ function Pipeline({
           <Dot filled={slot.task !== null} />
           {slot.task ? (
             <>
-              <span className="truncate font-mono text-[12px]" title={slot.task.task}>
+              <Link
+                to="/tasks/$taskId"
+                params={{ taskId: slot.task.task }}
+                className="truncate font-mono text-[12px] hover:underline"
+                title={slot.task.task}
+              >
                 {taskLabel(slot.task.task)}
-              </span>
+              </Link>
               {/* Elapsed answers "is this stuck"; the wall clock is what
                   correlates a slot with a line in a log or a task row. */}
               <span className="tnum flex shrink-0 items-center gap-2 text-[11px] text-[var(--fg-faint)]">
@@ -311,50 +313,6 @@ function SectionRow({ label, aside }: { label: string; aside?: React.ReactNode }
       <span />
       <span>{label}</span>
       <span className="normal-case tracking-normal">{aside}</span>
-    </div>
-  );
-}
-
-/** Finished work, newest first — the half that used to be mixed in with the rest. */
-function History({ history }: { history: Task[] }) {
-  if (history.length === 0) return null;
-  return (
-    <div>
-      <SectionRow label="recently finished" />
-      <Table>
-        <tbody>
-          {history.slice(0, 6).map((task) => (
-            <tr key={`${task.job}/${task.task}`}>
-              <Td mono title={task.task}>
-                {taskLabel(task.task)}
-              </Td>
-              <Td>
-                {/* Coloured on state AND exit code, and the code's MEANING is
-                    the badge — 124 is the guard's deadline, 137 the OOM killer.
-                    The number itself sat in its own column saying less than the
-                    word beside it, so it is a tooltip now. */}
-                <StatusBadge
-                  state={taskOutcome(task.state, task.exit_code)}
-                  tone={taskTone(task.state, task.exit_code)}
-                  title={[
-                    `Batch reports state "${task.state}"`,
-                    task.exit_code == null ? null : `exit ${task.exit_code}`,
-                    exitMeaning(task.exit_code),
-                  ]
-                    .filter(Boolean)
-                    .join(" — ")}
-                />
-              </Td>
-              <Td right className="tnum text-[var(--fg-muted)]">
-                {span(task.start_time, task.end_time)}
-              </Td>
-              <Td right className="text-[var(--fg-faint)]" title={task.end_time ?? undefined}>
-                {since(task.end_time)}
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
     </div>
   );
 }
