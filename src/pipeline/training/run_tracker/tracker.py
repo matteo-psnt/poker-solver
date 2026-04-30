@@ -235,6 +235,7 @@ class RunTracker:
             start_iter=attempt.start_iter,
             git_commit=attempt.git_commit,
             git_dirty=attempt.git_dirty,
+            git_branch=attempt.git_branch,
         )
 
     def _emit_attempt_ended(self, attempt: AttemptRecord) -> None:
@@ -325,6 +326,7 @@ def migrate_run_log(run_dir: Path) -> bool:
             start_iter=attempt.start_iter,
             git_commit=attempt.git_commit,
             git_dirty=attempt.git_dirty,
+            git_branch=attempt.git_branch,
         )
         if attempt.ended_at is not None or attempt.status != "running":
             run_events.append(

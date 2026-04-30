@@ -2,11 +2,13 @@
 
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from src.pipeline.evaluation import ledger
 from src.pipeline.evaluation.lbr.hunl_local_best_response import LBRConfig
+from src.pipeline.evaluation.ledger import records as ledger_records
 from src.shared.cloudtask import task_log
 from tests.test_helpers import seed_ledger
 
@@ -312,3 +314,53 @@ class TestEvalDocumentNamesItsTask:
         """The index is derived from the document; a field it drops is unqueryable."""
         monkeypatch.setenv(task_log.TASK_ID_ENV, "t-1")
         assert ledger.ledger_row(self._build(tmp_path))["task_id"] == "t-1"
+
+
+class TestWhichWorktreeProducedTheNumber:
+    """Two commits are recorded because two matter; two branches, for the same reason.
+
+    The train and eval commits are routinely IDENTICAL across arms that differ
+    entirely — experiments live in parallel git worktrees, and a worktree carries
+    its change uncommitted for as long as it is being iterated on. Without the
+    branch, `report --experiment` pairs arms it cannot tell apart.
+    """
+
+    def test_both_branches_are_recorded(self, monkeypatch):
+        monkeypatch.setattr(ledger_records, "get_git_branch", lambda: "main")
+        provenance = ledger.RunProvenance(
+            run_id="run-x",
+            git_commit="cafebabe" * 5,
+            git_dirty=True,
+            config_name="quick_test",
+            card_abstraction_hash="deadbeef",
+            action_config_hash="beefcafe",
+            git_branch="worktree-hybrid-kernels",
+        )
+
+        record = ledger_records.build_record(
+            provenance=provenance,
+            method="exact_br",
+            estimator="exact",
+            infosets=1,
+            knobs={},
+            results={},
+            result_path=Path("evals/x.json"),
+            timestamp="2026-08-06T00:00:00+00:00",
+        )
+
+        assert record["train_git_branch"] == "worktree-hybrid-kernels"
+        assert record["eval_git_branch"] == "main", "measured somewhere else — a separate fact"
+
+    def test_a_legacy_provenance_still_builds(self):
+        """Every row already on the share has no branch; none of them is unloadable."""
+        record = ledger_records.build_record(
+            provenance=_fake_provenance(),
+            method="exact_br",
+            estimator="exact",
+            infosets=1,
+            knobs={},
+            results={},
+            result_path=Path("evals/x.json"),
+            timestamp="2026-08-06T00:00:00+00:00",
+        )
+        assert record["train_git_branch"] is None

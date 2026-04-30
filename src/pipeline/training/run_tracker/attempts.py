@@ -62,6 +62,10 @@ class AttemptRecord:
     status: str = "running"
     git_commit: str | None = None
     git_dirty: bool | None = None
+    # The branch this attempt ran from. A run RESUMED from a different
+    # worktree is a real case here -- the arms share a commit and differ
+    # only in what is uncommitted -- so this is per attempt, not per run.
+    git_branch: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +79,7 @@ class AttemptRecord:
             "status": self.status,
             "git_commit": self.git_commit,
             "git_dirty": self.git_dirty,
+            "git_branch": self.git_branch,
         }
 
     @classmethod
@@ -90,4 +95,7 @@ class AttemptRecord:
             status=data.get("status", "unknown"),
             git_commit=data.get("git_commit") if isinstance(data.get("git_commit"), str) else None,
             git_dirty=data.get("git_dirty") if isinstance(data.get("git_dirty"), bool) else None,
+            git_branch=(
+                data.get("git_branch") if isinstance(data.get("git_branch"), str) else None
+            ),
         )
