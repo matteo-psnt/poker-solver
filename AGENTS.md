@@ -184,7 +184,11 @@ definition: never a source of truth, never worth backing up.
   never landed against Batch's view. 124 (the guard's deadline — a hang) and
   137 (SIGKILL from outside — the OOM killer) are DIFFERENT causes, and a wrong
   terminal one is permanent: it suppresses reconciliation.
-- `uv run pytest -m "not slow"` — fast gate; `uv run pytest` — full suite.
+- `uv run pytest -m "not slow"` — fast gate (25s); `uv run pytest` — full suite
+  (39s). **Both run across 12 workers: `-n auto` is in `addopts`**, because 86%
+  of the wall clock was 50 of the ~1460 tests and the rest were free (serial:
+  2m46s / 1m27s). Add `-n0` to turn it off — worth doing when debugging ONE
+  test, where worker startup and interleaved output are pure cost.
 - `uv run pre-commit run --all-files` — full quality gate (ruff lint+format,
   ty, import-linter, deptry, vulture). Run before handing off changes.
 
@@ -223,7 +227,9 @@ style. What is *not* enforced by tooling:
   bar — bugs, correctness risks, or inelegant code that can be optimized.
 
 ## Testing
-- While developing, run focused tests: `uv run pytest tests/<path>::<test>`.
+- While developing, run focused tests: `uv run pytest -n0 tests/<path>::<test>`
+  — `-n0` because `addopts` carries `-n auto`, and 12 workers for one test is
+  slower to start and harder to read than running it in-process.
 - Before handoff, run the fast gate (`-m "not slow"`). Run the full suite when
   a change touches training, abstraction/bucketing, evaluator logic, config
   loading, or shared infrastructure.
