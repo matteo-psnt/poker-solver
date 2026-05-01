@@ -9,6 +9,7 @@ import {
   Grid3x3,
   LayoutDashboard,
   ScrollText,
+  Spade,
 } from "lucide-react";
 
 const NAV = [
@@ -16,6 +17,7 @@ const NAV = [
   { to: "/tasks", label: "Tasks", icon: ScrollText },
   { to: "/runs", label: "Runs", icon: Activity },
   { to: "/solver", label: "Solver", icon: Grid3x3 },
+  { to: "/play", label: "Play", icon: Spade },
   { to: "/evals", label: "Evals", icon: FlaskConical },
   { to: "/cost", label: "Cost", icon: DollarSign },
 ] as const;

@@ -6,13 +6,14 @@
  * own age badge for free. A failing query keeps its last good data while
  * exposing `error`, which IS the per-panel isolation the design calls for.
  */
-import { useQuery } from "@tanstack/react-query";
-import { get } from "./client";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { get, send } from "./client";
 import {
   type BlueprintRun,
   type Combos,
   type Cost,
   type Curve,
+  type Hand,
   type Jobs,
   type Ledger,
   type LogLines,
@@ -26,6 +27,7 @@ import {
   combosSchema,
   costSchema,
   curveSchema,
+  handSchema,
   jobsSchema,
   ledgerSchema,
   logSchema,
@@ -150,4 +152,19 @@ export const useSolverNode = (path: string, board: string, average: boolean, ena
         nodeSchema,
       ),
     enabled,
+  });
+
+/**
+ * Play. Mutations rather than queries: a hand advances because you acted, so
+ * there is nothing to poll and a refetch would replay a move.
+ */
+export const useDealHand = () =>
+  useMutation<Hand, Error, { human_seat: number; seed?: number | null }>({
+    mutationFn: (body) => send("/api/blueprint/play", handSchema, body),
+  });
+
+export const useSubmitAction = () =>
+  useMutation<Hand, Error, { session: string; token: string }>({
+    mutationFn: ({ session, token }) =>
+      send(`/api/blueprint/play/${session}/action`, handSchema, { token }),
   });

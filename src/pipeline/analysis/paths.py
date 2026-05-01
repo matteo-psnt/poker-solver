@@ -114,8 +114,13 @@ def parse_path(path: str) -> tuple[str, ...]:
     return tokens
 
 
-def _match(token: str, legal: tuple[Action, ...]) -> Action:
-    """The legal action ``token`` names, or a refusal listing what was on offer."""
+def match_action(token: str, legal: tuple[Action, ...]) -> Action:
+    """The legal action ``token`` names, or a refusal listing what was on offer.
+
+    Public because play needs it too: a hand and the tree browser must agree on
+    what a token means, and two copies of this matching would drift the moment a
+    new action size appeared.
+    """
     wanted_type = _TYPE_BY_TOKEN[token[0]]
     wanted_amount = int(token[1:]) if token[1:] else None
     for action in legal:
@@ -172,7 +177,7 @@ def replay(
         if state.is_terminal:
             raise PathError(f"'{token}' comes after the hand has already ended.")
         legal = rules.get_legal_actions(state, action_model=blueprint.action_model)
-        state = state.apply_action(_match(token, legal), rules)
+        state = state.apply_action(match_action(token, legal), rules)
 
     state, consumed = _advance_chance(state, board, consumed)
     terminal = state.is_terminal

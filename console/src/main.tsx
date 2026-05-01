@@ -2,6 +2,7 @@ import { Shell } from "@/components/Shell";
 import { Cost } from "@/routes/Cost";
 import { Evals } from "@/routes/Evals";
 import { Overview } from "@/routes/Overview";
+import { Play } from "@/routes/Play";
 import { RunDetail } from "@/routes/RunDetail";
 import { Runs } from "@/routes/Runs";
 import { Solver } from "@/routes/Solver";
@@ -48,6 +49,11 @@ const routes = [
     getParentRoute: () => rootRoute,
     path: "/solver",
     component: Solver,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/play",
+    component: Play,
   }),
   createRoute({
     getParentRoute: () => rootRoute,
