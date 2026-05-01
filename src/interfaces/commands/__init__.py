@@ -40,6 +40,7 @@ from src.interfaces.commands.runinfo import COMMAND as RUNINFO
 from src.interfaces.commands.runs import COMMAND as RUNS
 from src.interfaces.commands.score import COMMAND as SCORE
 from src.interfaces.commands.serve import COMMAND as SERVE
+from src.interfaces.commands.serve_box import COMMAND as SERVE_BOX
 from src.interfaces.commands.status import COMMAND as STATUS
 from src.interfaces.commands.submit import COMMAND as SUBMIT
 from src.interfaces.commands.submit_precompute import COMMAND as SUBMIT_PRECOMPUTE
@@ -52,6 +53,7 @@ COMMANDS: tuple[Command, ...] = (
     STATUS,
     SERVE,
     BLUEPRINT_SERVE,
+    SERVE_BOX,
     SUBMIT,
     SCORE,
     SUBMIT_PRECOMPUTE,

@@ -37,7 +37,7 @@ serve. Nine pure passthroughs were removed because they retyped a command
 unchanged. A `>= n` floor caught a broken regex but not a passthrough creeping
 back -- the failure that actually happens -- so the guard names all four.
 """
-INVOKED_SUBCOMMANDS = ["score", "serve", "submit"]
+INVOKED_SUBCOMMANDS = ["score", "serve", "serve-box", "submit"]
 
 
 def _invoked() -> list[str]:

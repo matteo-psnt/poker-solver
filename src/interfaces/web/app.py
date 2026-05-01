@@ -40,6 +40,7 @@ from src.interfaces.commands import (
     progress,
     runinfo,
     runs,
+    serve_box,
     tasks,
 )
 from src.interfaces.errors import CommandError
@@ -140,6 +141,47 @@ def create_app() -> FastAPI:
     @app.get("/api/logs/{task_id}")
     def _log(task_id: str, lines: int = 200) -> JSONResponse:
         return answer(cache, logs.COMMAND, task=task_id, lines=lines)
+
+    # These three ARE commands, so they go through `answer` like the rest -- the
+    # button and `poker-solver serve-box` are then the same code path, which is
+    # the property that stops a second control surface existing. Not cached:
+    # asking whether the box is up must not be answered from 15 seconds ago while
+    # someone watches it boot.
+    @app.get("/api/box")
+    def _box() -> JSONResponse:
+        return answer(
+            TtlCache(0.0),
+            serve_box.COMMAND,
+            action="status",
+            wait=False,
+            resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
+            vm=serve_box.DEFAULT_VM,
+            subscription=serve_box.DEFAULT_SUBSCRIPTION,
+        )
+
+    @app.post("/api/box/start")
+    def _box_start() -> JSONResponse:
+        return answer(
+            TtlCache(0.0),
+            serve_box.COMMAND,
+            action="start",
+            wait=False,
+            resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
+            vm=serve_box.DEFAULT_VM,
+            subscription=serve_box.DEFAULT_SUBSCRIPTION,
+        )
+
+    @app.post("/api/box/stop")
+    def _box_stop() -> JSONResponse:
+        return answer(
+            TtlCache(0.0),
+            serve_box.COMMAND,
+            action="stop",
+            wait=False,
+            resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
+            vm=serve_box.DEFAULT_VM,
+            subscription=serve_box.DEFAULT_SUBSCRIPTION,
+        )
 
     # Not `answer(...)`: these are not commands and there is nothing to memoise
     # here. The blueprint server owns one loaded run and answers in

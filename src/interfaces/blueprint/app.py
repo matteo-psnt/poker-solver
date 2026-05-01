@@ -17,9 +17,10 @@ run, and switching runs means a new process.
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -27,6 +28,7 @@ from src.core.game.state import Card
 from src.engine.search.heads_up_session import HeadsUpHand
 from src.engine.search.range_inference import ALL_COMBOS
 from src.engine.solver.policy_source import ScorableBlueprint
+from src.interfaces.blueprint.idle import IdleWatch
 from src.interfaces.blueprint.sessions import Sessions, UnknownSessionError
 from src.pipeline.analysis.grid import StrategyGrid, strategy_grid
 from src.pipeline.analysis.paths import PathError, encode_action, match_action, replay
@@ -174,15 +176,62 @@ def create_app(
     load_blueprint: Callable[[], ScorableBlueprint],
     *,
     run_id: str = "unknown",
+    idle_timeout_seconds: float = 0.0,
 ) -> FastAPI:
     """Build the app around one blueprint, loaded now.
 
     Eagerly, not lazily: a server that loads on first request answers its
     readiness check before it can serve anything, and the first caller pays a
     minute with no way to tell that from a hang.
+
+    ``idle_timeout_seconds`` of 0 means stay up, which is what a laptop and a
+    test want. On the hosted box it is what turns "nobody is here" into a
+    stopped VM, via the systemd unit that escalates this process exiting.
     """
     blueprint = load_blueprint()
-    app = FastAPI(title=f"blueprint server — {run_id}", docs_url="/api/docs")
+    idle = IdleWatch(idle_timeout_seconds)
+    sessions = Sessions(blueprint)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # Started here, not at construction: loading takes ~1 minute on a
+        # production run, and a clock started before it would spend most of the
+        # timeout waiting for the server to become able to answer at all.
+        idle.touch()
+        idle.start()
+        yield
+        idle.stop()
+
+    app = FastAPI(title=f"blueprint server — {run_id}", docs_url="/api/docs", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def _touch(request: Request, call_next):
+        """Every request counts as someone being here.
+
+        Deliberately BEFORE the handler and unconditional -- a request that
+        404s or 422s is still a person at the keyboard, and only counting
+        successes would let a session spent hitting a stale link time out
+        underneath them.
+        """
+        idle.touch()
+        return await call_next(request)
+
+    @app.get("/api/health")
+    def _health() -> JSONResponse:
+        """What is loaded, and how close this box is to switching itself off.
+
+        The console polls this to decide whether it can show anything at all, so
+        it must be the cheapest endpoint here -- no table reads, no session walk.
+        """
+        return JSONResponse(
+            {
+                "run": run_id,
+                "ready": True,
+                "idle_seconds": round(idle.idle_seconds(), 1),
+                "idle_timeout_seconds": idle.timeout_seconds,
+                "sessions": len(sessions),
+            }
+        )
 
     @app.get("/api/run")
     def _run() -> JSONResponse:
@@ -241,8 +290,6 @@ def create_app(
             )
         except PathError as error:
             return JSONResponse({"error": str(error)}, status_code=422)
-
-    sessions = Sessions(blueprint)
 
     @app.post("/api/play")
     def _start(request: StartPlay) -> JSONResponse:

@@ -58,21 +58,32 @@ serve-create:
     {{tfv}} init -input=false
     {{tfv}} apply
     @echo ""
-    @echo "  next:  just serve-tunnel, then just serve-ssh to start a run"
+    @echo "  next:  just serve-ssh to point it at a run, then eval \"$(just serve-env)\""
 
 # Show what the serving box would change, without changing it.
 serve-plan:
     {{tfv}} init -input=false
     {{tfv}} plan
 
-# The forward that reaches the blueprint server. It binds loopback on the box,
-# so this is the only route to it -- run it in a second terminal and leave it.
-serve-tunnel:
-    @sh -c "$({{tfv}} output -raw tunnel)"
+# The two variables the console needs to reach the box. Eval it:
+#   eval "$(just serve-env)"
+# Printed rather than written to a file: the token is a secret, and a dotfile is
+# the kind of thing that gets committed once and then lives in history forever.
+serve-env:
+    @echo "export POKER_SOLVER_BLUEPRINT_URL=$({{tfv}} output -raw url)"
+    @echo "export POKER_SOLVER_BLUEPRINT_TOKEN=$({{tfv}} output -raw api_token)"
 
-# A shell on the serving box, for starting the server against a run.
+# A shell on the serving box, for pointing it at a run.
 serve-ssh:
     @sh -c "$({{tfv}} output -raw ssh)"
+
+# Wake the box, or put it back to sleep. The console does this too; these are
+# for when the console is what you are trying to fix.
+serve-start:
+    uv run poker-solver serve-box --action start --wait
+
+serve-stop:
+    uv run poker-solver serve-box --action stop
 
 # Delete the serving box. Nothing on it is a source of truth; it holds copies.
 serve-destroy:

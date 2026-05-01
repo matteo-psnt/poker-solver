@@ -358,3 +358,25 @@ export const handSchema = z
 
 export type Hand = z.infer<typeof handSchema>;
 export type HandEvent = z.infer<typeof handEventSchema>;
+
+/**
+ * The blueprint host's power state.
+ *
+ * `power` carries transitional values ("starting", "stopping") as well as the
+ * two stable ones, because a UI that only knew "running" and "deallocated"
+ * would show "stopped" for the whole two minutes a box takes to wake — which
+ * reads as the button having done nothing.
+ */
+export const boxSchema = z
+  .object({
+    op: z.literal("serve-box"),
+    action: z.string(),
+    vm: z.string(),
+    resource_group: z.string(),
+    power: z.string(),
+    usable: z.boolean(),
+    location: z.string(),
+  })
+  .passthrough();
+
+export type Box = z.infer<typeof boxSchema>;
