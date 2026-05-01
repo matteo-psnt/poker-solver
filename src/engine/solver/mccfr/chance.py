@@ -2,6 +2,20 @@
 
 Only :func:`deal_initial_state` needs the solver (stack, rules, button
 alternation); the rest are pure functions of the state.
+
+Where the randomness comes from
+-------------------------------
+Every dealing function takes an optional ``rng``. ``None`` -- the default, and
+what training passes -- draws from the ``random`` module's process-global
+instance, exactly as before: same functions, same call order, so the training
+stream is unchanged and no golden number moves.
+
+Passing an explicit :class:`random.Random` matters for anything that deals more
+than one hand at a time. A server holding several play sessions would otherwise
+have them all draw from one global, which makes no session reproducible from its
+own seed and interleaves their draws by request timing. The parameter is
+threaded rather than the global reseeded because reseeding is not composable:
+two sessions doing it race, and the loser silently inherits the winner's stream.
 """
 
 from __future__ import annotations
@@ -15,9 +29,9 @@ if TYPE_CHECKING:
     from .solver import MCCFRSolver
 
 
-def deal_initial_state(self: MCCFRSolver) -> GameState:
+def deal_initial_state(self: MCCFRSolver, rng: random.Random | None = None) -> GameState:
     """Deal random cards and create the initial game state."""
-    cards = random.sample(FULL_DECK, 4)
+    cards = random.sample(FULL_DECK, 4) if rng is None else rng.sample(FULL_DECK, 4)
     hole_cards = ((cards[0], cards[1]), (cards[2], cards[3]))
 
     return self.rules.create_initial_state(
@@ -32,7 +46,7 @@ def is_chance_node(state: GameState) -> bool:
     return len(state.board) < state.street.board_card_count
 
 
-def draw_cards(state: GameState, count: int) -> list[Card]:
+def draw_cards(state: GameState, count: int, rng: random.Random | None = None) -> list[Card]:
     """Draw ``count`` uniform random cards not present in the state.
 
     Rejection sampling against a bitmask of known cards: with at most 9 of 52
@@ -47,7 +61,7 @@ def draw_cards(state: GameState, count: int) -> list[Card]:
         known |= card.mask
 
     drawn: list[Card] = []
-    randrange = random.randrange
+    randrange = random.randrange if rng is None else rng.randrange
     while len(drawn) < count:
         card = FULL_DECK[randrange(52)]
         if card.mask & known:
@@ -57,7 +71,7 @@ def draw_cards(state: GameState, count: int) -> list[Card]:
     return drawn
 
 
-def sample_chance_outcome(state: GameState) -> GameState:
+def sample_chance_outcome(state: GameState, rng: random.Random | None = None) -> GameState:
     """Sample the next chance outcome (flop/turn/river card deals)."""
     board_size = len(state.board)
 
@@ -76,7 +90,7 @@ def sample_chance_outcome(state: GameState) -> GameState:
     first_to_act = 1 - state.button_position
 
     return state.replace(
-        board=(*state.board, *draw_cards(state, count)),
+        board=(*state.board, *draw_cards(state, count, rng)),
         current_player=first_to_act,
         is_terminal=False,
         to_call=0,
@@ -84,7 +98,7 @@ def sample_chance_outcome(state: GameState) -> GameState:
     )
 
 
-def deal_remaining_cards(state: GameState) -> GameState:
+def deal_remaining_cards(state: GameState, rng: random.Random | None = None) -> GameState:
     """Deal all remaining board cards for terminal all-in showdowns.
 
     A complete board returns ``state`` unchanged, so callers can run every
@@ -106,7 +120,7 @@ def deal_remaining_cards(state: GameState) -> GameState:
 
     return state.replace(
         street=Street.RIVER,
-        board=(*state.board, *draw_cards(state, cards_needed)),
+        board=(*state.board, *draw_cards(state, cards_needed, rng)),
         is_terminal=True,
         to_call=0,
     )

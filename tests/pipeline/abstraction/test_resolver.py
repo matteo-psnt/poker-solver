@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from src.pipeline.training.abstraction_resolver import (
+from src.pipeline.abstraction.resolver import (
     AbstractionMetadataError,
     ComboAbstractionResolver,
     _read_metadata,

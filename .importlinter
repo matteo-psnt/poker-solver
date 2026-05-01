@@ -44,3 +44,21 @@ type = independence
 modules =
     src.pipeline.training
     src.pipeline.evaluation
+
+; Building a blueprint is what training, evaluation and anything serving a run
+; for reading all start from, so it must depend on none of them. It lived under
+; `training` while training was the only builder, and the cost was that every
+; other consumer reached across the independence contract above to get at it.
+; Stated only in a docstring this would drift back within a release; the two
+; imports that would restore the old arrangement are exactly what this forbids.
+[importlinter:contract:blueprint_construction_is_foundational]
+name = Building a blueprint must not depend on what consumes one
+type = forbidden
+source_modules =
+    src.pipeline.blueprint
+    src.pipeline.abstraction
+forbidden_modules =
+    src.pipeline.training
+    src.pipeline.evaluation
+    src.pipeline.services
+    src.interfaces

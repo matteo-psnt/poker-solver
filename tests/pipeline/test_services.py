@@ -7,13 +7,13 @@ import pytest
 
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.pipeline import services
+from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
 from src.pipeline.evaluation.lbr.hunl_local_best_response import HandOutcome, LBRConfig
 from src.pipeline.services import abstraction as services_abstraction
 from src.pipeline.services import runs as services_runs
 from src.pipeline.services import static_training as services_training
 from src.pipeline.services.evaluation import _shared as services_shared
 from src.pipeline.services.evaluation import lbr as services_lbr
-from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.shared.config_loader import load_training_config
 
 
@@ -50,7 +50,7 @@ def _patch_abstraction_failure(monkeypatch, tmp_path, exc):
     def _raise(_cfg):
         raise exc
 
-    monkeypatch.setattr(services_training.components, "resolve_card_abstraction_hash", _raise)
+    monkeypatch.setattr(services_training.blueprint, "resolve_card_abstraction_hash", _raise)
 
 
 def test_train_static_translates_missing_abstraction(monkeypatch, tmp_path):

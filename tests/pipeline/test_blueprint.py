@@ -4,8 +4,8 @@ import json
 
 import pytest
 
+from src.pipeline import blueprint
 from src.pipeline.abstraction.config import PrecomputeConfig
-from src.pipeline.training import components
 from src.shared.config import Config
 from tests.test_helpers import DummyCardAbstraction
 
@@ -18,7 +18,7 @@ class TestBuildCardAbstraction:
         config = Config.default().merge({"card_abstraction": {"config": "nonexistent_config_xyz"}})
 
         with pytest.raises(FileNotFoundError, match="Config file not found"):
-            components.build_card_abstraction(config)
+            blueprint.build_card_abstraction(config)
 
     def test_build_loads_unique_hash_match(self, tmp_path, monkeypatch):
         """Build uses the unique abstraction path matching the expected config hash."""
@@ -44,10 +44,10 @@ class TestBuildCardAbstraction:
             loaded_path = path
             return DummyCardAbstraction()
 
-        monkeypatch.setattr(components.PostflopPrecomputer, "load", _mock_load)
+        monkeypatch.setattr(blueprint.PostflopPrecomputer, "load", _mock_load)
         config = Config.default().merge({"card_abstraction": {"config": "default"}})
 
-        abstraction = components.build_card_abstraction(
+        abstraction = blueprint.build_card_abstraction(
             config,
             abstractions_dir=base_path,
         )
@@ -75,7 +75,7 @@ class TestBuildCardAbstraction:
 
         config = Config.default().merge({"card_abstraction": {"config": "default"}})
         with pytest.raises(ValueError, match="Multiple combo abstractions found"):
-            components.build_card_abstraction(
+            blueprint.build_card_abstraction(
                 config,
                 abstractions_dir=base_path,
             )

@@ -33,12 +33,16 @@ and dropped a measured 39–74% of update samples.
 ## Modules
 
     static_parallel.py       the multi-process training loop
-    components.py            builders: abstraction, tree, storage, solver
-    abstraction_resolver.py  find and load a precomputed combo abstraction
     run_tracker/             what a run records about itself
 
 Storage lives one layer down in `src/engine/solver/storage/`:
 `static_array.py` (the arrays) and `static_checkpoint.py` (their snapshots).
+
+Two modules that used to live here now sit beside this package, because
+training stopped being their only consumer: `src/pipeline/blueprint.py`
+(builders for abstraction, tree, storage and solver) and
+`src/pipeline/abstraction/resolver.py` (find and load a precomputed combo
+abstraction).
 
 ### `static_parallel.py`
 
@@ -66,14 +70,6 @@ directory carries `.run.json` and `progress.jsonl`.
 trained with. Evaluation refuses a run without it. The `attempts` list records
 each start and resume as its own timeline entry, so wall-clock history survives
 interruption.
-
-### `abstraction_resolver.py`
-
-Resolves and loads the precomputed combo abstraction, raising two *distinct*
-errors on purpose: `AbstractionMetadataError` (metadata exists but is
-unreadable — which used to read as "no metadata" and silently drop the
-`config_hash` a checkpoint is pinned to) and `AbstractionHashMismatchError`
-(computed with different parameters, recoverable by recomputing).
 
 ## Storage and checkpoints
 

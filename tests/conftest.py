@@ -28,7 +28,7 @@ def requires_card_abstraction():
     serial EXACTLY, or the zero-variance instrument stops being zero-variance),
     so the skip names how to get it back rather than quietly passing.
     """
-    from src.pipeline.training import components
+    from src.pipeline import blueprint
     from src.shared.config_loader import load_training_config
 
     # `load_training_config`, NOT `load_config` -- the latter takes a PATH and
@@ -38,7 +38,7 @@ def requires_card_abstraction():
     # by running with the artifact restored and watching the test actually run.
     config = load_training_config("quick_test")
     try:
-        components.resolve_card_abstraction_hash(config)
+        blueprint.resolve_card_abstraction_hash(config)
     except FileNotFoundError:
         pytest.skip(
             "no local `quick_test` combo abstraction (~194 MB, gitignored). "
