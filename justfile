@@ -20,6 +20,7 @@
 
 tf := "terraform -chdir=infra"
 tfs := "terraform -chdir=infra/store"
+tfv := "terraform -chdir=infra/serve"
 
 _default:
     @just --list --unsorted
@@ -49,6 +50,33 @@ create:
 # Delete the Batch account and pool. The share and every published run survive.
 destroy:
     {{tf}} destroy
+
+# Create the box that serves a trained run for reading. Its own state, so
+# `destroy` above cannot reach it -- and it is NOT part of the pool, because the
+# pool is for work that finishes and a server never does.
+serve-create:
+    {{tfv}} init -input=false
+    {{tfv}} apply
+    @echo ""
+    @echo "  next:  just serve-tunnel, then just serve-ssh to start a run"
+
+# Show what the serving box would change, without changing it.
+serve-plan:
+    {{tfv}} init -input=false
+    {{tfv}} plan
+
+# The forward that reaches the blueprint server. It binds loopback on the box,
+# so this is the only route to it -- run it in a second terminal and leave it.
+serve-tunnel:
+    @sh -c "$({{tfv}} output -raw tunnel)"
+
+# A shell on the serving box, for starting the server against a run.
+serve-ssh:
+    @sh -c "$({{tfv}} output -raw ssh)"
+
+# Delete the serving box. Nothing on it is a source of truth; it holds copies.
+serve-destroy:
+    {{tfv}} destroy
 
 # --------------------------------------------------------------------------- #
 # emergency

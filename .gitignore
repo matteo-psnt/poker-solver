@@ -89,6 +89,9 @@ infra/*.tfvars
 infra/store/.terraform/
 infra/store/terraform.tfstate
 infra/store/terraform.tfstate.*
+infra/serve/.terraform/
+infra/serve/terraform.tfstate
+infra/serve/terraform.tfstate.*
 infra/store/*.tfvars
 
 # console build output

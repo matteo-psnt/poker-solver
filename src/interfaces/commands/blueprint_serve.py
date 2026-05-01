@@ -1,9 +1,15 @@
 """The `blueprint-serve` subcommand: hold one run, and answer questions about it.
 
-This belongs to the **run on a node** group, beside `train-static`, `precompute`
-and `evaluate`, and for the same reason: it needs the run's checkpoint and the
-card abstraction, both of which live on the share the node mounts. It keeps
-`--runs-dir` because a node reads from `/mnt/work`.
+This runs on the long-lived reader box (`infra/serve/`), NOT on the training
+pool. That distinction is the whole reason the box exists: the pool is for work
+that *finishes* -- its autoscale formula sizes itself on running tasks,
+`taskcompletion` deallocation assumes tasks end, and the task wall-clock guard
+exists to kill anything that does not. A server is the shape all three are aimed
+at, which is why there is deliberately no `TaskName` for it.
+
+It keeps `--runs-dir` because it reads a checkpoint and the card abstraction from
+LOCAL disk. Not a preference: a checkpoint is ~5,500 small files that the read
+path mmaps, and over SMB every page fault becomes a network round trip.
 
 Loopback only, and not configurable -- same rule as `serve`. There is no
 authentication here, so binding anywhere reachable would publish a run to
@@ -26,7 +32,11 @@ DEFAULT_PORT = 8790
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver blueprint-serve`."""
     parser.add_argument("--run", required=True, help="Run id, fragment, or path to a run dir.")
-    parser.add_argument("--runs-dir", default="data/runs", help="Where runs live on this box.")
+    parser.add_argument(
+        "--runs-dir",
+        default="/mnt/work/runs",
+        help="Where runs live on this box. Local disk, never the share.",
+    )
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT, help=f"Port (default {DEFAULT_PORT})."
     )
