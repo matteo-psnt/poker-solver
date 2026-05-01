@@ -23,7 +23,11 @@ const LIVE = new Set(["running", "preparing", "active"]);
  * is executing: a run is only `running` if one of its tasks is a task Batch has
  * live right now.
  */
-type Verdict = { label: string; tone: "live" | "warn" | "muted"; title: string } | null;
+type Verdict = {
+  label: string;
+  tone: "live" | "warn" | "muted";
+  title: string;
+} | null;
 
 export function verdictFor(
   status: string | null,
@@ -33,7 +37,11 @@ export function verdictFor(
 ): Verdict {
   if ((status ?? "") !== "running") return null;
   if (liveRuns.has(runName)) {
-    return { label: "running", tone: "live", title: "a task for this run is live in Batch" };
+    return {
+      label: "running",
+      tone: "live",
+      title: "a task for this run is live in Batch",
+    };
   }
   if (runsWithTasks.has(runName)) {
     return {

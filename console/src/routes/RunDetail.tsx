@@ -34,7 +34,11 @@ const route = getRouteApi("/runs/$runId");
 
 const AXIS = { stroke: "var(--fg-faint)", fontSize: 10 };
 const GRID = "var(--border)";
-const TOOLTIP = { background: "var(--panel)", border: `1px solid ${GRID}`, fontSize: 11 };
+const TOOLTIP = {
+  background: "var(--panel)",
+  border: `1px solid ${GRID}`,
+  fontSize: 11,
+};
 
 const COVERAGE = "#3b82f6";
 const VISITS = "#a78bfa";

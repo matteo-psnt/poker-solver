@@ -186,6 +186,15 @@ PAYLOADS: dict[str, dict] = {
         "tasks": [{"task_id": "prod-101010-1", "attempt": 1, "cause": "killed"}],
         "gaps": ["unscored ladder rungs: 5,000,000, 20,000,000"],
     },
+    "blueprint-serve": {
+        "op": "blueprint-serve",
+        "run": "run-production-025433-1095",
+        "run_dir": "/mnt/work/runs/run-production-025433-1095",
+        "at_iteration": None,
+        "url": "http://127.0.0.1:8790",
+        "host": "127.0.0.1",
+        "port": 8790,
+    },
     "serve": {
         "op": "serve",
         "url": "http://127.0.0.1:8765",
@@ -438,10 +447,11 @@ PAYLOADS["status"] = {
 BY_NAME = {command.name: command for command in COMMANDS}
 
 
-# `serve`'s renderer IS the server: calling it blocks on uvicorn. It is the one
-# command whose render has a side effect rather than being pure formatting, so it
-# is excluded here by name and covered by `tests/interfaces/web/` instead.
-SIDE_EFFECTING = {"serve"}
+# These two renderers ARE the server: calling one blocks on uvicorn. They are the
+# commands whose render has a side effect rather than being pure formatting, so
+# they are excluded here by name and covered by `tests/interfaces/web/` and
+# `tests/interfaces/blueprint/` instead.
+SIDE_EFFECTING = {"serve", "blueprint-serve"}
 
 
 class TestEveryOpRenders:

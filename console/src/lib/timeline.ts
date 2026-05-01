@@ -41,7 +41,11 @@ const MIN_WIDTH_PCT = 1.2;
 
 export function timelineBars(tasks: TaskRow[], now: number): Timeline | null {
   const dated = tasks
-    .map((task) => ({ task, start: instant(task.started_at), end: instant(task.ended_at) }))
+    .map((task) => ({
+      task,
+      start: instant(task.started_at),
+      end: instant(task.ended_at),
+    }))
     .filter((row): row is { task: TaskRow; start: number; end: number | null } => row.start != null)
     .sort((a, b) => a.start - b.start);
 

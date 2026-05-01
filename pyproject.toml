@@ -24,6 +24,7 @@ dependencies = [
     "azure-storage-file-share>=12.26.0",
     "fastapi>=0.129.0",
     "uvicorn>=0.41.0",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]

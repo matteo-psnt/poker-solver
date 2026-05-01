@@ -803,6 +803,7 @@ dependencies = [
     { name = "azure-storage-file-share" },
     { name = "eval7" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "numba" },
     { name = "numcodecs" },
     { name = "numpy" },

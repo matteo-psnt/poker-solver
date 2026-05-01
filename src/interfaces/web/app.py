@@ -43,6 +43,7 @@ from src.interfaces.commands import (
     tasks,
 )
 from src.interfaces.errors import CommandError
+from src.interfaces.web import blueprint_proxy
 from src.interfaces.web.cache import TtlCache
 
 # Long enough that several open tabs (or a remount) share one cloud sweep,
@@ -139,6 +140,12 @@ def create_app() -> FastAPI:
     @app.get("/api/logs/{task_id}")
     def _log(task_id: str, lines: int = 200) -> JSONResponse:
         return answer(cache, logs.COMMAND, task=task_id, lines=lines)
+
+    # Not `answer(...)`: these are not commands and there is nothing to memoise
+    # here. The blueprint server owns one loaded run and answers in
+    # milliseconds, so a TTL cache would only serve a stale grid after a caller
+    # walked to a different node.
+    blueprint_proxy.mount(app)
 
     _mount_console(app)
     return app
