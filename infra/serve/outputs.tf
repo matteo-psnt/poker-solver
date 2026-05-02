@@ -1,9 +1,6 @@
 output "public_ip" {
-  value = azurerm_public_ip.serve.ip_address
-}
-
-output "admin_username" {
-  value = var.admin_username
+  description = "Outbound address. Nothing inbound is permitted to reach it."
+  value       = azurerm_public_ip.serve.ip_address
 }
 
 output "resource_group" {
@@ -15,19 +12,17 @@ output "vm_name" {
 }
 
 output "url" {
-  description = "What POKER_SOLVER_BLUEPRINT_URL should be set to."
-  value       = "https://${azurerm_public_ip.serve.fqdn}"
-}
+  description = <<-EOT
+    What POKER_SOLVER_BLUEPRINT_URL should be set to.
 
-# The one thing between the internet and a trained run. Sensitive, so it stays
-# out of logs and plan diffs; `terraform output -raw api_token` is the only path
-# that prints it, and `just serve-env` pipes it straight into a shell export.
-output "api_token" {
-  value     = random_password.api_token.result
-  sensitive = true
+    A MagicDNS name, so it needs MagicDNS enabled on the tailnet -- check with
+    `tailscale status`. If short names do not resolve, use the full
+    `<hostname>.<tailnet>.ts.net`.
+  EOT
+  value       = "http://${var.tailscale_hostname}:8790"
 }
 
 output "ssh" {
-  description = "A shell on the box, for pointing it at a run."
-  value       = "ssh ${var.admin_username}@${azurerm_public_ip.serve.ip_address}"
+  description = "A shell on the box. Tailscale SSH — port 22 is closed."
+  value       = "tailscale ssh ${var.admin_username}@${var.tailscale_hostname}"
 }
