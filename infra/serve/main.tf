@@ -234,53 +234,128 @@ locals {
           az login --identity >/dev/null 2>&1 || exit 0
           az vm deallocate --ids "${"$"}ID" --no-wait
 
+      # Provisioning, as ONE script with a real shebang.
+      #
+      # Not as `runcmd` entries, which is where this first went wrong: cloud-init
+      # concatenates those into a file it runs with /bin/sh, and on Ubuntu that is
+      # dash -- which has no `pipefail`. Every block aborted on its first line
+      # with "Illegal option -o pipefail", cloud-init reported `status: error`,
+      # and the box came up with no disk, no mount and no toolchain. A script in
+      # `write_files` gets its shebang honoured, so bash is bash.
+      - path: /usr/local/bin/blueprint-provision
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+
+          # Non-interactive, and keep OUR config on a conflict. Both matter:
+          # `/etc/caddy/Caddyfile` is written above and the caddy package ships
+          # its own, so dpkg stops to ask which to keep -- on a box with no
+          # terminal that is a hang, and under `set -e` on a piped rerun it is a
+          # silent abort halfway through provisioning.
+          export DEBIAN_FRONTEND=noninteractive
+          export NEEDRESTART_MODE=a
+          APT_KEEP_OURS='-o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef'
+
+          # -- the data disk ---------------------------------------------------
+          # Found by its PROPERTIES, not by a path. `/dev/disk/azure/scsi1/lun0`
+          # is the obvious answer and it does not exist here: the als_v6 family
+          # presents data disks over NVMe, so the disk arrives as /dev/nvme0n2
+          # and no scsi1 symlink is ever created. This cost a rebuild to find,
+          # and it is the same shape as the trap in the pool's start task -- a
+          # fixed device path is an assumption about the VM family.
+          #
+          # It also has to WAIT: the attachment is a separate Terraform resource
+          # applied after the VM exists, so on a first boot the disk is genuinely
+          # not there yet.
+          #
+          # Three guards, because the failure mode of getting this wrong is
+          # formatting the OS disk. The candidate must carry no partitions, be
+          # mounted nowhere, and be about the size we asked for.
+          # Already done? Then there is nothing to find, and looking would fail:
+          # the guards below reject a mounted disk, so a re-run would scan past
+          # its own successful first run and exit. Provisioning has to be
+          # re-runnable -- it is piped at a box by hand when something needs
+          # fixing.
+          want_gb=${var.data_disk_gb}
+          DISK=""
+          if findmnt -n /mnt/work >/dev/null 2>&1; then
+            echo "/mnt/work already mounted"
+            DISK=skip
+          fi
+          [ -n "$DISK" ] || for _ in $(seq 1 60); do
+            for name in $(lsblk -dn -o NAME,TYPE | awk '$2=="disk"{print $1}'); do
+              dev="/dev/$name"
+              [ -b "$dev" ] || continue
+              [ "$(lsblk -n -o NAME "$dev" | wc -l)" -gt 1 ] && continue
+              [ -n "$(lsblk -n -o MOUNTPOINT "$dev" | tr -d ' \n')" ] && continue
+              # GiB, not GB: Azure provisions in GiB, so a "128 GB" disk reports
+              # 137 GB decimal and a decimal comparison misses it by nine.
+              gb=$(( $(blockdev --getsize64 "$dev") / 1073741824 ))
+              [ "$gb" -ge $(( want_gb - 2 )) ] && [ "$gb" -le $(( want_gb + 2 )) ] || continue
+              DISK="$dev"
+              break
+            done
+            [ -n "$DISK" ] && break
+            sleep 5
+          done
+
+          if [ -z "$DISK" ]; then
+            echo "no unpartitioned disk of about $want_gb GB found -- is it attached?" >&2
+            lsblk >&2
+            exit 1
+          fi
+          echo "data disk: $DISK"
+
+          if [ "$DISK" != skip ]; then
+            blkid "$DISK" >/dev/null 2>&1 || mkfs.ext4 -F -L work "$DISK"
+          fi
+          mkdir -p /mnt/work
+          grep -q '/mnt/work' /etc/fstab || echo "LABEL=work /mnt/work ext4 defaults,nofail 0 2" >> /etc/fstab
+          mount -a
+          mkdir -p /mnt/work/cache /mnt/work/data
+          chown -R ${var.admin_username}:${var.admin_username} /mnt/work
+
+          # -- the share -------------------------------------------------------
+          # `ro`: this box reads runs and abstractions and publishes nothing. A
+          # reader that cannot write cannot corrupt the one thing that is not a
+          # copy.
+          mkdir -p /mnt/shared
+          grep -q '/mnt/shared' /etc/fstab || echo "//${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.share_name} /mnt/shared cifs ro,nofail,vers=3.1.1,credentials=/etc/smbcredentials/store.cred,dir_mode=0555,file_mode=0444,serverino,nosharesock,actimeo=30,mfsymlinks 0 0" >> /etc/fstab
+          mount -a
+
+          # -- caddy and the azure cli -----------------------------------------
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+            | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
+            > /etc/apt/sources.list.d/caddy-stable.list
+          apt-get update
+          apt-get install -y $APT_KEEP_OURS caddy
+          curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+          systemctl enable --now caddy
+
+          # -- the toolchain ---------------------------------------------------
+          # uv brings its own Python, so the image's interpreter version is not a
+          # constraint here the way it is on a Batch node.
+          su - ${var.admin_username} -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+          echo 'export POKER_SOLVER_CACHE=/mnt/work/cache' >> /home/${var.admin_username}/.bashrc
+
+          # -- the service -----------------------------------------------------
+          # `enable`, not `enable --now`: RUN is empty until a deploy sets it, and
+          # starting now would fail three times and deallocate a box someone is
+          # still setting up. From the next boot on it starts by itself, which is
+          # what makes waking the box equivalent to starting the server.
+          systemctl daemon-reload
+          systemctl enable blueprint
+
+          # The passwordless sudo the deploy script needs, and nothing wider: it
+          # rewrites /etc/blueprint.env and restarts one unit.
+          echo '${var.admin_username} ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/blueprint.env, /usr/bin/systemctl restart blueprint, /usr/bin/systemctl enable blueprint, /usr/bin/systemctl daemon-reload, /usr/bin/journalctl -u blueprint *' \
+            > /etc/sudoers.d/blueprint
+          chmod 0440 /etc/sudoers.d/blueprint
+
     runcmd:
-      # -- the data disk -------------------------------------------------------
-      # By LUN, via the Azure Linux Agent's udev symlink. Unlike the Batch node
-      # image, the stock Ubuntu marketplace image DOES ship those rules, so the
-      # pool's three-guard disk hunt is not needed here.
-      - |
-        set -euo pipefail
-        DISK=/dev/disk/azure/scsi1/lun0
-        for _ in $(seq 1 30); do [ -e "$DISK" ] && break; sleep 2; done
-        if ! blkid "$DISK"; then mkfs.ext4 -F -L work "$DISK"; fi
-        mkdir -p /mnt/work
-        grep -q '/mnt/work' /etc/fstab || echo "LABEL=work /mnt/work ext4 defaults,nofail 0 2" >> /etc/fstab
-        mount -a
-        chown -R ${var.admin_username}:${var.admin_username} /mnt/work
-
-      # -- the share -----------------------------------------------------------
-      # `ro`: this box reads runs and abstractions and publishes nothing. A
-      # reader that cannot write cannot corrupt the one thing that is not a copy.
-      - |
-        set -euo pipefail
-        mkdir -p /mnt/shared
-        grep -q '/mnt/shared' /etc/fstab || echo "//${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.share_name} /mnt/shared cifs ro,nofail,vers=3.1.1,credentials=/etc/smbcredentials/store.cred,dir_mode=0555,file_mode=0444,serverino,nosharesock,actimeo=30,mfsymlinks 0 0" >> /etc/fstab
-        mount -a
-
-      # -- caddy and the azure cli ---------------------------------------------
-      - |
-        set -euo pipefail
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-          | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-        echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
-          > /etc/apt/sources.list.d/caddy-stable.list
-        apt-get update
-        apt-get install -y caddy
-        curl -sL https://aka.ms/InstallAzureCLIDeb | bash
-        systemctl enable --now caddy
-        systemctl daemon-reload
-        systemctl enable blueprint
-
-      # -- the toolchain -------------------------------------------------------
-      # uv brings its own Python, so the image's interpreter version is not a
-      # constraint here the way it is on a Batch node.
-      - |
-        set -euo pipefail
-        su - ${var.admin_username} -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-        mkdir -p /mnt/work/cache
-        chown ${var.admin_username}:${var.admin_username} /mnt/work/cache
-        echo 'export POKER_SOLVER_CACHE=/mnt/work/cache' >> /home/${var.admin_username}/.bashrc
+      - /usr/local/bin/blueprint-provision
   EOT
 }
 

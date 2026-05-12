@@ -77,6 +77,12 @@ serve-env:
 serve-ssh:
     @sh -c "$({{tfv}} output -raw ssh)"
 
+# Put code, the abstraction and one run on the box, and start serving it.
+# The script is PIPED over ssh rather than installed, so the box always runs the
+# version in this repo and keeps none of it. Args: run (id or fragment)
+serve-deploy run:
+    ssh solver@$({{tfv}} output -raw public_ip) 'bash -s' -- {{run}} < infra/serve/deploy.sh
+
 # Wake the box, or put it back to sleep. The console does this too; these are
 # for when the console is what you are trying to fix.
 serve-start:
