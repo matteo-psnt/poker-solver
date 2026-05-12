@@ -65,12 +65,13 @@ serve-plan:
     {{tfv}} init -input=false
     {{tfv}} plan
 
-# Where the console should look for the box. Eval it:
+# The two variables the console needs to reach the box. Eval it:
 #   eval "$(just serve-env)"
-# One variable, no secret: the tailnet is the auth boundary, so there is nothing
-# here worth protecting.
+# Printed rather than written to a file: the token is a secret, and a dotfile is
+# the kind of thing that gets committed once and then lives in history forever.
 serve-env:
     @echo "export POKER_SOLVER_BLUEPRINT_URL=$({{tfv}} output -raw url)"
+    @echo "export POKER_SOLVER_BLUEPRINT_TOKEN=$({{tfv}} output -raw api_token)"
 
 # A shell on the serving box, for pointing it at a run.
 serve-ssh:

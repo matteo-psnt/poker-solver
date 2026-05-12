@@ -27,24 +27,29 @@
 # property that would justify the extra machinery is the one property this
 # workload cannot use. A warm container app is a VM with a registry attached.
 #
-# NOTHING IS EXPOSED, AND THE TAILNET IS THE AUTH BOUNDARY. There are no inbound
-# NSG rules at all -- not 443, not 22. The box joins a tailnet on boot and the
-# console reaches it at `http://<hostname>:8790` over WireGuard.
+# HOW YOU REACH IT: A PUBLIC HTTPS ENDPOINT BEHIND A BEARER TOKEN. This is the
+# third answer to that question and the reasoning for each is worth keeping,
+# because the trade is not obvious and the first two both looked right.
 #
-# This replaced a public 443 endpoint with Caddy terminating TLS and checking a
-# bearer token, and it deleted every part of that: the certificate, the DNS
-# label Let's Encrypt needed, the reverse proxy, and the token itself. The token
-# existed only because the port was public. Identity now comes from the tailnet,
-# which is the thing that already knows who your devices are -- and a secret you
-# do not have is a secret that cannot leak.
+#   1. An SSH tunnel. Nothing exposed, auth is the key's. Rejected once the box
+#      became something the console starts on demand: a button that first needs
+#      you to open a terminal and leave it running is not a button.
+#   2. A tailnet. Strictly better on every axis -- no open port, no certificate,
+#      no secret -- and abandoned for a reason no design review would surface:
+#      Tailscale was not reliable enough for the person using it. An auth path
+#      that is down is worse than a weaker one that is up.
+#   3. This. Caddy terminates TLS and checks a token; the token is the ONLY
+#      thing between the internet and a trained run.
 #
-# Which matters, because this process will tell anyone who reaches it exactly
-# what a run's strategy is. Narrow it further with a Tailscale ACL on
-# `tag:blueprint` if the tailnet ever has a device you would not hand that to.
+# So the token is not belt-and-braces here, it is the whole belt. It costs one
+# `eval "$(just serve-env)"` and it is the difference between "everyone I send
+# the URL to" and "every scanner that walks the certificate transparency log" --
+# and this process will tell whoever reaches it exactly what a run plays.
 #
-# BREAK-GLASS IS THE SERIAL CONSOLE. With no port 22, a box whose `tailscale up`
-# failed would be unreachable -- so boot diagnostics are on, and Azure's serial
-# console works without any networking at all.
+# The blast radius if it leaks is bounded but not nil: a reader gets the
+# strategy, and can open play sessions. The share is mounted read-only and the
+# session store is capped, so neither the experiment record nor the box's memory
+# is at risk. Rotate by tainting `random_password.api_token` and re-applying.
 
 terraform {
   required_version = ">= 1.5"
@@ -52,6 +57,10 @@ terraform {
     azurerm = {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
     }
   }
 }
@@ -65,6 +74,15 @@ provider "azurerm" {
       delete_os_disk_on_deletion = true
     }
   }
+}
+
+# The only thing standing between the internet and a trained run. Generated
+# rather than chosen so it cannot be a memorable string someone reuses, and held
+# in state rather than in the repo. `terraform output -raw api_token` is the one
+# path that prints it.
+resource "random_password" "api_token" {
+  length  = 48
+  special = false
 }
 
 data "azurerm_storage_account" "store" {
@@ -97,6 +115,8 @@ locals {
       - cifs-utils
       - git
       - curl
+      - debian-keyring
+      - debian-archive-keyring
       - apt-transport-https
     write_files:
       # Credentials in a root-only file rather than in /etc/fstab, where the
@@ -107,6 +127,27 @@ locals {
         content: |
           username=${data.azurerm_storage_account.store.name}
           password=${data.azurerm_storage_account.store.primary_access_key}
+      # Caddy terminates TLS and checks the token. A reverse proxy rather than
+      # doing this in the app for one reason: the app must stay runnable on a
+      # laptop with no certificate and no secret, and an auth layer it could not
+      # be started without would make every test carry a token.
+      #
+      # `header_regexp` on the Authorization header, and a bare 404 otherwise --
+      # not 401. A 401 advertises that something authenticated lives here; a 404
+      # tells a scanner there is nothing at this address at all.
+      - path: /etc/caddy/Caddyfile
+        permissions: "0644"
+        content: |
+          ${var.dns_label}.${var.location}.cloudapp.azure.com {
+            @authorized header_regexp auth Authorization ^Bearer\s+${random_password.api_token.result}$$
+            handle @authorized {
+              reverse_proxy 127.0.0.1:8790
+            }
+            handle {
+              respond 404
+            }
+          }
+
       # Which run this box serves. An env file rather than a baked-in argument,
       # because the run changes far more often than the box does -- edit this and
       # `systemctl restart blueprint`.
@@ -190,23 +231,17 @@ locals {
         grep -q '/mnt/shared' /etc/fstab || echo "//${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.share_name} /mnt/shared cifs ro,nofail,vers=3.1.1,credentials=/etc/smbcredentials/store.cred,dir_mode=0555,file_mode=0444,serverino,nosharesock,actimeo=30,mfsymlinks 0 0" >> /etc/fstab
         mount -a
 
-      # -- the tailnet ---------------------------------------------------------
-      # Joined before anything else needs the network, and with `--ssh`, which is
-      # how you get a shell here: port 22 is closed to the world.
-      #
-      # `--accept-dns=false` on purpose. Tailscale would otherwise take over
-      # /etc/resolv.conf, and this box resolves an Azure Files endpoint for its
-      # SMB mount -- a DNS change underneath a live CIFS mount is a stall that
-      # looks like a hung server.
+      # -- caddy and the azure cli ---------------------------------------------
       - |
         set -euo pipefail
-        curl -fsSL https://tailscale.com/install.sh | sh
-        tailscale up \
-          --authkey='${var.tailscale_auth_key}' \
-          --hostname='${var.tailscale_hostname}' \
-          --ssh \
-          --accept-dns=false
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+          | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
+          > /etc/apt/sources.list.d/caddy-stable.list
+        apt-get update
+        apt-get install -y caddy
         curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+        systemctl enable --now caddy
         systemctl daemon-reload
         systemctl enable blueprint
 
@@ -253,15 +288,40 @@ resource "azurerm_network_security_group" "serve" {
   resource_group_name = azurerm_resource_group.serve.name
   tags                = local.tags
 
-  # NO INBOUND RULES. Not an omission -- the absence IS the design.
+  # Two rules, and the asymmetry is the point.
   #
-  # Azure's default rules already deny inbound from the internet, so leaving this
-  # empty means nothing on this box is reachable from outside the tailnet. The
-  # server binds loopback and Tailscale carries traffic to it over WireGuard,
-  # which is also why there is no rule for 8790 and must never be one.
+  # 443 is open to the world because the console has to reach this from wherever
+  # you are, and a button that first needs an SSH tunnel is not a button. What
+  # answers there is Caddy, which checks a bearer token and returns 404 -- not
+  # 401 -- to everything else, so a scanner learns nothing.
   #
-  # The public IP below is for OUTBOUND only: joining the tailnet, reaching the
-  # share, and installing packages.
+  # The server's OWN port (8790) is deliberately absent and must stay absent: it
+  # binds loopback and speaks to nobody but Caddy. Opening it would publish an
+  # unauthenticated read interface to a trained run, which is a mistake worth
+  # making impossible rather than merely discouraged.
+  security_rule {
+    name                       = "https"
+    priority                   = 90
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "ssh"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = var.ssh_source_address
+    destination_address_prefix = "*"
+  }
 }
 
 resource "azurerm_public_ip" "serve" {
@@ -270,10 +330,12 @@ resource "azurerm_public_ip" "serve" {
   resource_group_name = azurerm_resource_group.serve.name
   # Static, so stopping the box overnight does not invalidate the SSH config
   # line and the tunnel command you saved.
-  # Outbound only -- nothing inbound is permitted to reach it. Static so the
-  # address in a log or a support ticket stays meaningful across a deallocate.
   allocation_method = "Static"
   sku               = "Standard"
+  # Gives the box a name Let's Encrypt will issue for. Without it Caddy has only
+  # an IP, no certificate is possible, and the console would have to be taught to
+  # skip verification -- a setting nobody ever turns back on.
+  domain_name_label = var.dns_label
   tags              = local.tags
 }
 
@@ -339,10 +401,6 @@ resource "azurerm_linux_virtual_machine" "serve" {
   }
 
   custom_data = base64encode(local.cloud_init)
-
-  # The only way in if the tailnet join fails. Managed storage, so there is no
-  # storage account to create and nothing to pay for beyond the log itself.
-  boot_diagnostics {}
 
   lifecycle {
     # cloud-init runs once at first boot; a re-render (a changed storage key, a

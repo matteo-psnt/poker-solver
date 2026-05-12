@@ -340,33 +340,16 @@ costs nothing but its disks (~$15/mo), and because the run lives on a **managed*
 data disk that survives deallocation, waking is a boot plus a checkpoint load
 (~2 min) rather than re-copying ~1.6 GB.
 
-**It is on your tailnet, and nowhere else.** There are **no inbound NSG rules at
-all** — not 443, not 22. The box joins Tailscale on boot and the console reaches
-it at `http://blueprint-server:8790` over WireGuard. The public IP is outbound
-only.
-
-This replaced a public HTTPS endpoint with Caddy and a bearer token, and deleted
-every part of it: the certificate, the DNS label Let's Encrypt needed, the
-reverse proxy, and the token. The token existed *only because the port was
-public*. Identity now comes from the tailnet, which already knows your devices —
-and a secret you do not have cannot leak.
-
-- **`tailscale_auth_key` has no default and must not be committed.** Pass it as
-  `TF_VAR_tailscale_auth_key`, or let Terraform prompt. Generate it **reusable**
-  and **tagged** (`tag:blueprint`): a user-owned key inherits that user's expiry,
-  so the box would silently drop off the tailnet in 180 days and the console
-  would call it unreachable with nothing in the logs saying why.
-- **Break-glass is the serial console.** With no port 22, a box whose
-  `tailscale up` failed would be unreachable — so boot diagnostics are on, and
-  Azure's serial console works with no networking at all.
-- **Narrow it further with an ACL** on `tag:blueprint` if the tailnet ever holds
-  a device you would not hand a trained run to.
+**Two ports, asymmetric on purpose.** 443 is open to the world, and what answers
+is Caddy: it terminates TLS and checks a bearer token, returning a bare **404** —
+not 401 — to everything else, so a scanner learns nothing is there. The server's
+own port (8790) binds loopback and is deliberately absent from the NSG. Do not
+add it; that would publish an unauthenticated read interface to a trained run.
 
 ```bash
-export TF_VAR_tailscale_auth_key=tskey-auth-...
 just serve-create                 # once
 just serve-ssh                    # point it at a run: edit RUN= in /etc/blueprint.env
-eval "$(just serve-env)"          # one variable, no secret
+eval "$(just serve-env)"          # URL + token into this shell
 uv run poker-solver serve         # console; Solver and Play now have a host
 ```
 

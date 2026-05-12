@@ -70,41 +70,27 @@ variable "admin_username" {
 
 variable "ssh_public_key" {
   description = <<-EOT
-    Azure REQUIRES a key or a password on a Linux VM, so this exists to satisfy
-    the API -- not to be used. Port 22 is not open to anything; you reach the box
-    with `tailscale ssh`, which authenticates against the tailnet rather than
-    against this key.
-
-    Empty means "use ~/.ssh/id_ed25519.pub", which is what a laptop has.
+    Public half of the key that opens the tunnel. Empty means "use
+    ~/.ssh/id_ed25519.pub", which is what a laptop actually has -- naming a path
+    that does not exist fails at apply with a clearer error than a VM you cannot
+    log into.
   EOT
   type        = string
   default     = ""
 }
 
-variable "tailscale_auth_key" {
+variable "dns_label" {
   description = <<-EOT
-    Pre-authorised key that joins this box to your tailnet. **No default, and
-    never commit one** -- pass it as `TF_VAR_tailscale_auth_key`, or let
-    Terraform prompt.
+    Prefix of the box's name, giving it
+    `<label>.<region>.cloudapp.azure.com`. A NAME rather than a bare IP because
+    Caddy needs one to obtain a certificate -- Let's Encrypt does not issue for
+    IP addresses, and a self-signed cert would mean teaching the console to skip
+    verification, which is a setting nobody ever un-skips.
 
-    Generate it at https://login.tailscale.com/admin/settings/keys as
-    **reusable** and **tagged** (`tag:blueprint`). Tagged matters: a key tied to
-    a user inherits that user's key expiry, so the box would silently fall off
-    the tailnet in 180 days and the console would report it as unreachable with
-    nothing in the logs to say why. Tagged devices do not expire.
+    Globally unique within the region; change it if apply reports a conflict.
   EOT
   type        = string
-  sensitive   = true
-}
-
-variable "tailscale_hostname" {
-  description = <<-EOT
-    The name the box takes on the tailnet, so the console can reach it as
-    `http://<hostname>:8790` with no IP to look up and nothing to re-point when
-    Azure hands it a different address.
-  EOT
-  type        = string
-  default     = "blueprint-server"
+  default     = "poker-blueprint"
 }
 
 variable "idle_timeout_seconds" {
@@ -119,6 +105,20 @@ variable "idle_timeout_seconds" {
   EOT
   type        = number
   default     = 1800
+}
+
+variable "ssh_source_address" {
+  description = <<-EOT
+    The ONLY address allowed to reach port 22, and the only inbound rule at all.
+
+    "*" would expose SSH to the internet. Key-only auth makes that survivable
+    rather than safe, and this box holds a mount to the durable experiment
+    store. Set it to your current public IP (`curl -s ifconfig.me`) and re-apply
+    when it changes; that is a 30-second cost against the one thing here worth
+    protecting.
+  EOT
+  type        = string
+  default     = "*"
 }
 
 variable "store_account_name" {
