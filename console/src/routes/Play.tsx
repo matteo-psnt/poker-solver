@@ -2,6 +2,7 @@ import { useBlueprintRun, useDealHand, useSubmitAction } from "@/api/queries";
 import type { Hand, HandEvent } from "@/api/schemas";
 import { BoxControl } from "@/components/BoxControl";
 import { Panel } from "@/components/Panel";
+import { describeAction } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -28,6 +29,7 @@ export function Play() {
   const deal = useDealHand();
   const act = useSubmitAction();
 
+  const bigBlind = run.data?.big_blind ?? 0;
   const error = deal.error ?? act.error;
   const busy = deal.isPending || act.isPending;
 
@@ -89,7 +91,7 @@ export function Play() {
                   }
                   className="rounded border border-[var(--border)] px-3 py-1.5 font-mono text-[12px] text-[var(--fg)] hover:bg-white/[0.06] disabled:opacity-40"
                 >
-                  {label(action.type, action.amount)}
+                  {describeAction(action.token, bigBlind).text}
                 </button>
               ))}
             </div>
@@ -110,7 +112,11 @@ export function Play() {
             <ol className="space-y-1">
               {hand.log.map((event, index) => (
                 // Position, not content: a line repeats the same action freely.
-                <Event key={`${index}-${event.actor}-${event.action}`} event={event} />
+                <Event
+                  key={`${index}-${event.actor}-${event.action}`}
+                  event={event}
+                  bigBlind={bigBlind}
+                />
               ))}
             </ol>
           </div>
@@ -195,7 +201,7 @@ function Result({ hand }: { hand: Hand }) {
   );
 }
 
-function Event({ event }: { event: HandEvent }) {
+function Event({ event, bigBlind }: { event: HandEvent; bigBlind: number }) {
   return (
     <li className="space-y-0.5 border-b border-[var(--border)] pb-1 last:border-0 font-mono text-[11px]">
       <div className="flex items-center gap-2">
@@ -203,7 +209,7 @@ function Event({ event }: { event: HandEvent }) {
         <span className={event.actor === "bot" ? "text-[var(--fg)]" : "text-[var(--fg-muted)]"}>
           {event.actor}
         </span>
-        <span className="text-[var(--fg)]">{label(event.action, event.amount)}</span>
+        <span className="text-[var(--fg)]">{label(event.action, event.amount, bigBlind)}</span>
         {event.untrained && (
           <span className="rounded border border-[#D9A44E] px-1 text-[10px] text-[#D9A44E]">
             untrained
@@ -225,9 +231,20 @@ function Event({ event }: { event: HandEvent }) {
   );
 }
 
-function label(type: string, amount: number): string {
+/**
+ * The hand log speaks TYPES ("raise") and chip amounts, not path tokens, so it
+ * cannot use `describeAction` directly — but it must read the same way, or the
+ * same bet is "raise to 2bb" on a button and "raise 4" one panel below.
+ */
+function label(type: string, amount: number, bigBlind: number): string {
   if (type === "fold" || type === "check") return type;
-  if (type === "call") return amount ? `call ${amount}` : "call";
-  if (type === "all-in" || type === "all_in") return `all-in ${amount}`;
-  return `${type} ${amount}`;
+  if (type === "call") return "call";
+  if (type === "all-in" || type === "all_in") return "all-in";
+  const size =
+    bigBlind && Number.isInteger(amount / bigBlind)
+      ? String(amount / bigBlind)
+      : (amount / (bigBlind || 1)).toFixed(1);
+  if (type === "raise") return `raise to ${size}bb`;
+  if (type === "bet") return `bet ${size}bb`;
+  return `${type} ${size}bb`;
 }

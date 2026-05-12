@@ -2,6 +2,7 @@ import { useBlueprintRun, useCombos, useSolverNode } from "@/api/queries";
 import { BoxControl } from "@/components/BoxControl";
 import { Panel } from "@/components/Panel";
 import { RangeGrid } from "@/components/RangeGrid";
+import { type ActionLabel, describeAction, describeActions } from "@/lib/actions";
 import { type Cell, actionColour, aggregate } from "@/lib/range";
 import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
@@ -36,6 +37,13 @@ export function Solver() {
       actionCount: grid.actions.length,
     });
   }, [grid, combos.data]);
+
+  // Sizes are meaningless without the stakes, so labelling waits on /run.
+  const bigBlind = run.data?.big_blind ?? 0;
+  const labels = useMemo(
+    () => describeActions(grid?.actions ?? [], bigBlind),
+    [grid?.actions, bigBlind],
+  );
 
   const steps = path ? path.split("/") : [];
 
@@ -84,9 +92,10 @@ export function Solver() {
                 key={child.token}
                 type="button"
                 onClick={() => setPath(path ? `${path}/${child.token}` : child.token)}
+                title={`path token: ${child.token}`}
                 className="rounded border border-[var(--border)] px-2 py-1 font-mono text-[11px] text-[var(--fg-muted)] hover:bg-white/[0.06] hover:text-[var(--fg)]"
               >
-                {child.token}
+                {describeAction(child.token, bigBlind).text}
               </button>
             ))}
             {node.data?.terminal && (
@@ -135,18 +144,18 @@ export function Solver() {
       >
         {cells && grid ? (
           <div className="grid gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_220px]">
-            <RangeGrid cells={cells} actions={grid.actions} onHover={setHovered} />
+            <RangeGrid cells={cells} actions={labels} onHover={setHovered} />
             <aside className="space-y-3 font-mono text-[11px]">
               <div className="space-y-1">
-                {grid.actions.map((token, index) => (
-                  <div key={token} className="flex items-center gap-2">
+                {labels.map((label, index) => (
+                  <div key={label.token} className="flex items-center gap-2">
                     <span
                       className="size-2.5 rounded-[2px]"
                       style={{
-                        backgroundColor: actionColour(token, index, grid.actions.length),
+                        backgroundColor: actionColour(label.token, index, labels.length),
                       }}
                     />
-                    <span className="text-[var(--fg-muted)]">{token}</span>
+                    <span className="text-[var(--fg-muted)]">{label.text}</span>
                   </div>
                 ))}
               </div>
@@ -165,7 +174,7 @@ export function Solver() {
 
               <div className="min-h-[72px] border-t border-[var(--border)] pt-2">
                 {hovered ? (
-                  <Detail cell={hovered} actions={grid.actions} />
+                  <Detail cell={hovered} actions={labels} />
                 ) : (
                   <span className="text-[var(--fg-faint)]">hover a hand</span>
                 )}
@@ -212,7 +221,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Detail({ cell, actions }: { cell: Cell; actions: string[] }) {
+function Detail({ cell, actions }: { cell: Cell; actions: ActionLabel[] }) {
   if (cell.combos === 0) {
     return (
       <div className="space-y-1">
@@ -228,8 +237,8 @@ function Detail({ cell, actions }: { cell: Cell; actions: string[] }) {
       </div>
       {cell.strategy ? (
         cell.strategy.map((weight, index) => (
-          <div key={actions[index] ?? index} className="flex justify-between gap-2">
-            <span className="text-[var(--fg-muted)]">{actions[index]}</span>
+          <div key={actions[index]?.token ?? index} className="flex justify-between gap-2">
+            <span className="text-[var(--fg-muted)]">{actions[index]?.text}</span>
             <span className="tabular-nums text-[var(--fg)]">{(weight * 100).toFixed(1)}%</span>
           </div>
         ))
