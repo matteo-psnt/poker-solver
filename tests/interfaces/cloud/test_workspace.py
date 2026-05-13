@@ -242,6 +242,17 @@ class TestSharedTrees:
             assert (root / "marker").is_file()
         trees.close()
 
+    def test_two_caches_nest_rather_than_refusing(self):
+        """`create_app` promises two applications can live in one process, and
+        each brings its own lifespan. Refusing the second would surface as a
+        RuntimeError raised from inside one."""
+        with workspace.shared_record_cache(ttl=60.0) as outer:
+            with workspace.shared_record_cache(ttl=60.0) as inner:
+                assert inner is not outer
+                assert workspace.active_cache() is inner
+            assert workspace.active_cache() is outer
+        assert workspace.active_cache() is None
+
     def test_sharing_is_off_unless_asked_for(self):
         """The command line must keep answering against the record as it is NOW
         -- a run published thirty seconds ago must not be invisible to
