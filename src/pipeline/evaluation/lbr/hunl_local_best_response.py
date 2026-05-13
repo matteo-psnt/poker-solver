@@ -83,6 +83,7 @@ from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card, GameState
 from src.engine.search.range_inference import COMBO_MASKS, NUM_COMBOS
 from src.engine.solver.policy_source import ScorableBlueprint
+from src.pipeline.evaluation.lbr.config import LBRConfig
 from src.pipeline.evaluation.lbr.lbr_showdown import ShowdownValuer
 from src.pipeline.evaluation.lbr.lookahead_scorer import BlueprintDistMemo, LookaheadScorer
 from src.pipeline.evaluation.lbr.opponent_model import (
@@ -93,62 +94,10 @@ from src.pipeline.evaluation.lbr.opponent_model import (
 )
 from src.pipeline.evaluation.lbr.shadow_state import MenuCandidate, ShadowTracker
 from src.pipeline.evaluation.units import chips_to_bb, chips_to_mbb
-from src.shared.config import ResolverConfig
 from src.shared.log import configure_logging, progress_bars_enabled
 from src.shared.numeric import NORMALIZE_EPS
 
 _DECK_MASKS: np.ndarray = np.array([card.mask for card in FULL_DECK], dtype=np.int64)
-
-# Off-tree bet sizes (as a fraction of the pot) the LBR player may bet when it is
-# first to put money in on a street. These are deliberately not the blueprint's
-# trained sizes; overbets in particular probe the action abstraction.
-DEFAULT_OFF_TREE_POT_FRACTIONS: tuple[float, ...] = (0.33, 0.5, 0.66, 0.75, 1.0, 1.5, 2.0)
-
-
-@dataclass
-class LBRConfig:
-    """Settings for the HUNL LBR evaluator."""
-
-    num_hands: int = 1000
-    equity_runouts: int = 12
-    off_tree_pot_fractions: tuple[float, ...] = DEFAULT_OFF_TREE_POT_FRACTIONS
-    # Add off-tree bet/raise sizes to the exploiter's menu. Rigorous: opponent
-    # lookups go through a persistent on-tree shadow state (see module docs), so
-    # off-tree amounts never leak into infoset keys. Off by default only for
-    # comparability with recorded baselines — it changes the measured completion,
-    # so never mix on/off numbers in one comparison.
-    include_off_tree: bool = False
-    seed: int | None = None
-    # Parallel workers for hand evaluation. LBR is embarrassingly parallel over hands;
-    # each hand is seeded independently so the result is identical for any worker count.
-    num_workers: int = 1
-    # Board runouts averaged at all-in showdown terminals (board incomplete). All-in
-    # pots are the largest payoffs in the game, so valuing them on a single sampled
-    # runout was the dominant remaining variance source; averaging is a pure
-    # Rao-Blackwellization (same expectation, lower variance). When exactly one card
-    # is missing the runout is enumerated instead.
-    allin_runouts: int = 50
-    # WHICH strategy the LBR player exploits on the realized path. "blueprint" is
-    # the raw table (historical numbers); "deployed" routes the opponent's actual
-    # decisions through the runtime subgame resolver — the system that really
-    # plays. The exploiter's myopic scorer stays blueprint-backed either way
-    # (selection-only: approximations there loosen the bound, never invalidate it).
-    opponent: str = "blueprint"
-    # Resolver settings for opponent="deployed". Must set max_iterations (wall-
-    # clock budgets make the measured strategy machine-dependent). None with
-    # opponent="deployed" raises at engine construction.
-    resolver: ResolverConfig | None = None
-    # HOW the exploiter selects its actions. "myopic" is the classic one-step
-    # check/call-to-showdown arithmetic; "lookahead" scores candidates by a
-    # depth-limited best-response walk against the blueprint policy (see
-    # :mod:`lookahead_scorer`). Selection-only: any scorer keeps the bound valid.
-    scorer: str = "myopic"
-    # Opponent-response levels the lookahead expands (depth - 1 exploiter
-    # re-decisions; depth 1 ~= branch-resolved myopic). Ignored under "myopic".
-    lookahead_depth: int = 2
-    # Myopic prefilter width: lookahead-rescore only the top-k myopic candidates
-    # (the myopic argmax is always included). <= 0 rescores the whole menu.
-    lookahead_top_k: int = 3
 
 
 @dataclass(frozen=True)

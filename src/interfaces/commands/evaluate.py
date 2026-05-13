@@ -11,7 +11,7 @@ from src.interfaces.commands._base import (
     resolve_run_dir,
 )
 from src.pipeline import services
-from src.pipeline.evaluation.lbr.hunl_local_best_response import LBRConfig
+from src.pipeline.evaluation.lbr.config import LBRConfig
 from src.pipeline.evaluation.public_tree_br import PublicBRConfig
 from src.shared.config import DEFAULT_RUNS_DIR
 
