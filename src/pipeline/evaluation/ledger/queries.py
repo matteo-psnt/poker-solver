@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -90,10 +92,22 @@ def rebuild_ledger(runs_dir: Path, ledger_path: Path) -> tuple[int, int]:
     # regenerate them from, so a crash midway through an in-place rewrite would
     # destroy exactly the rows this function exists to protect. Same tmp+replace
     # pattern as the checkpoint manifest in engine/solver/storage/helpers.py.
+    #
+    # The temp name carries the WRITER's identity, because two readers now share
+    # one materialised record: `runinfo` and `curve`, answering a run's detail
+    # page together, both derive the index into the same directory. On a fixed
+    # `.tmp` name one thread renamed the file the other was still about to
+    # rename, and the loser died with FileNotFoundError -- a panel failing for a
+    # reason that had nothing to do with what it was asked. The final rename
+    # stays atomic, and both writers derive identical content from identical
+    # inputs, so whichever lands last is right.
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ledger_path.with_suffix(ledger_path.suffix + ".tmp")
-    tmp.write_text("".join(json.dumps(r, default=json_default) + "\n" for r in merged))
-    tmp.replace(ledger_path)
+    tmp = ledger_path.with_suffix(f"{ledger_path.suffix}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text("".join(json.dumps(r, default=json_default) + "\n" for r in merged))
+        tmp.replace(ledger_path)
+    finally:
+        tmp.unlink(missing_ok=True)
     return len(recovered), len(preserved)
 
 

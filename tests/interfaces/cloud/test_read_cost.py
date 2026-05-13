@@ -17,10 +17,12 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import pytest
 from azure.batch import BatchClient
 
-from src.interfaces.cloud import batch, share
+from src.interfaces.cloud import batch, share, workspace
 from src.interfaces.commands import jobs
+from src.interfaces.errors import CommandError
 
 
 def _as_client(fake: object) -> BatchClient:
@@ -140,3 +142,73 @@ class TestDeadKeyTablesAreNotFetched:
         """The prefix must not be so broad it hides a real run directory."""
         assert not share.is_snapshot_dir("run-keys-experiment")
         assert not share.is_snapshot_dir("keysight")
+
+
+class TestAPageCostsOneMaterialisation:
+    """Five endpoints, one copy of the record -- pinned as a count.
+
+    `/api/runs` and `/api/evals` each pulled the WHOLE record (12.4s), and a
+    run's three detail panels (`runinfo`, `progress`, `curve`) pulled that one
+    run three times over. Same few hundred kilobytes, five times per refresh,
+    because a context manager that deletes its tree on exit cannot share it.
+
+    This is the guard the fix needs: nothing about a new endpoint makes it
+    obvious that it is about to add a whole sweep, and the latency it costs is
+    invisible in a test.
+    """
+
+    @staticmethod
+    def _count_pulls(monkeypatch) -> list[str | None]:
+        pulls: list[str | None] = []
+
+        def _fake(root, *, run):
+            pulls.append(run)
+            (root / "run-a").mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(workspace, "_materialise", _fake)
+        return pulls
+
+    def test_every_reader_in_one_page_shares_one_tree(self, monkeypatch):
+        pulls = self._count_pulls(monkeypatch)
+
+        with workspace.shared_record_cache(ttl=60.0):
+            for run in (None, None, "run-a", "run-a", "run-a"):
+                with workspace.share_records(run=run):
+                    pass
+
+        assert pulls == [None], "a page's worth of readers pulled the record more than once"
+
+    def test_a_scoped_reader_is_served_from_the_whole_record(self, monkeypatch):
+        """Not a second, narrower pull: a scoped read is cheaper ONCE (3.7s
+        against 12.4s) and more expensive three times, which is what a run's
+        detail page does."""
+        pulls = self._count_pulls(monkeypatch)
+
+        with workspace.shared_record_cache(ttl=60.0), workspace.share_records(run="run-a"):
+            pass
+
+        assert pulls == [None]
+
+    def test_an_unpublished_run_is_still_refused_by_name(self, monkeypatch):
+        """The refusal a scoped pull used to make. Served from the whole tree
+        there is no scoped pull to make it, and the reader's own "Run not found"
+        names two local paths instead of what IS published."""
+        self._count_pulls(monkeypatch)
+
+        with (
+            workspace.shared_record_cache(ttl=60.0),
+            pytest.raises(CommandError, match="not published"),
+            workspace.share_records(run="run-nope"),
+        ):
+            pass
+
+    def test_the_command_line_still_pulls_per_read(self, monkeypatch):
+        """Sharing is the server's concern. A one-shot reader gains nothing and
+        would lose the guarantee it answers against the record as it is NOW."""
+        pulls = self._count_pulls(monkeypatch)
+
+        for _ in range(3):
+            with workspace.share_records(run=None):
+                pass
+
+        assert pulls == [None, None, None]

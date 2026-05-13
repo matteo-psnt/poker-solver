@@ -25,27 +25,52 @@ class TtlCache:
 
     def __init__(self, ttl: float) -> None:
         self._ttl = ttl
-        self._lock = threading.Lock()
+        # A Condition rather than a Lock: it is the same mutual exclusion plus
+        # the wait/notify single-flight needs, so there is still one lock here.
+        self._lock = threading.Condition()
         self._entries: dict[Hashable, tuple[float, Any]] = {}
+        self._producing: set[Hashable] = set()
 
     def get(self, key: Hashable, produce: Callable[[], Any]) -> Any:
         """Return the cached value, or produce and store a fresh one.
 
-        ``produce`` runs OUTSIDE the lock. Holding it across a 4s cloud read
-        would serialise every endpoint behind the slowest one -- turning a cache
-        meant to reduce load into the thing that makes the console feel slow.
-        The cost is that two simultaneous misses on the same key both fetch,
-        which is a duplicated read, not a wrong answer.
+        ``produce`` runs OUTSIDE the lock. Holding it across a cloud read would
+        serialise every endpoint behind the slowest one -- turning a cache meant
+        to reduce load into the thing that makes the console feel slow.
+
+        SINGLE-FLIGHT per key, though: concurrent misses on one key wait for the
+        first producer rather than each starting a read. They were all fetching,
+        which was defended as "a duplicated read, not a wrong answer" -- true of
+        two, and untrue of what actually happens, which is a page mounting eight
+        queries on the same tick and a `refetchInterval` firing them together
+        forever after. Different keys still overlap freely; that is the part
+        that must not be given up.
         """
-        now = time.monotonic()
-        with self._lock:
-            entry = self._entries.get(key)
-            if entry is not None and now - entry[0] < self._ttl:
-                return entry[1]
+        while True:
+            now = time.monotonic()
+            with self._lock:
+                entry = self._entries.get(key)
+                if entry is not None and now - entry[0] < self._ttl:
+                    return entry[1]
+                if key in self._producing:
+                    self._lock.wait()
+                    continue
+                self._producing.add(key)
+                break
 
-        value = produce()
+        try:
+            value = produce()
+        except BaseException:
+            # Waiters must be woken on failure too, or one bad credential parks
+            # every other request on that key until the server is restarted.
+            with self._lock:
+                self._producing.discard(key)
+                self._lock.notify_all()
+            raise
 
         with self._lock:
+            self._producing.discard(key)
+            self._lock.notify_all()
             # Drop what has expired before inserting. Otherwise the dict only
             # ever grows: `/api/runs/{id}` and `/api/logs/{task}` put an
             # unbounded key space in front of a server that stays up for days,
