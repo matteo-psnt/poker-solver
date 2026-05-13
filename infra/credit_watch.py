@@ -70,6 +70,9 @@ import argparse
 import json
 import subprocess
 import sys
+import time
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -107,22 +110,107 @@ class Report:
         self.alerts.append(text)
         self.lines.append(f"  ALERT  {text}")
 
+    def absorb(self, other: Report) -> None:
+        """Take another report's findings. How a concurrent check reports back."""
+        self.lines.extend(other.lines)
+        self.alerts.extend(other.alerts)
+
+
+def concurrently(thunks: list[Callable[[], object]]) -> None:
+    """Run independent checks at once, and fail as though they had not been.
+
+    Each check below is its own `az` process and its own round trip to Azure,
+    and none needs another's answer -- so run one at a time they simply added
+    up: 14.8s of the 17.4s this spent was waiting for the previous question to
+    come back. Nothing here is CPU-bound; the threads are all blocked on a
+    socket.
+
+    Two properties are preserved deliberately, because this is a watchdog:
+
+    order
+        Each check writes into its OWN report and they are merged by the
+        caller, so the output is byte-identical to the sequential version. A
+        report that reorders itself run to run cannot be diffed, which is most
+        of what a person does with one.
+    the first failure, by DECLARATION
+        Not the first to be raised. The same broken environment has to produce
+        the same message every time, and which of five concurrent calls loses
+        its token first is a race.
+    """
+    with ThreadPoolExecutor(max_workers=len(thunks) or 1) as pool:
+        futures = [pool.submit(thunk) for thunk in thunks]
+        errors = [_exception_of(future) for future in futures]
+    for error in errors:
+        if error is not None:
+            raise error
+
+
+def _exception_of(future: Future[object]) -> BaseException | None:
+    """Wait for a check and hand back what it raised, if anything.
+
+    Swallowed here rather than propagated so that every check is WAITED for
+    before any failure is reported: raising from inside the loop would leave
+    the rest running against an `az` process nobody reads.
+    """
+    try:
+        future.result()
+    except Exception as exc:  # noqa: BLE001 -- re-raised in declaration order by the caller
+        return exc
+    return None
+
+
+"""Being told to slow down is not the same as being unable to answer
+------------------------------------------------------------------
+Cost Management rate-limits its query API hard and per-tenant, and answers 429
+rather than queueing. Observed: running this three times inside half a minute
+was enough. Reported as COULD NOT EVALUATE that reads exactly like an expired
+token or an unreachable Azure -- a watchdog crying wolf at the one thing it is
+supposed to be trusted about.
+
+Backed off and retried instead, because 429 is the one failure here that is
+KNOWN to be temporary. Everything else still fails immediately: a wrong URL or
+a lost token will not improve by being asked again, and a watchdog that takes a
+minute to report a real problem is its own kind of broken.
+"""
+_THROTTLE_BACKOFF_SECONDS = (2.0, 6.0, 15.0)
+
+
+def _is_throttled(proc: subprocess.CompletedProcess[str]) -> bool:
+    """Whether Azure refused because it is being asked too often."""
+    detail = f"{proc.stderr} {proc.stdout}".lower()
+    return "too many requests" in detail or '"429"' in detail
+
 
 def az_json(args: list[str], what: str) -> dict:
     """Run an `az` command expected to emit JSON, or raise UnevaluableError."""
-    try:
-        proc = subprocess.run(
-            ["az", *args, "-o", "json"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-    except FileNotFoundError as exc:
-        raise UnevaluableError("the `az` CLI is not installed or not on PATH") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise UnevaluableError(f"{what}: timed out after 120s") from exc
+    for pause in (*_THROTTLE_BACKOFF_SECONDS, None):
+        try:
+            proc = subprocess.run(
+                ["az", *args, "-o", "json"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except FileNotFoundError as exc:
+            raise UnevaluableError("the `az` CLI is not installed or not on PATH") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise UnevaluableError(f"{what}: timed out after 120s") from exc
 
-    if proc.returncode != 0:
+        if proc.returncode == 0:
+            break
+        if _is_throttled(proc):
+            if pause is not None:
+                time.sleep(pause)
+                continue
+            # Named as throttling rather than reported as a raw error, because
+            # the two call for opposite responses: this one is "wait and run it
+            # again", and every other COULD-NOT-EVALUATE is "something is
+            # broken". Still exit 3 -- an unanswered question is unanswered.
+            raise UnevaluableError(
+                f"{what}: Azure is rate-limiting this query and did not relent after "
+                f"{sum(_THROTTLE_BACKOFF_SECONDS):.0f}s of backoff. Nothing is wrong with "
+                "the credential or the account — wait a minute and run it again."
+            )
         detail = (proc.stderr or proc.stdout or "").strip().splitlines()
         tail = detail[-1] if detail else f"exit {proc.returncode}"
         raise UnevaluableError(f"{what}: {tail}")
@@ -175,13 +263,26 @@ def discover_profile(subscription_id: str) -> Profile:
     if not rows:
         raise UnevaluableError("no billing account visible to this identity")
 
-    for account in rows:
+    # Asked of every account at once, then scanned in the listing's order. One
+    # account is the normal case and this changes nothing; several made the
+    # search cost a round trip per account before it could even start looking,
+    # and which account bills this subscription is not knowable in advance.
+    listings: list[list[dict]] = [[] for _ in rows]
+
+    def fetch(index: int, ba: str) -> Callable[[], object]:
+        def _load() -> None:
+            url = (
+                f"https://management.azure.com/providers/Microsoft.Billing"
+                f"/billingAccounts/{ba}/billingSubscriptions?api-version={BILLING_API}"
+            )
+            listings[index] = az_get(url, "billingSubscriptions").get("value", [])
+
+        return _load
+
+    concurrently([fetch(index, account["name"]) for index, account in enumerate(rows)])
+
+    for account, subs in zip(rows, listings, strict=True):
         ba = account["name"]
-        url = (
-            f"https://management.azure.com/providers/Microsoft.Billing"
-            f"/billingAccounts/{ba}/billingSubscriptions?api-version={BILLING_API}"
-        )
-        subs = az_get(url, "billingSubscriptions").get("value", [])
         for sub in subs:
             props = sub.get("properties", {})
             if props.get("subscriptionId") != subscription_id:
@@ -407,9 +508,16 @@ def main() -> int:
         "--daily-burn",
         type=float,
         default=76.80,
-        help="worst-case $/day: max_nodes x per-node rate. Default 4 x D16als_v6 "
-        "at ~$0.80/hr. Raise this whenever max_nodes or pool_vm_size goes up.",
+        help="worst-case $/day: max_nodes x per-node rate. Raise this whenever "
+        "max_nodes or pool_vm_size goes up.",
     )
+    # 4 x D16als_v6 bills $0.688/hr/node = $66.05/day (measured against Cost
+    # Management, not quoted). The default is deliberately left ABOVE that: this
+    # figure divides the credit balance to produce runway, so over-stating the
+    # burn under-states the warning time, which is the safe direction. It is
+    # also the only line here that is not meant to be exact -- a runaway is not
+    # obliged to stop at max_nodes-worth of compute, and storage and egress ride
+    # along on top.
     parser.add_argument(
         "--warn-days",
         type=int,
@@ -444,13 +552,29 @@ def main() -> int:
         report.say(f"  signed in as       {identity}")
         report.say(f"  billing profile    {found.profile} ({found.agreement})")
         report.say()
-        check_payment_methods(report, found.account, found.profile)
-        check_credit(report, found.account, found.profile, args.daily_burn, args.warn_days)
-        check_expiry(report, found.account, found.profile, args.expiry_warn_days)
+
+        # Five independent questions, asked at once and printed in this order.
+        # `check_auth` above stays sequential and first on purpose: it is the
+        # fail-closed gate, and it also settles the CLI's token before five
+        # processes want it at the same moment.
+        payment, credit, expiry, invoices, charges = (Report() for _ in range(5))
+        concurrently(
+            [
+                lambda: check_payment_methods(payment, found.account, found.profile),
+                lambda: check_credit(
+                    credit, found.account, found.profile, args.daily_burn, args.warn_days
+                ),
+                lambda: check_expiry(expiry, found.account, found.profile, args.expiry_warn_days),
+                lambda: check_invoices(invoices, found.account),
+                lambda: check_charge_shape(charges, found.account, found.profile, since),
+            ]
+        )
+        for section in (payment, credit, expiry):
+            report.absorb(section)
         report.say()
-        check_invoices(report, found.account)
+        report.absorb(invoices)
         report.say()
-        check_charge_shape(report, found.account, found.profile, since)
+        report.absorb(charges)
     except UnevaluableError as exc:
         return unevaluable(str(exc))
     except Exception as exc:  # noqa: BLE001 -- a crash must not read as a real alert; see below
