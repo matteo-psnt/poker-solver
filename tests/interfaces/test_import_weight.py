@@ -28,12 +28,17 @@ about the closure under test.
 
 from __future__ import annotations
 
+import pathlib
+import re
 import subprocess
 import sys
 
 import pytest
 
 HEAVY = ("scipy", "sklearn", "numba")
+
+SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
+TESTS = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _closure(module: str) -> set[str]:
@@ -66,18 +71,37 @@ class TestTheCommandSurfaceStaysLight:
         assert _closure("src.pipeline.evaluation.ledger.tiers") == set()
 
 
-class TestLBRConfigHasNoBackDoor:
-    """A re-export from the evaluator would let the expensive path return
-    silently, which is the whole thing being prevented."""
+class TestNothingReachesLBRConfigThroughTheEvaluator:
+    """The old import path still RESOLVES, and cannot be made not to.
 
-    def test_it_is_importable_from_its_own_module(self):
+    ``hunl_local_best_response`` imports ``LBRConfig`` for its own use, so
+    ``from ...hunl_local_best_response import LBRConfig`` keeps working -- and
+    any module that does it pays scipy, numpy, tqdm and the engine to get a
+    stdlib dataclass. Python offers no way to forbid that at import time.
+
+    So the guard is on the SOURCE, the same shape as
+    ``test_records.py::test_no_module_writes_a_json_artifact_outside_the_substrate``.
+    An earlier version of this test asserted ``"LBRConfig" not in __all__``,
+    which passed while the path it was meant to close stayed wide open -- a
+    guard that checks nothing is worse than no guard, because it is believed.
+    """
+
+    def test_the_config_is_importable_from_its_own_module(self):
         from src.pipeline.evaluation.lbr.config import LBRConfig
 
         assert LBRConfig().num_hands > 0
 
-    def test_the_evaluator_does_not_re_export_it(self):
-        from src.pipeline.evaluation.lbr import hunl_local_best_response
-
-        # It is imported there for its own use; what must not exist is a second
-        # NAME for it that a caller could reach for instead.
-        assert "LBRConfig" not in getattr(hunl_local_best_response, "__all__", [])
+    def test_no_module_imports_it_from_the_evaluator(self):
+        offenders = []
+        pattern = re.compile(
+            r"from src\.pipeline\.evaluation\.lbr\.hunl_local_best_response import [^\n]*LBRConfig"
+        )
+        for path in (*SRC.rglob("*.py"), *TESTS.rglob("*.py")):
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                if pattern.search(line):
+                    offenders.append(f"{path}:{number}")
+        assert not offenders, (
+            "these import LBRConfig from the evaluator, paying ~1.7s of scientific "
+            "stack for a stdlib dataclass — import it from "
+            "src.pipeline.evaluation.lbr.config instead: " + ", ".join(offenders)
+        )
