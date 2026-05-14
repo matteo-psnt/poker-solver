@@ -13,7 +13,12 @@ from src.pipeline.training.run_tracker.attempts import (
 )
 from src.shared import records, run_events
 from src.shared.config import Config
-from src.shared.gitinfo import get_git_branch, get_git_commit, is_git_dirty
+from src.shared.gitinfo import (
+    get_code_snapshot,
+    get_git_branch,
+    get_git_commit,
+    is_git_dirty,
+)
 
 
 @dataclass
@@ -47,6 +52,12 @@ class RunMetadata:
     # change uncommitted, so the hash and the dirty bit together do not
     # identify one. See `shared.gitinfo.BRANCH_ENV`.
     git_branch: str | None = None
+    # The tarball this run's code came from, which is the only COMPLETE answer:
+    # a commit plus a dirty bit names some unrecorded changes, the snapshot IS
+    # them. Recorded here because it was recorded only on TASK records, so
+    # 49 of 56 published snapshots had nothing naming them and could not be
+    # told apart from garbage. See `shared.gitinfo.SNAPSHOT_ENV`.
+    code_snapshot: str | None = None
     # Append-only per-session compute records. attempts[0] is the fresh run; each
     # resume appends one. Empty only on malformed/pre-attempts metadata (synthesized
     # on load, see from_dict).
@@ -79,6 +90,7 @@ class RunMetadata:
             "git_commit": self.git_commit,
             "git_dirty": self.git_dirty,
             "git_branch": self.git_branch,
+            "code_snapshot": self.code_snapshot,
             "experiment_id": self.experiment_id,
             "arm": self.arm,
             "parent_run_id": self.parent_run_id,
@@ -109,6 +121,7 @@ class RunMetadata:
         git_commit = get_git_commit()
         git_dirty = is_git_dirty()
         git_branch = get_git_branch()
+        code_snapshot = get_code_snapshot()
         return cls(
             run_id=run_id,
             config_name=config_name,
@@ -125,6 +138,7 @@ class RunMetadata:
             git_commit=git_commit,
             git_dirty=git_dirty,
             git_branch=git_branch,
+            code_snapshot=code_snapshot,
             attempts=[
                 AttemptRecord(
                     index=0,
@@ -134,6 +148,7 @@ class RunMetadata:
                     git_commit=git_commit,
                     git_dirty=git_dirty,
                     git_branch=git_branch,
+                    code_snapshot=code_snapshot,
                 )
             ],
             experiment_id=experiment_id,
@@ -159,6 +174,8 @@ class RunMetadata:
         git_commit = data.get("git_commit") if isinstance(data.get("git_commit"), str) else None
         git_dirty = data.get("git_dirty") if isinstance(data.get("git_dirty"), bool) else None
         git_branch = data.get("git_branch") if isinstance(data.get("git_branch"), str) else None
+        snapshot = data.get("code_snapshot")
+        code_snapshot = snapshot if isinstance(snapshot, str) else None
 
         raw_attempts = data.get("attempts")
         if isinstance(raw_attempts, list) and raw_attempts:
@@ -182,6 +199,7 @@ class RunMetadata:
                     git_commit=git_commit,
                     git_dirty=git_dirty,
                     git_branch=git_branch,
+                    code_snapshot=code_snapshot,
                 )
             ]
 
@@ -208,6 +226,7 @@ class RunMetadata:
             git_commit=git_commit,
             git_dirty=git_dirty,
             git_branch=git_branch,
+            code_snapshot=code_snapshot,
             attempts=attempts,
             # All four are absent on every pre-experiment run, so they default to
             # None rather than being required — a legacy run is simply an
@@ -241,6 +260,7 @@ class RunMetadata:
                     git_commit=started.get("git_commit"),
                     git_dirty=started.get("git_dirty"),
                     git_branch=started.get("git_branch"),
+                    code_snapshot=started.get("code_snapshot"),
                 )
             )
         for ended in run_events.events_of(events, run_events.ATTEMPT_ENDED):

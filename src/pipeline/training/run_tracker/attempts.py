@@ -66,6 +66,9 @@ class AttemptRecord:
     # worktree is a real case here -- the arms share a commit and differ
     # only in what is uncommitted -- so this is per attempt, not per run.
     git_branch: str | None = None
+    # See RunMetadata.code_snapshot: a resume can run DIFFERENT code from the
+    # attempt before it, which is the whole reason attempts carry provenance.
+    code_snapshot: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -80,6 +83,7 @@ class AttemptRecord:
             "git_commit": self.git_commit,
             "git_dirty": self.git_dirty,
             "git_branch": self.git_branch,
+            "code_snapshot": self.code_snapshot,
         }
 
     @classmethod
@@ -95,6 +99,9 @@ class AttemptRecord:
             status=data.get("status", "unknown"),
             git_commit=data.get("git_commit") if isinstance(data.get("git_commit"), str) else None,
             git_dirty=data.get("git_dirty") if isinstance(data.get("git_dirty"), bool) else None,
+            code_snapshot=(
+                data.get("code_snapshot") if isinstance(data.get("code_snapshot"), str) else None
+            ),
             git_branch=(
                 data.get("git_branch") if isinstance(data.get("git_branch"), str) else None
             ),
