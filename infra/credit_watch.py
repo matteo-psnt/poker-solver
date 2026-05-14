@@ -79,7 +79,13 @@ from datetime import UTC, datetime, timedelta
 SUBSCRIPTION_ID = "f9c31345-15ac-413f-8841-5d0151baca66"
 
 ALLOWED_PUBLISHER_TYPES = {"microsoft", "azure"}
-ALLOWED_CHARGE_TYPES = {"usage", "unusedreservation", ""}
+# `roundingadjustment` judged and admitted 2026-08-09, which is what the
+# allowlist is FOR: an unfamiliar value woke us up, someone looked, and it goes
+# in. It appeared as -$0.07 the day the first invoice closed -- Azure's own
+# reconciliation of sub-cent usage against the invoiced total. Left out, it
+# alerted on every run forever, and a watchdog that always fires is one nobody
+# reads. Note it is also NEGATIVE, which no charge to a card can be.
+ALLOWED_CHARGE_TYPES = {"usage", "unusedreservation", "roundingadjustment", ""}
 
 BILLING_API = "2024-04-01"
 CONSUMPTION_API = "2023-05-01"
