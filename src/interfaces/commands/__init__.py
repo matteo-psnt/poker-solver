@@ -16,67 +16,124 @@ so the seam is load-bearing enough that its path should not misattribute it.
 renderer, and for any other surface the payload is the interface. Parser,
 handler and renderer stay together on the one dataclass because when they lived
 apart a command borrowed another's renderer and died on a missing key.
+
+Naming a command is not running it
+----------------------------------
+The registry is :class:`CommandRef` -- a name and a help line -- and importing
+it imports NO handler. That distinction is the whole point: listing what this
+tool can do, and doing one of them, are different questions, and only the second
+needs `evaluate`'s evaluator or `precompute`'s clusterer.
+
+Eagerly importing all 27 modules cost 1.2s on every invocation, `--help`
+included, because the union of what they need is the union of everything: the
+engine, the abstraction pipeline, numba and scipy. Nothing about listing
+subcommand names requires any of it. `cli.headless` builds flags only for the
+subcommand argv actually names.
+
+The module is the name with hyphens as underscores. A convention the registry
+RELIES on rather than a mapping it stores -- one fewer field to get wrong, and
+``load_all()`` in the test suite fails loudly for any command that breaks it.
 """
 
-from src.interfaces.commands._base import Command
-from src.interfaces.commands.autoscale_check import COMMAND as AUTOSCALE_CHECK
-from src.interfaces.commands.blueprint_serve import COMMAND as BLUEPRINT_SERVE
-from src.interfaces.commands.cancel import COMMAND as CANCEL
-from src.interfaces.commands.compare import COMMAND as COMPARE
-from src.interfaces.commands.cost import COMMAND as COST
-from src.interfaces.commands.curve import COMMAND as CURVE
-from src.interfaces.commands.evaluate import COMMAND as EVALUATE
-from src.interfaces.commands.jobs import COMMAND as JOBS
-from src.interfaces.commands.ledger import COMMAND as LEDGER
-from src.interfaces.commands.logs import COMMAND as LOGS
-from src.interfaces.commands.pool_status import COMMAND as POOL_STATUS
-from src.interfaces.commands.precompute import COMMAND as PRECOMPUTE
-from src.interfaces.commands.progress import COMMAND as PROGRESS
-from src.interfaces.commands.promote import COMMAND as PROMOTE
-from src.interfaces.commands.push_code import COMMAND as PUSH_CODE
-from src.interfaces.commands.push_data import COMMAND as PUSH_DATA
-from src.interfaces.commands.report import COMMAND as REPORT
-from src.interfaces.commands.runinfo import COMMAND as RUNINFO
-from src.interfaces.commands.runs import COMMAND as RUNS
-from src.interfaces.commands.score import COMMAND as SCORE
-from src.interfaces.commands.serve import COMMAND as SERVE
-from src.interfaces.commands.serve_box import COMMAND as SERVE_BOX
-from src.interfaces.commands.status import COMMAND as STATUS
-from src.interfaces.commands.submit import COMMAND as SUBMIT
-from src.interfaces.commands.submit_precompute import COMMAND as SUBMIT_PRECOMPUTE
-from src.interfaces.commands.tasks import COMMAND as TASKS
-from src.interfaces.commands.train_static import COMMAND as TRAIN_STATIC
+from __future__ import annotations
 
-# Order is the order they appear in `--help`, in three groups: dispatch work to
-# the pool, run it here (these are what a node invokes), then read the record.
-COMMANDS: tuple[Command, ...] = (
-    STATUS,
-    SERVE,
-    BLUEPRINT_SERVE,
-    SERVE_BOX,
-    SUBMIT,
-    SCORE,
-    SUBMIT_PRECOMPUTE,
-    JOBS,
-    LOGS,
-    TASKS,
-    CANCEL,
-    POOL_STATUS,
-    AUTOSCALE_CHECK,
-    PUSH_CODE,
-    PUSH_DATA,
-    TRAIN_STATIC,
-    PRECOMPUTE,
-    EVALUATE,
-    LEDGER,
-    CURVE,
-    COST,
-    PROGRESS,
-    RUNS,
-    RUNINFO,
-    REPORT,
-    COMPARE,
-    PROMOTE,
+import importlib
+from dataclasses import dataclass
+from functools import cache
+
+from src.interfaces.commands._base import Command
+
+
+@dataclass(frozen=True)
+class CommandRef:
+    """What a subcommand is CALLED, without importing what it does.
+
+    ``help`` is repeated from the module's own :class:`Command` because reading
+    it there would mean importing there, which is the cost being avoided. That
+    makes it the one thing here that can drift, so it is the one thing pinned:
+    ``tests/interfaces/commands/test_registry.py`` fails if a ref and its module
+    disagree about either field.
+    """
+
+    name: str
+    help: str
+
+    @property
+    def module(self) -> str:
+        return self.name.replace("-", "_")
+
+    def load(self) -> Command:
+        """Import this subcommand's module and hand back its ``Command``."""
+        module = importlib.import_module(f"{__name__}.{self.module}")
+        return module.COMMAND
+
+
+"""Order is the order they appear in `--help`, in three groups: dispatch work to
+the pool, run it here (these are what a node invokes), then read the record."""
+COMMANDS: tuple[CommandRef, ...] = (
+    CommandRef("status", "Pool, Batch and task history on one screen (--watch to follow)."),
+    CommandRef("serve", "Serve the console on localhost."),
+    CommandRef("blueprint-serve", "Serve one trained run for reading, on localhost."),
+    CommandRef("serve-box", "Report, wake, or stop the blueprint host."),
+    CommandRef("submit", "Queue a training task on the pool (--run continues an existing run)."),
+    CommandRef("score", "Evaluate a published run on the pool, one task per ladder rung."),
+    CommandRef(
+        "submit-precompute", "Build a card abstraction on a node and publish it to the share."
+    ),
+    CommandRef("jobs", "Every queued/running task on the pool (--all includes finished jobs)."),
+    CommandRef("logs", "Read a task's log from the share (default) or live from its node."),
+    CommandRef("tasks", "Per-task outcomes from the share, reconciled against Batch."),
+    CommandRef("cancel", "Terminate a running task; its partial progress is published first."),
+    CommandRef(
+        "pool-status", "Pool node counts, and the real cause behind any allocation failure."
+    ),
+    CommandRef(
+        "autoscale-check",
+        "Evaluate the deployed autoscale formula on the live pool, errors included.",
+    ),
+    CommandRef("push-code", "Publish an immutable snapshot of the working tree; echoes its id."),
+    CommandRef(
+        "push-data", "Publish card abstractions to the share (copied, never recomputed on a node)."
+    ),
+    CommandRef(
+        "train-static", "Train over the statically-enumerated tree (fixed memory, no key maps)."
+    ),
+    CommandRef("precompute", "Precompute a combo abstraction into data/combo_abstraction/."),
+    CommandRef("evaluate", "Evaluate a run's exploitability (Local Best Response by default)."),
+    CommandRef("ledger", "List recorded evaluations from the eval ledger."),
+    CommandRef(
+        "curve", "Within-run exploitability vs iteration, from the retained checkpoint ladder."
+    ),
+    CommandRef("cost", "Billed spend from Azure, and node time derived from the task log."),
+    CommandRef("progress", "Per-checkpoint coverage, visits and throughput for a run."),
+    CommandRef("runs", "Every published run, newest first."),
+    CommandRef(
+        "runinfo", "Everything recorded about a run: provenance, curve, scores, tasks, gaps."
+    ),
+    CommandRef("report", "Score every arm of an experiment, each attributed against its control."),
+    CommandRef(
+        "compare", "Paired (CRN) comparison of two runs' latest evals; refuses mismatched tiers."
+    ),
+    CommandRef("promote", "Make a run the new baseline (closes one turn of the base-fork loop)."),
 )
 
-__all__ = ("COMMANDS", "Command")
+BY_NAME: dict[str, CommandRef] = {ref.name: ref for ref in COMMANDS}
+
+
+def load(name: str) -> Command:
+    """The one subcommand called ``name``. Raises ``KeyError`` if there is none."""
+    return BY_NAME[name].load()
+
+
+@cache
+def load_all() -> tuple[Command, ...]:
+    """Every subcommand, imported.
+
+    For callers that genuinely need all of them: the test suite, and
+    ``build_parser()`` with no argv. Named so that paying for it is a decision
+    rather than a side effect of touching the registry.
+    """
+    return tuple(ref.load() for ref in COMMANDS)
+
+
+__all__ = ("BY_NAME", "COMMANDS", "Command", "CommandRef", "load", "load_all")

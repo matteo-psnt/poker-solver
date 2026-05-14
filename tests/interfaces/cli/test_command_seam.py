@@ -22,7 +22,7 @@ import pytest
 
 from src.interfaces.cli import headless
 from src.interfaces.cloud.config import CloudConfigError
-from src.interfaces.commands import COMMANDS, progress
+from src.interfaces.commands import load_all, progress
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 
@@ -77,7 +77,7 @@ class TestInvokeBuildsArgumentsFromTheParser:
         with pytest.raises(CommandError, match="missing required"):
             ECHO.invoke(limit=3)
 
-    @pytest.mark.parametrize("command", COMMANDS, ids=lambda c: c.name)
+    @pytest.mark.parametrize("command", load_all(), ids=lambda c: c.name)
     def test_invoke_and_the_command_line_agree_for_every_command(self, command: Command):
         """The contract, stated exactly: the two paths must build the SAME args.
 
