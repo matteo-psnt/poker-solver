@@ -34,9 +34,7 @@ def _options(parser: argparse.ArgumentParser) -> dict[str, set[str]]:
     for action in actions:
         for name, sub in action.choices.items():
             found[name] = {
-                option
-                for sub_action in sub._actions
-                for option in sub_action.option_strings
+                option for sub_action in sub._actions for option in sub_action.option_strings
             }
     return found
 

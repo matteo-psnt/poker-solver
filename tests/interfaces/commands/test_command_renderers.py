@@ -430,6 +430,20 @@ PAYLOADS: dict[str, dict] = {
         "tasks": ["ochs_gate_ochs-000000-1"],
     },
     "push-data": {"op": "push-data", "uploaded": {"buckets-F50T100R200": 9}},
+    # The applied-and-deleted shape, because it is the one with something to
+    # report: a dry run renders a subset of these keys.
+    "compact-legs": {
+        "op": "compact-legs",
+        "bundle": "sealed.bundle.json",
+        "files_before": 375,
+        "files_after": 55,
+        "movable": 321,
+        "attempts": 141,
+        "applied": True,
+        "verified": True,
+        "deleted": 321,
+        "backup": "/home/me/legs-backup",
+    },
 }
 
 

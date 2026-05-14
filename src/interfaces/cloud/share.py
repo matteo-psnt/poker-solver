@@ -131,6 +131,25 @@ def write_text(service: ShareServiceClient, share: str, path: str, body: str) ->
     share_client.get_file_client(path).upload_file(body.encode("utf-8"))
 
 
+def delete_file(service: ShareServiceClient, share: str, path: str) -> bool:
+    """Remove one file. ``True`` if it was there, ``False`` if it already was not.
+
+    The share is the experiment record and this is the only function here that
+    destroys any of it, so it is deliberately narrow: one file, named in full,
+    never a directory and never a pattern. Anything wanting to remove many
+    things does so one name at a time, having decided each one.
+
+    An absent file is not an error. A delete that has already happened and a
+    delete that never needed to are the same outcome, and a caller retrying
+    after a partial sweep should not have to tell them apart.
+    """
+    try:
+        service.get_share_client(share).get_file_client(path).delete_file()
+    except ResourceNotFoundError:
+        return False
+    return True
+
+
 def walk_files(
     service: ShareServiceClient,
     share: str,

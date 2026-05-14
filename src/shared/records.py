@@ -182,6 +182,18 @@ REGISTRY: dict[str, Artifact] = {
         growth="live-only, as above. Separate from evaluate's only because the two "
         "are written by different services into different trees; the SHAPE is identical",
     ),
+    "legs/*.bundle.json": Artifact(
+        name="legs/*.bundle.json",
+        kind="snapshot",
+        scope="share",
+        version=1,
+        what="many SEALED leg documents in one file, so reading them is one round trip",
+        where="<share>/legs/<label>.bundle.json",
+        growth="one per compaction, and it REPLACES the loose files it holds -- the only "
+        "entry here that makes the directory smaller. Bundling an unsealed attempt "
+        "would strand its `.observed.json` reconciliation, so only attempts with a "
+        "terminal `.exit.json` go in",
+    ),
     "legs/*.progress.json": Artifact(
         name="legs/*.progress.json",
         kind="snapshot",

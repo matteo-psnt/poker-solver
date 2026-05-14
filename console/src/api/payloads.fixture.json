@@ -24,6 +24,18 @@
     "op": "cancel",
     "task_id": "run-a-000000-1"
   },
+  "compact-legs": {
+    "applied": true,
+    "attempts": 141,
+    "backup": "/home/me/legs-backup",
+    "bundle": "sealed.bundle.json",
+    "deleted": 321,
+    "files_after": 55,
+    "files_before": 375,
+    "movable": 321,
+    "op": "compact-legs",
+    "verified": true
+  },
   "compare": {
     "comparison": {
       "ci_lower": -30.0,
