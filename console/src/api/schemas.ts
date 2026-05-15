@@ -221,17 +221,50 @@ export const ledgerSchema = z
   })
   .passthrough();
 
+/**
+ * What Azure actually charged. Nullable as a whole: the billing API is asked
+ * independently of the task log and is allowed to fail on its own, so the page
+ * has to render node time with this absent.
+ */
+export const billedSchema = z
+  .object({
+    total: z.number(),
+    other: z.number(),
+    currency: z.string(),
+    /** Batch pool nodes — the ONLY figure node time may be compared against. */
+    pool_cost: z.number(),
+    pool_node_hours: z.number(),
+    /** Machines left ON outside the pool. No task log will ever explain these. */
+    standing_cost: z.number(),
+    standing_hours: z.number(),
+    standing: z.array(
+      z.object({ resource_group: z.string(), hours: z.number(), cost: z.number() }),
+    ),
+    since: z.string(),
+    /** The earliest day carrying a charge, which is not the query floor. */
+    first_at: z.string().nullable(),
+    /** The latest day with data. Cost lags hours, so the last day reads low. */
+    as_of: z.string().nullable(),
+    by_service: z.array(z.object({ service: z.string(), cost: z.number() })),
+  })
+  .passthrough();
+
 export const costSchema = z
   .object({
     op: z.literal("cost"),
     hours: z.number(),
     task_hours: z.number(),
     tasks: z.number(),
+    /** Attempts that started and never recorded an end: unknown, not zero. */
+    unended: z.number(),
     peak_concurrency: z.number(),
     first_at: z.string().nullable(),
     last_at: z.string().nullable(),
     rate_per_node_hour: z.number().nullable(),
     dollars: z.number().nullable(),
+    billed: billedSchema.nullable(),
+    /** Why there is no billed figure. Throttling is not an auth problem. */
+    billed_reason: z.string().nullable(),
     series: z.array(z.object({ at: z.string(), running: z.number() })),
   })
   .passthrough();
@@ -246,6 +279,7 @@ export type RunInfo = z.infer<typeof runinfoSchema>;
 export type Curve = z.infer<typeof curveSchema>;
 export type Ledger = z.infer<typeof ledgerSchema>;
 export type Cost = z.infer<typeof costSchema>;
+export type Billed = z.infer<typeof billedSchema>;
 export type Progress = z.infer<typeof progressSchema>;
 export type LogLines = z.infer<typeof logSchema>;
 
@@ -380,3 +414,14 @@ export const boxSchema = z
   .passthrough();
 
 export type Box = z.infer<typeof boxSchema>;
+
+/** What `cancel` reports back. Loose: the UI only needs to know it landed. */
+export const cancelSchema = z
+  .object({
+    op: z.literal("cancel"),
+    job: z.string(),
+    task: z.string(),
+  })
+  .passthrough();
+
+export type Cancelled = z.infer<typeof cancelSchema>;

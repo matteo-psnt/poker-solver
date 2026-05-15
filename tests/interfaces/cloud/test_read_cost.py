@@ -15,14 +15,18 @@ not make at all. Every number below was a measured defect.
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any, cast
 
 import pytest
 from azure.batch import BatchClient
 
-from src.interfaces.cloud import batch, share, workspace
-from src.interfaces.commands import jobs
+from src.interfaces.cloud import batch, billing, share, workspace
+from src.interfaces.commands import cost, jobs
 from src.interfaces.errors import CommandError
+
+SINCE = dt.date(2026, 7, 26)
+UNTIL = dt.date(2026, 8, 9)
 
 
 def _as_client(fake: object) -> BatchClient:
@@ -212,3 +216,61 @@ class TestAPageCostsOneMaterialisation:
                 pass
 
         assert pulls == [None, None, None]
+
+
+class TestBillingIsOneRoundTripAtMost:
+    """`cost` gained an Azure Cost Management read, and the console polls it.
+
+    Read cost is a maintained property here, so a NEW round trip is pinned
+    rather than discovered. Cost Management is also metered far more tightly
+    than the rest of ARM -- three probes inside a minute answered 429 while this
+    was being written -- so the ceiling matters more than usual.
+    """
+
+    def _count_queries(self, monkeypatch) -> list[int]:
+        calls: list[int] = []
+        billing._MEMO.clear()
+        monkeypatch.setattr(
+            billing,
+            "_query",
+            lambda subscription_id, since, until: calls.append(1)
+            or {
+                "properties": {
+                    "columns": [
+                        {"name": "Cost"},
+                        {"name": "UsageQuantity"},
+                        {"name": "UsageDate"},
+                        {"name": "ServiceName"},
+                        {"name": "ResourceGroupName"},
+                    ],
+                    "rows": [[1.0, 1.0, 20260806, "Virtual Machines", "azurebatch-a-c"]],
+                }
+            },
+        )
+        return calls
+
+    def test_repeated_reads_of_one_window_make_one_query(self, monkeypatch):
+        """The memo is load-bearing, not an optimisation: the console refetches
+        every 60s against data that only moves hourly."""
+        calls = self._count_queries(monkeypatch)
+
+        for _ in range(5):
+            billing.summarise("sub", since=SINCE, until=UNTIL)
+
+        assert calls == [1]
+        billing._MEMO.clear()
+
+    def test_a_short_window_asks_nothing_at_all(self, monkeypatch):
+        """Below `MIN_BILLED_WINDOW_HOURS` the biller cannot answer the window
+        that was asked for, so it is not asked -- a suppressed panel must not
+        cost a round trip to suppress."""
+        calls = self._count_queries(monkeypatch)
+
+        figures, reason = cost._billed(6.0, dt.datetime(2026, 8, 9, 21, 0, tzinfo=dt.UTC))
+
+        assert calls == []
+        assert figures is None
+        # Suppressed, and it says so. Silently omitting the panel would read as
+        # "nothing was spent" on the window a person is most likely to check.
+        assert reason is not None
+        assert "whole days" in reason

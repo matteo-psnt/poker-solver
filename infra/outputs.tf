@@ -34,10 +34,20 @@ output "hourly_cost" {
   # `STANDARD_D16als_v6`, not the `Standard_D16als_v6` written in variables.tf --
   # so a literal-keyed lookup silently fell through to the default and this
   # output read "see the Azure price list" for the SKU actually deployed.
+  #
+  # MEASURED, not quoted from a price page. Cost Management, subscription total
+  # 2026-07-26..2026-08-09: D16als_v6 $214.12 over 311.218 node-hours = $0.6880,
+  # D8als_v6 $13.80 over 40.117 = $0.3440. Both land on the rate exactly, so the
+  # per-vCPU line is $0.043/hr and D32 follows. The previous $0.80/$0.40/$1.60
+  # were round numbers nothing had ever checked, and they overstated the compute
+  # bill by 16%.
+  #
+  # RE-MEASURE rather than edit by hand if a SKU is added: `poker-solver cost`
+  # prints billed dollars beside billed node-hours for exactly this purpose.
   value = lookup({
-    "standard_d8als_v6"  = "$0.40/hr/node"
-    "standard_d16als_v6" = "$0.80/hr/node"
-    "standard_d32als_v6" = "$1.60/hr/node"
+    "standard_d8als_v6"  = "$0.344/hr/node"
+    "standard_d16als_v6" = "$0.688/hr/node"
+    "standard_d32als_v6" = "$1.376/hr/node"
   }, lower(azurerm_batch_pool.train.vm_size), "see the Azure price list")
 }
 

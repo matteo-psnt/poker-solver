@@ -122,6 +122,7 @@ class CloudConfig:
     share_key: str
     autoscale_formula: str
     hourly_cost: str
+    subscription_id: str
 
     @classmethod
     def load(cls) -> CloudConfig:
@@ -137,4 +138,5 @@ class CloudConfig:
             share_key=_value(str(STORE_DIR), "access_key"),
             autoscale_formula=_value(str(INFRA_DIR), "autoscale_formula"),
             hourly_cost=_value(str(INFRA_DIR), "hourly_cost"),
+            subscription_id=_value(str(INFRA_DIR), "subscription_id"),
         )
