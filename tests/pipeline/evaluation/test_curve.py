@@ -9,8 +9,8 @@ import json
 
 import pytest
 
-from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE
 from src.pipeline.evaluation import ledger
+from src.shared.records import STATIC_CHECKPOINT
 
 
 def _row(run_id="run-a", iteration=1000, mbb=100.0, scorer="myopic", seed=7, **knobs):
@@ -83,7 +83,7 @@ class TestExploitabilityCurve:
         return path
 
     def _manifest(self, run_dir, current, retained):
-        (run_dir / MANIFEST_FILE).write_text(
+        (run_dir / STATIC_CHECKPOINT).write_text(
             json.dumps(
                 {
                     "iteration": current,

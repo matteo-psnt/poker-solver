@@ -40,7 +40,6 @@ from src.shared import records
 
 logger = logging.getLogger(__name__)
 
-MANIFEST_FILE = "STATIC_CHECKPOINT.json"
 FORMAT_VERSION = "static-1"
 
 # clevel=1 / 50k chunks: benchmarked as both fastest and smallest for these
@@ -80,7 +79,7 @@ class StaticCheckpointManifest:
         checkpoints rather than one whose pointer needs repair. Callers that can
         proceed without it catch the error themselves.
         """
-        path = Path(checkpoint_dir) / MANIFEST_FILE
+        path = Path(checkpoint_dir) / records.STATIC_CHECKPOINT
         if not path.exists():
             return None
         raw = json.loads(path.read_text())
@@ -182,7 +181,9 @@ def save_checkpoint(
     # -- the two describe different things: the field set here, and the layout
     # of the arrays the manifest points at.
     records.write_snapshot(
-        checkpoint_dir / MANIFEST_FILE, manifest, records.REGISTRY[MANIFEST_FILE]
+        checkpoint_dir / records.STATIC_CHECKPOINT,
+        manifest,
+        records.REGISTRY[records.STATIC_CHECKPOINT],
     )
 
     _prune(checkpoint_dir, manifest)
@@ -293,7 +294,6 @@ def retained_iterations(checkpoint_dir: Path) -> list[int]:
 
 
 __all__ = (
-    "MANIFEST_FILE",
     "FingerprintMismatchError",
     "StaticCheckpointManifest",
     "load_checkpoint",

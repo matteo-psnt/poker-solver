@@ -24,7 +24,7 @@ import shutil
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
-MANIFEST = "STATIC_CHECKPOINT.json"
+from src.shared import records
 
 """The deleted dynamic backend's manifest. Recognised only so that a run
 predating the static tree is REFUSED with an explanation rather than fetched:
@@ -32,7 +32,7 @@ nothing at HEAD can read a ``checkpoint-*.zarr``, so copying one down would buy
 a confusing failure several minutes deeper."""
 LEGACY_MANIFEST = "CHECKPOINT.json"
 
-MANIFESTS = (MANIFEST, LEGACY_MANIFEST)
+MANIFESTS = (records.STATIC_CHECKPOINT, LEGACY_MANIFEST)
 
 """Directory names that are WRITE-ONCE, and only those.
 
@@ -280,13 +280,13 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet) -> st
     re-uploaded nor removed.
     """
     fetch_metadata(source, destination)
-    if (source / LEGACY_MANIFEST).is_file() and not (source / MANIFEST).is_file():
+    if (source / LEGACY_MANIFEST).is_file() and not (source / records.STATIC_CHECKPOINT).is_file():
         raise FetchRefusedError(
             f"{source.name} was trained by the dynamic backend, which no longer "
             f"exists. Its checkpoints are unreadable at HEAD by design, so this "
             f"run cannot be continued."
         )
-    manifest = read_manifest(source / MANIFEST)
+    manifest = read_manifest(source / records.STATIC_CHECKPOINT)
     if not manifest:
         # An absent manifest is not an error: a task that died before its first
         # checkpoint publishes .run.json and nothing else, and the right thing
@@ -295,10 +295,12 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet) -> st
         return ""
     current = manifest.get("zarr") or ""
     if not current:
-        raise FetchRefusedError(f"{MANIFEST} on the share names no current snapshot")
+        raise FetchRefusedError(
+            f"{records.STATIC_CHECKPOINT} on the share names no current snapshot"
+        )
     require_complete(source, current)
     fetch_snapshot(source, destination, current)
-    copy_file(source / MANIFEST, destination / MANIFEST)
+    copy_file(source / records.STATIC_CHECKPOINT, destination / records.STATIC_CHECKPOINT)
     log(f"fetched current rung {current} (ladder left on the share)")
     return current
 

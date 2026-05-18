@@ -11,9 +11,9 @@ same-run comparison could not be expressed at all.
 import json
 from pathlib import Path
 
-from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import checkpoint_iteration_of
+from src.shared.records import STATIC_CHECKPOINT
 from tests.test_helpers import seed_ledger
 
 PROVENANCE = eval_ledger.RunProvenance(
@@ -90,7 +90,7 @@ def test_unselected_lookup_still_returns_the_newest_row(tmp_path):
 
 def test_iteration_is_sourced_from_the_manifest(tmp_path):
     """The value stamped into evals comes from the atomically-committed manifest."""
-    (tmp_path / MANIFEST_FILE).write_text(
+    (tmp_path / STATIC_CHECKPOINT).write_text(
         json.dumps(
             {
                 "iteration": 16_160_000,
@@ -109,7 +109,7 @@ def test_a_scored_ladder_rung_reports_the_rung_not_the_published_iteration(tmp_p
     curve with the run's final iteration -- the precise mislabelling this field was
     added to prevent, reintroduced once per point.
     """
-    (tmp_path / MANIFEST_FILE).write_text(
+    (tmp_path / STATIC_CHECKPOINT).write_text(
         json.dumps(
             {
                 "iteration": 8_000_000,
