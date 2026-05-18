@@ -161,9 +161,25 @@ locals {
       # The unit, and the whole on-demand story.
       #
       # `ExecStopPost` is the hinge: the server exits when it has been idle, and
-      # THAT is what deallocates the box. The guard fires only on a CLEAN exit,
-      # so a crash restarts the service rather than switching off a box that
-      # might just have lost a race with its mounts.
+      # THAT is what deallocates the box. The guard fires only on the IDLE exit
+      # code (42), so a crash restarts the service rather than switching off a
+      # box that might just have lost a race with its mounts -- and a manual
+      # `systemctl stop`, or the `restart` in deploy.sh, does not switch it off
+      # at all.
+      #
+      # THE 62-HOUR BUG, measured 2026-08-10. The guard used to accept only a
+      # CLEAN exit, status 0. But idle expiry was "SIGTERM myself", and a
+      # process that takes SIGTERM exits 143 -- so every expiry was refused
+      # ("blueprint exited 143 -- not deallocating") and systemd, also reading
+      # 143 as failure, restarted it. One boot's journal: 120 idle shutdowns,
+      # 121 refusals, 0 deallocations. The box idled out every 30 minutes and
+      # woke itself straight back up, around the clock.
+      #
+      # `SuccessExitStatus=42` is the second half: without it systemd treats the
+      # idle exit as a failure and `Restart=on-failure` starts the server again
+      # before the deallocate lands. The bounded-restart backstop below could
+      # not save it either -- 30 minutes apart, the restarts never came close to
+      # 3-inside-300s, so `OnFailure=` never fired.
       #
       # But a service that can never start -- an unset RUN, a run that is not on
       # this disk, a broken deploy -- would then restart every 10s forever, and
@@ -191,6 +207,7 @@ locals {
           ExecStart=/home/${var.admin_username}/.local/bin/uv run poker-solver blueprint-serve \
             --run ${"$"}{RUN} --runs-dir ${"$"}{RUNS_DIR} --idle-timeout ${"$"}{IDLE_TIMEOUT}
           ExecStopPost=/usr/local/bin/deallocate-if-idle
+          SuccessExitStatus=42
           Restart=on-failure
           RestartSec=10
 
@@ -209,14 +226,20 @@ locals {
           Type=oneshot
           ExecStart=/usr/local/bin/deallocate-box
 
-      # Only on a clean exit, and only via the VM's own managed identity -- there
-      # are no credentials on this box to steal, and the identity's role is
-      # scoped to this resource group and nothing else.
+      # Only on the IDLE exit code, and only via the VM's own managed identity
+      # -- there are no credentials on this box to steal, and the identity's
+      # role is scoped to this resource group and nothing else.
+      #
+      # 42 and nothing else, deliberately. 0 is a deliberate stop; 143 is
+      # SIGTERM, which is what `systemctl stop` and deploy.sh's `restart`
+      # produce -- deallocating the box mid-deploy is the same bug as never
+      # deallocating it, wearing the other shoe. The number is
+      # `idle.IDLE_EXIT_CODE`, and a test pins this file against it.
       - path: /usr/local/bin/deallocate-if-idle
         permissions: "0755"
         content: |
           #!/bin/bash
-          if [ "${"$"}{EXIT_STATUS:-1}" != "0" ]; then
+          if [ "${"$"}{EXIT_STATUS:-1}" != "42" ]; then
             echo "blueprint exited ${"$"}{EXIT_STATUS} -- not deallocating"
             exit 0
           fi
@@ -231,8 +254,15 @@ locals {
           # the machine custom_data configures, which is a cycle.
           ID=${"$"}(curl -s -H Metadata:true --noproxy "*" \
             "http://169.254.169.254/metadata/instance/compute/resourceId?api-version=2021-02-01&format=text")
-          az login --identity >/dev/null 2>&1 || exit 0
-          az vm deallocate --ids "${"$"}ID" --no-wait
+          # Loudly. `az login --identity || exit 0` swallowed the one failure
+          # that costs money: a box that cannot log in never switches off, and
+          # said nothing about it in the journal.
+          if ! az login --identity >/dev/null 2>&1; then
+            echo "deallocate-box: managed-identity login FAILED -- this box will keep billing" >&2
+            exit 1
+          fi
+          az vm deallocate --ids "${"$"}ID" --no-wait \
+            || echo "deallocate-box: deallocate call FAILED -- this box will keep billing" >&2
 
       # Provisioning, as ONE script with a real shebang.
       #

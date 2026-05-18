@@ -203,6 +203,10 @@ def create_app(
         idle.stop()
 
     app = FastAPI(title=f"blueprint server — {run_id}", docs_url="/api/docs", lifespan=lifespan)
+    # Exposed so the caller can tell WHY the server stopped once uvicorn returns.
+    # Idle expiry has to exit with its own code -- see `idle.IDLE_EXIT_CODE` --
+    # and a SIGTERM is indistinguishable from `systemctl stop` by then.
+    app.state.idle = idle
 
     @app.middleware("http")
     async def _touch(request: Request, call_next):

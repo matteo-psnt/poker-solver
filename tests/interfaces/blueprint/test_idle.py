@@ -8,11 +8,13 @@ fail on a loaded one.
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 from fastapi.testclient import TestClient
 
 from src.interfaces.blueprint.app import create_app
-from src.interfaces.blueprint.idle import IdleWatch
+from src.interfaces.blueprint.idle import IDLE_EXIT_CODE, IdleWatch
 from tests.test_helpers import build_trained_test_solver
 
 
@@ -134,3 +136,52 @@ class TestThroughTheApp:
         client.post("/api/play", json={"human_seat": 0, "seed": 1})
 
         assert client.get("/api/health").json()["sessions"] == start + 1
+
+
+class TestTheUnitAgreesWithTheCode:
+    """Three places have to name the same number, and one of them is Terraform.
+
+    THE 62-HOUR BUG. Idle expiry was "SIGTERM myself"; a process that takes
+    SIGTERM exits 143; the unit's guard deallocated only on 0. So every expiry
+    was refused and systemd, also reading 143 as failure, restarted the server.
+    One boot's journal: 120 idle shutdowns, 121 refused deallocations, 0
+    deallocations — the box idled out every 30 minutes and woke itself straight
+    back up for two and a half days.
+
+    Nothing could have caught that from Python alone: the code was correct and
+    the unit was correct, and they disagreed about what a number meant. So the
+    test reads the Terraform.
+    """
+
+    @staticmethod
+    def _unit() -> str:
+        """The Terraform, COMMENTS STRIPPED.
+
+        The comments here explain the old broken values at length, so matching
+        against the raw file finds the bug being described rather than the code
+        doing the describing. What is under test is what runs.
+        """
+        raw = (
+            pathlib.Path(__file__).resolve().parents[3] / "infra" / "serve" / "main.tf"
+        ).read_text()
+        return "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#"))
+
+    def test_systemd_is_told_the_idle_exit_is_a_success(self):
+        """Without this, `Restart=on-failure` restarts the server before the
+        deallocate lands — which is exactly what happened."""
+        assert f"SuccessExitStatus={IDLE_EXIT_CODE}" in self._unit()
+
+    def test_the_deallocate_guard_keys_on_the_idle_code(self):
+        assert f'"${{"$"}}{{EXIT_STATUS:-1}}" != "{IDLE_EXIT_CODE}"' in self._unit()
+
+    def test_the_guard_does_not_accept_a_bare_sigterm(self):
+        """143 is `systemctl stop` and deploy.sh's `restart`. Deallocating the
+        box mid-deploy is the same bug wearing the other shoe."""
+        unit = self._unit()
+        assert '!= "143"' not in unit
+        assert '!= "0"' not in unit
+
+    def test_a_failed_managed_identity_login_is_not_swallowed(self):
+        """`az login --identity || exit 0` hid the one failure that costs money:
+        a box that cannot log in never switches off, silently."""
+        assert "|| exit 0" not in self._unit()

@@ -86,6 +86,7 @@ def render(payload: dict[str, Any]) -> None:
     import uvicorn
 
     from src.interfaces.blueprint.app import create_app
+    from src.interfaces.blueprint.idle import IDLE_EXIT_CODE
     from src.pipeline.services.evaluation._shared import build_blueprint_for
     from src.pipeline.training.run_tracker import RunTracker
 
@@ -105,10 +106,30 @@ def render(payload: dict[str, Any]) -> None:
     print(f"Loading {payload['run']} …")
     app = create_app(_load, run_id=payload["run"], idle_timeout_seconds=payload["idle_timeout"])
     print(f"Blueprint server on {payload['url']}   (Ctrl-C to stop)")
+
+    # An explicit Server rather than `uvicorn.run(...)`, so idle expiry can ask
+    # it to stop instead of signalling the process. MEASURED: uvicorn re-raises
+    # the captured signal after restoring the default handler, so on the SIGTERM
+    # path `run()` never returns and the process is 143 no matter what this
+    # function would rather exit with. `should_exit` returns control here.
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=payload["host"], port=payload["port"], log_level="warning")
+    )
+    app.state.idle.expire_with(lambda: setattr(server, "should_exit", True))
+
     try:
-        uvicorn.run(app, host=payload["host"], port=payload["port"], log_level="warning")
+        server.run()
     except KeyboardInterrupt:
         print()
+        return
+
+    # WHY the server stopped, as an exit code, because that is all the systemd
+    # unit can read. Idle expiry means "switch the box off"; every other way of
+    # stopping -- Ctrl-C, `systemctl stop`, the `restart` in deploy.sh -- must
+    # NOT, and they all look identical by this point. See `idle.IDLE_EXIT_CODE`
+    # for the 62 hours this cost.
+    if app.state.idle.fired:
+        raise SystemExit(IDLE_EXIT_CODE)
 
 
 COMMAND = Command(

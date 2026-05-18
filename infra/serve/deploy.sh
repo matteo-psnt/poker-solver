@@ -116,6 +116,37 @@ RUNS_DIR=$WORK/data/runs
 IDLE_TIMEOUT=$IDLE
 EOF
 
+# The shutdown half of the unit, rewritten on every deploy.
+#
+# It ships in cloud-init `write_files`, which runs ONCE at first boot -- so
+# before this block, the only way to correct it was to recreate the box. That is
+# how a box spent 62 hours idling out every 30 minutes and restarting itself:
+# the bug was one line in a file no deploy could reach.
+#
+# Only the two pieces that encode the shutdown contract are written here. The
+# rest of the unit is first-boot territory and does not change.
+sudo tee /usr/local/bin/deallocate-if-idle >/dev/null <<'EOF'
+#!/bin/bash
+# 42 is IDLE_EXIT_CODE: nobody was here, switch the box off. NOT 0 (a deliberate
+# stop) and NOT 143 (SIGTERM -- `systemctl stop`, and the restart below).
+if [ "${EXIT_STATUS:-1}" != "42" ]; then
+  echo "blueprint exited ${EXIT_STATUS} -- not deallocating"
+  exit 0
+fi
+exec /usr/local/bin/deallocate-box
+EOF
+sudo chmod 0755 /usr/local/bin/deallocate-if-idle
+
+# `SuccessExitStatus=42` as a drop-in, so the idle exit is not read as a failure
+# and restarted before the deallocate lands. A drop-in rather than a rewrite of
+# the unit: everything else in it is first-boot configuration this script has no
+# business restating.
+sudo mkdir -p /etc/systemd/system/blueprint.service.d
+sudo tee /etc/systemd/system/blueprint.service.d/idle-exit.conf >/dev/null <<'EOF'
+[Service]
+SuccessExitStatus=42
+EOF
+
 sudo systemctl daemon-reload
 sudo systemctl enable blueprint
 sudo systemctl restart blueprint

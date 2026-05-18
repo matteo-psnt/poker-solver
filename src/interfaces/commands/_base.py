@@ -95,6 +95,23 @@ def resolve_run_dir(run: str, runs_dir: str) -> Path:
     match would answer a question about a different run than the one asked
     about, and every reader here is used to make a decision.
     """
+    """Empty is not a run
+    -------------------
+    ``Path("")`` is ``PosixPath(".")`` and ``.is_dir()`` is True, so an empty
+    identifier used to resolve to the CURRENT DIRECTORY and be returned as a
+    run. Nothing downstream could tell that from a real answer: the caller's
+    ``run_dir.is_dir()`` check passes, the refusal this function exists to make
+    never happens, and the failure surfaces a minute later inside the loader as
+    a missing checkpoint.
+
+    It is reachable from the systemd unit on the blueprint host, whose
+    ``ExecStart`` interpolates ``--run ${RUN}`` from an env file that ships with
+    ``RUN=`` empty. There it resolves to ``WorkingDirectory``, i.e.
+    ``/mnt/work/code`` -- the code checkout, offered up as a trained run.
+    """
+    if not run.strip():
+        raise CommandError("No run given: --run needs a run id, a fragment of one, or a path.")
+
     as_path = Path(run)
     if as_path.is_dir():
         return as_path

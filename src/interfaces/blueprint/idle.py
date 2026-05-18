@@ -21,6 +21,30 @@ all, and it would be the only part of this package that could not run on a
 laptop. And a process that simply exits is something systemd already knows how
 to escalate -- so "stop serving" and "stop paying" stay separable, which is what
 you want the first time the deallocate misfires.
+
+Why the exit code is 42 and not 0
+---------------------------------
+MEASURED 2026-08-10, and the reason the box billed 62 hours doing nothing.
+
+Idle expiry used to be "SIGTERM myself", and the unit's ``ExecStopPost`` guard
+deallocated only on a CLEAN exit -- ``EXIT_STATUS`` of 0. But a process that
+takes SIGTERM exits **143**, so every single expiry was refused by the guard
+("blueprint exited 143 -- not deallocating"), and systemd, also reading 143 as a
+failure, applied ``Restart=on-failure`` and started it straight back up. The
+journal for one 62-hour boot: **120 idle shutdowns, 121 refused deallocations,
+0 deallocations.** The box idled out every 30 minutes and immediately woke
+itself, around the clock, reloading a 30M checkpoint each time.
+
+The bounded-restart backstop could not catch it either: the restarts were 30
+minutes apart, so ``StartLimitBurst=3`` inside ``StartLimitIntervalSec=300``
+never tripped and ``OnFailure=`` never fired.
+
+Nor is "also accept 143" the fix, because a MANUAL ``systemctl stop`` or the
+``restart`` in ``deploy.sh`` produces 143 too -- and deallocating the box in the
+middle of a deploy is the same bug wearing the other shoe. So idle expiry gets
+an exit code nothing else produces. The unit lists it in ``SuccessExitStatus``
+so systemd does not restart it, and the guard deallocates on it and nothing
+else.
 """
 
 from __future__ import annotations
@@ -38,6 +62,18 @@ logger = logging.getLogger(__name__)
 # minutes, and a tighter tick would only burn a wakeup to sharpen a deadline
 # nobody is measuring.
 POLL_SECONDS = 15.0
+
+"""The exit code that means "nobody was here; switch the box off".
+
+Distinct from 0 (a deliberate stop), from 143 (SIGTERM, which is what
+`systemctl stop` and a deploy's `restart` produce) and from any crash. Three
+places agree on this number and must keep agreeing: here, `SuccessExitStatus=`
+in the systemd unit, and the `deallocate-if-idle` guard -- all in
+`infra/serve/main.tf`. `tests/interfaces/blueprint/test_idle.py` pins the unit
+against this constant so they cannot drift apart silently, which is exactly how
+the 62-hour restart loop went unnoticed.
+"""
+IDLE_EXIT_CODE = 42
 
 
 class IdleWatch:
@@ -69,6 +105,35 @@ class IdleWatch:
         """A non-positive timeout means "stay up", which is what a laptop wants."""
         return self.timeout_seconds > 0
 
+    @property
+    def fired(self) -> bool:
+        """Whether expiry has happened.
+
+        Read AFTER the server loop returns, to tell "the box put itself to bed"
+        apart from every other way a server can stop. The signal alone cannot
+        carry that: a graceful SIGTERM from here and one from `systemctl stop`
+        are the same signal and the same exit code.
+        """
+        with self._lock:
+            return self._fired
+
+    def expire_with(self, action: Callable[[], None]) -> None:
+        """Replace what expiry DOES, after construction.
+
+        The app builds the watch but only the caller holds the server, and on
+        the hosted box expiry has to end the process with a specific code --
+        which a signal cannot deliver.
+
+        MEASURED: the default ``SIGTERM myself`` cannot be used there, because
+        uvicorn re-raises the captured signal after restoring the default
+        handler. ``uvicorn.run()`` therefore never returns on that path and the
+        process dies as 143, so any exit code the caller wanted is unreachable.
+        Setting ``should_exit`` instead lets the server return normally and the
+        caller decide how to exit.
+        """
+        with self._lock:
+            self._on_expire = action
+
     def touch(self) -> None:
         """Record activity. Called on every request, so it must stay trivial."""
         with self._lock:
@@ -94,8 +159,9 @@ class IdleWatch:
             if self._clock() - self._last_seen < self.timeout_seconds:
                 return False
             self._fired = True
+            action = self._on_expire
         logger.info("Idle for %.0fs — shutting down.", self.timeout_seconds)
-        self._on_expire()
+        action()
         return True
 
     def start(self) -> None:
