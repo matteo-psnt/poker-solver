@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from src.pipeline.evaluation.public_tree_br import PublicBRConfig, compute_public_tree_br
+from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig, compute_public_tree_br
 from src.pipeline.services.evaluation._shared import (
     EvaluationOutput,
     _effective_abstraction_hash,
@@ -34,7 +34,7 @@ def evaluate_run_exact_br(
     :class:`PublicBRConfig` always scores identically, so two checkpoints in one
     tier are exactly paired — a difference is pure signal, with no hand budget
     or p-value involved. The value is the exploitability of the board-sampled
-    restricted game (see :mod:`~src.pipeline.evaluation.public_tree_br`), not of
+    restricted game (see :mod:`~src.pipeline.evaluation.estimators.public_tree_br`), not of
     full HUNL: compare within a tier, don't quote it as a bound.
 
     ``at_iteration`` scores a retained ladder rung instead of the published

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.pipeline.evaluation.public_tree_br import PublicBRConfig
+from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
 
 
 class TestConfigContract:
@@ -56,7 +56,7 @@ class TestParallelMatchesSerial:
     def _score(self, solver, metadata, run_dir, workers: int) -> tuple[float, int]:
         import functools
 
-        from src.pipeline.evaluation.public_tree_br import compute_public_tree_br
+        from src.pipeline.evaluation.estimators.public_tree_br import compute_public_tree_br
         from src.pipeline.services.evaluation._shared import _load_blueprint
 
         config = PublicBRConfig(num_flops=1, num_turns=1, num_rivers=1, num_workers=workers)

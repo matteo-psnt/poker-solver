@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation import ledger as eval_ledger
-from src.pipeline.evaluation.lbr.hunl_local_best_response import (
+from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
     LBRConfig,
 )
-from src.pipeline.evaluation.public_tree_br import PublicBRConfig
+from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
 from src.pipeline.services.evaluation._shared import (
     EvaluationOutput,
     build_blueprint_for,

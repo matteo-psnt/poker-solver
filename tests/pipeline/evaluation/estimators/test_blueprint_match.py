@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
-from src.pipeline.evaluation.blueprint_match import play_blueprint_match
+from src.pipeline.evaluation.estimators.blueprint_match import play_blueprint_match
 from tests.test_helpers import build_trained_test_solver
 
 

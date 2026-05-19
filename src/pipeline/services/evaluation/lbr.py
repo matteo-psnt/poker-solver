@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from src.pipeline.evaluation.lbr.hunl_local_best_response import (
+from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
     LBRConfig,
     LBRResult,
     compute_lbr_exploitability,
