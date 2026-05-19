@@ -30,7 +30,7 @@ from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card, GameState
 from src.engine.solver.mccfr.chance import is_chance_node
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.source import ScorableBlueprint
 
 _TOKEN_BY_TYPE = {
     ActionType.FOLD: "f",

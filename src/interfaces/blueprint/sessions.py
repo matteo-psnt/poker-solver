@@ -31,7 +31,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 
 from src.engine.search.heads_up_session import HeadsUpHand
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.source import ScorableBlueprint
 
 DEFAULT_LIMIT = 64
 

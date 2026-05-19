@@ -82,7 +82,7 @@ from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card, GameState
 from src.engine.search.range_inference import COMBO_MASKS, NUM_COMBOS
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.source import ScorableBlueprint
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.lbr.lbr_showdown import ShowdownValuer
 from src.pipeline.evaluation.estimators.lbr.lookahead_scorer import (

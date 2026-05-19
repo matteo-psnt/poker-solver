@@ -9,8 +9,8 @@ import numpy as np
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState
-from src.engine.solver import infoset_encoder
-from src.engine.solver.infoset import InfoSetKey
+from src.engine.solver.infoset import encoder
+from src.engine.solver.infoset.model import InfoSetKey
 from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.base import Storage
 from src.shared.config import Config
@@ -100,7 +100,7 @@ class MCCFRSolver:
         regret math below it is not. See
         ``tests/engine/solver/mccfr/extensive_game_solver.py``.
         """
-        return infoset_encoder.encode_infoset_key(state, player, self.card_abstraction)
+        return encoder.encode_infoset_key(state, player, self.card_abstraction)
 
     def lookup_infoset(self, state: GameState, current_player: int):
         """Resolve ``current_player``'s infoset at ``state`` for the traversal.

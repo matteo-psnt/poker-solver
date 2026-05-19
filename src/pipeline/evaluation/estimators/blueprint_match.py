@@ -24,7 +24,7 @@ import numpy as np
 
 from src.core.game.rules import GameRules
 from src.core.game.state import Card
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.source import ScorableBlueprint
 from src.pipeline.evaluation.estimators.resolver_match import (
     _complete_board,
     _deal_from_stack,

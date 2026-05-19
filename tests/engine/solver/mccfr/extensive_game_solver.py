@@ -33,7 +33,7 @@ from typing import Any, cast
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action
 from src.core.game.state import GameState, Street
-from src.engine.solver.infoset import InfoSetKey
+from src.engine.solver.infoset.model import InfoSetKey
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.base import Storage
 from src.pipeline.evaluation.reference.game_tree import CHANCE, ExtensiveGame, InfoKey

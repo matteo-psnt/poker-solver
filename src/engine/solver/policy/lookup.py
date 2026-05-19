@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from src.core.game.actions import Action
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState
-from src.engine.solver.infoset import InfoSet
+from src.engine.solver.infoset.model import InfoSet
 
 
 def filter_stored_actions(

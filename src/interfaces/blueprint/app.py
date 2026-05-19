@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from src.core.game.state import Card
 from src.engine.search.heads_up_session import HeadsUpHand
 from src.engine.search.range_inference import ALL_COMBOS
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.source import ScorableBlueprint
 from src.interfaces.blueprint.idle import IdleWatch
 from src.interfaces.blueprint.sessions import Sessions, UnknownSessionError
 from src.pipeline.analysis.grid import StrategyGrid, strategy_grid

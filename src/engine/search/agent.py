@@ -3,7 +3,7 @@
 Deployment-time action selection used to live on ``MCCFRSolver.act``, which
 made the trainer double as the deployed player and forced a lazy
 solver -> search import to reach the resolver. The agent inverts that: it
-wraps any :class:`~src.engine.solver.policy_source.ScorableBlueprint` and owns the
+wraps any :class:`~src.engine.solver.policy.source.ScorableBlueprint` and owns the
 resolver lifecycle, so playing a strategy never requires carrying (or
 importing) the training machinery.
 """
@@ -15,7 +15,7 @@ import numpy as np
 from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.search.resolver import HUResolver
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.source import ScorableBlueprint
 from src.shared.config import ResolverConfig
 
 

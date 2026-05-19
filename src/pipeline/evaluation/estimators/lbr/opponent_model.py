@@ -36,8 +36,8 @@ from src.engine.search.range_inference import (
     update_ranges,
 )
 from src.engine.search.resolver import HUResolver
-from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.lookup import blueprint_action_distribution
+from src.engine.solver.policy.source import ScorableBlueprint
 from src.shared.config import ResolverConfig
 
 
