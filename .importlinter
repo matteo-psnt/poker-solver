@@ -56,6 +56,62 @@ forbidden_modules =
     src.engine
     src.core
 
+; THE ONE HERE THAT IS ABOUT CORRECTNESS, not tidiness. `reference/` holds
+; textbook implementations -- tabular CFR, exact BR, LBR -- that are tractable
+; only at Kuhn/Leduc scale and exist to PROVE the production estimators right:
+; `restricted_hunl.py` validates the vectorised public-tree engine against
+; `reference/best_response.py` to 1e-9. An oracle that imported the thing it
+; validates would make that agreement circular, and the test would still pass.
+[importlinter:contract:the_oracles_are_independent_of_what_they_validate]
+name = Reference implementations must not import the estimators they check
+type = forbidden
+source_modules =
+    src.pipeline.evaluation.reference
+forbidden_modules =
+    src.pipeline.evaluation.estimators
+    src.pipeline.evaluation.ledger
+    src.pipeline.services
+
+; An estimator produces a number; the ledger decides how one is written down and
+; which tier it may be compared against. Keeping the arrow one-way is what lets
+; a new estimator be added without touching the record, and what stops a scorer
+; from quietly depending on how it will be filed. (The reverse edge exists and
+; is fine: `ledger/tiers.py` reads `lbr/config.py` to derive a tier.)
+[importlinter:contract:an_estimator_does_not_know_how_it_is_recorded]
+name = Estimators must not import the ledger
+type = forbidden
+source_modules =
+    src.pipeline.evaluation.estimators
+forbidden_modules =
+    src.pipeline.evaluation.ledger
+    src.pipeline.services
+
+; `analysis/` turns a trained blueprint into something readable -- a preflop
+; grid, an action path. It is a pure reader of a built blueprint, which is what
+; makes it safe for the play server to call while serving; if it could reach
+; training or evaluation it would drag their weight onto that path.
+[importlinter:contract:analysis_only_reads]
+name = Blueprint analysis must not import training, evaluation or services
+type = forbidden
+source_modules =
+    src.pipeline.analysis
+forbidden_modules =
+    src.pipeline.training
+    src.pipeline.evaluation
+    src.pipeline.services
+
+; The play server loads a finished blueprint and answers questions about it.
+; Training is the one thing it must never do -- it runs on a box sized to serve,
+; deallocates itself when idle, and a training import there is either dead
+; weight at load time or an accident waiting on a shared filesystem.
+[importlinter:contract:serving_is_not_training]
+name = The play server must not import training
+type = forbidden
+source_modules =
+    src.interfaces.blueprint
+forbidden_modules =
+    src.pipeline.training
+
 [importlinter:contract:training_and_evaluation_are_independent]
 name = Training and evaluation must not import each other
 type = independence
