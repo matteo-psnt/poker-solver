@@ -10,11 +10,11 @@ from src.pipeline import services
 from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import HandOutcome
-from src.pipeline.services import abstraction as services_abstraction
+from src.pipeline.services import bucketing as services_bucketing
 from src.pipeline.services import runs as services_runs
 from src.pipeline.services import static_training as services_training
-from src.pipeline.services.evaluation import _shared as services_shared
-from src.pipeline.services.evaluation import lbr as services_lbr
+from src.pipeline.services.scoring import _shared as services_shared
+from src.pipeline.services.scoring import lbr as services_lbr
 from src.shared.config_loader import load_training_config
 
 
@@ -87,12 +87,12 @@ def test_precompute_abstraction_skips_when_present(monkeypatch, tmp_path):
     (out / "metadata.json").write_text("{}")
 
     monkeypatch.setattr(
-        services_abstraction.PrecomputeConfig, "from_yaml", lambda name: SimpleNamespace()
+        services_bucketing.PrecomputeConfig, "from_yaml", lambda name: SimpleNamespace()
     )
-    monkeypatch.setattr(services_abstraction, "abstraction_output_path", lambda base, cfg: out)
+    monkeypatch.setattr(services_bucketing, "abstraction_output_path", lambda base, cfg: out)
     built = {"n": 0}
     monkeypatch.setattr(
-        services_abstraction, "PostflopPrecomputer", lambda cfg: built.update(n=built["n"] + 1)
+        services_bucketing, "PostflopPrecomputer", lambda cfg: built.update(n=built["n"] + 1)
     )
 
     result = services.precompute_abstraction("quick_test", base_dir=tmp_path)
@@ -108,8 +108,8 @@ def test_precompute_abstraction_runs_and_saves(monkeypatch, tmp_path):
     base_cfg = SimpleNamespace(
         model_copy=lambda update: seen.update(update=update) or SimpleNamespace(tag="copied")
     )
-    monkeypatch.setattr(services_abstraction.PrecomputeConfig, "from_yaml", lambda name: base_cfg)
-    monkeypatch.setattr(services_abstraction, "abstraction_output_path", lambda base, cfg: out)
+    monkeypatch.setattr(services_bucketing.PrecomputeConfig, "from_yaml", lambda name: base_cfg)
+    monkeypatch.setattr(services_bucketing, "abstraction_output_path", lambda base, cfg: out)
 
     events: list = []
 
@@ -123,7 +123,7 @@ def test_precompute_abstraction_runs_and_saves(monkeypatch, tmp_path):
         def save(self, path):
             events.append(("save", path))
 
-    monkeypatch.setattr(services_abstraction, "PostflopPrecomputer", _FakePrecomputer)
+    monkeypatch.setattr(services_bucketing, "PostflopPrecomputer", _FakePrecomputer)
 
     result = services.precompute_abstraction("quick_test", num_workers=8, base_dir=tmp_path)
 

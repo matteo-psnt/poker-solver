@@ -21,10 +21,10 @@ import pytest
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.ledger import queries as ledger_queries
 from src.pipeline.evaluation.ledger import records as ledger_records
-from src.pipeline.services import evaluation as evaluation_service
 from src.pipeline.services import experiments
+from src.pipeline.services import scoring as scoring_service
 
-MODULES = (eval_ledger, ledger_queries, ledger_records, evaluation_service, experiments)
+MODULES = (eval_ledger, ledger_queries, ledger_records, scoring_service, experiments)
 
 PARAM = "ledger_path"
 

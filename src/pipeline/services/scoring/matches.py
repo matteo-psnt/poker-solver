@@ -8,10 +8,10 @@ from src.pipeline.blueprint import build_static_evaluation_solver
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.estimators.blueprint_match import play_blueprint_match
 from src.pipeline.evaluation.estimators.resolver_match import play_resolver_match
-from src.pipeline.services.evaluation._shared import (
+from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
+from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
 )
-from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
 
 logger = logging.getLogger(__name__)

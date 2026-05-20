@@ -41,8 +41,8 @@ class TestConfigContract:
 @pytest.mark.timeout(600)
 class TestParallelMatchesSerial:
     def _blueprint(self, tmp_path):
-        from src.pipeline.services.evaluation import build_blueprint_for
         from src.pipeline.services.runs import load_run_metadata
+        from src.pipeline.services.scoring import build_blueprint_for
         from src.pipeline.services.static_training import train_static
 
         out = train_static(
@@ -57,7 +57,7 @@ class TestParallelMatchesSerial:
         import functools
 
         from src.pipeline.evaluation.estimators.public_tree_br import compute_public_tree_br
-        from src.pipeline.services.evaluation._shared import _load_blueprint
+        from src.pipeline.services.scoring._shared import _load_blueprint
 
         config = PublicBRConfig(num_flops=1, num_turns=1, num_rivers=1, num_workers=workers)
         factory = (

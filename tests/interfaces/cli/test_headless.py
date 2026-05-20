@@ -19,7 +19,7 @@ from src.pipeline.services import (
     LBR_ESTIMATOR_LABEL,
     StaticTrainingOutput,
 )
-from src.pipeline.services import evaluation as services_evaluation
+from src.pipeline.services import scoring as services_scoring
 from src.shared.jsonio import json_default
 from tests.test_helpers import seed_ledger
 
@@ -113,7 +113,7 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     )
     # Patched on the owning submodule: `evaluate_and_record` dispatches through its
     # own namespace, which the re-export in the package __init__ does not stand in for.
-    monkeypatch.setattr(services_evaluation, "evaluate_run_lbr", lambda *a, **kw: fake_out)
+    monkeypatch.setattr(services_scoring, "evaluate_run_lbr", lambda *a, **kw: fake_out)
 
     rc = headless.main(["evaluate", "--run", "run-xyz", "--runs-dir", str(tmp_path), "--json"])
 

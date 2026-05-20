@@ -87,7 +87,7 @@ def render(payload: dict[str, Any]) -> None:
 
     from src.interfaces.blueprint.app import create_app
     from src.interfaces.blueprint.idle import IDLE_EXIT_CODE
-    from src.pipeline.services.evaluation._shared import build_blueprint_for
+    from src.pipeline.services.scoring._shared import build_blueprint_for
     from src.pipeline.training.run_tracker import RunTracker
 
     run_dir = Path(payload["run_dir"])

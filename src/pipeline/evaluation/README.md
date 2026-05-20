@@ -128,7 +128,7 @@ do not enable it.)
 ## How a result gets recorded
 
 All transports route through one orchestrator, `evaluate_and_record()` in
-`src/pipeline/services/evaluation/`. It runs the requested method, pins the
+`src/pipeline/services/scoring/`. It runs the requested method, pins the
 run's recorded `card_abstraction_hash` (refusing unhashed runs) so an eval
 always uses the abstraction the run trained with, records git provenance, and
 writes the complete row to `<run_dir>/evals/<slug>.json`.
