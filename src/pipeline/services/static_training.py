@@ -44,7 +44,7 @@ from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import run_events
 from src.shared.config import Config
-from src.shared.config_loader import load_training_config
+from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
 
 logger = logging.getLogger(__name__)

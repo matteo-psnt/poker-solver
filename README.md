@@ -114,7 +114,7 @@ Training still learns the blueprint policy; resolving happens only at decision t
 
 ## Configuration
 
-Training configs in `config/training/` are sparse overrides on the schema defaults in `src/shared/config.py` (`config/training/default.yaml` documents every default). The actual production config:
+Training configs in `config/training/` are sparse overrides on the schema defaults in `src/shared/config/schema.py` (`config/training/default.yaml` documents every default). The actual production config:
 
 ```yaml
 # config/training/production.yaml

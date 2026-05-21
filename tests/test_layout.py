@@ -37,8 +37,8 @@ SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
 """Loose modules that sit beside sub-packages, and why each set is allowed.
 
 A package that holds sub-packages AND loose modules is not automatically wrong
--- `shared/` is a flat utility package with one subsystem in it, and that is the
-right shape. It is wrong when a loose module is a PEER of something filed inside
+-- `shared/` is a flat utility package with two subsystems in it, and that is
+the right shape. It is wrong when a loose module is a PEER of something filed inside
 a sub-package, because then the same kind of thing is filed two ways and the
 directory stops answering what it looks like it answers.
 
@@ -71,14 +71,14 @@ LOOSE_BESIDE_PACKAGES: dict[str, tuple[str, ...]] = {
     "pipeline.services": ("bucketing.py", "experiments.py", "runs.py", "static_training.py"),
     "pipeline.training": ("static_parallel.py",),
     # `shared/` IS the flat one -- a module per concern, deliberately small, so
-    # that anything may import exactly what it needs. `cloudtask/` is the one
-    # subsystem, and it is a subsystem because the node imports it as a closure.
+    # that anything may import exactly what it needs, and each of these has 3-6
+    # importers spanning two or more LAYERS. That fan-out is the test: a module
+    # only two things use, both of them in one package, is that package's detail
+    # (`dicts.py` was, and moved into `config/`). Two subsystems: `config/`,
+    # and `cloudtask/` because the node imports it as a closure.
     "shared": (
         "action_tokens.py",
         "cache.py",
-        "config.py",
-        "config_loader.py",
-        "dicts.py",
         "gitinfo.py",
         "jsonio.py",
         "log.py",
@@ -110,7 +110,6 @@ DUPLICATE_BASENAMES: dict[str, tuple[str, ...]] = {
         "interfaces/cloud/config.py",
         "pipeline/abstraction/config.py",
         "pipeline/evaluation/estimators/lbr/config.py",
-        "shared/config.py",
     ),
     "paths.py": (
         "pipeline/abstraction/paths.py",

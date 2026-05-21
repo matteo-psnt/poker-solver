@@ -28,7 +28,7 @@ from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
 from src.pipeline.abstraction.resolver import ComboAbstractionResolver
-from src.shared.config_loader import load_training_config
+from src.shared.config.loader import load_training_config
 
 _RUNG = re.compile(r"static-(\d+)\.zarr")
 

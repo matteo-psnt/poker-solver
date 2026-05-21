@@ -16,7 +16,7 @@ import xxhash
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, parse_multiplier_token
-from src.shared.dicts import deep_merge_dicts
+from src.shared.config.merge import deep_merge_dicts
 
 logger = logging.getLogger(__name__)
 
