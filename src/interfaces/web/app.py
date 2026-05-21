@@ -32,7 +32,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.interfaces.cloud import workspace
+from src.interfaces.cloud.store import workspace
 from src.interfaces.commands import (
     Command,
     cancel,

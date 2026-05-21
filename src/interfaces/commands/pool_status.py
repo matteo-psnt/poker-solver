@@ -6,8 +6,8 @@ import argparse
 import json
 from typing import Any
 
-from src.interfaces.cloud import batch
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
 
 

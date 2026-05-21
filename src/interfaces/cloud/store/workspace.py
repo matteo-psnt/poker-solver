@@ -36,8 +36,8 @@ from pathlib import Path
 from azure.storage.fileshare import ShareServiceClient
 
 from src.interfaces import run_names
-from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.store import share
 from src.interfaces.errors import CommandError
 
 BASELINE_NAME = "baseline.json"

@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.interfaces.cloud import dispatch, spec
+from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo
 from src.shared.cloudtask.kinds import TaskName

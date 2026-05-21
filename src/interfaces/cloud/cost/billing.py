@@ -1,6 +1,6 @@
 """What Azure actually charged, as opposed to what node time implies.
 
-:mod:`~src.interfaces.cloud.node_time` derives an estimate from the task log:
+:mod:`~src.interfaces.cloud.cost.node_time` derives an estimate from the task log:
 complete, granular, attributable to a run -- and structurally unable to be the
 bill. Three reasons, all measured over 2026-07-26..2026-08-09:
 

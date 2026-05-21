@@ -17,7 +17,7 @@ small-file copying a fresh box pays.
 
 ``AzureCliCredential``, not ``DefaultAzureCredential``: the default chain probes
 the link-local IMDS address, which on a laptop hangs rather than refusing
-(measured: >120s vs 1.3s). Same rule as :mod:`src.interfaces.cloud.batch`.
+(measured: >120s vs 1.3s). Same rule as :mod:`src.interfaces.cloud.tasks.batch`.
 """
 
 from __future__ import annotations

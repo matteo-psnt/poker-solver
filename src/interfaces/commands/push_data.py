@@ -14,8 +14,8 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.store import share
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 

@@ -20,8 +20,9 @@ from typing import Any
 
 from azure.core.exceptions import ResourceNotFoundError
 
-from src.interfaces.cloud import batch, share
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.store import share
+from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 

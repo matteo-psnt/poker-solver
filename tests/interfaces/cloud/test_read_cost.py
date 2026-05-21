@@ -21,7 +21,9 @@ from typing import Any, cast
 import pytest
 from azure.batch import BatchClient
 
-from src.interfaces.cloud import batch, billing, share, workspace
+from src.interfaces.cloud.cost import billing
+from src.interfaces.cloud.store import share, workspace
+from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands import cost, jobs
 from src.interfaces.errors import CommandError
 

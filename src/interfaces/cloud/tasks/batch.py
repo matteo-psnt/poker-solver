@@ -32,7 +32,7 @@ from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.identity import AzureCliCredential
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.spec import TaskSpec, daily_job_id, suffixed_job_id, task_command
+from src.interfaces.cloud.tasks.spec import TaskSpec, daily_job_id, suffixed_job_id, task_command
 
 # Batch calls are latency-bound round trips, not work, so independent ones are
 # worth issuing together. 16 matches the share downloader.
