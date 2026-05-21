@@ -19,9 +19,10 @@ of this package would not.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
-WEB = Path(__file__).resolve().parents[3] / "src" / "interfaces" / "web"
+from src.shared import repo
+
+WEB = repo.SRC / "interfaces" / "web"
 
 
 def test_every_endpoint_answers_through_a_command():

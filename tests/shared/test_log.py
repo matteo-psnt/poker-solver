@@ -2,13 +2,13 @@
 
 import logging
 import multiprocessing as mp
-import pathlib
 import re
 import sys
 
 import pytest
 
 from src.shared import log as log_module
+from src.shared import repo
 from src.shared.log import (
     LEVEL_ENV_VAR,
     configure_logging,
@@ -261,7 +261,7 @@ class TestNoHandWrittenSeverityPrefixes:
         loud; with the level in the line it is duplication that also breaks a
         severity grep by matching INFO lines that merely mention "Error".
         """
-        repo_src = pathlib.Path(__file__).resolve().parents[2] / "src"
+        repo_src = repo.SRC
         offenders = []
         pattern = re.compile(r"logger\.(info|warning|error)\(f?\"[^\"]*(WARN|Warning|ERROR|Error)")
         for path in repo_src.rglob("*.py"):
@@ -295,7 +295,7 @@ class TestEveryProgressBarIsGuarded:
     """
 
     def test_every_tqdm_site_consults_the_predicate(self):
-        src = pathlib.Path(__file__).resolve().parents[2] / "src"
+        src = repo.SRC
         for path in src.rglob("*.py"):
             text = path.read_text()
             bars = text.count("tqdm(")

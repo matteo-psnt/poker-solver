@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import pathlib
 import re
 
 import pytest
 
-from src.shared import records
+from src.shared import records, repo
 
-SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
+SRC = repo.SRC
 
 
 def _read(path) -> dict:

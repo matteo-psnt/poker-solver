@@ -11,6 +11,7 @@ from typing import Any
 
 import yaml
 
+from src.shared import repo
 from src.shared.config import Config
 from src.shared.dicts import deep_merge_dicts
 
@@ -72,8 +73,7 @@ def load_training_config(config_name: str, **overrides: Any) -> Config:
     Raises:
         FileNotFoundError: If ``config/training/<config_name>.yaml`` does not exist.
     """
-    repo_root = Path(__file__).resolve().parents[2]
-    config_path = repo_root / "config" / "training" / f"{config_name}.yaml"
+    config_path = repo.ROOT / "config" / "training" / f"{config_name}.yaml"
     return load_config(config_path, **overrides)
 
 

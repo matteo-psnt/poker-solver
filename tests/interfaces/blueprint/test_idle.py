@@ -8,13 +8,12 @@ fail on a loaded one.
 
 from __future__ import annotations
 
-import pathlib
-
 import pytest
 from fastapi.testclient import TestClient
 
 from src.interfaces.blueprint.app import create_app
 from src.interfaces.blueprint.idle import IDLE_EXIT_CODE, IdleWatch
+from src.shared import repo
 from tests.test_helpers import build_trained_test_solver
 
 
@@ -161,9 +160,7 @@ class TestTheUnitAgreesWithTheCode:
         against the raw file finds the bug being described rather than the code
         doing the describing. What is under test is what runs.
         """
-        raw = (
-            pathlib.Path(__file__).resolve().parents[3] / "infra" / "serve" / "main.tf"
-        ).read_text()
+        raw = (repo.ROOT / "infra" / "serve" / "main.tf").read_text()
         return "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#"))
 
     def test_systemd_is_told_the_idle_exit_is_a_success(self):

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.game.state import Street
+from src.shared import repo
 from src.shared.config_loader import _load_yaml
 
 PositiveInt = Annotated[int, Field(gt=0)]
@@ -69,8 +69,7 @@ class PrecomputeConfig(StrictFrozenModel):
     @classmethod
     def from_yaml(cls, config_name: str) -> PrecomputeConfig:
         """Load precompute config from ``config/abstraction/<name>.yaml``."""
-        repo_root = Path(__file__).resolve().parents[3]
-        config_path = repo_root / "config" / "abstraction" / f"{config_name}.yaml"
+        config_path = repo.ROOT / "config" / "abstraction" / f"{config_name}.yaml"
         yaml_data = _load_yaml(config_path)
         yaml_data["config_name"] = config_name
         return cls.model_validate(yaml_data)

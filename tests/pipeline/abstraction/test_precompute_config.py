@@ -1,16 +1,15 @@
 """Tests for PrecomputeConfig YAML loading."""
 
-from pathlib import Path
-
 import pytest
 import yaml
 
 from src.core.game.state import Street
 from src.pipeline.abstraction.config import PrecomputeConfig
+from src.shared import repo
 
 
 def _load_yaml_config(name: str) -> dict:
-    config_dir = Path(__file__).resolve().parents[3] / "config" / "abstraction"
+    config_dir = repo.ROOT / "config" / "abstraction"
     with (config_dir / f"{name}.yaml").open() as f:
         return yaml.safe_load(f)
 
@@ -69,7 +68,7 @@ class TestPrecomputeConfig:
 
     def test_config_files_exist(self):
         """Test that all expected config files exist."""
-        config_dir = Path(__file__).resolve().parents[3] / "config" / "abstraction"
+        config_dir = repo.ROOT / "config" / "abstraction"
 
         assert (config_dir / "quick_test.yaml").exists()
         assert (config_dir / "default.yaml").exists()
@@ -77,7 +76,7 @@ class TestPrecomputeConfig:
 
     def test_all_abstraction_profiles_load(self):
         """All abstraction YAML profiles should parse and set config_name from filename."""
-        config_dir = Path(__file__).resolve().parents[3] / "config" / "abstraction"
+        config_dir = repo.ROOT / "config" / "abstraction"
         profile_names = sorted(path.stem for path in config_dir.glob("*.yaml"))
 
         assert profile_names, "No abstraction config files found"

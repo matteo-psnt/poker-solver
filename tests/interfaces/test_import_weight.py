@@ -28,17 +28,18 @@ about the closure under test.
 
 from __future__ import annotations
 
-import pathlib
 import re
 import subprocess
 import sys
 
 import pytest
 
+from src.shared import repo
+
 HEAVY = ("scipy", "sklearn", "numba")
 
-SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
-TESTS = pathlib.Path(__file__).resolve().parents[1]
+SRC = repo.SRC
+TESTS = repo.ROOT / "tests"
 
 
 def _closure(module: str) -> set[str]:

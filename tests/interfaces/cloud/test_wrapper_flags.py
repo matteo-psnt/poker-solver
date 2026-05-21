@@ -28,12 +28,12 @@ the registry already is.
 from __future__ import annotations
 
 import argparse
-import pathlib
 import tomllib
 
 import pytest
 
 from src.interfaces.commands import load_all
+from src.shared import repo
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import handlers as node_handlers
 from src.shared.cloudtask.node import plan as node_plan
@@ -149,7 +149,7 @@ class TestTheWrapperInvokesACommandThatExists:
     """
 
     def _script_names(self) -> set[str]:
-        pyproject = pathlib.Path(__file__).resolve().parents[3] / "pyproject.toml"
+        pyproject = repo.ROOT / "pyproject.toml"
         return set(tomllib.loads(pyproject.read_text())["project"]["scripts"])
 
     def test_the_node_calls_a_script_the_project_installs(self):

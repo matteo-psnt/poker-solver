@@ -11,7 +11,6 @@ from __future__ import annotations
 import subprocess
 import sys
 from multiprocessing import resource_tracker, shared_memory
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -21,10 +20,11 @@ from src.core.game.rules import GameRules
 from src.core.game.state import Street
 from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.storage.static_array import StaticArrayStorage
+from src.shared import repo
 from tests.test_helpers import make_test_config
 
 BUCKETS = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = repo.ROOT
 
 
 def build_tree() -> BettingTree:
