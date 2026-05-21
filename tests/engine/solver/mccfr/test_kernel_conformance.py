@@ -18,7 +18,7 @@ probabilities (instrumented: chance never multiplied into it). Because those
 actions were sampled, the traversal already visits an infoset with probability
 pi_{-i}, carrying that same action reach; applying it again squared the action
 component and the regrets minimised a reweighted objective whose fixed point is
-not the equilibrium. Same double-counting ``docs/AVERAGE_STRATEGY_WEIGHTING.md``
+not the equilibrium. Same double-counting
 diagnosed for the average-strategy accumulator, still live on the regret one.
 
 It was a floor, not slowness -- Leduc, seed 42, identical but for that multiplier:

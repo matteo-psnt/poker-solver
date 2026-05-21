@@ -124,7 +124,7 @@ def _accumulate_average_strategy(
     ``pi_i * pi_chance`` on its own (chance is iteration-invariant and
     normalizes out per infoset), so the correct ``reach_weight`` is 1.0 and any
     explicit reach term would double-count (OpenSpiel's ``AverageType.SIMPLE``
-    placement; see docs/AVERAGE_STRATEGY_WEIGHTING.md, option A).
+    placement).
     """
     weight = reach_weight
     if self.config.solver.iteration_weighting == "dcfr":
@@ -259,7 +259,7 @@ def cfr_external_sampling(
             # strategy itself accumulates at OPPONENT nodes below — a
             # traverser-node update would be pi_{-i}-weighted, since the
             # traverser enumerates its own actions and its visit frequency
-            # carries no pi_i (see docs/AVERAGE_STRATEGY_WEIGHTING.md).
+            # carries no pi_i.
             infoset.increment_reach_count()
             infoset.add_cumulative_utility(node_utility)
             self.applied_updates += 1

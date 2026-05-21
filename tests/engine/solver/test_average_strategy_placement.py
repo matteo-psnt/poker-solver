@@ -4,7 +4,7 @@ Under external sampling the average strategy must accumulate at OPPONENT
 nodes, unweighted: an opponent node is visited exactly when the sampled
 opponent/chance actions lead there, so visit frequency already supplies the
 acting player's own reach — Zinkevich's weight. The historical defect
-(docs/AVERAGE_STRATEGY_WEIGHTING.md) accumulated at the traverser's own nodes
+accumulated at the traverser's own nodes
 with a dead reach weight of 1.0, converging to a pi_{-i}-weighted average.
 These tests pin the corrected placement so a regression to either the old
 site or an explicit reach term (option C's trap: threading pi_i in place
