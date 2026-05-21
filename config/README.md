@@ -106,7 +106,7 @@ else.
 1. Add the field, with default and validation, to the right model in
    `src/shared/config.py` — constraints live there, nowhere else.
 2. Wire usage where relevant, typically
-   `src/pipeline/blueprint.py`,
+   `src/pipeline/blueprint/construction.py`,
    `src/pipeline/training/static_parallel.py`, or `src/engine/solver|search/`.
 3. Add/update tests in the mirrored test packages and document the field in
    `config/training/default.yaml`.
@@ -149,7 +149,7 @@ the identity.
 - Abstractions are resolved by config name/hash through
   `AbstractionResolver` and `build_card_abstraction(...)`
   (`src/pipeline/abstraction/resolver.py`,
-  `src/pipeline/blueprint.py`).
+  `src/pipeline/blueprint/construction.py`).
 - Evaluation auto-pins to a run's recorded `card_abstraction_hash` and
   refuses runs without one, so a strategy is never scored under a different
   abstraction than it was trained with.

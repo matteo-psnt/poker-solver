@@ -55,11 +55,6 @@ LOOSE_BESIDE_PACKAGES: dict[str, tuple[str, ...]] = {
     # so it sits above them; `serve_box` provisions the play-server VM and is
     # its own job, sharing nothing with dispatching work or reading the bill.
     "interfaces.cloud": ("config.py", "serve_box.py"),
-    # Deliberate, and load-bearing: `blueprint.py` is what training, evaluation
-    # and the play server all START from, so it sits above all three rather than
-    # inside the one that used to own it. Pinned by its own import-linter
-    # contract (`blueprint_construction_is_foundational`).
-    "pipeline": ("blueprint.py",),
     # Shared across postflop/ and preflop/, which is why they are not in either.
     "pipeline.abstraction": ("base.py", "config.py", "paths.py", "resolver.py"),
     # Measurement helpers used BY the estimators, not estimators themselves.
@@ -118,7 +113,7 @@ DUPLICATE_BASENAMES: dict[str, tuple[str, ...]] = {
     ),
     "paths.py": (
         "pipeline/abstraction/paths.py",
-        "pipeline/analysis/paths.py",
+        "pipeline/blueprint/paths.py",
         "shared/cloudtask/node/paths.py",
     ),
     # command -> implementation, below.

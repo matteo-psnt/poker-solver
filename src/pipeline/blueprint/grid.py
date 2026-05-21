@@ -42,7 +42,7 @@ from src.engine.search.range_inference import (
 )
 from src.engine.solver.policy.lookup import blueprint_action_distribution
 from src.engine.solver.policy.source import ScorableBlueprint
-from src.pipeline.analysis.paths import PathError, ReplayedNode, encode_action
+from src.pipeline.blueprint.paths import PathError, ReplayedNode, encode_action
 
 
 @dataclass(frozen=True)

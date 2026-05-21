@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.pipeline.blueprint import build_static_evaluation_solver
+from src.pipeline.blueprint.construction import build_static_evaluation_solver
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.estimators.blueprint_match import play_blueprint_match
 from src.pipeline.evaluation.estimators.resolver_match import play_resolver_match

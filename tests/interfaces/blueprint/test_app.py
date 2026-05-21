@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from src.engine.search.range_inference import NUM_COMBOS
 from src.interfaces.blueprint.app import create_app, parse_board
-from src.pipeline.analysis.paths import PathError
+from src.pipeline.blueprint.paths import PathError
 from tests.test_helpers import build_trained_test_solver
 
 

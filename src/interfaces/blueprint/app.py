@@ -1,8 +1,8 @@
-"""HTTP over :mod:`src.pipeline.analysis` -- transport only, no logic of its own.
+"""HTTP over :mod:`src.pipeline.blueprint` -- transport only, no logic of its own.
 
 Every handler here parses a request, calls one analysis function and returns its
 result. Anything a caller could have got right raises
-:class:`~src.pipeline.analysis.paths.PathError` and comes back as a 422 with the
+:class:`~src.pipeline.blueprint.paths.PathError` and comes back as a 422 with the
 sentence the analysis layer wrote; a bug still tracebacks. That split is the same
 one `Command.invoke` makes, for the same reason -- a surface that greys out one
 panel is more useful than one that dies.
@@ -30,8 +30,8 @@ from src.engine.search.range_inference import ALL_COMBOS
 from src.engine.solver.policy.source import ScorableBlueprint
 from src.interfaces.blueprint.idle import IdleWatch
 from src.interfaces.blueprint.sessions import Sessions, UnknownSessionError
-from src.pipeline.analysis.grid import StrategyGrid, strategy_grid
-from src.pipeline.analysis.paths import PathError, encode_action, match_action, replay
+from src.pipeline.blueprint.grid import StrategyGrid, strategy_grid
+from src.pipeline.blueprint.paths import PathError, encode_action, match_action, replay
 
 
 # `repr`, not `str`: a Card's `__str__` is the pretty terminal form ("[ 2 ♣ ]")
