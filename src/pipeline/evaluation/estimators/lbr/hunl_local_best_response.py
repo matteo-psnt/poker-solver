@@ -595,9 +595,9 @@ def compute_lbr_exploitability(
 
     Plays ``config.num_hands`` deals; on each, the LBR player exploits from both
     positions (paired sampling on the same deal to cut variance) and the sample
-    exploitability is ``(u_p0 + u_p1) / 2``. This mirrors the convention in
-    :func:`~src.pipeline.evaluation.exploitability.compute_exploitability`,
-    which assumes button-symmetrized on-policy value is ~0, so the two figures
+    exploitability is ``(u_p0 + u_p1) / 2``. This mirrors the convention of
+    ``public_tree_br.exploitability_mbb`` -- a mean over per-seat BR values,
+    assuming button-symmetrized on-policy value is ~0 -- so the two figures
     are directly comparable — LBR should never report *less*.
 
     To *compare* two blueprints, run both evals with the same explicit seed and
