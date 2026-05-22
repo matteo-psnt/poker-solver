@@ -74,10 +74,15 @@ definition: never a source of truth, never worth backing up.
   answer a question about the wrong machine — the node mounts the share, and the
   laptop's copy is irrelevant. Config overrides likewise go through `--set k=v`
   and nothing else: a task carries a config name plus `LegSpec.sets`.
-- `uv run poker-solver` — the single entrypoint, in three groups:
-  - **see and dispatch** — `status`, `submit`, `score`, `submit-precompute`,
+- `uv run poker-solver` — the single entrypoint, in four groups, and the order
+  of the `COMMANDS` tuple IS the grouping:
+  - **open a surface** — `status`, `serve`, `blueprint-serve`, `serve-box`.
+    One screen, or a server putting a surface on localhost: `serve` is the
+    console, `blueprint-serve` is one trained run served for reading, and
+    `serve-box` reports/wakes/stops the VM the latter runs on.
+  - **dispatch and account for work** — `submit`, `score`, `submit-precompute`,
     `jobs`, `logs`, `tasks`, `cancel`, `pool-status`, `autoscale-check`,
-    `push-code`, `push-data`.
+    `push-code`, `push-data`, `compact-legs`.
     **`status` is the one screen for "what is the pool doing right now"** —
     it composes `pool-status` + `jobs` + `tasks` through `invoke()` and renders
     each with the command that owns it. Panels are fetched CONCURRENTLY and
@@ -96,8 +101,8 @@ definition: never a source of truth, never worth backing up.
     invoked BY the node wrapper, on whichever box executes the task; not a
     local-compute door, and they keep `--runs-dir` because a node writes to
     `/mnt/work` before publishing.
-  - **read the record** — `ledger`, `curve`, `progress`, `runinfo`, `report`,
-    `compare`, `promote`. **There is no `--source` and no `--runs-dir`: every
+  - **read the record** — `ledger`, `curve`, `cost`, `progress`, `runs`,
+    `runinfo`, `report`, `compare`, `promote`. **There is no `--source` and no `--runs-dir`: every
     reader answers against the published record**, materialised into a temp
     tree and discarded. Nothing on a laptop is a source of truth about a run,
     so a local copy could only be a stale second answer. The eval index is
@@ -141,14 +146,21 @@ definition: never a source of truth, never worth backing up.
   `Path` cannot print fine on one surface and 500 the other, past the refusal
   ladder. They differ in one declared respect: the console keeps
   `allow_nan=False`, because `JSON.parse` rejects `NaN`.
-- **Azure dispatch is Python, in `src/interfaces/cloud/`** — `spec.py` (pure,
-  the testable core: what a task IS), `batch.py`, `share.py`, `dispatch.py`,
-  `config.py`, `workspace.py` (what `--source share` materialises). It lives
-  under `interfaces` so nothing in
-  `pipeline`/`engine`/`core` can reach Azure. **Auth is `AzureCliCredential`,
-  never `DefaultAzureCredential`** — the default chain probes the link-local
-  IMDS address, which on a laptop hangs rather than refusing (measured: >120s
-  vs 1.3s).
+- **Azure dispatch is Python, in `src/interfaces/cloud/`** — three sub-packages
+  by what the code TALKS TO, not by what it is about:
+  - `tasks/` — Batch. `spec.py` (pure, the testable core: what a task IS),
+    `batch.py` (the SDK client), `dispatch.py` (queueing one).
+  - `store/` — the SMB share. `share.py` (the file operations),
+    `workspace.py` (materialising the published record a reader answers against).
+  - `cost/` — what it all billed. `billing.py`, against Cost Management.
+
+  Above them, because all three need them: `config.py` (credentials and resource
+  ids) and `serve_box.py` (provisioning the play-server VM, which shares nothing
+  with dispatching work or reading the bill). The package lives under
+  `interfaces` so nothing in `pipeline`/`engine`/`core` can reach Azure.
+  **Auth is `AzureCliCredential`, never `DefaultAzureCredential`** — the default
+  chain probes the link-local IMDS address, which on a laptop hangs rather than
+  refusing (measured: >120s vs 1.3s).
 - `just` is **Terraform lifecycle + `panic` + `credit-check` + a few aliases**.
   `just panic <rg> <account> <pool>` is the one recipe that deliberately avoids
   the Python CLI and reads no Terraform state, so it works from a phone in Azure
@@ -248,7 +260,10 @@ plus a go-ahead check before anything multi-hour — a scheduling constraint, no
 a budget one.
 
 ## Code Style
-Python 3.12+. Ruff enforces formatting and import sorting — don't hand-police
+Python 3.13+ (`requires-python = ">=3.13"`, ruff `target-version = "py313"`).
+The one exception is `src/shared/cloudtask/`, which the node imports on the
+pinned image's system `python3` — 3.10 — before `uv sync`; two tests enforce
+that floor. Ruff enforces formatting and import sorting — don't hand-police
 style. What is *not* enforced by tooling:
 - Prefer explicit, typed interfaces between solver, training, and evaluation
   layers.

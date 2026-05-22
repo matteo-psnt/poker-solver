@@ -178,7 +178,7 @@ The primary quality metric is **exploitability**, measured with **Local Best Res
 - `--opponent blueprint|deployed` — raw strategy table vs. blueprint + runtime resolver
 - `--include-off-tree` — allow the exploiter off the trained action tree (shadow-state translation)
 
-Every evaluation is recorded to `data/eval_ledger.jsonl` with git provenance and the pinned abstraction hash; `poker-solver compare` runs a paired statistical comparison and refuses mismatched seeds or tiers.
+Every evaluation is written as its own document under `<run_dir>/evals/`, with git provenance and the pinned abstraction hash. There is no stored index: `poker-solver ledger` DERIVES one from the published documents on every read, which is what makes evaluating from several boxes at once safe. `poker-solver compare` runs a paired statistical comparison and refuses mismatched seeds or tiers.
 
 An older rollout-based estimator (`compute_exploitability`) is retained as a fast smoke test only — it measures a one-ply deviation gain and is not a trustworthy exploitability figure.
 
@@ -215,17 +215,17 @@ uv run lint-imports
 ```
 poker-solver/
 ├── src/
-│   ├── interfaces/      # cli/ (the CLI) + web/ (the console's API) + cloud/ dispatch
+│   ├── interfaces/      # commands/ (every subcommand) + cli/ and web/ that render them + cloud/ dispatch
 │   ├── pipeline/        # Training, evaluation, abstraction workflows
 │   ├── engine/          # Solver/search internals
 │   ├── core/            # Poker domain foundations (game/actions)
-│   └── shared/          # Cross-layer utilities (config, node/ wrapper, cache)
+│   └── shared/          # Cross-layer utilities (config/, cloudtask/ node wrapper, cache)
 ├── console/             # The web console (Vite + React); its own npm toolchain
 ├── tests/               # Mirrors src/ layout + integration tests
 ├── config/
 │   ├── training/        # Training configuration presets
 │   └── abstraction/     # Card abstraction presets
-├── infra/               # Azure Batch substrate (Terraform) + run_leg.py node wrapper
+├── infra/               # Azure Batch substrate (Terraform) + run_task.py, the node's entry point
 └── justfile             # Terraform lifecycle, `panic`, `credit-check`
 ```
 
