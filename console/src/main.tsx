@@ -1,3 +1,4 @@
+import { isTransient } from "@/api/client";
 import { Shell } from "@/components/Shell";
 import { Cost } from "@/routes/Cost";
 import { Dispatch } from "@/routes/Dispatch";
@@ -102,7 +103,15 @@ const queryClient = new QueryClient({
     queries: {
       // A cloud read that failed is unlikely to succeed on an immediate retry,
       // and the panel already shows the reason. Retrying would only delay it.
-      retry: false,
+      // The exception is the server not being there YET — see `isTransient`.
+      // `console-dev` starts Vite and `serve` together and Vite wins by several
+      // seconds, so at boot this is the NORMAL state, not an incident.
+      retry: (failureCount, error) => isTransient(error) && failureCount < 5,
+      // Backs off to ~15s of trying, which covers a cold `serve` (the Azure SDK
+      // import alone is most of it). Capped rather than growing: a page left
+      // open through a real outage should keep asking at a sane cadence, not
+      // drift to minutes between attempts.
+      retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 5_000),
       // Keep showing the last good answer while refetching, so a panel never
       // blanks between polls.
       placeholderData: (previous: unknown) => previous,

@@ -19,6 +19,32 @@ export class ApiError extends Error {
 }
 
 /**
+ * Whether a failure is worth trying again — the ONE case where it is.
+ *
+ * Nothing was retried, on the reasoning that a cloud read which failed will not
+ * succeed a second later. That is right for everything the server itself
+ * answers: a 422 is a refusal it will repeat, and a 503 means Azure did not
+ * answer, which needs `az login` and not patience.
+ *
+ * It is wrong for the server not being there YET, which is the ordinary state
+ * for the first seconds of `just console-dev`: it starts Vite and `serve`
+ * together, Vite is ready in ~3s and the Python server is not, so every query
+ * fired in that window failed permanently. Panels on an interval healed
+ * themselves and looked fine; `configs` — `staleTime: Infinity`, no interval —
+ * stayed broken for the life of the tab, which is how this surfaced.
+ *
+ * Two shapes, and neither is the server declining to answer. 502 is our own
+ * "the body was not JSON", which in dev is Vite handing back the SPA for a
+ * refused connection. A bare `TypeError` is `fetch` failing to connect at all,
+ * which is what production looks like when `serve` is down — there is no proxy
+ * there to dress it up.
+ */
+export function isTransient(error: unknown): boolean {
+  if (error instanceof ApiError) return error.status === 502;
+  return error instanceof TypeError;
+}
+
+/**
  * Generic over the SCHEMA, not over a payload type.
  *
  * `z.infer` is the schema's OUTPUT type, and that distinction is load-bearing:
