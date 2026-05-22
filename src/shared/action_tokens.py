@@ -1,7 +1,7 @@
 """Preflop action-size token vocabulary (e.g. ``"3x_open"``, ``"2.5x_last"``, ``"jam"``).
 
 Single source of truth for the token format: config validation
-(``src/shared/config.py``) and runtime parsing
+(``src/shared/config/schema.py``) and runtime parsing
 (``src/core/actions/action_model.py``) both build on these helpers so the
 accepted vocabulary cannot drift between the two.
 """

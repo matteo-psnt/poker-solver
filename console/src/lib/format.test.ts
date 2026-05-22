@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runLabel, span, taskLabel } from "./format";
 
 /**
- * These mirror `run_token` and `task_id` in `src/interfaces/cloud/spec.py`.
+ * These mirror `run_token` and `task_id` in `src/interfaces/cloud/tasks/spec.py`.
  *
  * If the Python rule changes and these do not, the console and Batch start
  * showing different words for one task — which is exactly the confusion the
