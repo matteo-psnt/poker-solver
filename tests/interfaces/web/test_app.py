@@ -172,3 +172,62 @@ class TestServingTheConsole:
         an ordering mistake would turn every endpoint into the SPA shell."""
         assert client.get("/api/pool").status_code == 200
         assert invoked
+
+
+class TestThePayloadEncodesLikeTheCLI:
+    """The bytes are the interface, not just the dict.
+
+    `headless --json` serialises with `jsonio.dumps`, which carries a `default`
+    hook for values JSON has no native form for. Starlette's `JSONResponse` has
+    no such hook, so the same payload printed fine on one surface and raised a
+    `TypeError` from inside the response on the other -- past the refusal /
+    unavailable ladder, reaching the browser as an untranslated 500.
+
+    Nothing reaches it today: every console-reachable payload is derived from
+    JSONL on the share, and the numpy-adjacent numbers are coerced at their
+    source. That is provenance, not a guarantee, and `PAYLOADS` cannot pin it --
+    the fixture is hand-written JSON-native literals, so a probe over it passes
+    unconditionally. Hence a payload built to be hostile.
+    """
+
+    def test_a_payload_json_cannot_natively_encode_still_answers(self, client, monkeypatch):
+        import numpy as np
+
+        def _invoke(self: Command, **kwargs: Any) -> dict[str, Any]:
+            return {
+                "op": "pool-status",
+                "coverage": np.float32(0.5),
+                "touched": np.int64(7),
+                "where": Path("/mnt/work/runs"),
+            }
+
+        monkeypatch.setattr(Command, "invoke", _invoke)
+        response = client.get("/api/pool")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["coverage"] == pytest.approx(0.5)
+        assert body["touched"] == pytest.approx(7)
+        assert body["where"] == "/mnt/work/runs"
+
+    def test_a_nan_fails_loudly_rather_than_reaching_the_client(self, client, monkeypatch):
+        """The one respect in which the two surfaces still differ, deliberately.
+
+        `NaN` is not valid JSON and `JSON.parse` rejects it, so the console asks
+        for a failure with an origin rather than a parse error in the browser.
+        This is Starlette's own `allow_nan=False`, kept rather than introduced.
+
+        `allow_nan=False` rejects `Infinity` too, so blessing it means knowing
+        no console-reachable payload can produce one. Checked: the only ratio on
+        that surface is `ExploitabilityCurve.decay_ratio`, which returns `None`
+        rather than dividing when the last point is 0. What remains is a
+        non-finite value already written INTO a record, which is a bug upstream
+        — and failing at the boundary is how it gets an origin.
+        """
+
+        def _invoke(self: Command, **kwargs: Any) -> dict[str, Any]:
+            return {"op": "pool-status", "rate": float("nan")}
+
+        monkeypatch.setattr(Command, "invoke", _invoke)
+        with pytest.raises(ValueError, match="Out of range float"):
+            client.get("/api/pool")

@@ -124,7 +124,7 @@ class TestReportedLedgerPath:
 
         derived = tmp_path / "derived.jsonl"
         derived.write_text("")
-        monkeypatch.setattr(ledger_cmd, "ledger_for", lambda args, root: derived)
+        monkeypatch.setattr(ledger_cmd, "ledger_for", lambda root: derived)
         args = argparse.Namespace(
             run=None,
             experiment=None,

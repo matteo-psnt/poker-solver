@@ -32,7 +32,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     with records_root(args) as root:
         out = services.exploitability_curve(
             resolve_run_dir(args.run, str(root)),
-            ledger_path=ledger_for(args, root),
+            ledger_path=ledger_for(root),
             tier_index=args.tier,
         )
     return {"op": "curve", "decay_ratio": out.decay_ratio, **dataclasses.asdict(out)}

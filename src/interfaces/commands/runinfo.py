@@ -42,7 +42,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     with records_root(args) as root:
         digest = services.run_digest(
             resolve_run_dir(args.run, str(root)),
-            ledger_path=ledger_for(args, root),
+            ledger_path=ledger_for(root),
             tier_index=args.tier,
             tasks_dir=Path(args.tasks_dir) if args.tasks_dir else None,
         )

@@ -42,12 +42,12 @@ SRC = repo.SRC
 TESTS = repo.ROOT / "tests"
 
 
-def _closure(module: str) -> set[str]:
+def _closure(module: str, heavy: tuple[str, ...] = HEAVY) -> set[str]:
     """The heavy top-level packages importing ``module`` drags in."""
     code = (
         "import sys, importlib;"
         f"importlib.import_module({module!r});"
-        f"print(' '.join(sorted({{m.split('.')[0] for m in sys.modules}} & set({HEAVY!r}))))"
+        f"print(' '.join(sorted({{m.split('.')[0] for m in sys.modules}} & set({heavy!r}))))"
     )
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, f"importing {module} failed:\n{done.stderr}"
@@ -70,6 +70,18 @@ class TestTheCommandSurfaceStaysLight:
         """The specific edge: a knob tier is derived from `LBRConfig`, which is
         a stdlib dataclass. It must not live behind numpy and scipy again."""
         assert _closure("src.pipeline.evaluation.ledger.tiers") == set()
+
+    def test_classifying_a_failure_does_not_import_the_azure_sdk(self):
+        """`errors.attempt` names the SDK's exceptions, and `_base` imports
+        `errors`, so EVERY command would pay for them at module scope.
+
+        Measured at 76ms against a 0.18s `--help` — invisible in a wall-clock
+        assertion, which is why this is a closure. `_azure_failures()` resolves
+        them on first use instead, by which point the caller has already
+        imported the SDK to talk to Batch at all.
+        """
+        assert _closure("src.interfaces.errors", ("azure",)) == set()
+        assert _closure("src.interfaces.commands", ("azure",)) == set()
 
 
 class TestNothingReachesLBRConfigThroughTheEvaluator:

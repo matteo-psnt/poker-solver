@@ -169,13 +169,19 @@ def records_root(args: argparse.Namespace) -> Iterator[Path]:
         yield root
 
 
-def ledger_for(args: argparse.Namespace, root: Path) -> Path:  # noqa: ARG001
+def ledger_for(root: Path) -> Path:
     """The eval index, REBUILT from the published documents.
 
     There is deliberately no ledger FILE on the share: a second writable file
     on a share with no atomic append is the contention the per-run records were
     introduced to remove. Each published document carries its own provenance,
     so the index is derived on demand instead of stored.
+
+    Takes only the root. It used to take ``args`` as well, from when a
+    ``--source`` flag chose where the ledger came from; that flag is gone --
+    every reader answers against the published record -- and the parameter
+    outlived it as a ``noqa: ARG001``, which reads as "this function considers
+    your flags" to anyone adding one.
     """
     derived = root / "eval_ledger.jsonl"
     rebuild_ledger(root, derived)

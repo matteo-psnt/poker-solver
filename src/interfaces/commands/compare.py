@@ -49,7 +49,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _compare(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    ledger_path = ledger_for(args, root)
+    ledger_path = ledger_for(root)
     rec_a = eval_ledger.latest_record_for_run(args.a, ledger_path, args.a_at)
     rec_b = eval_ledger.latest_record_for_run(args.b, ledger_path, args.b_at)
     if rec_a is None or rec_b is None:

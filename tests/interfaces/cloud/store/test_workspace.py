@@ -126,12 +126,9 @@ class TestSourceSeam:
     def test_share_derives_the_index_rather_than_reading_a_shared_file(self, tmp_path):
         """A second writable file on a share with no atomic append is the
         contention the per-run records exist to remove."""
-        import argparse
-
         from src.interfaces.commands import _base
 
-        args = argparse.Namespace(source="share", runs_dir="unused", ledger="unused.jsonl")
-        derived = _base.ledger_for(args, tmp_path)
+        derived = _base.ledger_for(tmp_path)
         assert derived.parent == tmp_path, "derived inside the materialised tree"
         assert derived.is_file(), "rebuild_ledger ran"
 
