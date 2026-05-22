@@ -17,6 +17,8 @@ def _patch_metadata(monkeypatch, *, commit="abc123", dirty=False):
             num_infosets=43041,
             config_name="quick_test",
             status="completed",
+            experiment_id=None,
+            arm=None,
         ),
     )
     monkeypatch.setattr(services_runs, "commits_ahead_of", lambda _commit: 4)

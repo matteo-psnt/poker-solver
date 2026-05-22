@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
 import fixture from "./payloads.fixture.json";
 import {
+  autoscaleSchema,
+  compactSchema,
+  compareSchema,
+  configsSchema,
   costSchema,
   curveSchema,
+  dispatchedSchema,
   jobsSchema,
   ledgerSchema,
   poolSchema,
+  promoteSchema,
+  pushCodeSchema,
+  pushDataSchema,
+  reportSchema,
   runinfoSchema,
   runsSchema,
   tasksSchema,
@@ -29,6 +38,19 @@ const CASES = [
   ["curve", curveSchema],
   ["ledger", ledgerSchema],
   ["cost", costSchema],
+  ["configs", configsSchema],
+  ["autoscale-check", autoscaleSchema],
+  ["report", reportSchema],
+  ["compare", compareSchema],
+  // All three dispatches share one schema, so all three are checked against it.
+  // A key that only `score` carries would otherwise be nobody's contract.
+  ["submit", dispatchedSchema],
+  ["score", dispatchedSchema],
+  ["submit-precompute", dispatchedSchema],
+  ["push-code", pushCodeSchema],
+  ["push-data", pushDataSchema],
+  ["compact-legs", compactSchema],
+  ["promote", promoteSchema],
 ] as const;
 
 describe("schemas parse the payloads Python actually emits", () => {

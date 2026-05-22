@@ -122,6 +122,11 @@ export const runSummarySchema = z
     num_infosets: z.number().nullable(),
     config_name: z.string().nullable(),
     status: z.string().nullable(),
+    /** Lineage. The run listing is the only place the SET of experiments
+        exists — `report` takes an id and `runinfo` reports one run's — so the
+        experiment picker is built from these. Absent on every legacy run. */
+    experiment_id: z.string().nullable().optional(),
+    arm: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -425,3 +430,181 @@ export const cancelSchema = z
   .passthrough();
 
 export type Cancelled = z.infer<typeof cancelSchema>;
+
+/**
+ * The commands the console gained when coverage became a maintained property.
+ *
+ * `tests/interfaces/web/test_command_coverage.py` is the other half: it fails if
+ * a command has neither an endpoint nor a written-down reason to lack one. These
+ * schemas are what makes an endpoint usable rather than merely present.
+ */
+
+export const configsSchema = z
+  .object({
+    op: z.literal("configs"),
+    root: z.string(),
+    kinds: z.array(
+      z
+        .object({
+          kind: z.string(),
+          /** The flag these feed, verbatim — so a picker can say what it sets. */
+          flag: z.string(),
+          names: z.array(z.string()),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+/**
+ * The deployed autoscale formula, evaluated against the live pool.
+ *
+ * `error` is a FIELD, not a failed request: Batch evaluates the formula and
+ * reports that it did not compute, which is the answer to "why is the pool not
+ * growing" and must reach the screen rather than blanking the panel.
+ */
+export const autoscaleSchema = z
+  .object({
+    op: z.literal("autoscale-check"),
+    pool_id: z.string(),
+    variables: z.array(z.string()).default([]),
+    error: z.string().nullable(),
+  })
+  .passthrough();
+
+/**
+ * One experiment, every arm attributed against its control.
+ *
+ * `vs_control_blocked` is the field that matters and the one easiest to drop: an
+ * arm that could not be paired has no `vs_control_mbb`, and rendering that as a
+ * dash claims "no difference" for a comparison that never happened.
+ */
+export const reportSchema = z
+  .object({
+    op: z.literal("report"),
+    experiment_id: z.string(),
+    control_run_id: z.string().nullable(),
+    baseline_run_id: z.string().nullable(),
+    notes: z.array(z.string()).default([]),
+    arms: z.array(
+      z
+        .object({
+          arm: z.string(),
+          run_id: z.string(),
+          checkpoint_iteration: z.number().nullable(),
+          exploitability_mbb: z.number().nullable(),
+          std_error_mbb: z.number().nullable(),
+          git_branch: z.string().nullable().optional(),
+          vs_control_mbb: z.number().nullable(),
+          vs_control_p_value: z.number().nullable(),
+          vs_control_blocked: z.array(z.string()).default([]),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+/**
+ * A paired comparison of two runs.
+ *
+ * `comparison` is nullable because the command refuses rather than guesses: two
+ * runs with no shared seed have no paired statistic, and `tier_warnings` says
+ * why. Both halves are needed — a refusal with no reason is indistinguishable
+ * from a bug.
+ */
+export const compareSchema = z
+  .object({
+    op: z.literal("compare"),
+    run_a: z.string(),
+    run_b: z.string(),
+    tier_warnings: z.array(z.string()).default([]),
+    comparison: z
+      .object({
+        mean_a: z.number(),
+        mean_b: z.number(),
+        mean_diff: z.number(),
+        se_diff: z.number(),
+        ci_lower: z.number(),
+        ci_upper: z.number(),
+        p_value: z.number(),
+        is_significant: z.boolean(),
+        correlation: z.number().nullable(),
+        se_unpaired: z.number().nullable(),
+      })
+      .passthrough()
+      .nullable(),
+  })
+  .passthrough();
+
+/**
+ * What a dispatch reports back. One shape for all three, because
+ * `dispatch.stage_and_queue` supplies the same three keys to each: the snapshot
+ * it sealed, the job it queued into, and the tasks it created.
+ *
+ * The op differs, so it is not narrowed here — the page already knows which
+ * button it pressed, and a literal per command would be three near-identical
+ * schemas whose only job is to disagree with each other eventually.
+ */
+export const dispatchedSchema = z
+  .object({
+    op: z.string(),
+    code_snapshot: z.string(),
+    job_id: z.string(),
+    tasks: z.array(z.string()).default([]),
+  })
+  .passthrough();
+
+export const pushCodeSchema = z
+  .object({ op: z.literal("push-code"), code_snapshot: z.string() })
+  .passthrough();
+
+export const pushDataSchema = z
+  .object({
+    op: z.literal("push-data"),
+    /** abstraction name → files uploaded. Empty means everything was current. */
+    uploaded: z.record(z.number()).default({}),
+  })
+  .passthrough();
+
+/**
+ * `compact-legs`, whose payload describes BOTH halves of the operation.
+ *
+ * `applied`/`verified`/`deleted` are what separate a dry run from the
+ * irreversible one, and the page renders the dry run's numbers as a preview
+ * before offering it — so the same shape has to carry "what would move" and
+ * "what did".
+ */
+export const compactSchema = z
+  .object({
+    op: z.literal("compact-legs"),
+    bundle: z.string().nullable(),
+    files_before: z.number(),
+    files_after: z.number(),
+    movable: z.number(),
+    attempts: z.number().optional(),
+    applied: z.boolean(),
+    verified: z.boolean(),
+    deleted: z.number(),
+    backup: z.string().nullable(),
+  })
+  .passthrough();
+
+export const promoteSchema = z
+  .object({
+    op: z.literal("promote"),
+    run_id: z.string(),
+    rationale: z.string(),
+    promoted_at: z.string().nullable(),
+    checkpoint_iteration: z.number().nullable(),
+  })
+  .passthrough();
+
+export type Configs = z.infer<typeof configsSchema>;
+export type Autoscale = z.infer<typeof autoscaleSchema>;
+export type Report = z.infer<typeof reportSchema>;
+export type Comparison = z.infer<typeof compareSchema>;
+export type Dispatched = z.infer<typeof dispatchedSchema>;
+export type PushedCode = z.infer<typeof pushCodeSchema>;
+export type PushedData = z.infer<typeof pushDataSchema>;
+export type Compacted = z.infer<typeof compactSchema>;
+export type Promoted = z.infer<typeof promoteSchema>;

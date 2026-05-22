@@ -9,28 +9,42 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, send } from "./client";
 import {
+  type Autoscale,
   type BlueprintRun,
   type Box,
   type Cancelled,
   type Combos,
+  type Compacted,
+  type Comparison,
+  type Configs,
   type Cost,
   type Curve,
+  type Dispatched,
   type Hand,
   type Jobs,
   type Ledger,
   type LogLines,
   type Pool,
   type Progress,
+  type Promoted,
+  type PushedCode,
+  type PushedData,
+  type Report,
   type RunInfo,
   type Runs,
   type SolverNode,
   type Tasks,
+  autoscaleSchema,
   blueprintRunSchema,
   boxSchema,
   cancelSchema,
   combosSchema,
+  compactSchema,
+  compareSchema,
+  configsSchema,
   costSchema,
   curveSchema,
+  dispatchedSchema,
   handSchema,
   jobsSchema,
   ledgerSchema,
@@ -38,6 +52,10 @@ import {
   nodeSchema,
   poolSchema,
   progressSchema,
+  promoteSchema,
+  pushCodeSchema,
+  pushDataSchema,
+  reportSchema,
   runinfoSchema,
   runsSchema,
   tasksSchema,
@@ -129,6 +147,121 @@ export const useEvals = (limit = 50) =>
     queryFn: () => get(`/api/evals?limit=${limit}`, ledgerSchema),
     refetchInterval: SLOW,
   });
+
+/**
+ * A local directory read, and the only query here that touches neither Azure
+ * nor the share. `staleTime: Infinity` because a config file appearing while
+ * the console is open is not a thing worth polling for — the picker has a
+ * refresh, and that is the honest cost of a list that changes when someone
+ * edits the repo.
+ */
+export const useConfigs = () =>
+  useQuery<Configs>({
+    queryKey: ["configs"],
+    queryFn: () => get("/api/configs", configsSchema),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+/**
+ * The deployed autoscale formula, evaluated live. Polled at the pool's cadence:
+ * the formula is static but the variables it reads are the pool's own state,
+ * which is exactly what the panel is being asked about.
+ */
+export const useAutoscale = () =>
+  useQuery<Autoscale>({
+    queryKey: ["autoscale"],
+    queryFn: () => get("/api/autoscale", autoscaleSchema),
+    refetchInterval: FAST,
+  });
+
+/**
+ * One experiment's report. `enabled` on the id: the page opens with no
+ * experiment selected, and a request for `""` would be a share read that can
+ * only refuse.
+ */
+export const useReport = (experimentId: string | null) =>
+  useQuery<Report>({
+    queryKey: ["report", experimentId],
+    queryFn: () => get(`/api/experiments/${encodeURIComponent(experimentId ?? "")}`, reportSchema),
+    enabled: Boolean(experimentId),
+    refetchInterval: SLOW,
+  });
+
+/**
+ * A paired comparison. Not polled at all, and `enabled` only once BOTH runs are
+ * chosen — this is a question someone asks deliberately, and the answer cannot
+ * change without a new evaluation landing.
+ */
+export const useCompare = (a: string, b: string, force: boolean) =>
+  useQuery<Comparison>({
+    queryKey: ["compare", a, b, force],
+    queryFn: () =>
+      get(
+        `/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}&force=${force}`,
+        compareSchema,
+      ),
+    enabled: Boolean(a && b),
+    refetchInterval: false,
+  });
+
+/**
+ * The dispatching writes.
+ *
+ * Each invalidates what its work will show up in — `jobs` and `tasks` for a
+ * queued task, `runs` for a promotion. The click is not the authority on any of
+ * it: Batch is, and the invalidation is how the page goes and asks.
+ *
+ * The bodies are `Record<string, unknown>` rather than mirrored interfaces on
+ * purpose. The server's models already declare what each command accepts, and
+ * they declare it by DROPPING what the caller omitted — a TypeScript interface
+ * that filled in defaults would put them back, which is the exact disagreement
+ * that design exists to prevent. The form builds the body it means to send.
+ */
+const useDispatch = <T>(path: string, schema: Parameters<typeof send>[1]) => {
+  const queryClient = useQueryClient();
+  return useMutation<T, Error, Record<string, unknown>>({
+    mutationFn: (body) => send(path, schema, body),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+};
+
+export const useSubmit = () => useDispatch<Dispatched>("/api/submit", dispatchedSchema);
+export const useScore = () => useDispatch<Dispatched>("/api/score", dispatchedSchema);
+export const usePrecompute = () => useDispatch<Dispatched>("/api/precompute", dispatchedSchema);
+
+export const usePushCode = () =>
+  useMutation<PushedCode, Error, Record<string, unknown>>({
+    mutationFn: (body) => send("/api/push-code", pushCodeSchema, body),
+  });
+
+export const usePushData = () =>
+  useMutation<PushedData, Error, Record<string, unknown>>({
+    mutationFn: (body) => send("/api/push-data", pushDataSchema, body),
+  });
+
+/**
+ * `compact-legs`, both halves. The dry run and the apply are the same endpoint
+ * and differ only in the body, which is why they are one hook: a page that had
+ * two could show a preview from one and apply the other.
+ */
+export const useCompactLegs = () => {
+  const queryClient = useQueryClient();
+  return useMutation<Compacted, Error, Record<string, unknown>>({
+    mutationFn: (body) => send("/api/compact-legs", compactSchema, body),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+  });
+};
+
+export const usePromote = () => {
+  const queryClient = useQueryClient();
+  return useMutation<Promoted, Error, Record<string, unknown>>({
+    mutationFn: (body) => send("/api/promote", promoteSchema, body),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
+  });
+};
 
 /**
  * The blueprint server. Not polled: a loaded run does not change under you, so

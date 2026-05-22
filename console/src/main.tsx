@@ -1,10 +1,13 @@
 import { Shell } from "@/components/Shell";
 import { Cost } from "@/routes/Cost";
+import { Dispatch } from "@/routes/Dispatch";
 import { Evals } from "@/routes/Evals";
+import { Experiments } from "@/routes/Experiments";
 import { Overview } from "@/routes/Overview";
 import { Play } from "@/routes/Play";
 import { RunDetail } from "@/routes/RunDetail";
 import { Runs } from "@/routes/Runs";
+import { Share } from "@/routes/Share";
 import { Solver } from "@/routes/Solver";
 import { TaskLog } from "@/routes/TaskLog";
 import { Tasks } from "@/routes/Tasks";
@@ -64,6 +67,25 @@ const routes = [
     getParentRoute: () => rootRoute,
     path: "/cost",
     component: Cost,
+  }),
+  // The write surfaces. No search params: a dispatch form's state is what the
+  // operator is about to DO, and putting that in the URL makes a half-filled
+  // submission bookmarkable and shareable — which is the wrong thing to be able
+  // to hand someone.
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/dispatch",
+    component: Dispatch,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/share",
+    component: Share,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/experiments",
+    component: Experiments,
   }),
 ];
 
