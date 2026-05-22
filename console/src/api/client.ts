@@ -30,17 +30,68 @@ export async function get<S extends z.ZodTypeAny>(path: string, schema: S): Prom
   const response = await fetch(path, {
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null);
+  const raw = await response.text();
 
   if (!response.ok) {
     // The server puts the reason in `error` for exactly this: 422 is a refusal
     // (an unpublished run), 503 is the cloud (an expired `az login`). Both are
     // sentences meant for a person.
-    const reason =
-      body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : `${response.status} ${response.statusText}`;
-    throw new ApiError(reason, response.status);
+    throw new ApiError(reasonFrom(raw, response), response.status);
+  }
+
+  return check(path, schema, raw, response);
+}
+
+/**
+ * The reason a failed response carries, or its status line.
+ *
+ * A failure whose body is not JSON at all — a proxy's own error page, a gateway
+ * timeout — has no `error` field to read, and running it through `JSON.parse`
+ * would throw *inside the error path* and replace a status nobody has to guess
+ * at with a parse error nobody can act on.
+ */
+function reasonFrom(raw: string, response: Response): string {
+  try {
+    const body = JSON.parse(raw);
+    if (body && typeof body === "object" && "error" in body) {
+      return String((body as { error: unknown }).error);
+    }
+  } catch {
+    // Not JSON. The status line is the honest answer.
+  }
+  return `${response.status} ${response.statusText}`;
+}
+
+/**
+ * Parse a successful response, telling the two failures APART.
+ *
+ * They were one message, and the wrong one won. A 200 whose body is not JSON
+ * used to reach `safeParse(null)` and be reported as *"did not match the
+ * expected shape — Expected object, received null"*, which names the schema and
+ * sends the reader to `schemas.ts`. The actual cause is upstream and has
+ * nothing to do with the contract: under `console-dev` the Vite proxy answers a
+ * refused connection with the SPA's own `index.html` at status 200, so every
+ * panel blamed its payload while the real fact was that `serve` was not
+ * running. That is a five-minute detour per occurrence and it recurs, because
+ * the dev server outlives the backend by design.
+ *
+ * So a non-JSON body is a transport failure and says so, and a schema mismatch
+ * keeps the loud field-naming message it is good at.
+ */
+function check<S extends z.ZodTypeAny>(
+  path: string,
+  schema: S,
+  raw: string,
+  response: Response,
+): z.infer<S> {
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    throw new ApiError(
+      `${path} answered ${response.status} but the body is not JSON. The API server is probably not running — start it with "just console" (or "poker-solver serve").`,
+      502,
+    );
   }
 
   const parsed = schema.safeParse(body);
@@ -48,8 +99,11 @@ export async function get<S extends z.ZodTypeAny>(path: string, schema: S): Prom
     // Loud, at the boundary, naming the field. The alternative is `undefined`
     // three components deep, which reads as a UI bug rather than a contract one.
     const issue = parsed.error.issues[0];
+    // A root-level mismatch has an empty path, and joining it produced a stray
+    // "` — `" with nothing before it.
+    const where = issue?.path.length ? `${issue.path.join(".")} — ` : "";
     throw new ApiError(
-      `Payload from ${path} did not match the expected shape: ${issue?.path.join(".")} — ${issue?.message}`,
+      `Payload from ${path} did not match the expected shape: ${where}${issue?.message}`,
       500,
     );
   }
@@ -75,23 +129,15 @@ export async function send<S extends z.ZodTypeAny>(
     headers: { accept: "application/json", "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const payload = await response.json().catch(() => null);
+  const raw = await response.text();
 
   if (!response.ok) {
-    const reason =
-      payload && typeof payload === "object" && "error" in payload
-        ? String((payload as { error: unknown }).error)
-        : `${response.status} ${response.statusText}`;
-    throw new ApiError(reason, response.status);
+    throw new ApiError(reasonFrom(raw, response), response.status);
   }
 
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    throw new ApiError(
-      `Payload from ${path} did not match the expected shape: ${issue?.path.join(".")} — ${issue?.message}`,
-      500,
-    );
-  }
-  return parsed.data;
+  // The same two-failures-apart rule as `get`, and it matters MORE here: a
+  // dispatch that queued a task and then failed to parse its own receipt must
+  // not read as "the submission was malformed". It was not — the work is on the
+  // pool, and the message has to point at the response, not the request.
+  return check(path, schema, raw, response);
 }
