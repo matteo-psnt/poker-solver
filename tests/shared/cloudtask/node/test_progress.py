@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 
+from src.shared import task_history
 from src.shared.cloudtask import task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import plan as node_plan
@@ -97,7 +98,7 @@ class TestProgressHeartbeat:
             paths.share, task_id="t-1", event=task_log.EVENT_FINISHED, cause="completed"
         )
 
-        (row,) = task_log.read_tasks(paths.share)
+        (row,) = task_history.read_tasks(paths.share)
         assert row["cause"] == "completed"
         assert row["progress"] is None
 

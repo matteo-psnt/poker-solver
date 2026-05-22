@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 import tempfile
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,7 +29,8 @@ from src.interfaces.cloud.store import share, workspace
 from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands import jobs
 from src.interfaces.commands._base import Command
-from src.shared.cloudtask import task_log
+from src.shared import task_history
+from src.shared.cloudtask import kinds, task_log
 
 # Round trips, not bytes: see `workspace._PARALLEL_DOWNLOADS`, measured there.
 _PARALLEL_SHARE_IO = 64
@@ -80,7 +81,7 @@ def _result(rows: list[dict[str, Any]], reconciled: int | None, limit: int) -> d
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Join the node's account with Batch's, and report one row per attempt."""
     if args.tasks_dir:
-        return _result(task_log.read_tasks(Path(args.tasks_dir)), None, args.limit)
+        return _result(task_history.read_tasks(Path(args.tasks_dir)), None, args.limit)
 
     config = CloudConfig.load()
     service = share.share_client(config)
@@ -89,7 +90,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         # Only the tasks with no terminal record are worth asking about; the module
         # decides which those are, so the criterion lives in one place rather than
         # being re-derived from a rendered table.
-        open_tasks = task_log.unresolved_tasks(local)
+        open_tasks = task_history.unresolved_tasks(local)
         if not args.skip_reconcile and open_tasks:
             observed = _ask_batch(config, open_tasks)
             # Asking Batch is the slow half and overlaps freely; deciding what is
@@ -101,18 +102,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             # Serialised, the second sees the first's record and has nothing to
             # say, which is also why this is not a bottleneck.
             with _RECONCILE_LOCK:
-                explained = task_log.reconcile(local, observed)
+                explained = task_history.reconcile(local, observed)
                 _upload_observed(service, config.share_name, local, explained)
             reconciled = len(explained)
 
-        return _result(task_log.read_tasks(local), reconciled, args.limit)
+        return _result(task_history.read_tasks(local), reconciled, args.limit)
 
 
 def _translate(task: dict[str, Any]) -> dict[str, Any]:
     """Batch's vocabulary into this project's.
 
-    Done HERE, not in task_log: the record module is stdlib-only shared code
-    that the node imports, and `observed_cause` compares against bare
+    Done HERE, not in `task_history`: that module is layer-neutral and knows
+    nothing of Azure, and `observed_cause` compares against bare
     `completed`/`success`. A raw `BatchTaskState.COMPLETED` matches neither, so
     every reconciled task would read as its own state string instead of an
     outcome.
@@ -206,7 +207,7 @@ def _upload_observed(service: Any, share_name: str, local: Path, explained: list
         return
 
     def publish(task_id: str) -> None:
-        name = f"{task_id}{task_log.OBSERVED_SUFFIX}"
+        name = f"{task_id}{task_history.OBSERVED_SUFFIX}"
         body = (task_log.tasks_dir(local) / name).read_text()
         share.write_text(service, share_name, f"{task_log.RECORDS_DIRNAME}/{name}", body)
 
@@ -214,12 +215,104 @@ def _upload_observed(service: Any, share_name: str, local: Path, explained: list
         list(pool.map(publish, explained))
 
 
+def format_table(rows: Iterable[dict[str, Any]]) -> str:
+    """Compact fixed-width listing, one row per task.
+
+    The terminal's renderer, and it lives with the command that prints it: for
+    any other surface the payload IS the interface. It spent a while in
+    `task_log` instead, which put `ljust` column arithmetic inside the module
+    the node imports before `uv sync`.
+    """
+    # `what` rather than `op`: it IS the op for a task that recorded nothing more,
+    # and the op plus what it was aimed at for one that did.
+    # `code` is the branch, not the snapshot id: the id is exact but twenty
+    # characters of timestamp, and this table is for scanning. The exact answer
+    # is one `--limit 0` payload or one console click away, and both carry all
+    # three. A column here at all because comparing two arms means first knowing
+    # which arm each row IS, and every row used to look identical.
+    columns = (
+        "task_id",
+        "attempt",
+        "what",
+        "run_id",
+        "code",
+        "cause",
+        "done",
+        "left",
+        "ended_at",
+    )
+    # `done` is the running task's bar in a terminal: a phrase, since a
+    # fixed-width table has nowhere to draw one, and it says what is being
+    # counted rather than only how much of it.
+    materialised = [{c: _cell(_derived(r, c)) for c in columns} for r in rows]
+    if not materialised:
+        return "  no task records on the share"
+    widths = {c: max(len(c), *(len(r[c]) for r in materialised)) for c in columns}
+    lines = ["  " + "  ".join(c.ljust(widths[c]) for c in columns)]
+    lines.append("  " + "  ".join("-" * widths[c] for c in columns))
+    lines += ["  " + "  ".join(r[c].ljust(widths[c]) for c in columns) for r in materialised]
+    return "\n".join(lines)
+
+
+def _derived(row: dict[str, Any], column: str) -> Any:
+    if column == "code":
+        return code_label(row)
+    if column == "done":
+        progress = kinds.Progress.from_record(row.get("progress"))
+        return f"{progress.fraction:.0%} {progress.phrase}" if progress is not None else ""
+    if column == "left":
+        return _duration(row.get("eta_seconds"))
+    return row.get(column)
+
+
+def code_label(row: dict[str, Any]) -> str:
+    """One short phrase for which code a task ran, for a column or a chip.
+
+    The branch when there is one, because that is the name the work has while it
+    is being done -- `worktree-hybrid-kernels` says what the arm IS, where
+    `c13dcb7` says only which history it forked from and is shared by every
+    worktree that has not committed yet. A short commit when the checkout was
+    detached, and `+` when the tree was dirty on top of it.
+
+    Empty for the tasks that pre-date this being recorded, which is most of the
+    ones on the share: a blank column reads as "not known" where a plausible
+    filler would read as an answer.
+    """
+    branch = row.get("git_branch") or ""
+    commit = row.get("git_commit") or ""
+    base = branch or commit[:7]
+    if not base:
+        return ""
+    return f"{base}+" if row.get("git_dirty") == "1" else base
+
+
+def _duration(seconds: Any) -> str:
+    """`2h 14m`, `3m`, `40s`.
+
+    Seconds below a minute rather than `~0m`, which reads as "no estimate"
+    when it means "nearly done" -- the first probe finished in under a minute
+    and reported exactly that.
+    """
+    if not isinstance(seconds, int | float):
+        return ""
+    if seconds < 60:
+        return f"~{int(seconds)}s"
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return f"~{minutes}m"
+    return f"~{minutes // 60}h {minutes % 60}m"
+
+
+def _cell(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
 def render(payload: dict[str, Any]) -> None:
     rows = payload["rows"]
     reconciled = payload.get("reconciled")
     if reconciled:
         print(f"Asked Batch about {reconciled} task(s) the share could not explain.")
-    print(task_log.format_table(rows))
+    print(format_table(rows))
     if payload.get("hidden_rows"):
         print(f"  {payload['hidden_rows']} earlier attempt(s) hidden — show with --limit 0")
 

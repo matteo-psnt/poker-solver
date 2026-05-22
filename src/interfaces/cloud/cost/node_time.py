@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from src.shared.cloudtask import task_log
+from src.shared import task_history
 
 
 def instant(value: Any) -> datetime | None:
@@ -40,7 +40,7 @@ def intervals(
     """One (start, end) per task that ran, plus a count of the ones dropped.
 
     A task with no ``ended_at`` is credited up to ``now`` ONLY when its cause
-    says a node is committed right now (:data:`task_log.LIVE_CAUSES`).
+    says a node is committed right now (:data:`task_history.LIVE_CAUSES`).
     Excluding genuinely in-flight work would make the number dip exactly when
     the pool is busiest, which is the case the original code was written for and
     which still holds.
@@ -65,7 +65,7 @@ def intervals(
             continue
         end = instant(task.get("ended_at"))
         if end is None:
-            if task.get("cause") not in task_log.LIVE_CAUSES:
+            if task.get("cause") not in task_history.LIVE_CAUSES:
                 unended += 1
                 continue
             end = now

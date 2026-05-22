@@ -201,19 +201,28 @@ definition: never a source of truth, never worth backing up.
   pool; jobs and tasks are created at runtime by `src/interfaces/cloud/`, never
   in HCL. **The cloud task is one subsystem, in `src/shared/cloudtask/`** —
   `kinds.py` (what KIND of work a task is, read from BOTH ends of the wire),
-  `task_log.py` (the durable per-task account), and `node/`, the wrapper:
+  `task_log.py` (WRITING the durable per-task account, on the node), and `node/`,
+  the wrapper:
   `paths.py`, `process.py` (the timeout guard and the tee), `plan.py` (the
   `RUN_*` environment → the argv), `archive.py` (publish/fetch between the node
   disk and the SMB share), `progress.py` (the heartbeat and what a task
   achieved), `handlers.py` (what each kind DOES), `lifecycle.py` (one task start
   to finish, and the exit accounting), with `infra/run_task.py` as the entry
   point the task command line names. It lives under `shared` for two reasons:
-  `pipeline` reads the task log, and `pipeline → interfaces` is forbidden; and
+  `pipeline` reads the task record, and `pipeline → interfaces` is forbidden; and
   the node runs it BEFORE `uv sync`, so **stdlib only** — a constraint enforced
   twice, by `tests/shared/cloudtask/node/test_node_interpreter.py` (which
   imports the node's whole closure on the interpreter `main.tf` installs) and by
   `tests/shared/cloudtask/test_imports.py` (fail-closed: nothing outside
   `records`/`jsonio`/`cache` may be reached).
+  **READING that record is `src/shared/task_history.py`, deliberately outside
+  this package** — the join, reconciliation against Batch, and what may be
+  compacted. It runs only on a laptop, and the fail-closed guard above walks
+  every file in `cloudtask/`, so keeping it there held ~260 lines to a stdlib
+  floor they have no reason to meet. It cannot go under `interfaces` either,
+  where most callers are: `pipeline.services.experiments` joins task rows into a
+  run digest. The TABLE is neither — that is the terminal's renderer and lives
+  on the `tasks` command, like every other `render()`.
   Two shell things REMAIN shell and should stay that way: `just panic` (must
   work from a phone in Cloud Shell, with no venv and no Terraform state) and
   `main.tf`'s `start_task` (disk discovery, `mkfs`, mount — it runs before any

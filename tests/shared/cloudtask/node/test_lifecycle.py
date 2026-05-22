@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.shared import cache
+from src.shared import cache, task_history
 from src.shared.cloudtask import task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import lifecycle
@@ -70,7 +70,7 @@ class TestMain:
         monkeypatch.setitem(lifecycle.HANDLERS, TaskName.TRAIN, _signalled)
 
         assert lifecycle.main() == 143
-        (row,) = task_log.read_tasks(paths.share)
+        (row,) = task_history.read_tasks(paths.share)
         assert row["cause"] == task_log.CAUSE_CANCELLED
         assert row["exit_code"] == 143
 
@@ -81,13 +81,13 @@ class TestMain:
         monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 1)
 
         assert lifecycle.main() == 1
-        (row,) = task_log.read_tasks(paths.share)
+        (row,) = task_history.read_tasks(paths.share)
         assert row["cause"] == task_log.CAUSE_FAILED
 
     def test_a_bad_environment_is_a_message_not_a_traceback(self, paths, monkeypatch):
         monkeypatch.setenv("RUN_TO", "0")
         assert lifecycle.main() == 1
-        (row,) = task_log.read_tasks(paths.share)
+        (row,) = task_history.read_tasks(paths.share)
         assert row["cause"] == task_log.CAUSE_FAILED
         assert "ABSOLUTE" in (paths.share / "logs" / "task-1.log").read_text()
 

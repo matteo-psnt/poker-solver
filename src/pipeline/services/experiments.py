@@ -18,8 +18,7 @@ from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
-from src.shared import records, run_events
-from src.shared.cloudtask import task_log
+from src.shared import records, run_events, task_history
 from src.shared.config import DEFAULT_RUNS_DIR
 
 
@@ -408,7 +407,7 @@ def run_digest(
     progress = run_events.checkpoints(run_events.read(run_dir))
     curve = exploitability_curve(run_dir, ledger_path=ledger_path, tier_index=tier_index)
     tasks = (
-        [row for row in task_log.read_tasks(tasks_dir) if row["run_id"] == run_dir.name]
+        [row for row in task_history.read_tasks(tasks_dir) if row["run_id"] == run_dir.name]
         if tasks_dir
         else []
     )
@@ -472,7 +471,7 @@ def _digest_gaps(
         gaps.append("trained from a dirty working tree — the commit does not identify the code")
     if metadata.status != "completed":
         gaps.append(f"status is '{metadata.status}', not 'completed'")
-    unresolved = [row for row in tasks if row["cause"] not in task_log.TERMINAL_CAUSES]
+    unresolved = [row for row in tasks if row["cause"] not in task_history.TERMINAL_CAUSES]
     if unresolved:
         gaps.append(
             f"{len(unresolved)} task(s) with no terminal record — `poker-solver tasks` to reconcile"

@@ -38,7 +38,7 @@ from src.interfaces.cloud.store import share
 from src.interfaces.commands._base import Command
 from src.interfaces.commands.tasks import download_tasks
 from src.interfaces.errors import CommandError
-from src.shared import records
+from src.shared import records, task_history
 from src.shared.cloudtask import task_log
 
 _PARALLEL_SHARE_IO = 64
@@ -89,8 +89,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         download_tasks(service, config.share_name, local)
         directory = task_log.tasks_dir(local)
 
-        before = task_log.read_tasks(local)
-        movable, names = task_log.compactable(directory)
+        before = task_history.read_tasks(local)
+        movable, names = task_history.compactable(directory)
         result: dict[str, Any] = {
             "op": "compact-legs",
             "bundle": f"{args.label}{task_log.BUNDLE_SUFFIX}",
@@ -114,7 +114,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         bundle_path = directory / result["bundle"]
         records.write_snapshot(
             bundle_path,
-            task_log.bundle_document(movable),
+            task_history.bundle_document(movable),
             records.REGISTRY[f"legs/*{task_log.BUNDLE_SUFFIX}"],
         )
         share.write_text(service, config.share_name, remote, bundle_path.read_text())
@@ -126,7 +126,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as check_tmp:
             check = Path(check_tmp)
             download_tasks(service, config.share_name, check)
-            after = task_log.read_tasks(check)
+            after = task_history.read_tasks(check)
         if after != before:
             raise CommandError(
                 "The bundle landed but the joined task log CHANGED, so nothing was "
