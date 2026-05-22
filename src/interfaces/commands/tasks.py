@@ -161,14 +161,14 @@ def _task_records(service: Any, share_name: str) -> Iterator[Path]:
     if cache is None:
         with tempfile.TemporaryDirectory() as tmp:
             local = Path(tmp)
-            _download_tasks(service, share_name, local)
+            download_tasks(service, share_name, local)
             yield local
         return
-    with cache.acquire(_LEGS_KEY, lambda root: _download_tasks(service, share_name, root)) as local:
+    with cache.acquire(_LEGS_KEY, lambda root: download_tasks(service, share_name, root)) as local:
         yield local
 
 
-def _download_tasks(service: Any, share_name: str, local: Path) -> None:
+def download_tasks(service: Any, share_name: str, local: Path) -> None:
     """Pull the whole legs/ directory: the join needs every record.
 
     Concurrently -- these are tiny JSON files at ~0.195s of round trip each, so

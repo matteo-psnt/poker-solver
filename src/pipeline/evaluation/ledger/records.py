@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.pipeline.evaluation.ledger.tiers import _knob_hash
+from src.pipeline.evaluation.ledger.tiers import knob_hash
 from src.shared import records as record_store
 from src.shared.cloudtask import task_log
 from src.shared.gitinfo import (
@@ -188,7 +188,7 @@ def eval_slug(knobs: dict[str, Any]) -> str:
     names from boxes in different timezones still sort.
     """
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
-    return f"{stamp}-{_knob_hash(knobs)}-{uuid.uuid4().hex[:6]}"
+    return f"{stamp}-{knob_hash(knobs)}-{uuid.uuid4().hex[:6]}"
 
 
 def ledger_row(document: dict[str, Any]) -> dict[str, Any]:

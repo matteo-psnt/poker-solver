@@ -8,9 +8,7 @@ The estimator labels are deliberately long: they travel into the ledger, and a
 number whose instrument is only identified as "lbr" is a number nobody can audit
 two months later."""
 
-import contextlib
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -77,7 +75,11 @@ def evaluate_and_record(
             br_config,
             abstraction_hash=abstraction_hash,
             at_iteration=at_iteration,
-            on_branch=_progress_writer(progress_file),
+            # Flop branches, the outermost thing the walk counts: four walks of
+            # `--br-flops` each, so the default 8 gives 32 steps. The bar it
+            # replaced said `0 / 1 rungs`, which read 0% for the whole ~10
+            # minutes and made a long score look exactly like a hung one.
+            on_branch=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
         )
         estimator = EXACT_BR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_exact_br_knobs_from_params(
@@ -134,30 +136,6 @@ def evaluate_and_record(
     except Exception as exc:  # recording must never break the eval  # noqa: BLE001 -- recording must never break the eval it records
         logger.warning(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
     return payload
-
-
-def _progress_writer(path: Path | None) -> Callable[[int, int], None] | None:
-    """Publish branch completion for whoever is watching from outside.
-
-    Scoring one checkpoint is ~10 minutes in which NOTHING about the process is
-    observable, and the bar it had said `0 / 1 rungs` — one rung, so it read 0%
-    from the first second to the last and a long score looked exactly like a
-    hung one. Flop branches are the outermost thing the walk counts, four walks
-    of `--br-flops` each, so the default 8 gives 32 steps where there was 1.
-
-    Same shape as the precompute writer, deliberately: a callback that writes
-    `{done, total}` and can never be the reason an evaluation dies.
-    """
-    if path is None:
-        return None
-
-    def write(done: int, total: int) -> None:
-        with contextlib.suppress(OSError):
-            records.write_snapshot(
-                path, {"done": done, "total": total}, records.REGISTRY[PROGRESS_ARTIFACT]
-            )
-
-    return write
 
 
 __all__ = (

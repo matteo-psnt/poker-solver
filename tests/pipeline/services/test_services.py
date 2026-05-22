@@ -182,7 +182,7 @@ def test_evaluate_run_lbr_refuses_run_without_recorded_abstraction(monkeypatch, 
     """
     metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash=None)
     metadata.config.game.big_blind = 100
-    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_shared, "load_run_metadata", lambda run_dir: metadata)
 
     with pytest.raises(ValueError, match="does not record which card abstraction"):
         services.evaluate_run_lbr(tmp_path / "run-legacy", LBRConfig(num_hands=1))
@@ -196,7 +196,7 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
     storage.num_infosets.return_value = 1
     seen = {}
 
-    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_shared, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",
@@ -238,7 +238,7 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
     storage.num_infosets.return_value = 1
     seen = {}
 
-    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_shared, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",
@@ -297,7 +297,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     )
     seen = {}
 
-    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_shared, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",
@@ -386,7 +386,7 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
         ],
     )
     seen = {}
-    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_shared, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",

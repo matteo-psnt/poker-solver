@@ -57,12 +57,12 @@ class TestParallelMatchesSerial:
         import functools
 
         from src.pipeline.evaluation.estimators.public_tree_br import compute_public_tree_br
-        from src.pipeline.services.scoring._shared import _load_blueprint
+        from src.pipeline.services.scoring._shared import load_blueprint
 
         config = PublicBRConfig(num_flops=1, num_turns=1, num_rivers=1, num_workers=workers)
         factory = (
             functools.partial(
-                _load_blueprint,
+                load_blueprint,
                 metadata.config,
                 run_dir,
                 metadata.card_abstraction_hash,

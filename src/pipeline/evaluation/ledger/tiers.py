@@ -28,7 +28,8 @@ CONDITIONAL_TIER_KNOBS = (
 )
 
 
-def _knob_hash(knobs: dict[str, Any]) -> str:
+def knob_hash(knobs: dict[str, Any]) -> str:
+    """Short digest of a knob set, used by `records` to name a result file."""
     digest = hashlib.sha256(json.dumps(knobs, sort_keys=True).encode()).hexdigest()
     return digest[:8]
 
