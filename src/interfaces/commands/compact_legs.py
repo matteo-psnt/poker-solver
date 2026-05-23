@@ -119,6 +119,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             # this run therefore carries forward rather than replaces.
             "carried": 0,
         }
+        # The bundle already at this name, if any. Passing it is what stops a
+        # second compaction from overwriting the first one's records -- the
+        # documents it absorbed are no longer loose, so `compactable` does not
+        # offer them and they exist only here.
+        #
+        # Read before the early returns so the DRY RUN can say so too. The
+        # preview is where someone decides whether to apply, and a second round
+        # that reported only its own 54 documents against a bundle holding 321
+        # would look exactly like the bug this replaced.
+        bundle_path = directory / result["bundle"]
+        previous = records.read_snapshot(bundle_path) if bundle_path.exists() else None
+        result["carried"] = len((previous or {}).get("records", {}))
+
         if not names:
             return result
         if not args.apply:
@@ -128,13 +141,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             result["backup"] = _back_up(directory, Path(args.backup))
 
         remote = f"{task_log.RECORDS_DIRNAME}/{result['bundle']}"
-        bundle_path = directory / result["bundle"]
-        # The bundle already at this name, if any. Passing it is what stops a
-        # second compaction from overwriting the first one's records -- the
-        # documents it absorbed are no longer loose, so `compactable` does not
-        # offer them and they exist only here.
-        previous = records.read_snapshot(bundle_path) if bundle_path.exists() else None
-        result["carried"] = len((previous or {}).get("records", {}))
         records.write_snapshot(
             bundle_path,
             task_history.bundle_document(
@@ -216,10 +222,13 @@ def render(payload: dict[str, Any]) -> None:
         print(f"Nothing to compact: {payload['attempts']} attempt(s), none sealed and loose.")
         return
     if not payload["applied"]:
+        carried = payload.get("carried", 0)
         print(
             f"Would bundle {payload['movable']} of {payload['files_before']} file(s) "
             f"into {payload['bundle']}, covering {payload['attempts']} attempt(s)."
         )
+        if carried:
+            print(f"  {payload['bundle']} already holds {carried}; they are carried forward.")
         print("  Nothing has changed. Re-run with --apply to write the bundle.")
         return
 
