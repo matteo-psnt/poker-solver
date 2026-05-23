@@ -6,6 +6,7 @@ import {
   Activity,
   DollarSign,
   FlaskConical,
+  Gauge,
   Grid3x3,
   LayoutDashboard,
   Rocket,
@@ -54,6 +55,9 @@ const NAV = [
       { to: "/experiments", label: "Experiments", icon: Split },
       { to: "/evals", label: "Evals", icon: FlaskConical },
       { to: "/cost", label: "Cost", icon: DollarSign },
+      // What the TOOL cost, beside what the compute cost. Different subjects,
+      // same shape of question, and neither belongs under "work".
+      { to: "/activity", label: "Activity", icon: Gauge },
     ],
   },
 ] as const;

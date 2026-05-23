@@ -118,7 +118,8 @@ definition: never a source of truth, never worth backing up.
     `configs`, `runinfo`, `report`, `compare`, `promote`. `configs` lists the
     stems `submit`/`submit-precompute` accept; `runs` carries
     `experiment_id`/`arm`, since the listing is the only place the set of
-    experiments exists. **There is no `--source` and no `--runs-dir`: every
+    experiments exists; `activity` reads the local telemetry log (below).
+    **There is no `--source` and no `--runs-dir`: every
     reader answers against the published record**, materialised into a temp
     tree and discarded. Nothing on a laptop is a source of truth about a run,
     so a local copy could only be a stale second answer. The eval index is
@@ -135,6 +136,18 @@ definition: never a source of truth, never worth backing up.
   The `Command` dataclass carries parser, handler AND
   renderer together on purpose: when those lived apart, `checkpoint-profile`
   borrowed evaluate's renderer and died on a missing key.
+- **`Command.execute` is the seam both surfaces share, and it is observed.**
+  Not `invoke` — the command line parses argv and calls the handler, so anything
+  wrapped around `invoke` sees the console and misses the CLI. `execute` writes
+  one row per invocation via `interfaces/telemetry.py`: command, surface,
+  duration, outcome (`ok`/`refusal`/`error`), the exception's type name, and the
+  arguments that differ from their defaults. `poker-solver activity` reads it
+  (p50/p95/total, refusals apart from errors). It is **laptop-local and
+  disposable** — under `$POKER_SOLVER_CACHE`, rotated at 8 MB — never the share:
+  no atomic append, a per-document scheme would outgrow `legs/` in hours, and
+  every write would add a round trip to the thing being measured. Writes are
+  best-effort and must stay that way; `POKER_SOLVER_TELEMETRY=0` turns it off,
+  which is what the test suite does.
 - **A command is callable without a command line, and refusals are values.**
   `Command.invoke(**kwargs)` builds the arguments from the command's own parser
   — one declaration of what a command accepts, so a second surface cannot drift

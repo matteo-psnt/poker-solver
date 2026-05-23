@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.interfaces import run_names
+from src.interfaces import run_names, telemetry
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation.ledger import rebuild_ledger
 
@@ -42,6 +42,42 @@ class Command:
     render: Callable[[dict[str, Any]], None]
     help: str = ""
 
+    def declared(self) -> tuple[dict[str, Any], set[str]]:
+        """This command's flag defaults, and which of them are required.
+
+        Read from a parser built here rather than stored, so there is still ONE
+        declaration of what a command accepts -- the `add_arguments` it already
+        has. `_actions` is private and there is no public accessor for "every
+        flag this parser knows"; the alternative is ``parse_args([])``, which
+        cannot be used because it rejects a parser with any required flag (most
+        of them) and exits the process on failure, which is the behaviour this
+        seam exists to remove.
+        """
+        parser = argparse.ArgumentParser(prog=self.name, add_help=False)
+        self.add_arguments(parser)
+        actions = parser._actions  # noqa: SLF001
+        return (
+            {action.dest: action.default for action in actions},
+            {action.dest for action in actions if action.required},
+        )
+
+    def execute(self, args: argparse.Namespace) -> dict[str, Any]:
+        """Run this command's handler. **The seam every surface goes through.**
+
+        `invoke` is not that seam and cannot be: the command line builds its
+        Namespace by parsing argv and calls the handler directly, so anything
+        wrapped around `invoke` would see the console and miss the CLI entirely.
+        This is one level down, where both meet.
+
+        Kept separate from :attr:`run` so the handler stays an ordinary function
+        a test can call. What is added here is observation and nothing else --
+        the timing, the outcome and which surface asked. A guard test fails if a
+        surface calls `run` directly and slips past it.
+        """
+        defaults, _ = self.declared()
+        with telemetry.observe(self.name, telemetry.asked_for(self.add_arguments, args, defaults)):
+            return self.run(args)
+
     def arguments(self, **overrides: Any) -> argparse.Namespace:
         """Build this command's arguments without a command line.
 
@@ -51,16 +87,7 @@ class Command:
         that ignores its own flag; a required flag left out is rejected here
         rather than surfacing as a ``None`` several frames into ``run``.
         """
-        parser = argparse.ArgumentParser(prog=self.name, add_help=False)
-        self.add_arguments(parser)
-        # `_actions` is private, and there is no public accessor for "every flag
-        # this parser knows". The alternative is `parse_args([])`, which cannot
-        # be used: it rejects a parser with any required flag, which is most of
-        # them, and it exits the process on failure -- the behaviour this seam
-        # exists to remove.
-        actions = parser._actions  # noqa: SLF001
-        defaults = {action.dest: action.default for action in actions}
-        required = {action.dest for action in actions if action.required}
+        defaults, required = self.declared()
 
         unknown = sorted(set(overrides) - set(defaults))
         if unknown:
@@ -78,7 +105,7 @@ class Command:
         raises :class:`CommandError` where the command line would have exited,
         so a caller polling several commands survives one of them failing.
         """
-        return self.run(self.arguments(**overrides))
+        return self.execute(self.arguments(**overrides))
 
 
 def resolve_run_dir(run: str, runs_dir: str) -> Path:

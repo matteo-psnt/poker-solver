@@ -439,6 +439,58 @@ export type Cancelled = z.infer<typeof cancelSchema>;
  * schemas are what makes an endpoint usable rather than merely present.
  */
 
+/**
+ * The local activity log, summarised.
+ *
+ * The only payload here that describes THIS TOOL rather than the solver or the
+ * cloud. `exists`/`enabled` are two different empty states with different fixes
+ * — nothing has run yet, versus recording is switched off — and collapsing them
+ * would send someone hunting for a bug in the writer.
+ */
+export const activitySchema = z
+  .object({
+    op: z.literal("activity"),
+    log: z.string(),
+    exists: z.boolean(),
+    enabled: z.boolean(),
+    days: z.number(),
+    rows: z.number(),
+    total_rows: z.number(),
+    commands: z.array(
+      z
+        .object({
+          command: z.string(),
+          calls: z.number(),
+          /** p50 is what it normally costs, p95 what it costs when it does not.
+              A mean would be wrong about both. */
+          p50_seconds: z.number(),
+          p95_seconds: z.number(),
+          max_seconds: z.number(),
+          /** What says whether a command is worth optimising: 0.4s run 3,000
+              times outranks 9s run twice. */
+          total_seconds: z.number(),
+          refusals: z.number(),
+          errors: z.number(),
+        })
+        .passthrough(),
+    ),
+    failures: z.array(
+      z
+        .object({
+          at: z.string().nullable(),
+          command: z.string().nullable(),
+          surface: z.string().nullable(),
+          outcome: z.string().nullable(),
+          error_type: z.string().nullable(),
+          error: z.string().nullable(),
+          asked: z.record(z.unknown()).default({}),
+        })
+        .passthrough(),
+    ),
+    by_surface: z.record(z.number()).default({}),
+  })
+  .passthrough();
+
 export const configsSchema = z
   .object({
     op: z.literal("configs"),
@@ -604,6 +656,7 @@ export const promoteSchema = z
   })
   .passthrough();
 
+export type Activity = z.infer<typeof activitySchema>;
 export type Configs = z.infer<typeof configsSchema>;
 export type Autoscale = z.infer<typeof autoscaleSchema>;
 export type Report = z.infer<typeof reportSchema>;

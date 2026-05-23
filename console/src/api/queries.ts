@@ -9,6 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, send } from "./client";
 import {
+  type Activity,
   type Autoscale,
   type BlueprintRun,
   type Box,
@@ -34,6 +35,7 @@ import {
   type Runs,
   type SolverNode,
   type Tasks,
+  activitySchema,
   autoscaleSchema,
   blueprintRunSchema,
   boxSchema,
@@ -160,6 +162,18 @@ export const useConfigs = () =>
     queryKey: ["configs"],
     queryFn: () => get("/api/configs", configsSchema),
     staleTime: Number.POSITIVE_INFINITY,
+  });
+
+/**
+ * The local activity log. A file read, so it is cheap — but it is also the only
+ * query whose answer THIS PAGE changes, since asking is itself an invocation.
+ * Polled slowly for that reason as much as for cost.
+ */
+export const useActivity = (days = 7) =>
+  useQuery<Activity>({
+    queryKey: ["activity", days],
+    queryFn: () => get(`/api/activity?days=${days}`, activitySchema),
+    refetchInterval: SLOW,
   });
 
 /**

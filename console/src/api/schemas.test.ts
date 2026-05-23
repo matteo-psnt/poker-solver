@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fixture from "./payloads.fixture.json";
 import {
+  activitySchema,
   autoscaleSchema,
   compactSchema,
   compareSchema,
@@ -39,6 +40,7 @@ const CASES = [
   ["ledger", ledgerSchema],
   ["cost", costSchema],
   ["configs", configsSchema],
+  ["activity", activitySchema],
   ["autoscale-check", autoscaleSchema],
   ["report", reportSchema],
   ["compare", compareSchema],

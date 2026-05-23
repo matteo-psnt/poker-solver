@@ -56,8 +56,10 @@ LOOSE_BESIDE_PACKAGES: dict[str, tuple[str, ...]] = {
     # Each is a single thing with no siblings to be filed away from.
     "engine.solver": ("betting_tree.py", "numba_ops.py", "protocols.py"),
     # Leaf helpers with no owner among the surfaces; `errors` is imported by all
-    # of them and belongs above each.
-    "interfaces": ("errors.py", "run_names.py"),
+    # of them and belongs above each, and `telemetry` observes the command seam
+    # that `cli/` and `web/` both go through -- so it is above both for the same
+    # reason, not a peer of either.
+    "interfaces": ("errors.py", "run_names.py", "telemetry.py"),
     # `config` is the credentials and resource ids all three sub-packages need,
     # so it sits above them; `serve_box` provisions the play-server VM and is
     # its own job, sharing nothing with dispatching work or reading the bill.

@@ -32,9 +32,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from src.interfaces import telemetry
 from src.interfaces.cloud.store import workspace
 from src.interfaces.commands import (
     Command,
+    activity,
     autoscale_check,
     cancel,
     compact_legs,
@@ -194,8 +196,15 @@ class PromoteBody(BaseModel):
     rationale: str
 
 
-def answer(cache: TtlCache, command: Command, **kwargs: Any) -> JSONResponse:
+def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
     """Run one command, memoised, and map its failures onto status codes.
+
+    ``cache`` and ``command`` are POSITIONAL-ONLY, and the ``/`` is load-bearing.
+    Everything after it is a command's own flags, and a command is free to have
+    a flag called `command` -- `activity --command tasks` does. Without the
+    slash that argument binds to this function's parameter instead, and the
+    error is a type mismatch several frames from anything the reader was
+    thinking about. The same trap waits for any future `--cache`.
 
     The cache is passed in rather than reached for: :func:`create_app` owns one
     per application, so two apps in one process (a test and its subject, most
@@ -212,7 +221,11 @@ def answer(cache: TtlCache, command: Command, **kwargs: Any) -> JSONResponse:
     down" for the whole TTL after `az login` has already fixed it.
     """
     key = (command.name, tuple(sorted(kwargs.items())))
-    payload, failure = attempt(lambda: cache.get(key, lambda: command.invoke(**kwargs)))
+    # Around the memo, not inside it: a request served from the cache did not
+    # run the command, and recording it as if it had would report a `tasks` that
+    # takes 5 seconds as one that mostly takes microseconds.
+    with telemetry.surface("console"):
+        payload, failure = attempt(lambda: cache.get(key, lambda: command.invoke(**kwargs)))
     if failure is not None:
         return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
     return PayloadResponse(payload)
@@ -293,6 +306,15 @@ def create_app() -> FastAPI:
     @app.get("/api/configs")
     def _configs() -> JSONResponse:
         return answer(cache, configs.COMMAND, kind="")
+
+    # Local, so it costs nothing and is memoised only to keep a shared tab from
+    # re-reading the log every poll. It is also the one endpoint whose answer
+    # this server's own requests keep changing.
+    @app.get("/api/activity")
+    def _activity(days: float = 7.0, limit: int = 20) -> JSONResponse:
+        return answer(
+            cache, activity.COMMAND, days=days, limit=limit, command="", surface="", failures=False
+        )
 
     @app.get("/api/autoscale")
     def _autoscale() -> JSONResponse:
