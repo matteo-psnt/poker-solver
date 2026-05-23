@@ -17,6 +17,18 @@ Only SEALED attempts move. An attempt with no terminal record is one that
 reconciliation still writes a ``<task>.observed.json`` for, and that is a
 filename rather than a bundle entry.
 
+A bundle is per LABEL, not per compaction
+-----------------------------------------
+The second round at a given label ABSORBS the bundle already there. It has to:
+the documents that bundle holds are no longer loose, so ``compactable`` does not
+offer them, and a payload built from its answer alone would replace them. The
+default label is ``sealed``, so this is the ordinary path -- the verification
+below caught the resulting loss, but only after the share had been overwritten.
+
+And the bundle records the act. Nothing else does: this command can remove
+hundreds of files from the share, which is the only copy of the task record, and
+the sole trace used to be a backup directory on whichever laptop ran it.
+
 Deleting is a separate decision from bundling
 ---------------------------------------------
 The default is a dry run: it says what WOULD move. ``--apply`` writes the bundle
@@ -28,8 +40,10 @@ reversible, because nothing else on this machine holds a copy of the record.
 from __future__ import annotations
 
 import argparse
+import socket
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +52,7 @@ from src.interfaces.cloud.store import share
 from src.interfaces.commands._base import Command
 from src.interfaces.commands.tasks import download_tasks
 from src.interfaces.errors import CommandError
-from src.shared import records, task_history
+from src.shared import gitinfo, records, task_history
 from src.shared.cloudtask import task_log
 
 _PARALLEL_SHARE_IO = 64
@@ -101,6 +115,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "verified": False,
             "deleted": 0,
             "backup": "",
+            # How many records an existing bundle at this name already held, and
+            # this run therefore carries forward rather than replaces.
+            "carried": 0,
         }
         if not names:
             return result
@@ -112,9 +129,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
         remote = f"{task_log.RECORDS_DIRNAME}/{result['bundle']}"
         bundle_path = directory / result["bundle"]
+        # The bundle already at this name, if any. Passing it is what stops a
+        # second compaction from overwriting the first one's records -- the
+        # documents it absorbed are no longer loose, so `compactable` does not
+        # offer them and they exist only here.
+        previous = records.read_snapshot(bundle_path) if bundle_path.exists() else None
+        result["carried"] = len((previous or {}).get("records", {}))
         records.write_snapshot(
             bundle_path,
-            task_history.bundle_document(movable),
+            task_history.bundle_document(
+                movable, previous=previous, compaction=_provenance(args, result)
+            ),
             records.REGISTRY[f"legs/*{task_log.BUNDLE_SUFFIX}"],
         )
         share.write_text(service, config.share_name, remote, bundle_path.read_text())
@@ -139,6 +164,33 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             result["deleted"] = _delete(service, config.share_name, names)
             result["files_after"] = result["files_before"] - result["deleted"] + 1
         return result
+
+
+def _provenance(args: argparse.Namespace, result: dict[str, Any]) -> dict[str, Any]:
+    """What this compaction was, recorded into the bundle it writes.
+
+    Written BEFORE the delete, which is the only order available: the bundle has
+    to land and then be verified against a fresh download before anything may be
+    removed, and rewriting it afterwards would invalidate the verification it
+    just passed. So ``deleting`` is an intent rather than an outcome -- it says
+    what was about to happen and, crucially, WHERE THE COPY WENT, which is the
+    fact someone reconstructing the record actually needs. How many files
+    survived is a property of the directory, and `tasks` can already be asked.
+
+    The branch is here for the reason worktree provenance is on every other
+    record: several checkouts run in parallel and a commit does not identify
+    one.
+    """
+    return {
+        "at": datetime.now(UTC).isoformat(),
+        "host": socket.gethostname(),
+        "label": args.label,
+        "bundled": result["movable"],
+        "carried": result["carried"],
+        "backup": result["backup"],
+        "deleting": bool(args.delete),
+        "git_branch": gitinfo.get_git_branch() or "",
+    }
 
 
 def _back_up(directory: Path, destination: Path) -> str:
@@ -171,7 +223,16 @@ def render(payload: dict[str, Any]) -> None:
         print("  Nothing has changed. Re-run with --apply to write the bundle.")
         return
 
-    print(f"Wrote {payload['bundle']} holding {payload['movable']} document(s).")
+    # What the bundle HOLDS, not what this round moved. A second compaction at
+    # the same label absorbs the first, and reporting only the new documents
+    # would read as though the earlier ones had been dropped -- which is exactly
+    # what used to happen.
+    carried = payload.get("carried", 0)
+    held = payload["movable"] + carried
+    print(
+        f"Wrote {payload['bundle']} holding {held} document(s)"
+        + (f" ({payload['movable']} new, {carried} carried forward)." if carried else ".")
+    )
     print(
         "  verified: the joined task log is row-identical"
         if payload["verified"]
