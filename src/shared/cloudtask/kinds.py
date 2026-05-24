@@ -48,6 +48,7 @@ class TaskName(StrEnum):
     TRAIN = "train"
     EVALUATE = "evaluate"
     PRECOMPUTE = "precompute"
+    VECTOR_SWEEP = "vector-sweep"
 
 
 class BadTaskError(ValueError):
@@ -533,6 +534,58 @@ def _flag(flags: object, name: str) -> str:
         if isinstance(item, str) and item.startswith(f"{name}="):
             return item.split("=", 1)[1]
     return ""
+
+
+class VectorSweepTask(TaskKind):
+    """Score one CFR kernel against iteration count on one abstraction.
+
+    A measurement, not a run: nothing is trained that anything later consumes,
+    and the output is a single JSON curve rather than a checkpoint ladder.
+
+    The parameters ride on fields that already exist rather than on new ones.
+    ``config`` is the abstraction directory, ``arm`` is the kernel -- which is
+    exactly what an arm IS here, one leg of a comparison -- and ``eval_flags``
+    carries the rest verbatim to the command line. Adding six fields to
+    TaskSpec, TaskPlan and the environment round-trip to say the same thing
+    would widen a wire that three other kinds have to keep passing through.
+    """
+
+    name = TaskName.VECTOR_SWEEP
+    unit = "checkpoints"
+    progress_file = "vector-sweep-progress.json"
+    """NOT retried. The sweep publishes each checkpoint as it lands, but a retry
+    restarts training from zero rather than resuming -- so three attempts at a
+    deterministic failure would bill three full sweeps to fail three times, and
+    a flaky one would overwrite good partial results with fewer."""
+    retries = 0
+
+    def validate(self, task: TaskFields) -> None:
+        if not task.config:
+            raise BadTaskError("a vector-sweep task needs an abstraction directory")
+
+    def commands(self, plan: NodePlan) -> list[list[str]]:
+        argv = ["vector-sweep", "--abstraction", plan.config, *plan.eval_flags]
+        work = plan.progress_path
+        return [[*argv, "--progress-file", work] if work else argv]
+
+    def label(self, task: Submission) -> str:
+        return f"vector-{task.arm or 'sweep'}-{task.config}"
+
+    def describe(self, record: Mapping[str, Any]) -> str:
+        kernel = record.get("arm") or "sweep"
+        return f"vector-sweep {kernel} on {record.get('config') or ''}".strip()
+
+    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
+        """Checkpoints scored, against checkpoints requested.
+
+        The curve IS the deliverable, so a checkpoint is the honest unit: each
+        one is a point that will survive a kill, not a fraction of a single
+        answer that only exists at the end.
+        """
+        done, total = state.get("done"), state.get("total")
+        if not isinstance(done, int | float) or not isinstance(total, int | float) or total <= 0:
+            return None
+        return Progress(float(done), float(total), self.unit)
 
 
 def samples(rows: Sequence[Mapping[str, Any]], name: str) -> list[Sample]:

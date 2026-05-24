@@ -88,13 +88,20 @@ class TestTheRegistryStaysHonest:
 class TestLookup:
     def test_the_submit_path_refuses_an_op_no_node_can_run(self):
         with pytest.raises(BadTaskError, match="Unknown task kind"):
-            kinds.kind("vector-sweep")
+            kinds.kind("train-vector")
 
     def test_the_read_path_tolerates_its_own_history(self):
-        """`vector-sweep` and `train-vector` are in the task log from deleted
-        work. Listing history must not raise on it."""
-        assert kinds.kind_of("vector-sweep") is None
-        assert kinds.describe({"op": "vector-sweep"}) == "vector-sweep"
+        """`train-vector` is in the task log from deleted work. Listing history
+        must not raise on it.
+
+        This used to use `vector-sweep` for the same purpose, and that stopped
+        being true when the sweep came back as a live kind -- which is the point
+        of the test: the retired list is history, and history gains and loses
+        members. A retired op must still READ, and a live one must still RUN.
+        """
+        assert kinds.kind_of("train-vector") is None
+        assert kinds.describe({"op": "train-vector"}) == "train-vector"
+        assert kinds.kind_of("vector-sweep") is not None
 
     def test_a_wire_string_and_its_enum_member_are_the_same_key(self):
         assert kinds.kind("train") is kinds.kind(TaskName.TRAIN)

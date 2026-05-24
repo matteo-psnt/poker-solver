@@ -81,6 +81,7 @@ COMMANDS: tuple[CommandRef, ...] = (
     CommandRef(
         "submit-precompute", "Build a card abstraction on a node and publish it to the share."
     ),
+    CommandRef("submit-vector", "Queue CFR kernel measurements on the pool, one task per arm."),
     CommandRef("jobs", "Every queued/running task on the pool (--all includes finished jobs)."),
     CommandRef("logs", "Read a task's log from the share (default) or live from its node."),
     CommandRef("tasks", "Per-task outcomes from the share, reconciled against Batch."),
@@ -102,6 +103,9 @@ COMMANDS: tuple[CommandRef, ...] = (
     ),
     CommandRef(
         "train-static", "Train over the statically-enumerated tree (fixed memory, no key maps)."
+    ),
+    CommandRef(
+        "vector-sweep", "Exploitability vs iteration for one vector-CFR kernel on one abstraction."
     ),
     CommandRef("precompute", "Precompute a combo abstraction into data/combo_abstraction/."),
     CommandRef("evaluate", "Evaluate a run's exploitability (Local Best Response by default)."),

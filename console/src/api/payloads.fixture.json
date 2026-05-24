@@ -613,6 +613,26 @@
       "ochs_gate_ochs-000000-1"
     ]
   },
+  "submit-vector": {
+    "arms": [
+      {
+        "abstraction": "buckets-F10T20R30-r200-ae5a7e66",
+        "derive_boards": 6000,
+        "kernel": "board-free"
+      },
+      {
+        "abstraction": "buckets-F10T20R30-r200-ae5a7e66",
+        "derive_boards": 0,
+        "kernel": "hand-space"
+      }
+    ],
+    "code_snapshot": "code-20260805_000000",
+    "job_id": "poker-20260805",
+    "op": "submit-vector",
+    "tasks": [
+      "vector-board-free-buckets-F10T20R30-000000-1"
+    ]
+  },
   "tasks": {
     "op": "tasks",
     "reconciled": 1,
@@ -661,5 +681,38 @@
     "runtime_seconds": 1.5,
     "status": "completed",
     "touched_rows": 31970418
+  },
+  "vector-sweep": {
+    "abstraction": "buckets-F100T300R600-rexact-a1542e88",
+    "best_at_iterations": 400,
+    "best_exploitability": 0.5392,
+    "buckets": {
+      "flop": 100,
+      "river": 600,
+      "turn": 300
+    },
+    "derive_boards": 6000,
+    "derive_seconds": 457.0,
+    "done": 2,
+    "infoset_rows": 1132552,
+    "kernel": "board-free",
+    "nodes": 2140,
+    "op": "vector-sweep",
+    "points": [
+      {
+        "exploitability": 0.5392,
+        "iterations": 400,
+        "train_seconds": 53.1
+      },
+      {
+        "exploitability": 0.693,
+        "iterations": 1600,
+        "train_seconds": 210.1
+      }
+    ],
+    "score_boards": 32,
+    "stack": 20,
+    "total": 9,
+    "uniform_baseline": 4.1869
   }
 }

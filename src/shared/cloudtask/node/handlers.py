@@ -10,6 +10,7 @@ what made the shell version impossible to reason about.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -206,8 +207,67 @@ it rather than a task that silently does nothing. Declared ``str`` rather than
 ``TaskName`` for the same reason ``TaskKind.KINDS`` is: what arrives from the
 environment is the wire string, and a member of a ``StrEnum`` IS that string.
 """
+
+
+def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
+    """Measure one kernel on one abstraction, publishing the curve as it grows.
+
+    The result is published on EVERY exit, not only success. A sweep that runs
+    past its timeout is killed mid-checkpoint, and without this it would lose
+    every checkpoint it had already scored -- the same failure this module's
+    training path publishes rungs to avoid, in a different shape.
+
+    Abstractions are read from the share in place: they are ~773 MB each and the
+    node's disk is discarded when the task ends, so a copy would be paid for on
+    every arm and thrown away.
+    """
+    plan = replace(plan, progress_path=str(paths.work / kinds.kind(plan.op).progress_file))
+    result = Path(plan.progress_path)
+    destination = paths.share / "vector-sweeps"
+    # The task id is the node's, not the plan's -- the plan describes the WORK
+    # and several retries of it would share one. Read the same way every other
+    # node module reads it.
+    published = f"{os.environ.get('AZ_BATCH_TASK_ID', 'local')}.json"
+
+    def publish_partial() -> None:
+        if result.is_file() and result.stat().st_size > 0:
+            try:
+                destination.mkdir(parents=True, exist_ok=True)
+                archive.copy_file(result, destination / published)
+            except OSError as error:
+                log(f"could not publish partial result: {error}")
+
+    abstractions = paths.share / "combo_abstraction"
+    if not (abstractions / plan.config).is_dir():
+        log(f"FATAL no such abstraction on the share: {plan.config}")
+        log("  publish one with `poker-solver push-data`, or build one with submit-precompute")
+        return 1, None
+
+    log(f"vector-sweep: {plan.arm or 'sweep'} on {plan.config} (timeout {plan.timeout_seconds}s)")
+    progress.note_baseline(paths, plan)
+    watcher = progress.LadderWatcher(paths, log, plan=plan)
+    watcher.start()
+    try:
+        code = run_guarded(
+            _cli([*plan.commands[0], "--abstractions-dir", str(abstractions)]),
+            cwd=paths.code,
+            timeout=plan.timeout_seconds,
+            log=log,
+        )
+    finally:
+        watcher.stop()
+        publish_partial()
+
+    if code != 0:
+        log(f"vector-sweep failed rc={code} (partial curve published if any was reached)")
+        return code, None
+    log(f"published vector-sweeps/{published}")
+    return 0, None
+
+
 HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN: _train,
     TaskName.EVALUATE: _evaluate,
     TaskName.PRECOMPUTE: _precompute,
+    TaskName.VECTOR_SWEEP: _vector_sweep,
 }
