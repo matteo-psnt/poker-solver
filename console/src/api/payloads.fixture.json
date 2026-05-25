@@ -694,6 +694,7 @@
     "derive_boards": 6000,
     "derive_seconds": 457.0,
     "done": 2,
+    "in_sample": false,
     "infoset_rows": 1132552,
     "kernel": "board-free",
     "nodes": 2140,
@@ -715,6 +716,7 @@
     "score_boards": 32,
     "stack": 20,
     "total": 9,
+    "train_boards": 8,
     "uniform_baseline": 4.1869,
     "uniform_baseline_unconstrained": 4.4021
   }
