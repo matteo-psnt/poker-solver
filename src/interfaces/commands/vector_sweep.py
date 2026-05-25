@@ -171,8 +171,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     held_out = [build_hand_context(board, abstraction) for board in boards]
     pairs = float(np.mean([(~c.blocks).sum() for c in held_out]))
     initial = np.ones(held_out[0].num_hands, dtype=np.float32)
-    scorer = BoardMixtureCFR(compiled, held_out, cfr_plus=True)
-    baseline = float(scorer.exploitability(initial, pairs))
+    scorer = BoardMixtureCFR(compiled, held_out, cfr_plus=True, boards=boards)
+    baseline = (
+        float(scorer.exploitability(initial, pairs)),
+        float(scorer.exploitability(initial, pairs, unconstrained=True)),
+    )
 
     requested = args.checkpoints or DEFAULT_CHECKPOINTS[args.kernel]
     checkpoints = [int(part) for part in requested.split(",") if part.strip()]
@@ -217,13 +220,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         "iterations": done,
                         "train_seconds": round(time.perf_counter() - started, 1),
                         "exploitability": round(float(scorer.exploitability(initial, pairs)), 6),
+                        "unconstrained": round(
+                            float(scorer.exploitability(initial, pairs, unconstrained=True)), 6
+                        ),
                     }
                 )
                 checkpoint_reached(None)
         finally:
             storage.close()
     elif args.kernel == HAND_SPACE:
-        solver = BoardMixtureCFR(compiled, held_out, cfr_plus=True)
+        solver = BoardMixtureCFR(compiled, held_out, cfr_plus=True, boards=boards)
         done = 0
         for target in checkpoints:
             while done < target:
@@ -234,6 +240,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     "iterations": done,
                     "train_seconds": round(time.perf_counter() - started, 1),
                     "exploitability": round(float(solver.exploitability(initial, pairs)), 6),
+                    # Against an opponent who sees its own cards rather than only
+                    # its bucket. Always the larger of the two; the gap is the
+                    # abstraction's own cost, which no amount of solving removes.
+                    "unconstrained": round(
+                        float(solver.exploitability(initial, pairs, unconstrained=True)), 6
+                    ),
                 }
             )
             checkpoint_reached(None)
@@ -268,6 +280,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     "iterations": trained,
                     "train_seconds": round(spent, 1),
                     "exploitability": round(float(scorer.exploitability(initial, pairs)), 6),
+                    "unconstrained": round(
+                        float(scorer.exploitability(initial, pairs, unconstrained=True)), 6
+                    ),
                 }
             )
             checkpoint_reached(derive_seconds)
@@ -295,7 +310,8 @@ def _payload(
         "nodes": compiled.num_nodes,
         "infoset_rows": compiled.tree.num_rows,
         "derive_seconds": derive_seconds,
-        "uniform_baseline": round(baseline, 6),
+        "uniform_baseline": round(baseline[0], 6),
+        "uniform_baseline_unconstrained": round(baseline[1], 6),
         "points": points,
         "best_exploitability": best["exploitability"] if best else None,
         "best_at_iterations": best["iterations"] if best else None,
@@ -311,12 +327,15 @@ def render(payload: dict[str, Any]) -> None:
     )
     if payload["derive_seconds"] is not None:
         print(f"  derived from {payload['derive_boards']:,} boards in {payload['derive_seconds']}s")
-    print(f"  uniform baseline {payload['uniform_baseline']:.4f}")
-    print(f"  {'iters':>8} {'train s':>9} {'exploitability':>15}")
+    print(
+        f"  uniform baseline {payload['uniform_baseline']:.4f} in-abstraction, "
+        f"{payload['uniform_baseline_unconstrained']:.4f} per-hand"
+    )
+    print(f"  {'iters':>8} {'train s':>9} {'in-abs':>12} {'per-hand':>12}")
     for point in payload["points"]:
         print(
             f"  {point['iterations']:>8,} {point['train_seconds']:>9.1f} "
-            f"{point['exploitability']:>15.5f}"
+            f"{point['exploitability']:>12.5f} {point['unconstrained']:>12.5f}"
         )
     if payload["best_exploitability"] is not None:
         print(

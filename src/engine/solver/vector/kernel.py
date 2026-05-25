@@ -466,15 +466,32 @@ class VectorCFR:
 
     # ---- scoring ---------------------------------------------------------
 
-    def best_response_value(self, br_player: int, initial_range: np.ndarray) -> np.ndarray:
+    def best_response_value(
+        self, br_player: int, initial_range: np.ndarray, *, unconstrained: bool = False
+    ) -> np.ndarray:
         """Root counterfactual value of ``br_player``'s best response.
 
         The opponent plays the *average* strategy — the one CFR's guarantee is
-        about. The responder maximises per ``(node, bucket)`` rather than per
-        hand, so this is exploitability **inside the abstraction**: the quantity
-        that must fall to zero if the kernel is minimising regret, as distinct
-        from real-game exploitability, which cannot fall below the abstraction's
-        own error.
+        about.
+
+        ``unconstrained`` decides WHICH exploitability this is, and the two
+        answer different questions:
+
+        constrained (default)
+            The responder maximises per ``(node, bucket)`` — it sees exactly what
+            the abstraction shows. This is exploitability *inside the abstract
+            game*, the quantity that must fall to zero if the kernel is
+            minimising regret.
+        unconstrained
+            The responder maximises per ``(node, hand)`` — it sees its actual
+            holding on the actual board, as a real opponent does. This cannot
+            fall below the abstraction's own error, so it does NOT go to zero,
+            and the gap between the two IS that error.
+
+        Reporting only the first is the trap this option exists to close: a
+        kernel can drive its own game's exploitability arbitrarily low while
+        remaining wide open to anyone who can tell two hands in one bucket
+        apart.
 
         A responder's own reach never enters its counterfactual value, so the
         forward pass need not know a best response is being computed — only the
@@ -497,7 +514,9 @@ class VectorCFR:
                 children = self.gather_children(targets, is_terminal, br_player)
 
                 if group.actor == br_player:
-                    self.value[br_player, nodes] = self._maximise(group, children)
+                    self.value[br_player, nodes] = (
+                        children.max(axis=-1) if unconstrained else self._maximise(group, children)
+                    )
                 else:
                     # The actor's own probabilities already rode down in the
                     # reach vector, so the responder's value sums over actions.
@@ -524,7 +543,9 @@ class VectorCFR:
         chosen = best[:, self.context.buckets_for(group.street)]
         return np.take_along_axis(actor_children, chosen[:, :, None], axis=2)[:, :, 0]
 
-    def exploitability(self, initial_range: np.ndarray, compatible_pairs: float) -> float:
+    def exploitability(
+        self, initial_range: np.ndarray, compatible_pairs: float, *, unconstrained: bool = False
+    ) -> float:
         """Mean of both players' best-response gains, in chips per hand.
 
         ``compatible_pairs`` normalises the unnormalised root values: with an
@@ -534,7 +555,10 @@ class VectorCFR:
         the standard exploitability.
         """
         gains = [
-            float(self.best_response_value(player, initial_range).sum()) / compatible_pairs
+            float(
+                self.best_response_value(player, initial_range, unconstrained=unconstrained).sum()
+            )
+            / compatible_pairs
             for player in (0, 1)
         ]
         return (gains[0] + gains[1]) / 2.0

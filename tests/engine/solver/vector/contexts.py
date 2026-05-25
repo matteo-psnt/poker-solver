@@ -42,10 +42,21 @@ MIN_SHOWDOWN_SIGNAL = 0.5
 
 
 def ordered_context(
-    rng: np.random.Generator, counts: dict[Street, int], *, num_cards: int = 52
+    rng: np.random.Generator,
+    counts: dict[Street, int],
+    *,
+    num_cards: int = 52,
+    board: Sequence[int] | np.ndarray | None = None,
 ) -> HandContext:
-    """A context whose bucket index tracks hand strength, as a real one does."""
-    hand_cards = enumerate_live_hands(rng.choice(num_cards, 5, replace=False), num_cards)
+    """A context whose bucket index tracks hand strength, as a real one does.
+
+    ``board`` pins the five cards instead of drawing them, which is what lets a
+    test build runouts that deliberately share a prefix — the case that decides
+    whether an unconstrained best response is reading cards that are still face
+    down. See ``test_mixture``.
+    """
+    cards = rng.choice(num_cards, 5, replace=False) if board is None else board
+    hand_cards = enumerate_live_hands(cards, num_cards)
     num_hands = hand_cards.shape[0]
     ranks = rng.permutation(num_hands)
 
@@ -53,6 +64,58 @@ def ordered_context(
     for street, count in counts.items():
         buckets[street.value - 1] = np.minimum(ranks * count // num_hands, count - 1)
     return HandContext(hand_cards, buckets, ranks, blocking_matrix(hand_cards))
+
+
+def prefix_consistent_contexts(
+    boards: Sequence[Sequence[int] | np.ndarray],
+    counts: dict[Street, int],
+    *,
+    num_cards: int = 52,
+) -> list[HandContext]:
+    """Contexts obeying the rule production buckets obey: a street sees a prefix.
+
+    ``build_hand_context`` asks the abstraction for a street's bucket with
+    ``cards[:seen]`` — three cards on the flop, four on the turn, five on the
+    river, none preflop. So a bucket at street ``s`` is a function of the hand
+    and the cards *face up* at ``s``, and two runouts sharing that prefix hand
+    the same holding the same bucket. A player genuinely cannot tell them apart.
+
+    :func:`ordered_context` draws a fresh permutation per board and so breaks
+    that rule: it gives one hand unrelated turn buckets on two boards with the
+    same turn. Every test that treats boards independently is unaffected — but a
+    test about what a responder may DISTINGUISH is measuring nothing on such a
+    fixture, because the abstraction itself leaks the runout there.
+
+    Buckets are keyed on the global two-card id rather than a board's own hand
+    index, since boards remove different cards and index their live hands
+    differently.
+    """
+    visible = {Street.PREFLOP: 0, Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}
+    span = num_cards * num_cards
+    contexts = []
+    for board in boards:
+        hand_cards = enumerate_live_hands(board, num_cards)
+        global_id = hand_cards[:, 0] * num_cards + hand_cards[:, 1]
+        buckets = np.zeros((4, hand_cards.shape[0]), dtype=np.int64)
+        strength = None
+        for street, count in counts.items():
+            prefix = sorted(int(card) for card in board[: visible[street]])
+            # A stable integer seed, NOT hash() of anything: Python randomises
+            # string hashing per process and a fixture that moved between runs
+            # would be worse than one that is merely unrealistic.
+            seed = street.value
+            for card in prefix:
+                seed = seed * 53 + card + 1
+            rank = np.random.default_rng(seed).permutation(span)[global_id]
+            buckets[street.value - 1] = np.minimum(rank * count // span, count - 1)
+            if street is Street.RIVER:
+                strength = rank
+        if strength is None:
+            raise ValueError("counts must include Street.RIVER: showdown ranks come from it.")
+        # Showdown is settled on the full board, which the river prefix already
+        # is, so ranking by the river ordering keeps buckets strength-ordered.
+        contexts.append(HandContext(hand_cards, buckets, strength, blocking_matrix(hand_cards)))
+    return contexts
 
 
 def showdown_signal(contexts: Sequence[HandContext], counts: dict[Street, int]) -> float:
@@ -70,4 +133,9 @@ def showdown_signal(contexts: Sequence[HandContext], counts: dict[Street, int]) 
     return float(np.abs(bucket_game.derive(contexts, counts).showdown).max())
 
 
-__all__: Sequence[str] = ("MIN_SHOWDOWN_SIGNAL", "ordered_context", "showdown_signal")
+__all__: Sequence[str] = (
+    "MIN_SHOWDOWN_SIGNAL",
+    "ordered_context",
+    "prefix_consistent_contexts",
+    "showdown_signal",
+)
