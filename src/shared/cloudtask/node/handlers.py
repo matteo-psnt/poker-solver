@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -21,6 +22,12 @@ from src.shared.cloudtask.node import archive, progress
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import TaskPlan
 from src.shared.cloudtask.node.process import TaskLogger, run_guarded
+
+# How often a running sweep copies its curve to the share. Two minutes against
+# arms that run for hours: frequent enough to see the first rung land, rare
+# enough that the copy is invisible next to the work.
+PUBLISH_EVERY_SECONDS = 120
+
 
 """An executor: what a task of one kind does, and how it ended.
 
@@ -237,6 +244,29 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
             except OSError as error:
                 log(f"could not publish partial result: {error}")
 
+    def publish_as_it_lands(stop: threading.Event) -> None:
+        """Copy the curve up whenever it grows, not only when the task ends.
+
+        The sweep writes the whole result after every checkpoint, but that file
+        is on the node's disk, which is discarded. Publishing only on exit means
+        a six-hour arm shows NOTHING until it stops -- no way to tell a slow
+        sweep from a wedged one, and no early read on a measurement whose first
+        rung landed in minutes. The command prints its table at the end too, so
+        the log is no help either.
+
+        Cheap enough to be unconditional: the curve is a few kilobytes, and a
+        copy is skipped entirely unless the file changed.
+        """
+        seen: tuple[int, float] | None = None
+        while not stop.wait(PUBLISH_EVERY_SECONDS):
+            if not result.is_file():
+                continue
+            stat = result.stat()
+            current = (stat.st_size, stat.st_mtime)
+            if current != seen and stat.st_size > 0:
+                seen = current
+                publish_partial()
+
     abstractions = paths.share / "combo_abstraction"
     if not (abstractions / plan.config).is_dir():
         log(f"FATAL no such abstraction on the share: {plan.config}")
@@ -247,6 +277,11 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
     progress.note_baseline(paths, plan)
     watcher = progress.LadderWatcher(paths, log, plan=plan)
     watcher.start()
+    stop = threading.Event()
+    publisher = threading.Thread(
+        target=publish_as_it_lands, args=(stop,), name="vector-sweep-publish", daemon=True
+    )
+    publisher.start()
     try:
         code = run_guarded(
             _cli([*plan.commands[0], "--abstractions-dir", str(abstractions)]),
@@ -255,6 +290,8 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
             log=log,
         )
     finally:
+        stop.set()
+        publisher.join(timeout=30)
         watcher.stop()
         publish_partial()
 
