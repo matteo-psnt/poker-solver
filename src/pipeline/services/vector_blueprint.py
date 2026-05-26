@@ -117,6 +117,7 @@ def train_vector_blueprint(
     checkpoint_every: int = 25,
     retain_every: int = 1,
     dtype: str = "float32",
+    config_overrides: dict[str, object] | None = None,
     runs_dir: Path | None = None,
     run_id: str | None = None,
     experiment: ExperimentTag | None = None,
@@ -139,7 +140,7 @@ def train_vector_blueprint(
         dtype: ``float32`` (default, measured to cost nothing in strategy
             quality) or ``float64`` (sharper zero-sum residual, 2x memory).
     """
-    config: Config = load_training_config(config_name)
+    config: Config = load_training_config(config_name, **(config_overrides or {}))
     configure_logging(config.system.log_level)
 
     base_dir = Path(runs_dir) if runs_dir is not None else Path(config.training.runs_dir)
