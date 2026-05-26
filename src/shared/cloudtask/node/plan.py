@@ -59,6 +59,7 @@ class TaskPlan:
     dtype: str = ""
     warm_start_from: str = ""
     warm_start_weight: int = 0
+    warm_start_at: int = 0
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     eval_method: str = DEFAULT_EVAL_METHOD
     eval_rungs: tuple[str, ...] = ()
@@ -155,6 +156,7 @@ def parse_environment(environ: dict[str, str] | None = None) -> TaskPlan:
         dtype=env.get("RUN_DTYPE", ""),
         warm_start_from=env.get("RUN_WARM_START_FROM", ""),
         warm_start_weight=_int(env.get("RUN_WARM_START_WEIGHT"), 0),
+        warm_start_at=_int(env.get("RUN_WARM_START_AT"), 0),
         timeout_seconds=parse_duration(env.get("RUN_TIMEOUT")),
         eval_method=env.get("RUN_EVAL_METHOD") or DEFAULT_EVAL_METHOD,
         eval_rungs=tuple(r for r in (env.get("RUN_EVAL_AT") or "").split(",") if r),

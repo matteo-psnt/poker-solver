@@ -157,6 +157,7 @@ class TestEnvironment:
             "RUN_DTYPE",
             "RUN_WARM_START_FROM",
             "RUN_WARM_START_WEIGHT",
+            "RUN_WARM_START_AT",
             "RUN_CHECKPOINT_EVERY",
             "RUN_GIT_COMMIT",
             "RUN_GIT_DIRTY",

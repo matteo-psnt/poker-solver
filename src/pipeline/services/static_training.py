@@ -88,6 +88,7 @@ def train_static(
     run_id: str | None = None,
     warm_start_from: Path | None = None,
     warm_start_weight: int = warm_start.DEFAULT_EFFECTIVE_ITERATIONS,
+    warm_start_at: int | None = None,
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
 
@@ -109,6 +110,10 @@ def train_static(
             before training. Ignored when continuing, so a retried leg does
             not re-seed over its own progress.
         warm_start_weight: How much accumulated regret the prior claims.
+        warm_start_at: Which rung of the prior to seed from. Board-free
+            quality is not monotone in iterations, so the LAST rung is not
+            generally the best one; omitting this seeds from whatever the
+            manifest calls current, which is rarely what was measured.
         seed: Overrides ``system.seed``.
         config_overrides: Nested config overrides (``__`` separator).
         experiment: Experiment/arm/parent recorded on the run.
@@ -196,6 +201,7 @@ def train_static(
             run_dir=run_dir,
             effective_iterations=warm_start_weight,
             abstraction_hash=tracker.metadata.card_abstraction_hash,
+            at_iteration=warm_start_at,
         )
         seeded = True
 
