@@ -124,9 +124,10 @@ class TestKernel:
         assert np.isfinite(solver.regrets).all()
         assert np.isfinite(solver.strategy_sum).all()
 
-    # 200 iterations plus four best-response scorings: real work, and past the
-    # 5 s default. Bounded explicitly rather than left to inherit, so a genuine
-    # stall still fails instead of merely being slow.
+    # 5.8s single-process for 200 iterations, and the suite runs 12-way
+    # parallel, so the default 5s fires on a loaded box. Bounded rather than
+    # marked slow: this is the check that the kernel solves the game it plays,
+    # and it should run on every commit.
     @pytest.mark.timeout(60)
     def test_abstract_game_exploitability_falls_toward_zero(self, solver, initial):
         """The kernel must solve the game it is actually playing.

@@ -43,7 +43,6 @@ def _cli(argv: list[str]) -> list[str]:
 
 
 def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-
     # The prior lives on the share like any other run. Fetching it is the node's
     # job: without this the trainer resolves a run directory that was never
     # brought down, and a task that seeds is a task that dies.
@@ -315,6 +314,9 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
 
 HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN: _train,
+    # Same executor: the board-free kernel writes ordinary checkpoints, so
+    # the fetch, the ladder watcher and the publish path are identical.
+    TaskName.TRAIN_VECTOR: _train,
     TaskName.EVALUATE: _evaluate,
     TaskName.PRECOMPUTE: _precompute,
     TaskName.VECTOR_SWEEP: _vector_sweep,
