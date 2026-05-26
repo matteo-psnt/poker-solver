@@ -43,16 +43,27 @@ def _cli(argv: list[str]) -> list[str]:
 
 
 def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-    # The prior lives on the share like any other run. Fetching it is the node's
-    # job: without this the trainer resolves a run directory that was never
-    # brought down, and a task that seeds is a task that dies.
+    # The prior lives on the share like any other run, and fetching it is the
+    # node's job -- without this the trainer resolves a run directory that was
+    # never brought down.
+    #
+    # FATAL when it is missing, not a warning. This warned and trained on, which
+    # is how four 30M arms -- eight node-hours -- came back as four identical
+    # controls: the prior had been pruned from the share, every arm quietly
+    # became its own control, and nothing said so until the coverage ladders
+    # turned out identical. For a warm-started task the prior IS the experiment,
+    # so a missing one is a task that cannot do its job, not one that can do
+    # less of it.
     if getattr(plan, "warm_start_from", ""):
         prior = paths.archive / plan.warm_start_from
-        if prior.is_dir():
-            log(f"fetching warm-start prior {plan.warm_start_from}")
-            archive.fetch_current_rung(prior, paths.runs / plan.warm_start_from, log)
-        else:
-            log(f"WARN warm-start prior {plan.warm_start_from} is not on the share")
+        if not prior.is_dir():
+            log(
+                f"FATAL warm-start prior {plan.warm_start_from} is not on the share; "
+                "refusing to train an unseeded arm that would look like a control"
+            )
+            return 1, "missing-prior"
+        log(f"fetching warm-start prior {plan.warm_start_from}")
+        archive.fetch_current_rung(prior, paths.runs / plan.warm_start_from, log)
     run_id = plan.train_run_id
     published = paths.archive / run_id
     if published.is_dir():
