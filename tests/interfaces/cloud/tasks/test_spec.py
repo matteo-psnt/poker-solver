@@ -155,6 +155,8 @@ class TestEnvironment:
             "RUN_UNIVERSE_BOARDS",
             "RUN_UNIVERSE_SEED",
             "RUN_DTYPE",
+            "RUN_WARM_START_FROM",
+            "RUN_WARM_START_WEIGHT",
             "RUN_CHECKPOINT_EVERY",
             "RUN_GIT_COMMIT",
             "RUN_GIT_DIRTY",

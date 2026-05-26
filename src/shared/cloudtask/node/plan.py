@@ -54,6 +54,11 @@ class TaskPlan:
     sets: tuple[str, ...] = ()
     workers: int = 1
     checkpoint_every: int = 0
+    universe_boards: int = 0
+    universe_seed: int = 0
+    dtype: str = ""
+    warm_start_from: str = ""
+    warm_start_weight: int = 0
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     eval_method: str = DEFAULT_EVAL_METHOD
     eval_rungs: tuple[str, ...] = ()
@@ -94,7 +99,99 @@ class TaskPlan:
         A list: scoring a ladder is one command per rung, and the wrapper
         accounts for each separately.
         """
+<<<<<<< HEAD:src/shared/cloudtask/node/plan.py
         return kinds.kind(self.op).commands(self)
+=======
+        argv = [
+            "train-static",
+            "--config",
+            self.config,
+            "--iterations",
+            str(self.to),
+            "--run",
+            self.train_run_id,
+            # Never omitted. "Empty means all CPUs" was documented but never
+            # implemented: `train-static` defaults --workers to 1, so an
+            # omitted count trained SINGLE-THREADED on a 16-vCPU node -- a ~16x
+            # loss that reads as a slow leg rather than a misconfiguration, and
+            # that turns a 1.8h leg into one the wall-clock ceiling kills.
+            "--workers",
+            str(self.workers),
+        ]
+        if self.checkpoint_every:
+            argv += ["--checkpoint-every", str(self.checkpoint_every)]
+        # Seeding is a property of a FRESH run; train_static ignores it when
+        # continuing, so a retry cannot lay the prior back over real progress.
+        if self.warm_start_from:
+            argv += ["--warm-start-from", self.warm_start_from]
+            if self.warm_start_weight:
+                argv += ["--warm-start-weight", str(self.warm_start_weight)]
+        # Appended only when set: `--arm ""` would record an arm literally
+        # named empty string rather than an unaffiliated run.
+        for flag, value in (
+            ("--experiment", self.experiment),
+            ("--arm", self.arm),
+            ("--parent", self.parent),
+        ):
+            if value:
+                argv += [flag, value]
+        for override in self.sets:
+            argv += ["--set", override]
+        return argv
+
+    def train_vector_argv(self) -> list[str]:
+        """The board-free kernel's command line.
+
+        Deliberately not ``train_argv`` with a different verb. It takes NO
+        ``--workers``: the kernel is one process, and splatting a shared array
+        carrying that flag into this command is the exact defect this module's
+        docstring records. The universe knobs have no analogue on the scalar
+        side at all -- they estimate the bucket-transition matrices, so they
+        define the GAME, not how long to train it.
+        """
+        argv = [
+            "train-vector",
+            "--config",
+            self.config,
+            "--iterations",
+            str(self.to),
+            "--run",
+            self.train_run_id,
+        ]
+        if self.universe_boards:
+            argv += ["--universe-boards", str(self.universe_boards)]
+        if self.universe_seed:
+            argv += ["--universe-seed", str(self.universe_seed)]
+        if self.checkpoint_every:
+            argv += ["--checkpoint-every", str(self.checkpoint_every)]
+        if self.dtype:
+            argv += ["--dtype", self.dtype]
+        for flag, value in (
+            ("--experiment", self.experiment),
+            ("--arm", self.arm),
+            ("--parent", self.parent),
+        ):
+            if value:
+                argv += [flag, value]
+        for override in self.sets:
+            argv += ["--set", override]
+        return argv
+
+    def evaluate_argv(self, rung: str) -> list[str]:
+        """One rung's scoring command.
+
+        ``eval_flags`` is the submitter's passthrough (``score --run r --
+        --br-flops 8``); it is validated where it is built, in ``score.py``,
+        because its contents are unknowable here.
+        """
+        argv = ["evaluate", "--run", self.run_id, "--method", self.eval_method]
+        if rung:
+            argv += ["--at", rung]
+        return argv + list(self.eval_flags)
+
+    def precompute_argv(self) -> list[str]:
+        return ["precompute", "--config", self.config, "--json"]
+>>>>>>> 1916f25 (feat(warm-start): seed and train in ONE leg):src/shared/node/plan.py
 
     @property
     def provenance(self) -> str:
@@ -145,6 +242,11 @@ def parse_environment(environ: dict[str, str] | None = None) -> TaskPlan:
         sets=_json_list(env.get("RUN_SETS_JSON"), "RUN_SETS_JSON"),
         workers=_int(env.get("RUN_WORKERS"), 0) or _node_cpus(),
         checkpoint_every=_int(env.get("RUN_CHECKPOINT_EVERY"), 0),
+        universe_boards=_int(env.get("RUN_UNIVERSE_BOARDS"), 0),
+        universe_seed=_int(env.get("RUN_UNIVERSE_SEED"), 0),
+        dtype=env.get("RUN_DTYPE", ""),
+        warm_start_from=env.get("RUN_WARM_START_FROM", ""),
+        warm_start_weight=_int(env.get("RUN_WARM_START_WEIGHT"), 0),
         timeout_seconds=parse_duration(env.get("RUN_TIMEOUT")),
         eval_method=env.get("RUN_EVAL_METHOD") or DEFAULT_EVAL_METHOD,
         eval_rungs=tuple(r for r in (env.get("RUN_EVAL_AT") or "").split(",") if r),

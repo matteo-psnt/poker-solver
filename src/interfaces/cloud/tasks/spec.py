@@ -147,6 +147,8 @@ class TaskSpec:
     universe_boards: int = 0
     universe_seed: int = 0
     dtype: str = ""
+    warm_start_from: str = ""
+    warm_start_weight: int = 0
     force_publish: bool = False
     # Stamped by `dispatch.stage_and_queue`, never by a caller: the node has no
     # `.git` (the snapshot excludes it), so the submitting machine is the only
@@ -203,6 +205,8 @@ class TaskSpec:
             "RUN_UNIVERSE_BOARDS": str(self.universe_boards) if self.universe_boards else "",
             "RUN_UNIVERSE_SEED": str(self.universe_seed) if self.universe_seed else "",
             "RUN_DTYPE": self.dtype,
+            "RUN_WARM_START_FROM": self.warm_start_from,
+            "RUN_WARM_START_WEIGHT": str(self.warm_start_weight) if self.warm_start_weight else "",
         }
 
     def validate(self) -> None:
