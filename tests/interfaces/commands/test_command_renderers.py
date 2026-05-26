@@ -101,6 +101,18 @@ PAYLOADS: dict[str, dict] = {
         "dtype": "float32",
         "status": "completed",
     },
+    "warm-start": {
+        "op": "warm-start",
+        "run_id": "warm-a",
+        "runs_dir": "data/runs",
+        "config_name": "production",
+        "source_run_id": "vec-a",
+        "effective_iterations": 1000,
+        "num_rows": 32_240_608,
+        "seeded_rows": 32_240_608,
+        "seeded_fraction": 1.0,
+        "status": "seeded",
+    },
     "precompute": {
         "op": "precompute",
         "abstraction_config": "production",
@@ -599,6 +611,7 @@ class TestFixturesMatchTheRealPayloads:
         for op, cls, extra in (
             ("train-static", services.StaticTrainingOutput, set()),
             ("train-vector", services.VectorBlueprintOutput, set()),
+            ("warm-start", services.WarmStartOutput, set()),
             ("promote", services.Baseline, {"baseline"}),
             ("report", services.ExperimentReport, set()),
             ("curve", services.CurveOutput, {"decay_ratio"}),
