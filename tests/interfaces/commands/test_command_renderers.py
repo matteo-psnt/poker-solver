@@ -84,6 +84,23 @@ PAYLOADS: dict[str, dict] = {
         "job_id": "poker-20260805",
         "tasks": ["vector-board-free-buckets-F10T20R30-000000-1"],
     },
+    "train-vector": {
+        "op": "train-vector",
+        "run_id": "vec-a",
+        "runs_dir": "data/runs",
+        "config_name": "production",
+        "iterations": 400,
+        "num_rows": 32_240_608,
+        "touched_rows": 32_240_608,
+        "coverage": 1.0,
+        "runtime_seconds": 1800.0,
+        "seconds_per_iteration": 4.5,
+        "abstract_exploitability": 1.16,
+        "universe_boards": 2000,
+        "universe_seed": 7,
+        "dtype": "float32",
+        "status": "completed",
+    },
     "precompute": {
         "op": "precompute",
         "abstraction_config": "production",
@@ -581,6 +598,7 @@ class TestFixturesMatchTheRealPayloads:
     def test_fixture_keys_come_from_the_service_dataclasses(self):
         for op, cls, extra in (
             ("train-static", services.StaticTrainingOutput, set()),
+            ("train-vector", services.VectorBlueprintOutput, set()),
             ("promote", services.Baseline, {"baseline"}),
             ("report", services.ExperimentReport, set()),
             ("curve", services.CurveOutput, {"decay_ratio"}),
