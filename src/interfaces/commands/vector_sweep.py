@@ -46,13 +46,14 @@ from src.engine.solver.vector.bucket_kernel import BucketVectorCFR
 from src.engine.solver.vector.fixed_board_scalar import FixedBoardStaticSolver
 from src.engine.solver.vector.mixture import BoardMixtureCFR
 from src.interfaces.commands._base import Command
+from src.interfaces.errors import CommandError
 from src.pipeline.abstraction.postflop.bucketer import DenseBucketer
 from src.pipeline.abstraction.vector_universe import (
     build_hand_context,
     iter_universe,
     sample_boards,
 )
-from src.shared.config_loader import load_config
+from src.shared.config.loader import load_config
 
 # Per kernel, because they differ by ~70x in cost per iteration: board-free is
 # ~0.14 s and hand-space ~10 s on a 32-board scoring set. One shared list is how
@@ -154,11 +155,11 @@ def _bucket_counts(abstraction: DenseBucketer) -> dict[Street, int]:
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Train one kernel, scoring it against the exact best response as it goes."""
     if args.seed == args.score_seed:
-        raise SystemExit("--seed and --score-seed must differ, or scoring is not held out.")
+        raise CommandError("--seed and --score-seed must differ, or scoring is not held out.")
 
     path = Path(args.abstractions_dir) / args.abstraction
     if not path.is_dir():
-        raise SystemExit(f"No such abstraction: {path}")
+        raise CommandError(f"No such abstraction: {path}")
     abstraction = DenseBucketer.load(path)
     counts = _bucket_counts(abstraction)
 

@@ -58,6 +58,7 @@ def games():
     return compiled, contexts, pairs, game, mass
 
 
+@pytest.mark.timeout(30)
 def test_both_kernels_agree_on_the_untrained_strategy(games):
     """Uniform play must be about as exploitable in one game as the other."""
     compiled, contexts, pairs, game, mass = games

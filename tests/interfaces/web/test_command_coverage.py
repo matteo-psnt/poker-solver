@@ -43,6 +43,7 @@ NODE_ONLY: dict[str, str] = {
     "train-static": "compute, run BY the node wrapper — `submit` is the console's door",
     "precompute": "compute, run BY the node wrapper — `submit-precompute` is the door",
     "evaluate": "compute, run BY the node wrapper — `score` is the door",
+    "vector-sweep": "compute, run BY the node wrapper — `submit-vector` is the door",
 }
 
 EXCLUDED = NO_PAYLOAD | NODE_ONLY
