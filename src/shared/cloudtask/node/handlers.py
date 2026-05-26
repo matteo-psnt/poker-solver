@@ -43,6 +43,17 @@ def _cli(argv: list[str]) -> list[str]:
 
 
 def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
+
+    # The prior lives on the share like any other run. Fetching it is the node's
+    # job: without this the trainer resolves a run directory that was never
+    # brought down, and a task that seeds is a task that dies.
+    if getattr(plan, "warm_start_from", ""):
+        prior = paths.archive / plan.warm_start_from
+        if prior.is_dir():
+            log(f"fetching warm-start prior {plan.warm_start_from}")
+            archive.fetch_current_rung(prior, paths.runs / plan.warm_start_from, log)
+        else:
+            log(f"WARN warm-start prior {plan.warm_start_from} is not on the share")
     run_id = plan.train_run_id
     published = paths.archive / run_id
     if published.is_dir():

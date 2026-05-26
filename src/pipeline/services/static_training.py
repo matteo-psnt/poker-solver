@@ -184,9 +184,15 @@ def train_static(
     # must not lay the prior back over the progress it already made.
     seeded = False
     if warm_start_from is not None and not resuming:
+        # A bare run id resolves under runs_dir, exactly as --run does; an
+        # explicit path is taken as given. A node passes the id, because the
+        # directory it lands in is the node's business, not the submitter's.
+        source = Path(warm_start_from)
+        if not source.exists():
+            source = base_dir / str(warm_start_from)
         warm_start.seed_checkpoint(
             config,
-            source_run=Path(warm_start_from),
+            source_run=source,
             run_dir=run_dir,
             effective_iterations=warm_start_weight,
             abstraction_hash=tracker.metadata.card_abstraction_hash,
