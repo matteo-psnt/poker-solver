@@ -63,7 +63,25 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             )
             return 1, "missing-prior"
         log(f"fetching warm-start prior {plan.warm_start_from}")
-        archive.fetch_current_rung(prior, paths.runs / plan.warm_start_from, log)
+        # The rung the task will SEED FROM, not the manifest's current one. A
+        # prior is a ladder and the best rung is rarely the last: asking for
+        # rung 100 while fetching rung 200 left the trainer with no such
+        # checkpoint, the first attempt died, and the Batch retry -- finding a
+        # populated run directory -- skipped seeding and trained a control. Two
+        # 30M sweeps were lost that way before the cause was visible.
+        wanted = getattr(plan, "warm_start_at", 0)
+        destination = paths.runs / plan.warm_start_from
+        if wanted:
+            archive.fetch_metadata(prior, destination)
+            name = f"static-{wanted}.zarr"
+            if not (prior / name).is_dir():
+                log(f"FATAL warm-start prior has no rung {wanted} ({name} absent on the share)")
+                return 1, "missing-rung"
+            archive.require_complete(prior, name)
+            archive.fetch_snapshot(prior, destination, name)
+            log(f"fetched warm-start rung {name}")
+        else:
+            archive.fetch_current_rung(prior, destination, log)
     run_id = plan.train_run_id
     published = paths.archive / run_id
     if published.is_dir():

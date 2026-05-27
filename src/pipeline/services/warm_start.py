@@ -68,6 +68,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EFFECTIVE_ITERATIONS = 1000
 
+SEEDED_MARKER = ".warm-started"
+"""Written once a run is seeded, so a RESUME can tell "this arm carries a
+prior" from "this arm asked for one and never got it". Without it a retry
+after a failed seed is indistinguishable from a control -- which is exactly
+what two 30M sweeps turned out to be."""
+
 
 @dataclass(frozen=True)
 class WarmStartOutput:
@@ -253,6 +259,7 @@ def warm_start_run(
 
 __all__ = (
     "DEFAULT_EFFECTIVE_ITERATIONS",
+    "SEEDED_MARKER",
     "WarmStartOutput",
     "regrets_encoding",
     "seed_checkpoint",
