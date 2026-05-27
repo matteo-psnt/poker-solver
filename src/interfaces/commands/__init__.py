@@ -113,8 +113,7 @@ COMMANDS: tuple[CommandRef, ...] = (
     ),
     CommandRef(
         "warm-start",
-        "Seed a scalar run from another kernel's strategy "
-        "(regrets encode it; average does not).",
+        "Seed a scalar run from another kernel's strategy (regrets encode it; average does not).",
     ),
     CommandRef("precompute", "Precompute a combo abstraction into data/combo_abstraction/."),
     CommandRef("evaluate", "Evaluate a run's exploitability (Local Best Response by default)."),
