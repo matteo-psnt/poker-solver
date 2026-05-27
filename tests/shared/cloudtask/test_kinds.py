@@ -15,6 +15,14 @@ from src.shared.cloudtask import kinds
 from src.shared.cloudtask.kinds import BadTaskError, Progress, Sample, TaskKind, TaskName
 from src.shared.cloudtask.node import plan as node_plan
 
+"""An op string this project has never defined and never will.
+
+Deliberately not a real retired op: see
+``TestLookup.test_the_read_path_tolerates_its_own_history`` for why naming one
+has broken this test twice.
+"""
+RETIRED_OP = "train-dynamic"
+
 
 def _spec(**kwargs):
     base = {
@@ -95,20 +103,23 @@ class TestTheRegistryStaysHonest:
 class TestLookup:
     def test_the_submit_path_refuses_an_op_no_node_can_run(self):
         with pytest.raises(BadTaskError, match="Unknown task kind"):
-            kinds.kind("train-vector")
+            kinds.kind(RETIRED_OP)
 
     def test_the_read_path_tolerates_its_own_history(self):
-        """`train-vector` is in the task log from deleted work. Listing history
-        must not raise on it.
+        """An op the log holds and this code no longer defines must still READ.
 
-        This used to use `vector-sweep` for the same purpose, and that stopped
-        being true when the sweep came back as a live kind -- which is the point
-        of the test: the retired list is history, and history gains and loses
-        members. A retired op must still READ, and a live one must still RUN.
+        The name is synthetic ON PURPOSE. This test twice named a real op --
+        `vector-sweep`, then `train-vector` -- and twice broke when that op came
+        back as a live kind. Every op string this project has ever defined is
+        live again today, so there is no retired one to point at, and pinning
+        the property to whichever is currently dead only schedules the next
+        failure. What is being tested is the SHAPE: unknown reads as ``None``
+        and degrades to its bare op, while a live one still resolves.
         """
-        assert kinds.kind_of("train-vector") is None
-        assert kinds.describe({"op": "train-vector"}) == "train-vector"
+        assert kinds.kind_of(RETIRED_OP) is None
+        assert kinds.describe({"op": RETIRED_OP}) == RETIRED_OP
         assert kinds.kind_of("vector-sweep") is not None
+        assert kinds.kind_of("train-vector") is not None
 
     def test_a_wire_string_and_its_enum_member_are_the_same_key(self):
         assert kinds.kind("train") is kinds.kind(TaskName.TRAIN)

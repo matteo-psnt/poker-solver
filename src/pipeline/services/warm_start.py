@@ -57,11 +57,11 @@ from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
-from src.pipeline.training import components
+from src.pipeline.blueprint import construction
 from src.pipeline.training.run_tracker import RunTracker
 from src.pipeline.training.run_tracker.attempts import ExperimentTag
 from src.shared.config import Config
-from src.shared.config_loader import load_training_config
+from src.shared.config.loader import load_training_config
 from src.shared.numeric import NORMALIZE_EPS
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ def seed_checkpoint(
         raise ValueError("effective_iterations must be positive; it scales the prior's weight.")
 
     action_model = ActionModel(config)
-    abstraction = components.build_card_abstraction(config)
+    abstraction = construction.build_card_abstraction(config)
     rules = GameRules(config.game.small_blind, config.game.big_blind)
     tree = build_betting_tree(
         rules, action_model, abstraction, starting_stack=config.game.starting_stack
@@ -209,8 +209,8 @@ def warm_start_run(
         )
 
     action_model = ActionModel(config)
-    abstraction = components.build_card_abstraction(config)
-    abstraction_hash = components.resolve_card_abstraction_hash(config)
+    abstraction = construction.build_card_abstraction(config)
+    abstraction_hash = construction.resolve_card_abstraction_hash(config)
     rules = GameRules(config.game.small_blind, config.game.big_blind)
     tree = build_betting_tree(
         rules, action_model, abstraction, starting_stack=config.game.starting_stack

@@ -775,8 +775,13 @@ def kind(name: object) -> TaskKind:
 def kind_of(name: object) -> TaskKind | None:
     """The kind, or ``None`` for one this code no longer defines.
 
-    The READ path. The task log holds `vector-sweep` and `train-vector` from
-    deleted work, and listing history must not raise on its own past.
+    The READ path: listing history must not raise on its own past. As it
+    happens every op string ever defined here is live again today -- both
+    `vector-sweep` and `train-vector` were retired and came back -- so this
+    currently has no real example to point at. That is exactly why the
+    tolerance stays: the set of live kinds has shrunk before and will again,
+    and a reader that raised on a name it had dropped would make the task log
+    unreadable retroactively.
     """
     return TaskKind.KINDS.get(str(name or ""))
 
