@@ -19,7 +19,7 @@ is exploring, not that anything is broken.
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -74,6 +74,15 @@ def _at(row: dict[str, Any]) -> datetime | None:
         return None
 
 
+def _surface_of(row: dict[str, Any]) -> str:
+    """Which surface a row claims, with absent and null both reading as unknown.
+
+    One expression, used for the keys AND the counts, because computing them
+    two ways is what let them disagree.
+    """
+    return str(row.get("surface") or "unknown")
+
+
 def _percentile(values: list[float], fraction: float) -> float:
     """Nearest-rank, on a list already sorted. Exact for the sizes involved.
 
@@ -90,7 +99,9 @@ def _percentile(values: list[float], fraction: float) -> float:
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Summarise the local activity log."""
     path = telemetry.log_path()
-    rows = records.read_log(path)
+    # Both generations, oldest first. Reading only the live file would make a
+    # rotation look like the history had been deleted.
+    rows = [row for generation in telemetry.logs() for row in records.read_log(generation)]
 
     floor = _since(args.days)
     selected = [
@@ -139,6 +150,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if row.get("outcome") in {"refusal", "error"}
     ]
     failures.reverse()
+    # Counted BEFORE truncation. `--limit` is a display cap, and reporting the
+    # capped length as the total said "20 failure(s)" when there were 100.
+    total_failures = len(failures)
 
     if args.limit > 0:
         summary = summary[: args.limit]
@@ -159,10 +173,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "first_at": min((str(row.get("at", "")) for row in selected), default=None) or None,
         "commands": summary,
         "failures": failures,
-        "by_surface": {
-            name: sum(1 for row in selected if row.get("surface") == name)
-            for name in sorted({str(row.get("surface", "unknown")) for row in selected})
-        },
+        "total_failures": total_failures,
+        # Counted off ONE expression, so the parts sum to `rows`. Deriving the
+        # keys and the counts separately meant a row with a missing or null
+        # `surface` contributed a key it then failed to match, and the header
+        # rendered `unknown 0` beside a total that included it.
+        "by_surface": dict(sorted(Counter(_surface_of(row) for row in selected).items())),
     }
 
 
@@ -203,8 +219,12 @@ def render(payload: dict[str, Any]) -> None:
             f"{entry['max_seconds']:>8.3f} {entry['total_seconds']:>9.1f} "
             f"{entry['refusals']:>8} {entry['errors']:>7}"
         )
-    if payload["failures"]:
-        print(f"\n{len(payload['failures'])} failure(s) — `--failures` to list them.")
+    total = payload.get("total_failures", len(payload["failures"]))
+    if total:
+        shown = (
+            "" if total == len(payload["failures"]) else f" (showing {len(payload['failures'])})"
+        )
+        print(f"\n{total} failure(s){shown} — `--failures` to list them.")
 
 
 def _listing_failures(payload: dict[str, Any]) -> bool:

@@ -530,6 +530,7 @@ PAYLOADS: dict[str, dict] = {
                 "asked": {"run": "run-x"},
             }
         ],
+        "total_failures": 41,
         "by_surface": {"cli": 96, "console": 316},
     },
     "configs": {
