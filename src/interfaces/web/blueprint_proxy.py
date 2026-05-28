@@ -124,6 +124,14 @@ def mount(app: FastAPI) -> None:
     def _combos() -> JSONResponse:
         return forward("/api/combos", {})
 
+    # The one WRITE here, and the reason the console can change which run it is
+    # charting at all. It returns immediately with a 202 and the far side loads
+    # on its own thread, so nothing here needs a longer timeout than any other
+    # call: the client watches `/api/blueprint/run` for the swap to land.
+    @app.post("/api/blueprint/load")
+    def _load(body: dict[str, Any]) -> JSONResponse:
+        return forward("/api/load", method="POST", json=body)
+
     @app.get("/api/blueprint/node")
     def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:
         return forward("/api/node", {"path": path, "board": board, "average": average})

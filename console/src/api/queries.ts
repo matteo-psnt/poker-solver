@@ -11,6 +11,7 @@ import { get, send } from "./client";
 import {
   type Activity,
   type Autoscale,
+  type BlueprintLoad,
   type BlueprintRun,
   type Box,
   type Cancelled,
@@ -37,6 +38,7 @@ import {
   type Tasks,
   activitySchema,
   autoscaleSchema,
+  blueprintLoadSchema,
   blueprintRunSchema,
   boxSchema,
   cancelSchema,
@@ -278,16 +280,38 @@ export const usePromote = () => {
 };
 
 /**
- * The blueprint server. Not polled: a loaded run does not change under you, so
- * a refetch interval would be pure cost. `combos` is the canonical 1326-entry
+ * The blueprint server. Polled ONLY while a swap is in flight.
+ *
+ * A loaded run does not change under you, so an interval would normally be pure
+ * cost — but it CAN now change, because this console can ask for it, and a load
+ * takes about a minute on the far side. So the cadence follows the state: fast
+ * while `loading` is set, never otherwise. `combos` is the canonical 1326-entry
  * order and never changes at all, hence `staleTime: Infinity`.
  */
 export const useBlueprintRun = () =>
   useQuery<BlueprintRun>({
     queryKey: ["blueprint", "run"],
     queryFn: () => get("/api/blueprint/run", blueprintRunSchema),
+    refetchInterval: (query) => (query.state.data?.loading ? 2_000 : false),
     staleTime: Number.POSITIVE_INFINITY,
   });
+
+/**
+ * Ask the box to serve a different run.
+ *
+ * Returns as soon as the far side has ACCEPTED the job (202), not when the run
+ * is in — the load takes about a minute and holding a request open that long
+ * would cross three proxies with shorter timeouts than that. Invalidating the
+ * blueprint queries is what starts the polling above; the node and combo caches
+ * go with it, because they describe the run that is being replaced.
+ */
+export const useLoadBlueprintRun = () => {
+  const queryClient = useQueryClient();
+  return useMutation<BlueprintLoad, Error, { run: string; at?: number | null }>({
+    mutationFn: (body) => send("/api/blueprint/load", blueprintLoadSchema, body),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["blueprint"] }),
+  });
+};
 
 export const useCombos = (enabled: boolean) =>
   useQuery<Combos>({

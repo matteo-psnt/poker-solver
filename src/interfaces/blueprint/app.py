@@ -10,12 +10,20 @@ panel is more useful than one that dies.
 The blueprint is supplied as a factory rather than loaded here, so a test can
 serve a four-iteration solver through the identical app the node serves a 30M
 one through. Loading takes ~1 minute and allocates the full table, so it happens
-once at construction and the app holds it for its lifetime: this process is one
-run, and switching runs means a new process.
+once at construction -- but the app can be asked to REPLACE it, which is what
+``/api/load`` is for.
+
+Switching used to mean a new process, and in practice a new deploy: an SSH
+script that re-synced the code, re-ran ``uv sync``, rewrote the unit's
+environment and restarted it, about three minutes. None of that has anything to
+do with which run is loaded. Everything a swap actually needs is already on the
+box -- the share is mounted, the runs directory is known -- so it is done in
+process here, and the deploy script goes back to being for deploys.
 """
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -112,6 +120,19 @@ class SubmitAction(BaseModel):
     token: str
 
 
+class LoadRun(BaseModel):
+    """Which run to serve instead, and optionally which checkpoint of it."""
+
+    run: str
+    at: int | None = None
+
+
+_LOADING = (
+    "The server is loading a run. Everything here answers again once it is in — "
+    "watch /api/health, which stays up throughout."
+)
+
+
 _GONE = (
     "That hand is no longer on the server — it ended, or was dropped to make room. Deal a new one."
 )
@@ -172,11 +193,30 @@ def hand_payload(hand: HeadsUpHand) -> dict[str, Any]:
     }
 
 
+class _Held:
+    """The one run this server is currently answering for.
+
+    A mutable holder rather than three closure variables, because ``/api/load``
+    replaces all three together and a handler must never see a blueprint from
+    one run beside sessions from another.
+    """
+
+    def __init__(self, blueprint: ScorableBlueprint, run_id: str) -> None:
+        self.blueprint = blueprint
+        self.run_id = run_id
+        self.sessions = Sessions(blueprint)
+        #: Set while a swap is in flight, so every reader can say so.
+        self.loading: str | None = None
+        #: Why the last swap failed, kept until the next one is attempted.
+        self.error: str | None = None
+
+
 def create_app(
     load_blueprint: Callable[[], ScorableBlueprint],
     *,
     run_id: str = "unknown",
     idle_timeout_seconds: float = 0.0,
+    load_run: Callable[[str, int | None], tuple[ScorableBlueprint, str]] | None = None,
 ) -> FastAPI:
     """Build the app around one blueprint, loaded now.
 
@@ -187,10 +227,18 @@ def create_app(
     ``idle_timeout_seconds`` of 0 means stay up, which is what a laptop and a
     test want. On the hosted box it is what turns "nobody is here" into a
     stopped VM, via the systemd unit that escalates this process exiting.
+
+    ``load_run`` is what makes ``/api/load`` possible: given a run id it stages
+    and builds that run, returning the blueprint and the id it resolved to.
+    OPTIONAL on purpose -- a test and a laptop serve a solver they built
+    themselves and have no share to stage from, and for them the endpoint
+    refuses with a sentence rather than 404ing as though it did not exist.
     """
-    blueprint = load_blueprint()
+    held = _Held(load_blueprint(), run_id)
     idle = IdleWatch(idle_timeout_seconds)
-    sessions = Sessions(blueprint)
+    # One swap at a time. A second caller is told the server is busy rather than
+    # queued behind a minute of loading it cannot see.
+    swapping = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -229,27 +277,92 @@ def create_app(
         """
         return JSONResponse(
             {
-                "run": run_id,
-                "ready": True,
+                "run": held.run_id,
+                "ready": held.loading is None,
+                "loading": held.loading,
+                "can_switch": load_run is not None,
+                "last_error": held.error,
                 "idle_seconds": round(idle.idle_seconds(), 1),
                 "idle_timeout_seconds": idle.timeout_seconds,
-                "sessions": len(sessions),
+                "sessions": len(held.sessions),
             }
         )
 
     @app.get("/api/run")
     def _run() -> JSONResponse:
         """What is loaded here, so a client can label what it is looking at."""
-        config = blueprint.config
+        config = held.blueprint.config
         return JSONResponse(
             {
-                "run": run_id,
+                "run": held.run_id,
                 "starting_stack": config.game.starting_stack,
                 "small_blind": config.game.small_blind,
                 "big_blind": config.game.big_blind,
                 "combos": len(_COMBO_LABELS),
+                "loading": held.loading,
+                "can_switch": load_run is not None,
             }
         )
+
+    def _swap(run: str, at_iteration: int | None) -> None:
+        """Do the load. Runs on its own thread; never raises to the caller.
+
+        The old blueprint is dropped BEFORE the new one is built, which is the
+        decision here worth arguing about. Building first and swapping at the end
+        would keep the server answering throughout -- but it would hold two full
+        tables at once, and this box is sized for one. An OOM kill takes the whole
+        server down and deallocates the VM; a minute of `loading` does not.
+
+        The cost is that a failed build leaves nothing loaded. That is reported
+        rather than hidden, and the fix is to load something again.
+        """
+        try:
+            # Sessions die with the blueprint they were dealt from. Carrying one
+            # across would leave a half-played hand whose next bot action comes
+            # from a different run -- silently, and mid-hand.
+            held.sessions.clear()
+            held.blueprint = None  # type: ignore[assignment]
+            blueprint, resolved = load_run(run, at_iteration)  # type: ignore[misc]
+            held.blueprint = blueprint
+            held.run_id = resolved
+            held.sessions = Sessions(blueprint)
+        except Exception as error:  # noqa: BLE001 -- reported, not swallowed
+            held.error = f"{type(error).__name__}: {error}"
+        finally:
+            held.loading = None
+            swapping.release()
+
+    @app.post("/api/load")
+    def _load(request: LoadRun) -> JSONResponse:
+        """Start replacing the loaded run, and return at once.
+
+        202, not 200: the work takes about a minute and this answers in
+        milliseconds. Holding the request open for the whole load would put a
+        60-second HTTP call behind Caddy, the console's proxy and a browser tab,
+        each with its own timeout and none of them 60 seconds -- so the load
+        would keep succeeding while the caller saw a failure. Progress is on
+        ``/api/health``, which is why that endpoint stays cheap and answering
+        throughout.
+        """
+        if load_run is None:
+            return JSONResponse(
+                {
+                    "error": "This server cannot switch runs: it was started with a "
+                    "blueprint handed to it directly rather than a way to resolve one."
+                },
+                status_code=422,
+            )
+        if not swapping.acquire(blocking=False):
+            return JSONResponse({"error": f"Already loading {held.loading}."}, status_code=409)
+
+        held.loading = request.run
+        held.error = None
+        # `daemon`, so an idle expiry or a Ctrl-C during a load does not hang the
+        # process waiting for a minute of numpy to finish.
+        threading.Thread(
+            target=_swap, args=(request.run, request.at), name="blueprint-swap", daemon=True
+        ).start()
+        return JSONResponse({"run": request.run, "loading": True}, status_code=202)
 
     @app.get("/api/combos")
     def _combos() -> JSONResponse:
@@ -259,9 +372,11 @@ def create_app(
     @app.get("/api/node")
     def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:
         """The strategy at one spot, for every combo the board allows."""
+        if held.loading is not None:
+            return JSONResponse({"error": _LOADING}, status_code=503)
         try:
             cards = parse_board(board)
-            node = replay(blueprint, path, cards)
+            node = replay(held.blueprint, path, cards)
             if node.actor is None:
                 return JSONResponse(
                     {
@@ -272,7 +387,7 @@ def create_app(
                         "children": [],
                     }
                 )
-            grid = strategy_grid(blueprint, node, use_average=average)
+            grid = strategy_grid(held.blueprint, node, use_average=average)
             return JSONResponse(
                 {
                     "path": path,
@@ -298,8 +413,10 @@ def create_app(
     @app.post("/api/play")
     def _start(request: StartPlay) -> JSONResponse:
         """Deal a hand. The button alternates unless the caller pins it."""
+        if held.loading is not None:
+            return JSONResponse({"error": _LOADING}, status_code=503)
         try:
-            session_id, hand = sessions.start(
+            session_id, hand = held.sessions.start(
                 human_seat=request.human_seat, button=request.button, seed=request.seed
             )
         except ValueError as error:
@@ -309,7 +426,9 @@ def create_app(
     @app.get("/api/play/{session_id}")
     def _hand(session_id: str) -> JSONResponse:
         try:
-            return JSONResponse({"session": session_id, **hand_payload(sessions.get(session_id))})
+            return JSONResponse(
+                {"session": session_id, **hand_payload(held.sessions.get(session_id))}
+            )
         except UnknownSessionError:
             return JSONResponse({"error": _GONE}, status_code=404)
 
@@ -317,7 +436,7 @@ def create_app(
     def _act(session_id: str, request: SubmitAction) -> JSONResponse:
         """Take the human's action, then auto-play to their next turn."""
         try:
-            hand = sessions.get(session_id)
+            hand = held.sessions.get(session_id)
         except UnknownSessionError:
             return JSONResponse({"error": _GONE}, status_code=404)
         legal = hand.legal_actions()
@@ -331,7 +450,7 @@ def create_app(
 
     @app.delete("/api/play/{session_id}")
     def _leave(session_id: str) -> JSONResponse:
-        sessions.drop(session_id)
+        held.sessions.drop(session_id)
         return JSONResponse({"session": session_id, "dropped": True})
 
     return app

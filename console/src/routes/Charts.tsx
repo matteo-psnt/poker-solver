@@ -1,4 +1,4 @@
-import { useBlueprintRun, useCombos, useSolverNode } from "@/api/queries";
+import { useBlueprintRun, useCombos, useLoadBlueprintRun, useSolverNode } from "@/api/queries";
 import { BoxControl } from "@/components/BoxControl";
 import { Panel } from "@/components/Panel";
 import { RangeGrid } from "@/components/RangeGrid";
@@ -33,8 +33,8 @@ export function Charts() {
   const [pinned, setPinned] = useState<Cell | null>(null);
   const [hovered, setHovered] = useState<Cell | null>(null);
 
-  // What the box is actually holding. The console cannot change this — see
-  // `Loaded` below — so it is reported rather than chosen.
+  // What the box is actually holding, which `Loaded` can also change. Polled
+  // only while a swap is in flight — see `useBlueprintRun`.
   const run = useBlueprintRun();
   const combos = useCombos(!!run.data);
   const node = useSolverNode(path, board, average, !!run.data);
@@ -65,7 +65,12 @@ export function Charts() {
 
   return (
     <div className="space-y-3">
-      <Loaded loaded={run.data?.run ?? null} error={run.error} />
+      <Loaded
+        loaded={run.data?.run ?? null}
+        loading={run.data?.loading ?? null}
+        canSwitch={run.data?.can_switch ?? false}
+        error={run.error}
+      />
 
       <Panel
         title={grid ? `${grid.street} · seat ${grid.actor} to act` : "chart"}
@@ -113,26 +118,43 @@ export function Charts() {
 }
 
 /**
- * WHICH run you are looking at, and the fact that you cannot change it here.
+ * WHICH run you are looking at, and the control that changes it.
  *
- * The box loads one run eagerly at process start (`create_app` builds the
- * blueprint before the server answers anything), and the only way to swap it is
- * `just serve-deploy <run>` — an SSH script that copies the run from the share,
- * rewrites `/etc/blueprint.env` and restarts the unit, about three minutes.
+ * Switching used to be an SSH script — `just serve-deploy <run>` — that re-synced
+ * the code, re-ran `uv sync`, rewrote the unit's environment and restarted it,
+ * about three minutes. None of that has to do with which run is loaded, and the
+ * console could not do any of it, so this panel used to hand you the command to
+ * paste elsewhere. The box swaps in process now, so it is a button.
  *
- * So this panel does the one honest thing available: it names what is loaded,
- * lets you pick any other run to find out its id, and hands you the exact
- * command. Silently showing a chart with no run label at all — which is what
- * this page did — is how you read one run's strategy believing it is another's.
+ * The load is watched rather than awaited: the server answers 202 immediately
+ * and does the work on its own thread, so what is rendered here is the polled
+ * state of the box, not the state of a request.
  */
-function Loaded({ loaded, error }: { loaded: string | null; error: unknown }) {
+function Loaded({
+  loaded,
+  loading,
+  canSwitch,
+  error,
+}: {
+  loaded: string | null;
+  loading: string | null;
+  canSwitch: boolean;
+  error: unknown;
+}) {
   const [wanted, setWanted] = useState<string | null>(null);
+  const load = useLoadBlueprintRun();
+  const target = wanted ?? loaded;
   const mismatch = wanted !== null && wanted !== loaded;
 
   return (
     <Panel title="loaded on the blueprint box">
       <div className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-        {loaded ? (
+        {loading ? (
+          <span className="flex items-center gap-2 font-mono text-[13px] text-[var(--fg-muted)]">
+            <span className="size-1.5 rounded-full bg-amber-400 motion-safe:animate-pulse" />
+            loading {runLabel(loading)}…
+          </span>
+        ) : loaded ? (
           <span className="font-mono text-[13px] text-[var(--fg)]">{runLabel(loaded)}</span>
         ) : (
           <span className="text-[12px] text-[var(--fg-muted)]">
@@ -141,23 +163,46 @@ function Loaded({ loaded, error }: { loaded: string | null; error: unknown }) {
               : "Nothing loaded — start a blueprint server."}
           </span>
         )}
-        <RunPicker value={wanted ?? loaded} onChange={setWanted} label="switch to" loadableOnly />
+
+        <RunPicker value={target} onChange={setWanted} label="switch to" loadableOnly />
+
+        {mismatch && !loading && (
+          <button
+            type="button"
+            disabled={load.isPending}
+            onClick={() => wanted && load.mutate({ run: wanted })}
+            className="rounded border border-[var(--fg-faint)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--fg)] hover:bg-white/[0.06] disabled:opacity-40"
+          >
+            {load.isPending ? "asking…" : "load it"}
+          </button>
+        )}
+
         <div className="ml-auto">
           <BoxControl />
         </div>
       </div>
 
-      {mismatch && (
-        <div className="border-t border-[var(--border)] px-3 py-2.5">
-          <p className="text-[12px] text-[var(--fg-muted)]">
-            The console cannot switch runs: the box loads one at startup. Deploying{" "}
-            <span className="font-mono text-[var(--fg)]">{runLabel(wanted)}</span> copies it from
-            the share and restarts the server — about three minutes.
-          </p>
-          <code className="mt-2 block rounded border border-[var(--border)] bg-black/30 px-2.5 py-1.5 font-mono text-[12px] text-[var(--fg)] select-all">
-            just serve-deploy {wanted}
-          </code>
-        </div>
+      {/* The duration is stated because it is a minute of nothing happening on
+          screen, and an unlabelled spinner reads as a hang at about thirty
+          seconds — which is when someone reloads and asks for it twice. */}
+      {loading && (
+        <p className="border-t border-[var(--border)] px-3 py-2 text-[12px] text-[var(--fg-muted)]">
+          Staging from the share and rebuilding — about a minute. Hands in progress ended: a session
+          belongs to the run it was dealt from.
+        </p>
+      )}
+
+      {load.error && (
+        <p className="border-t border-red-500/30 bg-red-500/5 px-3 py-2 font-mono text-[12px] text-red-400">
+          {String(load.error.message)}
+        </p>
+      )}
+
+      {mismatch && !canSwitch && !loading && (
+        <p className="border-t border-[var(--border)] px-3 py-2 text-[12px] text-[var(--fg-muted)]">
+          This server cannot switch runs — it was started with a blueprint handed to it directly
+          rather than a runs directory to resolve one from.
+        </p>
       )}
     </Panel>
   );

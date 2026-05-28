@@ -70,6 +70,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "op": "blueprint-serve",
         "run": run_dir.name,
         "run_dir": str(run_dir),
+        # Kept so the server can stage a DIFFERENT run beside this one when
+        # asked to switch, rather than only ever knowing the one it started on.
+        "runs_dir": args.runs_dir,
         "at_iteration": args.at,
         "idle_timeout": args.idle_timeout,
         "url": f"http://{HOST}:{args.port}",
@@ -87,24 +90,45 @@ def render(payload: dict[str, Any]) -> None:
 
     from src.interfaces.blueprint.app import create_app
     from src.interfaces.blueprint.idle import IDLE_EXIT_CODE
+    from src.interfaces.blueprint.staging import stage_run
     from src.pipeline.services.scoring._shared import build_blueprint_for
     from src.pipeline.training.run_tracker import RunTracker
 
     run_dir = Path(payload["run_dir"])
+    runs_dir = Path(payload["runs_dir"])
 
-    def _load():
-        """Load once, at app construction. Takes ~1 min on a production run."""
-        metadata = RunTracker.load(run_dir).metadata
+    def _build(directory: Path, at_iteration: int | None):
+        """A run directory on local disk -> a blueprint. ~1 min in production."""
+        metadata = RunTracker.load(directory).metadata
         solver, _storage = build_blueprint_for(
-            run_dir,
+            directory,
             metadata,
             abstraction_hash=metadata.card_abstraction_hash,
-            at_iteration=payload["at_iteration"],
+            at_iteration=at_iteration,
         )
         return solver
 
+    def _load():
+        """Load once, at app construction."""
+        return _build(run_dir, payload["at_iteration"])
+
+    def _load_run(run: str, at_iteration: int | None):
+        """Serve a DIFFERENT run, staging it from the share if it is not local.
+
+        Handed to the app rather than reached for by it: `interfaces.blueprint`
+        is transport, and resolving a run id against a share is this command's
+        job -- the same job it already does once for `--run`.
+        """
+        directory = stage_run(run, runs_dir=runs_dir)
+        return _build(directory, at_iteration), directory.name
+
     print(f"Loading {payload['run']} …")
-    app = create_app(_load, run_id=payload["run"], idle_timeout_seconds=payload["idle_timeout"])
+    app = create_app(
+        _load,
+        run_id=payload["run"],
+        idle_timeout_seconds=payload["idle_timeout"],
+        load_run=_load_run,
+    )
     print(f"Blueprint server on {payload['url']}   (Ctrl-C to stop)")
 
     # An explicit Server rather than `uvicorn.run(...)`, so idle expiry can ask
