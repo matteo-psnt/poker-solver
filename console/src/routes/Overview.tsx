@@ -1,5 +1,5 @@
 import { useAutoscale, useJobs, usePool, useTasks } from "@/api/queries";
-import type { TaskRow } from "@/api/schemas";
+import type { TaskRow } from "@/api/types";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";

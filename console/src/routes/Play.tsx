@@ -1,5 +1,5 @@
 import { useBlueprintRun, useDealHand, useSubmitAction } from "@/api/queries";
-import type { Hand, HandEvent } from "@/api/schemas";
+import type { Hand, HandEvent } from "@/api/types";
 import { BoxControl } from "@/components/BoxControl";
 import { Panel } from "@/components/Panel";
 import { describeAction } from "@/lib/actions";

@@ -8,113 +8,128 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, send } from "./client";
-import {
-  type Activity,
-  type Autoscale,
-  type BlueprintLoad,
-  type BlueprintRun,
-  type Box,
-  type Cancelled,
-  type Combos,
-  type Compacted,
-  type Comparison,
-  type Configs,
-  type Cost,
-  type Curve,
-  type Dispatched,
-  type Hand,
-  type Jobs,
-  type Ledger,
-  type LogLines,
-  type Pool,
-  type Progress,
-  type Promoted,
-  type PushedCode,
-  type PushedData,
-  type Report,
-  type RunInfo,
-  type Runs,
-  type SolverNode,
-  type Tasks,
-  activitySchema,
-  autoscaleSchema,
-  blueprintLoadSchema,
-  blueprintRunSchema,
-  boxSchema,
-  cancelSchema,
-  combosSchema,
-  compactSchema,
-  compareSchema,
-  configsSchema,
-  costSchema,
-  curveSchema,
-  dispatchedSchema,
-  handSchema,
-  jobsSchema,
-  ledgerSchema,
-  logSchema,
-  nodeSchema,
-  poolSchema,
-  progressSchema,
-  promoteSchema,
-  pushCodeSchema,
-  pushDataSchema,
-  reportSchema,
-  runinfoSchema,
-  runsSchema,
-  tasksSchema,
-} from "./schemas";
+import type {
+  Activity,
+  Autoscale,
+  BlueprintLoad,
+  BlueprintRun,
+  Box,
+  Cancelled,
+  Combos,
+  Compacted,
+  Comparison,
+  Configs,
+  Cost,
+  Curve,
+  Dispatched,
+  ExperimentView,
+  Hand,
+  Jobs,
+  Ledger,
+  LogLines,
+  NowView,
+  Pool,
+  Progress,
+  Promoted,
+  PushedCode,
+  PushedData,
+  Report,
+  RunInfo,
+  RunView,
+  Runs,
+  SolverNode,
+  Tasks,
+} from "./types";
 
 /** Cheap reads (~2s) can be frequent; the share reads (~5s) should not be. */
 const FAST = 15_000;
 const SLOW = 60_000;
 
+/**
+ * The composed views: one screen, one request.
+ *
+ * These are what a PAGE should use. The per-command hooks below stay for the
+ * ad-hoc questions — a picker that needs only `configs`, a log nobody has opened
+ * — but a screen assembled out of four of them pays four round trips and gets
+ * four different ages, which is what made the Overview feel stale while every
+ * individual panel was behaving correctly.
+ *
+ * One cadence per view rather than one per panel, and that is the point: every
+ * number on the page is now the same age as every other, and the age badge is
+ * telling the truth about all of them at once.
+ */
+export const useNow = () =>
+  useQuery<NowView>({
+    queryKey: ["view", "now"],
+    queryFn: () => get("/api/view/now"),
+    refetchInterval: FAST,
+  });
+
+export const useRunView = (runId: string) =>
+  useQuery<RunView>({
+    queryKey: ["view", "run", runId],
+    queryFn: () => get(`/api/view/run/${encodeURIComponent(runId)}`),
+    refetchInterval: SLOW,
+  });
+
+/**
+ * `enabled` on the id: the page opens with no experiment selected, and a request
+ * for `""` would be a share read that can only refuse.
+ */
+export const useExperimentView = (experimentId: string | null) =>
+  useQuery<ExperimentView>({
+    queryKey: ["view", "experiment", experimentId],
+    queryFn: () => get(`/api/view/experiment/${encodeURIComponent(experimentId ?? "")}`),
+    enabled: Boolean(experimentId),
+    refetchInterval: SLOW,
+  });
+
 export const usePool = () =>
   useQuery<Pool>({
     queryKey: ["pool"],
-    queryFn: () => get("/api/pool", poolSchema),
+    queryFn: () => get("/api/pool"),
     refetchInterval: FAST,
   });
 
 export const useJobs = (limit = 20) =>
   useQuery<Jobs>({
     queryKey: ["jobs", limit],
-    queryFn: () => get(`/api/jobs?limit=${limit}`, jobsSchema),
+    queryFn: () => get(`/api/jobs?limit=${limit}`),
     refetchInterval: FAST,
   });
 
 export const useTasks = (limit = 0) =>
   useQuery<Tasks>({
     queryKey: ["tasks", limit],
-    queryFn: () => get(`/api/tasks?limit=${limit}`, tasksSchema),
+    queryFn: () => get(`/api/tasks?limit=${limit}`),
     refetchInterval: SLOW,
   });
 
 export const useRuns = () =>
   useQuery<Runs>({
     queryKey: ["runs"],
-    queryFn: () => get("/api/runs", runsSchema),
+    queryFn: () => get("/api/runs"),
     refetchInterval: SLOW,
   });
 
 export const useRun = (runId: string) =>
   useQuery<RunInfo>({
     queryKey: ["run", runId],
-    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}`, runinfoSchema),
+    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}`),
     refetchInterval: SLOW,
   });
 
 export const useCurve = (runId: string) =>
   useQuery<Curve>({
     queryKey: ["curve", runId],
-    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}/curve`, curveSchema),
+    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}/curve`),
     refetchInterval: SLOW,
   });
 
 export const useCost = (hours = 0) =>
   useQuery<Cost>({
     queryKey: ["cost", hours],
-    queryFn: () => get(`/api/cost?hours=${hours}`, costSchema),
+    queryFn: () => get(`/api/cost?hours=${hours}`),
     // Derived from the task log, so it costs what `tasks` costs. The billing
     // half rides along free: Cost Management is rate-limited hard and its data
     // lags hours, so `cloud/billing.py` memoises it for 15 minutes server-side
@@ -125,7 +140,7 @@ export const useCost = (hours = 0) =>
 export const useProgress = (runId: string) =>
   useQuery<Progress>({
     queryKey: ["progress", runId],
-    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}/progress`, progressSchema),
+    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}/progress`),
     refetchInterval: SLOW,
   });
 
@@ -137,7 +152,7 @@ export const useProgress = (runId: string) =>
 export const useLog = (taskId: string | null, lines = 400) =>
   useQuery<LogLines>({
     queryKey: ["log", taskId, lines],
-    queryFn: () => get(`/api/logs/${encodeURIComponent(taskId ?? "")}?lines=${lines}`, logSchema),
+    queryFn: () => get(`/api/logs/${encodeURIComponent(taskId ?? "")}?lines=${lines}`),
     enabled: Boolean(taskId),
     // A published log for a finished task does not change. Refetching it would
     // be a cloud read for an answer that cannot have moved.
@@ -148,7 +163,7 @@ export const useLog = (taskId: string | null, lines = 400) =>
 export const useEvals = (limit = 50) =>
   useQuery<Ledger>({
     queryKey: ["evals", limit],
-    queryFn: () => get(`/api/evals?limit=${limit}`, ledgerSchema),
+    queryFn: () => get(`/api/evals?limit=${limit}`),
     refetchInterval: SLOW,
   });
 
@@ -162,7 +177,7 @@ export const useEvals = (limit = 50) =>
 export const useConfigs = () =>
   useQuery<Configs>({
     queryKey: ["configs"],
-    queryFn: () => get("/api/configs", configsSchema),
+    queryFn: () => get("/api/configs"),
     staleTime: Number.POSITIVE_INFINITY,
   });
 
@@ -174,7 +189,7 @@ export const useConfigs = () =>
 export const useActivity = (days = 7) =>
   useQuery<Activity>({
     queryKey: ["activity", days],
-    queryFn: () => get(`/api/activity?days=${days}`, activitySchema),
+    queryFn: () => get(`/api/activity?days=${days}`),
     refetchInterval: SLOW,
   });
 
@@ -186,7 +201,7 @@ export const useActivity = (days = 7) =>
 export const useAutoscale = () =>
   useQuery<Autoscale>({
     queryKey: ["autoscale"],
-    queryFn: () => get("/api/autoscale", autoscaleSchema),
+    queryFn: () => get("/api/autoscale"),
     refetchInterval: FAST,
   });
 
@@ -198,7 +213,7 @@ export const useAutoscale = () =>
 export const useReport = (experimentId: string | null) =>
   useQuery<Report>({
     queryKey: ["report", experimentId],
-    queryFn: () => get(`/api/experiments/${encodeURIComponent(experimentId ?? "")}`, reportSchema),
+    queryFn: () => get(`/api/experiments/${encodeURIComponent(experimentId ?? "")}`),
     enabled: Boolean(experimentId),
     refetchInterval: SLOW,
   });
@@ -212,10 +227,7 @@ export const useCompare = (a: string, b: string, force: boolean) =>
   useQuery<Comparison>({
     queryKey: ["compare", a, b, force],
     queryFn: () =>
-      get(
-        `/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}&force=${force}`,
-        compareSchema,
-      ),
+      get(`/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}&force=${force}`),
     enabled: Boolean(a && b),
     refetchInterval: false,
   });
@@ -233,10 +245,10 @@ export const useCompare = (a: string, b: string, force: boolean) =>
  * that filled in defaults would put them back, which is the exact disagreement
  * that design exists to prevent. The form builds the body it means to send.
  */
-const useDispatch = <T>(path: string, schema: Parameters<typeof send>[1]) => {
+const useDispatch = <T>(path: string) => {
   const queryClient = useQueryClient();
   return useMutation<T, Error, Record<string, unknown>>({
-    mutationFn: (body) => send(path, schema, body),
+    mutationFn: (body) => send<T>(path, body),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -244,18 +256,18 @@ const useDispatch = <T>(path: string, schema: Parameters<typeof send>[1]) => {
   });
 };
 
-export const useSubmit = () => useDispatch<Dispatched>("/api/submit", dispatchedSchema);
-export const useScore = () => useDispatch<Dispatched>("/api/score", dispatchedSchema);
-export const usePrecompute = () => useDispatch<Dispatched>("/api/precompute", dispatchedSchema);
+export const useSubmit = () => useDispatch<Dispatched>("/api/submit");
+export const useScore = () => useDispatch<Dispatched>("/api/score");
+export const usePrecompute = () => useDispatch<Dispatched>("/api/precompute");
 
 export const usePushCode = () =>
   useMutation<PushedCode, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/push-code", pushCodeSchema, body),
+    mutationFn: (body) => send("/api/push-code", body),
   });
 
 export const usePushData = () =>
   useMutation<PushedData, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/push-data", pushDataSchema, body),
+    mutationFn: (body) => send("/api/push-data", body),
   });
 
 /**
@@ -266,7 +278,7 @@ export const usePushData = () =>
 export const useCompactLegs = () => {
   const queryClient = useQueryClient();
   return useMutation<Compacted, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/compact-legs", compactSchema, body),
+    mutationFn: (body) => send("/api/compact-legs", body),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
   });
 };
@@ -274,7 +286,7 @@ export const useCompactLegs = () => {
 export const usePromote = () => {
   const queryClient = useQueryClient();
   return useMutation<Promoted, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/promote", promoteSchema, body),
+    mutationFn: (body) => send("/api/promote", body),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
   });
 };
@@ -291,7 +303,7 @@ export const usePromote = () => {
 export const useBlueprintRun = () =>
   useQuery<BlueprintRun>({
     queryKey: ["blueprint", "run"],
-    queryFn: () => get("/api/blueprint/run", blueprintRunSchema),
+    queryFn: () => get("/api/blueprint/run"),
     refetchInterval: (query) => (query.state.data?.loading ? 2_000 : false),
     staleTime: Number.POSITIVE_INFINITY,
   });
@@ -308,7 +320,7 @@ export const useBlueprintRun = () =>
 export const useLoadBlueprintRun = () => {
   const queryClient = useQueryClient();
   return useMutation<BlueprintLoad, Error, { run: string; at?: number | null }>({
-    mutationFn: (body) => send("/api/blueprint/load", blueprintLoadSchema, body),
+    mutationFn: (body) => send("/api/blueprint/load", body),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["blueprint"] }),
   });
 };
@@ -316,7 +328,7 @@ export const useLoadBlueprintRun = () => {
 export const useCombos = (enabled: boolean) =>
   useQuery<Combos>({
     queryKey: ["blueprint", "combos"],
-    queryFn: () => get("/api/blueprint/combos", combosSchema),
+    queryFn: () => get("/api/blueprint/combos"),
     staleTime: Number.POSITIVE_INFINITY,
     enabled,
   });
@@ -327,7 +339,6 @@ export const useSolverNode = (path: string, board: string, average: boolean, ena
     queryFn: () =>
       get(
         `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}&average=${average}`,
-        nodeSchema,
       ),
     enabled,
   });
@@ -338,13 +349,12 @@ export const useSolverNode = (path: string, board: string, average: boolean, ena
  */
 export const useDealHand = () =>
   useMutation<Hand, Error, { human_seat: number; seed?: number | null }>({
-    mutationFn: (body) => send("/api/blueprint/play", handSchema, body),
+    mutationFn: (body) => send("/api/blueprint/play", body),
   });
 
 export const useSubmitAction = () =>
   useMutation<Hand, Error, { session: string; token: string }>({
-    mutationFn: ({ session, token }) =>
-      send(`/api/blueprint/play/${session}/action`, handSchema, { token }),
+    mutationFn: ({ session, token }) => send(`/api/blueprint/play/${session}/action`, { token }),
   });
 
 /**
@@ -355,7 +365,7 @@ export const useSubmitAction = () =>
 export const useBox = () =>
   useQuery<Box>({
     queryKey: ["blueprint", "box"],
-    queryFn: () => get("/api/box", boxSchema),
+    queryFn: () => get("/api/box"),
     refetchInterval: (query) => {
       const power = query.state.data?.power;
       return power === "running" || power === "deallocated" ? 30_000 : 5_000;
@@ -364,7 +374,7 @@ export const useBox = () =>
 
 export const useBoxAction = () =>
   useMutation<Box, Error, "start" | "stop">({
-    mutationFn: (action) => send(`/api/box/${action}`, boxSchema),
+    mutationFn: (action) => send(`/api/box/${action}`),
   });
 
 /**
@@ -375,10 +385,7 @@ export const useCancelTask = () => {
   const queryClient = useQueryClient();
   return useMutation<Cancelled, Error, { job: string; task: string }>({
     mutationFn: ({ job, task }) =>
-      send(
-        `/api/tasks/${encodeURIComponent(job)}/${encodeURIComponent(task)}/cancel`,
-        cancelSchema,
-      ),
+      send(`/api/tasks/${encodeURIComponent(job)}/${encodeURIComponent(task)}/cancel`),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
   });
 };
