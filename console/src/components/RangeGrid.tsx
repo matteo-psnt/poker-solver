@@ -1,5 +1,5 @@
 import type { ActionLabel } from "@/lib/actions";
-import { type Cell, GRID_SIZE, actionColour } from "@/lib/range";
+import { type Cell, GRID_SIZE, actionColours } from "@/lib/range";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,11 +20,14 @@ export function RangeGrid({
   cells,
   actions,
   onHover,
+  onPick,
 }: {
   cells: Cell[][];
   /** Display labels, in the same order as each cell's strategy. */
   actions: ActionLabel[];
   onHover?: (cell: Cell | null) => void;
+  /** Pin a hand's mix so it survives the mouse leaving. */
+  onPick?: (cell: Cell | null) => void;
 }) {
   return (
     <div
@@ -40,6 +43,9 @@ export function RangeGrid({
             key={cell.label}
             onMouseEnter={() => onHover?.(cell)}
             onFocus={() => onHover?.(cell)}
+            // Clicking the SAME cell again unpins, so the control that set the
+            // state is also the one that clears it.
+            onClick={() => onPick?.(cell)}
             className="relative aspect-square overflow-hidden rounded-[2px] border border-[var(--border)] text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fg)]"
             title={describe(cell, actions)}
           >
@@ -72,17 +78,16 @@ export function RangeGrid({
 }
 
 function Bar({ strategy, actions }: { strategy: number[]; actions: ActionLabel[] }) {
+  // Keyed on the TOKENS, not the labels: colour encodes what kind of action it
+  // is, and the label is prose. Computed for the whole menu at once, because a
+  // raise's shade depends on how many other raises there are.
+  const colours = actionColours(actions.map((action) => action.token));
   return (
     <span className="absolute inset-0 flex">
       {strategy.map((weight, index) => (
         <span
           key={actions[index]?.token ?? index}
-          style={{
-            width: `${weight * 100}%`,
-            // Keyed on the TOKEN, not the label: colour encodes what kind of
-            // action it is, and the label is prose that may be translated.
-            backgroundColor: actionColour(actions[index]?.token ?? "", index, actions.length),
-          }}
+          style={{ width: `${weight * 100}%`, backgroundColor: colours[index] }}
         />
       ))}
     </span>

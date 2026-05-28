@@ -1,6 +1,7 @@
 import { isTransient } from "@/api/client";
 import { Shell } from "@/components/Shell";
 import { Activity as ActivityPage } from "@/routes/Activity";
+import { Charts } from "@/routes/Charts";
 import { Cost } from "@/routes/Cost";
 import { Dispatch } from "@/routes/Dispatch";
 import { Evals } from "@/routes/Evals";
@@ -10,7 +11,6 @@ import { Play } from "@/routes/Play";
 import { RunDetail } from "@/routes/RunDetail";
 import { Runs } from "@/routes/Runs";
 import { Share } from "@/routes/Share";
-import { Solver } from "@/routes/Solver";
 import { TaskLog } from "@/routes/TaskLog";
 import { Tasks } from "@/routes/Tasks";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -50,10 +50,18 @@ const routes = [
     path: "/runs/$runId",
     component: RunDetail,
   }),
+  // The spot lives in the URL, which is what makes a chart shareable — the page
+  // it replaces held all three in `useState`, so its own claim that a bookmarked
+  // spot survives was not true of anything on it.
   createRoute({
     getParentRoute: () => rootRoute,
-    path: "/solver",
-    component: Solver,
+    path: "/charts",
+    component: Charts,
+    validateSearch: z.object({
+      path: z.string().default(""),
+      board: z.string().default(""),
+      average: z.boolean().default(true),
+    }),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
