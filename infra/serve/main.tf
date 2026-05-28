@@ -207,7 +207,14 @@ locals {
           ExecStart=/home/${var.admin_username}/.local/bin/uv run poker-solver blueprint-serve \
             --run ${"$"}{RUN} --runs-dir ${"$"}{RUNS_DIR} --idle-timeout ${"$"}{IDLE_TIMEOUT}
           ExecStopPost=/usr/local/bin/deallocate-if-idle
-          SuccessExitStatus=42
+          # 143 is SIGTERM: `systemctl stop`, and the `restart` every deploy
+          # runs. Without it here, systemd calls a deliberate stop a failure and
+          # `OnFailure=` above deallocates the box -- so a deploy switched the
+          # machine off a minute after reporting success. `deallocate-if-idle`
+          # refused that exit already; `OnFailure` is a second path that never
+          # asked it. Kept in step with the drop-in `deploy.sh` writes, which is
+          # what reaches a box that already exists.
+          SuccessExitStatus=42 143
           Restart=on-failure
           RestartSec=10
 

@@ -141,10 +141,18 @@ sudo chmod 0755 /usr/local/bin/deallocate-if-idle
 # and restarted before the deallocate lands. A drop-in rather than a rewrite of
 # the unit: everything else in it is first-boot configuration this script has no
 # business restating.
+#
+# 143 is in there for a bug this script caused to ITSELF. 143 is SIGTERM, which
+# is what `systemctl restart` sends -- the restart four lines below. Without it
+# systemd read the deploy's own restart as a failure and fired
+# `OnFailure=blueprint-deallocate`, so every deploy switched the box off a
+# minute after reporting success. `deallocate-if-idle` already refused that exit
+# ("blueprint exited 143 -- not deallocating"), but `OnFailure` is a SECOND and
+# independent path to the same deallocate and never consulted it.
 sudo mkdir -p /etc/systemd/system/blueprint.service.d
 sudo tee /etc/systemd/system/blueprint.service.d/idle-exit.conf >/dev/null <<'EOF'
 [Service]
-SuccessExitStatus=42
+SuccessExitStatus=42 143
 EOF
 
 sudo systemctl daemon-reload
