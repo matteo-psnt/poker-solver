@@ -102,15 +102,45 @@ class TestRefusals:
             gate.set()
         _settle(client)
 
-    def test_reads_refuse_while_a_swap_is_in_flight(self, solvers):
-        """503, not a stale answer: there is no blueprint to answer FROM."""
+
+class TestTheServerStaysUsableThroughout:
+    """The regression this file exists for after the first deploy.
+
+    The first version dropped the old blueprint before building the new one, so
+    for the whole minute-plus of a load `held.blueprint` was None. `/api/run`
+    read straight through it and raised `AttributeError: 'NoneType' object has
+    no attribute 'config'` -- on the ONE endpoint a client polls to watch the
+    swap, so every switch produced a stream of 500s on the page watching it.
+
+    Building first means the run already loaded stays answerable, so these are
+    ordinary 200s rather than a refusal.
+    """
+
+    def test_run_keeps_answering_and_names_what_is_coming(self, solvers):
         gate = threading.Event()
         client = TestClient(app_that_can_switch(solvers, block=gate))
         try:
             client.post("/api/load", json={"run": "second"})
-            assert client.get("/api/node").status_code == 503
-            # The endpoint the caller watches must keep answering throughout.
-            assert client.get("/api/health").json()["loading"] == "second"
+            answer = client.get("/api/run")
+            assert answer.status_code == 200
+            body = answer.json()
+            # Still the OLD run, and honest about the one on its way.
+            assert body["run"] == "first"
+            assert body["loading"] == "second"
+            # The config is READ from the live blueprint — the field whose
+            # absence was the crash.
+            assert body["big_blind"] > 0
+        finally:
+            gate.set()
+        _settle(client)
+
+    def test_the_strategy_is_still_readable(self, solvers):
+        """A reader who does not care about the swap must not notice one."""
+        gate = threading.Event()
+        client = TestClient(app_that_can_switch(solvers, block=gate))
+        try:
+            client.post("/api/load", json={"run": "second"})
+            assert client.get("/api/node").status_code == 200
         finally:
             gate.set()
         _settle(client)
