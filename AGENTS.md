@@ -51,8 +51,10 @@ looks like a regression.
   enforced**: `tests/interfaces/web/test_command_coverage.py` fails until a
   command has an endpoint or a declared reason — `NO_PAYLOAD` (`serve`,
   `blueprint-serve` never return one) or `NODE_ONLY` (`train-static`,
-  `precompute`, `evaluate` are node compute). `status` is covered by the three
-  panels it composes — do not add `/api/status`.
+  `train-vector`, `vector-sweep`, `warm-start`, `precompute`, `evaluate` are
+  node compute, each with the dispatching command that IS the console's door).
+  `status` is covered by the three panels it composes — do not add
+  `/api/status`.
 - **Two shapes of endpoint, and both go through a command.** One per command is
   the grain for an ad-hoc question — `/tasks` does not pay for `ledger`, and
   each panel fails alone. It is the wrong grain for a SCREEN, so
@@ -300,8 +302,9 @@ style. What is *not* enforced by tooling:
   belong in the commit message or a decision record — not at the top of a file
   every reader pays for. Prose rots silently: `kinds.py` asserted for weeks that
   two task kinds no longer existed while four of their commands stayed
-  registered. `scratch/prose-sweep.py` finds candidates; judging them is a
-  person's job, and it must never become a test.
+  registered. Grepping docstrings for "used to", "no longer", "this replaces"
+  finds candidates; judging them is a person's job, and it must never become a
+  test.
 
 ## Testing
 - While developing, run focused tests: `uv run pytest -n0 tests/<path>::<test>`
