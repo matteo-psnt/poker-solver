@@ -75,7 +75,11 @@ build/
 # Data artifacts
 data/
 
-.claude/
+# Local agent config stays out; the path-scoped rules are project documentation
+# and are tracked. Git cannot re-include a path under an excluded DIRECTORY, so
+# this must exclude the contents (`.claude/*`) rather than the directory itself.
+.claude/*
+!.claude/rules/
 
 # Terraform: state holds resource detail, .terraform/ is a large provider cache.
 # .terraform.lock.hcl is deliberately absent — it pins provider versions and is
