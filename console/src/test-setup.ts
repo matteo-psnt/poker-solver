@@ -23,3 +23,12 @@ if (!window.matchMedia) {
       dispatchEvent: () => false,
     }) as MediaQueryList;
 }
+
+/**
+ * `scrollTo` is jsdom's other unimplemented browser API, and the router calls it
+ * on every navigation. Unstubbed it prints a stack per navigation and buries
+ * whatever a failing test was trying to say.
+ */
+// Assigned unconditionally: jsdom DEFINES `scrollTo` and makes it throw
+// "Not implemented", so a `if (!window.scrollTo)` guard never fires.
+window.scrollTo = () => {};

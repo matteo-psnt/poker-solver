@@ -1,95 +1,96 @@
-import { chartTheme } from "@/lib/theme";
-import { useEffect, useRef } from "react";
-import uPlot from "uplot";
-import "uplot/dist/uPlot.min.css";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 /**
- * uPlot, not Recharts, and the reason is arithmetic rather than taste.
+ * Concurrency over time, drawn as the step function it is.
  *
- * The pool is sampled every 15s and kept for 30 days: 172,800 points. Recharts
- * renders SVG — one DOM node per point — so the page would hang rather than
- * degrade. uPlot draws to canvas and is comfortable well past that.
+ * `stepAfter` is the honest shape and the only part of this that is not
+ * negotiable: a point means "this many tasks were running from here until the
+ * next change", which is a step, not a ramp. A smoothed line would draw node
+ * counts that never existed — fractional nodes, between two integers.
  *
- * `stepAfter` is the honest shape: a sample means "the pool held N nodes from
- * here until the next observation", which is a step, not a ramp. Interpolating
- * would draw nodes that never existed.
+ * Why this is Recharts now
+ * -----------------------
+ * It was uPlot, on a stated argument that turned out to describe code that does
+ * not exist: *"the pool is sampled every 15s and kept for 30 days: 172,800
+ * points, and Recharts renders one DOM node per point."* There is no sampling.
+ * `cost/node_time.timeline` is an EVENT SWEEP — exactly two events per task
+ * span, start and end, collapsed where they coincide — so the series is about
+ * twice the task count. Hundreds of points, not six figures, and SVG is
+ * completely comfortable there.
+ *
+ * With the arithmetic gone, what was left was one canvas chart needing
+ * machinery no SVG chart needs: `lib/theme.ts` existed solely to read CSS
+ * custom properties into JS, because a canvas cannot resolve `var(--fg-faint)`
+ * and silently falls back to black — which is how these axes once rendered
+ * black on a near-black panel. Plus 24 lines of `index.css` overriding uPlot's
+ * defaults. That is ongoing complexity for one chart, and it is why the console
+ * carried two charting libraries for one page each.
+ *
+ * If a genuinely long series ever arrives — a sampled pool metric, say — this is
+ * the right place to reach for a canvas again. The premise just has to be true.
  */
 export function StepChart({
   times,
   values,
   label,
 }: {
+  /** Epoch milliseconds, matching what `Cost` already computes. */
   times: number[];
   values: (number | null)[];
   label: string;
 }) {
-  const host = useRef<HTMLDivElement>(null);
-  const plot = useRef<uPlot | null>(null);
+  const data = times.map((at, index) => ({ at, running: values[index] ?? 0 }));
 
-  useEffect(() => {
-    const element = host.current;
-    if (!element) return;
-
-    const build = () => {
-      // Resolved HERE, not written as `var(--…)`: these reach a canvas, which
-      // ignores custom properties and falls back to black.
-      const theme = chartTheme();
-      plot.current?.destroy();
-      plot.current = new uPlot(
-        {
-          width: element.clientWidth || 600,
-          height: 200,
-          padding: [8, 8, 0, 0],
-          cursor: { y: false },
-          legend: { show: false },
-          scales: { x: { time: true } },
-          // `stroke` is the TICK LABEL colour, and uPlot passes it straight to
-          // `ctx.fillStyle`. A `var(--…)` there is not an error: the assignment
-          // is ignored and uPlot's default `#000` stands, which is how these
-          // rendered black on a near-black panel.
-          axes: [
-            {
-              stroke: theme.axis,
-              grid: { stroke: theme.grid, width: 1 },
-              ticks: { stroke: theme.grid, show: true, size: 4 },
-              font: "10px ui-monospace, monospace",
-            },
-            {
-              stroke: theme.axis,
-              grid: { stroke: theme.grid, width: 1 },
-              ticks: { show: false },
-              font: "10px ui-monospace, monospace",
-              size: 44,
-            },
-          ],
-          series: [
-            {},
-            {
-              label,
-              stroke: theme.series,
-              fill: theme.seriesFill,
-              width: 1.5,
-              paths: uPlot.paths.stepped?.({ align: 1 }),
-              points: { show: false },
-            },
-          ],
-        },
-        [times, values] as uPlot.AlignedData,
-        element,
-      );
-    };
-
-    build();
-    const observer = new ResizeObserver(() => {
-      if (element.clientWidth) plot.current?.setSize({ width: element.clientWidth, height: 200 });
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-      plot.current?.destroy();
-      plot.current = null;
-    };
-  }, [times, values, label]);
-
-  return <div ref={host} className="w-full" />;
+  return (
+    <div className="h-[200px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" />
+          <XAxis
+            dataKey="at"
+            type="number"
+            scale="time"
+            domain={["dataMin", "dataMax"]}
+            tick={{ stroke: "var(--fg-faint)", fontSize: 10 }}
+            tickFormatter={(at: number) => new Date(at).toLocaleDateString()}
+          />
+          <YAxis
+            width={44}
+            allowDecimals={false}
+            tick={{ stroke: "var(--fg-faint)", fontSize: 10 }}
+          />
+          <Tooltip
+            contentStyle={{
+              background: "var(--panel)",
+              border: "1px solid var(--border)",
+              fontSize: 11,
+            }}
+            labelFormatter={(at: number) => new Date(at).toLocaleString()}
+            formatter={(running: number) => [running, label]}
+          />
+          {/* Filled, because the AREA is the quantity: node-hours is the
+              integral of this curve, and the page says so directly underneath. */}
+          <Area
+            type="stepAfter"
+            dataKey="running"
+            name={label}
+            stroke="#3b82f6"
+            fill="#3b82f6"
+            fillOpacity={0.15}
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
 }
