@@ -2,64 +2,36 @@ import { useJobs, usePool } from "@/api/queries";
 import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import {
-  Activity,
-  DollarSign,
-  FlaskConical,
-  Gauge,
-  Grid3x3,
-  LayoutDashboard,
-  Rocket,
-  ScrollText,
-  Spade,
-  Split,
-  UploadCloud,
-} from "lucide-react";
+import { Activity, Grid3x3, LayoutDashboard, Rocket, ScrollText, Split } from "lucide-react";
 
 /**
- * The nav, grouped the way `poker-solver --help` is grouped.
+ * Six destinations, one per SUBJECT.
  *
- * A flat list was fine at seven items and stopped being fine at ten, and the
- * obvious fixes — alphabetical, or by how often a page is opened — would both
- * be a second organising idea for a tool that already has one. The command
- * line's `COMMANDS` tuple is ordered in groups on purpose (open a surface,
- * dispatch and account for work, read the record), so the console uses the
- * same three. Someone who knows one surface then knows where to look on the
- * other, and a new page has an obvious home rather than a position.
+ * This list used to be the CLI's `COMMANDS` tuple in three groups, on the
+ * reasoning that someone who knows one surface then knows where to look on the
+ * other. That is a good property for a REFERENCE and the wrong organising idea
+ * for a console: the command line is organised by what you can DO because argv
+ * offers no other structure, and a screen does. It reached fourteen items
+ * because every new command arrived with a page of its own, and nothing ever
+ * said that was a decision.
  *
- * The fourth CLI group — run on a node — has no entry and cannot get one:
- * those commands are compute invoked BY the node wrapper, and a button here
- * would train on whichever laptop is serving the console.
+ * The test each survivor passed: is this a place you GO, or a follow-up you
+ * arrive at? Seven of the fourteen were all "read the record", and answering
+ * one question crossed three of them. A task log is a place you go — "why did
+ * that die" is a question people start with. An eval is not: it belongs to the
+ * run it scored, which is where it now lives.
+ *
+ * Ungrouped, because six items do not need headings. The three group labels
+ * were carrying the old structure more than they were helping anyone find
+ * anything.
  */
 const NAV = [
-  {
-    group: "surface",
-    items: [
-      { to: "/", label: "Overview", icon: LayoutDashboard },
-      { to: "/charts", label: "Charts", icon: Grid3x3 },
-      { to: "/play", label: "Play", icon: Spade },
-    ],
-  },
-  {
-    group: "work",
-    items: [
-      { to: "/dispatch", label: "Dispatch", icon: Rocket },
-      { to: "/tasks", label: "Tasks", icon: ScrollText },
-      { to: "/share", label: "Share", icon: UploadCloud },
-    ],
-  },
-  {
-    group: "record",
-    items: [
-      { to: "/runs", label: "Runs", icon: Activity },
-      { to: "/experiments", label: "Experiments", icon: Split },
-      { to: "/evals", label: "Evals", icon: FlaskConical },
-      { to: "/cost", label: "Cost", icon: DollarSign },
-      // What the TOOL cost, beside what the compute cost. Different subjects,
-      // same shape of question, and neither belongs under "work".
-      { to: "/activity", label: "Activity", icon: Gauge },
-    ],
-  },
+  { to: "/", label: "Now", icon: LayoutDashboard },
+  { to: "/runs", label: "Runs", icon: Activity },
+  { to: "/experiments", label: "Experiments", icon: Split },
+  { to: "/tasks", label: "Tasks", icon: ScrollText },
+  { to: "/blueprint", label: "Blueprint", icon: Grid3x3 },
+  { to: "/operate", label: "Operate", icon: Rocket },
 ] as const;
 
 /**
@@ -89,34 +61,27 @@ export function Shell() {
         <div className="mb-4 px-2 font-mono text-[11px] tracking-widest text-[var(--fg-faint)]">
           POKER-SOLVER
         </div>
-        {NAV.map(({ group, items }) => (
-          <div key={group} className="mb-3">
-            <div className="mb-1 px-2 text-[10px] tracking-widest text-[var(--fg-faint)] uppercase">
-              {group}
-            </div>
-            <ul className="space-y-0.5">
-              {items.map(({ to, label, icon: Icon }) => {
-                const active = to === "/" ? path === "/" : path.startsWith(to);
-                return (
-                  <li key={to}>
-                    <Link
-                      to={to}
-                      className={cn(
-                        "flex items-center gap-2 rounded px-2 py-1.5 text-[12px]",
-                        active
-                          ? "bg-white/[0.07] text-[var(--fg)]"
-                          : "text-[var(--fg-muted)] hover:bg-white/[0.04] hover:text-[var(--fg)]",
-                      )}
-                    >
-                      <Icon className="size-3.5" />
-                      {label}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+        <ul className="space-y-0.5">
+          {NAV.map(({ to, label, icon: Icon }) => {
+            const active = to === "/" ? path === "/" : path.startsWith(to);
+            return (
+              <li key={to}>
+                <Link
+                  to={to}
+                  className={cn(
+                    "flex items-center gap-2 rounded px-2 py-1.5 text-[12px]",
+                    active
+                      ? "bg-white/[0.07] text-[var(--fg)]"
+                      : "text-[var(--fg-muted)] hover:bg-white/[0.04] hover:text-[var(--fg)]",
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                  {label}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
       </nav>
 
       <div className="min-w-0 flex-1">

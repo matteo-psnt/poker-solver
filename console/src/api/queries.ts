@@ -10,7 +10,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, send } from "./client";
 import type {
   Activity,
-  Autoscale,
   BlueprintLoad,
   BlueprintRun,
   Box,
@@ -20,21 +19,16 @@ import type {
   Comparison,
   Configs,
   Cost,
-  Curve,
   Dispatched,
   ExperimentView,
   Hand,
   Jobs,
-  Ledger,
   LogLines,
   NowView,
   Pool,
-  Progress,
   Promoted,
   PushedCode,
   PushedData,
-  Report,
-  RunInfo,
   RunView,
   Runs,
   RunsView,
@@ -120,20 +114,6 @@ export const useRuns = () =>
     refetchInterval: SLOW,
   });
 
-export const useRun = (runId: string) =>
-  useQuery<RunInfo>({
-    queryKey: ["run", runId],
-    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}`),
-    refetchInterval: SLOW,
-  });
-
-export const useCurve = (runId: string) =>
-  useQuery<Curve>({
-    queryKey: ["curve", runId],
-    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}/curve`),
-    refetchInterval: SLOW,
-  });
-
 export const useCost = (hours = 0) =>
   useQuery<Cost>({
     queryKey: ["cost", hours],
@@ -142,13 +122,6 @@ export const useCost = (hours = 0) =>
     // half rides along free: Cost Management is rate-limited hard and its data
     // lags hours, so `cloud/billing.py` memoises it for 15 minutes server-side
     // and a poll at this interval mostly re-serves that.
-    refetchInterval: SLOW,
-  });
-
-export const useProgress = (runId: string) =>
-  useQuery<Progress>({
-    queryKey: ["progress", runId],
-    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}/progress`),
     refetchInterval: SLOW,
   });
 
@@ -166,13 +139,6 @@ export const useLog = (taskId: string | null, lines = 400) =>
     // be a cloud read for an answer that cannot have moved.
     refetchInterval: false,
     staleTime: 5 * 60_000,
-  });
-
-export const useEvals = (limit = 50) =>
-  useQuery<Ledger>({
-    queryKey: ["evals", limit],
-    queryFn: () => get(`/api/evals?limit=${limit}`),
-    refetchInterval: SLOW,
   });
 
 /**
@@ -198,31 +164,6 @@ export const useActivity = (days = 7) =>
   useQuery<Activity>({
     queryKey: ["activity", days],
     queryFn: () => get(`/api/activity?days=${days}`),
-    refetchInterval: SLOW,
-  });
-
-/**
- * The deployed autoscale formula, evaluated live. Polled at the pool's cadence:
- * the formula is static but the variables it reads are the pool's own state,
- * which is exactly what the panel is being asked about.
- */
-export const useAutoscale = () =>
-  useQuery<Autoscale>({
-    queryKey: ["autoscale"],
-    queryFn: () => get("/api/autoscale"),
-    refetchInterval: FAST,
-  });
-
-/**
- * One experiment's report. `enabled` on the id: the page opens with no
- * experiment selected, and a request for `""` would be a share read that can
- * only refuse.
- */
-export const useReport = (experimentId: string | null) =>
-  useQuery<Report>({
-    queryKey: ["report", experimentId],
-    queryFn: () => get(`/api/experiments/${encodeURIComponent(experimentId ?? "")}`),
-    enabled: Boolean(experimentId),
     refetchInterval: SLOW,
   });
 

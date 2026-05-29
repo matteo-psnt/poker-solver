@@ -5,5 +5,5 @@ import { defineConfig } from "vitest/config";
 // accept a `test` key, and the merged type is more friction than a second file.
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
-  test: { environment: "jsdom", globals: true },
+  test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"] },
 });

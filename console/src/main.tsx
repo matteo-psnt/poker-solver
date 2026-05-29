@@ -1,110 +1,12 @@
 import { isTransient } from "@/api/client";
-import { Shell } from "@/components/Shell";
-import { Activity as ActivityPage } from "@/routes/Activity";
-import { Charts } from "@/routes/Charts";
-import { Cost } from "@/routes/Cost";
-import { Dispatch } from "@/routes/Dispatch";
-import { Evals } from "@/routes/Evals";
-import { Experiments } from "@/routes/Experiments";
-import { Overview } from "@/routes/Overview";
-import { Play } from "@/routes/Play";
-import { RunDetail } from "@/routes/RunDetail";
-import { Runs } from "@/routes/Runs";
-import { Share } from "@/routes/Share";
-import { TaskLog } from "@/routes/TaskLog";
-import { Tasks } from "@/routes/Tasks";
+import { routeTree } from "@/routes/tree";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { z } from "zod";
 import "./index.css";
 
-const rootRoute = createRootRoute({ component: Shell });
-
-const routes = [
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/",
-    component: Overview,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/tasks",
-    component: Tasks,
-    // Validated, so a hand-edited URL cannot put arbitrary state into the page.
-    validateSearch: z.object({ cause: z.string().optional() }),
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/tasks/$taskId",
-    component: TaskLog,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/runs",
-    component: Runs,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/runs/$runId",
-    component: RunDetail,
-  }),
-  // The spot lives in the URL, which is what makes a chart shareable — the page
-  // it replaces held all three in `useState`, so its own claim that a bookmarked
-  // spot survives was not true of anything on it.
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/charts",
-    component: Charts,
-    validateSearch: z.object({
-      path: z.string().default(""),
-      board: z.string().default(""),
-      average: z.boolean().default(true),
-    }),
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/play",
-    component: Play,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/evals",
-    component: Evals,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/cost",
-    component: Cost,
-  }),
-  // The write surfaces. No search params: a dispatch form's state is what the
-  // operator is about to DO, and putting that in the URL makes a half-filled
-  // submission bookmarkable and shareable — which is the wrong thing to be able
-  // to hand someone.
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/dispatch",
-    component: Dispatch,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/share",
-    component: Share,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/experiments",
-    component: Experiments,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/activity",
-    component: ActivityPage,
-  }),
-];
-
-const router = createRouter({ routeTree: rootRoute.addChildren(routes) });
+const router = createRouter({ routeTree });
 
 declare module "@tanstack/react-router" {
   interface Register {
