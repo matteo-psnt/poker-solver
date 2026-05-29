@@ -1,4 +1,4 @@
-import { useJobs, useRuns, useTasks } from "@/api/queries";
+import { useRunsView } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, shortState } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
@@ -65,45 +65,51 @@ export function verdictFor(
 }
 
 export function Runs() {
-  const runs = useRuns();
-  const jobs = useJobs(50);
-  const tasks = useTasks(0);
+  const view = useRunsView();
+  const parts = view.data?.parts;
+  const runs = parts?.runs.payload ?? null;
 
   const { liveRuns, runsWithTasks } = useMemo(() => {
-    // Join on task id: Batch knows which TASKS are live, the task log knows
-    // which run each task belonged to. Neither can answer alone.
+    // Batch knows which TASKS are live; `task_runs` says which RUN each task
+    // was for. The server does that projection because it needs the whole task
+    // log and this page does not — but which STATES count as live stays here,
+    // because that is what "running" means and it is a UI decision.
+    const taskRuns = view.data?.task_runs ?? {};
     const liveTasks = new Set(
-      (jobs.data?.jobs ?? []).flatMap((job) =>
+      (parts?.jobs.payload?.jobs ?? []).flatMap((job) =>
         job.tasks.filter((task) => LIVE.has(shortState(task.state))).map((task) => task.task),
       ),
     );
     const live = new Set<string>();
-    const withTasks = new Set<string>();
-    for (const task of tasks.data?.rows ?? []) {
-      if (!task.run_id) continue;
-      withTasks.add(task.run_id);
-      if (liveTasks.has(task.task_id)) live.add(task.run_id);
+    for (const [taskId, runId] of Object.entries(taskRuns)) {
+      if (liveTasks.has(taskId)) live.add(runId);
     }
-    return { liveRuns: live, runsWithTasks: withTasks };
-  }, [jobs.data, tasks.data]);
+    return { liveRuns: live, runsWithTasks: new Set(Object.values(taskRuns)) };
+  }, [view.data?.task_runs, parts?.jobs.payload]);
 
   // Only claim a run is abandoned once BOTH cross-check sources have answered.
   // Before that every run would look abandoned, which is worse than saying
-  // nothing: the page would cry wolf on every load.
-  const checked = Boolean(jobs.data && tasks.data);
+  // nothing: the page would cry wolf on every load. They now arrive together,
+  // so this is one condition rather than two — but it still has to be checked:
+  // either part can be individually unavailable.
+  const checked = Boolean(parts?.jobs.payload && parts?.tasks.payload);
 
   return (
     <Panel
       title="Runs"
-      updatedAt={runs.dataUpdatedAt}
+      updatedAt={view.dataUpdatedAt}
       staleAfterMs={120_000}
-      error={errorOf(runs.error)}
-      loading={runs.isLoading}
-      empty={runs.data && runs.data.runs.length === 0 ? "No published runs." : null}
-      onRefresh={() => runs.refetch()}
-      refreshing={runs.isFetching}
+      // The run list itself failing is what blanks this panel. The two
+      // cross-check parts failing is not: the table still answers "what runs
+      // exist", it just cannot second-guess a claimed status, and `checked`
+      // above is what holds it back from guessing.
+      error={errorOf(view.error) ?? parts?.runs.error ?? null}
+      loading={view.isLoading}
+      empty={runs && runs.runs.length === 0 ? "No published runs." : null}
+      onRefresh={() => view.refetch()}
+      refreshing={view.isFetching}
     >
-      {runs.data && runs.data.runs.length > 0 && (
+      {runs && runs.runs.length > 0 && (
         <Table>
           <thead>
             <tr>
@@ -115,7 +121,7 @@ export function Runs() {
             </tr>
           </thead>
           <tbody>
-            {runs.data.runs.map((run) => {
+            {runs.runs.map((run) => {
               const verdict = checked
                 ? verdictFor(run.status, run.name, liveRuns, runsWithTasks)
                 : null;

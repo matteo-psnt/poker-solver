@@ -89,6 +89,7 @@ export type LeftSession = S["LeftSession"];
  * downloading the whole task log to do it.
  */
 export type NowView = S["NowView"];
+export type RunsView = S["RunsView"];
 export type RunView = S["RunView"];
 export type ExperimentView = S["ExperimentView"];
 

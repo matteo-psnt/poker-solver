@@ -1,67 +1,83 @@
-import { useAutoscale, useJobs, usePool, useTasks } from "@/api/queries";
+import { useNow } from "@/api/queries";
 import type { TaskRow } from "@/api/types";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
-import { errorOf } from "@/lib/error";
 import { clock, count, duration, since, span, taskLabel } from "@/lib/format";
 import { type PoolShape, elapsed, poolShape } from "@/lib/pool";
 import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 
-/** The page the console exists for: what is happening, and did anything die. */
+/**
+ * The page the console exists for: what is happening, and did anything die.
+ *
+ * ONE request for the whole screen. It used to be four — pool, jobs, tasks and
+ * autoscale each with its own cache slot and its own poll interval — so the four
+ * panels were never the same age as each other and the freshest one made the
+ * page look live while another was 45 seconds behind. Now every number here was
+ * read in the same sweep, which is what makes a single age badge honest.
+ *
+ * Panels still fail INDEPENDENTLY: each part carries its own `error`, so an
+ * expired `az login` greys the two Batch panels and leaves the rest.
+ */
 export function Overview() {
-  const pool = usePool();
-  const jobs = useJobs(10);
-  const tasks = useTasks(10);
-  const autoscale = useAutoscale();
+  const view = useNow();
+  const parts = view.data?.parts;
+  const pool = parts?.pool;
+  const poolData = pool?.payload;
+  const jobs = parts?.jobs;
+  const jobsData = jobs?.payload;
+  const tasks = parts?.tasks;
+  const tasksData = tasks?.payload;
+  const autoscale = parts?.autoscale;
+  const autoscaleData = autoscale?.payload;
 
   // Recomputed each render rather than ticked: the panel already re-renders on
   // the 15s poll, and a second timer would redraw it between polls to move one
   // "2h 14m" by a minute.
   const now = Date.now();
   const shape = useMemo(
-    () => poolShape(jobs.data, pool.data?.target_dedicated_nodes),
-    [jobs.data, pool.data],
+    () => poolShape(jobsData ?? undefined, poolData?.target_dedicated_nodes),
+    [jobsData, poolData],
   );
   const busy = shape.slots.filter((slot) => slot.task !== null).length;
   // Batch knows which task holds a node; only the task log knows how far along
   // it is. Neither can draw the bar alone.
   const progress = useMemo(() => {
     const byTask = new Map<string, TaskRow>();
-    for (const row of tasks.data?.rows ?? []) {
+    for (const row of tasksData?.rows ?? []) {
       if (row.progress || row.eta_seconds != null) byTask.set(row.task_id, row);
     }
     return byTask;
-  }, [tasks.data]);
+  }, [tasksData]);
 
   return (
     <div className="space-y-3">
       <Panel
         title="Pool"
-        updatedAt={pool.dataUpdatedAt}
+        updatedAt={view.dataUpdatedAt}
         staleAfterMs={30_000}
-        error={errorOf(pool.error)}
-        loading={pool.isLoading}
-        onRefresh={() => pool.refetch()}
-        refreshing={pool.isFetching}
+        error={pool?.error ?? null}
+        loading={view.isLoading}
+        onRefresh={() => view.refetch()}
+        refreshing={view.isFetching}
       >
-        {pool.data && (
+        {poolData && (
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 p-3 sm:grid-cols-4">
-            <Stat label="pool" value={pool.data.pool_id} mono />
+            <Stat label="pool" value={poolData.pool_id} mono />
             {/* ALLOCATED against wanted -- machines that exist. The panel below
                 counts how many of them hold a task, which is a different fact
                 that used to be written the same way and read as a contradiction. */}
             <Stat
               label="nodes"
-              value={`${count(pool.data.current_dedicated_nodes)} of ${count(
-                pool.data.target_dedicated_nodes,
+              value={`${count(poolData.current_dedicated_nodes)} of ${count(
+                poolData.target_dedicated_nodes,
               )} wanted`}
             />
-            <Stat label="allocation" value={pool.data.allocation_state?.split(".").pop() ?? "—"} />
-            <Stat label="vm size" value={pool.data.vm_size ?? "—"} mono />
-            {pool.data.resize_errors.map((e) => (
+            <Stat label="allocation" value={poolData.allocation_state?.split(".").pop() ?? "—"} />
+            <Stat label="vm size" value={poolData.vm_size ?? "—"} mono />
+            {poolData.resize_errors.map((e) => (
               <p key={e.code} className="col-span-full font-mono text-[12px] text-red-400">
                 {e.code}: {e.message}
               </p>
@@ -79,24 +95,24 @@ export function Overview() {
           of one. */}
       <Panel
         title="Autoscale"
-        updatedAt={autoscale.dataUpdatedAt}
+        updatedAt={view.dataUpdatedAt}
         staleAfterMs={60_000}
-        error={errorOf(autoscale.error)}
-        loading={autoscale.isLoading}
-        onRefresh={() => autoscale.refetch()}
-        refreshing={autoscale.isFetching}
+        error={autoscale?.error ?? null}
+        loading={view.isLoading}
+        onRefresh={() => view.refetch()}
+        refreshing={view.isFetching}
       >
-        {autoscale.data && (
+        {autoscaleData && (
           <div className="p-3">
-            {autoscale.data.error && (
-              <p className="mb-2 font-mono text-[12px] text-[#E0655C]">{autoscale.data.error}</p>
+            {autoscaleData.error && (
+              <p className="mb-2 font-mono text-[12px] text-[#E0655C]">{autoscaleData.error}</p>
             )}
             <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] text-[var(--fg-muted)]">
-              {autoscale.data.variables.map((variable) => (
+              {autoscaleData.variables.map((variable) => (
                 <span key={variable}>{variable}</span>
               ))}
             </div>
-            {autoscale.data.variables.length === 0 && !autoscale.data.error && (
+            {autoscaleData.variables.length === 0 && !autoscaleData.error && (
               <p className="text-[var(--fg-faint)]">The formula evaluated to no variables.</p>
             )}
           </div>
@@ -109,30 +125,30 @@ export function Overview() {
         title={`In flight — ${busy} running${
           shape.queue.length > 0 ? `, ${shape.queue.length} queued` : ""
         }`}
-        updatedAt={jobs.dataUpdatedAt}
+        updatedAt={view.dataUpdatedAt}
         staleAfterMs={30_000}
-        error={errorOf(jobs.error)}
-        loading={jobs.isLoading}
-        empty={jobs.data && shape.slots.length === 0 && shape.queue.length === 0 ? "Idle." : null}
-        onRefresh={() => jobs.refetch()}
-        refreshing={jobs.isFetching}
+        error={jobs?.error ?? null}
+        loading={view.isLoading}
+        empty={jobsData && shape.slots.length === 0 && shape.queue.length === 0 ? "Idle." : null}
+        onRefresh={() => view.refetch()}
+        refreshing={view.isFetching}
       >
-        {jobs.data && (shape.slots.length > 0 || shape.queue.length > 0) && (
+        {jobsData && (shape.slots.length > 0 || shape.queue.length > 0) && (
           <Pipeline shape={shape} busy={busy} now={now} progress={progress} />
         )}
       </Panel>
 
       <Panel
         title="Recent tasks"
-        updatedAt={tasks.dataUpdatedAt}
+        updatedAt={view.dataUpdatedAt}
         staleAfterMs={120_000}
-        error={errorOf(tasks.error)}
-        loading={tasks.isLoading}
-        empty={tasks.data && tasks.data.rows.length === 0 ? "No task records." : null}
-        onRefresh={() => tasks.refetch()}
-        refreshing={tasks.isFetching}
+        error={tasks?.error ?? null}
+        loading={view.isLoading}
+        empty={tasksData && tasksData.rows.length === 0 ? "No task records." : null}
+        onRefresh={() => view.refetch()}
+        refreshing={view.isFetching}
       >
-        {tasks.data && tasks.data.rows.length > 0 && (
+        {tasksData && tasksData.rows.length > 0 && (
           <Table>
             <thead>
               <tr>
@@ -144,7 +160,7 @@ export function Overview() {
               </tr>
             </thead>
             <tbody>
-              {[...tasks.data.rows].reverse().map((row) => (
+              {[...(tasksData?.rows ?? [])].reverse().map((row) => (
                 <tr key={`${row.task_id}-${row.attempt}`}>
                   <Td mono title={row.task_id}>
                     <Link

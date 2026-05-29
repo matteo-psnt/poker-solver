@@ -520,6 +520,11 @@ def create_app() -> FastAPI:
         with telemetry.surface("console"):
             return view(views.now)
 
+    @app.get("/api/view/runs", response_model=contract.RunsView, responses=ERRORS)
+    def _view_runs() -> JSONResponse:
+        with telemetry.surface("console"):
+            return view(views.runs)
+
     @app.get("/api/view/run/{run_id}", response_model=contract.RunView, responses=ERRORS)
     def _view_run(run_id: str) -> JSONResponse:
         with telemetry.surface("console"):

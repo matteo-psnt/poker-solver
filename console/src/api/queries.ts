@@ -37,6 +37,7 @@ import type {
   RunInfo,
   RunView,
   Runs,
+  RunsView,
   SolverNode,
   Tasks,
 } from "./types";
@@ -63,6 +64,13 @@ export const useNow = () =>
     queryKey: ["view", "now"],
     queryFn: () => get("/api/view/now"),
     refetchInterval: FAST,
+  });
+
+export const useRunsView = () =>
+  useQuery<RunsView>({
+    queryKey: ["view", "runs"],
+    queryFn: () => get("/api/view/runs"),
+    refetchInterval: SLOW,
   });
 
 export const useRunView = (runId: string) =>

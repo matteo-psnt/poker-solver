@@ -3053,6 +3053,64 @@
         "title": "Runs",
         "type": "object"
       },
+      "RunsParts": {
+        "additionalProperties": true,
+        "properties": {
+          "jobs": {
+            "$ref": "#/components/schemas/Part_Jobs_"
+          },
+          "runs": {
+            "$ref": "#/components/schemas/Part_Runs_"
+          },
+          "tasks": {
+            "$ref": "#/components/schemas/Part_Tasks_"
+          }
+        },
+        "required": [
+          "runs",
+          "jobs",
+          "tasks"
+        ],
+        "title": "RunsParts",
+        "type": "object"
+      },
+      "RunsView": {
+        "additionalProperties": true,
+        "description": "Every published run, plus what is needed to check its claimed status.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "elapsed_seconds": {
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "parts": {
+            "$ref": "#/components/schemas/RunsParts"
+          },
+          "task_runs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Task Runs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "op",
+          "at",
+          "elapsed_seconds",
+          "parts"
+        ],
+        "title": "RunsView",
+        "type": "object"
+      },
       "ScoreBody": {
         "properties": {
           "at": {
@@ -5599,6 +5657,44 @@
           }
         },
         "summary": " View Run"
+      }
+    },
+    "/api/view/runs": {
+      "get": {
+        "operationId": "_view_runs_api_view_runs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " View Runs"
       }
     }
   }

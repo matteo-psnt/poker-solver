@@ -1,4 +1,4 @@
-import { useCompare, usePromote, useReport, useRuns } from "@/api/queries";
+import { useCompare, useExperimentView, usePromote, useRuns } from "@/api/queries";
 import type { Report, RunSummary } from "@/api/types";
 import { Actions, Field, Guard, Outcome, Run, Select, Text } from "@/components/Form";
 import { Panel } from "@/components/Panel";
@@ -56,22 +56,31 @@ function ArmReport({
   }, [runs]);
 
   const [experiment, setExperiment] = useState("");
-  const report = useReport(experiment || null);
+  const view = useExperimentView(experiment || null);
+  const report = view.data?.parts?.report;
+
+  // Each arm's run record, keyed for the table. `report` says how an arm SCORED;
+  // this says what it WAS, and the two were previously on different pages.
+  const armRuns = useMemo(() => {
+    const byName = new Map<string, RunSummary>();
+    for (const run of view.data?.arm_runs ?? []) byName.set(run.name, run);
+    return byName;
+  }, [view.data?.arm_runs]);
 
   return (
     <Panel
       title="Experiment report"
-      updatedAt={report.dataUpdatedAt}
+      updatedAt={view.dataUpdatedAt}
       staleAfterMs={120_000}
-      error={errorOf(error) ?? errorOf(report.error)}
-      loading={loading || report.isLoading}
+      error={errorOf(error) ?? errorOf(view.error) ?? report?.error ?? null}
+      loading={loading || view.isLoading}
       empty={
         experiments.length === 0 && !loading
           ? "No run carries an experiment tag. Submit with an experiment id to build one."
           : null
       }
-      onRefresh={() => report.refetch()}
-      refreshing={report.isFetching}
+      onRefresh={() => view.refetch()}
+      refreshing={view.isFetching}
     >
       {experiments.length > 0 && (
         <div className="border-b border-[var(--border)]">
@@ -80,12 +89,12 @@ function ArmReport({
           </Field>
         </div>
       )}
-      {report.data && <Arms report={report.data} />}
+      {report?.payload && <Arms report={report.payload} armRuns={armRuns} />}
     </Panel>
   );
 }
 
-function Arms({ report }: { report: Report }) {
+function Arms({ report, armRuns }: { report: Report; armRuns: Map<string, RunSummary> }) {
   return (
     <>
       {report.notes.length > 0 && (
@@ -98,6 +107,7 @@ function Arms({ report }: { report: Report }) {
           <tr>
             <Th>arm</Th>
             <Th>run</Th>
+            <Th>config</Th>
             <Th>branch</Th>
             <Th right>at</Th>
             <Th right>mbb/g</Th>
@@ -120,6 +130,9 @@ function Arms({ report }: { report: Report }) {
                 </Td>
                 <Td mono title={arm.run_id}>
                   {runLabel(arm.run_id)}
+                </Td>
+                <Td className="text-[var(--fg-muted)]">
+                  {armRuns.get(arm.run_id)?.config_name ?? "—"}
                 </Td>
                 <Td className="text-[var(--fg-muted)]">{arm.git_branch ?? "—"}</Td>
                 <Td right className="text-[var(--fg-muted)]">
