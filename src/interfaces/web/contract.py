@@ -1,45 +1,29 @@
 """The payload contract, declared ONCE, in Python, beside what produces it.
 
-What this replaces
-------------------
-The shapes used to be written twice. A handler returned an untyped dict; a
-hand-written `PAYLOADS` example in a Python test pinned it; a generated
-`payloads.fixture.json` exported that example; and `console/src/api/schemas.ts`
-declared all of it AGAIN as 682 lines of hand-written Zod, checked against the
-fixture. Adding one field meant editing Python, a Python test and TypeScript,
-and the only thing that caught you forgetting the third was a test that failed
-by name after the fixture regenerated. `schemas.ts` opened by claiming it was
-"ONE declaration rather than two"; it was the second declaration of every
-payload in the system.
-
-Now: these models are the declaration, `response_model` puts them in the OpenAPI
-schema, and `console/src/api/types.gen.ts` is GENERATED from that schema. The
-TypeScript is no longer written by anyone.
+These models are the declaration. ``response_model`` puts them in the OpenAPI
+schema, and `console/src/api/types.gen.ts` is GENERATED from it -- the
+TypeScript is not written by anyone, and never should be.
 
 Why the models are lenient
 --------------------------
-``extra="allow"`` throughout, which is the Zod ``.passthrough()`` these came
-from. A payload gaining a key is not a reason to break the console, and these
-models deliberately describe only what a surface READS -- they are a contract,
-not a mirror. The commands remain free to return more.
+``extra="allow"`` throughout. A payload gaining a key is not a reason to break
+the console, and these models deliberately describe only what a surface READS --
+a contract, not a mirror. The commands remain free to return more.
 
 Why this does not validate at request time
 ------------------------------------------
-It cannot, and the attempt would be worse than the absence. FastAPI skips
-validation and serialization for a handler that returns a ``Response``, and
-every endpoint here returns :class:`PayloadResponse` -- which exists because
-`jsonio.dumps` handles the numpy scalars and ``Path`` objects that reach these
-payloads (`runinfo` is `dataclasses.asdict` of a digest) and that plain
-``json.dumps`` turns into a 500 the CLI never sees. Measured: a handler
+It cannot. FastAPI skips validation and serialization for a handler that returns
+a ``Response``, and every endpoint here returns :class:`PayloadResponse` -- which
+exists because `jsonio.dumps` handles the numpy scalars and ``Path`` objects that
+reach these payloads (`runinfo` is `dataclasses.asdict` of a digest) and that
+plain ``json.dumps`` turns into a 500 the CLI never sees. Measured: a handler
 declaring ``response_model`` and returning a wrong-shaped ``JSONResponse``
 answers 200 with the wrong shape, while `/openapi.json` still carries the right
 ``$ref``.
 
-So the enforcement is a TEST -- `tests/interfaces/web/test_contract.py` -- which
+So enforcement is a TEST -- `tests/interfaces/web/test_contract.py` -- which
 round-trips every model against the `PAYLOADS` examples the renderer tests
-already pin. That closes the loop with one hand-written declaration instead of
-two: change a payload, `PAYLOADS` must change, and the model then fails against
-it.
+already pin.
 """
 
 from __future__ import annotations

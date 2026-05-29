@@ -1,12 +1,8 @@
 """The failure a surface can show, as distinct from the failure that is a bug.
 
-Every headless command used to signal a bad request by raising ``SystemExit``.
-That is a correct thing for a command-line process to do exactly once, and it is
-the assumption no other surface can make. It was first paid for by a menu that
-had to wrap its own calls in ``except SystemExit`` so a missing config would not
-close the whole session -- one surface paying, in an exception clause, for
-another surface's convention. That menu is gone; the constraint outlived it,
-because the console is a worse case of the same thing.
+Raising ``SystemExit`` to signal a bad request is a correct thing for a
+command-line process to do exactly once, and it is the assumption no other
+surface can make.
 
 ``CommandError`` is that same signal carried as a value. :mod:`headless` turns
 it back into a message and an exit code, so the command line behaves exactly as
@@ -20,14 +16,13 @@ The Azure SDK's exceptions, and why they are here now
 -----------------------------------------------------
 ``ClientAuthenticationError`` and ``HttpResponseError`` are raised from a dozen
 call sites in :mod:`src.interfaces.cloud.tasks.batch` with no single chokepoint
-to wrap, so this module used to leave them alone and every surface that talks to
-Batch caught them by name. That was fine while there was one such surface. There
-are now two -- ``status`` composing three panels and the console's ``answer`` --
-and they carried the *same* three-arm ladder, differing only in whether the
-result became an HTTP status or a dict field. A third surface would write it a
-third time, and the cost of forgetting an arm is the failure the ladder exists
-to prevent: an expired ``az login`` blanking a whole screen rather than the two
-panels that actually talk to Batch.
+to wrap, so they are caught HERE and nowhere else. Two surfaces talk to Batch --
+``status`` composing three panels and the console's ``answer`` -- and each
+otherwise carries the same three-arm ladder, differing only in whether the
+result becomes an HTTP status or a dict field. The cost of one of them
+forgetting an arm is the failure the ladder exists to prevent: an expired
+``az login`` blanking a whole screen rather than the two panels that actually
+talk to Batch.
 
 :func:`attempt` is that ladder, once. It classifies rather than translates,
 because the two callers need different renderings of the same distinction: a

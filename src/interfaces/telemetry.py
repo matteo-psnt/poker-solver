@@ -1,45 +1,23 @@
 """What every command invocation cost, recorded where caches live.
 
-`tests/interfaces/cloud/test_read_cost.py` pins read cost as call counts against
-fakes, and it is the durable guard: it PREVENTS a regression. Nothing notices
-one in production. The numbers in that file's docstring -- `jobs` at 11s, 47 task
-records fetched serially for 9.1s -- were all found by someone timing a screen by
-hand and being surprised, which is a detection method that only works when
-somebody happens to be watching.
+One row per command that ran, so "what is slow, and how often does it fail" is a
+question with an answer rather than an impression. `poker-solver activity` reads
+it.
 
-This is the other half: one row per command that ran, so "what is slow, and how
-often does it fail" is a question with an answer rather than an impression.
+**Laptop-local and disposable.** It goes under
+:func:`~src.shared.cache.cache_root`, never the share: the share has no atomic
+append, a document per invocation would outgrow `legs/` in hours, and every
+write there is an SMB round trip -- so instrumenting round-trip cost would ADD
+one to every command.
 
-Local, and disposable
----------------------
-It goes under :func:`~src.shared.cache.cache_root`, and that placement is a
-decision rather than convenience. The share is where the durable record lives
-and it is the wrong home for this, three times over: it has no atomic append,
-which is why the eval ledger stopped being one file and became per-run
-documents; a document per invocation would pass `legs/` -- 375 files, enough to
-need `compact-legs` -- within hours of a console tab being open; and every write
-is an SMB round trip, so instrumenting round-trip cost would ADD a round trip to
-every command. Observability that degrades what it measures is not worth having.
+**Never the reason a command fails.** Every write is best-effort: a full disk, a
+read-only cache directory, a value that will not serialise -- none of them may
+turn a working command into a failing one.
 
-So: laptop-local, rotated, and of no value if lost. What belongs on the share is
-the record of what was DONE -- runs, evals, task records, a compaction's
-provenance -- and that already lives there.
-
-Never the reason a command fails
---------------------------------
-Every write is best-effort. A full disk, a read-only cache directory, a value
-that will not serialise: none of them may turn a working command into a failing
-one, because this is a bystander to the work and the work is what the user
-asked for.
-
-Best-effort is not the same as silent, though, and the difference matters here
-more than usual: a cache directory that cannot be written stops the log
-FOREVER, and `activity` then reports "no commands recorded yet" while commands
-are plainly running -- a wrong answer with a plausible explanation, which is the
-worst kind. So the first failure is logged once at WARNING and the rest at
-DEBUG. Once, because the alternative is a warning on every invocation of every
-command, which would make the tool unusable to protect a file that is
-disposable by definition.
+Best-effort is not silent, though. A cache directory that cannot be written
+stops the log FOREVER, and `activity` then reports "no commands recorded yet"
+while commands are plainly running -- a wrong answer with a plausible
+explanation. So the first failure is logged at WARNING and the rest at DEBUG.
 """
 
 from __future__ import annotations

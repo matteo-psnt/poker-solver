@@ -143,5 +143,5 @@ def test_every_kind_the_submit_path_accepts_has_something_to_run_it():
     upload, a pool spin-up and every Batch retry. Exactly the "found three of
     four" failure the whole abstraction exists to remove.
     """
-    missing = sorted(set(kinds.TaskKind.KINDS) - {str(name) for name in handlers.HANDLERS})
+    missing = sorted(set(kinds.KINDS) - {str(name) for name in handlers.HANDLERS})
     assert not missing, f"these kinds can be submitted but not run: {missing}"

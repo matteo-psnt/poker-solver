@@ -38,10 +38,10 @@ Every artifact is declared in :data:`REGISTRY`. A test asserts nothing writes
 outside it, so "what does this project store" is answerable by reading one list.
 
 WHERE it lives and HOW IT GROWS are declared there too, and for the same
-reason. The registry used to say only how a file was *written*, so answering
-"where does a leg record live" meant reading ``task_log`` and ``share`` and
-``archive`` and hoping they agreed -- and no single place said which of these
-accumulate forever. Two do: ``legs/*`` gains four files per task-attempt and is
+reason: otherwise answering "where does a leg record live" means reading
+``task_log`` and ``share`` and ``archive`` and hoping they agree, and no single
+place says which of these accumulate forever. Two do: ``legs/*`` gains four
+files per task-attempt and is
 read by joining ALL of them, and code snapshots gain a tarball per submit.
 Neither is pruned by anything. ``growth`` is prose because it is read by a
 person deciding what to compact, not by code -- the alternative, a machine

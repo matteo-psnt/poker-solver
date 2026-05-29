@@ -75,13 +75,10 @@ class Command:
         surface calls `run` directly and slips past it.
 
         Preparing the observation is itself guarded, and that is not belt and
-        braces. `telemetry.observe`'s own write is best-effort, but the two
-        calls that build its argument ran BEFORE it and unprotected: `declared`
-        builds a parser, and `asked_for` evaluates ``value != default`` on
-        caller-supplied values. A value whose ``__ne__`` returns something other
-        than a bool -- a numpy array is the obvious one, and `invoke` accepts
-        anything -- raised out of here and failed a command that would otherwise
-        have worked. A bystander that can do that is not a bystander.
+        braces: `asked_for` evaluates ``value != default`` on caller-supplied
+        values, and a value whose ``__ne__`` returns something other than a bool
+        -- a numpy array is the obvious one, and `invoke` accepts anything --
+        would otherwise raise out of here and fail a working command.
 
         Skipped entirely when recording is off, so a disabled log costs nothing
         rather than two parser builds per invocation.
@@ -144,16 +141,11 @@ def resolve_run_dir(run: str, runs_dir: str) -> Path:
     """Empty is not a run
     -------------------
     ``Path("")`` is ``PosixPath(".")`` and ``.is_dir()`` is True, so an empty
-    identifier used to resolve to the CURRENT DIRECTORY and be returned as a
-    run. Nothing downstream could tell that from a real answer: the caller's
-    ``run_dir.is_dir()`` check passes, the refusal this function exists to make
-    never happens, and the failure surfaces a minute later inside the loader as
-    a missing checkpoint.
-
-    It is reachable from the systemd unit on the blueprint host, whose
-    ``ExecStart`` interpolates ``--run ${RUN}`` from an env file that ships with
-    ``RUN=`` empty. There it resolves to ``WorkingDirectory``, i.e.
-    ``/mnt/work/code`` -- the code checkout, offered up as a trained run.
+    identifier would resolve to the CURRENT DIRECTORY and be returned as a run,
+    indistinguishable downstream from a real answer. It is reachable: the
+    blueprint host's systemd unit interpolates ``--run ${RUN}`` from an env file
+    that ships with ``RUN=`` empty, which would offer up the code checkout as a
+    trained run.
     """
     if not run.strip():
         raise CommandError("No run given: --run needs a run id, a fragment of one, or a path.")
@@ -196,12 +188,11 @@ def parse_overrides(pairs: list[str]) -> dict[str, Any]:
 def records_root(args: argparse.Namespace) -> Iterator[Path]:
     """The published record, materialised into a temporary tree.
 
-    There is no longer a ``--source`` to choose. Every reader answers against
-    the share, because the share is the only place a run exists: work runs on
-    the pool, the node publishes, and nothing on this machine is a source of
-    truth about it. A local copy could only ever be a stale second answer to a
-    question the share can already answer -- measured at 2.9s for `progress`
-    and 3.7s for `ledger`, which is what made this practical.
+    Every reader answers against the share, because the share is the only place
+    a run exists: work runs on the pool, the node publishes, and nothing on this
+    machine is a source of truth about it. A local copy could only ever be a
+    stale second answer to a question the share can already answer -- measured at
+    2.9s for `progress` and 3.7s for `ledger`, which is what made this practical.
 
     The tree is removed on exit; the reader itself stays ordinary local-path
     code and never learns that Azure exists.
@@ -222,12 +213,6 @@ def ledger_for(root: Path) -> Path:
     on a share with no atomic append is the contention the per-run records were
     introduced to remove. Each published document carries its own provenance,
     so the index is derived on demand instead of stored.
-
-    Takes only the root. It used to take ``args`` as well, from when a
-    ``--source`` flag chose where the ledger came from; that flag is gone --
-    every reader answers against the published record -- and the parameter
-    outlived it as a ``noqa: ARG001``, which reads as "this function considers
-    your flags" to anyone adding one.
     """
     derived = root / "eval_ledger.jsonl"
     rebuild_ledger(root, derived)

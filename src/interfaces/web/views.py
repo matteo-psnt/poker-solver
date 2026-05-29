@@ -1,34 +1,5 @@
 """One screen, one request -- composed from commands and nothing else.
 
-The rule this package has always been subordinate to is that it must not grow a
-second read path: `fbcf9a8` deleted a browser UI (-4,776 lines) whose
-`chart_service.py`, `play_service.py` and `chart/data.py` answered questions the
-CLI already answered, drifted from it, and rotted with nothing failing until
-someone looked.
-
-That rule was enforced as *every endpoint body is one `Command.invoke`*, which
-stopped the disease by forbidding composition. But composition was never the
-disease -- DERIVING answers was -- and forbidding it moved the composing onto
-the browser, where it cost three things:
-
-latency
-    A screen is several questions. Asked as separate requests they are separate
-    round trips, each with its own cache slot and its own poll cadence, so the
-    Overview's four panels are never the same age as each other.
-transfer
-    `RunDetail` fetched the ENTIRE task log and filtered it client-side to find
-    one run's tasks -- over the wire, into the browser, to discard ~95% of it --
-    because `runinfo.tasks` comes back empty for runs whose records predate that
-    field, including the production run.
-the information architecture
-    Fourteen routes, one per command, because a page that can only ask one
-    question can only be about one command. `CONSOLE-DESIGN.md` specified five
-    destinations; the console grew to fourteen by following the CLI's grouping,
-    which is the right organising idea for a reference and the wrong one for a
-    console.
-
-So the rule is restated, strictly stronger and still mechanically checked:
-
     **This layer may COMPOSE command payloads. It may not COMPUTE one.**
 
 A view fans out over :meth:`Command.invoke` and joins what comes back. A join

@@ -7,10 +7,7 @@ place that can be forgotten.
 This sits beside ``cli`` and ``web`` rather than inside either, because it
 belongs to neither: ``cli.headless`` renders a command to a terminal, and
 ``web.app`` calls the same command through :meth:`Command.invoke` and serves
-the payload. It lived under ``cli`` while the terminal was the only caller, and
-the path went on naming one owner after the console became a second -- an
-import-linter contract exists purely to keep the console reading through here,
-so the seam is load-bearing enough that its path should not misattribute it.
+the payload.
 
 ``render()`` is deliberately NOT abstracted away: it is the terminal's
 renderer, and for any other surface the payload is the interface. Parser,
@@ -20,15 +17,11 @@ apart a command borrowed another's renderer and died on a missing key.
 Naming a command is not running it
 ----------------------------------
 The registry is :class:`CommandRef` -- a name and a help line -- and importing
-it imports NO handler. That distinction is the whole point: listing what this
-tool can do, and doing one of them, are different questions, and only the second
-needs `evaluate`'s evaluator or `precompute`'s clusterer.
-
-Eagerly importing every one of these modules cost 1.2s on every invocation, `--help`
-included, because the union of what they need is the union of everything: the
-engine, the abstraction pipeline, numba and scipy. Nothing about listing
-subcommand names requires any of it. `cli.headless` builds flags only for the
-subcommand argv actually names.
+it imports NO handler. Listing what this tool can do, and doing one of them, are
+different questions, and only the second needs `evaluate`'s evaluator or
+`precompute`'s clusterer. Eagerly importing every module here cost 1.2s on every
+invocation, `--help` included, because the union of what they need is the union
+of everything: the engine, the abstraction pipeline, numba and scipy.
 
 The module is the name with hyphens as underscores. A convention the registry
 RELIES on rather than a mapping it stores -- one fewer field to get wrong, and
