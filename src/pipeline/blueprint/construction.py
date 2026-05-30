@@ -20,7 +20,7 @@ from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
-from src.pipeline.abstraction.base import BucketingStrategy
+from src.engine.solver.protocols import BucketingStrategy
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 from src.pipeline.abstraction.resolver import ComboAbstractionResolver
 from src.shared.config import Config

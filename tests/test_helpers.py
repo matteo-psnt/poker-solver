@@ -11,7 +11,7 @@ from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
-from src.pipeline.abstraction.base import BucketingStrategy
+from src.engine.solver.protocols import BucketingStrategy
 from src.shared import records as record_store
 from src.shared.config import Config
 
@@ -142,7 +142,7 @@ def skew_preflop_infoset(
     infoset.strategy_sum[infoset.legal_actions.index(action)] = 1.0
 
 
-class DummyCardAbstraction(BucketingStrategy):
+class DummyCardAbstraction:
     """
     Minimal card abstraction for testing.
 

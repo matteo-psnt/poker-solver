@@ -1,4 +1,4 @@
-"""A dict-backed :class:`Storage` for the Kuhn/Leduc conformance harness.
+"""Dict-backed :class:`KeyedStorage` for the Kuhn/Leduc conformance harness.
 
 Lives in tests/ because Kuhn and Leduc have no betting tree, so the production
 static backend cannot back them -- and a second storage implementation in
@@ -7,14 +7,17 @@ static backend cannot back them -- and a second storage implementation in
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
 
-from src.core.game.actions import Action
 from src.engine.solver.infoset.model import InfoSet, InfoSetKey
-from src.engine.solver.storage.base import Storage
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    from src.core.game.actions import Action
 
 
-class DictStorage(Storage):
+class DictStorage:
     """Key-addressed infoset storage over a plain dict."""
 
     def __init__(self) -> None:
@@ -36,5 +39,3 @@ class DictStorage(Storage):
     def iter_infosets(self) -> Iterable[InfoSet]:
         return list(self._infosets.values())
 
-    def checkpoint(self, iteration: int) -> None:
-        """No-op: the harness asserts on in-memory strategies, never on disk."""

@@ -175,15 +175,6 @@ class TestMCCFRSolver:
             f"Variance {variance:.2%} exceeds 20% (infosets: {infosets1} vs {infosets2})"
         )
 
-    def test_checkpoint(self, tmp_path):
-        """Test that checkpoint doesn't crash."""
-        card_abs = DummyCardAbstraction()
-        solver, _storage = build_test_solver(make_test_config(), card_abs, checkpoint_dir=tmp_path)
-
-        for _ in range(10):
-            solver.train_iteration()
-        solver.checkpoint()  # Should not crash
-
     def test_str_representation(self):
         ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()

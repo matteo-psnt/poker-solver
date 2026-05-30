@@ -26,7 +26,6 @@ from pathlib import Path
 import numpy as np
 
 from src.core.game.state import Card, Street
-from src.pipeline.abstraction.base import BucketingStrategy
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
     SuitMapping,
     canonicalize_board,
@@ -78,7 +77,7 @@ def _street_filenames(street: Street) -> tuple[str, str]:
     return f"{name}_board_ids.npy", f"{name}_buckets.npy"
 
 
-class DenseBucketer(BucketingStrategy):
+class DenseBucketer:
     """
     Runtime bucket lookup over full-coverage dense bucket matrices.
 
