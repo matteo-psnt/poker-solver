@@ -39,9 +39,11 @@ Stdlib only, and the 3.10 floor: the node imports this before ``uv sync``.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 DEFAULT_TIMEOUT_SECONDS = 6 * 3600
 DEFAULT_EVAL_METHOD = "exact_br"
