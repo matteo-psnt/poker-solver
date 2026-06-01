@@ -12,21 +12,25 @@ Deliberately does NOT import the command layer. ``.importlinter`` forbids
 when this runs anyway. The argv is emitted as data; the *test* imports
 ``COMMANDS`` and checks every flag against the real parser.
 
-``src/interfaces/cloud/tasks/spec.py`` writes this environment. The two files are the
-same contract from opposite ends, and ``test_plan.py`` pins them together.
+``src/interfaces/cloud/tasks/spec.py`` writes this environment, and neither end
+spells the keys any more: both derive from :data:`src.shared.cloudtask.wire.KEYS`,
+which is the one declaration of what crosses.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field
 
-from src.shared.cloudtask import kinds
+from src.shared.cloudtask import kinds, wire
 from src.shared.cloudtask.kinds import BadTaskError, TaskName
+from src.shared.cloudtask.wire import (
+    DEFAULT_EVAL_METHOD,
+    DEFAULT_TIMEOUT_SECONDS,
+    parse_duration,
+)
 
-DEFAULT_TIMEOUT_SECONDS = 6 * 3600
-DEFAULT_EVAL_METHOD = "exact_br"
+__all__ = ["DEFAULT_EVAL_METHOD", "DEFAULT_TIMEOUT_SECONDS", "parse_duration"]
 
 
 class BadEnvironmentError(Exception):
@@ -138,35 +142,18 @@ def parse_environment(environ: dict[str, str] | None = None) -> TaskPlan:
     one place rather than implied by which branch happened to set what.
     """
     env = dict(os.environ if environ is None else environ)
-    op = env.get("RUN_OP") or TaskName.TRAIN
+    try:
+        fields = wire.decode(env)
+    except wire.BadWireValueError as error:
+        raise BadEnvironmentError(str(error)) from error
 
-    plan = TaskPlan(
-        op=op,
-        config=env.get("RUN_CONFIG", ""),
-        to=_int(env.get("RUN_TO"), 0),
-        run_id=env.get("RUN_ID", ""),
-        experiment=env.get("RUN_EXPERIMENT", ""),
-        arm=env.get("RUN_ARM", ""),
-        parent=env.get("RUN_PARENT", ""),
-        sets=_json_list(env.get("RUN_SETS_JSON"), "RUN_SETS_JSON"),
-        workers=_int(env.get("RUN_WORKERS"), 0) or _node_cpus(),
-        checkpoint_every=_int(env.get("RUN_CHECKPOINT_EVERY"), 0),
-        universe_boards=_int(env.get("RUN_UNIVERSE_BOARDS"), 0),
-        universe_seed=_int(env.get("RUN_UNIVERSE_SEED"), 0),
-        dtype=env.get("RUN_DTYPE", ""),
-        warm_start_from=env.get("RUN_WARM_START_FROM", ""),
-        warm_start_weight=_int(env.get("RUN_WARM_START_WEIGHT"), 0),
-        warm_start_at=_int(env.get("RUN_WARM_START_AT"), 0),
-        timeout_seconds=parse_duration(env.get("RUN_TIMEOUT")),
-        eval_method=env.get("RUN_EVAL_METHOD") or DEFAULT_EVAL_METHOD,
-        eval_rungs=tuple(r for r in (env.get("RUN_EVAL_AT") or "").split(",") if r),
-        eval_flags=_json_list(env.get("RUN_EVAL_FLAGS_JSON"), "RUN_EVAL_FLAGS_JSON"),
-        force_publish=bool(env.get("RUN_FORCE_PUBLISH")),
-        git_commit=env.get("RUN_GIT_COMMIT", ""),
-        git_dirty=env.get("RUN_GIT_DIRTY", ""),
-        git_branch=env.get("RUN_GIT_BRANCH", ""),
-        code_snapshot=env.get("CODE_SNAPSHOT", ""),
-    )
+    # The two things only this end can supply, kept visible rather than buried
+    # in a codec: an environment with no `RUN_OP` has always meant training, and
+    # the node is the only place that knows its own core count.
+    fields["op"] = fields["op"] or TaskName.TRAIN
+    fields["workers"] = fields["workers"] or _node_cpus()
+
+    plan = TaskPlan(**fields)
     _validate(plan)
     return plan
 
@@ -193,55 +180,3 @@ def _node_cpus() -> int:
     task.
     """
     return os.cpu_count() or 1
-
-
-def _int(raw: str | None, default: int) -> int:
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-
-
-def _json_list(raw: str | None, name: str) -> tuple[str, ...]:
-    """A JSON array, not a space-separated string.
-
-    The elements are LISTS whose members may contain ``=``, a space or a
-    newline -- a config override's value routinely does. The old
-    ``for kv in $RUN_SETS`` split on whitespace and silently cut such a value in
-    half; the shell port of that fix needed a NUL-separated temp file and
-    ``read -d ''`` to get back to what one ``json.loads`` does here.
-
-    A malformed payload is FATAL, never an empty list. See
-    :class:`BadEnvironment`.
-    """
-    if not raw:
-        return ()
-    try:
-        decoded = json.loads(raw)
-    except ValueError as error:
-        raise BadEnvironmentError(f"could not decode {name}: {error}") from error
-    if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
-        raise BadEnvironmentError(f"{name} must be a JSON array of strings, got: {raw!r}")
-    return tuple(item for item in decoded if item)
-
-
-_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-
-
-def parse_duration(raw: str | None) -> int:
-    """``6h`` / ``90m`` / ``3600`` -> seconds.
-
-    The wall-clock ceiling for the training process itself. The task-level
-    ``maxWallClockTime`` (P1D) is not a backstop for a hang -- it is longer than
-    any task is meant to run, so a wedged process bills a full node-day before
-    Batch acts. One task proved it: training died, the process could not exit,
-    and the task stayed ``running`` indefinitely.
-    """
-    text = (raw or "").strip().lower()
-    if not text:
-        return DEFAULT_TIMEOUT_SECONDS
-    unit = _UNITS.get(text[-1])
-    seconds = _int(text, 0) if unit is None else _int(text[:-1], 0) * unit
-    # A non-positive ceiling would make the guard fire before the trainer has
-    # started, which reads as a hang (124) rather than as the bad input it is.
-    return seconds if seconds > 0 else DEFAULT_TIMEOUT_SECONDS

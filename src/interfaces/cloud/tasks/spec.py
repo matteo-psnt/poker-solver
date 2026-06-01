@@ -22,12 +22,11 @@ old space-joined form silently split them.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from src.shared.cloudtask import kinds
+from src.shared.cloudtask import kinds, wire
 from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
 DEFAULT_TIMEOUT = "6h"
@@ -175,41 +174,11 @@ class TaskSpec:
     def environment(self) -> dict[str, str]:
         """The full RUN_* environment the node wrapper reads.
 
-        Every key is emitted even when empty. An absent variable and an empty
-        one are the same thing to the node, but emitting them all keeps the
-        contract visible in one place rather than implied by which branch
-        happened to set what.
+        Derived from :data:`src.shared.cloudtask.wire.KEYS`, which the node
+        decodes through as well, so this end cannot emit a key the other does
+        not read or spell one of them differently.
         """
-        return {
-            "CODE_SNAPSHOT": self.code_snapshot,
-            "RUN_OP": self.op,
-            "RUN_CONFIG": self.config,
-            "RUN_TO": str(self.to),
-            "RUN_ID": self.run_id,
-            "RUN_EXPERIMENT": self.experiment,
-            "RUN_ARM": self.arm,
-            "RUN_PARENT": self.parent,
-            "RUN_SETS_JSON": json.dumps(list(self.sets)),
-            "RUN_TIMEOUT": self.timeout,
-            "RUN_WORKERS": "" if self.workers is None else str(self.workers),
-            "RUN_CHECKPOINT_EVERY": str(self.checkpoint_every),
-            "RUN_EVAL_METHOD": self.eval_method,
-            "RUN_EVAL_AT": self.eval_at,
-            "RUN_EVAL_FLAGS_JSON": json.dumps(list(self.eval_flags)),
-            "RUN_FORCE_PUBLISH": "1" if self.force_publish else "",
-            "RUN_GIT_COMMIT": self.git_commit,
-            # Three-state ("1"/"0"/""), unlike the booleans above: `gitinfo`
-            # distinguishes "verified clean" from "unknown", and that
-            # distinction is what makes a bare hash worth recording.
-            "RUN_GIT_DIRTY": self.git_dirty,
-            "RUN_GIT_BRANCH": self.git_branch,
-            "RUN_UNIVERSE_BOARDS": str(self.universe_boards) if self.universe_boards else "",
-            "RUN_UNIVERSE_SEED": str(self.universe_seed) if self.universe_seed else "",
-            "RUN_DTYPE": self.dtype,
-            "RUN_WARM_START_FROM": self.warm_start_from,
-            "RUN_WARM_START_WEIGHT": str(self.warm_start_weight) if self.warm_start_weight else "",
-            "RUN_WARM_START_AT": str(self.warm_start_at) if self.warm_start_at else "",
-        }
+        return wire.encode(self)
 
     def validate(self) -> None:
         """Reject the submissions that would waste a node rather than fail fast.
