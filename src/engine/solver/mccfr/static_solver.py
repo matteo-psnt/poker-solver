@@ -81,13 +81,12 @@ class StaticTreeSolver(MCCFRSolver[StaticArrayStorage]):
         # two abstractions with the same per-street counts produce an identical
         # fingerprint while mapping hands to different buckets.
         self.abstraction_id = abstraction_id
-        # Pruning is the one mode `tree_traversal` does not implement, so it
-        # falls back to the state-based traversal rather than silently ignoring
-        # the flag. Decided once here, not tested per node.
-        self._walk_tree = not config.solver.enable_pruning
+        # Decided once here, not tested per node. `state` exists so the two
+        # traversals can be A/B'd on one machine; nothing else selects it.
+        self._walk_tree = config.solver.traversal == "tree"
 
     def _cfr_external_sampling(self, state: GameState, traversing_player: int) -> float:
-        """Walk node ids, falling back to the state-based traversal for pruning.
+        """Walk node ids; ``solver.traversal="state"`` selects the other one.
 
         Both produce bit-identical arrays from the same seed
         (``test_tree_traversal_equivalence``); the tree walk builds one

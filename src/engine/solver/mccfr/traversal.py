@@ -169,29 +169,8 @@ def cfr_external_sampling(
     if current_player == traversing_player:
         action_utilities = np.zeros(len(legal_actions))
         solver_config = self.config.solver
-        prune = (
-            infoset.pruned_mask(
-                self.iteration,
-                solver_config.pruning_threshold,
-                solver_config.prune_start_iteration,
-                solver_config.prune_reactivate_frequency,
-            )
-            if solver_config.enable_pruning
-            else None
-        )
-        # Collapse "nothing pruned this visit" to None so every node where pruning
-        # does nothing — the overwhelming majority — takes the vectorised fast path
-        # exactly like a pruning-disabled run. Pruning then pays the masked
-        # Python-loop paths only on the few nodes that actually skip an action.
-        if prune is not None and not prune.any():
-            prune = None
 
         for local_idx, action in enumerate(legal_actions):
-            original_idx = valid_indices[local_idx]
-
-            if prune is not None and prune[original_idx]:
-                continue
-
             next_state = state.apply_action(action, self.rules)
             if self.is_chance_node(next_state):
                 next_state = self.sample_chance_outcome(next_state)
@@ -202,39 +181,19 @@ def cfr_external_sampling(
                 traversing_player,
             )
 
-        if prune is not None:
-            unpruned_mask = np.array(
-                [not prune[valid_indices[i]] for i in range(len(legal_actions))]
-            )
-            if np.any(unpruned_mask):
-                unpruned_strategy = strategy[unpruned_mask]
-                unpruned_sum = unpruned_strategy.sum()
-                if unpruned_sum > 0:
-                    unpruned_strategy = unpruned_strategy / unpruned_sum
-                else:
-                    unpruned_strategy = np.ones(unpruned_mask.sum()) / unpruned_mask.sum()
-                node_utility = float(np.dot(unpruned_strategy, action_utilities[unpruned_mask]))
-            else:
-                node_utility = float(np.dot(strategy, action_utilities))
-        else:
-            node_utility = float(np.dot(strategy, action_utilities))
+        node_utility = float(np.dot(strategy, action_utilities))
 
         # Lock-free shared writes: every worker applies the full per-update
         # CFR+/DCFR math directly to shared memory for every infoset it visits.
         # Skipped only for placeholder views whose global ID is still unknown.
         if infoset.writable:
-            # One kernel call for every shape: full row (identity indices,
-            # allocation-free), partial-legal subset, or unpruned subset.
-            if prune is None:
-                if len(valid_indices) == infoset.num_actions:
-                    target_indices = identity_indices(infoset.num_actions)
-                else:
-                    target_indices = np.asarray(valid_indices, dtype=np.int64)
-                utilities = action_utilities
+            # One kernel call for either shape: the full row (identity indices,
+            # allocation-free) or a partial-legal subset.
+            if len(valid_indices) == infoset.num_actions:
+                target_indices = identity_indices(infoset.num_actions)
             else:
-                unpruned = [j for j in range(len(legal_actions)) if not prune[valid_indices[j]]]
-                target_indices = np.array([valid_indices[j] for j in unpruned], dtype=np.int64)
-                utilities = action_utilities[unpruned]
+                target_indices = np.asarray(valid_indices, dtype=np.int64)
+            utilities = action_utilities
             # Opponent reach is deliberately 1.0. Under external sampling the
             # opponent's actions are SAMPLED, so this node is visited with
             # probability pi_{-i} and the visit frequency already supplies that

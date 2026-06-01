@@ -386,34 +386,6 @@ class InfoSet:
             dcfr_beta,
         )
 
-    def pruned_mask(
-        self,
-        iteration: int,
-        pruning_threshold: float,
-        prune_start_iteration: int,
-        prune_reactivate_frequency: int,
-    ) -> np.ndarray:
-        """Per-action prune flags for this visit, derived live from the regrets.
-
-        Regret-based pruning (Brown & Sandholm 2019): an action whose cumulative
-        regret is below ``-pruning_threshold`` is skipped, so its subtree is not
-        traversed and its regret is not updated this visit. It needs no stored
-        state — ``regrets`` already persists in shared storage, and because a
-        pruned action's regret is frozen while pruned, the decision is naturally
-        sticky across visits. A periodic reactivation window (before
-        ``prune_start_iteration`` and whenever ``iteration`` is a multiple of
-        ``prune_reactivate_frequency``) returns an all-false mask so every action
-        is re-explored and a prematurely pruned action can recover — the
-        convergence safeguard. Never prunes every action: there must be something
-        to sample and to renormalise the node value over.
-        """
-        if iteration < prune_start_iteration or iteration % prune_reactivate_frequency == 0:
-            return np.zeros(self.num_actions, dtype=bool)
-        mask = self.regrets < -pruning_threshold
-        if mask.all():
-            return np.zeros(self.num_actions, dtype=bool)
-        return mask
-
     def __str__(self) -> str:
         """Human-readable string representation."""
         strategy = self.get_strategy()

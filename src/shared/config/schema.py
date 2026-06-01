@@ -296,21 +296,18 @@ class SolverConfig(StrictFrozenModel):
     dcfr_beta: NonNegFloat = Field(default=0.0)
     dcfr_gamma: PositiveFloat = Field(default=2.0)
 
-    # Regret-based pruning (Brown & Sandholm 2019). The pruned set is derived
-    # live from the persistent regrets each visit (see InfoSet.pruned_mask), so
-    # the knob needs no stored state.
+    # A MEASUREMENT SEAM, not a strategy choice. `tree` walks the betting
+    # tree's edge table; `state` rebuilds a GameState per edge. The two are
+    # required to produce bit-identical arrays and an identical random stream
+    # (`test_tree_traversal_equivalence`), so this changes throughput and
+    # nothing else — which is the only reason it is selectable at all.
     #
-    # Default off, and measured before trusting: a single-worker 60k-iter
-    # production smoke found it throughput-NEUTRAL (~1.0x it/s; it skipped ~4.5%
-    # of subtrees but external-sampling's per-node cost is already low, so the
-    # saving ~ the masking overhead). Its effect on the average-strategy /
-    # exploitability is NOT validated — enabling it changes the algorithm and
-    # needs a paired-LBR gate, not just the it/s wash. Do not expect the
-    # literature speedup here.
-    enable_pruning: bool = Field(default=False)
-    pruning_threshold: NonNegFloat = Field(default=300.0)
-    prune_start_iteration: PositiveInt = Field(default=100)
-    prune_reactivate_frequency: PositiveInt = Field(default=100)
+    # It exists because throughput here is box-variance-dominated: a 13x swing
+    # was once measured on identical code across nodes, so the ONLY trustworthy
+    # comparison is two arms back to back on one machine. Without a switch
+    # that has to be two code snapshots, which differ in more than the thing
+    # being measured.
+    traversal: Literal["tree", "state"] = Field(default="tree")
 
 
 # ---------------------------------------------------------------------------

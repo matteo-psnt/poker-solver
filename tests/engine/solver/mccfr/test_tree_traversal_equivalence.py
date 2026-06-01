@@ -408,12 +408,19 @@ def test_an_out_of_range_bucket_raises_instead_of_aliasing():
         train_until_it_lands_on_a_postflop_node()
 
 
-def test_pruning_falls_back_to_the_state_traversal():
-    """The fast path does not implement pruning, so it must not claim to."""
-    config = make_test_config(seed=42, starting_stack=200, enable_pruning=True)
+@pytest.mark.parametrize(("traversal", "walks_tree"), [("tree", True), ("state", False)])
+def test_the_traversal_config_selects_the_path(traversal, walks_tree):
+    """The A/B switch has to actually switch, or a benchmark measures one arm twice.
+
+    This is the seam the cloud comparison drives through ``--set
+    solver__traversal=state``; a default that quietly won over the override
+    would produce two identical arms and a 1.0x speedup nobody could explain.
+    """
+    config = make_test_config(seed=42, starting_stack=200, **{"solver.traversal": traversal})
     action_model, abstraction, tree = build(config)
     solver = StaticTreeSolver(
         action_model, abstraction, StaticArrayStorage(tree), config, tree=tree
     )
 
-    assert solver._walk_tree is False
+    assert config.solver.traversal == traversal
+    assert solver._walk_tree is walks_tree
