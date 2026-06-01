@@ -9,6 +9,14 @@ with a dead reach weight of 1.0, converging to a pi_{-i}-weighted average.
 These tests pin the corrected placement so a regression to either the old
 site or an explicit reach term (option C's trap: threading pi_i in place
 yields full reach, still wrong) is loud.
+
+They spy on the state-based traversal, which production no longer runs.
+That is deliberate and it is not a coverage hole: the state-based traversal is
+the SPECIFICATION, and ``test_tree_traversal_equivalence`` requires the
+node-id walk production does run to produce bit-identical arrays from the same
+seed. A fast path that accumulated at the wrong nodes, or under a weight other
+than 1.0, could not survive that comparison. Placement is asserted here, where
+it is observable as placement rather than as a difference in a float32 array.
 """
 
 from src.engine.solver.mccfr import traversal
@@ -47,7 +55,11 @@ def _spy_accumulations(monkeypatch):
 
 
 def _build_solver():
-    return build_test_solver(make_test_config(seed=42), DummyCardAbstraction())
+    solver, storage = build_test_solver(make_test_config(seed=42), DummyCardAbstraction())
+    # The spies above hook the state-based traversal; see the module docstring
+    # for why asserting placement there still binds the path production runs.
+    solver._walk_tree = False
+    return solver, storage
 
 
 def test_external_sampling_accumulates_only_at_opponent_nodes(monkeypatch):

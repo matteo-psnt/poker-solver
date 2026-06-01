@@ -43,22 +43,35 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.actions.action_model import ActionModel
-from src.core.game.actions import Action
-from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
-from src.engine.solver.protocols import BucketingStrategy
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.actions import Action
+    from src.core.game.rules import GameRules
+    from src.engine.solver.protocols import BucketingStrategy
 
 # Enumeration needs a concrete state to walk, but the betting tree does not
 # depend on card identities — only on street, pot, stacks and to_call. These are
 # placeholders that get overwritten as the walk advances streets.
-_PLACEHOLDER_HOLE = ((Card("As"), Card("Kd")), (Card("Qh"), Card("Jc")))
-_PLACEHOLDER_BOARD = (Card("2c"), Card("7d"), Card("9h"), Card("4s"), Card("Ts"))
+_PLACEHOLDER_HOLE = (
+    (Card.new("As"), Card.new("Kd")),
+    (Card.new("Qh"), Card.new("Jc")),
+)
+_PLACEHOLDER_BOARD = (
+    Card.new("2c"),
+    Card.new("7d"),
+    Card.new("9h"),
+    Card.new("4s"),
+    Card.new("Ts"),
+)
 
 # Preflop uses the 169 canonical starting hands directly rather than equity
 # buckets, so its "bucket count" is fixed by the game, not by the abstraction.
@@ -88,6 +101,50 @@ class BettingNode:
     @property
     def num_actions(self) -> int:
         return len(self.legal_actions)
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalOutcome:
+    """What an action that ends the hand pays, for every way it can end.
+
+    Payoffs are constants of the betting line. ``get_payoff`` reads only
+    ``pot``, ``stacks`` and the winner, and the first two are fixed by the
+    sequence of bets — no card ever moves them. So the whole payoff table is
+    computable at enumeration time and the traversal is left with one job at a
+    terminal: decide *who won*, which for a fold is also already decided.
+
+    Each field is a ``(button, non-button)`` pair, since the tree is stored
+    button-relative. ``win``/``lose`` are indexed by the player being paid, not
+    by the winner: ``win[0]`` is what the button collects when the button wins.
+
+    cards_to_deal:
+        Board cards the runout still owes at this terminal — zero for a fold,
+        and up to five for an all-in that closed the action before the river.
+    """
+
+    is_fold: bool
+    cards_to_deal: int
+    fold: tuple[float, float]
+    win: tuple[float, float]
+    lose: tuple[float, float]
+    tie: tuple[float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class Edge:
+    """Where one action at one node leads.
+
+    Exactly one of ``child_id``/``terminal`` is set: an action either hands the
+    turn to another decision node or ends the hand.
+
+    deal:
+        Board cards the chance dealer owes before the child acts — 0 within a
+        street, 3 onto the flop, 1 onto the turn and river.
+    """
+
+    child_id: int
+    deal: int
+    terminal: TerminalOutcome | None
 
 
 class BettingTree:
@@ -120,6 +177,12 @@ class BettingTree:
 
         self.nodes: list[BettingNode] = []
         self._index: dict[tuple[Street, str], int] = {}
+        self.edges: list[tuple[Edge, ...]] = []
+        # Terminals are interned: the production tree ends 101,904 ways but a
+        # payoff table is fixed by (pot, stacks, how it ended), and the action
+        # abstraction produces far fewer distinct ones than that. Every worker
+        # process holds its own tree, so the saving is per worker.
+        self._terminals: dict[tuple, TerminalOutcome] = {}
 
         self._enumerate()
         self._build_layout()
@@ -132,37 +195,70 @@ class BettingTree:
             hole_cards=_PLACEHOLDER_HOLE,
             button=0,
         )
-        self._walk(root)
+        self.root_id = self._register(root)
 
-    def _walk(self, state: GameState) -> None:
-        if state.is_terminal:
-            return
+    def _register(self, state: GameState) -> int:
+        """Id of the decision node ``state`` sits at, enumerating it if new.
 
+        Deals the placeholder board first when the state arrives mid-chance, so
+        every registered node has a board matching its street. Recursion happens
+        only for a node seen for the first time — the walk is a tree, so a
+        repeat key would re-derive an identical subtree.
+        """
         needed = state.street.board_card_count
         if len(state.board) < needed:
-            # Chance node: the betting tree is card-independent, so one
-            # representative board stands in for every runout.
-            self._walk(dataclasses.replace(state, board=_PLACEHOLDER_BOARD[:needed]))
-            return
+            # The betting tree is card-independent, so one representative board
+            # stands in for every runout.
+            state = dataclasses.replace(state, board=_PLACEHOLDER_BOARD[:needed])
+
+        key = (state.street, state.normalized_betting_sequence())
+        existing = self._index.get(key)
+        if existing is not None:
+            return existing
 
         legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
         if not legal_actions:
-            return
+            raise ValueError(f"Non-terminal state with no legal actions: {state}")
 
-        key = (state.street, state.normalized_betting_sequence())
-        if key not in self._index:
-            node = BettingNode(
-                node_id=len(self.nodes),
-                street=state.street,
-                betting_sequence=key[1],
-                actor_is_button=state.current_player == state.button_position,
-                legal_actions=tuple(legal_actions),
+        node = BettingNode(
+            node_id=len(self.nodes),
+            street=state.street,
+            betting_sequence=key[1],
+            actor_is_button=state.current_player == state.button_position,
+            legal_actions=tuple(legal_actions),
+        )
+        self._index[key] = node.node_id
+        self.nodes.append(node)
+        # Reserve this node's slot before recursing: children append after it,
+        # so the list stays index-aligned with `nodes` under a depth-first walk.
+        self.edges.append(())
+        self.edges[node.node_id] = tuple(self._edge(state, action) for action in node.legal_actions)
+        return node.node_id
+
+    def _edge(self, state: GameState, action: Action) -> Edge:
+        """Record where ``action`` leads, reading the answer off the rules engine.
+
+        Nothing here re-derives the game: the child comes from the same
+        ``apply_action`` the traversal used to call per visit, and the terminal
+        payoffs come off that child's own pot and stacks. The enumeration is
+        simply the last time anyone has to ask.
+        """
+        child = self.rules.apply_action(state, action)
+        if child.is_terminal:
+            key = (
+                child.pot,
+                child.stacks,
+                child.ended_by_fold,
+                child.current_player,
+                len(child.board),
             )
-            self._index[key] = node.node_id
-            self.nodes.append(node)
+            outcome = self._terminals.get(key)
+            if outcome is None:
+                outcome = self._terminals[key] = _terminal_outcome(child)
+            return Edge(-1, 0, outcome)
 
-        for action in legal_actions:
-            self._walk(self.rules.apply_action(state, action))
+        deal = child.street.board_card_count - len(child.board)
+        return Edge(self._register(child), deal, None)
 
     # ---- layout ----------------------------------------------------------
 
@@ -190,6 +286,31 @@ class BettingTree:
 
         self.num_rows = int(self.row_offset[-1])
         self.num_slots = int(self.slot_offset[-1])
+
+        # Plain-Python mirrors of the three arrays the traversal indexes once
+        # per node visit. Pulling a scalar out of an int64 array boxes a numpy
+        # object and costs several times a list index, and this is the hottest
+        # read in the solver.
+        self.row_offset_list: list[int] = self.row_offset.tolist()
+        self.slot_offset_list: list[int] = self.slot_offset.tolist()
+        self.num_actions_list: list[int] = self.num_actions.tolist()
+
+        # Everything the traversal reads at a node, denormalized into one tuple
+        # so a visit costs one list index and one unpack instead of a walk
+        # through three arrays and a dataclass.
+        self.node_spec: list[tuple] = [
+            (
+                node.street == Street.PREFLOP,
+                node.actor_is_button,
+                node.street,
+                node.num_actions,
+                self.row_offset_list[node.node_id],
+                self.slot_offset_list[node.node_id],
+                int(rows_per_node[node.node_id]),
+                self.edges[node.node_id],
+            )
+            for node in self.nodes
+        ]
 
     def num_buckets(self, street: Street) -> int:
         """Rows this street's nodes own — 169 canonical hands preflop, else buckets."""
@@ -270,6 +391,33 @@ class BettingTree:
         )
 
 
+def _terminal_outcome(state: GameState) -> TerminalOutcome:
+    """Tabulate every payoff a terminal state can produce.
+
+    Mirrors ``GameRules.get_payoff`` expression for expression, including the
+    order of the additions, so the tabulated value is the same float the live
+    formula would return rather than merely the same number in exact
+    arithmetic. Enumeration runs button-relative with ``button=0``, so seat 0
+    here IS the button.
+    """
+    pot = state.pot
+    stacks = state.stacks
+    starting = (pot + stacks[0] + stacks[1]) / 2
+    share = pot / 2
+
+    win = ((stacks[0] + pot) - starting, (stacks[1] + pot) - starting)
+    lose = (stacks[0] - starting, stacks[1] - starting)
+    tie = ((stacks[0] + share) - starting, (stacks[1] + share) - starting)
+
+    if state.ended_by_fold:
+        # `current_player` on a terminal state is whoever folded into it.
+        winner = 1 - state.current_player
+        fold = (win[0], lose[1]) if winner == 0 else (lose[0], win[1])
+        return TerminalOutcome(True, 0, fold, win, lose, tie)
+
+    return TerminalOutcome(False, 5 - len(state.board), (0.0, 0.0), win, lose, tie)
+
+
 def buckets_from_abstraction(card_abstraction: BucketingStrategy) -> dict[Street, int]:
     """Read per-street bucket counts off a bucketing strategy."""
     return {
@@ -298,6 +446,8 @@ __all__: Sequence[str] = (
     "NUM_PREFLOP_HANDS",
     "BettingNode",
     "BettingTree",
+    "Edge",
+    "TerminalOutcome",
     "buckets_from_abstraction",
     "build_betting_tree",
 )

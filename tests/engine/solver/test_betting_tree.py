@@ -243,6 +243,15 @@ class TestProductionScale:
 
     @pytest.fixture(scope="class")
     def production_tree(self):
+        """Built the way a node builds it: bucket counts come from the CONFIG.
+
+        Hardcoding the counts here would put a hole in the fingerprint guard
+        below, in the one dimension it exists for — ``fingerprint()`` covers
+        per-street bucket counts, so a river count moved 600 -> 800 orphans
+        every checkpoint on the share, and a fixture that never consults
+        ``config/abstraction/production.yaml`` would stay green through it.
+        """
+        from src.pipeline.abstraction.config import PrecomputeConfig
         from src.shared.config.loader import load_config
 
         config = load_config("config/training/production.yaml")
@@ -251,8 +260,36 @@ class TestProductionScale:
             rules,
             ActionModel(config),
             starting_stack=config.game.starting_stack,
-            buckets_per_street={Street.FLOP: 100, Street.TURN: 300, Street.RIVER: 600},
+            buckets_per_street=PrecomputeConfig.from_yaml(
+                config.card_abstraction.config
+            ).num_buckets,
         )
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_production_layout_is_the_one_the_share_was_written_against(self, production_tree):
+        """A golden fingerprint, and it is a LINEAGE GUARD — never re-pin it.
+
+        A checkpoint on the share is a bare array of numbers; this tree is the
+        only thing that says which infoset each row is. Change node identity,
+        node ORDER, a node's action count or a per-street bucket count and the
+        fingerprint moves — at which point every checkpoint ever written either
+        refuses to load or, if the guard were relaxed, silently reinterprets
+        every row as a different infoset and keeps training.
+
+        So a failure here is never a stale constant. It means the layout moved,
+        and the question is what happens to the runs on the share — not what to
+        edit on this line. See ``static_checkpoint``, which refuses the load.
+        """
+        assert production_tree.buckets_per_street == {
+            Street.FLOP: 100,
+            Street.TURN: 300,
+            Street.RIVER: 600,
+        }, "the abstraction config moved; the fingerprint below moved with it"
+        assert production_tree.fingerprint() == "ca50e2d3291fa227"
+        assert len(production_tree.nodes) == 57_604
+        assert production_tree.num_rows == 32_240_608
+        assert production_tree.num_slots == 89_138_455
 
     @pytest.mark.slow
     @pytest.mark.timeout(120)
