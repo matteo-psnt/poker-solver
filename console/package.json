@@ -8,7 +8,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "check": "biome check --write src && tsc -b",
-    "ci": "npm run gen:types && biome ci src && tsc -b && vitest run",
+    "ci": "npm run gen:types && biome ci src && tsc -b && vitest run && knip",
     "knip": "knip",
     "gen:types": "openapi-typescript src/api/openapi.json -o src/api/types.gen.ts"
   },
