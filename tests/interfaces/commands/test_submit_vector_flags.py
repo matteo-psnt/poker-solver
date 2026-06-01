@@ -13,12 +13,15 @@ this from becoming a third declaration that can itself drift.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import pytest
 
 from src.engine.solver.vector import KERNELS
 from src.interfaces.commands import submit_vector, vector_sweep
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _sweep_parser() -> argparse.ArgumentParser:

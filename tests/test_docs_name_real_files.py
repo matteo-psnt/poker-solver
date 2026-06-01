@@ -26,13 +26,16 @@ own reach:
 
 from __future__ import annotations
 
-import pathlib
 import re
 import subprocess
+from typing import TYPE_CHECKING
 
 import pytest
 
 from src.shared import repo
+
+if TYPE_CHECKING:
+    import pathlib
 
 REPO_ROOT = repo.ROOT
 REFERENCE = re.compile(r"`([^`\n]+?\.(?:py|md))`")

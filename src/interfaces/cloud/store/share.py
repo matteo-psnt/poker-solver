@@ -23,16 +23,20 @@ import contextlib
 import json
 import tarfile
 import tempfile
-from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.fileshare import ShareDirectoryClient, ShareServiceClient
 
-from src.interfaces.cloud.config import CloudConfig
 from src.shared import records
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from datetime import datetime
+
+    from src.interfaces.cloud.config import CloudConfig
 
 ARCHIVE_DIR = "archive"
 CODE_DIR = "code"

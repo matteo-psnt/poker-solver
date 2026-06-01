@@ -9,9 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
+if TYPE_CHECKING:
+    from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 
 logger = logging.getLogger(__name__)
 

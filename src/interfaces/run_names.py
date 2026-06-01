@@ -14,7 +14,10 @@ about another -- so there is one definition and both import it. Nothing below
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def matching(fragment: str, names: Iterable[str]) -> list[str]:

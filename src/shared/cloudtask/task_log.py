@@ -42,10 +42,12 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.shared import records
-from src.shared.cloudtask import kinds
+
+if TYPE_CHECKING:
+    from src.shared.cloudtask import kinds
 
 RECORDS_DIRNAME = "legs"
 

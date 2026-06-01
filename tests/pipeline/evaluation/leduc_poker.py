@@ -20,10 +20,13 @@ it as a test file.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 from src.pipeline.evaluation.reference.game_tree import CHANCE
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 MAX_RAISES = 2
 _BET_SIZE = {0: 2, 1: 4}

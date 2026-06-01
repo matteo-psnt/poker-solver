@@ -27,11 +27,8 @@ when it did not.
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterable
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.shared import records
 from src.shared.cloudtask import kinds
@@ -49,6 +46,11 @@ from src.shared.cloudtask.task_log import (
     read_documents,
     tasks_dir,
 )
+
+if TYPE_CHECKING:
+    import os
+    from collections.abc import Iterable
+    from pathlib import Path
 
 """Written by the READER, not the node -- so the suffix belongs here.
 

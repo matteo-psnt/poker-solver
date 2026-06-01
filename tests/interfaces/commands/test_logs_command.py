@@ -10,13 +10,16 @@ answer is one flag away on the share.
 
 from __future__ import annotations
 
-import argparse
+from typing import TYPE_CHECKING
 
 import pytest
 from azure.core.exceptions import ResourceNotFoundError
 
 from src.interfaces.commands import logs
 from src.interfaces.errors import CommandError
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def _args(**overrides) -> argparse.Namespace:

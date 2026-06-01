@@ -11,10 +11,12 @@ make.
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import Command
+
+if TYPE_CHECKING:
+    import argparse
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -58,7 +60,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 def render(payload: dict[str, Any]) -> None:
     # Imported here, not at module scope: `--help` and every other subcommand
     # would otherwise pay to import uvicorn and the whole FastAPI stack.
-    import uvicorn
+    import uvicorn  # noqa: PLC0415 -- see above
 
     print(f"Console on {payload['url']}   (Ctrl-C to stop)")
     try:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,6 +12,9 @@ from src.pipeline.training.run_tracker import RunMetadata, RunTracker
 from src.shared import run_events
 from src.shared.cloudtask import task_log
 from src.shared.config import Config
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _run(tmp_path, *, run_id="run-a", dirty=False, status="completed", abstraction="ae5a") -> Path:

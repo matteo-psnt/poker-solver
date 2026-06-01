@@ -6,10 +6,14 @@ precompute paths compute the same directory names the resolver scans for.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.core.game.state import Street
-from src.pipeline.abstraction.config import PrecomputeConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from src.pipeline.abstraction.config import PrecomputeConfig
 
 OUTPUT_HASH_LENGTH = 8
 

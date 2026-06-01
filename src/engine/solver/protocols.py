@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from src.core.game.state import Card, Street
+if TYPE_CHECKING:
+    from src.core.game.state import Card, Street
 
 
 class BucketingStrategy(Protocol):

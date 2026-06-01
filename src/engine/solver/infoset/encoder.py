@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.core.game.state import Card, GameState, Street
 from src.engine.solver.infoset.model import InfoSetKey
-from src.engine.solver.protocols import BucketingStrategy
+
+if TYPE_CHECKING:
+    from src.engine.solver.protocols import BucketingStrategy
 
 # SPR (Stack-to-Pot Ratio) thresholds for bucketing
 # Shallow: SPR < 4 (push/fold decisions)

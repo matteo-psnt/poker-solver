@@ -28,10 +28,14 @@ import itertools
 import secrets
 import threading
 from collections import OrderedDict
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from src.engine.search.heads_up_session import HeadsUpHand
-from src.engine.solver.policy.source import ScorableBlueprint
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.engine.solver.policy.source import ScorableBlueprint
 
 DEFAULT_LIMIT = 64
 

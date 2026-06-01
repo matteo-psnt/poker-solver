@@ -32,13 +32,15 @@ second read path.
 
 from __future__ import annotations
 
-import argparse
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands import jobs, pool_status, tasks
 from src.interfaces.commands._base import Command
 from src.interfaces.commands._compose import Part, compose
+
+if TYPE_CHECKING:
+    import argparse
 
 PANELS: tuple[tuple[str, Command], ...] = (
     ("pool", pool_status.COMMAND),

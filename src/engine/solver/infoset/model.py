@@ -7,13 +7,11 @@ to a player given their information (hole cards, board, betting history).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
-from src.core.game.actions import Action
 from src.engine.solver.numba_ops import (
     WEIGHTING_CODES,
     apply_regret_updates,
@@ -22,6 +20,9 @@ from src.engine.solver.numba_ops import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from src.core.game.actions import Action
     from src.core.game.state import Street
 
 

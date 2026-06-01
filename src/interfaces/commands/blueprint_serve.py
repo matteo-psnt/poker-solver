@@ -19,11 +19,13 @@ keeps the authentication question with the thing that already answers it.
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
+
+if TYPE_CHECKING:
+    import argparse
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8790
@@ -83,16 +85,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def render(payload: dict[str, Any]) -> None:
     # Imported here, not at module scope, so `--help` and every other subcommand
-    # is spared uvicorn, FastAPI and the whole pipeline import chain.
-    from pathlib import Path
+    # is spared uvicorn, FastAPI and the whole pipeline import chain. This is a
+    # `render()`, so it runs only when this command is the one being run --
+    # which is what makes the whole block deferrable rather than just uvicorn.
+    from pathlib import Path  # noqa: PLC0415 -- see above
 
-    import uvicorn
+    import uvicorn  # noqa: PLC0415 -- see above
 
-    from src.interfaces.blueprint.app import create_app
-    from src.interfaces.blueprint.idle import IDLE_EXIT_CODE
-    from src.interfaces.blueprint.staging import stage_run
-    from src.pipeline.services.scoring._shared import build_blueprint_for
-    from src.pipeline.training.run_tracker import RunTracker
+    from src.interfaces.blueprint.app import create_app  # noqa: PLC0415 -- see above
+    from src.interfaces.blueprint.idle import IDLE_EXIT_CODE  # noqa: PLC0415 -- see above
+    from src.interfaces.blueprint.staging import stage_run  # noqa: PLC0415 -- see above
+    from src.pipeline.services.scoring._shared import (  # noqa: PLC0415 -- see above
+        build_blueprint_for,
+    )
+    from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415 -- see above
 
     run_dir = Path(payload["run_dir"])
     runs_dir = Path(payload["runs_dir"])

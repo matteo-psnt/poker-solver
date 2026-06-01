@@ -32,7 +32,7 @@ the hand-space kernel needs is the identity in bucket space.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -40,6 +40,9 @@ from src.core.game.state import Street
 from src.engine.solver.vector.bucket_game import BucketGame
 from src.engine.solver.vector.compiled_tree import EDGE_TO_TERMINAL, CompiledTree, TerminalKind
 from src.engine.solver.vector.kernel import NodeGroup, build_groups
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # float32, and the choice is measured rather than inherited.
 #

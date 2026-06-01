@@ -20,10 +20,13 @@ averaging, the storage. Only where the cards come from. A comparison whose
 from __future__ import annotations
 
 import random
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from src.core.game.state import FULL_DECK, Card, GameState
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # A runout is the community cards in order; the prefix of length
 # ``street.board_card_count`` is what is public on each street. Typed as a plain

@@ -10,14 +10,16 @@ everything else that costs CPU moved to the pool.
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

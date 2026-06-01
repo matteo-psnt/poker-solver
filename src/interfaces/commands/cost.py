@@ -26,15 +26,17 @@ wrapper with its own start and end, whether or not anything is watching.
 
 from __future__ import annotations
 
-import argparse
 import datetime as dt
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.cost import billing, node_time
 from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.commands._base import Command
+
+if TYPE_CHECKING:
+    import argparse
 
 """How far back to ask the biller when the window is 'everything'.
 

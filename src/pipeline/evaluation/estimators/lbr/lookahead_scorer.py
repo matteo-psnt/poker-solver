@@ -48,15 +48,18 @@ is preserved by the existing per-hand reseeding.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
-from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState
-from src.pipeline.evaluation.estimators.lbr.shadow_state import MenuCandidate
 from src.shared.numeric import NORMALIZE_EPS
+
+if TYPE_CHECKING:
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.rules import GameRules
+    from src.pipeline.evaluation.estimators.lbr.shadow_state import MenuCandidate
 
 # The blueprint response distribution at one public opponent node. Keyed
 # beyond the infoset key: two public states can share an infoset key (same

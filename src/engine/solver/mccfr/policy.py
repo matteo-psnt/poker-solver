@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.game.actions import Action
-from src.core.game.state import GameState
 from src.engine.solver.policy.lookup import blueprint_action_distribution
 
 if TYPE_CHECKING:
+    from src.core.game.actions import Action
+    from src.core.game.state import GameState
     from src.engine.solver.policy.source import ScorableBlueprint
 
 

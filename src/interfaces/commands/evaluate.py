@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import (
     Command,
@@ -14,6 +13,9 @@ from src.pipeline import services
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
 from src.shared.config import DEFAULT_RUNS_DIR
+
+if TYPE_CHECKING:
+    import argparse
 
 # The estimators a node can actually run. `score` imports this rather than
 # repeating it: a value the submitter accepts but `evaluate` rejects is not

@@ -29,11 +29,10 @@ than substituting the uniform that a caller would have no way to recognise.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.game.actions import Action
-from src.core.game.state import Card, GameState
 from src.engine.search.range_inference import (
     ALL_COMBOS,
     COMBO_MASKS,
@@ -41,8 +40,12 @@ from src.engine.search.range_inference import (
     replace_actor_hole_cards,
 )
 from src.engine.solver.policy.lookup import blueprint_action_distribution
-from src.engine.solver.policy.source import ScorableBlueprint
 from src.pipeline.blueprint.paths import PathError, ReplayedNode, encode_action
+
+if TYPE_CHECKING:
+    from src.core.game.actions import Action
+    from src.core.game.state import Card, GameState
+    from src.engine.solver.policy.source import ScorableBlueprint
 
 
 @dataclass(frozen=True)

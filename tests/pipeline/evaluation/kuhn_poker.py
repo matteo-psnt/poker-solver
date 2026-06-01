@@ -27,9 +27,12 @@ it as a test file.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from src.pipeline.evaluation.reference.game_tree import CHANCE
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # State is (cards, history):
 #   cards: tuple[int, int] | None  -- None before the deal (chance root)

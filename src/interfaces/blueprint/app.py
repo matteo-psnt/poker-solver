@@ -24,22 +24,25 @@ process here, and the deploy script goes back to being for deploys.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.core.game.state import Card
-from src.engine.search.heads_up_session import HeadsUpHand
 from src.engine.search.range_inference import ALL_COMBOS
-from src.engine.solver.policy.source import ScorableBlueprint
 from src.interfaces.blueprint.idle import IdleWatch
 from src.interfaces.blueprint.sessions import Sessions, UnknownSessionError
 from src.pipeline.blueprint.grid import StrategyGrid, strategy_grid
 from src.pipeline.blueprint.paths import PathError, encode_action, match_action, replay
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.engine.search.heads_up_session import HeadsUpHand
+    from src.engine.solver.policy.source import ScorableBlueprint
 
 
 # `repr`, not `str`: a Card's `__str__` is the pretty terminal form ("[ 2 ♣ ]")

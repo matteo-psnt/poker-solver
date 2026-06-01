@@ -22,9 +22,12 @@ import contextlib
 import json
 import shutil
 from collections.abc import Callable, Iterable, Sequence
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.shared import records
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 """The deleted dynamic backend's manifest. Recognised only so that a run
 predating the static tree is REFUSED with an explanation rather than fetched:

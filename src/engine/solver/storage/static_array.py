@@ -34,13 +34,17 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Iterator
 from multiprocessing import shared_memory
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.infoset.model import InfoSet
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from src.engine.solver.betting_tree import BettingTree
 
 logger = logging.getLogger(__name__)
 

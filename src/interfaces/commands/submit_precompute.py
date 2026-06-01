@@ -12,9 +12,8 @@ existing local copy onto a fresh share, not something to run routinely.
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
@@ -24,6 +23,9 @@ from src.interfaces.errors import CommandError
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 from src.shared.cloudtask.kinds import TaskName
+
+if TYPE_CHECKING:
+    import argparse
 
 PRECOMPUTE_TIMEOUT = "12h"
 

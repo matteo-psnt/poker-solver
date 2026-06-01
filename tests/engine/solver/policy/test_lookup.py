@@ -29,14 +29,14 @@ class _StubRules:
 
 
 def _rules(invalid=()) -> GameRules:
-    return cast(GameRules, _StubRules(invalid))
+    return cast("GameRules", _StubRules(invalid))
 
 
 def _infoset(actions):
     return InfoSet(InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1), actions)
 
 
-STATE = cast(GameState, object())  # opaque to _StubRules
+STATE = cast("GameState", object())  # opaque to _StubRules
 
 
 class TestFilterStoredActions:

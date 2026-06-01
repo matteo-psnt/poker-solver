@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store.share import share_client
@@ -17,6 +15,10 @@ from src.interfaces.commands._base import (
 )
 from src.interfaces.errors import CommandError
 from src.pipeline import services
+
+if TYPE_CHECKING:
+    import argparse
+    from pathlib import Path
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

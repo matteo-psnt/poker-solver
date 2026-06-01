@@ -54,11 +54,14 @@ it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType, all_in, bet, raises
-from src.core.game.rules import GameRules
 from src.core.game.state import GameState, Street
+
+if TYPE_CHECKING:
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.rules import GameRules
 
 
 @dataclass(frozen=True)

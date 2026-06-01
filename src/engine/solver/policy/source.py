@@ -13,21 +13,24 @@ problem that module was written to end would come back.
 
 from __future__ import annotations
 
-from collections.abc import Hashable
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from src.core.actions.action_model import ActionModel
-from src.core.game.actions import Action
-from src.core.game.rules import GameRules
-from src.core.game.state import GameState, Street
-from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.infoset.index import (
     bucket_of,
 )
-from src.engine.solver.infoset.model import InfoSet
-from src.engine.solver.protocols import BucketingStrategy
-from src.engine.solver.storage.static_array import StaticArrayStorage
-from src.shared.config import Config
+
+if TYPE_CHECKING:
+    from collections.abc import Hashable
+
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.actions import Action
+    from src.core.game.rules import GameRules
+    from src.core.game.state import GameState, Street
+    from src.engine.solver.betting_tree import BettingTree
+    from src.engine.solver.infoset.model import InfoSet
+    from src.engine.solver.protocols import BucketingStrategy
+    from src.engine.solver.storage.static_array import StaticArrayStorage
+    from src.shared.config import Config
 
 
 class ScorableBlueprint(Protocol):

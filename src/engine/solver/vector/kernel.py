@@ -37,14 +37,17 @@ Values carried:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.core.game.state import Street
 from src.engine.solver.vector.compiled_tree import EDGE_TO_TERMINAL, CompiledTree, TerminalKind
 from src.engine.solver.vector.hand_context import HandContext, showdown_matrix
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # A standard deck, fixing the width of the per-card range-mass table.
 NUM_CARDS = 52

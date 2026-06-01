@@ -25,8 +25,7 @@ import random
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -34,13 +33,17 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
-from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.pipeline.abstraction.resolver import ComboAbstractionResolver
 from src.shared import run_events
-from src.shared.config import Config
 from src.shared.log import configure_logging
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from src.engine.solver.protocols import BucketingStrategy
+    from src.shared.config import Config
 
 logger = logging.getLogger(__name__)
 

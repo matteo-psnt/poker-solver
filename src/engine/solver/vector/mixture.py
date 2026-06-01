@@ -46,14 +46,18 @@ real. ``_visible_partition`` is what keeps the two apart.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.core.game.state import Street
-from src.engine.solver.vector.compiled_tree import CompiledTree
-from src.engine.solver.vector.hand_context import HandContext
 from src.engine.solver.vector.kernel import DTYPE, VectorCFR
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from src.engine.solver.vector.compiled_tree import CompiledTree
+    from src.engine.solver.vector.hand_context import HandContext
 
 # How many board cards are face up when a street's decisions are taken.
 VISIBLE_CARDS: dict[Street, int] = {

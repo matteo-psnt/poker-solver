@@ -10,8 +10,8 @@ from src.engine.search.range_inference import replace_actor_hole_cards
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
-from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.protocols import BucketingStrategy
+from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.shared import records as record_store
 from src.shared.config import Config
 

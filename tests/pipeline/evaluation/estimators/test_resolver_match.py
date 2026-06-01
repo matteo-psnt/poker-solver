@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 
 from src.core.game.actions import call
 from src.core.game.state import Card, Street
-from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.pipeline.evaluation.estimators.resolver_match import (
     _deal_from_stack,
     play_resolver_match,
 )
 from tests.test_helpers import build_trained_test_solver
+
+if TYPE_CHECKING:
+    from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 
 
 def _build_solver(iterations: int) -> StaticTreeSolver:

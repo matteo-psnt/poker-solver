@@ -18,13 +18,15 @@ different fixes, and a bare `ConnectionRefused` conflates them.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
-from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from src.interfaces.web import contract
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 BLUEPRINT_URL_ENV = "POKER_SOLVER_BLUEPRINT_URL"
 BLUEPRINT_TOKEN_ENV = "POKER_SOLVER_BLUEPRINT_TOKEN"

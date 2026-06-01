@@ -16,13 +16,17 @@ from __future__ import annotations
 import contextlib
 import json
 import threading
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.node import archive
-from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import TaskPlan, parse_environment
 from src.shared.cloudtask.node.process import GRACE_SECONDS
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from src.shared.cloudtask.node.paths import NodePaths
 
 """How often the retained ladder is checked. Deliberately coarse: publishing is
 a copy to SMB, and a task that has not reached a new rung has nothing to send."""

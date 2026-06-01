@@ -14,13 +14,16 @@ warning cannot carry, because nobody reads a node log for a task that succeeded.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from src.shared.cloudtask.node import handlers, process, progress
 from src.shared.cloudtask.node import paths as node_paths
 from src.shared.cloudtask.node import plan as node_plan
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 ENV = {
     "RUN_OP": "train",

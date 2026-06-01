@@ -23,9 +23,13 @@ against the production enumeration:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.core.game.state import Card, GameState, Street
-from src.engine.solver.betting_tree import BettingTree
-from src.engine.solver.protocols import BucketingStrategy
+
+if TYPE_CHECKING:
+    from src.engine.solver.betting_tree import BettingTree
+    from src.engine.solver.protocols import BucketingStrategy
 
 _RANKS = "AKQJT98765432"
 _RANK_VALUES = {rank: 14 - idx for idx, rank in enumerate(_RANKS)}

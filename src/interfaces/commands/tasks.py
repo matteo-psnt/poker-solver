@@ -15,14 +15,12 @@ explain those.
 
 from __future__ import annotations
 
-import argparse
 import tempfile
 import threading
-from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share, workspace
@@ -31,6 +29,10 @@ from src.interfaces.commands import jobs
 from src.interfaces.commands._base import Command
 from src.shared import task_history
 from src.shared.cloudtask import kinds, task_log
+
+if TYPE_CHECKING:
+    import argparse
+    from collections.abc import Iterable, Iterator
 
 # Round trips, not bytes: see `workspace._PARALLEL_DOWNLOADS`, measured there.
 _PARALLEL_SHARE_IO = 64

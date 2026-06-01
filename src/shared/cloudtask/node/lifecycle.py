@@ -20,7 +20,7 @@ import json
 import os
 import shutil
 import signal
-from types import FrameType
+from typing import TYPE_CHECKING
 
 from src.shared import cache
 from src.shared.cloudtask import kinds, task_log
@@ -30,6 +30,9 @@ from src.shared.cloudtask.node.handlers import HANDLERS
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import BadEnvironmentError, parse_environment
 from src.shared.cloudtask.node.process import EXIT_TIMEOUT, Killed, TaskLogger, run_guarded
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 """Its own, much shorter ceiling. A wedged dependency install is not a long
 job running slowly -- it is a task that will never start."""

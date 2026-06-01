@@ -23,7 +23,7 @@ This module is a helper, not a test module, so pytest does not collect it.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -34,6 +34,9 @@ from src.engine.solver.vector.hand_context import (
     blocking_matrix,
     enumerate_live_hands,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Below this the showdown matrix carries too little signal for a test to observe
 # polarity or anything else that scales with it. Ordered buckets clear it

@@ -10,8 +10,8 @@ Uses suit isomorphism to collapse strategically identical situations:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from src.core.game.state import Card
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
@@ -24,6 +24,9 @@ from src.pipeline.abstraction.postflop.suit_isomorphism import (
     get_canonical_board_id,
     get_canonical_hand_id,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 @dataclass(frozen=True)

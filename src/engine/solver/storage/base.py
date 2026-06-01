@@ -43,7 +43,9 @@ class KeyedStorage(CountsInfosets, Protocol):
     Production never takes this path.
     """
 
-    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: Sequence[Action]) -> InfoSet: ...
+    def get_or_create_infoset(
+        self, key: InfoSetKey, legal_actions: Sequence[Action]
+    ) -> InfoSet: ...
 
     def get_infoset(self, key: InfoSetKey) -> InfoSet | None: ...
 

@@ -15,11 +15,14 @@ would then miss is the one that cannot be diagnosed from the outside.
 from __future__ import annotations
 
 import ast
-import pathlib
+from typing import TYPE_CHECKING
 
 import pytest
 
 from src.shared import repo
+
+if TYPE_CHECKING:
+    import pathlib
 
 PACKAGE = repo.SRC / "shared" / "cloudtask"
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from src.core.actions.action_model import ActionModel
-from src.core.game.actions import Action
-from src.core.game.rules import GameRules
-from src.core.game.state import GameState
+if TYPE_CHECKING:
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.actions import Action
+    from src.core.game.rules import GameRules
+    from src.core.game.state import GameState
 
 
 @dataclass

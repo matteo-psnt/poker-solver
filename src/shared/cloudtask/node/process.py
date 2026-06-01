@@ -18,9 +18,11 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
-from pathlib import Path
-from typing import IO
+from typing import IO, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 """`timeout`'s convention, kept because `task_log` maps it to a distinct cause
 and a wrong terminal cause is permanent -- it suppresses reconciliation."""
