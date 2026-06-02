@@ -58,17 +58,35 @@ describe("dealing a board", () => {
   });
 });
 
+describe("the slots are the way in", () => {
+  it("opens the deck when you click an empty one", () => {
+    // No "pick cards" button: you point at the empty turn to say "deal a turn".
+    pick("", { forceOpen: false });
+    expect(screen.queryByTitle("As")).toBeNull();
+    // Three slots carry this title — the flop is three cards.
+    const [flop] = screen.getAllByTitle("pick the flop");
+    fireEvent.click(flop as HTMLElement);
+    expect(screen.getByTitle("As")).toBeTruthy();
+  });
+
+  it("changes nothing by opening — an empty slot is past the end of the board", () => {
+    const onChange = pick("AsKd7c", { forceOpen: false });
+    fireEvent.click(screen.getByTitle("pick the turn"));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("taking a board back", () => {
   it("clears a slot AND everything after it, because a board is an ordered deal", () => {
     const onChange = pick("AsKd7c2h");
     // The turn — index 3. Clearing it alone would promote the river to a turn.
-    fireEvent.click(screen.getByTitle(/2h — click to clear from here/));
+    fireEvent.click(screen.getByTitle(/^2h —/));
     expect(onChange).toHaveBeenCalledWith("AsKd7c");
   });
 
   it("clears the flop's first card back to nothing", () => {
     const onChange = pick("AsKd7c");
-    fireEvent.click(screen.getByTitle(/As — click to clear from here/));
+    fireEvent.click(screen.getByTitle(/^As —/));
     expect(onChange).toHaveBeenCalledWith("");
   });
 
