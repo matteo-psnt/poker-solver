@@ -197,43 +197,49 @@ function Table({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
 
   return (
     <div
-      className="space-y-5 border-b border-[var(--border)] px-3 py-5"
+      className="border-b border-[var(--border)] px-3 py-6"
       style={{
         // A felt, kept nearly as dark as the panel: the console is a dark
         // instrument and a green table would be the loudest thing in it. Enough
         // to say "this region is the table", not enough to be decoration.
         backgroundImage:
-          "radial-gradient(120% 80% at 50% 50%, rgba(45,90,70,.16) 0%, rgba(20,30,26,.10) 45%, transparent 75%)",
+          "radial-gradient(60% 70% at 50% 50%, rgba(45,105,80,.20) 0%, rgba(20,32,27,.12) 55%, transparent 80%)",
       }}
     >
-      <Seat
-        name="bot"
-        seat={villain}
-        button={hand.button}
-        stack={hand.stacks[villain] ?? 0}
-        bigBlind={bigBlind}
-        cards={hand.bot_hole_cards}
-        active={hand.to_act === villain}
-      />
+      {/* Narrow and centred, NOT the panel's full width. Stretched, the two
+          seats were 1700px bars with the name at one end and the cards at the
+          other — two toolbars stacked, when the whole point is that they face
+          each other across a board. A table has a size; a row does not. */}
+      <div className="mx-auto max-w-[42rem] space-y-4">
+        <Seat
+          name="bot"
+          seat={villain}
+          button={hand.button}
+          stack={hand.stacks[villain] ?? 0}
+          bigBlind={bigBlind}
+          cards={hand.bot_hole_cards}
+          active={hand.to_act === villain}
+        />
 
-      <div className="flex flex-col items-center gap-2">
-        <CardRow cards={board} size="md" live={hand.board.length} />
-        <div className="flex items-baseline gap-2 font-mono text-[12px]">
-          <span className="tracking-widest text-[var(--fg-faint)] uppercase">pot</span>
-          <span className="text-[15px] tabular-nums text-[var(--fg)]">{hand.pot}</span>
-          <span className="text-[var(--fg-muted)]">{inBlinds(hand.pot, bigBlind)}</span>
+        <div className="flex flex-col items-center gap-2">
+          <CardRow cards={board} size="md" live={hand.board.length} />
+          <div className="flex items-baseline gap-2 font-mono text-[12px]">
+            <span className="tracking-widest text-[var(--fg-faint)] uppercase">pot</span>
+            <span className="text-[15px] tabular-nums text-[var(--fg)]">{hand.pot}</span>
+            <span className="text-[var(--fg-muted)]">{inBlinds(hand.pot, bigBlind)}</span>
+          </div>
         </div>
-      </div>
 
-      <Seat
-        name="you"
-        seat={hand.human_seat}
-        button={hand.button}
-        stack={hand.stacks[hand.human_seat] ?? 0}
-        bigBlind={bigBlind}
-        cards={hand.hole_cards}
-        active={hand.to_act === hand.human_seat}
-      />
+        <Seat
+          name="you"
+          seat={hand.human_seat}
+          button={hand.button}
+          stack={hand.stacks[hand.human_seat] ?? 0}
+          bigBlind={bigBlind}
+          cards={hand.hole_cards}
+          active={hand.to_act === hand.human_seat}
+        />
+      </div>
     </div>
   );
 }
@@ -285,6 +291,9 @@ function Seat({
         <span className="rounded border border-[var(--border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--fg-muted)]">
           {seat === button ? "BTN" : "BB"}
         </span>
+        {/* Beside the name and the lamp, not after the cards: it is a fact
+            about WHO, and it read as a caption on the wrong thing out there. */}
+        {active && <span className="text-[11px] text-[var(--fg-muted)]">to act</span>}
       </div>
 
       <div className="flex items-baseline gap-2 font-mono text-[12px]">
@@ -296,10 +305,6 @@ function Seat({
       <div className="ml-auto">
         <CardRow cards={cards ?? [null, null]} size="lg" faceDown={cards === null} />
       </div>
-
-      {active && (
-        <span className="w-full text-[11px] text-[var(--fg-muted)] sm:w-auto">to act</span>
-      )}
     </div>
   );
 }

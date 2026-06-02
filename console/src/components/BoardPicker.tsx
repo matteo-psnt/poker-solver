@@ -78,7 +78,10 @@ export function BoardPicker({
                       >
                         <PlayingCard
                           card={card?.text ?? null}
-                          size="sm"
+                          // The board is the control this bar is FOR, so it is
+                          // the largest thing on it. At `sm` it read as
+                          // punctuation between two buttons.
+                          size="md"
                           dimmed={live != null && index >= live}
                         />
                       </button>
@@ -163,7 +166,10 @@ function Deck({
 }) {
   return (
     <div
-      className="grid gap-px rounded border border-[var(--border)] bg-[var(--border)] p-px"
+      // Capped, not stretched. `1fr` columns in a panel this wide made each
+      // card a 130px slab of empty space, so the deck outweighed the board it
+      // is for. A card should look like a card at any window width.
+      className="grid w-full max-w-[36rem] gap-px rounded border border-[var(--border)] bg-[var(--border)] p-px"
       style={{ gridTemplateColumns: `repeat(${RANKS.length}, minmax(0, 1fr))` }}
     >
       {deck().map((card) => {
