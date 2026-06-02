@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from pydantic import Field
+
 from src.interfaces.commands._base import (
     Command,
     ledger_for,
@@ -41,8 +43,11 @@ class RunInfoPayload(services.RunDigest):
     the SURFACE needs and the digest does not carry: the op tag, the truncation
     of `progress` to its tail, and the count of what was truncated.
 
-    `attempts` is renamed to `training_tasks` here because the digest's word is
-    about the task log and the reader's question is about the run.
+    `attempts` is RENAMED to `training_tasks`, not duplicated: the digest's word
+    is about the task log and the reader's question is about the run. The
+    inherited field is redeclared with ``exclude=True`` so exactly one of the two
+    names crosses the wire -- subclassing would otherwise ship the same number
+    twice, which the dict this replaced avoided by popping the old key.
     """
 
     op: Literal["runinfo"] = "runinfo"
@@ -51,6 +56,7 @@ class RunInfoPayload(services.RunDigest):
     like a complete history, which is why the total travels beside it."""
     total_progress_rows: int = 0
     training_tasks: int | None = None
+    attempts: int = Field(default=0, exclude=True)
 
 
 def run(args: argparse.Namespace) -> RunInfoPayload:

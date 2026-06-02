@@ -1059,6 +1059,19 @@
       "CurveOutput": {
         "description": "A within-run exploitability-vs-iteration curve, plus what is still missing.\n\n``tier`` names the single instrument every point was measured with. Points from\ndifferent tiers are never merged: a curve mixing two scorers measures two\ndifferent things and its shape means nothing.\n\n``missing_iterations`` are ladder rungs on disk with no evaluation in this tier\n-- the gaps to fill with ``evaluate --at N`` to complete the curve.",
         "properties": {
+          "decay_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "First point's exploitability divided by the last. O(1/sqrt(T)) predicts\n~sqrt of the iteration ratio, so this is the number to read against theory.\n\n``computed_field`` and not a bare property, because a bare one does not\nSERIALISE: `model_dump` skips it, exactly as `dataclasses.asdict` did.\n`curve` used to work around that by spreading the value in by hand, which\nmeant `runinfo` -- which embeds one of these -- never carried it at all.\nDeclared here, both surfaces get it and so does the OpenAPI schema.",
+            "readOnly": true,
+            "title": "Decay Ratio"
+          },
           "missing_iterations": {
             "items": {
               "type": "integer"
@@ -1114,7 +1127,8 @@
           "points",
           "missing_iterations",
           "other_tiers",
-          "retained_iterations"
+          "retained_iterations",
+          "decay_ratio"
         ],
         "title": "CurveOutput",
         "type": "object"
@@ -1122,6 +1136,19 @@
       "CurvePayload": {
         "description": "Within-run exploitability vs iteration. Subclasses what the service\nproduces rather than restating its fields; the op tag is the only addition.",
         "properties": {
+          "decay_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "First point's exploitability divided by the last. O(1/sqrt(T)) predicts\n~sqrt of the iteration ratio, so this is the number to read against theory.\n\n``computed_field`` and not a bare property, because a bare one does not\nSERIALISE: `model_dump` skips it, exactly as `dataclasses.asdict` did.\n`curve` used to work around that by spreading the value in by hand, which\nmeant `runinfo` -- which embeds one of these -- never carried it at all.\nDeclared here, both surfaces get it and so does the OpenAPI schema.",
+            "readOnly": true,
+            "title": "Decay Ratio"
+          },
           "missing_iterations": {
             "items": {
               "type": "integer"
@@ -1183,7 +1210,8 @@
           "points",
           "missing_iterations",
           "other_tiers",
-          "retained_iterations"
+          "retained_iterations",
+          "decay_ratio"
         ],
         "title": "CurvePayload",
         "type": "object"
@@ -2938,7 +2966,7 @@
         "type": "object"
       },
       "RunInfoPayload": {
-        "description": "Everything recorded about one run, joined into one view.\n\nSubclasses the digest the service already produces. What this adds is what\nthe SURFACE needs and the digest does not carry: the op tag, the truncation\nof `progress` to its tail, and the count of what was truncated.\n\n`attempts` is renamed to `training_tasks` here because the digest's word is\nabout the task log and the reader's question is about the run.",
+        "description": "Everything recorded about one run, joined into one view.\n\nSubclasses the digest the service already produces. What this adds is what\nthe SURFACE needs and the digest does not carry: the op tag, the truncation\nof `progress` to its tail, and the count of what was truncated.\n\n`attempts` is RENAMED to `training_tasks`, not duplicated: the digest's word\nis about the task log and the reader's question is about the run. The\ninherited field is redeclared with ``exclude=True`` so exactly one of the two\nnames crosses the wire -- subclassing would otherwise ship the same number\ntwice, which the dict this replaced avoided by popping the old key.",
         "properties": {
           "arm": {
             "anyOf": [
@@ -2950,10 +2978,6 @@
               }
             ],
             "title": "Arm"
-          },
-          "attempts": {
-            "title": "Attempts",
-            "type": "integer"
           },
           "card_abstraction_hash": {
             "anyOf": [
@@ -3101,7 +3125,6 @@
           "card_abstraction_hash",
           "iterations",
           "runtime_seconds",
-          "attempts",
           "progress",
           "coverage_flat_from",
           "curve",

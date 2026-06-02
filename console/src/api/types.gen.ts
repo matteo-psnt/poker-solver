@@ -1178,6 +1178,18 @@ export interface components {
          *     -- the gaps to fill with ``evaluate --at N`` to complete the curve.
          */
         CurveOutput: {
+            /**
+             * Decay Ratio
+             * @description First point's exploitability divided by the last. O(1/sqrt(T)) predicts
+             *     ~sqrt of the iteration ratio, so this is the number to read against theory.
+             *
+             *     ``computed_field`` and not a bare property, because a bare one does not
+             *     SERIALISE: `model_dump` skips it, exactly as `dataclasses.asdict` did.
+             *     `curve` used to work around that by spreading the value in by hand, which
+             *     meant `runinfo` -- which embeds one of these -- never carried it at all.
+             *     Declared here, both surfaces get it and so does the OpenAPI schema.
+             */
+            readonly decay_ratio: number | null;
             /** Missing Iterations */
             missing_iterations: number[];
             /** Other Tiers */
@@ -1202,6 +1214,18 @@ export interface components {
          *     produces rather than restating its fields; the op tag is the only addition.
          */
         CurvePayload: {
+            /**
+             * Decay Ratio
+             * @description First point's exploitability divided by the last. O(1/sqrt(T)) predicts
+             *     ~sqrt of the iteration ratio, so this is the number to read against theory.
+             *
+             *     ``computed_field`` and not a bare property, because a bare one does not
+             *     SERIALISE: `model_dump` skips it, exactly as `dataclasses.asdict` did.
+             *     `curve` used to work around that by spreading the value in by hand, which
+             *     meant `runinfo` -- which embeds one of these -- never carried it at all.
+             *     Declared here, both surfaces get it and so does the OpenAPI schema.
+             */
+            readonly decay_ratio: number | null;
             /** Missing Iterations */
             missing_iterations: number[];
             /**
@@ -1966,14 +1990,15 @@ export interface components {
          *     the SURFACE needs and the digest does not carry: the op tag, the truncation
          *     of `progress` to its tail, and the count of what was truncated.
          *
-         *     `attempts` is renamed to `training_tasks` here because the digest's word is
-         *     about the task log and the reader's question is about the run.
+         *     `attempts` is RENAMED to `training_tasks`, not duplicated: the digest's word
+         *     is about the task log and the reader's question is about the run. The
+         *     inherited field is redeclared with ``exclude=True`` so exactly one of the two
+         *     names crosses the wire -- subclassing would otherwise ship the same number
+         *     twice, which the dict this replaced avoided by popping the old key.
          */
         RunInfoPayload: {
             /** Arm */
             arm: string | null;
-            /** Attempts */
-            attempts: number;
             /** Card Abstraction Hash */
             card_abstraction_hash: string | null;
             /** Config Name */
