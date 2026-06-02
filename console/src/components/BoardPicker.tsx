@@ -101,7 +101,10 @@ export function BoardPicker({
                             ? `${card.text} — click to pick it again, clearing what follows`
                             : `pick the ${group.street}`
                         }
-                        className="rounded-[4px] hover:opacity-70"
+                        // `flex`, so the card is a flex item rather than inline
+                        // content and no baseline is consulted at all — belt
+                        // and braces with `PlayingCard`'s own alignment.
+                        className="flex rounded-[4px] hover:opacity-70"
                       >
                         <PlayingCard
                           card={card?.text ?? null}
