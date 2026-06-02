@@ -75,7 +75,12 @@ export function RunPicker({
     );
   }, [runs.data, query, loadableOnly]);
 
-  const current = runs.data?.runs.find((run) => run.name === value) ?? null;
+  // Guarded past `runs`, not merely past `data`, the way line 64 already is: a
+  // 200 whose body carries no `runs` threw HERE and took the whole page's
+  // render with it — a blank screen rather than a greyed panel. Read from
+  // `runs.data` rather than `matches`, which the typed query filters: the run
+  // you have loaded must keep its label while you search for a different one.
+  const current = runs.data?.runs?.find((run) => run.name === value) ?? null;
 
   return (
     <div ref={box} className="relative">

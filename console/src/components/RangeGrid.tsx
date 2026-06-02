@@ -19,12 +19,18 @@ import { cn } from "@/lib/utils";
 export function RangeGrid({
   cells,
   actions,
+  selected,
+  pinned,
   onHover,
   onPick,
 }: {
   cells: Cell[][];
   /** Display labels, in the same order as each cell's strategy. */
   actions: ActionLabel[];
+  /** The class the rail is currently describing — hovered or pinned. */
+  selected?: string | null;
+  /** The class that is pinned, drawn harder than a passing hover. */
+  pinned?: string | null;
   onHover?: (cell: Cell | null) => void;
   /** Pin a hand's mix so it survives the mouse leaving. */
   onPick?: (cell: Cell | null) => void;
@@ -46,7 +52,18 @@ export function RangeGrid({
             // Clicking the SAME cell again unpins, so the control that set the
             // state is also the one that clears it.
             onClick={() => onPick?.(cell)}
-            className="relative aspect-square overflow-hidden rounded-[2px] border border-[var(--border)] text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fg)]"
+            className={cn(
+              "relative aspect-square overflow-hidden rounded-[2px] border text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fg)]",
+              // The rail describes ONE class at a time and the grid has 169
+              // squares; without this, reading a number meant remembering which
+              // square the mouse was over. The pin is drawn harder than the
+              // hover because it is the one that survives looking away.
+              cell.label === pinned
+                ? "border-[var(--fg)] ring-1 ring-[var(--fg)]"
+                : cell.label === selected
+                  ? "border-[var(--fg-muted)]"
+                  : "border-[var(--border)]",
+            )}
             title={describe(cell, actions)}
           >
             {cell.combos === 0 ? null : cell.strategy ? (

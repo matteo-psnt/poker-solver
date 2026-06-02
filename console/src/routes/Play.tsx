@@ -1,10 +1,11 @@
-import { useBlueprintRun, useDealHand, useSubmitAction } from "@/api/queries";
+import { useBlueprintRun, useDealHand, useLeaveHand, useSubmitAction } from "@/api/queries";
 import type { Hand, HandEvent } from "@/api/types";
-import { BoxControl } from "@/components/BoxControl";
-import { Panel } from "@/components/Panel";
+import { CardRow } from "@/components/PlayingCard";
 import { describeAction } from "@/lib/actions";
+import { BOARD_SIZE } from "@/lib/cards";
+import { actionColours } from "@/lib/range";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Sit down against the blueprint, one hand at a time.
@@ -21,6 +22,21 @@ import { useState } from "react";
  * invite exactly the conclusion the numbers cannot support. Per-hand chips are
  * shown because they are a fact about the hand; a total would be a claim about
  * the solver.
+ *
+ * Why it is a table now
+ * ---------------------
+ * It was three labelled rows of two-character cards — `board  As Kd 7c` — with
+ * the pot and the stacks as one line of text above them. Everything on it was
+ * legible and nothing on it was READABLE: whose turn it was, which seat had the
+ * button, and whether the bot had acted since you last looked were all facts
+ * you assembled by reading, on a page whose whole value is how many hands you
+ * get through. Seats face each other, the board is between them, the cards are
+ * cards, and the seat to act is the one that is lit.
+ *
+ * The keys matter for the same reason. Finding a strange spot is a numbers
+ * game, and a hand costs two clicks and a mouse trip to a button whose position
+ * moves with the size of the menu. Every action is a digit in menu order, the
+ * common ones are also their own initial, and space deals the next hand.
  */
 export function Play() {
   const [hand, setHand] = useState<Hand | null>(null);
@@ -28,186 +44,417 @@ export function Play() {
   const run = useBlueprintRun();
   const deal = useDealHand();
   const act = useSubmitAction();
+  const leave = useLeaveHand();
 
   const bigBlind = run.data?.big_blind ?? 0;
   const error = deal.error ?? act.error;
   const busy = deal.isPending || act.isPending;
+  const canAct = Boolean(hand && !hand.over) && !busy;
+
+  /**
+   * Hand the session back when you walk away from it.
+   *
+   * `Blueprint.tsx` mounts this tab and the chart one at a time so that leaving
+   * "ends it where it lives" — which was not true of anything, because the
+   * endpoint existed and nothing called it. Sessions live on the blueprint
+   * server in a store of 64 that drops the OLDEST to make room, so an abandoned
+   * hand is not free: it evicts a hand someone is still playing.
+   */
+  const sessionRef = useRef<string | null>(null);
+  sessionRef.current = hand?.session ?? null;
+  const release = leave.mutate;
+  useEffect(
+    () => () => {
+      const session = sessionRef.current;
+      if (session) release({ session });
+    },
+    [release],
+  );
+
+  const onDeal = useCallback(() => {
+    if (busy || !run.data) return;
+    const previous = sessionRef.current;
+    deal.mutate(
+      { human_seat: seat },
+      {
+        onSuccess: (next) => {
+          setHand(next);
+          // Abandoning the old one explicitly rather than leaving it to be
+          // evicted: the store is shared with anyone else at a keyboard.
+          if (previous && previous !== next.session) release({ session: previous });
+        },
+      },
+    );
+  }, [busy, deal.mutate, release, run.data, seat]);
+
+  const onAct = useCallback(
+    (token: string) => {
+      if (!hand || hand.over || busy) return;
+      act.mutate({ session: hand.session, token }, { onSuccess: setHand });
+    },
+    [act.mutate, busy, hand],
+  );
+
+  useKeyboard(hand, canAct, onAct, onDeal);
 
   return (
-    <div className="space-y-3 p-3">
-      <BoxControl />
-      <Panel
-        title="table"
-        error={
-          run.error
-            ? "No blueprint server is reachable — nothing to play against."
-            : error
-              ? String(error.message)
-              : null
-        }
-      >
-        <div className="space-y-3 px-3 py-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled={busy || !run.data}
-              onClick={() => deal.mutate({ human_seat: seat }, { onSuccess: setHand })}
-              className="rounded border border-[var(--border)] px-3 py-1.5 font-mono text-[12px] text-[var(--fg)] hover:bg-white/[0.06] disabled:opacity-40"
-            >
-              {hand ? "next hand" : "deal"}
-            </button>
-            <label className="flex items-center gap-2 font-mono text-[11px] text-[var(--fg-muted)]">
-              seat
-              <select
-                value={seat}
-                onChange={(event) => setSeat(Number(event.target.value))}
-                className="rounded border border-[var(--border)] bg-transparent px-2 py-1 text-[11px]"
-              >
-                <option value={0}>0</option>
-                <option value={1}>1</option>
-              </select>
-            </label>
-            {hand && (
-              <span className="font-mono text-[11px] text-[var(--fg-faint)]">
-                button seat {hand.button} · {hand.street}
-              </span>
-            )}
-          </div>
+    <div className="space-y-3">
+      <div className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+        <DealBar
+          hand={hand}
+          seat={seat}
+          onSeat={setSeat}
+          onDeal={onDeal}
+          busy={busy}
+          ready={Boolean(run.data)}
+        />
 
-          {hand ? <Table hand={hand} /> : null}
+        {run.error || error ? (
+          <p className="border-b border-red-500/25 bg-red-500/5 px-3 py-2 font-mono text-[12px] text-red-400">
+            {run.error
+              ? "No blueprint server is reachable — nothing to play against."
+              : String(error?.message)}
+          </p>
+        ) : null}
 
-          {hand && !hand.over ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {hand.legal.map((action) => (
-                <button
-                  key={action.token}
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    act.mutate(
-                      { session: hand.session, token: action.token },
-                      { onSuccess: setHand },
-                    )
-                  }
-                  className="rounded border border-[var(--border)] px-3 py-1.5 font-mono text-[12px] text-[var(--fg)] hover:bg-white/[0.06] disabled:opacity-40"
-                >
-                  {describeAction(action.token, bigBlind).text}
-                </button>
-              ))}
-            </div>
-          ) : null}
+        {hand ? (
+          <Table hand={hand} bigBlind={bigBlind} />
+        ) : (
+          <p className="px-3 py-16 text-center text-[13px] text-[var(--fg-faint)]">
+            Deal a hand to sit down. Space deals; every action is a digit.
+          </p>
+        )}
 
-          {hand?.over ? <Result hand={hand} /> : null}
-        </div>
-      </Panel>
+        {hand && !hand.over ? (
+          <Actions hand={hand} bigBlind={bigBlind} busy={busy} onAct={onAct} />
+        ) : null}
+        {hand?.over ? <Result hand={hand} bigBlind={bigBlind} onDeal={onDeal} busy={busy} /> : null}
+      </div>
 
-      {hand ? (
-        <Panel title="what the bot did">
-          <div className="space-y-2 px-3 py-3">
-            <div className="font-mono text-[11px] text-[var(--fg-muted)]">
-              {hand.bot_untrained_decisions} of {hand.bot_decisions} bot decisions were at infosets
-              training never visited
-              {hand.bot_untrained_decisions > 0 && " — those were uniform-random, not strategy"}
-            </div>
-            <ol className="space-y-1">
-              {hand.log.map((event, index) => (
-                // Position, not content: a line repeats the same action freely.
-                <Event
-                  key={`${index}-${event.actor}-${event.action}`}
-                  event={event}
-                  bigBlind={bigBlind}
-                />
-              ))}
-            </ol>
-          </div>
-        </Panel>
-      ) : null}
+      {hand ? <History hand={hand} bigBlind={bigBlind} /> : null}
     </div>
   );
 }
 
-function Table({ hand }: { hand: Hand }) {
+/** Sit down, and choose which seat to sit in. */
+function DealBar({
+  hand,
+  seat,
+  onSeat,
+  onDeal,
+  busy,
+  ready,
+}: {
+  hand: Hand | null;
+  seat: number;
+  onSeat: (seat: number) => void;
+  onDeal: () => void;
+  busy: boolean;
+  ready: boolean;
+}) {
   return (
-    <div className="space-y-2 rounded border border-[var(--border)] p-3">
-      <div className="flex flex-wrap items-center gap-6 font-mono text-[11px] text-[var(--fg-muted)]">
-        <span>
-          pot <span className="tabular-nums text-[var(--fg)]">{hand.pot}</span>
+    <div className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-3 py-2.5">
+      <button
+        type="button"
+        disabled={busy || !ready}
+        onClick={onDeal}
+        className="flex items-center gap-2 rounded border border-[var(--fg-faint)] px-3 py-1.5 text-[12px] text-[var(--fg)] hover:bg-white/[0.06] disabled:opacity-40"
+      >
+        {busy ? "dealing…" : hand ? "next hand" : "deal"}
+        <Key label="space" />
+      </button>
+
+      <label className="flex items-center gap-2 text-[11px] text-[var(--fg-muted)]">
+        you sit in seat
+        <select
+          value={seat}
+          onChange={(event) => onSeat(Number(event.target.value))}
+          className="rounded border border-[var(--border)] bg-transparent px-2 py-1 text-[11px]"
+        >
+          <option value={0}>0</option>
+          <option value={1}>1</option>
+        </select>
+      </label>
+
+      {/* The button alternates on its own — the server does that so nobody sees
+          one side of every spot and reads it as the whole strategy. Saying so
+          here stops the alternation looking like a control that slipped. */}
+      <span className="text-[11px] text-[var(--fg-faint)]">the button alternates each hand</span>
+    </div>
+  );
+}
+
+/**
+ * The table: two seats facing each other, the board between them.
+ *
+ * The seat to act is lit, and that is the one piece of state the old page made
+ * you work out — `to_act` was not on screen at all, so "is it me" was answered
+ * by noticing whether there were buttons underneath.
+ */
+function Table({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
+  const villain = 1 - hand.human_seat;
+  const board = Array.from({ length: BOARD_SIZE }, (_, index) => hand.board[index] ?? null);
+
+  return (
+    <div
+      className="space-y-5 border-b border-[var(--border)] px-3 py-5"
+      style={{
+        // A felt, kept nearly as dark as the panel: the console is a dark
+        // instrument and a green table would be the loudest thing in it. Enough
+        // to say "this region is the table", not enough to be decoration.
+        backgroundImage:
+          "radial-gradient(120% 80% at 50% 50%, rgba(45,90,70,.16) 0%, rgba(20,30,26,.10) 45%, transparent 75%)",
+      }}
+    >
+      <Seat
+        name="bot"
+        seat={villain}
+        button={hand.button}
+        stack={hand.stacks[villain] ?? 0}
+        bigBlind={bigBlind}
+        cards={hand.bot_hole_cards}
+        active={hand.to_act === villain}
+      />
+
+      <div className="flex flex-col items-center gap-2">
+        <CardRow cards={board} size="md" live={hand.board.length} />
+        <div className="flex items-baseline gap-2 font-mono text-[12px]">
+          <span className="tracking-widest text-[var(--fg-faint)] uppercase">pot</span>
+          <span className="text-[15px] tabular-nums text-[var(--fg)]">{hand.pot}</span>
+          <span className="text-[var(--fg-muted)]">{inBlinds(hand.pot, bigBlind)}</span>
+        </div>
+      </div>
+
+      <Seat
+        name="you"
+        seat={hand.human_seat}
+        button={hand.button}
+        stack={hand.stacks[hand.human_seat] ?? 0}
+        bigBlind={bigBlind}
+        cards={hand.hole_cards}
+        active={hand.to_act === hand.human_seat}
+      />
+    </div>
+  );
+}
+
+/**
+ * One player: who they are, what they hold, and what is left behind it.
+ *
+ * `cards` is null while the server is withholding the bot's, which is not the
+ * same as holding none — see `hand_payload`. Backs are drawn for it, so the
+ * layout does not jump when they arrive at showdown either.
+ */
+function Seat({
+  name,
+  seat,
+  button,
+  stack,
+  bigBlind,
+  cards,
+  active,
+}: {
+  name: string;
+  seat: number;
+  button: number;
+  stack: number;
+  bigBlind: number;
+  cards: string[] | null;
+  active: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-4 rounded-md border px-3 py-2.5 transition-colors",
+        active ? "border-[var(--fg-faint)] bg-white/[0.04]" : "border-[var(--border)] bg-black/20",
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            active ? "bg-[#56B184] motion-safe:animate-pulse" : "bg-transparent",
+          )}
+        />
+        <span className="font-mono text-[13px] tracking-wider text-[var(--fg)] uppercase">
+          {name}
         </span>
-        <span>
-          stacks <span className="tabular-nums text-[var(--fg)]">{hand.stacks.join(" / ")}</span>
+        {/* Heads-up, so the button is the small blind and the other seat is the
+            big one. Two labels rather than a seat number, because the spot is
+            what a player is reading and `seat 1` is not one. */}
+        <span className="rounded border border-[var(--border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--fg-muted)]">
+          {seat === button ? "BTN" : "BB"}
         </span>
       </div>
 
-      <Row label="board" cards={hand.board} empty="—" />
-      <Row label="you" cards={hand.hole_cards} empty="—" />
-      {/* Withheld by the server until the hand ends; shown as backs so the
-          layout does not jump when they arrive. */}
-      <Row label="bot" cards={hand.bot_hole_cards ?? ["??", "??"]} empty="—" />
+      <div className="flex items-baseline gap-2 font-mono text-[12px]">
+        <span className="tracking-widest text-[var(--fg-faint)] uppercase">stack</span>
+        <span className="tabular-nums text-[var(--fg)]">{stack}</span>
+        <span className="text-[var(--fg-muted)]">{inBlinds(stack, bigBlind)}</span>
+      </div>
+
+      <div className="ml-auto">
+        <CardRow cards={cards ?? [null, null]} size="lg" faceDown={cards === null} />
+      </div>
+
+      {active && (
+        <span className="w-full text-[11px] text-[var(--fg-muted)] sm:w-auto">to act</span>
+      )}
     </div>
   );
 }
 
-function Row({ label, cards, empty }: { label: string; cards: string[]; empty: string }) {
+/**
+ * The menu, in the server's order, each action on a digit.
+ *
+ * Coloured by the same rule the chart uses — fold blue, call green, raise red
+ * shading with size — so the button you press here and the square you read
+ * there are the same colour for the same action. That is the whole reason
+ * `actionColours` is shared rather than re-picked per page.
+ */
+function Actions({
+  hand,
+  bigBlind,
+  busy,
+  onAct,
+}: {
+  hand: Hand;
+  bigBlind: number;
+  busy: boolean;
+  onAct: (token: string) => void;
+}) {
+  const colours = actionColours(hand.legal.map((action) => action.token));
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-10 font-mono text-[11px] text-[var(--fg-faint)]">{label}</span>
-      <div className="flex gap-1">
-        {cards.length === 0 ? (
-          <span className="font-mono text-[12px] text-[var(--fg-faint)]">{empty}</span>
-        ) : (
-          cards.map((card, index) => <Card key={`${index}-${card}`} card={card} />)
+    <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-3">
+      {hand.legal.map((action, index) => (
+        <button
+          key={action.token}
+          type="button"
+          disabled={busy}
+          onClick={() => onAct(action.token)}
+          title={`token: ${action.token}`}
+          className="flex items-center gap-2 rounded border px-3 py-2 text-[13px] text-[var(--fg)] hover:brightness-125 disabled:opacity-40"
+          style={{
+            borderColor: colours[index],
+            // A tint rather than a fill: five saturated buttons in a row is a
+            // toolbar, and the one thing that must stay readable is the size.
+            backgroundColor: `color-mix(in srgb, ${colours[index]} 22%, transparent)`,
+          }}
+        >
+          {describeAction(action.token, bigBlind).text}
+          <Key label={String(index + 1)} />
+        </button>
+      ))}
+      {busy && <span className="text-[11px] text-[var(--fg-faint)]">waiting on the bot…</span>}
+    </div>
+  );
+}
+
+/** How the hand ended, and what it cost. Per-hand only — never a total. */
+function Result({
+  hand,
+  bigBlind,
+  onDeal,
+  busy,
+}: {
+  hand: Hand;
+  bigBlind: number;
+  onDeal: () => void;
+  busy: boolean;
+}) {
+  const payoff = hand.payoff ?? 0;
+  const flat = payoff === 0;
+  return (
+    <div className="flex flex-wrap items-center gap-4 border-b border-[var(--border)] px-3 py-3">
+      <span
+        className={cn(
+          "font-mono text-[15px]",
+          flat ? "text-[var(--fg-muted)]" : payoff > 0 ? "text-[#56B184]" : "text-[#E0655C]",
+        )}
+      >
+        {flat ? "chopped" : payoff > 0 ? "you win" : "you lose"}{" "}
+        <span className="tabular-nums">
+          {payoff > 0 ? "+" : ""}
+          {payoff}
+        </span>{" "}
+        <span className="text-[12px] opacity-70">{inBlinds(payoff, bigBlind)}</span>
+      </span>
+      <span className="text-[12px] text-[var(--fg-faint)]">
+        {hand.showdown ? "at showdown" : "on a fold"}
+      </span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onDeal}
+        className="ml-auto flex items-center gap-2 rounded border border-[var(--fg-faint)] px-3 py-1.5 text-[12px] text-[var(--fg)] hover:bg-white/[0.06] disabled:opacity-40"
+      >
+        next hand
+        <Key label="space" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * What the bot did, street by street, and how untrained it was while doing it.
+ *
+ * The untrained count leads because it is the caveat on everything below it: a
+ * decision at an infoset training never visited is uniform-random, and a mix
+ * that reads as a strategy when it is a coin flip is the one way this page can
+ * actively mislead.
+ */
+function History({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
+  const streets = groupByStreet(hand.log);
+  return (
+    <div className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+      <header className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-3 py-2">
+        <h2 className="font-mono text-[11px] tracking-widest text-[var(--fg-muted)] uppercase">
+          hand history
+        </h2>
+        <span
+          className={cn(
+            "font-mono text-[11px]",
+            hand.bot_untrained_decisions > 0 ? "text-[#D9A44E]" : "text-[var(--fg-faint)]",
+          )}
+        >
+          {hand.bot_untrained_decisions} of {hand.bot_decisions} bot decisions were at infosets
+          training never visited
+          {hand.bot_untrained_decisions > 0 && " — those were uniform-random, not strategy"}
+        </span>
+      </header>
+
+      <div className="divide-y divide-[var(--border)]">
+        {streets.map(({ street, events }) => (
+          <div key={street} className="flex gap-3 px-3 py-2">
+            <span className="w-14 shrink-0 pt-0.5 font-mono text-[10px] tracking-wider text-[var(--fg-faint)] uppercase">
+              {street}
+            </span>
+            <ol className="min-w-0 flex-1 space-y-1.5">
+              {events.map(({ event, index }) => (
+                <Event key={index} event={event} bigBlind={bigBlind} />
+              ))}
+            </ol>
+          </div>
+        ))}
+        {hand.log.length === 0 && (
+          <p className="px-3 py-3 text-[12px] text-[var(--fg-faint)]">Nothing has happened yet.</p>
         )}
       </div>
     </div>
   );
 }
 
-const RED = new Set(["h", "d"]);
-
-function Card({ card }: { card: string }) {
-  const hidden = card === "??";
-  const suit = card.slice(1, 2);
-  return (
-    <span
-      className={cn(
-        "inline-flex h-7 w-6 items-center justify-center rounded-[3px] border font-mono text-[12px]",
-        hidden
-          ? "border-[var(--border)] bg-white/[0.03] text-[var(--fg-faint)]"
-          : "border-[var(--border)] bg-white/[0.06]",
-        !hidden && RED.has(suit) ? "text-[#E0655C]" : !hidden ? "text-[var(--fg)]" : "",
-      )}
-    >
-      {hidden ? "·" : card}
-    </span>
-  );
-}
-
-function Result({ hand }: { hand: Hand }) {
-  const won = (hand.payoff ?? 0) > 0;
-  const flat = (hand.payoff ?? 0) === 0;
-  return (
-    <div className="flex flex-wrap items-center gap-3 font-mono text-[12px]">
-      <span
-        className={cn(flat ? "text-[var(--fg-muted)]" : won ? "text-[#56B184]" : "text-[#E0655C]")}
-      >
-        {flat ? "chopped" : won ? "you win" : "you lose"}{" "}
-        <span className="tabular-nums">
-          {(hand.payoff ?? 0) > 0 ? "+" : ""}
-          {hand.payoff}
-        </span>
-      </span>
-      <span className="text-[var(--fg-faint)]">{hand.showdown ? "at showdown" : "on a fold"}</span>
-    </div>
-  );
-}
-
 function Event({ event, bigBlind }: { event: HandEvent; bigBlind: number }) {
   return (
-    <li className="space-y-0.5 border-b border-[var(--border)] pb-1 last:border-0 font-mono text-[11px]">
-      <div className="flex items-center gap-2">
-        <span className="w-12 text-[var(--fg-faint)]">{event.street}</span>
-        <span className={event.actor === "bot" ? "text-[var(--fg)]" : "text-[var(--fg-muted)]"}>
-          {event.actor}
+    <li className="space-y-1 font-mono text-[11px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "w-8 shrink-0",
+            event.actor === "bot" ? "text-[var(--fg)]" : "text-[var(--fg-muted)]",
+          )}
+        >
+          {event.actor === "bot" ? "bot" : "you"}
         </span>
         <span className="text-[var(--fg)]">{label(event.action, event.amount, bigBlind)}</span>
         {event.untrained && (
@@ -217,18 +464,135 @@ function Event({ event, bigBlind }: { event: HandEvent; bigBlind: number }) {
         )}
       </div>
       {/* The mix arrives only once the hand is over — mid-hand it would be a
-          look at the opponent's strategy. */}
-      {event.mix && (
-        <div className="flex flex-wrap gap-3 pl-14 text-[var(--fg-faint)]">
-          {event.mix.map(([name, weight]) => (
-            <span key={name}>
-              {name} <span className="tabular-nums">{(weight * 100).toFixed(0)}%</span>
-            </span>
-          ))}
-        </div>
-      )}
+          look at the opponent's strategy. It names action TYPES, so a menu with
+          two raise sizes shows "raise" twice, in menu order: the sizes are not
+          on the wire and are not invented here. */}
+      {event.mix && <Mix mix={event.mix} />}
     </li>
   );
+}
+
+/** The distribution the bot sampled from, as a bar and as numbers. */
+function Mix({ mix }: { mix: [string, number][] }) {
+  const colours = actionColours(mix.map(([name]) => TOKEN_FOR[name] ?? name));
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-10 text-[10px]">
+      <span className="flex h-1.5 w-24 overflow-hidden rounded-[2px] bg-[var(--border)]">
+        {mix.map(([name, weight], index) => (
+          <span
+            key={`${index}-${name}`}
+            style={{ width: `${weight * 100}%`, backgroundColor: colours[index] }}
+          />
+        ))}
+      </span>
+      {mix.map(([name, weight], index) => (
+        <span key={`${index}-${name}`} className="text-[var(--fg-faint)]">
+          {name} <span className="tabular-nums text-[var(--fg-muted)]">{pct(weight)}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Action TYPE names back to the token vocabulary `actionColours` keys on.
+ *
+ * The log speaks types and the chart speaks tokens, and the colours have to
+ * agree across them or the same action is red in one panel and green in the
+ * other. Sizes do not survive the trip — a type name carries no amount — so
+ * every raise shades identically here, which is honest: nothing on the wire
+ * says which of them this was.
+ */
+const TOKEN_FOR: Record<string, string> = {
+  fold: "f",
+  check: "x",
+  call: "c",
+  bet: "b",
+  raise: "r",
+  "all-in": "A",
+};
+
+/** Consecutive events sharing a street, keeping each event's original index. */
+function groupByStreet(
+  log: HandEvent[],
+): { street: string; events: { event: HandEvent; index: number }[] }[] {
+  const groups: { street: string; events: { event: HandEvent; index: number }[] }[] = [];
+  log.forEach((event, index) => {
+    const last = groups.at(-1);
+    if (last && last.street === event.street) last.events.push({ event, index });
+    else groups.push({ street: event.street, events: [{ event, index }] });
+  });
+  return groups;
+}
+
+/**
+ * Every action on a digit, the common ones also on their initial.
+ *
+ * Ignored while a text field has focus, so typing into one is typing and not a
+ * fold. Bound on the window rather than a container because the table is not
+ * focusable and requiring a click into it first is the exact friction this is
+ * here to remove.
+ */
+function useKeyboard(
+  hand: Hand | null,
+  canAct: boolean,
+  onAct: (token: string) => void,
+  onDeal: () => void,
+) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) return;
+
+      if (event.key === " ") {
+        event.preventDefault();
+        if (!hand || hand.over) onDeal();
+        return;
+      }
+      if (!canAct || !hand) return;
+
+      const digit = Number(event.key);
+      const byDigit = Number.isInteger(digit) && digit > 0 ? hand.legal[digit - 1] : undefined;
+      const byLetter = hand.legal.find(
+        (action) => INITIALS[event.key.toLowerCase()] === action.type,
+      );
+      const chosen = byDigit ?? byLetter;
+      if (chosen) {
+        event.preventDefault();
+        onAct(chosen.token);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canAct, hand, onAct, onDeal]);
+}
+
+/** `k` for check rather than `x`: the button says "check", and the token is a URL thing. */
+const INITIALS: Record<string, string> = {
+  f: "fold",
+  k: "check",
+  c: "call",
+  a: "all-in",
+};
+
+function Key({ label }: { label: string }) {
+  return (
+    <kbd className="rounded border border-[var(--border)] bg-black/40 px-1 font-mono text-[9px] text-[var(--fg-faint)]">
+      {label}
+    </kbd>
+  );
+}
+
+function pct(weight: number): string {
+  return `${(weight * 100).toFixed(0)}%`;
+}
+
+/** Chips as blinds, for the second line under every chip figure. */
+function inBlinds(chips: number, bigBlind: number): string {
+  if (!bigBlind) return "";
+  const bb = chips / bigBlind;
+  return `${Number.isInteger(bb) ? bb : bb.toFixed(1)}bb`;
 }
 
 /**
