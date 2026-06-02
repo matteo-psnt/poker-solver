@@ -24,7 +24,7 @@ const PAYLOADS: Record<string, unknown> = {
     root: "/repo/config",
     kinds: [
       { kind: "training", flag: "submit --config", names: ["production", "quick_test"] },
-      { kind: "abstraction", flag: "submit-precompute --config", names: ["ochs_gate_ochs"] },
+      { kind: "abstraction", flag: "submit-precompute --config", names: ["production"] },
     ],
   },
   "/api/runs": {
@@ -171,19 +171,19 @@ describe("the precompute form", () => {
   it("omits --force until it is explicitly armed", async () => {
     mount(<Dispatch />);
     const pre = panel(/Precompute/);
-    await choose(pre, /^config$/i, "ochs_gate_ochs");
+    await choose(pre, /^config$/i, "production");
 
     fireEvent.click(pre.getByRole("button", { name: /Queue precompute/ }));
     await waitFor(() => expect(posted).toHaveLength(1));
     // Republishing over a name silently invalidates the provenance of every run
     // trained against it. An unchecked box must reach the command as *nothing*,
     // so its own `store_true` default is what answers.
-    expect(posted[0]?.body).toEqual({ config: "ochs_gate_ochs" });
+    expect(posted[0]?.body).toEqual({ config: "production" });
 
     fireEvent.click(pre.getByRole("checkbox"));
     fireEvent.click(pre.getByRole("button", { name: /Queue precompute/ }));
     await waitFor(() => expect(posted).toHaveLength(2));
-    expect(posted[1]?.body).toEqual({ config: "ochs_gate_ochs", force: true });
+    expect(posted[1]?.body).toEqual({ config: "production", force: true });
   });
 });
 

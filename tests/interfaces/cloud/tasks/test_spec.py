@@ -210,9 +210,13 @@ class TestLabel:
 
     def test_an_arm_is_kept_because_it_is_what_distinguishes_two_arms(self):
         task = spec.TaskSpec(
-            code_snapshot="s", config="ochs_gate", to=1_000_000, experiment="ochs", arm="river"
+            code_snapshot="s",
+            config="production",
+            to=1_000_000,
+            experiment="river-feature",
+            arm="river",
         )
-        assert task.label == "train-ochs_gate-to1M-river"
+        assert task.label == "train-production-to1M-river"
 
 
 class TestValidate:
@@ -245,7 +249,7 @@ class TestPrecomputeTask:
             spec.TaskSpec(code_snapshot="s", op=TaskName.PRECOMPUTE).validate()
 
     def test_a_config_is_all_it_needs(self):
-        spec.TaskSpec(code_snapshot="s", op=TaskName.PRECOMPUTE, config="ochs_gate_ochs").validate()
+        spec.TaskSpec(code_snapshot="s", op=TaskName.PRECOMPUTE, config="production").validate()
 
     def test_it_needs_no_iteration_target(self):
         """Unlike a training task -- there is nothing to converge to."""

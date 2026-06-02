@@ -1,7 +1,7 @@
 """The `configs` subcommand: what `--config` will accept.
 
 Every dispatching command names a config by STEM -- `submit --config production`,
-`submit-precompute --config ochs_gate_ochs` -- and nothing said what the legal
+`submit-precompute --config production` -- and nothing said what the legal
 stems were. On a command line that is a mild annoyance (`ls config/training`
 answers it). For a second surface it is a wall: the console cannot offer a
 picker without either a command to ask, or its own directory read -- and its own

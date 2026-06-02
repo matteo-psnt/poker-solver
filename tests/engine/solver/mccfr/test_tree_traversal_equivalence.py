@@ -35,6 +35,12 @@ from tests.test_helpers import make_test_config
 
 ARRAYS = ("regrets", "strategy_sum", "reach_counts", "cumulative_utility", "visited")
 
+# These train real solvers (three per test, 120 iterations each), so the 5s
+# default is not a hang detector here -- it is a contention detector: they pass
+# alone and time out under twelve xdist workers. Tight enough to still catch a
+# genuine hang.
+pytestmark = pytest.mark.timeout(30)
+
 
 class BucketsByStreet:
     """Deterministic, cheap stand-in for the equity abstraction."""

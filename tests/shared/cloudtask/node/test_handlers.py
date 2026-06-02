@@ -66,7 +66,7 @@ class TestPrecompute:
     """Never probed on the pool -- it is a rare, expensive op -- so the guard
     that makes it safe to run in the cloud is only checked here."""
 
-    def _wrote(self, paths, name="ochs_gate_ochs"):
+    def _wrote(self, paths, name="production"):
         output = paths.data / "combo_abstraction" / name
         (output / "buckets.npy").parent.mkdir(parents=True, exist_ok=True)
         (output / "buckets.npy").write_text("buckets")
@@ -77,10 +77,10 @@ class TestPrecompute:
     def test_a_fresh_abstraction_is_published(self, paths, log, monkeypatch):
         self._wrote(paths)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production")
 
         assert handlers._precompute(task, paths, log) == (0, None)
-        published = paths.share / "combo_abstraction" / "ochs_gate_ochs" / "buckets.npy"
+        published = paths.share / "combo_abstraction" / "production" / "buckets.npy"
         assert published.read_text() == "buckets"
 
     def test_republishing_over_an_existing_name_is_refused(self, paths, log, monkeypatch):
@@ -90,11 +90,11 @@ class TestPrecompute:
         passes. This guard is what makes precompute-in-the-cloud as safe as on
         a laptop."""
         self._wrote(paths)
-        existing = paths.share / "combo_abstraction" / "ochs_gate_ochs"
+        existing = paths.share / "combo_abstraction" / "production"
         existing.mkdir(parents=True)
         (existing / "buckets.npy").write_text("THE ORIGINAL")
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production")
 
         assert handlers._precompute(task, paths, log) == (1, None)
         assert (existing / "buckets.npy").read_text() == "THE ORIGINAL"
@@ -102,20 +102,18 @@ class TestPrecompute:
 
     def test_force_publish_overrides_it(self, paths, log, monkeypatch):
         self._wrote(paths)
-        existing = paths.share / "combo_abstraction" / "ochs_gate_ochs"
+        existing = paths.share / "combo_abstraction" / "production"
         existing.mkdir(parents=True)
         (existing / "buckets.npy").write_text("THE ORIGINAL")
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(
-            op=TaskName.PRECOMPUTE, config="ochs_gate_ochs", force_publish=True
-        )
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production", force_publish=True)
 
         assert handlers._precompute(task, paths, log) == (0, None)
         assert (existing / "buckets.npy").read_text() == "buckets"
 
     def test_a_failed_build_publishes_nothing(self, paths, log, monkeypatch):
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 2)
-        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production")
 
         assert handlers._precompute(task, paths, log) == (2, None)
         assert not (paths.share / "combo_abstraction").exists()
@@ -127,7 +125,7 @@ class TestPrecompute:
         (paths.work).mkdir(parents=True, exist_ok=True)
         (paths.work / "precompute.json").write_text("not json")
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production")
 
         assert handlers._precompute(task, paths, log) == (1, None)
         assert "no usable output_dir" in log.path.read_text()
