@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.commands._base import (
     Command,
@@ -84,7 +83,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class StaticTrainingPayload(services.StaticTrainingOutput):
+    """What a training leg achieved. NODE-ONLY: no endpoint serves this."""
+
+    op: Literal["train-static"] = "train-static"
+
+
+def run(args: argparse.Namespace) -> StaticTrainingPayload:
     """Argparse transport around :func:`services.train_static`."""
     out = services.train_static(
         args.config,
@@ -103,28 +108,27 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         warm_start_weight=args.warm_start_weight,
         warm_start_at=args.warm_start_at,
     )
-    return {"op": "train-static", **dataclasses.asdict(out)}
+    return StaticTrainingPayload(**out.model_dump())
 
 
-def render(payload: dict[str, Any]) -> None:
+def render(payload: StaticTrainingPayload) -> None:
     print("Static-tree training complete.")
-    print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
-    print(f"  Config:      {payload['config_name']}")
-    print(f"  Iterations:  {payload['iterations']:,}")
+    print(f"  Run ID:      {payload.run_id}  (under {payload.runs_dir})")
+    print(f"  Config:      {payload.config_name}")
+    print(f"  Iterations:  {payload.iterations:,}")
     # Coverage is what only this path can report: the table size is known up
     # front, so "how much of the tree did we actually touch" is answerable.
     print(
-        f"  Coverage:    {payload['touched_rows']:,} / {payload['num_rows']:,} rows "
-        f"({payload['coverage']:.1%})"
+        f"  Coverage:    {payload.touched_rows:,} / {payload.num_rows:,} rows "
+        f"({payload.coverage:.1%})"
     )
-    print(f"  Visits/row:  {payload['mean_visits_per_touched']:.1f} mean, on touched rows")
+    print(f"  Visits/row:  {payload.mean_visits_per_touched:.1f} mean, on touched rows")
     print(
-        f"  Runtime:     {payload['runtime_seconds']:.2f}s "
-        f"({payload['iterations_per_second']:.1f} it/s)"
+        f"  Runtime:     {payload.runtime_seconds:.2f}s ({payload.iterations_per_second:.1f} it/s)"
     )
-    if payload["dropped_updates"]:
-        print(f"  Dropped:     {payload['dropped_updates']:,} updates")
-    print(f"  Status:      {payload['status']}")
+    if payload.dropped_updates:
+        print(f"  Dropped:     {payload.dropped_updates:,} updates")
+    print(f"  Status:      {payload.status}")
 
 
 COMMAND = Command(

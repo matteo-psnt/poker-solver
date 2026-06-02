@@ -70,13 +70,9 @@ def now() -> dict[str, Any]:
         [
             Part("pool", pool_status.COMMAND),
             Part("jobs", jobs.COMMAND, {"limit": LIVE_LIMIT}),
-            Part(
-                "tasks",
-                tasks.COMMAND,
-                {"limit": LIVE_LIMIT, "skip_reconcile": False, "tasks_dir": None},
-            ),
+            Part("tasks", tasks.COMMAND, {"limit": LIVE_LIMIT}),
             Part("autoscale", autoscale_check.COMMAND),
-            Part("cost", cost.COMMAND, {"hours": 0.0, "rate": ""}),
+            Part("cost", cost.COMMAND),
         ],
     )
 
@@ -112,9 +108,9 @@ def run(run_id: str) -> dict[str, Any]:
             Part(
                 "evals",
                 ledger.COMMAND,
-                {"run": run_id, "limit": 0, "experiment": None, "method": None, "since": None},
+                {"run": run_id, "limit": 0},
             ),
-            Part("tasks", tasks.COMMAND, {"limit": 0, "skip_reconcile": False, "tasks_dir": None}),
+            Part("tasks", tasks.COMMAND),
         ],
         join=lambda parts: {"run_tasks": _tasks_for(run_id, parts)},
     )
@@ -150,7 +146,7 @@ def runs() -> dict[str, Any]:
         [
             Part("runs", runs_command.COMMAND, {"limit": 0, "loadable_only": False}),
             Part("jobs", jobs.COMMAND, {"limit": RUN_LIST_JOB_LIMIT}),
-            Part("tasks", tasks.COMMAND, {"limit": 0, "skip_reconcile": False, "tasks_dir": None}),
+            Part("tasks", tasks.COMMAND),
         ],
         join=lambda parts: {"task_runs": _task_runs(parts)},
     )
@@ -185,6 +181,13 @@ def _summarised(part: dict[str, Any]) -> dict[str, Any]:
     grey one panel rather than claim there is nothing to show -- but its rows do
     not go on the wire, because the join is what the client asked for.
 
+    A DIFFERENT TYPE, not the same one with its rows emptied. `Tasks` and
+    `TasksSummary` describe two different things, and while one model covered
+    both, `parts.tasks.payload.rows` was `[]` on a trimmed part and correct about
+    nothing -- a page avoided that only by remembering to read the join instead.
+    `TasksSummary` has no `rows` field, so the generated TypeScript cannot offer
+    one and the join is all there is.
+
     **A copy, emphatically.** Trimming the payload in place edits the object the
     command layer returned, which is not this module's to edit: the payload is
     memoised per (command, arguments) and shared by every reader for the TTL, so
@@ -199,7 +202,10 @@ def _summarised(part: dict[str, Any]) -> dict[str, Any]:
     payload = part.get("payload")
     if not isinstance(payload, dict) or "rows" not in payload:
         return part
-    return {**part, "payload": {**payload, "rows": [], "source_rows": len(payload["rows"])}}
+    summary = tasks.TasksSummary(
+        source_rows=len(payload["rows"]), reconciled=payload.get("reconciled")
+    )
+    return {**part, "payload": summary.model_dump()}
 
 
 def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:

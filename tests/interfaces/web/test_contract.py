@@ -54,10 +54,13 @@ MODELS: dict[str, type[BaseModel]] = {
     "activity": contract.Activity,
     "configs": contract.Configs,
     "autoscale-check": contract.Autoscale,
-    "submit": contract.Dispatched,
-    "score": contract.Dispatched,
-    "submit-precompute": contract.Dispatched,
-    "submit-vector": contract.DispatchedVector,
+    # Each dispatch declares its OWN payload now. They shared `Dispatched` while
+    # the shapes were restated here, which lost `score`'s rungs and
+    # `submit-precompute`'s target every time someone read the schema.
+    "submit": contract.SubmitPayload,
+    "score": contract.ScorePayload,
+    "submit-precompute": contract.PrecomputeDispatchPayload,
+    "submit-vector": contract.SubmitVectorPayload,
     "push-code": contract.PushedCode,
     "push-data": contract.PushedData,
     "compact-legs": contract.Compacted,
@@ -105,22 +108,32 @@ class TestTheModelsDescribeRealPayloads:
             f"so the console would read it as `unknown`. Add it to MODELS in {__file__}."
         )
 
-    def test_additional_keys_are_tolerated(self):
-        """`extra="allow"` is the Zod `.passthrough()` these came from, and it is
-        load-bearing: a payload gaining a key must not break the console."""
-        widened = {**PAYLOADS["pool-status"], "a_field_added_next_week": 1}
-        assert contract.Pool.model_validate(widened).pool_id
+    def test_a_typed_payload_carries_only_what_it_declares(self):
+        """What replaced `extra="allow"`, and why it is no longer needed.
+
+        Leniency existed because `contract.py` RESTATED each shape and had to
+        survive the command adding a field it had not heard about. A model the
+        command CONSTRUCTS cannot be behind, so there is nothing to tolerate: an
+        undeclared key is not part of the contract and does not survive.
+
+        The stronger check is a static one. `ty` rejects
+        `PoolPayload(a_field_added_next_week=1)` at pre-commit -- which is the
+        drift this whole exercise measured, and the reason this test no longer
+        has to be the thing standing between a rename and the console.
+        """
+        widened = {**PAYLOADS["pool-status"].model_dump(), "a_field_added_next_week": 1}
+        assert not hasattr(contract.Pool.model_validate(widened), "a_field_added_next_week")
 
     def test_a_removed_field_is_caught(self):
         """The guard, verified rather than assumed. Without this, a model whose
         fields were all optional would pass everything and pin nothing."""
-        without = {k: v for k, v in PAYLOADS["pool-status"].items() if k != "pool_id"}
+        without = {k: v for k, v in PAYLOADS["pool-status"].model_dump().items() if k != "pool_id"}
         with pytest.raises(ValidationError):
             contract.Pool.model_validate(without)
 
     def test_a_retyped_field_is_caught(self):
         """The likelier drift: a field that stays but changes shape."""
-        retyped = {**PAYLOADS["cost"], "task_hours": "seventeen"}
+        retyped = {**PAYLOADS["cost"].model_dump(), "task_hours": "seventeen"}
         with pytest.raises(ValidationError):
             contract.Cost.model_validate(retyped)
 
@@ -129,7 +142,10 @@ class TestTheViewEnvelopes:
     """A view's own shape, which no command owns and so nothing else pins."""
 
     def _part(self, op: str) -> dict:
-        return {"payload": PAYLOADS[op], "error": None}
+        """One answered part. Dumped, because that is how `_compose` ships it."""
+        payload = PAYLOADS[op]
+        dump = getattr(payload, "model_dump", None)
+        return {"payload": dump() if callable(dump) else payload, "error": None}
 
     def test_the_now_view_validates(self):
         view = contract.NowView.model_validate(
@@ -181,16 +197,21 @@ class TestTheViewEnvelopes:
                     "progress": self._part("progress"),
                     "curve": self._part("curve"),
                     "evals": self._part("ledger"),
+                    # A `TasksSummary`, which is a DIFFERENT model from `Tasks`
+                    # and carries no rows -- see `views._summarised`.
                     "tasks": {
-                        "payload": {"op": "tasks", "rows": [], "reconciled": 0, "source_rows": 412},
+                        "payload": {"op": "tasks", "reconciled": 0, "source_rows": 412},
                         "error": None,
                     },
                 },
-                "run_tasks": PAYLOADS["tasks"]["rows"],
+                "run_tasks": [row.model_dump() for row in PAYLOADS["tasks"].rows],
             }
         )
         assert view.parts.tasks.payload is not None
         assert view.parts.tasks.payload.source_rows == 412
+        assert not hasattr(view.parts.tasks.payload, "rows"), (
+            "a trimmed part must not offer rows — that is the whole point of the type"
+        )
         assert view.run_tasks
 
     def test_the_experiment_view_validates(self):
@@ -203,7 +224,7 @@ class TestTheViewEnvelopes:
                     "report": self._part("report"),
                     "runs": self._part("runs"),
                 },
-                "arm_runs": PAYLOADS["runs"]["runs"],
+                "arm_runs": [row.model_dump() for row in PAYLOADS["runs"].runs],
             }
         )
         assert view.parts.report.payload is not None

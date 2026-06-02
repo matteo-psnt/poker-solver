@@ -99,8 +99,8 @@ class TestProgressHeartbeat:
         )
 
         (row,) = task_history.read_tasks(paths.share)
-        assert row["cause"] == "completed"
-        assert row["progress"] is None
+        assert row.cause == "completed"
+        assert row.progress is None
 
 
 class TestTheWatcherReportsPromptly:

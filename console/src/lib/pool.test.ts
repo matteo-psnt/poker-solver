@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { elapsed, poolShape } from "./pool";
 
+/**
+ * A task as the SERVER sends it: already classified.
+ *
+ * These fixtures used to carry `"BatchTaskState.COMPLETED"` and let `poolShape`
+ * work out what that meant. It does not any more -- `phase` arrives decided
+ * (`src/shared/task_states.py`), so a fixture that spelled a raw Batch state
+ * here would be testing a translation this console no longer performs.
+ */
 const T = (over: Record<string, unknown>) => ({
   task: "t",
-  state: "BatchTaskState.COMPLETED",
+  phase: "finished",
   exit_code: 0,
   ...over,
 });
@@ -23,17 +31,17 @@ describe("poolShape", () => {
       jobs(
         T({
           task: "done",
-          state: "BatchTaskState.COMPLETED",
+          phase: "finished",
           end_time: "2026-08-04T09:00:00Z",
         }),
         T({
           task: "live",
-          state: "BatchTaskState.RUNNING",
+          phase: "running",
           start_time: "2026-08-04T09:30:00Z",
         }),
         T({
           task: "next",
-          state: "BatchTaskState.ACTIVE",
+          phase: "queued",
           created: "2026-08-04T09:31:00Z",
         }),
       ),
@@ -46,7 +54,7 @@ describe("poolShape", () => {
 
   it("draws a slot per node even when nothing is in it", () => {
     /** A list of 2 running tasks looks identical whether the pool holds 2 or 8. */
-    const shape = poolShape(jobs(T({ state: "BatchTaskState.RUNNING" })), 4);
+    const shape = poolShape(jobs(T({ phase: "running" })), 4);
     expect(shape.slots).toHaveLength(4);
     expect(shape.slots.filter((s) => s.task === null)).toHaveLength(3);
   });
@@ -56,9 +64,9 @@ describe("poolShape", () => {
         would drop two of them off the page entirely. */
     const shape = poolShape(
       jobs(
-        T({ task: "a", state: "BatchTaskState.RUNNING" }),
-        T({ task: "b", state: "BatchTaskState.RUNNING" }),
-        T({ task: "c", state: "BatchTaskState.RUNNING" }),
+        T({ task: "a", phase: "running" }),
+        T({ task: "b", phase: "running" }),
+        T({ task: "c", phase: "running" }),
       ),
       1,
     );
@@ -70,17 +78,17 @@ describe("poolShape", () => {
       jobs(
         T({
           task: "third",
-          state: "BatchTaskState.ACTIVE",
+          phase: "queued",
           created: "2026-08-04T09:05:00Z",
         }),
         T({
           task: "first",
-          state: "BatchTaskState.ACTIVE",
+          phase: "queued",
           created: "2026-08-04T09:01:00Z",
         }),
         T({
           task: "second",
-          state: "BatchTaskState.ACTIVE",
+          phase: "queued",
           created: "2026-08-04T09:03:00Z",
         }),
       ),
@@ -94,12 +102,12 @@ describe("poolShape", () => {
       jobs(
         T({
           task: "young",
-          state: "BatchTaskState.RUNNING",
+          phase: "running",
           start_time: "2026-08-04T09:30:00Z",
         }),
         T({
           task: "old",
-          state: "BatchTaskState.RUNNING",
+          phase: "running",
           start_time: "2026-08-04T06:00:00Z",
         }),
       ),
@@ -124,8 +132,8 @@ describe("poolShape", () => {
     /** The pool is at its ceiling; the tail waits on a resize, not on a task. */
     const shape = poolShape(
       jobs(
-        T({ task: "r", state: "BatchTaskState.RUNNING" }),
-        ...["a", "b", "c"].map((task) => T({ task, state: "BatchTaskState.ACTIVE" })),
+        T({ task: "r", phase: "running" }),
+        ...["a", "b", "c"].map((task) => T({ task, phase: "queued" })),
       ),
       2,
     );
@@ -134,7 +142,7 @@ describe("poolShape", () => {
   });
 
   it("treats preparing as occupying — the node is committed", () => {
-    const shape = poolShape(jobs(T({ task: "p", state: "BatchTaskState.PREPARING" })), 1);
+    const shape = poolShape(jobs(T({ task: "p", phase: "starting" })), 1);
     expect(shape.slots[0]?.task?.task).toBe("p");
     expect(shape.queue).toHaveLength(0);
   });

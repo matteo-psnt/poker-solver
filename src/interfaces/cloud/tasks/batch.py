@@ -29,8 +29,11 @@ from azure.batch.models import (
 )
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.identity import AzureCliCredential
+from pydantic import BaseModel
 
 from src.interfaces.cloud.tasks.spec import TaskSpec, daily_job_id, suffixed_job_id, task_command
+from src.shared import task_states
+from src.shared.task_states import Outcome, Phase
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,40 +65,149 @@ def client(config: CloudConfig) -> BatchClient:
     return BatchClient(endpoint=config.batch_endpoint, credential=AzureCliCredential())
 
 
-def _task_record(task: Any) -> dict[str, Any]:
-    """One task, in this project's vocabulary rather than Batch's.
+class ResizeError(BaseModel):
+    """Why a resize failed, with Batch's own values kept whole.
+
+    Batch reports every allocation problem as a generic ``AllocationFailed`` and
+    hides the actual cause -- a Gen1-vs-Gen2 image, a policy denial, quota -- as
+    escaped JSON inside one of these values. Every value is kept rather than only
+    the ``*Json`` ones: a cause arriving under an unfamiliar name is exactly the
+    one worth seeing.
+    """
+
+    code: str | None = None
+    message: str | None = None
+    values: dict[str, str | None] = {}
+
+
+class PoolStatus(BaseModel):
+    """The pool's node counts, and any reason it could not reach them."""
+
+    pool_id: str
+    allocation_state: str | None
+    current_dedicated_nodes: int | None
+    target_dedicated_nodes: int | None
+    vm_size: str | None
+    resize_errors: list[ResizeError] = []
+
+
+class AutoscaleResult(BaseModel):
+    """A formula evaluated server-side: BOTH its variables and its error.
+
+    The error half is the reason this exists. An invalid or throwing formula
+    still returns partial results, so reporting results alone makes a broken
+    formula look healthy -- which is how a ``#`` comment (Batch wants ``//``) and
+    a one-argument ``GetSample`` both went unnoticed while the pool quietly
+    stopped scaling.
+    """
+
+    variables: list[str] = []
+    error: ResizeError | None = None
+
+
+class TaskFailure(BaseModel):
+    """Batch's failure detail, kept as data rather than a stringified object."""
+
+    code: str | None = None
+    message: str | None = None
+    category: str = ""
+
+
+class BatchTask(BaseModel):
+    """One Batch task, in THIS project's vocabulary rather than Batch's.
+
+    The docstring above this used to make that claim while emitting
+    ``"BatchTaskState.ACTIVE"`` verbatim, which is why the browser ended up
+    carrying an Azure-semantics module: `shortState`, `taskOutcome` and
+    `exitMeaning` all existed to undo this. :attr:`phase` and :attr:`outcome` are
+    the claim made true, computed once, here, from
+    :mod:`~src.shared.task_states`.
+
+    ``state`` and ``result`` are kept RAW beside them. They are what Batch
+    actually said, they are what lands in an observer record on the share, and a
+    classification that cannot be checked against its input is a classification
+    nobody can debug.
+    """
+
+    task: str
+    """Which job it belongs to. `task_history.reconcile` files an observer
+    record under it, and a task fetched on its own has no other way to say."""
+    job: str = ""
+    state: str | None
+    """The classification. What every reader should branch on."""
+    phase: Phase
+    """What a task that STOPPED achieved. Null while it is still going."""
+    outcome: Outcome | None = None
+    exit_code: int | None = None
+    """The recurring exit codes in words, so the terminal explains them too."""
+    exit_meaning: str | None = None
+    result: str | None = None
+    created: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    node: str | None = None
+    failure: TaskFailure | None = None
+
+
+class Job(BaseModel):
+    """One Batch job. ``tasks`` is empty until `attach_tasks` fills it in."""
+
+    job: str
+    state: str | None
+    tasks: list[BatchTask] = []
+
+
+def _task_record(task: Any, job_id: str = "") -> BatchTask:
+    """One task, as everything downstream of Batch reads it.
 
     Everything `task_history.reconcile` needs to explain a task the node never got to
     account for: `result` separates a task that finished from one that merely
     stopped, and the timestamps bound a death the EXIT trap could not report.
     """
     execution = task.execution_info
-    return {
-        "task": task.id,
-        "state": str(task.state) if task.state else None,
-        "created": _isoformat(task.creation_time),
-        "result": str(execution.result) if execution is not None and execution.result else None,
-        "exit_code": execution.exit_code if execution is not None else None,
-        "failure": _failure(execution),
-        "start_time": _isoformat(execution.start_time) if execution is not None else None,
-        "end_time": _isoformat(execution.end_time) if execution is not None else None,
-        "node": task.node_info.node_id if task.node_info is not None else None,
-    }
+    exit_code = execution.exit_code if execution is not None else None
+    phase = task_states.phase_of(str(task.state) if task.state else None)
+    return BatchTask(
+        task=task.id,
+        job=job_id,
+        state=str(task.state) if task.state else None,
+        phase=phase,
+        # Only for a task that has stopped: an outcome derived from the exit code
+        # of a task still running would report "done" for work in progress.
+        outcome=task_states.outcome_of(exit_code) if phase is Phase.FINISHED else None,
+        exit_code=exit_code,
+        exit_meaning=task_states.exit_meaning(exit_code),
+        # SHORTENED, unlike `state`: `observed_cause` compares against bare
+        # `success`/`failure`, and a raw `BatchTaskResult.SUCCESS` matches
+        # neither -- which used to be `tasks._translate`'s job.
+        result=_short(str(execution.result))
+        if execution is not None and execution.result
+        else None,
+        failure=_failure(execution),
+        created=_isoformat(task.creation_time),
+        start_time=_isoformat(execution.start_time) if execution is not None else None,
+        end_time=_isoformat(execution.end_time) if execution is not None else None,
+        node=task.node_info.node_id if task.node_info is not None else None,
+    )
+
+
+def _short(value: str) -> str:
+    """``BatchTaskResult.SUCCESS`` -> ``success``."""
+    return value.rsplit(".", 1)[-1].lower()
 
 
 def _isoformat(value: Any) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _failure(execution: Any) -> dict[str, Any] | None:
-    """Batch's failure detail, kept as data rather than a stringified object."""
+def _failure(execution: Any) -> TaskFailure | None:
     info = execution.failure_info if execution is not None else None
     if info is None:
         return None
-    return {"code": info.code, "message": info.message, "category": str(info.category or "")}
+    return TaskFailure(code=info.code, message=info.message, category=str(info.category or ""))
 
 
-def list_jobs(batch: BatchClient) -> list[dict[str, Any]]:
+def list_jobs(batch: BatchClient) -> list[Job]:
     """Every job, WITHOUT its tasks. One call, ~1.1s against 44 jobs.
 
     Split from the tasks deliberately. Listing tasks costs ~0.39s per job, so
@@ -103,16 +215,16 @@ def list_jobs(batch: BatchClient) -> list[dict[str, Any]]:
     are worth that before paying it -- see :func:`attach_tasks`.
     """
     return [
-        {"job": job.id, "state": str(job.state) if job.state else None} for job in batch.list_jobs()
+        Job(job=job.id, state=str(job.state) if job.state else None) for job in batch.list_jobs()
     ]
 
 
 def attach_tasks(
     batch: BatchClient,
-    jobs: list[dict[str, Any]],
+    jobs: list[Job],
     *,
-    want: Callable[[dict[str, Any]], bool] | None = None,
-) -> list[dict[str, Any]]:
+    want: Callable[[Job], bool] | None = None,
+) -> list[Job]:
     """Fill in ``tasks`` for the jobs ``want`` selects; ``[]`` for the rest.
 
     Two costs are removed here, and the first is the larger. Tasks used to be
@@ -127,17 +239,17 @@ def attach_tasks(
     """
     wanted = [job for job in jobs if want is None or want(job)]
     if not wanted:
-        return [{**job, "tasks": []} for job in jobs]
+        return [job.model_copy(update={"tasks": []}) for job in jobs]
 
-    def _tasks(job: dict[str, Any]) -> list[dict[str, Any]]:
-        return [_task_record(task) for task in batch.list_tasks(job["job"])]
+    def _tasks(job: Job) -> list[BatchTask]:
+        return [_task_record(task, job.job) for task in batch.list_tasks(job.job)]
 
     with ThreadPoolExecutor(max_workers=min(_PARALLEL_CALLS, len(wanted))) as pool:
-        fetched = dict(zip([job["job"] for job in wanted], pool.map(_tasks, wanted), strict=True))
-    return [{**job, "tasks": fetched.get(job["job"], [])} for job in jobs]
+        fetched = dict(zip([job.job for job in wanted], pool.map(_tasks, wanted), strict=True))
+    return [job.model_copy(update={"tasks": fetched.get(job.job, [])}) for job in jobs]
 
 
-def task_record(batch: BatchClient, job_id: str, task_id: str) -> dict[str, Any] | None:
+def task_record(batch: BatchClient, job_id: str, task_id: str) -> BatchTask | None:
     """One task, asked for by name. ``None`` if Batch has forgotten it.
 
     The targeted alternative to enumerating every job: a reconcile knows the
@@ -145,12 +257,12 @@ def task_record(batch: BatchClient, job_id: str, task_id: str) -> dict[str, Any]
     costs one call each rather than one call per job in the account's history.
     """
     try:
-        return {**_task_record(batch.get_task(job_id, task_id)), "job": job_id}
+        return _task_record(batch.get_task(job_id, task_id), job_id)
     except ResourceNotFoundError:
         return None
 
 
-def pool_status(batch: BatchClient, pool_id: str) -> dict[str, Any]:
+def pool_status(batch: BatchClient, pool_id: str) -> PoolStatus:
     """Node counts, and -- the point of the command -- why a resize failed.
 
     Batch reports every allocation problem as a generic ``AllocationFailed``.
@@ -162,25 +274,25 @@ def pool_status(batch: BatchClient, pool_id: str) -> dict[str, Any]:
     exactly the one worth seeing.
     """
     pool = batch.get_pool(pool_id)
-    errors = [
-        {
-            "code": error.code,
-            "message": error.message,
-            "values": {value.name: value.value for value in (error.error_values or [])},
-        }
-        for error in (pool.resize_errors or [])
-    ]
-    return {
-        "pool_id": pool.id,
-        "allocation_state": str(pool.allocation_state) if pool.allocation_state else None,
-        "current_dedicated_nodes": pool.current_dedicated_nodes,
-        "target_dedicated_nodes": pool.target_dedicated_nodes,
-        "vm_size": pool.vm_size,
-        "resize_errors": errors,
-    }
+    return PoolStatus(
+        pool_id=pool.id,
+        allocation_state=str(pool.allocation_state) if pool.allocation_state else None,
+        current_dedicated_nodes=pool.current_dedicated_nodes,
+        target_dedicated_nodes=pool.target_dedicated_nodes,
+        vm_size=pool.vm_size,
+        resize_errors=[_resize_error(error) for error in (pool.resize_errors or [])],
+    )
 
 
-def evaluate_autoscale(batch: BatchClient, pool_id: str, formula: str) -> dict[str, Any]:
+def _resize_error(error: Any) -> ResizeError:
+    return ResizeError(
+        code=error.code,
+        message=error.message,
+        values={value.name: value.value for value in (error.error_values or [])},
+    )
+
+
+def evaluate_autoscale(batch: BatchClient, pool_id: str, formula: str) -> AutoscaleResult:
     """Evaluate a formula server-side, returning BOTH its variables and its error.
 
     The error half is the reason this exists. An invalid or throwing formula
@@ -192,15 +304,10 @@ def evaluate_autoscale(batch: BatchClient, pool_id: str, formula: str) -> dict[s
     run = batch.evaluate_pool_auto_scale(
         pool_id, BatchPoolEvaluateAutoScaleOptions(auto_scale_formula=formula)
     )
-    variables = [part.strip() for part in (run.results or "").split(";") if part.strip()]
-    error = None
-    if run.error is not None:
-        error = {
-            "code": run.error.code,
-            "message": run.error.message,
-            "values": {value.name: value.value for value in (run.error.error_values or [])},
-        }
-    return {"variables": variables, "error": error}
+    return AutoscaleResult(
+        variables=[part.strip() for part in (run.results or "").split(";") if part.strip()],
+        error=None if run.error is None else _resize_error(run.error),
+    )
 
 
 def ensure_job(batch: BatchClient, pool_id: str, now: datetime) -> str:

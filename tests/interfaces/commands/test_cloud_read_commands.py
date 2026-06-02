@@ -8,17 +8,25 @@ either one still looks perfectly healthy.
 import pytest
 
 from src.interfaces.cli.headless import build_parser
+from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands import evaluate, jobs, pool_status, score
+from src.shared import task_states
 
 
-def _job(job_state: str, task_state: str) -> dict:
-    return {
-        "job": "poker-20260802",
-        "state": job_state,
-        "tasks": [
-            {"task": "t-1", "state": task_state, "exit_code": None, "node": "tvmps_x"},
+def _job(job_state: str, task_state: str) -> batch.Job:
+    return batch.Job(
+        job="poker-20260802",
+        state=job_state,
+        tasks=[
+            batch.BatchTask(
+                task="t-1",
+                job="poker-20260802",
+                state=task_state,
+                phase=task_states.phase_of(task_state),
+                node="tvmps_x",
+            )
         ],
-    }
+    )
 
 
 class TestLiveJobFilter:
@@ -134,4 +142,4 @@ class TestReportedLedgerPath:
             migrate=False,
             rebuild=False,
         )
-        assert ledger_cmd.run(args)["ledger"] == str(derived)
+        assert ledger_cmd.run(args).ledger == str(derived)

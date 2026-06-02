@@ -123,11 +123,17 @@ class TestTaskReconcileSeam:
             creation_time = None
             execution_info, node_info = _Exec(), _Node()
 
-        record = batch._task_record(_Task())
+        # Dumped, because that is how it crosses into `reconcile`: the record is
+        # a model now, and reconcile reads it with `.get()` on the far side of
+        # `tasks._observed_by_batch`. The keys are what has to line up.
+        record = batch._task_record(_Task()).model_dump()
         for field in ("task", "state", "result", "exit_code", "failure", "start_time", "end_time"):
             assert field in record, f"reconcile reads {field!r}"
         assert record["exit_code"] == 137
         assert record["failure"]["code"] == "TaskEnded"
+        # SHORTENED here rather than by the caller: `observed_cause` compares
+        # against a bare `failure`, and the raw enum repr matches nothing.
+        assert record["result"] == "failure"
         # Not read by reconcile, but by the console: a task WAITING for a node
         # has no start_time, so submission order is the only thing that can put
         # the queue in the order Batch will dispatch it.

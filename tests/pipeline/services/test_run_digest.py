@@ -117,7 +117,7 @@ class TestTasks:
             )
 
         digest = _digest(_run(tmp_path), tmp_path, tasks_dir=share)
-        assert [task["task_id"] for task in digest.tasks] == ["t-1"]
+        assert [task.task_id for task in digest.tasks] == ["t-1"]
 
     def test_an_unresolved_task_becomes_a_gap(self, tmp_path):
         share = tmp_path / "share"
@@ -134,7 +134,7 @@ class TestTasks:
         )
 
         digest = _digest(_run(tmp_path), tmp_path, tasks_dir=share)
-        assert digest.tasks[0]["cause"] == "killed"
+        assert digest.tasks[0].cause == "killed"
         assert not any("no terminal record" in g for g in digest.gaps)
 
 

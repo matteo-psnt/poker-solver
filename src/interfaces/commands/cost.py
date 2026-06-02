@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.cost import billing, node_time
@@ -112,7 +112,7 @@ def _rate(explicit: str) -> float | None:
         return None
 
 
-def _billed(hours: float, now: dt.datetime) -> tuple[dict[str, Any] | None, str | None]:
+def _billed(hours: float, now: dt.datetime) -> tuple[billing.BilledPayload | None, str | None]:
     """Actual charges over the same window, and why there are none if there are.
 
     Independently failing, like a `status` panel: the subscription id comes from
@@ -138,104 +138,123 @@ def _billed(hours: float, now: dt.datetime) -> tuple[dict[str, Any] | None, str 
     return (result.as_payload() if result else None), reason
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class CostPayload(node_time.NodeTime):
+    """What it all cost: node time from the task log, and what Azure billed.
+
+    Subclasses `NodeTime` rather than restating its seven fields. The two halves
+    are asked independently and fail independently -- `billed` is null with
+    `billed_reason` set when Cost Management throttles, and the screen still
+    renders node time.
+    """
+
+    op: Literal["cost"] = "cost"
+    hours: float
+    rate_per_node_hour: float | None = None
+    dollars: float | None = None
+    billed: billing.BilledPayload | None = None
+    """Why there is no billed figure. Throttling is not an auth problem."""
+    billed_reason: str | None = None
+
+
+def run(args: argparse.Namespace) -> CostPayload:
     """Summarise node time over the window, and what it was billed as."""
     now = dt.datetime.now(dt.UTC)
     since = now - dt.timedelta(hours=args.hours) if args.hours > 0 else None
-    rows = tasks_command.COMMAND.invoke(limit=0, skip_reconcile=False, tasks_dir=None)["rows"]
+    # No arguments: `invoke` fills every one from `tasks`'s own parser, and
+    # restating a default here is how the two surfaces come to disagree.
+    rows = tasks_command.COMMAND.invoke_as(tasks_command.TasksPayload).rows
 
     totals = node_time.summarise(rows, now=now, since=since)
     rate = _rate(args.rate)
     billed, billed_reason = (None, None) if args.skip_billing else _billed(args.hours, now)
-    return {
-        "op": "cost",
-        "hours": args.hours,
-        "rate_per_node_hour": rate,
-        "dollars": None if rate is None else totals["task_hours"] * rate,
-        "billed": billed,
+    return CostPayload(
+        hours=args.hours,
+        rate_per_node_hour=rate,
+        dollars=None if rate is None else totals.task_hours * rate,
+        billed=billed,
         # Why there is no billed figure, when there is none. A surface that says
         # "check az login" at a throttled API sends someone to fix an identity
         # that was never broken -- and throttling is the failure that actually
         # happens here, Cost Management being metered far tighter than ARM.
-        "billed_reason": billed_reason,
-        **totals,
-    }
+        billed_reason=billed_reason,
+        **totals.model_dump(),
+    )
 
 
-def _render_billed(billed: dict[str, Any], hours: float) -> None:
+def _render_billed(billed: billing.BilledPayload, hours: float) -> None:
     """The invoice half. Printed first: it is the one that is actually true."""
-    currency = "$" if billed["currency"] == "USD" else f"{billed['currency']} "
-    start = billed["first_at"] or billed["since"]
+    currency = "$" if billed.currency == "USD" else f"{billed.currency} "
+    start = billed.first_at or billed.since
     print(f"Billed since {start} — Azure Cost Management, the authority")
     if hours:
         # Whole days, so a windowed billing figure covers a little MORE than the
         # window asked for. Said out loud rather than left for someone to notice
         # that two adjacent totals do not divide.
         print(f"  (whole days — not exactly the last {hours:g}h; the biller has no finer grain)")
-    print(f"  total:       {currency}{billed['total']:,.2f}")
+    print(f"  total:       {currency}{billed.total:,.2f}")
     print(
-        f"    pool:      {currency}{billed['pool_cost']:,.2f}"
-        f"   over {billed['pool_node_hours']:,.1f} billed node-hours"
+        f"    pool:      {currency}{billed.pool_cost:,.2f}"
+        f"   over {billed.pool_node_hours:,.1f} billed node-hours"
     )
-    if billed["standing_hours"]:
+    if billed.standing_hours:
         # Named, not folded into compute. A machine that is simply switched on
         # bills 24 hours a day and no task log will ever mention it -- which is
         # exactly why it has to be said out loud rather than left to look like
         # the pool's allocation overhead.
         print(
-            f"    standing:  {currency}{billed['standing_cost']:,.2f}"
-            f"   over {billed['standing_hours']:,.1f} hours — machines left ON:"
+            f"    standing:  {currency}{billed.standing_cost:,.2f}"
+            f"   over {billed.standing_hours:,.1f} hours — machines left ON:"
         )
-        for box in billed["standing"][:3]:
+        for box in billed.standing[:3]:
             print(
-                f"                 {currency}{box['cost']:>9,.2f}  {box['resource_group']} "
-                f"({box['hours']:,.1f} h)"
+                f"                 {currency}{box.cost:>9,.2f}  {box.resource_group} "
+                f"({box.hours:,.1f} h)"
             )
-    print(f"    other:     {currency}{billed['other']:,.2f}   storage, disks, network")
-    for line in billed["by_service"][:4]:
-        print(f"                 {currency}{line['cost']:>9,.2f}  {line['service']}")
-    if billed["as_of"]:
-        print(f"  complete to: {billed['as_of']} — cost data lags hours and is restated,")
+    print(f"    other:     {currency}{billed.other:,.2f}   storage, disks, network")
+    for line in billed.by_service[:4]:
+        print(f"                 {currency}{line.cost:>9,.2f}  {line.service}")
+    if billed.as_of:
+        print(f"  complete to: {billed.as_of} — cost data lags hours and is restated,")
         print("               so the most recent day always reads low.")
 
 
-def render(payload: dict[str, Any]) -> None:
-    hours = payload["hours"]
-    billed = payload.get("billed")
+def render(payload: CostPayload) -> None:
+    hours = payload.hours
+    billed = payload.billed
     if billed:
         _render_billed(billed, hours)
         print()
-    elif payload.get("billed_reason"):
-        print(f"{payload['billed_reason']}\n")
+    elif payload.billed_reason:
+        print(f"{payload.billed_reason}\n")
 
-    if not payload["tasks"]:
-        window = f" in the last {payload['hours']:g}h" if payload["hours"] else ""
+    if not payload.tasks:
+        window = f" in the last {payload.hours:g}h" if payload.hours else ""
         print(f"No tasks have run{window}.")
         return
 
-    scope = f"last {payload['hours']:g}h" if payload["hours"] else "all recorded history"
+    scope = f"last {payload.hours:g}h" if payload.hours else "all recorded history"
     print(f"Node time over {scope} — from the task log, attributable to a run")
-    print(f"  node-hours:  {payload['task_hours']:.2f}", end="")
-    if payload["dollars"] is not None:
-        print(f"   (~${payload['dollars']:.2f} at ${payload['rate_per_node_hour']:.3f}/node-hr)")
+    print(f"  node-hours:  {payload.task_hours:.2f}", end="")
+    if payload.dollars is not None:
+        print(f"   (~${payload.dollars:.2f} at ${payload.rate_per_node_hour:.3f}/node-hr)")
     else:
         print("   (rate unknown)")
-    print(f"  tasks:        {payload['tasks']:,}, peak {payload['peak_concurrency']} at once")
-    print(f"  spanning:    {payload['first_at']} → {payload['last_at']}")
-    if payload.get("unended"):
+    print(f"  tasks:        {payload.tasks:,}, peak {payload.peak_concurrency} at once")
+    print(f"  spanning:    {payload.first_at} → {payload.last_at}")
+    if payload.unended:
         print(
-            f"  EXCLUDED:    {payload['unended']} attempt(s) started and never recorded an end. "
+            f"  EXCLUDED:    {payload.unended} attempt(s) started and never recorded an end. "
             "Their\n               node time is unknown, not zero — `poker-solver tasks` "
             "lists them."
         )
     # Compared against POOL node-hours specifically. Comparing it against total
     # compute is what made the old caveat wrong: it folded in a standing VM and
     # then blamed the whole gap on allocation overhead.
-    pool_hours = (billed or {}).get("pool_node_hours")
+    pool_hours = billed.pool_node_hours if billed else None
     if pool_hours:
         print(
             f"  Counts time tasks were EXECUTING. Against {pool_hours:,.1f} billed POOL "
-            f"node-hours\n  that is {pool_hours / payload['task_hours']:.2f}x — a node is "
+            f"node-hours\n  that is {pool_hours / payload.task_hours:.2f}x — a node is "
             "allocated before its task starts\n  and released after it ends, and the record "
             "begins after the first charges.\n  Machines left ON outside the pool are listed "
             "above and are not in this number."

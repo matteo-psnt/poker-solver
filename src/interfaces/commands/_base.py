@@ -33,15 +33,62 @@ from src.pipeline.evaluation.ledger import rebuild_ledger
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from pydantic import BaseModel
+
+"""Why pydantic is named but not imported
+---------------------------------------
+`commands/__init__` imports this module to get :class:`Command`, and the point
+of the lazy registry is that naming a command imports no handler -- ``--help``
+went 3.15s to 0.18s on it. A runtime import here is paid by every invocation
+including that one, measured at 0.10s to 0.13s, for a name used in annotations
+and nowhere else. Under ``from __future__ import annotations`` the checker sees
+the type and the interpreter never loads the module.
+"""
+
+"""What a handler may return, DURING the migration to typed payloads.
+
+A model is the destination: it is the single declaration of the shape, and `ty`
+turns a renamed field into a pre-commit failure rather than something 1061 tests
+sail past. The ``dict`` arm is the commands not converted yet, and it is the
+only reason this is a union -- when the last one lands this becomes
+``BaseModel``, and every remaining dict is a type error. That is how it ends.
+
+PEP 695 aliases evaluate lazily, so naming ``BaseModel`` costs no import.
+"""
+type Payload = BaseModel | dict[str, Any]
+
 
 @dataclass(frozen=True)
 class Command:
-    """One `poker-solver` subcommand."""
+    """One `poker-solver` subcommand.
+
+    ``run`` returns a MODEL, not a dict, and that is the single declaration of
+    what this command answers. `contract.py` imports it instead of restating it,
+    `response_model` puts it in the OpenAPI schema, and `types.gen.ts` is
+    generated from that -- so the shape exists once, in the module that produces
+    it. Before this it existed three times (here as an untyped dict, in
+    `contract.py` as a pydantic model, and in a hand-written `PAYLOADS` fixture),
+    and renaming a REQUIRED field passed 1061 tests without a murmur.
+
+    ``render`` takes the same model, so a renderer reading a field the payload
+    does not carry is a type error rather than the runtime ``KeyError`` that
+    made bundling parser, handler and renderer onto one object necessary.
+
+    Serialisation is each surface's own business, at its own boundary:
+    `jsonio.dumps` handles a model wherever it appears, `_compose` dumps so a
+    view can join over plain data, and nothing here decides for them.
+
+    ``render`` is typed ``Any`` rather than ``BaseModel`` on purpose: each
+    renderer names its OWN payload type, and a ``Callable[[JobsPayload], None]``
+    is not a ``Callable[[BaseModel], None]`` -- parameters are contravariant, and
+    the checker is right to say so. The checking that matters happens inside each
+    renderer, against the annotation it declares.
+    """
 
     name: str
     add_arguments: Callable[[argparse.ArgumentParser], None]
-    run: Callable[[argparse.Namespace], dict[str, Any]]
-    render: Callable[[dict[str, Any]], None]
+    run: Callable[[argparse.Namespace], Payload]
+    render: Callable[[Any], None]
     help: str = ""
 
     def declared(self) -> tuple[dict[str, Any], set[str]]:
@@ -63,7 +110,7 @@ class Command:
             {action.dest for action in actions if action.required},
         )
 
-    def execute(self, args: argparse.Namespace) -> dict[str, Any]:
+    def execute(self, args: argparse.Namespace) -> Payload:
         """Run this command's handler. **The seam every surface goes through.**
 
         `invoke` is not that seam and cannot be: the command line builds its
@@ -87,7 +134,7 @@ class Command:
         """
         return self._observed(args) if telemetry.enabled() else self.run(args)
 
-    def _observed(self, args: argparse.Namespace) -> dict[str, Any]:
+    def _observed(self, args: argparse.Namespace) -> Payload:
         """:meth:`execute`, with the observation attached."""
         try:
             asked = telemetry.asked_for(self.add_arguments, args, self.declared()[0])
@@ -116,7 +163,7 @@ class Command:
             raise CommandError(f"{self.name}: missing required argument(s) {missing}")
         return argparse.Namespace(**{**defaults, **overrides})
 
-    def invoke(self, **overrides: Any) -> dict[str, Any]:
+    def invoke(self, **overrides: Any) -> Payload:
         """Answer this command's question and return the payload, unrendered.
 
         The entry point for every surface that is not the command line. It
@@ -124,6 +171,26 @@ class Command:
         so a caller polling several commands survives one of them failing.
         """
         return self.execute(self.arguments(**overrides))
+
+    def invoke_as[T](self, model: type[T], **overrides: Any) -> T:
+        """:meth:`invoke`, narrowed to the payload the caller expects.
+
+        For a command built out of ANOTHER command -- `cost` is `tasks` plus
+        arithmetic, `status` is three panels -- which needs the fields, not an
+        opaque payload. :meth:`invoke` cannot be typed for them: it answers for
+        every command, so its return is the union of every payload there is.
+
+        The check is real rather than a cast. Asking `tasks` for its rows and
+        getting something else back is a wiring mistake, and it should say so
+        here rather than as an attribute error inside the arithmetic.
+        """
+        payload = self.invoke(**overrides)
+        if not isinstance(payload, model):
+            raise CommandError(
+                f"{self.name} answered with {type(payload).__name__}, "
+                f"but {model.__name__} was expected"
+            )
+        return payload
 
 
 def resolve_run_dir(run: str, runs_dir: str) -> Path:

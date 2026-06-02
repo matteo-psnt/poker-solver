@@ -11,7 +11,9 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
@@ -56,9 +58,27 @@ class Queued:
     label: str
 
 
+class Dispatched(BaseModel):
+    """What every dispatch reports back.
+
+    One shape for all of them, because this function supplies the same three
+    facts to each: the snapshot it sealed, the job it queued into, and the tasks
+    it created. Commands SUBCLASS this to add what is theirs -- the rungs a
+    `score` covered, the arms a `submit-vector` queued -- so the common half is
+    declared once and the specific half is not lost.
+    """
+
+    op: str = ""
+    """WHICH CODE will run. A task executes the tree as it stood at submission,
+    and a later push must not change what an in-flight job is running."""
+    code_snapshot: str
+    job_id: str
+    tasks: list[str] = []
+
+
 def stage_and_queue(
     make_tasks: Callable[[str], list[TaskSpec]], *, root: Path = CHECKOUT_ROOT
-) -> dict[str, Any]:
+) -> Dispatched:
     """Snapshot the tree, open a job, and queue every task against that snapshot.
 
     The snapshot is taken HERE rather than left as a step the caller must
@@ -104,11 +124,9 @@ def stage_and_queue(
         batch.submit_task(client, job_id, identifier, task, retries=kinds.kind(task.op).retries)
         queued.append(Queued(task_id=identifier, job_id=job_id, label=task.label))
 
-    return {
-        "code_snapshot": snapshot,
-        "job_id": job_id,
-        "tasks": [item.task_id for item in queued],
-    }
+    return Dispatched(
+        code_snapshot=snapshot, job_id=job_id, tasks=[item.task_id for item in queued]
+    )
 
 
 def _stamped(task: TaskSpec) -> TaskSpec:
@@ -135,11 +153,11 @@ def _stamped(task: TaskSpec) -> TaskSpec:
     )
 
 
-def render_queued(payload: dict[str, Any]) -> None:
+def render_queued(payload: Dispatched) -> None:
     """Shared human rendering for a dispatch result."""
-    print(f"  code snapshot: {payload['code_snapshot']}")
-    print(f"  job:           {payload['job_id']}")
-    for task in payload["tasks"]:
+    print(f"  code snapshot: {payload.code_snapshot}")
+    print(f"  job:           {payload.job_id}")
+    for task in payload.tasks:
         print(f"  queued:        {task}")
-    count = len(payload["tasks"])
+    count = len(payload.tasks)
     print(f"\n  {count} task(s) queued — walk away; watch with: poker-solver jobs")

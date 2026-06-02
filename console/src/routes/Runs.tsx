@@ -1,14 +1,23 @@
 import { useRunsView } from "@/api/queries";
+import type { Phase } from "@/api/types";
 import { Panel } from "@/components/Panel";
-import { StatusBadge, shortState } from "@/components/StatusBadge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { count, runLabel } from "@/lib/format";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 
-/** Batch task states that mean a node is actually working on it. */
-const LIVE = new Set(["running", "preparing", "active"]);
+/**
+ * Phases that mean this run still has work in the pool.
+ *
+ * `queued` counts, and that is deliberate: the question here is "is this run
+ * abandoned", and a task waiting for a node is not. It is a DIFFERENT question
+ * from the one cost accounting asks — which excludes `queued`, because queue
+ * time is not node time — and the two answers are allowed to differ now that
+ * both are asked in the same words.
+ */
+const IN_FLIGHT = new Set<Phase>(["running", "starting", "queued"]);
 
 /**
  * A run's `status` is a CLAIM, not an observation.
@@ -77,7 +86,7 @@ export function Runs() {
     const taskRuns = view.data?.task_runs ?? {};
     const liveTasks = new Set(
       (parts?.jobs.payload?.jobs ?? []).flatMap((job) =>
-        job.tasks.filter((task) => LIVE.has(shortState(task.state))).map((task) => task.task),
+        job.tasks.filter((task) => IN_FLIGHT.has(task.phase)).map((task) => task.task),
       ),
     );
     const live = new Set<string>();

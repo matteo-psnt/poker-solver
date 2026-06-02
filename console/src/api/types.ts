@@ -27,46 +27,79 @@ import type { components } from "./types.gen";
 type S = components["schemas"];
 
 /** The pool, and what Batch is running. */
-export type Pool = S["Pool"];
-export type Jobs = S["Jobs"];
+export type Pool = S["PoolPayload"];
+export type Jobs = S["JobsPayload"];
 export type Job = S["Job"];
 export type BatchTask = S["BatchTask"];
 
+/**
+ * What a Batch task's state MEANS, decided server-side.
+ *
+ * `phase` and `outcome` replaced an Azure-semantics module in this console:
+ * `shortState`, `taskOutcome` and `exitMeaning` all existed because `/api/jobs`
+ * shipped `"BatchTaskState.ACTIVE"` while `/api/tasks` shipped `"active"`. The
+ * words are `src/shared/task_states.py`'s and arrive already classified.
+ */
+export type Phase = S["Phase"];
+export type Outcome = S["Outcome"];
+
 /** The durable task account -- the only thing that can say why a task DIED. */
-export type Tasks = S["Tasks"];
+export type Tasks = S["TasksPayload"];
 export type TaskRow = S["TaskRow"];
 
+/**
+ * A `tasks` part that a view fetched only to JOIN, with its rows removed.
+ *
+ * A separate type from `Tasks`, and it has no `rows` field — which is the
+ * point. One model used to describe both, so `parts.tasks.payload.rows` was `[]`
+ * on a trimmed part and correct about nothing; a page only avoided that by
+ * remembering to read the join (`run_tasks`) instead. Now there is nothing to
+ * remember.
+ */
+export type TasksSummary = S["TasksSummary"];
+
 /** The record. */
-export type Runs = S["Runs"];
+export type Runs = S["RunsPayload"];
 export type RunSummary = S["RunSummary"];
-export type RunInfo = S["RunInfo"];
-export type Progress = S["Progress"];
-export type ProgressRow = S["ProgressRow"];
-export type Curve = S["Curve"];
-export type Ledger = S["Ledger"];
-export type LogLines = S["LogLines"];
-export type Cost = S["Cost"];
-export type Billed = S["Billed"];
+export type RunInfo = S["RunInfoPayload"];
+export type Progress = S["ProgressPayload"];
+/**
+ * A row of `progress.jsonl`, which is a RECORD rather than a modelled payload:
+ * a resumed run appends across code versions, so the fields present vary by
+ * when the row was written and the server does not pretend otherwise.
+ */
+export type ProgressRow = Record<string, unknown>;
+export type Curve = S["CurvePayload"];
+export type Ledger = S["LedgerPayload"];
+export type LogLines = S["LogsPayload"];
+export type Cost = S["CostPayload"];
+export type Billed = S["BilledPayload"];
 
 /** Experiments and comparisons. */
-export type Report = S["Report"];
-export type Arm = S["Arm"];
-export type Comparison = S["Comparison"];
+export type Report = S["ReportPayload"];
+export type Arm = S["ArmResult"];
+export type Comparison = S["ComparePayload"];
 
 /** This tool's own behaviour, and the local reads. */
-export type Activity = S["Activity"];
-export type Configs = S["Configs"];
-export type Autoscale = S["Autoscale"];
+export type Activity = S["ActivityPayload"];
+export type Configs = S["ConfigsPayload"];
+export type Autoscale = S["AutoscalePayload"];
 
 /** The writes. */
-export type Dispatched = S["Dispatched"];
-export type DispatchedVector = S["DispatchedVector"];
-export type PushedCode = S["PushedCode"];
-export type PushedData = S["PushedData"];
-export type Compacted = S["Compacted"];
-export type Promoted = S["Promoted"];
-export type Cancelled = S["Cancelled"];
-export type Box = S["Box"];
+/**
+ * What a dispatch reports back. A UNION, because each command declares its own:
+ * `score` carries the rungs it covered, `submit-precompute` the name it will
+ * publish as. They shared one shape while `contract.py` restated it, and the
+ * specific halves were invisible in the schema.
+ */
+export type Dispatched = S["SubmitPayload"] | S["ScorePayload"] | S["PrecomputeDispatchPayload"];
+export type DispatchedVector = S["SubmitVectorPayload"];
+export type PushedCode = S["PushedCodePayload"];
+export type PushedData = S["PushedDataPayload"];
+export type Compacted = S["CompactedPayload"];
+export type Promoted = S["PromotedPayload"];
+export type Cancelled = S["CancelledPayload"];
+export type Box = S["BoxPayload"];
 
 /** The blueprint server's shapes, proxied through `/api/blueprint/*`. */
 export type BlueprintRun = S["BlueprintRun"];

@@ -19,7 +19,7 @@ def _node(share, task_id, event, cause=None, **kw):
 class TestNodeRecord:
     def test_started_record_is_not_terminal(self, tmp_path):
         _node(tmp_path, "task-a", "started")
-        assert task_history.read_tasks(tmp_path)[0]["cause"] == "unresolved"
+        assert task_history.read_tasks(tmp_path)[0].cause == "unresolved"
 
     def test_terminal_record_supersedes_started(self, tmp_path):
         _node(tmp_path, "task-a", "started")
@@ -27,18 +27,18 @@ class TestNodeRecord:
 
         rows = task_history.read_tasks(tmp_path)
         assert len(rows) == 1, "start + exit are one attempt, not two rows"
-        assert rows[0]["cause"] == "completed"
-        assert rows[0]["exit_code"] == 0
+        assert rows[0].cause == "completed"
+        assert rows[0].exit_code == 0
         # Both from the node's own two records.
-        assert rows[0]["started_at"]
-        assert rows[0]["ended_at"]
+        assert rows[0].started_at
+        assert rows[0].ended_at
 
     def test_carries_the_run_identity(self, tmp_path):
         _node(
             tmp_path, "task-a", "started", run_id="run-xyz", op="train-static", config="production"
         )
         row = task_history.read_tasks(tmp_path)[0]
-        assert (row["run_id"], row["op"], row["config"]) == (
+        assert (row.run_id, row.op, row.config) == (
             "run-xyz",
             "train-static",
             "production",
@@ -49,7 +49,7 @@ class TestNodeRecord:
         _node(tmp_path, "hung", "finished", cause="timeout", exit_code=124)
         _node(tmp_path, "crashed", "finished", cause="failed", exit_code=1)
 
-        causes = {r["task_id"]: r["cause"] for r in task_history.read_tasks(tmp_path)}
+        causes = {r.task_id: r.cause for r in task_history.read_tasks(tmp_path)}
         assert causes == {"hung": "timeout", "crashed": "failed"}
 
 
@@ -70,11 +70,12 @@ class TestJoin:
         )
 
         row = task_history.read_tasks(tmp_path)[0]
-        assert row["cause"] == "failed"
-        assert row["cause_source"] == "batch"
-        assert row["run_id"] == "run-xyz", "the run identity comes from the node half"
-        assert row["failure"]["code"] == "TaskEnded"
-        assert row["exit_code"] == 137, (
+        assert row.cause == "failed"
+        assert row.cause_source == "batch"
+        assert row.run_id == "run-xyz", "the run identity comes from the node half"
+        assert row.failure is not None
+        assert row.failure["code"] == "TaskEnded"
+        assert row.exit_code == 137, (
             "the node's record carries a null exit_code, which must not shadow "
             "the only code that exists for a task killed before its trap ran"
         )
@@ -87,19 +88,19 @@ class TestJoin:
         )
 
         row = task_history.read_tasks(tmp_path)[0]
-        assert row["cause"] == "timeout"
-        assert row["cause_source"] == "node"
+        assert row.cause == "timeout"
+        assert row.cause_source == "node"
 
     def test_observer_only_task_still_appears(self, tmp_path):
         """A task killed before the node wrote anything must not vanish."""
         task_history.write_observed_record(
             tmp_path, task_id="task-ghost", job_id="j", state="completed", result="failure"
         )
-        assert task_history.read_tasks(tmp_path)[0]["task_id"] == "task-ghost"
+        assert task_history.read_tasks(tmp_path)[0].task_id == "task-ghost"
 
     def test_running_task_is_not_called_dead(self, tmp_path):
         task_history.write_observed_record(tmp_path, task_id="t", job_id="j", state="running")
-        assert task_history.read_tasks(tmp_path)[0]["cause"] == "running"
+        assert task_history.read_tasks(tmp_path)[0].cause == "running"
 
 
 class TestBatchRetry:
@@ -111,9 +112,9 @@ class TestBatchRetry:
         _node(tmp_path, "task-1", "started")  # Batch retries with the SAME id
         _node(tmp_path, "task-1", "finished", cause="completed", exit_code=0)
 
-        rows = sorted(task_history.read_tasks(tmp_path), key=lambda r: r["attempt"])
-        assert [r["attempt"] for r in rows] == [1, 2]
-        assert [r["cause"] for r in rows] == ["killed", "completed"], (
+        rows = sorted(task_history.read_tasks(tmp_path), key=lambda r: r.attempt)
+        assert [r.attempt for r in rows] == [1, 2]
+        assert [r.cause for r in rows] == ["killed", "completed"], (
             "the OOM that caused the retry is the whole point of the record"
         )
 
@@ -125,9 +126,9 @@ class TestBatchRetry:
         _node(tmp_path, "task-1", "started")
         task_history.write_observed_record(tmp_path, task_id="task-1", job_id="j", state="running")
 
-        rows = {r["attempt"]: r for r in task_history.read_tasks(tmp_path)}
-        assert rows[1]["cause"] == "killed"
-        assert rows[2]["cause"] == "running"
+        rows = {r.attempt: r for r in task_history.read_tasks(tmp_path)}
+        assert rows[1].cause == "killed"
+        assert rows[2].cause == "running"
 
     def test_unresolved_reports_each_task_once(self, tmp_path):
         _node(tmp_path, "task-1", "started")
@@ -148,8 +149,8 @@ class TestTornTerminalWrite:
         (task_log.tasks_dir(tmp_path) / "task-torn.1.exit.json").write_text('{"task_id": "task')
 
         rows = task_history.read_tasks(tmp_path)
-        assert [r["task_id"] for r in rows] == ["task-torn"]
-        assert rows[0]["cause"] == "unresolved"
+        assert [r.task_id for r in rows] == ["task-torn"]
+        assert rows[0].cause == "unresolved"
         assert task_history.unresolved_task_ids(tmp_path) == ["task-torn"]
 
 
@@ -173,7 +174,7 @@ class TestCauseVocabulary:
     def test_every_node_cause_is_terminal(self, tmp_path, cause):
         _node(tmp_path, "t", "started")
         _node(tmp_path, "t", "finished", cause=cause)
-        assert task_history.read_tasks(tmp_path)[0]["cause"] == cause
+        assert task_history.read_tasks(tmp_path)[0].cause == cause
         assert task_history.unresolved_task_ids(tmp_path) == []
 
     def test_an_oom_is_not_recorded_as_a_hang(self, tmp_path):
@@ -182,12 +183,12 @@ class TestCauseVocabulary:
         _node(tmp_path, "oom", "finished", cause=task_log.CAUSE_KILLED, exit_code=137)
         _node(tmp_path, "hang", "finished", cause=task_log.CAUSE_TIMEOUT, exit_code=124)
 
-        causes = {r["task_id"]: r["cause"] for r in task_history.read_tasks(tmp_path)}
+        causes = {r.task_id: r.cause for r in task_history.read_tasks(tmp_path)}
         assert causes == {"oom": "killed", "hang": "timeout"}
 
     def test_a_cancelled_task_is_not_a_clean_completion(self, tmp_path):
         _node(tmp_path, "c", "finished", cause=task_log.CAUSE_CANCELLED, exit_code=143)
-        assert task_history.read_tasks(tmp_path)[0]["cause"] == "cancelled"
+        assert task_history.read_tasks(tmp_path)[0].cause == "cancelled"
 
 
 class TestReconcile:
@@ -224,8 +225,8 @@ class TestReconcile:
             tmp_path,
             [{"task": "vanished", "job": "poker-1", "state": "completed", "result": "failure"}],
         )
-        row = next(r for r in task_history.read_tasks(tmp_path) if r["task_id"] == "vanished")
-        assert row["cause"] == task_log.CAUSE_FAILED
+        row = next(r for r in task_history.read_tasks(tmp_path) if r.task_id == "vanished")
+        assert row.cause == task_log.CAUSE_FAILED
 
 
 class TestAnObservationIsOnlyWrittenWhenItSaysSomethingNew:
@@ -281,8 +282,8 @@ class TestAnObservationIsOnlyWrittenWhenItSaysSomethingNew:
         )
 
         assert explained == ["vanished"]
-        row = next(r for r in task_history.read_tasks(tmp_path) if r["task_id"] == "vanished")
-        assert row["cause"] == task_log.CAUSE_FAILED
+        row = next(r for r in task_history.read_tasks(tmp_path) if r.task_id == "vanished")
+        assert row.cause == task_log.CAUSE_FAILED
 
 
 class TestRobustness:
@@ -292,7 +293,7 @@ class TestRobustness:
         (task_log.tasks_dir(tmp_path) / "torn.1.exit.json").write_text('{"task_id": "torn"')
 
         rows = task_history.read_tasks(tmp_path)
-        assert [r["task_id"] for r in rows] == ["good"]
+        assert [r.task_id for r in rows] == ["good"]
 
     def test_missing_directory_reads_as_empty(self, tmp_path):
         assert task_history.read_tasks(tmp_path / "nothing-here") == []
@@ -318,8 +319,8 @@ class TestWhatATaskDid:
             eval_flags=("--br-flops", "4", "--br-board-seed", "7"),
         )
         (row,) = task_history.read_tasks(tmp_path)
-        assert row["eval_at"] == "150000000"
-        assert row["what"] == "evaluate @150M seed7"
+        assert row.eval_at == "150000000"
+        assert row.what == "evaluate @150M seed7"
 
     def test_three_seeds_on_one_checkpoint_are_now_distinguishable(self, tmp_path):
         """The exact case that had to be kept in a scratchpad file."""
@@ -333,7 +334,7 @@ class TestWhatATaskDid:
                 eval_at="150000000",
                 eval_flags=("--br-board-seed", seed),
             )
-        assert len({row["what"] for row in task_history.read_tasks(tmp_path)}) == 3
+        assert len({row.what for row in task_history.read_tasks(tmp_path)}) == 3
 
     def test_a_training_task_says_what_it_was_aiming_at(self, tmp_path):
         task_log.write_node_record(
@@ -344,7 +345,7 @@ class TestWhatATaskDid:
             target_iteration="5000000",
         )
         (row,) = task_history.read_tasks(tmp_path)
-        assert row["what"] == "train ->5M"
+        assert row.what == "train ->5M"
 
     def test_a_task_from_before_these_fields_degrades_to_its_op(self, tmp_path):
         """Honest: those records genuinely hold nothing more to show."""
@@ -356,7 +357,7 @@ class TestWhatATaskDid:
             target_iteration="0",
         )
         (row,) = task_history.read_tasks(tmp_path)
-        assert row["what"] == "evaluate"
+        assert row.what == "evaluate"
 
 
 class TestWhichCodeRan:
@@ -384,8 +385,8 @@ class TestWhichCodeRan:
             git_branch="worktree-hybrid-kernels",
         )
         (row,) = task_history.read_tasks(tmp_path)
-        assert row["code_snapshot"] == "code-20260805_111229"
-        assert row["git_branch"] == "worktree-hybrid-kernels"
+        assert row.code_snapshot == "code-20260805_111229"
+        assert row.git_branch == "worktree-hybrid-kernels"
 
     def test_two_worktrees_on_one_dirty_commit_are_distinguishable(self, tmp_path):
         """The case the commit alone cannot answer, which is the normal one."""
@@ -401,9 +402,9 @@ class TestWhichCodeRan:
                 git_branch=branch,
             )
         rows = task_history.read_tasks(tmp_path)
-        assert len({row["git_commit"] for row in rows}) == 1, "same commit — that is the premise"
-        assert len({row["git_branch"] for row in rows}) == 2
-        assert len({row["code_snapshot"] for row in rows}) == 2
+        assert len({row.git_commit for row in rows}) == 1, "same commit — that is the premise"
+        assert len({row.git_branch for row in rows}) == 2
+        assert len({row.code_snapshot for row in rows}) == 2
 
     def test_provenance_survives_a_task_that_died_before_finishing(self, tmp_path):
         """The start record carries it, and that is the only record such a task has."""
@@ -416,8 +417,8 @@ class TestWhichCodeRan:
             git_branch="worktree-vector-cfr",
         )
         (row,) = task_history.read_tasks(tmp_path)
-        assert row["cause"] == "unresolved", "died before its exit record — the case under test"
-        assert row["code_snapshot"] == "code-20260805_111229"
+        assert row.cause == "unresolved", "died before its exit record — the case under test"
+        assert row.code_snapshot == "code-20260805_111229"
 
 
 class TestBundlesAreJustAnotherContainer:
@@ -507,7 +508,7 @@ class TestBundlesAreJustAnotherContainer:
         assert second, "round two found nothing to bundle — the test proves nothing"
         self._bundle(tmp_path, second)
 
-        assert {row["task_id"] for row in task_history.read_tasks(tmp_path)} == {"a", "b"}
+        assert {row.task_id for row in task_history.read_tasks(tmp_path)} == {"a", "b"}
 
     def test_the_bundle_records_that_a_compaction_happened(self, tmp_path):
         """Nothing else does.
@@ -569,5 +570,5 @@ class TestBundlesAreJustAnotherContainer:
         # The node writes again, in the shape it always does.
         _node(tmp_path, "a", "finished", cause=task_log.CAUSE_TIMEOUT, exit_code=124)
 
-        causes = {row["cause"] for row in task_history.read_tasks(tmp_path)}
+        causes = {row.cause for row in task_history.read_tasks(tmp_path)}
         assert task_log.CAUSE_TIMEOUT in causes

@@ -10,7 +10,9 @@ snapshot would contain.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
@@ -26,17 +28,24 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--root", default=".", help="Tree to snapshot.")
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class PushedCodePayload(BaseModel):
+    """The snapshot that was sealed. Its id is what a task executes."""
+
+    op: Literal["push-code"] = "push-code"
+    code_snapshot: str
+
+
+def run(args: argparse.Namespace) -> PushedCodePayload:
     """Build and upload one snapshot; return its id."""
     config = CloudConfig.load()
     snapshot = share.publish_code_snapshot(
         share.share_client(config), config.share_name, Path(args.root), spec.utcnow()
     )
-    return {"op": "push-code", "code_snapshot": snapshot}
+    return PushedCodePayload(code_snapshot=snapshot)
 
 
-def render(payload: dict[str, Any]) -> None:
-    print(payload["code_snapshot"])
+def render(payload: PushedCodePayload) -> None:
+    print(payload.code_snapshot)
 
 
 COMMAND = Command(

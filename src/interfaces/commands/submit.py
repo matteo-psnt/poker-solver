@@ -10,7 +10,7 @@ diverge are how one of them stops being exercised.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command
@@ -143,7 +143,17 @@ def _arm(args: argparse.Namespace) -> str:
     return gitinfo.get_git_branch() or ""
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class SubmitPayload(dispatch.Dispatched):
+    """One queued training task, and what it is aiming at."""
+
+    op: Literal["submit"] = "submit"
+    """The ABSOLUTE iteration target. `train-static` treats it as such, so
+    re-running past it is a no-op -- which is what makes a scheduler retry
+    converge instead of training twice."""
+    target_iteration: int
+
+
+def run(args: argparse.Namespace) -> SubmitPayload:
     """Stage the tree and queue one training task."""
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
@@ -169,11 +179,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             )
         ]
     )
-    return {"op": "submit", "target_iteration": args.to, **payload}
+    return SubmitPayload(target_iteration=args.to, **payload.model_dump(exclude={"op"}))
 
 
-def render(payload: dict[str, Any]) -> None:
-    print(f"Submitted training to {payload['target_iteration']:,} iterations (absolute).")
+def render(payload: SubmitPayload) -> None:
+    print(f"Submitted training to {payload.target_iteration:,} iterations (absolute).")
     dispatch.render_queued(payload)
 
 

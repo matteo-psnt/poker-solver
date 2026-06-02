@@ -14,7 +14,9 @@ wall-clock figure beside them meaningless.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel, Field
 
 from src.engine.solver.vector import BOARD_FREE, HAND_SPACE, KERNELS, SCALAR
 from src.interfaces.cloud.tasks import dispatch, spec
@@ -138,7 +140,25 @@ def _flags(args: argparse.Namespace, kernel: str, derive: int) -> tuple[str, ...
     return tuple(flags)
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class VectorArm(BaseModel):
+    abstraction: str
+    kernel: str
+    derive_boards: int
+
+
+class SubmitVectorPayload(dispatch.Dispatched):
+    """A dispatch, plus WHICH ARMS it queued.
+
+    The arms are the part worth reading back: which abstractions and kernels to
+    compare IS the experiment, and a payload that reported only "3 tasks queued"
+    could not say what was being measured.
+    """
+
+    op: Literal["submit-vector"] = "submit-vector"
+    arms: list[VectorArm] = Field(default_factory=list)
+
+
+def run(args: argparse.Namespace) -> SubmitVectorPayload:
     """Stage the tree once and queue one task per arm."""
     arms = _arms(args)
     payload = dispatch.stage_and_queue(
@@ -154,16 +174,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             for abstraction, kernel, derive in arms
         ]
     )
-    payload["op"] = "submit-vector"
-    payload["arms"] = [{"abstraction": a, "kernel": k, "derive_boards": d} for a, k, d in arms]
-    return payload
+    return SubmitVectorPayload(
+        arms=[VectorArm(abstraction=a, kernel=k, derive_boards=d) for a, k, d in arms],
+        **payload.model_dump(exclude={"op"}),
+    )
 
 
-def render(payload: dict[str, Any]) -> None:
-    print(f"Queued {len(payload['arms'])} vector-sweep arm(s):")
-    for arm in payload["arms"]:
-        derive = f", {arm['derive_boards']:,} boards" if arm["derive_boards"] else ""
-        print(f"  {arm['kernel']:<11} {arm['abstraction']}{derive}")
+def render(payload: SubmitVectorPayload) -> None:
+    print(f"Queued {len(payload.arms)} vector-sweep arm(s):")
+    for arm in payload.arms:
+        derive = f", {arm.derive_boards:,} boards" if arm.derive_boards else ""
+        print(f"  {arm.kernel:<11} {arm.abstraction}{derive}")
     dispatch.render_queued(payload)
 
 

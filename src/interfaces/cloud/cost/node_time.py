@@ -20,6 +20,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import BaseModel
+
 from src.shared import task_history
 
 
@@ -35,7 +37,7 @@ def instant(value: Any) -> datetime | None:
 
 
 def intervals(
-    tasks: list[dict[str, Any]], *, now: datetime
+    tasks: list[task_history.TaskRow], *, now: datetime
 ) -> tuple[list[tuple[datetime, datetime]], int]:
     """One (start, end) per task that ran, plus a count of the ones dropped.
 
@@ -60,12 +62,12 @@ def intervals(
     spans: list[tuple[datetime, datetime]] = []
     unended = 0
     for task in tasks:
-        start = instant(task.get("started_at"))
+        start = instant(task.started_at)
         if start is None:
             continue
-        end = instant(task.get("ended_at"))
+        end = instant(task.ended_at)
         if end is None:
-            if task.get("cause") not in task_history.LIVE_CAUSES:
+            if task.cause not in task_history.LIVE_CAUSES:
                 unended += 1
                 continue
             end = now
@@ -100,9 +102,34 @@ def timeline(spans: list[tuple[datetime, datetime]]) -> list[tuple[datetime, int
     return out
 
 
+class ConcurrencyPoint(BaseModel):
+    at: str
+    running: int
+
+
+class NodeTime(BaseModel):
+    """Node time over a window, and the concurrency series that draws it.
+
+    ``task_hours`` is the integral of concurrency, which equals node-hours while
+    Batch places one task per node. It is a LOWER bound: `unended` counts
+    attempts that started and never recorded an end, which are dropped rather
+    than estimated -- running them to `now` credited four abandoned attempts with
+    455 of 718 node-hours.
+    """
+
+    task_hours: float
+    tasks: int
+    """Attempts that started and never recorded an end: unknown, not zero."""
+    unended: int
+    peak_concurrency: int
+    first_at: str | None = None
+    last_at: str | None = None
+    series: list[ConcurrencyPoint] = []
+
+
 def summarise(
-    tasks: list[dict[str, Any]], *, now: datetime, since: datetime | None = None
-) -> dict[str, Any]:
+    tasks: list[task_history.TaskRow], *, now: datetime, since: datetime | None = None
+) -> NodeTime:
     """Node-time over the window, plus the concurrency series to draw.
 
     ``task_hours`` is the integral of concurrency, which equals node-hours while
@@ -118,12 +145,12 @@ def summarise(
     series = timeline(spans)
     peak = max((count for _, count in series), default=0)
 
-    return {
-        "task_hours": task_seconds / 3600.0,
-        "tasks": len(spans),
-        "unended": unended,
-        "peak_concurrency": peak,
-        "first_at": series[0][0].isoformat() if series else None,
-        "last_at": series[-1][0].isoformat() if series else None,
-        "series": [{"at": when.isoformat(), "running": count} for when, count in series],
-    }
+    return NodeTime(
+        task_hours=task_seconds / 3600.0,
+        tasks=len(spans),
+        unended=unended,
+        peak_concurrency=peak,
+        first_at=series[0][0].isoformat() if series else None,
+        last_at=series[-1][0].isoformat() if series else None,
+        series=[ConcurrencyPoint(at=when.isoformat(), running=count) for when, count in series],
+    )

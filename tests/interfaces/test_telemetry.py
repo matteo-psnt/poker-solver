@@ -299,9 +299,11 @@ class TestTheLogIsReadableAfterRotation:
         rotated = len(records.read_log(recording.with_suffix(".jsonl.1")))
         assert rotated, "nothing rotated — the test proves nothing"
 
-        payload = activity.COMMAND.run(activity.COMMAND.arguments(days=0))
+        # `activity.run`, not `COMMAND.run`: the field is typed for every
+        # command at once, so a subscript on it cannot be checked.
+        payload = activity.run(activity.COMMAND.arguments(days=0))
 
-        assert payload["total_rows"] > rotated
+        assert payload.total_rows > rotated
 
 
 class TestRotation:

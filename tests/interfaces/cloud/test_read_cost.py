@@ -104,8 +104,8 @@ class TestJobsDoesNotPayForHistory:
             _as_client(client), batch.list_jobs(_as_client(client)), want=jobs.is_active
         )
 
-        assert [job["job"] for job in attached] == list(ACCOUNT)
-        assert [job["tasks"] for job in attached if job["job"] != "job-live"] == [[], []]
+        assert [job.job for job in attached] == list(ACCOUNT)
+        assert [job.tasks for job in attached if job.job != "job-live"] == [[], []]
 
     def test_all_still_fetches_everything(self):
         client = FakeBatch(ACCOUNT)
@@ -122,7 +122,7 @@ class TestReconcileAsksAboutOpenQuestionsOnly:
         assert client.get_task_calls == [("job-live", "t3")]
         assert client.list_tasks_calls == []
         assert record is not None
-        assert record["job"] == "job-live"
+        assert record.job == "job-live"
 
 
 class TestDeadKeyTablesAreNotFetched:

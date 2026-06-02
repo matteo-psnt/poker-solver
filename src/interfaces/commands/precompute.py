@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.commands._base import (
     Command,
@@ -34,7 +36,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class PrecomputePayload(BaseModel):
+    """Where a built abstraction landed. NODE-ONLY: no endpoint serves this."""
+
+    op: Literal["precompute"] = "precompute"
+    abstraction_config: str
+    output_dir: str
+
+
+def run(args: argparse.Namespace) -> PrecomputePayload:
     """Precompute a combo abstraction into ``data/combo_abstraction/<name>``."""
     out = services.precompute_abstraction(
         args.config,
@@ -42,17 +52,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         overwrite=args.overwrite,
         progress_file=Path(args.progress_file) if args.progress_file else None,
     )
-    return {
-        "op": "precompute",
-        "abstraction_config": args.config,
-        "output_dir": str(out),
-    }
+    return PrecomputePayload(abstraction_config=args.config, output_dir=str(out))
 
 
-def render(payload: dict[str, Any]) -> None:
+def render(payload: PrecomputePayload) -> None:
     print("Precompute complete.")
-    print(f"  Abstraction: {payload['abstraction_config']}")
-    print(f"  Output:      {payload['output_dir']}")
+    print(f"  Abstraction: {payload.abstraction_config}")
+    print(f"  Output:      {payload.output_dir}")
 
 
 COMMAND = Command(

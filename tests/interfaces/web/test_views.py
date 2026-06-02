@@ -121,7 +121,10 @@ class TestTheJoins:
         shipping every row under `parts` would move the work and keep the bytes
         -- and the bytes are what made this page slow."""
         composed = views.run("run-a")
-        assert composed["parts"]["tasks"]["payload"]["rows"] == []
+        # No `rows` AT ALL, not an empty one: the trimmed part is a
+        # `TasksSummary`, which has no such field for a page to misread.
+        assert "rows" not in composed["parts"]["tasks"]["payload"]
+        assert composed["parts"]["tasks"]["payload"]["source_rows"] == 4
         assert composed["parts"]["tasks"]["payload"]["source_rows"] == len(TASK_ROWS)
         assert len(composed["run_tasks"]) == 2
 
@@ -153,7 +156,10 @@ class TestTheJoins:
         was downloading the whole task log to cross-check their claimed status."""
         composed = views.runs()
         assert composed["task_runs"] == {"t1": "run-a", "t2": "run-b", "t3": "run-a"}
-        assert composed["parts"]["tasks"]["payload"]["rows"] == []
+        # No `rows` AT ALL, not an empty one: the trimmed part is a
+        # `TasksSummary`, which has no such field for a page to misread.
+        assert "rows" not in composed["parts"]["tasks"]["payload"]
+        assert composed["parts"]["tasks"]["payload"]["source_rows"] == 4
 
     def test_a_task_with_no_run_is_left_out_of_the_projection(self, answers):
         """Mapped to null it would look like a run named `null` that has tasks."""

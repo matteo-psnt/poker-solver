@@ -26,6 +26,23 @@ The console reimplements nothing.
   by `npm run build`) → `api/types.ts`, which only names them. The hand-written
   Zod this replaced disagreed with `cancel` about `job_id`/`task_id`, so the
   console terminated a task and then reported that it had failed.
+- **A payload's shape is declared by the command that PRODUCES it, and
+  `contract.py` imports it.** `run()` returns a model; `render()` takes the same
+  model. Measured 08-13: while `contract.py` restated the shape, renaming a
+  REQUIRED field in `jobs.py` passed 1061 tests — both the model and the
+  `PAYLOADS` fixture were hand-written and drifted together. `ty` (pre-commit)
+  catches it now. `_base.Payload` is still `BaseModel | dict[str, Any]` while
+  commands are converted; the last conversion collapses it to `BaseModel`.
+- **Never re-pass a value equal to a command's parser default.**
+  `Command.invoke` fills every one from `add_arguments`, so `rate=""` or
+  `tasks_dir=None` at a call site is a second declaration that can drift. There
+  is no guard test — none of the 25 that existed had drifted — so this is the
+  rule. `/api/box` spelling `action="status"` is the deliberate exception: those
+  three endpoints differ in exactly one argument and read as a set.
+- **A trimmed view part gets its own TYPE.** `views._summarised` returns a
+  `TasksSummary`, which has no `rows` field, so TypeScript cannot offer one. One
+  model describing both the full log and the stub meant `parts.tasks.payload.rows`
+  was `[]` on a trimmed part and correct about nothing.
 - **`response_model` is for OpenAPI only.** FastAPI skips validation for a
   handler returning a `Response`, and every endpoint returns `PayloadResponse`
   to keep `jsonio.dumps`. Enforcement is `test_contract.py`.

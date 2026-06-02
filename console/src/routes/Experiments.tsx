@@ -121,7 +121,7 @@ function Arms({ report, armRuns }: { report: Report; armRuns: Map<string, RunSum
             // A blocked pairing is NOT "no difference". Rendering it as a dash
             // would claim a comparison that never happened, which is the one
             // reading of this table that could move a baseline wrongly.
-            const blocked = arm.vs_control_blocked.length > 0;
+            const blocked = (arm.vs_control_blocked ?? []).length > 0;
             return (
               <tr key={arm.run_id} className={cn(control && "bg-white/[0.03]")}>
                 <Td>
@@ -139,7 +139,7 @@ function Arms({ report, armRuns }: { report: Report; armRuns: Map<string, RunSum
                   {count(arm.checkpoint_iteration)}
                 </Td>
                 <Td right>{mbb(arm.exploitability_mbb, arm.std_error_mbb)}</Td>
-                <Td right title={blocked ? arm.vs_control_blocked.join("; ") : undefined}>
+                <Td right title={blocked ? (arm.vs_control_blocked ?? []).join("; ") : undefined}>
                   {blocked ? (
                     <span className="text-amber-400">unpaired</span>
                   ) : arm.vs_control_mbb == null ? (

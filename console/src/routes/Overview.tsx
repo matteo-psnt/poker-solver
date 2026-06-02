@@ -104,8 +104,23 @@ export function Overview() {
       >
         {autoscaleData && (
           <div className="p-3">
+            {/* Batch reports the CAUSE as a code plus named values, not a
+                sentence. This rendered `{autoscaleData.error}` for as long as
+                both existed — the contract said `str`, the command has always
+                sent an object, and React throws on an object child. It only
+                never fired because the formula has not errored since. */}
             {autoscaleData.error && (
-              <p className="mb-2 font-mono text-[12px] text-[#E0655C]">{autoscaleData.error}</p>
+              <div className="mb-2 font-mono text-[12px] text-[#E0655C]">
+                <p>{autoscaleData.error.code}</p>
+                {autoscaleData.error.message && (
+                  <p className="opacity-80">{autoscaleData.error.message}</p>
+                )}
+                {Object.entries(autoscaleData.error.values).map(([name, value]) => (
+                  <p key={name} className="opacity-70">
+                    {name}: {value}
+                  </p>
+                ))}
+              </div>
             )}
             <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] text-[var(--fg-muted)]">
               {autoscaleData.variables.map((variable) => (

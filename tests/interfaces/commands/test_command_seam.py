@@ -69,6 +69,7 @@ class TestInvokeBuildsArgumentsFromTheParser:
 
     def test_overrides_win(self):
         payload = ECHO.invoke(name="x", limit=3, all=True)
+        assert isinstance(payload, dict)
         assert (payload["limit"], payload["all"]) == (3, True)
 
     def test_an_unknown_argument_is_refused_not_ignored(self):

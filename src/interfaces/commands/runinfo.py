@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.interfaces.commands._base import (
     Command,
@@ -35,7 +34,26 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--last", type=int, default=8, help="Checkpoints to show (0 = all).")
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class RunInfoPayload(services.RunDigest):
+    """Everything recorded about one run, joined into one view.
+
+    Subclasses the digest the service already produces. What this adds is what
+    the SURFACE needs and the digest does not carry: the op tag, the truncation
+    of `progress` to its tail, and the count of what was truncated.
+
+    `attempts` is renamed to `training_tasks` here because the digest's word is
+    about the task log and the reader's question is about the run.
+    """
+
+    op: Literal["runinfo"] = "runinfo"
+    """TRUNCATED to `--last`. `progress` with `--last 0` is the full series --
+    the console's chart drew 8 of 112 checkpoints from this field and looked
+    like a complete history, which is why the total travels beside it."""
+    total_progress_rows: int = 0
+    training_tasks: int | None = None
+
+
+def run(args: argparse.Namespace) -> RunInfoPayload:
     """Everything recorded about one run, joined into one view.
 
     The evidence is spread across artifacts written by four subsystems; this is
@@ -48,34 +66,35 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             tier_index=args.tier,
             tasks_dir=Path(args.tasks_dir) if args.tasks_dir else None,
         )
-    payload = dataclasses.asdict(digest)
-    payload["op"] = "runinfo"
+    fields = digest.model_dump()
     # Trimmed to the tail: a 30M run has thirty checkpoints and the reader wants
     # the shape, not the log.
-    payload["progress"] = digest.progress[-args.last :] if args.last > 0 else digest.progress
-    payload["total_progress_rows"] = len(digest.progress)
-    payload["training_tasks"] = payload.pop("attempts", None)
-    return payload
-
-
-def render(payload: dict[str, Any]) -> None:
-    tag = ""
-    if payload.get("experiment_id"):
-        tag = f"  {payload['experiment_id']}/{payload.get('arm') or '-'}"
-    print(f"{payload['run_id']}  {payload['config_name']}{tag}")
-
-    commit = (payload.get("git_commit") or "unknown")[:8]
-    dirty = " (dirty)" if payload.get("git_dirty") else ""
-    abstraction = (payload.get("card_abstraction_hash") or "none")[:16]
-    print(f"  git {commit}{dirty}   abstraction {abstraction}   status {payload['status']}")
-    print(
-        f"  {payload['iterations']:,} iterations over {payload['training_tasks']} training task(s), "
-        f"{payload['runtime_seconds']:.0f}s compute"
+    fields["progress"] = digest.progress[-args.last :] if args.last > 0 else digest.progress
+    return RunInfoPayload(
+        **fields,
+        total_progress_rows=len(digest.progress),
+        training_tasks=digest.attempts,
     )
 
-    rows = payload.get("progress") or []
+
+def render(payload: RunInfoPayload) -> None:
+    tag = ""
+    if payload.experiment_id:
+        tag = f"  {payload.experiment_id}/{payload.arm or '-'}"
+    print(f"{payload.run_id}  {payload.config_name}{tag}")
+
+    commit = (payload.git_commit or "unknown")[:8]
+    dirty = " (dirty)" if payload.git_dirty else ""
+    abstraction = (payload.card_abstraction_hash or "none")[:16]
+    print(f"  git {commit}{dirty}   abstraction {abstraction}   status {payload.status}")
+    print(
+        f"  {payload.iterations:,} iterations over {payload.training_tasks} training task(s), "
+        f"{payload.runtime_seconds:.0f}s compute"
+    )
+
+    rows = payload.progress or []
     if rows:
-        total = payload.get("total_progress_rows", len(rows))
+        total = payload.total_progress_rows
         print(f"\n  progress  ({total} checkpoints, last {len(rows)})")
         print(f"    {'iteration':>12}{'coverage':>10}{'visits':>9}{'it/s':>8}")
         for row in rows:
@@ -85,28 +104,26 @@ def render(payload: dict[str, Any]) -> None:
                 f"{_num(row.get('mean_visits_per_touched'), '{:.1f}'):>9}"
                 f"{_num(row.get('iters_per_sec'), '{:.0f}'):>8}"
             )
-        flat = payload.get("coverage_flat_from")
+        flat = payload.coverage_flat_from
         if flat is not None:
             print(f"    coverage flat from {flat:,}")
 
-    curve = payload.get("curve") or {}
-    points = curve.get("points") or []
+    points = payload.curve.points
     if points:
-        print(f"\n  curve  ({curve.get('tier') or 'untiered'})")
+        print(f"\n  curve  ({payload.curve.tier or 'untiered'})")
         for point in points:
             print(
-                f"    {point['iteration']:>12,}  {point['exploitability_mbb']:>9.1f} mbb"
-                f"  (± {point['std_error_mbb']:.1f})"
+                f"    {point.iteration:>12,}  {point.exploitability_mbb:>9.1f} mbb"
+                f"  (± {point.std_error_mbb:.1f})"
             )
 
-    tasks = payload.get("tasks") or []
+    tasks = payload.tasks or []
     if tasks:
         print(f"\n  tasks  ({len(tasks)})")
         for task in tasks:
-            attempt = f"#{task.get('attempt', 1)}"
-            print(f"    {task['task_id']:<28} {attempt:<4} {task['cause']}")
+            print(f"    {task.task_id:<28} {f'#{task.attempt}':<4} {task.cause}")
 
-    gaps = payload.get("gaps") or []
+    gaps = payload.gaps or []
     print("\n  gaps" if gaps else "\n  no gaps: scored, complete, reproducible")
     for gap in gaps:
         print(f"    - {gap}")

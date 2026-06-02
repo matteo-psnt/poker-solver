@@ -10,7 +10,7 @@ free, safe and instant.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.tasks import batch
@@ -24,27 +24,38 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver autoscale-check`. It takes none."""
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:  # noqa: ARG001
+class AutoscalePayload(batch.AutoscaleResult):
+    """The deployed formula, evaluated against the live pool.
+
+    `error` is a FIELD, not a failed request: Batch evaluates the formula and
+    reports that it did not compute, which is the answer to "why is the pool not
+    growing" and must reach the screen rather than blanking the panel.
+    """
+
+    op: Literal["autoscale-check"] = "autoscale-check"
+    pool_id: str
+
+
+def run(args: argparse.Namespace) -> AutoscalePayload:  # noqa: ARG001
     """Evaluate the deployed formula against the live pool."""
     config = CloudConfig.load()
     result = batch.evaluate_autoscale(
         batch.client(config), config.pool_id, config.autoscale_formula
     )
-    return {"op": "autoscale-check", "pool_id": config.pool_id, **result}
+    return AutoscalePayload(pool_id=config.pool_id, **result.model_dump())
 
 
-def render(payload: dict[str, Any]) -> None:
-    error = payload["error"]
-    if error is None:
+def render(payload: AutoscalePayload) -> None:
+    if payload.error is None:
         print("  no error")
     else:
-        print(f"  ERROR: {error['code']}")
-        if error["message"]:
-            print(f"    {error['message']}")
-        for name, value in error["values"].items():
+        print(f"  ERROR: {payload.error.code}")
+        if payload.error.message:
+            print(f"    {payload.error.message}")
+        for name, value in payload.error.values.items():
             print(f"    {name}: {value}")
         print("  (variables below are PARTIAL — the formula did not fully evaluate)")
-    for variable in payload["variables"]:
+    for variable in payload.variables:
         print(f"    {variable}")
 
 

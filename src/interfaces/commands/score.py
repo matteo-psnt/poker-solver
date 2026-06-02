@@ -14,7 +14,9 @@ a node holds one comfortably.
 from __future__ import annotations
 
 import argparse
-from typing import Any
+from typing import Literal
+
+from pydantic import Field
 
 from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command
@@ -76,7 +78,19 @@ def _passthrough(flags: list[str]) -> tuple[str, ...]:
     return tuple(flags[1:] if flags and flags[0] == "--" else flags)
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class ScorePayload(dispatch.Dispatched):
+    """One scoring task per ladder rung, all against one code snapshot."""
+
+    op: Literal["score"] = "score"
+    run_id: str
+    method: str
+    """The rungs covered, one task each -- they are independent, so Batch is the
+    scheduler. STRINGS, not ints: an empty one means the latest checkpoint, which
+    is a rung the ladder cannot name in advance."""
+    rungs: list[str] = Field(default_factory=list)
+
+
+def run(args: argparse.Namespace) -> ScorePayload:
     """Stage the tree and queue one scoring task per rung."""
     rungs = _rungs(args.at)
     payload = dispatch.stage_and_queue(
@@ -93,12 +107,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             for rung in rungs
         ]
     )
-    return {"op": "score", "run_id": args.run, "method": args.method, "rungs": rungs, **payload}
+    return ScorePayload(
+        run_id=args.run,
+        method=args.method,
+        rungs=rungs,
+        **payload.model_dump(exclude={"op"}),
+    )
 
 
-def render(payload: dict[str, Any]) -> None:
-    rungs = ", ".join(rung or "latest" for rung in payload["rungs"])
-    print(f"Scoring {payload['run_id']} with {payload['method']} at: {rungs}")
+def render(payload: ScorePayload) -> None:
+    rungs = ", ".join(rung or "latest" for rung in payload.rungs)
+    print(f"Scoring {payload.run_id} with {payload.method} at: {rungs}")
     dispatch.render_queued(payload)
 
 
