@@ -29,15 +29,17 @@ describe("dealing a board", () => {
     expect(onChange).toHaveBeenCalledWith("AsKd7c");
   });
 
-  it("appends to the CARDS, not to whatever is in the field", () => {
-    // A half-typed paste used to be carried along: `"AsK"` plus a click wrote
-    // `"AsK7c"`, which the server refuses as not a whole number of cards.
+  it("appends to the CARDS, not to the raw search param", () => {
+    // The board comes out of the URL, which anyone can hand-edit and which
+    // outlives the page that wrote it. Appending to the raw text carried the
+    // junk along: `"AsK"` plus a click wrote `"AsK7c"`, which the server
+    // refuses as not a whole number of cards.
     const onChange = pick("AsK");
     fireEvent.click(screen.getByTitle("7c"));
     expect(onChange).toHaveBeenCalledWith("As7c");
   });
 
-  it("canonicalises a pasted board on the next click", () => {
+  it("canonicalises a spaced board on the next click", () => {
     const onChange = pick("As Kd");
     fireEvent.click(screen.getByTitle("7c"));
     expect(onChange).toHaveBeenCalledWith("AsKd7c");

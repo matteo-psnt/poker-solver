@@ -17,8 +17,9 @@
  *
  * The server remains the authority on whether a board is legal. `readBoard` is
  * lenient in exactly the way `parse_board` is — spaces and commas optional —
- * so that pasting a board someone sent you works; anything it cannot read it
- * drops, and the request that follows gets the refusal in the server's words.
+ * because the board arrives from a URL, which anyone can hand-edit and which
+ * outlives the page that wrote it. Anything it cannot read it drops, and the
+ * request that follows gets the refusal in the server's own words.
  */
 
 /** High to low, matching the chart's row order so the two read the same way. */
@@ -94,8 +95,8 @@ export function parseCard(text: string): ParsedCard | null {
 export function readBoard(board: string): ParsedCard[] {
   const text = board.replace(/[\s,]/g, "");
   const cards: ParsedCard[] = [];
-  // `+ 1 <` rather than `<`: a trailing half-card is someone still typing, not
-  // a card, and treating it as one makes the last slot flicker on every keypress.
+  // `+ 1 <` rather than `<`: a lone trailing character is not a card, and a
+  // truncated URL is the ordinary way one arrives.
   for (let index = 0; index + 1 < text.length; index += 2) {
     const card = parseCard(text.slice(index, index + 2));
     if (card) cards.push(card);

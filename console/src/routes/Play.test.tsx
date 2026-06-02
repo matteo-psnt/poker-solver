@@ -142,6 +142,51 @@ describe("the table", () => {
   });
 });
 
+/**
+ * What the bot just did, at the table.
+ *
+ * `POST /action` auto-plays the bot and returns, so its move never had a moment
+ * of its own on screen: the pot number moved and nothing else did, and the only
+ * record was a line two panels down. Reading the log on every hand is exactly
+ * the cost this page cannot afford.
+ */
+describe("what just happened", () => {
+  it("draws the bot's move in front of it", async () => {
+    await deal();
+    const chips = screen.getAllByTestId("did").map((chip) => chip.textContent);
+    // `r6` at a big blind of 2, and the caveat travels with the move.
+    expect(chips).toEqual(["raise to 3bbuntrained"]);
+  });
+
+  it("names the street, which the board only implies — and preflop not at all", async () => {
+    await deal();
+    // Twice: once at the table, once as the log's street heading. One would
+    // mean the table lost its label, which is the whole point preflop, where
+    // there is no board to infer it from.
+    expect(screen.getAllByText("Preflop")).toHaveLength(2);
+  });
+
+  it("still answers the question after the street has turned, and names the street", async () => {
+    // You raise, the bot calls, the flop comes. Scoped to the current street
+    // this went blank at exactly the moment you were asking what the bot did —
+    // which is the most common shape a hand has.
+    const onFlop = { ...HAND, street: "Flop", board: ["As", "Kd", "7c"] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).startsWith("/api/blueprint/run")
+          ? new Response(JSON.stringify(RUN), { status: 200 })
+          : new Response(JSON.stringify(onFlop), { status: 200 }),
+      ),
+    );
+    await deal();
+    const chips = screen.getAllByTestId("did").map((chip) => chip.textContent);
+    // Carried, but labelled with the street it was taken on, so it cannot read
+    // as something the bot did on the flop now showing.
+    expect(chips).toEqual(["raise to 3bbPreflopuntrained"]);
+  });
+});
+
 describe("the keys", () => {
   it("sends the action a digit names, in menu order", async () => {
     await deal();
