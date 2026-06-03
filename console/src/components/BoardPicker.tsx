@@ -6,39 +6,22 @@ import { useState } from "react";
 /**
  * Choosing the runout, by clicking cards.
  *
- * This was a 36-pixel text field that took `"2c7d9h"`. That is the right thing
- * for the URL to carry and the wrong thing to ask a person for: you have to know
- * the spelling, you get no help with which cards are already out, and a typo
- * comes back as a 422 that greys the panel rather than as a card that will not
- * take. Postflop was effectively unreachable — which is most of the game.
+ * Slots are grouped flop/turn/river so the board has a shape before it has cards.
+ * The grouping is naming, not game logic -- the server decides what a line reaches.
  *
- * Three things make it work, and each is a fix for something specific:
- *
- *   SLOTS, grouped flop/turn/river, so the board has a shape before it has
- *   cards and "this line needs three" is answerable by looking. The grouping is
- *   naming, not game logic — the server decides what a line reaches.
- *
- *   The slots are also the WAY IN. There was a "pick cards" button beside them,
- *   which is a control standing in for the thing it edits: you point at the
- *   empty turn to say "deal a turn", so that is what takes the click. One
- *   gesture covers dealing and re-dealing, because truncating to a slot at or
- *   past the end of the board is a no-op and truncating to a filled one is
- *   exactly what changing that card means.
- *
- *   `live`, so a board longer than the line uses is visibly longer. Replay
- *   consumes cards street by street and IGNORES the surplus, which is what lets
- *   you hold one runout fixed while walking back up the line. Left undrawn, that
- *   silently answers a turn question with a river card on screen.
- *
- * There is no text field. One was kept at first, on the reasoning that a board
- * someone sends you arrives as text — but the thing they send you is a LINK,
- * and `board` is a search param, so the URL already is the paste target. A
- * second way in bought nothing and put the spelling back on screen.
- *
- * Clicking a filled slot clears IT AND EVERYTHING AFTER, rather than leaving a
- * hole. A board is an ordered deal, so there is no such thing as a river with no
- * turn, and the alternative — shifting later cards forward — silently changes
+ * The slots are also the way in: you point at the empty turn to say "deal a turn".
+ * One gesture covers dealing and re-dealing, because truncating to a slot at or
+ * past the end is a no-op and truncating to a filled one is what changing that
+ * card means. Clicking a filled slot clears IT AND EVERYTHING AFTER, because a
+ * board is an ordered deal and shifting later cards forward would silently change
  * which street a card was dealt on.
+ *
+ * `live` marks the cards the line does not reach: replay consumes cards street by
+ * street and IGNORES the surplus, which is what lets you hold one runout fixed
+ * while walking back up the line. Left undrawn, a turn question is answered with a
+ * river card on screen.
+ *
+ * No text field. `board` is a search param, so the URL is already the paste target.
  */
 export function BoardPicker({
   board,

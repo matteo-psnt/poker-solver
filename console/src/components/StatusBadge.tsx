@@ -1,26 +1,20 @@
 /**
  * State to colour, over the ONE vocabulary this file still owns.
  *
- * It used to own three, and two of them were Azure's. `shortState`,
- * `taskOutcome` and `exitMeaning` lived here to undo the fact that `/api/jobs`
- * shipped `"BatchTaskState.ACTIVE"` to the browser while `/api/tasks` shipped
- * `"active"` — the same concept, two vocabularies, from two endpoints of one
- * server. The server now classifies once (`BatchTask.phase`, `.outcome`,
- * `.exit_meaning`, from `src/shared/task_states.py`) and this file was deleted
- * down to what genuinely belongs in a UI.
+ * The server classifies Azure's states once (`BatchTask.phase`, `.outcome`,
+ * `.exit_meaning`, from `src/shared/task_states.py`); this file must not undo that.
  *
- * What remains is the TASK LOG's own causes, and they stay here on purpose:
- * they are words the node wrote into records on the share, `TERMINAL_CAUSES`
- * gates reconciliation against them, and renaming one at the source would make
- * every historical task read as unresolved. So they are renamed for DISPLAY,
- * which is a UI decision and is the only kind this file should be making.
+ * What remains is the TASK LOG's own causes, and they stay here on purpose: they
+ * are words the node wrote into records on the share, `TERMINAL_CAUSES` gates
+ * reconciliation against them, and renaming one at the source would make every
+ * historical task read as unresolved. So they are renamed for DISPLAY, which is
+ * the only kind of decision this file should be making.
  *
- * Two distinctions inside that vocabulary are load-bearing and were both
- * learned the hard way:
+ * Two distinctions inside that vocabulary are load-bearing:
  *
- *   `timeout` is NOT `failed` — an 8h wall-clock ceiling firing is information.
- *   `cancelled` is NOT `failed` — exit -9 there reads as a crash and is not
- *   one; Batch reports it as `TaskEnded` / UserError.
+ *   `timeout` is NOT `failed` -- an 8h wall-clock ceiling firing is information.
+ *   `cancelled` is NOT `failed` -- exit -9 there reads as a crash and is not one;
+ *   Batch reports it as `TaskEnded` / UserError.
  */
 import type { Phase } from "@/api/types";
 import { cn } from "@/lib/utils";

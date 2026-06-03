@@ -23,22 +23,16 @@ const rootRoute = createRootRoute({ component: Shell });
 /**
  * Six destinations, one per SUBJECT.
  *
- * There were fourteen, one per command, because the nav was the CLI's `COMMANDS`
- * grouping wearing a sidebar — and `Shell.tsx` said so, on the reasoning that
- * someone who knows one surface then knows the other. That is a good property
- * for a reference and the wrong organising idea for a console: argv has no
- * structure but a list of verbs, and a screen does. `CONSOLE-DESIGN.md` asked
- * for five; the count reached fourteen because every new command arrived with a
- * page, and nothing said that was a decision.
+ * A console is organised by what you are looking AT; the command line is organised
+ * by what you can DO, because argv offers no other structure. One page per command
+ * reached fourteen destinations, and answering *is this run any good* crossed
+ * three of them -- Runs, RunDetail, Evals, Cost. That is one subject, so it is one
+ * page.
  *
- * Answering one question used to cross three of them — *is this run any good*
- * meant Runs, then RunDetail, then Evals (every run's scores in one flat list,
- * matched by eye), then Cost. That is one subject, so it is now one page.
- *
- * What survived as its own destination did so on the same test: is this a place
- * you GO, or a follow-up you arrive at? Tasks stays, because "why did that die"
- * is a question people start with — the run log cannot record a death, and the
- * task account is the only thing that can.
+ * The test each survivor passed: is this a place you GO, or a follow-up you arrive
+ * at? Tasks stays, because "why did that die" is a question people start with --
+ * the run log cannot record a death, and the task account is the only thing that
+ * can. An eval is not: it belongs to the run it scored.
  */
 const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: Overview }),

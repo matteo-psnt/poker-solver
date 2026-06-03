@@ -1,25 +1,19 @@
 /**
  * Cards as a person sees them, from the spelling the wire uses.
  *
- * A card arrives as `Card.__repr__` writes it — `"Ah"`, `"Td"`, `"2c"` — and
+ * A card arrives as `Card.__repr__` writes it -- `"Ah"`, `"Td"`, `"2c"` -- and
  * that spelling is the ONLY one `parse_board` reads back, so it stays canonical
- * everywhere: in the URL, in the picker, in a bookmark. This module never
- * changes it; it only says what a rank and a suit should LOOK like.
+ * everywhere: in the URL, in the picker, in a bookmark. This module never changes
+ * it; it only says what a rank and a suit should LOOK like.
  *
- * Four colours, not two
- * ---------------------
- * A two-colour deck is right at a physical table, where you hold two cards and
- * can see both suits at a glance. It is wrong on a screen showing five board
- * cards beside two hole cards, where "is the flush draw live" is a question the
- * reader should answer by colour instead of by reading seven glyphs. Every
- * solver UI is four-colour for that reason, and the chart beside this one
- * already encodes meaning in colour, so the eye is doing that work anyway.
+ * Four colours, because "is the flush draw live" should be answerable by colour
+ * rather than by reading seven glyphs across five board cards and two hole cards.
  *
  * The server remains the authority on whether a board is legal. `readBoard` is
- * lenient in exactly the way `parse_board` is — spaces and commas optional —
- * because the board arrives from a URL, which anyone can hand-edit and which
- * outlives the page that wrote it. Anything it cannot read it drops, and the
- * request that follows gets the refusal in the server's own words.
+ * lenient in exactly the way `parse_board` is -- spaces and commas optional --
+ * because the board arrives from a URL, which anyone can hand-edit. Anything it
+ * cannot read it drops, and the request that follows gets the refusal in the
+ * server's own words.
  */
 
 /** High to low, matching the chart's row order so the two read the same way. */

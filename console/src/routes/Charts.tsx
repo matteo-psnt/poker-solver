@@ -12,28 +12,16 @@ import { useMemo, useState } from "react";
 const route = getRouteApi("/blueprint");
 
 /**
- * The chart, as the thing the page is FOR.
+ * The chart, as the thing the page is FOR: the grid is the page, the line and the
+ * board sit in one bar above it, everything else is a rail beside it.
  *
- * It was a 13x13 grid in a `minmax(0,1fr)` column beside a 220px sidebar,
- * inside a padded panel, under two other panels — so the object you opened the
- * page to read got about a third of the screen and the controls got the rest.
- * Here the grid is the page: the line and the board sit in one bar above it,
- * everything else is a rail beside it, and the grid takes what is left.
+ * **The spot is in the URL.** `path`, `board` and `average` are search params, not
+ * `useState`, which is what makes a bookmarked spot the spot it was and lets you
+ * send someone one.
  *
- * **The spot is in the URL.** The old page's own docstring said a spot is
- * addressed by its line so "a bookmarked spot stays the spot it was" — but
- * `path`, `board` and `average` were all `useState`, so nothing on it was
- * bookmarkable or shareable at all. They are search params now, which is what
- * makes that sentence true and what lets you send someone a spot.
- *
- * Postflop was unreachable in practice
- * ------------------------------------
- * Every line past the preflop needs a board, and replay refuses without one —
- * *"This line reaches Flop and needs 3 board cards, but 0 were given."* That
- * refusal was rendered by `Panel`'s error slot, so the ordinary act of clicking
- * "call" turned the page red and said **unavailable**, beside a text field
- * asking for a spelling. The refusal is not a fault: it is the page asking a
- * question, and it is shown here as one, with the deck open under it.
+ * Every line past the preflop needs a board and replay refuses without one. That
+ * refusal is not a fault -- it is the page asking a question, and it is shown as
+ * one with the deck open under it.
  */
 export function Charts() {
   const { path, board, average } = route.useSearch();
@@ -130,25 +118,20 @@ export function Charts() {
 }
 
 /**
- * A refusal about the BOARD, rather than a fault — and the server's words for it.
+ * A refusal about the BOARD, rather than a fault -- and the server's words for it.
  *
- * *"This line reaches Flop and needs 3 board cards, but 0 were given."* Both
- * facts a reader needs are already in that sentence, so it is shown rather than
- * paraphrased: a second copy here would be a second thing to keep true when the
- * streets or the wording move.
+ * *"This line reaches Flop and needs 3 board cards, but 0 were given."* Both facts
+ * a reader needs are in that sentence, so it is shown rather than paraphrased: a
+ * copy here is a second thing to keep true when the streets or the wording move.
  *
- * The discriminator is that the message mentions a CARD. Every board refusal
- * does — too few for the line, `'Ax' is not a card`, `repeats a card`, not a
- * whole number of them — and no path refusal does: those name a token and list
- * what was on offer, and they mean a bookmark that outlived its action model,
- * which IS a fault worth greying the panel for. Narrower matching left the typo
- * refusals as **unavailable:**, which is the same failure this page was fixed
- * for, reachable through the paste field.
+ * The discriminator is that the message mentions a CARD. Every board refusal does
+ * -- too few for the line, `'Ax' is not a card`, `repeats a card` -- and no path
+ * refusal does: those name a token and list what was on offer, and they mean a
+ * bookmark that outlived its action model, which IS worth greying the panel for.
  *
- * Recognised by matching, the technique `BoxControl` uses for "no blueprint
- * host". The alternative — working out client-side which street a line reaches,
- * or which cards are left — is engine logic, and the console does not get to
- * hold a second copy of the rules.
+ * Recognised by matching, as `BoxControl` does for "no blueprint host". Working out
+ * client-side which street a line reaches is engine logic, and the console does not
+ * get to hold a second copy of the rules.
  */
 function boardRefusal(error: unknown): string | null {
   if (!(error instanceof ApiError) || error.status !== 422) return null;
