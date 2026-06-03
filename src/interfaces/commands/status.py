@@ -125,17 +125,34 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-PANEL_RENDERERS: dict[str, Any] = {
-    "pool": pool_status.render,
-    "jobs": jobs.render,
-    "tasks": tasks.render,
-}
-
 PANEL_TITLES: dict[str, str] = {
     "pool": "POOL",
     "jobs": "BATCH",
     "tasks": "TASKS",
 }
+
+
+def _render_panel(name: str, payload: dict[str, Any]) -> None:
+    """Hand one panel to the command that owns it, as that command's model.
+
+    Spelled out rather than looked up in a table, and the table is what this
+    replaced. `PANEL_RENDERERS` was a ``dict[str, Any]``, so when the panel
+    renderers were converted to take models the checker could not see that this
+    was still passing them the dict `_compose` produces -- `status` crashed on
+    its first panel and `ty` had nothing to say. Written this way each call is
+    checked against the renderer's own parameter type.
+
+    Re-validating rather than keeping the model is deliberate: `gather` is the
+    entry point for any surface, and `--json` consumers want the payload, so the
+    fan-out dumps. Rebuilding here costs one validation per panel per refresh
+    and keeps exactly one shape crossing that seam.
+    """
+    if name == "pool":
+        pool_status.render(pool_status.PoolPayload.model_validate(payload))
+    elif name == "jobs":
+        jobs.render(jobs.JobsPayload.model_validate(payload))
+    elif name == "tasks":
+        tasks.render(tasks.TasksPayload.model_validate(payload))
 
 
 def _render_once(payload: dict[str, Any]) -> None:
@@ -152,7 +169,7 @@ def _render_once(payload: dict[str, Any]) -> None:
         if panel["error"]:
             print(f"  unavailable: {panel['error']}")
             continue
-        PANEL_RENDERERS[name](panel["payload"])
+        _render_panel(name, panel["payload"])
 
 
 def render(payload: dict[str, Any]) -> None:
