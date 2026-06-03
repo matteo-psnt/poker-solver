@@ -32,20 +32,9 @@ class PreflopHandClasses:
         self.rank_values = {rank: 14 - idx for idx, rank in enumerate(self.RANKS)}
 
     def get_hand_string(self, hole_cards: tuple[Card, Card]) -> str:
-        """
-        Get canonical hand string for hole cards.
+        """Canonical hand string for two hole cards: "AKs", "AKo", "77", "72o".
 
-        Args:
-            hole_cards: Tuple of two cards
-
-        Returns:
-            Hand string (e.g., "AKs", "72o", "TT")
-
-        Examples:
-            (A♠, K♠) -> "AKs"
-            (A♠, K♥) -> "AKo"
-            (7♦, 7♣) -> "77"
-            (2♥, 7♣) -> "72o"  # Lower rank first for offsuit
+        Offsuit hands put the lower rank first.
         """
         c1, c2 = hole_cards
 
@@ -72,21 +61,11 @@ class PreflopHandClasses:
         return f"{high}{low}{suffix}"
 
     def get_hand_index(self, hole_cards: tuple[Card, Card]) -> int:
-        """
-        Get unique index (0-168) for a hand.
+        """Unique index 0-168 for a hand, for array indexing in precomputation.
 
-        Useful for array indexing in precomputation.
-
-        Args:
-            hole_cards: Tuple of two cards
-
-        Returns:
-            Index from 0 to 168
-
-        Ordering:
-            0-12: Pairs (AA=0, KK=1, ..., 22=12)
-            13-90: Suited hands (AKs=13, AQs=14, ..., 32s=90)
-            91-168: Offsuit hands (AKo=91, AQo=92, ..., 32o=168)
+        0-12    pairs (AA=0, KK=1, ..., 22=12)
+        13-90   suited (AKs=13, AQs=14, ..., 32s=90)
+        91-168  offsuit (AKo=91, AQo=92, ..., 32o=168)
         """
         hand_str = self.get_hand_string(hole_cards)
 
@@ -110,15 +89,7 @@ class PreflopHandClasses:
 
     @staticmethod
     def get_all_hands() -> list[str]:
-        """
-        Get all 169 canonical hand strings.
-
-        Returns:
-            List of hand strings in order
-
-        Example:
-            ["AA", "KK", "QQ", ..., "22", "AKs", "AQs", ..., "32s", "AKo", "AQo", ..., "32o"]
-        """
+        """All 169 canonical hand strings, in :meth:`get_hand_index` order."""
         ranks = PreflopHandClasses.RANKS
         pairs = [f"{rank}{rank}" for rank in ranks]
         suited = [f"{high}{low}s" for i, high in enumerate(ranks) for low in ranks[i + 1 :]]
