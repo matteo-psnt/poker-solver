@@ -1,19 +1,19 @@
 """Depth-limited best-response lookahead scorer for the HUNL LBR exploiter.
 
 The myopic scorer (one-step check/call-to-showdown pot arithmetic) misranks
-candidates: measured on both weak and converged blueprints, widening the menu
-made the exploiter *worse* because the argmax kept picking overestimated
-actions. This scorer replaces the continuation model with a small expectimax
-walk **against the blueprint's actual policy** — opponent nodes branch over the
-blueprint's per-combo action distribution (Bayes-updating the belief per
-branch), exploiter nodes take the max over their on-tree menu, and leaves are
-valued by check-down equity against the posterior range. It is deliberately
-NOT a CFR re-solve: an equilibrium solve assumes a counter-adapting opponent
-and systematically underestimates how exploitable the fixed blueprint is.
+candidates: on both weak and converged blueprints, widening the menu made the
+exploiter *worse*, because the argmax kept picking overestimated actions. This
+replaces the continuation model with a small expectimax walk **against the
+blueprint's actual policy** -- opponent nodes branch over the blueprint's
+per-combo action distribution (Bayes-updating the belief per branch), exploiter
+nodes take the max over their on-tree menu, and leaves are valued by check-down
+equity against the posterior range. Deliberately NOT a CFR re-solve: an
+equilibrium solve assumes a counter-adapting opponent and systematically
+underestimates how exploitable the fixed blueprint is.
 
-Scoring is selection-only: the reported LBR figure is the realized payoff of
-the chosen actions, so any approximation here (depth limit, runout noise, the
-chip-scaling rule) loosens the lower bound but never invalidates it.
+Scoring is selection-only. The reported LBR figure is the realized payoff of the
+chosen actions, so any approximation here -- depth limit, runout noise, the
+chip-scaling rule -- loosens the lower bound but never invalidates it.
 
 Chip-space rule
 ---------------
@@ -22,27 +22,24 @@ Valuation never reads chips off the shadow state. The walk carries explicit
 at the scored decision, the root candidate adds its real committed chips (so
 off-tree candidates stay distinguishable from their on-tree proxies), and every
 deeper hypothetical action adds its shadow committed chips scaled by the fixed
-ratio ``real_pot / shadow_pot`` taken once at the scored decision (1 unless the
-hand diverged earlier; preflop map-back is blind-anchored, so the ratio is a
-first-order approximation there — scorer-only, bound-safe). Shadow states
+ratio ``real_pot / shadow_pot`` taken once at the scored decision. Shadow states
 provide only structure: menus, turn order, street/terminal transitions, and
 blueprint lookups.
 
 Depth semantics
 ---------------
-``depth`` counts opponent-response levels. Opponent nodes are ALWAYS expanded —
+``depth`` counts opponent-response levels. Opponent nodes are ALWAYS expanded --
 they are the fold-equity source, and cutting at an exploiter bet would value it
-as called-and-checked-down with zero fold equity, burying exactly the bluffs
-the lookahead exists to find. Exploiter re-decisions consume budget: ``depth``
+as called-and-checked-down with zero fold equity, burying exactly the bluffs the
+lookahead exists to find. Exploiter re-decisions consume budget: ``depth``
 allows ``depth - 1`` of them, so ``depth=1`` is the branch-resolved analogue of
 the myopic scorer and ``depth=2`` (default) adds one exploiter re-decision and
-the opponent's response to it. Street boundaries are leaves (no chance fanout,
-matching the resolver's local-tree convention); leaf equity rolls the board out.
+the opponent's response. Street boundaries are leaves, matching the resolver's
+local-tree convention; leaf equity rolls the board out.
 
-Determinism: candidates and actions are iterated in deterministic order and all
-sampling happens inside the injected ``equity_fn`` (the LBR engine's
-``_equity``, which draws from the per-hand engine RNG), so parallel == serial
-is preserved by the existing per-hand reseeding.
+Candidates and actions are iterated in deterministic order and all sampling
+happens inside the injected ``equity_fn``, so parallel == serial is preserved by
+the existing per-hand reseeding.
 """
 
 from __future__ import annotations

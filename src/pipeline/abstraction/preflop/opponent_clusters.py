@@ -1,33 +1,26 @@
 """Opponent hand clusters for Opponent Cluster Hand Strength (OCHS).
 
 OCHS (Johanson, Burch, Valenzano & Bowling, AAMAS 2013) replaces river
-expected-hand-strength-against-a-uniform-range with a *vector* of win rates,
-one per cluster of opponent holdings. The motivation is that scalar equity
-cannot express *which* part of the opponent's range a hand beats: a bluff-catcher
-that loses to value and beats bluffs, and a mediocre made hand that beats
-nothing and loses to everything, can share an equity number while wanting
-opposite strategies.
+expected-hand-strength-against-a-uniform-range with a VECTOR of win rates, one
+per cluster of opponent holdings, because scalar equity cannot express WHICH
+part of the opponent's range a hand beats: a bluff-catcher and a mediocre made
+hand can share an equity number while wanting opposite strategies.
 
-This module owns only the opponent partition — "which holdings count as cluster
-c". The per-board win-rate vectors are computed in
+This module owns only the opponent partition -- which holdings count as cluster
+c. The per-board win-rate vectors live in
 :mod:`src.pipeline.abstraction.utils.equity`.
 
 Clusters are the 169 preflop hand classes grouped by preflop all-in equity
-against a random hand, which is the standard instantiation: it is a fixed,
-game-level notion of "kind of holding" that does not depend on the board being
-evaluated.
+against a random hand: a fixed, game-level notion of "kind of holding" that does
+not depend on the board being evaluated.
 
-Determinism:
-    Preflop equity has no tractable exact enumeration (C(50,5) boards per
-    matchup), so it is estimated by Monte Carlo with a fixed seed and sample
-    count. The result is cached on disk and keyed by both, so a given
-    (samples, seed) always yields the same clusters — a moving opponent
-    partition would silently change every OCHS feature and therefore every
-    bucket.
+Determinism. Preflop equity has no tractable exact enumeration, so it is
+estimated by Monte Carlo with a fixed seed and sample count, cached on disk and
+keyed by BOTH -- a moving opponent partition would silently change every OCHS
+feature and therefore every bucket.
 
-sklearn is imported at its call site rather than here: ~0.5s that every
-``poker-solver`` invocation was paying for a clusterer it never calls. Same
-reason as :mod:`src.pipeline.abstraction.postflop.precompute`; the guard is
+sklearn is imported at its call site: ~0.5s that every ``poker-solver``
+invocation was paying for a clusterer it never calls. The guard is
 ``tests/interfaces/test_import_weight.py``.
 """
 

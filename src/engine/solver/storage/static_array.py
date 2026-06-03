@@ -1,15 +1,12 @@
 """Preallocated flat-array infoset storage over a static betting tree.
 
-Every infoset the solver can ever touch is known once :class:`BettingTree` is
-built, so storage is a pair of flat arrays sized exactly to the tree and indexed
-by arithmetic. There is no key table, no id allocation, no owner map, no
-capacity estimate and no resize path.
-
-The row is a pure function of the tree, identical in every process, so every
-infoset is writable by every worker from the start. The layout this replaced
-needed cross-worker agreement and dropped a measured 39-74% of update samples.
-The traversal's drop counter is unreachable through this backend — which is why
-a nonzero value is worth asserting on.
+Every infoset the solver can touch is known once :class:`BettingTree` is built,
+so storage is a pair of flat arrays sized exactly to the tree and indexed by
+arithmetic -- no key table, no id allocation, no owner map, no resize path. The
+row is a pure function of the tree and identical in every process, so every
+infoset is writable by every worker from the start, and the traversal's drop
+counter is unreachable through this backend. A nonzero value is worth asserting
+on.
 
 Layout (ragged, zero padding):
 
@@ -19,15 +16,14 @@ Layout (ragged, zero padding):
     infoset (node n, bucket b) owns slots
         [slot_offset[n] + b*num_actions[n],  ... + num_actions[n])
 
-A dense ``(num_infosets, max_actions)`` rectangle would waste
-``max_actions - num_actions`` floats on every row; at the production tree's mean
-of ~2.6 actions against ``max_actions=10`` that is roughly 4x the memory.
+Ragged rather than a dense ``(num_infosets, max_actions)`` rectangle, which at
+the production tree's mean of ~2.6 actions against ``max_actions=10`` would cost
+roughly 4x the memory.
 
-Concurrency:
-    Workers Hogwild-write shared memory exactly as before — lock-free, racy by
-    design, and unchanged in its convergence argument. The difference is that
-    the shared arrays are mapped once at a fixed size and every process computes
-    identical indices, so there is nothing to exchange at runtime.
+Workers Hogwild-write shared memory -- lock-free and racy by design, unchanged
+in its convergence argument. The arrays are mapped once at a fixed size and
+every process computes identical indices, so there is nothing to exchange at
+runtime.
 """
 
 from __future__ import annotations

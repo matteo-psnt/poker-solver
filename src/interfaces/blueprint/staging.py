@@ -1,36 +1,25 @@
 """Getting a published run onto local disk, so the server can load it.
 
-This is the half of `just serve-deploy` that actually has to do with which run
-is served. The rest of that script -- rsyncing the code, `uv sync`, rewriting
-the unit's environment, `systemctl restart` -- is deployment, and none of it
-changes when you only want to look at a different run. Separating them is what
-turns a three-minute SSH round trip into an in-process load.
+The half of `just serve-deploy` that has to do with WHICH RUN is served. The
+rest of that script is deployment and none of it changes when you only want to
+look at a different run; separating them turns a three-minute SSH round trip
+into an in-process load.
 
-Why copy at all
----------------
-The share is SMB. A checkpoint is ~5,500 small files that the read path mmaps,
-so serving one straight off the share turns every page fault into a network
-round trip. `deploy.sh` copies for that reason and so does this.
+Copied rather than served off the share, because the share is SMB and a
+checkpoint is ~5,500 small files the read path mmaps -- every page fault would
+be a network round trip.
 
-Why ONE checkpoint
-------------------
-A published run holds its whole ladder -- `static-1000000.zarr` through
-`static-150000000.zarr`, ~850 MB and ~5,500 files each. Copying the run
-directory therefore moved ~127 GB in 400,000 files to load ONE of them.
-Measured on the box at 950 files/min, that is about six hours to answer a
-question the server needs 850 MB to answer.
+ONE checkpoint, not the run directory. A published run holds its whole ladder at
+~850 MB and ~5,500 files per rung, so copying the directory moves ~127 GB in
+400,000 files to load one of them -- about six hours at the box's measured 950
+files/min. The manifest is read first and exactly one rung is staged: the head,
+or the one `at_iteration` names. That is what makes `at` worth having.
 
-So the manifest is read first and exactly one checkpoint is staged: the head, or
-the rung `at_iteration` names. That is ~5 minutes the first time a run is
-touched and seconds every time after, and it is what makes `at` worth having --
-you stage a rung, not a ladder.
-
-The abstraction is NOT copied here either. It is ~773 MB, it is shared by every
-run trained against it, and the box already holds the one its deployed run
-needed -- so the common case is that the target run wants the same one and there
-is nothing to do. When it wants a different one, `build_card_abstraction` raises
-against the local directory and the server reports that rather than silently
-pulling most of a gigabyte over SMB while a caller waits on an HTTP request.
+The abstraction is NOT copied either. It is ~773 MB and shared by every run
+trained against it, so the common case is that the box already holds the right
+one. When it does not, `build_card_abstraction` raises against the local
+directory and the server reports that, rather than silently pulling most of a
+gigabyte over SMB while a caller waits on an HTTP request.
 """
 
 from __future__ import annotations

@@ -1,28 +1,11 @@
 """Training over the statically-enumerated betting tree.
 
-WHY THIS EXISTS. The approach this replaced discovered infosets as it went, so
-the space never stopped growing and every worker held dicts proportional to it.
-Fitted against a live run (``infosets ~ 1.96 * iters^1.058``):
-
-      iters      infosets   shared GB   per-worker GB   8w node GB
-  5,000,000    24,169,390        2.4            2.6         23.3
- 10,000,000    50,335,061        5.0            4.1         37.6
- 30,000,000   161,007,993       16.1           10.2         98.0
-
-A 30M-iteration run needs ~98 GB on 8 workers. No node we have reaches it, and
-no worker count fixes it, because the growth is in the KEYING, not the
-parallelism.
-
-The static tree removes the growth rather than budgeting for it. The public
-betting tree is small and finite -- 57,604 decision nodes under
-``config/training/production.yaml`` -- so an infoset is ``(node_id, bucket)``,
-which is an array index. The table is allocated once at full size:
-
-    bounded infoset space  ~16.8M rows, ~1.7 GB, FIXED
-    per-worker dicts       none
-
-1M iterations and 300M iterations cost the same memory. That is the difference
+An infoset is ``(node_id, bucket)`` -- an array index into a table allocated
+once at full size, ~16.8M rows and ~1.7 GB, with no per-worker dicts. So 1M
+iterations and 300M iterations cost the same memory, which is the difference
 between a long run being a budgeting exercise and a long run being possible.
+Discovering infosets at runtime instead grows with the KEYING rather than the
+parallelism, and no worker count fixes that.
 
 This module is the service seam only: run directory, provenance, metadata. The
 solver work lives in :mod:`src.pipeline.training.static_parallel`.

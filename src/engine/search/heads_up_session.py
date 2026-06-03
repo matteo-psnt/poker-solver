@@ -1,41 +1,31 @@
 """Interactive heads-up hand: a human seat versus the trained blueprint.
 
-A resumable analogue of :func:`~src.pipeline.evaluation.estimators.resolver_match._play_game`.
-That driver plays a *concrete* blueprint-vs-blueprint hand straight to a true
-terminal; here one seat is a human, so the hand must **pause** whenever it is the
-human's turn and resume when their action arrives. Everything else -- chance
-dealing, the all-in runout, terminal payoffs -- mirrors that driver exactly so
-the two agree on game semantics.
+A resumable analogue of
+:func:`~src.pipeline.evaluation.estimators.resolver_match._play_game`, which
+plays a concrete blueprint-vs-blueprint hand straight to a terminal. Here one
+seat is a human, so the hand must PAUSE on their turn and resume when their
+action arrives. Chance dealing, the all-in runout and terminal payoffs mirror
+that driver exactly, so the two agree on game semantics.
 
-The bot plays the *raw blueprint* (no runtime resolver): the resolver is slower
-(a subgame solve per decision) and measured to hurt at the frontier, so playing
-the bare table is both faster and stronger for a "how good is it?" sit-down.
-Wiring :class:`~src.engine.search.agent.BlueprintAgent` in for an optional
-resolver seat is a later extension.
+The bot plays the RAW blueprint, no runtime resolver: the resolver costs a
+subgame solve per decision and is measured to hurt at the frontier, so the bare
+table is both faster and stronger for a sit-down.
 
-Every hand is reproducible from its seed
-----------------------------------------
-One ``seed`` determines everything a hand does: the hole cards, every board card,
-and each of the bot's action samples. That needs two generators -- numpy for the
-action draws, :class:`random.Random` for the board, because the dealing helpers
-in :mod:`~src.engine.solver.mccfr.chance` use the stdlib one -- and both are
-derived here from the single seed rather than asked for separately, so there is
-no way to seed half a hand.
+Every hand is reproducible from its seed. One ``seed`` determines the hole
+cards, every board card and each of the bot's action samples. That needs two
+generators -- numpy for the action draws, :class:`random.Random` for the board,
+because the dealing helpers in :mod:`~src.engine.solver.mccfr.chance` use the
+stdlib one -- and both are derived HERE from the single seed, so there is no way
+to seed half a hand. Those helpers take an explicit source; drawing from the
+process-global instance would also let two sessions in one process interleave.
 
-This was previously impossible and documented as a non-goal: board cards were
-drawn from the ``random`` module's process-global instance, so a fixed seed
-fixed the hole cards and nothing else, and two sessions in one process
-interleaved their draws by arrival time. The helpers now take an explicit source.
-
-Untrained-node signal
----------------------
-The blueprint is defined only on the infosets self-play reached; a lookup miss
-falls back to a uniform-random legal action. A human explores off the self-play
-distribution far harder than self-play does, so these misses are common -- and a
-bot that jams or folds at random because it has *no* strategy there must not be
-mistaken for a bad blueprint. Every bot decision records whether it was a trained
-lookup or a uniform fallback so the caller can surface it;
-``bot_untrained_decisions`` / ``bot_decisions`` summarize the hand.
+Untrained-node signal. The blueprint is defined only on the infosets self-play
+reached, and a lookup miss falls back to a uniform-random legal action. A human
+explores off that distribution far harder than self-play does, so misses are
+common -- and a bot playing at random because it has NO strategy there must not
+be mistaken for a bad blueprint. Every bot decision records whether it was a
+trained lookup or a fallback; ``bot_untrained_decisions`` / ``bot_decisions``
+summarize the hand.
 """
 
 from __future__ import annotations
