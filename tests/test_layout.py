@@ -30,7 +30,7 @@ TESTS = pathlib.Path(__file__).resolve().parent
 ROOT = SRC.parent
 
 
-"""Strings that look like module paths but are not, and why each is allowed."""
+# Strings that look like module paths but are not, and why each is allowed.
 NOT_MODULE_PATHS: dict[str, str] = {
     "src.pipeline.demo": "a fake logger name in test_log.py, module-shaped on purpose",
 }

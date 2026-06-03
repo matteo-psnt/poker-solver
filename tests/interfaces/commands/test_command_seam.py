@@ -143,12 +143,8 @@ class TestTheCommandLinePutsTheExitBack:
             headless.main(["progress", "--run", "r"])
 
 
-"""Where ending the process IS the answer, declared with the reason.
-
-Two sites raise ``SystemExit`` and should. Naming them here rather than widening
-the guard keeps the next one a decision: adding a line is fine, adding it
-without a reason is what the failure message argues against.
-"""
+# Where ending the process IS the answer. Naming the two sites here rather than
+# widening the guard keeps the next one a decision.
 EXITS_ON_PURPOSE: dict[str, str] = {
     "interfaces/cli/headless.py": (
         "The `__main__` guard. This is the one place a refusal becomes an exit "

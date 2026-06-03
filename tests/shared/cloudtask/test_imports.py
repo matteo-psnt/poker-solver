@@ -26,13 +26,9 @@ if TYPE_CHECKING:
 
 PACKAGE = repo.SRC / "shared" / "cloudtask"
 
-"""The only first-party modules the node may reach outside this package.
-
-``records`` is the write/read substrate every task record goes through (and it
-reaches ``jsonio``); ``cache`` is where the wrapper points the board cache. Both
-are stdlib-only themselves, and that is the property being borrowed -- so
-anything added here has to be checked for it by hand.
-"""
+# The only first-party modules the node may reach outside this package. Both are
+# stdlib-only themselves -- that is the property being borrowed, so anything
+# added here has to be checked for it by hand.
 ALLOWED = {"src.shared.records", "src.shared.jsonio", "src.shared.cache"}
 
 

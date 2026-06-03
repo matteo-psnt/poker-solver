@@ -185,17 +185,9 @@ class TestDuration:
         assert node_plan.parse_duration(raw) == node_plan.DEFAULT_TIMEOUT_SECONDS
 
 
-"""One distinctive value per wire key, and what the node should decode it to.
-
-The point is that every key is EXERCISED. The guard this replaced scanned
-`plan.py`'s source text for each key name, so a key mentioned only in a comment
-counted as consumed -- and `RUN_SETS` sat in a docstring, which is exactly that
-false pass. It also could not have caught a key read into the wrong field.
-
-A value is chosen to be wrong-looking if it lands anywhere else: distinct
-strings, distinct integers. Adding a wire key without adding a row here fails
-`test_every_wire_key_is_exercised`.
-"""
+# One distinctive value per wire key, chosen to look wrong if it lands anywhere
+# else, so a key decoded into the WRONG FIELD fails. Adding a wire key without a
+# row here fails `test_every_wire_key_is_exercised`.
 WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
     "CODE_SNAPSHOT": ("snap-1", "snap-1"),
     "RUN_OP": ("evaluate", "evaluate"),

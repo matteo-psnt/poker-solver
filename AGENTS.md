@@ -84,24 +84,17 @@ Ruff enforces formatting and import sorting — don't hand-police style. What is
   belong in the commit message — not at the top of a file every reader pays for.
   Prose rots silently and nothing fails: `kinds.py` asserted for weeks that two
   task kinds no longer existed while four of their commands stayed registered.
-- **Write the shortest docstring that leaves the reader able to act, and default
-  to none.** It earns its lines by carrying what the code cannot: an invariant a
-  caller can violate, a unit, a sign convention, a measurement that decides a
-  knob. It does not restate the signature — the annotations are there and `ty`
-  checks them, so `Args:`/`Returns:` blocks are noise. It does not narrate the
-  incident behind the code; one sentence of rule, and the story stays in the
-  commit. **Three lines is the working budget, and longer than the code below it
-  is the smell** — 39 lines over an 8-line body is how `bundle_document` read
-  before 724c910.
-- **Do not restate a `.claude/rules/` bullet in a docstring.** Those files
-  are path-scoped and load when you open a matching file, so a second copy is
-  not redundancy — it is a second thing to keep true, and `views.py` was already
-  carrying a drifted one.
-- **A string that is not the first statement of a module, class or function is
-  not a docstring.** It is evaluated and discarded at import and nothing reads
-  it — `use_attribute_docstrings` is off and nothing here runs Sphinx. Ruff has
-  no rule for it, which is why this is written down: 130 of them had grown to
-  705 lines by 46b10aa. Use a `#` comment at the point of use.
+- **Write the shortest docstring that leaves the reader able to act.** It earns
+  its lines by carrying what the code cannot — an invariant a caller can
+  violate, a unit, a sign convention, an array shape, a measurement that decides
+  a knob — and never by restating a signature `ty` already checks, so
+  `Args:`/`Returns:` blocks are noise. Don't restate a `.claude/rules/` bullet
+  either; those load with the file, so a copy is a second thing to keep true.
+  **Three lines is the budget, and longer than the code below it is the smell.**
+  A one-line annotation *after* a field is the house style for a non-obvious
+  attribute; a multi-paragraph block with an underlined heading, sitting between
+  declarations, is not — that is a string statement, discarded at import, read
+  by nothing, and ruff has no rule that will tell you.
 - **A guard test pins a MEASURED failure, not a filing convention.** Read cost,
   the node's stdlib floor, contract staleness and the golden numbers each earn
   their place because they broke something expensive. A registry with no
