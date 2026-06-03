@@ -47,14 +47,8 @@ _SUIT_CHARS = "cdhs"
 
 @dataclass
 class CanonicalBoardInfo:
-    """
-    Information about a canonical board.
-
-    Attributes:
-        canonical_board: The canonical form (tuple of CanonicalCard)
-        board_id: Unique integer ID
-        raw_count: Number of raw boards that map to this canonical form
-        representative: A concrete example board (using real suits)
+    """A canonical board: its form, its integer id, how many raw boards map to it, and
+    a concrete example in real suits.
     """
 
     canonical_board: tuple[CanonicalCard, ...]
@@ -74,14 +68,7 @@ class CanonicalBoardEnumerator:
     """
 
     def __init__(self, street: Street, cache_dir: Path | None = DEFAULT_CACHE_DIR):
-        """
-        Initialize enumerator for a street.
-
-        Args:
-            street: Which street to enumerate (FLOP, TURN, or RIVER)
-            cache_dir: Directory for the on-disk enumeration cache
-                (None disables caching)
-        """
+        """Enumerate one street. ``cache_dir=None`` disables the on-disk cache."""
         self.street = street
         self.num_cards = self._get_num_cards(street)
         self.cache_dir = cache_dir
@@ -232,12 +219,7 @@ class CanonicalBoardEnumerator:
         return True
 
     def iterate(self) -> Iterator[CanonicalBoardInfo]:
-        """
-        Iterate over all canonical boards.
-
-        Yields:
-            CanonicalBoardInfo for each unique canonical board
-        """
+        """Every unique canonical board on this street."""
         if not self._enumerated:
             self.enumerate()
 

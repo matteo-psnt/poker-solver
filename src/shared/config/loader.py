@@ -17,27 +17,12 @@ from src.shared.config.schema import Config
 
 
 def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
-    """
-    Load configuration from an optional YAML file with optional programmatic overrides.
+    """Load configuration from an optional YAML file, with optional overrides.
 
-    Resolution order (last wins):
-      1. Python field defaults (always the base)
-      2. YAML file (resolved via ``extends`` chain if present)
-      3. Programmatic keyword overrides
+    Resolution order, last wins: Python field defaults, then the YAML file (through
+    its ``extends`` chain), then keyword overrides. Overrides nest with ``__``::
 
-    Args:
-        path: Optional path to a YAML config file.
-        **overrides: Programmatic overrides using ``__`` as a nesting separator,
-            e.g. ``training__num_iterations=50_000``.
-
-    Returns:
-        Validated, frozen :class:`Config` instance.
-
-    Examples:
-        >>> cfg = load_config()
-        >>> cfg = load_config("config/training/quick_test.yaml")
-        >>> cfg = load_config("config/training/quick_test.yaml", training__num_iterations=500)
-        >>> cfg = load_config(training__num_iterations=500, game__big_blind=4)
+        cfg = load_config("config/training/quick_test.yaml", training__num_iterations=500)
     """
     config = Config.default()
 
@@ -55,20 +40,11 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
 
 
 def load_training_config(config_name: str, **overrides: Any) -> Config:
-    """
-    Load a training config by name from ``config/training/<name>.yaml``.
+    """Load a training config by name from ``config/training/<name>.yaml``.
 
-    Resolves the repository ``config/training`` directory relative to this
-    module so headless and cloud entrypoints do not depend on the interactive
-    CLI's working-directory conventions.
-
-    Args:
-        config_name: Stem of a YAML file under ``config/training`` (e.g. ``"quick_test"``).
-        **overrides: Programmatic overrides forwarded to :func:`load_config`
-            (``__`` nesting separator), e.g. ``system__seed=7``.
-
-    Returns:
-        Validated, frozen :class:`Config` instance.
+    Resolves that directory relative to THIS module, so headless and cloud
+    entrypoints do not depend on a working directory. Overrides are forwarded to
+    :func:`load_config` and nest with ``__``.
 
     Raises:
         FileNotFoundError: If ``config/training/<config_name>.yaml`` does not exist.

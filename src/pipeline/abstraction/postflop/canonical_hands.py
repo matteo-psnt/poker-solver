@@ -66,13 +66,8 @@ class CanonicalHand:
 
 @dataclass(frozen=True)
 class HandClass:
-    """
-    One canonical hand class on a specific board.
-
-    Attributes:
-        canonical: The canonical (hand, board) pair
-        representative: A concrete hole-card pair in this class
-        multiplicity: Number of concrete combos that map to this class
+    """One canonical hand class on a specific board, with the concrete pair that
+    represents it and how many combos map to it.
     """
 
     canonical: CanonicalHand
@@ -132,15 +127,9 @@ def enumerate_hand_classes(board: tuple[Card, ...]) -> list[HandClass]:
 def get_all_canonical_hands(
     board: tuple[Card, ...], exclude_board_cards: bool = True
 ) -> Iterator[CanonicalHand]:
-    """
-    Generate all canonical combos for a given board.
+    """Every canonical combo on a board.
 
-    Args:
-        board: The board cards
-        exclude_board_cards: If True, exclude hands that share cards with board
-
-    Yields:
-        CanonicalHand objects
+    ``exclude_board_cards`` drops hands sharing a card with the board.
     """
     canonical_board, suit_mapping = canonicalize_board(board)
     board_card_set = set(board)
@@ -170,17 +159,8 @@ def get_all_canonical_hands(
 def get_representative_hand(
     canonical_hand: tuple[CanonicalCard, CanonicalCard], suit_mapping: SuitMapping
 ) -> tuple[Card, Card]:
-    """
-    Convert a canonical hand back to a concrete hand.
-
-    Uses the inverse of the suit mapping to get real suits.
-
-    Args:
-        canonical_hand: Canonical hand representation
-        suit_mapping: Mapping used to canonicalize
-
-    Returns:
-        Tuple of two Card objects
+    """A canonical hand back as concrete cards, through the inverse of the suit
+    mapping that canonicalized it.
     """
     # Invert the mapping
     inv_mapping = {v: k for k, v in suit_mapping.mapping.items()}
