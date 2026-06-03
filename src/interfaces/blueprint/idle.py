@@ -1,50 +1,22 @@
 """Knowing when nobody is using this, so the box can turn itself off.
 
-The blueprint host is woken on demand and costs money while it runs, so the
-question "is anyone still here?" has to be answered by the process that actually
-knows -- and then acted on, because a box you have to remember to stop is a box
-that runs all weekend.
+The blueprint host is woken on demand and costs money while it runs, so a box
+you have to remember to stop is a box that runs all weekend.
 
-Idle means no requests, not no sessions
----------------------------------------
-A hand in progress is not a reason to stay up; a person *playing* one is. Those
-differ: a browser tab left open on a half-finished hand holds a session forever
-and sends nothing. So the clock is reset by traffic, and a live session that is
-genuinely being played resets it on every action anyway.
+Idle means no REQUESTS, not no sessions. A browser tab left open on a
+half-finished hand holds a session forever and sends nothing, while a hand
+genuinely being played resets the clock on every action.
 
-Exiting rather than deallocating
---------------------------------
-This module ends the *process*; the box's own systemd unit turns that into a
-deallocate. Two reasons that split is worth it. A server that called the Azure
-control plane would need credentials and a role assignment to be testable at
-all, and it would be the only part of this package that could not run on a
-laptop. And a process that simply exits is something systemd already knows how
-to escalate -- so "stop serving" and "stop paying" stay separable, which is what
-you want the first time the deallocate misfires.
+This module ends the PROCESS; the box's systemd unit turns that into a
+deallocate. Keeping those separable is what makes the server testable on a
+laptop -- calling the Azure control plane here would need credentials and a role
+assignment -- and it is what you want the first time the deallocate misfires.
 
-Why the exit code is 42 and not 0
----------------------------------
-MEASURED 2026-08-10, and the reason the box billed 62 hours doing nothing.
-
-Idle expiry used to be "SIGTERM myself", and the unit's ``ExecStopPost`` guard
-deallocated only on a CLEAN exit -- ``EXIT_STATUS`` of 0. But a process that
-takes SIGTERM exits **143**, so every single expiry was refused by the guard
-("blueprint exited 143 -- not deallocating"), and systemd, also reading 143 as a
-failure, applied ``Restart=on-failure`` and started it straight back up. The
-journal for one 62-hour boot: **120 idle shutdowns, 121 refused deallocations,
-0 deallocations.** The box idled out every 30 minutes and immediately woke
-itself, around the clock, reloading a 30M checkpoint each time.
-
-The bounded-restart backstop could not catch it either: the restarts were 30
-minutes apart, so ``StartLimitBurst=3`` inside ``StartLimitIntervalSec=300``
-never tripped and ``OnFailure=`` never fired.
-
-Nor is "also accept 143" the fix, because a MANUAL ``systemctl stop`` or the
-``restart`` in ``deploy.sh`` produces 143 too -- and deallocating the box in the
-middle of a deploy is the same bug wearing the other shoe. So idle expiry gets
-an exit code nothing else produces. The unit lists it in ``SuccessExitStatus``
-so systemd does not restart it, and the guard deallocates on it and nothing
-else.
+The exit code is 42 because every other code is taken and means something else:
+0 is a deliberate stop, and 143 is SIGTERM, which is what ``systemctl stop`` and
+the ``restart`` in ``deploy.sh`` produce. Deallocating a box mid-deploy is the
+same bug as never deallocating it. The unit lists 42 in ``SuccessExitStatus`` so
+systemd does not restart it, and the guard deallocates on it and nothing else.
 """
 
 from __future__ import annotations

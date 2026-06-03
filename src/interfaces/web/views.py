@@ -4,9 +4,7 @@
 
 A view fans out over :meth:`Command.invoke` and joins what comes back. A join
 may filter, group and cross-reference; it may not derive a quantity no command
-can answer. `tests/interfaces/web/test_no_second_read_path.py` is what says so,
-and the `web_reads_through_the_command_layer` import-linter contract is what
-stops this module reaching past the command layer to do it anyway.
+can answer. `tests/interfaces/web/test_no_second_read_path.py` is what says so.
 
 Every view returns its raw ``parts`` alongside its joins. The joins are a
 convenience, never a replacement: a part that failed still has to reach the UI
@@ -46,16 +44,12 @@ def now() -> dict[str, Any]:
     """What is happening right now, and did anything die.
 
     Five questions that were five requests. `cost` rides along because burn rate
-    belongs beside node count -- it is the same question asked in dollars -- and
-    it is nearly free here: it derives from the task log this view is already
-    paying for, and the billing half is memoised for 15 minutes server-side
-    because Cost Management is rate-limited hard.
+    belongs beside node count, and it is nearly free: it derives from the task log
+    this view already pays for, and the billing half is memoised server-side.
 
-    No join. Everything on this screen is a panel in its own right, and the one
-    cross-reference the client draws -- a running task's progress bar, which
-    needs Batch for *which* task holds a node and the task log for *how far
-    along* it is -- is presentation, not data. Moving it here would mean this
-    module deciding what "running" means, which is the line.
+    No join. Everything here is a panel in its own right, and the one
+    cross-reference the client draws -- a running task's progress bar -- is
+    presentation, not data.
     """
     return compose(
         "view-now",
@@ -72,24 +66,17 @@ def now() -> dict[str, Any]:
 def run(run_id: str) -> dict[str, Any]:
     """Everything about one run: what it is, how it trained, what it scored.
 
-    Five parts, one of which is filtered by the command itself and one of which
-    is joined here -- and the difference is worth naming, because it is the rule
-    in miniature. `ledger` has a `--run` flag, so asking it for one run's evals
-    is the command's own answer to its own question. `tasks` has no such flag,
-    so the run's tasks are drawn out of the full log by :func:`_tasks_for`.
+    `ledger` has a `--run` flag, so asking it for one run's evals is the command's
+    own answer to its own question. `tasks` has none, so the run's tasks are drawn
+    out of the full log by :func:`_tasks_for` -- the rule in miniature.
 
-    `progress` is fetched with ``last=0`` deliberately. `runinfo` carries a
-    progress array too, but truncated to its `--last` default of eight, so the
-    console's chart drew 8 of 112 checkpoints and looked like a complete
-    history.
+    `progress` is fetched with ``last=0`` deliberately: `runinfo` carries a progress
+    array too, truncated to its `--last` default of eight.
 
-    The `tasks` part is answered and then **discarded down to the join**, which
-    is the only place in this module a payload does not reach the client whole.
-    It has to be: the whole point of joining here is that a run's page stops
-    carrying the entire task log, and shipping it under `parts` as well would
-    move the filtering off the browser while leaving every byte of it on the
-    wire. :func:`_summarised` keeps the part -- and therefore its error, and
-    therefore the greyed panel -- while replacing its rows with a count.
+    The `tasks` part is answered and then discarded down to the join, which is the
+    only place in this module a payload does not reach the client whole. It has to
+    be -- shipping it under `parts` as well would leave every byte of the task log
+    on the wire.
     """
     composed = compose(
         "view-run",
@@ -113,25 +100,16 @@ def run(run_id: str) -> dict[str, Any]:
 def runs() -> dict[str, Any]:
     """Every published run, with what is needed to check its claimed status.
 
-    A run's `status` is a CLAIM, not an observation: it lives in the run's own
-    event log, written by the training process, so it records what a LIVING
-    process did and cannot record how an attempt died. A task killed by OOM,
-    `maxWallClockTime`, SIGKILL or node loss is gone before it can write
-    `finished`, and the run then claims `running` forever -- four runs on this
-    share have.
+    A run's `status` is a CLAIM: it is written by the training process, so it
+    records what a LIVING process did and cannot record how an attempt died. A task
+    killed by OOM, `maxWallClockTime`, SIGKILL or node loss leaves the run claiming
+    `running` forever. Checking that needs Batch (which TASKS are live) joined to
+    the task log (which RUN each task was for); neither can answer alone.
 
-    Checking that needs three sources and two joins: Batch knows which TASKS are
-    live, the task log knows which RUN each task belonged to, and neither can
-    answer alone. The console did this itself, which cost it the whole task log
-    on a page that shows a table of run names.
-
-    **What this ships is the projection, not the verdict.** `task_runs` is
-    `task_id -> run_id` and nothing more. Deciding which Batch states count as
-    live -- and whether a run with no live task is "abandoned" or merely
-    "abandoned?" because it predates the task log -- stays in the client, for the
-    same reason :func:`now` does not draw the progress bar here: that is this
-    module deciding what "running" means, which is the line. The client already
-    holds the `jobs` part, so it can intersect the two without another request.
+    **What this ships is the projection, not the verdict.** Deciding which Batch
+    states count as live stays in the client, for the same reason :func:`now` does
+    not draw the progress bar here: that is this module deciding what "running"
+    means, which is the line.
     """
     composed = compose(
         "view-runs",
@@ -168,28 +146,19 @@ def experiment(experiment_id: str) -> dict[str, Any]:
 def _summarised(part: dict[str, Any]) -> dict[str, Any]:
     """A copy of one part with its `rows` replaced by how many there were.
 
-    For a part fetched only to be joined against. The part stays -- a view that
-    dropped it entirely would drop its `error` with it, and the UI needs that to
-    grey one panel rather than claim there is nothing to show -- but its rows do
-    not go on the wire, because the join is what the client asked for.
+    For a part fetched only to be joined against. The part stays -- dropping it
+    would drop its `error`, which the UI needs to grey one panel rather than claim
+    there is nothing to show.
 
-    A DIFFERENT TYPE, not the same one with its rows emptied. `Tasks` and
-    `TasksSummary` describe two different things, and while one model covered
-    both, `parts.tasks.payload.rows` was `[]` on a trimmed part and correct about
-    nothing -- a page avoided that only by remembering to read the join instead.
-    `TasksSummary` has no `rows` field, so the generated TypeScript cannot offer
-    one and the join is all there is.
+    A DIFFERENT TYPE, not the same one emptied: `TasksSummary` has no `rows` field,
+    so the generated TypeScript cannot offer one and the join is all there is.
 
-    **A copy, emphatically.** Trimming the payload in place edits the object the
-    command layer returned, which is not this module's to edit: the payload is
-    memoised per (command, arguments) and shared by every reader for the TTL, so
-    a view that empties `rows` on the way past hands the next caller of
-    `/api/tasks` an empty task log. It surfaced here as a run page that was
-    correct once and empty afterwards.
+    A COPY, emphatically. The payload is memoised per (command, arguments) and
+    shared by every reader for the TTL, so trimming in place would hand the next
+    caller of `/api/tasks` an empty task log.
 
-    `source_rows` rather than silence, so a run page that shows two tasks out of
-    a log of four hundred can say which number is which. A join that quietly
-    returns few rows out of many is indistinguishable from a join that is broken.
+    `source_rows` rather than silence, so a join returning few rows out of many is
+    distinguishable from a join that is broken.
     """
     payload = part.get("payload")
     if not isinstance(payload, dict) or "rows" not in payload:
@@ -203,18 +172,16 @@ def _summarised(part: dict[str, Any]) -> dict[str, Any]:
 def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """The task-log rows belonging to one run.
 
-    The join is `task.run_id`, and it deliberately crosses jobs: a run outlives
-    the daily job its tasks happen to land in, so grouping by job would split
-    one lineage across three headings for a reason that is purely about
-    scheduling.
+    The join is `task.run_id`, and it deliberately crosses jobs: a run outlives the
+    daily job its tasks land in, so grouping by job would split one lineage for a
+    reason that is purely about scheduling.
 
-    Read from the task log rather than `runinfo.tasks` because that field is
-    empty for runs whose records predate it -- the production run among them --
-    and the task log is the durable account either way.
+    Read from the task log rather than `runinfo.tasks`, which is empty for runs
+    whose records predate it -- the production run among them.
 
     Returns ``[]`` when the tasks part failed, which the caller must not read as
-    "this run has no tasks": the part carries its own error, and that is what
-    the UI renders. A join cannot signal failure and must not try.
+    "this run has no tasks": the part carries its own error. A join cannot signal
+    failure and must not try.
     """
     available = payloads(parts).get("tasks")
     if available is None:

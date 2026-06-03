@@ -1,26 +1,11 @@
 """The ``RUN_*`` environment contract, declared once and read from both ends.
 
-A task travels from the submitter to the node as environment variables. That
-crossing used to be a hand-written pair -- ``spec.TaskSpec.environment`` built a
-25-key dict and ``node.plan.parse_environment`` read the same 25 keys back --
-with nothing but a test holding them together, and the test scanned
-``plan.py``'s SOURCE TEXT for each key, so a key named only in a comment counted
-as consumed.
-
-The cost was not the typing. It was that widening the wire meant editing both
-halves plus two dataclasses, and a feature already contorted to avoid it:
-:class:`~src.shared.cloudtask.kinds.VectorSweepTask` overloads ``config`` to
-mean an abstraction directory and ``arm`` to mean a kernel rather than add the
-fields it wanted. When the transport starts shaping the domain model, the
-transport is the thing to fix.
-
-So :data:`KEYS` is the declaration and both ends derive from it. Adding a knob
+A task travels from the submitter to the node as environment variables.
+:data:`KEYS` is the declaration and both ends derive from it, so adding a knob
 is one entry here plus a field on whichever shapes carry it.
 
-Why not just walk the dataclass fields
---------------------------------------
-Because the two ends are genuinely different shapes, and that difference is
-load-bearing rather than accidental:
+NOT a walk over dataclass fields, because the two ends are genuinely different
+shapes and the difference is load-bearing:
 
 * ``RUN_TIMEOUT`` is written as ``6h`` and read as ``timeout_seconds``.
 * ``RUN_EVAL_AT`` is one rung at submit and ``eval_rungs``, a tuple, on the node
@@ -28,10 +13,9 @@ load-bearing rather than accidental:
 * ``workers`` is unset at submit and resolves to the node's own core count on
   arrival, because the node is the only place that knows it.
 
-A field-name walk would have to special-case all three, so the codec is written
-down per key instead. The attribute names are strings on purpose: this module
-is imported by both ends, and ``shared -> interfaces`` is forbidden, so it can
-name ``TaskSpec`` no more than it can import it.
+The attribute names are strings on purpose: this module is imported by both
+ends, and ``shared -> interfaces`` is forbidden, so it can name ``TaskSpec`` no
+more than it can import it.
 
 Stdlib only, and the 3.10 floor: the node imports this before ``uv sync``.
 """

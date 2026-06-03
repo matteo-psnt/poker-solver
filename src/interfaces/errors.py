@@ -9,22 +9,16 @@ it back into a message and an exit code, so the command line behaves exactly as
 it did. Anything else -- the console's ``/api`` handlers above all -- catches it
 and renders ONE panel unavailable instead of dying: a status screen fetches
 several commands concurrently, so a single unpublished run must grey out its own
-panel and nothing else. ``raise SystemExit`` at 16 call sites made that
-impossible. The core reports; the surface decides what a report means.
+panel and nothing else. The core reports; the surface decides what a report
+means.
 
-The Azure SDK's exceptions, and why they are here now
------------------------------------------------------
 ``ClientAuthenticationError`` and ``HttpResponseError`` are raised from a dozen
 call sites in :mod:`src.interfaces.cloud.tasks.batch` with no single chokepoint
-to wrap, so they are caught HERE and nowhere else. Two surfaces talk to Batch --
-``status`` composing three panels and the console's ``answer`` -- and each
-otherwise carries the same three-arm ladder, differing only in whether the
-result becomes an HTTP status or a dict field. The cost of one of them
-forgetting an arm is the failure the ladder exists to prevent: an expired
-``az login`` blanking a whole screen rather than the two panels that actually
-talk to Batch.
+to wrap, so they are caught HERE and nowhere else -- otherwise each of the two
+surfaces that talk to Batch carries the same ladder, and one of them forgetting
+an arm lets an expired ``az login`` blank a whole screen.
 
-:func:`attempt` is that ladder, once. It classifies rather than translates,
+:func:`attempt` is that ladder, once. It CLASSIFIES rather than translates,
 because the two callers need different renderings of the same distinction: a
 refusal is "understood, and the answer is no" (422), unavailable is "the service
 could not be reached" (503). Anything that is neither still propagates -- a bug
