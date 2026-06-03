@@ -42,14 +42,10 @@ class Phase(StrEnum):
     UNKNOWN = "unknown"
 
 
-"""Which phases mean a node is committed RIGHT NOW.
-
-``QUEUED`` is deliberately absent, and this is the expensive one. A task waiting
-for a node has no ``started_at``, so anything that runs an open interval to
-``now`` on it credits queue time as node time -- which reported four attempts
-abandoned on 2026-08-04 as 455 of 718 node-hours, growing by four hours per
-elapsed hour. `tests/shared/test_task_states.py` pins that.
-"""
+# ``QUEUED`` is deliberately absent: a task waiting for a node has no
+# ``started_at``, so running an open interval to ``now`` on it counts queue time
+# as node time -- which reported four abandoned attempts as 455 of 718
+# node-hours. `tests/shared/test_task_states.py` pins that.
 OCCUPIES_A_NODE = frozenset({Phase.STARTING, Phase.RUNNING})
 
 """Work that exists and holds no node. Queue depth, never node time."""
@@ -66,22 +62,16 @@ _PHASE_BY_STATE: dict[str, Phase] = {
     "completed": Phase.FINISHED,
 }
 
-"""The phase's spelling in a task record on the share. Frozen by history.
-
-Only the phases a task can be observed IN appear here: a finished task's cause
-comes from its outcome (or the node's own account), not from its phase.
-"""
+# Only the phases a task can be observed IN: a finished task's cause comes from
+# its outcome, not its phase. Spellings are frozen by history.
 _CAUSE_BY_PHASE: dict[Phase, str] = {
     Phase.QUEUED: "active",
     Phase.STARTING: "preparing",
     Phase.RUNNING: "running",
 }
 
-"""Causes on the share that mean the clock is running -- DERIVED, not restated.
-
-`task_history.LIVE_CAUSES` is this. Deriving it is what keeps "which phases
-occupy a node" a single decision rather than two lists that happen to agree.
-"""
+# `task_history.LIVE_CAUSES` is this. Deriving it keeps "which phases occupy a
+# node" one decision rather than two lists that happen to agree.
 LIVE_CAUSES = frozenset(_CAUSE_BY_PHASE[phase] for phase in OCCUPIES_A_NODE)
 
 
@@ -114,16 +104,9 @@ class Outcome(StrEnum):
     CANCELLED = "cancelled"
 
 
-"""What a Batch exit code MEANT, in words. The recurring ones only.
-
-Anything else stays a bare number rather than being guessed at -- and this is on
-the PAYLOAD, so the terminal gets the explanation too. It used to exist only in
-the console, which meant `poker-solver tasks` printed 137 and left the reader to
-know what it was.
-
-124 and 137 are kept apart deliberately: a wrong terminal cause suppresses
-reconciliation permanently, so a hang must never be recorded as an OOM.
-"""
+# The recurring codes only; anything else stays a bare number rather than being
+# guessed at. On the PAYLOAD, so the terminal explains them too. 124 and 137 are
+# kept apart: a wrong terminal cause suppresses reconciliation permanently.
 EXIT_MEANING: dict[int, str] = {
     0: "clean",
     2: "the CLI rejected a flag — argparse exits before doing any work",

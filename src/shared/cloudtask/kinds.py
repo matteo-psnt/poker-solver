@@ -246,10 +246,8 @@ class TaskKind(abc.ABC):
 
     name: ClassVar[TaskName]
     unit: ClassVar[str]
-    """A file this kind writes its own progress into, relative to the node's
-    scratch. Empty when the work is observable some other way -- training
-    through its checkpoint manifest -- and it is what the wrapper branches on,
-    so no caller has to know one kind's name."""
+    """A file this kind writes its progress into, relative to the node's scratch.
+    Empty when the work is observable another way; the wrapper branches on it."""
     progress_file: ClassVar[str] = ""
     """Batch retries. Work cheap to repeat wants them -- training resumes from
     its last published rung, scoring is idempotent. Work with no
@@ -656,10 +654,8 @@ class VectorSweepTask(TaskKind):
     name = TaskName.VECTOR_SWEEP
     unit = "checkpoints"
     progress_file = "vector-sweep-progress.json"
-    """NOT retried. The sweep publishes each checkpoint as it lands, but a retry
-    restarts training from zero rather than resuming -- so three attempts at a
-    deterministic failure would bill three full sweeps to fail three times, and
-    a flaky one would overwrite good partial results with fewer."""
+    """NOT retried: a retry restarts training from zero rather than resuming, so
+    three attempts at a deterministic failure bill three full sweeps."""
     retries = 0
 
     def validate(self, task: TaskFields) -> None:

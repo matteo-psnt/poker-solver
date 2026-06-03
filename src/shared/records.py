@@ -65,18 +65,10 @@ if TYPE_CHECKING:
 SCHEMA_VERSION_KEY = "schema_version"
 UNVERSIONED = 0
 
-"""The filename that identifies a run as loadable at HEAD.
-
-Named here rather than beside the code that parses it because four unrelated
-places need the string and only one of them can import the parser. The node
-wrapper is stdlib-only and cannot reach `engine`; `interfaces.cloud` reaching it
-put Azure code one import away from the solver. So each had spelled the literal
-again -- and a manifest rename would have been found by whichever copy was
-missed, at the point where a run silently reads as unpublished.
-
-This module already declares the artifact; the name is part of that
-declaration.
-"""
+# Named here rather than beside the parser because four unrelated places need the
+# string and only one can import the parser: the node wrapper is stdlib-only, and
+# `interfaces.cloud` reaching `engine` would put Azure code one import from the
+# solver. Spelled once, so a rename cannot leave a copy behind.
 STATIC_CHECKPOINT = "STATIC_CHECKPOINT.json"
 
 Kind = Literal["snapshot", "log"]

@@ -85,11 +85,8 @@ class PrecomputeDispatchPayload(dispatch.Dispatched):
 
     op: Literal["submit-precompute"] = "submit-precompute"
     abstraction_config: str
-    """What it will publish as, and every abstraction ALREADY on the share.
-
-    The whole list rather than a yes/no: a name that collides is one answer, and
-    "here is what is there instead" is the one that lets someone pick another.
-    """
+    """What it will publish as, and every abstraction ALREADY on the share. The
+    whole list, so a collision comes with somewhere else to go."""
     target_name: str
     already_published: list[str] = Field(default_factory=list)
     """The guard. An existing copy is replaced only when this is set, and the

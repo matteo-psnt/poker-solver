@@ -54,11 +54,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
-"""Written by the READER, not the node -- so the suffix belongs here.
-
-Its own filename, so the two sides never contend on a share with no atomic
-append. Joins to the task's LATEST attempt, because Batch describes no other.
-"""
+# Written by the READER, not the node. Its own filename, so the two sides never
+# contend on a share with no atomic append; joins to the task's LATEST attempt.
 OBSERVED_SUFFIX = ".observed.json"
 
 # Batch ``executionInfo.result`` / task state -> coarse exit cause. The dead
@@ -70,19 +67,10 @@ _OBSERVED_CAUSE_BY_RESULT: dict[str, str] = {
     "failure": "failed",
 }
 
-"""Which causes END a task, and why a wrong one is permanent
----------------------------------------------------------
-A terminal cause SUPPRESSES reconciliation: the reader stops asking Batch about
-a task it believes explained. Getting one wrong therefore loses the observer
-half of the join forever, which is why 124 (the guard's deadline -- a hang) and
-137 (SIGKILL from outside -- the OOM killer) are kept apart rather than both
-being called "failed".
-
-The vocabulary itself is the writer's, in `task_log`: the node is what stamps a
-cause. Deciding which of them are final is a reader's question, and only readers
-ask it -- `compactable` to know what is safe to bundle, `read_tasks` to know
-whose account wins.
-"""
+# A terminal cause SUPPRESSES reconciliation -- the reader stops asking Batch
+# about a task it believes explained -- so a wrong one loses the observer half of
+# the join forever. That is why 124 (a hang) and 137 (the OOM killer) are kept
+# apart. The vocabulary itself is the writer's, in `task_log`.
 TERMINAL_CAUSES = frozenset(
     {
         CAUSE_COMPLETED,
@@ -94,24 +82,11 @@ TERMINAL_CAUSES = frozenset(
     }
 )
 
-"""Causes that mean a node is committed RIGHT NOW
--------------------------------------------------
-Not-terminal is NOT the same as live: ``unresolved`` is what a task gets when the
-node wrote a start, never wrote an end, and Batch has nothing to say about it
-either -- which covers a task that is running and a task that died without
-stamping an end, and the record genuinely cannot tell them apart.
-
-That distinction has to be drawn somewhere, because anything reading an open
-interval has to decide whether to run it to ``now``. Doing that on
-not-terminal credited four attempts abandoned on 2026-08-04 with 455 of the
-718 node-hours the cost screen reported, growing by four hours per elapsed
-hour. Only a live cause is positive evidence the clock is still running.
-
-DERIVED from :data:`~src.shared.task_states.OCCUPIES_A_NODE` rather than spelled
-again. Which phases hold a node is one decision, and it is made there -- this
-module needs the same decision in the SHARE's vocabulary, which is the only
-difference between the two names.
-"""
+# Not-terminal is NOT the same as live: ``unresolved`` covers both a running task
+# and one that died without stamping an end. Running an open interval to ``now``
+# on not-terminal credited four abandoned attempts with 455 of 718 node-hours.
+# DERIVED from :data:`~src.shared.task_states.OCCUPIES_A_NODE`, which is where
+# the decision is made -- this is the same decision in the SHARE's vocabulary.
 CAUSE_RUNNING = task_states.cause_of(task_states.Phase.RUNNING)
 CAUSE_PREPARING = task_states.cause_of(task_states.Phase.STARTING)
 
@@ -142,12 +117,20 @@ def observed_record(
 
     Split from the write so :func:`reconcile` can ask whether the observation
     it just made says anything the share does not already hold.
+
+    ``state`` is stored SHORT -- ``completed``, not ``BatchTaskState.COMPLETED``.
+    Every observed record on the share already holds the short word, and the
+    caller no longer shortens it: `tasks._translate` used to, and was deleted
+    when `batch.BatchTask` began carrying a classified `phase` beside the raw
+    state. Normalising here rather than at the caller is what keeps the record
+    format the reader's business, and stops Azure's spelling from being the
+    thing that lands in a durable record.
     """
     return {
         "source": "batch",
         "task_id": task_id,
         "job_id": job_id,
-        "state": state,
+        "state": (state or "").rsplit(".", 1)[-1].lower(),
         "result": result,
         "exit_code": exit_code,
         "failure": failure,
@@ -199,15 +182,9 @@ def write_observed_record(
     return path
 
 
-"""When an observation is worth writing down
-------------------------------------------
-``observed_at`` is stamped on every read, so byte-comparing two observations of
-the same finished task always differs -- which made every reconcile re-write and
-re-upload records that said nothing new. Measured: six unchanged observations
-re-uploaded on EVERY console poll, 14.1s of serial share writes for no
-information. A task that is still running is legitimately re-observed; one that
-finished last week is not.
-"""
+# ``observed_at`` is stamped on every read, so two observations of one finished
+# task always differ and every reconcile re-uploaded records saying nothing new:
+# 14.1s of serial share writes per console poll.
 _VOLATILE_OBSERVED_FIELDS = frozenset({"observed_at", "schema_version"})
 
 
@@ -438,8 +415,7 @@ class TaskRow(BaseModel):
     units: float = 0.0
     units_unit: str = ""
     """WHICH CODE RAN. Three answers that do not replace one another: the commit
-    names a history, the branch names the line of work (several worktrees share
-    a commit and differ only in what is uncommitted), and the snapshot names the
+    names a history, the branch names the line of work, the snapshot names the
     exact bytes. Empty on every task recorded before this existed."""
     code_snapshot: str = ""
     git_commit: str = ""

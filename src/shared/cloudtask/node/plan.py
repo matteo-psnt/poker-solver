@@ -77,11 +77,8 @@ class TaskPlan:
     git_commit: str = ""
     git_dirty: str = ""
     git_branch: str = ""
-    """The snapshot this task extracted, which is the EXACT answer to "what code
-    is this" -- it names the bytes, uncommitted changes included, where a commit
-    names a history the tree may have diverged from. It reached the node as a
-    fetch instruction long before it was carried here; what it lacked was
-    anywhere to be recorded."""
+    """The snapshot this task extracted -- the exact bytes, uncommitted changes
+    included, where a commit names a history the tree may have diverged from."""
     code_snapshot: str = ""
     """Where a build writes its own progress, filled in by the wrapper because
     only the node knows its scratch directory."""

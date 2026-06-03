@@ -37,13 +37,10 @@ a bar that moves twice an hour is not a bar. The 60k probe finished between two
 ladder ticks and so published nothing at all."""
 PROGRESS_INTERVAL_SECONDS = 15
 
-"""What this task had already done when it began.
-
-A module global because this process runs exactly ONE task, and because the
-baseline cannot be taken at entry: a resumed run's checkpoint is not on the node
-until its handler fetches it, so anything measured before that reads zero and
-would credit this task with the whole run's work.
-"""
+# A module global because this process runs exactly ONE task, and because the
+# baseline cannot be taken at entry: a resumed run's checkpoint is not on the
+# node until its handler fetches it, so anything earlier reads zero and credits
+# this task with the whole run's work.
 _BASELINE: dict[str, float] = {}
 
 

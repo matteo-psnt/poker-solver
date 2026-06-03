@@ -32,21 +32,11 @@ from src.shared.cloudtask.kinds import BadTaskError, TaskName
 DEFAULT_TIMEOUT = "6h"
 DEFAULT_CHECKPOINT_EVERY = 1_000_000
 
-"""The node's interpreter
-------------------------
-NOT the OS python3, which is 3.10 on the pinned 22.04 image. The start task
-installs this one and links it into a system bin directory, so the wrapper runs
-a plain interpreter at a fixed absolute path -- no uv at task time.
-
-That indirection is the point. `uv run` here needed uv to resolve a managed
-interpreter, and uv resolves it under HOME: the start task runs as an elevated
-POOL-scoped auto-user and a task runs as a different, non-elevated one whose
-HOME is its own working directory, so the install was invisible to the task.
-Measured -- the probe died in 208ms having written nothing, which is the worst
-shape of failure available here, since the wrapper is what explains failures.
-
-Pinned against `infra/main.tf` by ``tests/interfaces/cloud/test_spec.py``.
-"""
+# NOT the OS python3 (3.10 on the pinned image). The start task installs this one
+# at a fixed absolute path, so no uv is needed at task time -- `uv run` here
+# resolved its interpreter under HOME, which differs between the elevated start
+# task and the task's own auto-user. Pinned against `infra/main.tf` by
+# `tests/interfaces/cloud/test_spec.py`.
 NODE_PYTHON = "3.13"
 NODE_PYTHON_BIN = f"/usr/local/bin/python{NODE_PYTHON}"
 

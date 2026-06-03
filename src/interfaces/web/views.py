@@ -36,17 +36,9 @@ from src.interfaces.commands._compose import Part, compose, payloads
 # them is the point: `tasks` is the slowest read in the console.
 LIVE_LIMIT = 10
 
-"""Why the run list asks for FIFTY jobs and the live screen asks for ten
-----------------------------------------------------------------------
-They are asking different questions. `now` shows what is happening, so ten is
-generous. The run list uses jobs to decide whether a run that CLAIMS to be
-running actually has a task executing -- and a run's live task can sit in a job
-well down the list, because a run outlives the daily job its tasks land in.
-
-Reusing `LIVE_LIMIT` here would make a run whose task is in the eleventh-most-
-recent job read as abandoned: a false alarm on the exact screen the check exists
-to make trustworthy. Pinned by a test, since nothing else would notice.
-"""
+# Deliberately NOT `LIVE_LIMIT`. The run list uses jobs to check whether a run
+# claiming to be running has a task executing, and a run outlives the daily job
+# its tasks land in -- so a smaller limit reads a live run as abandoned.
 RUN_LIST_JOB_LIMIT = 50
 
 

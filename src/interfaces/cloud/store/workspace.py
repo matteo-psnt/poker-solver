@@ -51,13 +51,8 @@ BASELINE_NAME = "baseline.json"
 # is a copy of the record; this is a question being asked of it.
 DEAD_SUFFIX = "_result.json"
 
-"""How wide to fan out
---------------------
-Every one of these is a round trip carrying a few kilobytes, so the pool is
-sized by latency and not by bandwidth or CPU: 105 metadata files measured 7.5s
-at 16 threads, 4.6s at 32 and 3.5s at 64. Threads blocked on a socket cost
-almost nothing, and the share is not the bottleneck -- the round trip is.
-"""
+# Sized by latency, not bandwidth: 105 metadata files took 7.5s at 16 threads,
+# 4.6s at 32, 3.5s at 64. Threads blocked on a socket cost almost nothing.
 _PARALLEL_DOWNLOADS = 64
 
 
@@ -255,15 +250,9 @@ class SharedTrees:
                 self._retire(key)
 
 
-"""Who gets to share, and who does not
------------------------------------
-Sharing is opt-in through a context manager rather than a module-level default,
-because the two callers want opposite things. A server answers the same question
-for eight panels a second apart and should pay once. The command line is
-one-shot, gains nothing -- and would LOSE the guarantee the readers are built
-on: that every answer is against the published record as it is now. A run
-published thirty seconds ago must not be invisible to `promote`.
-"""
+# Opt-in rather than a module default: a server answering eight panels should pay
+# once, while the one-shot CLI would LOSE the guarantee its readers are built on
+# -- that every answer is against the record as it is now.
 _ACTIVE: SharedTrees | None = None
 _ACTIVE_LOCK = threading.Lock()
 

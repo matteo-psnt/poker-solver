@@ -66,16 +66,9 @@ logger = logging.getLogger(__name__)
 # nobody is measuring.
 POLL_SECONDS = 15.0
 
-"""The exit code that means "nobody was here; switch the box off".
-
-Distinct from 0 (a deliberate stop), from 143 (SIGTERM, which is what
-`systemctl stop` and a deploy's `restart` produce) and from any crash. Three
-places agree on this number and must keep agreeing: here, `SuccessExitStatus=`
-in the systemd unit, and the `deallocate-if-idle` guard -- all in
-`infra/serve/main.tf`. `tests/interfaces/blueprint/test_idle.py` pins the unit
-against this constant so they cannot drift apart silently, which is exactly how
-the 62-hour restart loop went unnoticed.
-"""
+# Must agree with `SuccessExitStatus=` and the `deallocate-if-idle` guard, both
+# in `infra/serve/main.tf`; `test_idle.py` pins them together. Distinct from 0
+# (deliberate stop) and 143 (SIGTERM, which a deploy produces).
 IDLE_EXIT_CODE = 42
 
 

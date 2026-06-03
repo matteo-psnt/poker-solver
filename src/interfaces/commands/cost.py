@@ -38,30 +38,14 @@ from src.interfaces.commands._base import Command
 if TYPE_CHECKING:
     import argparse
 
-"""How far back to ask the biller when the window is 'everything'.
-
-Cost Management caps a query at one year and rejects the whole request with a
-400 above it. The range is INCLUSIVE of both ends, so 365 days back is 366 days
-of data and fails; 364 is the largest that does not. A year covers the whole
-life of this subscription with room to spare -- the credit lot was granted in
-2026-07 -- so the cap costs nothing here, but it must not be tripped, because
-this module answers a rejected query and an unreachable Azure identically.
-"""
+# Cost Management caps a query at one year and rejects the whole request above
+# it. The range is INCLUSIVE, so 365 days back is 366 days of data and fails.
 _ALL_HISTORY_DAYS = 364
 
-"""The shortest window the biller can honestly answer.
-
-Cost Management's finest granularity is a DAY, and its data reaches only to
-yesterday. So a windowed billing figure is never the window that was asked for:
-`--hours 6` at 21:00 UTC becomes "everything charged since 00:00 today", and
-`cost --hours 6` printed `$1.76 billed` directly above `No tasks have run in the
-last 6h` -- two numbers that look comparable, describing different intervals,
-which is the same class of error as the rate this change fixes.
-
-Below this, billing is SUPPRESSED and the renderer says why. Reporting a wrong
-window is worse than reporting none, and the node-time half answers short
-windows exactly, which is what a short window is for.
-"""
+# Cost Management's finest granularity is a DAY, reaching only to yesterday, so
+# a shorter window is never the window asked for -- `--hours 6` printed a billed
+# figure for "since 00:00 today" beside "no tasks in the last 6h". Below this,
+# billing is SUPPRESSED and the renderer says why.
 MIN_BILLED_WINDOW_HOURS = 48.0
 
 

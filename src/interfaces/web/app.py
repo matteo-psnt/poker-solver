@@ -82,19 +82,10 @@ if TYPE_CHECKING:
 # short enough that a manual refresh feels live. A sweep is 2-4s per panel.
 CACHE_TTL_SECONDS = 15.0
 
-"""Why the server materialises the record once, and this file knows about it
---------------------------------------------------------------------------
-The memo above is per (command, arguments), so five endpoints asking five
-different questions about the SAME record each paid for their own copy of it:
-`/api/runs` and `/api/evals` pulled the whole thing (12.4s each) and a run's
-three detail panels pulled that run three times over. The work is ~120 network
-round trips for 0.23 MB -- latency, not bytes, and duplicated per endpoint.
-
-Held for longer than `CACHE_TTL_SECONDS` because it is a different thing being
-cached: the payloads are what a panel shows and should look live, the tree is
-the substrate they are all derived from. The honest bound is that a panel's age
-badge -- client fetch time -- can understate the data's age by up to this.
-"""
+# The payload memo is per (command, arguments), so five endpoints asking five
+# questions about the SAME record each paid ~120 round trips for their own copy.
+# Held longer than `CACHE_TTL_SECONDS` because it is a different thing being
+# cached: the payloads are what a panel shows, the tree is what they derive from.
 RECORD_TREE_TTL_SECONDS = 45.0
 
 
@@ -128,50 +119,19 @@ class PayloadResponse(JSONResponse):
 # unavailable means Azure did not answer, which is transient and worth retrying.
 _STATUS = {"refusal": 422, "unavailable": 503}
 
-"""What `response_model` is for here, and what it is NOT
-------------------------------------------------------
-It is the OpenAPI schema, which `console/src/api/types.gen.ts` is generated
-from. It is NOT request-time validation, and cannot be: FastAPI skips both
-validation and serialization for a handler that returns a `Response`, and every
-handler here returns :class:`PayloadResponse` -- which exists because
-`jsonio.dumps` handles the numpy scalars and `Path` objects these payloads carry
-and plain `json.dumps` turns into a 500 the CLI never sees. Measured: a handler
-declaring a model and returning a wrong-shaped `JSONResponse` answers 200 with
-the wrong shape, while `/openapi.json` still carries the right `$ref`.
-
-So the models are enforced by `tests/interfaces/web/test_contract.py`, which
-round-trips each against the payload examples the renderer tests already pin.
-Validation at test time rather than request time -- the same guarantee, without
-giving up the encoder.
-
-`ERRORS` puts the two failure bodies in the schema too, so a generated client
-knows a 422 and a 503 carry `{error}` rather than the payload.
-"""
+# OpenAPI only -- FastAPI skips validation for a handler returning a `Response`,
+# and every handler here returns :class:`PayloadResponse` to keep `jsonio.dumps`.
+# The models are enforced by `tests/interfaces/web/test_contract.py` instead.
 ERRORS: dict[int | str, dict[str, Any]] = {
     422: {"model": contract.ApiError, "description": "Understood, and the answer is no."},
     503: {"model": contract.ApiError, "description": "Azure did not answer."},
 }
 
 
-"""Request bodies, and why the writes take one at all
----------------------------------------------------
-A read's arguments are few and short, so they ride in the query string. A
-dispatch's are neither: `submit` alone carries nine, one of them a repeatable
-list of config overrides, and a repeated query parameter is the shape most
-likely to arrive as a bare string rather than a list of one.
-
-These models are NOT a second declaration of what a command accepts. An
-optional field means *omitted*, spelled `None`, and :func:`given` drops those
-before `invoke` so the command's OWN parser supplies every default. Writing the
-defaults again here is the failure mode being avoided: a default that disagreed
-with its flag would make the console and the command line do different things
-from the same input, and nothing would report it.
-
-That is also what keeps the destructive halves safe by construction rather than
-by care. `compact-legs --delete` is the irreversible one -- its own help says so
--- and an omitted `delete` reaches argparse's `store_true` default of False,
-which is the dry run.
-"""
+# A dispatch's arguments are many and repeatable, which a query string handles
+# badly. These are NOT a second declaration of what a command accepts: an
+# optional field means *omitted*, and :func:`given` drops those so the command's
+# own parser supplies every default.
 
 
 def given(body: BaseModel) -> dict[str, Any]:
@@ -393,21 +353,9 @@ def create_app() -> FastAPI:
     def _cancel(job_id: str, task_id: str) -> JSONResponse:
         return answer(TtlCache(0.0), cancel.COMMAND, job=job_id, task=task_id)
 
-    """The dispatching writes, and the one property they all share
-    ------------------------------------------------------------
-    `TtlCache(0.0)`, every one of them. The memo above keys on (command,
-    arguments), which is exactly right for a read and exactly wrong here: two
-    identical `submit` bodies fifteen seconds apart are two runs someone wants,
-    and serving the second from the first's payload would report a job id for
-    work that was never queued. A dispatch is not idempotent and must not be
-    made to look like it.
-
-    Sealing a code snapshot and queueing a task is ~10-20s, which is longer than
-    a person waits before clicking again -- so the CLIENT disables the control
-    while one is in flight. That is a nicety, not the guarantee; nothing here
-    can tell a double-click from a deliberate second submission, and it should
-    not try.
-    """
+    # `TtlCache(0.0)`, every one: two identical `submit` bodies fifteen seconds
+    # apart are two runs someone wants, and a dispatch must not be made to look
+    # idempotent.
 
     @app.post("/api/submit", response_model=contract.SubmitPayload, responses=ERRORS)
     def _submit(body: SubmitBody) -> JSONResponse:
@@ -490,23 +438,9 @@ def create_app() -> FastAPI:
             subscription=serve_box.DEFAULT_SUBSCRIPTION,
         )
 
-    """The composed views: one screen, one request
-    ---------------------------------------------
-    Each is several commands fanned out CONCURRENTLY and joined, which is the
-    same thing the client was doing across several requests -- minus the round
-    trips, and with every number on the page the same age as every other.
-
-    They go through `answer` like everything else, so they are memoised, they
-    classify failures the same way, and they are recorded by telemetry under one
-    invocation rather than five. `view.__name__` stands in for a command name in
-    the cache key: a view is not a command and has none, but the key must still
-    separate `/api/view/run/a` from `/api/view/run/b`.
-
-    Concurrency is safe against both caches in front of these reads, and that is
-    checked rather than hoped for -- `TtlCache.get` is single-flight per key and
-    `workspace.SharedTrees.acquire` is single-flight and refcounted, so five
-    parts asking for the same record still pay for one materialisation.
-    """
+    # Several commands fanned out concurrently and joined -- through `answer`
+    # like everything else, so they are memoised, classified and recorded once.
+    # `view.__name__` stands in for a command name in the cache key.
 
     def view(build: Any, *key: str) -> JSONResponse:
         payload, failure = attempt(lambda: cache.get((build.__name__, key), lambda: build(*key)))

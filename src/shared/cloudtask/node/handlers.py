@@ -29,12 +29,8 @@ from src.shared.cloudtask.node.process import TaskLogger, run_guarded
 PUBLISH_EVERY_SECONDS = 120
 
 
-"""An executor: what a task of one kind does, and how it ended.
-
-The second element is the OUTCOME the exit code cannot carry -- an evaluation
-that scored some rungs and failed others exits 0 for Batch's retry economics,
-which is not a claim of success.
-"""
+# The second element is the OUTCOME an exit code cannot carry: an evaluation that
+# scored some rungs and failed others exits 0 for Batch's retry economics.
 Handler = Callable[[TaskPlan, NodePaths, TaskLogger], tuple[int, str | None]]
 
 
@@ -246,13 +242,9 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
     return 0, None
 
 
-"""Which executor runs a task, by kind.
-
-Keyed by the kind's own name -- so a kind with no executor is a KeyError naming
-it rather than a task that silently does nothing. Declared ``str`` rather than
-``TaskName`` for the same reason ``kinds.KINDS`` is: what arrives from the
-environment is the wire string, and a member of a ``StrEnum`` IS that string.
-"""
+# Keyed by the kind's own name, so a kind with no executor is a KeyError naming
+# it rather than a task that silently does nothing. ``str`` rather than
+# ``TaskName`` because what arrives from the environment is the wire string.
 
 
 def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:

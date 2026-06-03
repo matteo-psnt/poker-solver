@@ -151,9 +151,8 @@ class ActivityPayload(BaseModel):
     first_at: str | None = None
     commands: list[CommandActivity] = Field(default_factory=list)
     failures: list[Failure] = Field(default_factory=list)
-    """Before `--limit` truncates `failures`. The list is a display cap and the
-    count is the fact; reporting the capped length said "20 failures" when there
-    were 100."""
+    """Before `--limit` truncates `failures`: the count is the fact, the list is
+    the display."""
     total_failures: int = 0
     by_surface: dict[str, int] = Field(default_factory=dict)
 

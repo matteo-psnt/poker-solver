@@ -29,22 +29,15 @@ from src.shared import records
 if TYPE_CHECKING:
     from pathlib import Path
 
-"""The deleted dynamic backend's manifest. Recognised only so that a run
-predating the static tree is REFUSED with an explanation rather than fetched:
-nothing at HEAD can read a ``checkpoint-*.zarr``, so copying one down would buy
-a confusing failure several minutes deeper."""
+# The deleted dynamic backend's manifest, recognised only so a run predating the
+# static tree is REFUSED rather than fetched and failed several minutes deeper.
 LEGACY_MANIFEST = "CHECKPOINT.json"
 
 MANIFESTS = (records.STATIC_CHECKPOINT, LEGACY_MANIFEST)
 
-"""Directory names that are WRITE-ONCE, and only those.
-
-The completion marker doubles as "already published, skip it", which is sound
-only for a directory the trainer never revisits. ``evals/`` grows over time, so
-marking it would freeze it at its first published state. ``checkpoint-``/
-``keys-`` belong to the dynamic backend and can no longer be produced; they
-stay listed because naming a dead prefix costs nothing and missing a live one
-costs a partial rung indistinguishable from a whole one."""
+# WRITE-ONCE only: the completion marker doubles as "already published, skip it",
+# which is wrong for a directory the trainer revisits. ``evals/`` grows, so
+# marking it would freeze it at its first published state.
 SNAPSHOT_PREFIXES = ("static-", "checkpoint-", "keys-")
 
 MARKER_PREFIX = ".complete-"

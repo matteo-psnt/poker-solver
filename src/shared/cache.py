@@ -44,22 +44,11 @@ def cache_dir(name: str) -> Path:
     return cache_root() / name
 
 
-"""A small expiring JSON cache, for answers that are slow to fetch and cheap to
-be slightly stale
--------------------------------------------------------------------------------
-This is the counterpart to :mod:`src.shared.records`, and the split is the whole
-point. ``records`` owns ARTIFACTS: the durable account of what happened, one
-convention, atomic, versioned, on the share. This owns CACHES: regenerable, of
-no value if lost, deletable at any moment. A guard test in
-``tests/shared/test_records.py`` fails if any other module hand-rolls a
-``write_text(json.dumps(...))``, precisely so those two stay the only two ways
-JSON is written -- the drift it replaced was six writers with six sets of
-decisions.
-
-It exists because an in-process memo does nothing for the CLI, which is a fresh
-process every time. `poker-solver cost` run three times made three Cost
-Management queries and earned a 429 that outlasted the burst by minutes.
-"""
+# The counterpart to :mod:`src.shared.records`, which owns durable ARTIFACTS.
+# This owns CACHES: regenerable, deletable at any moment. A guard test in
+# `tests/shared/test_records.py` keeps these the only two ways JSON is written.
+# It exists because an in-process memo does nothing for the CLI: three `cost`
+# runs made three Cost Management queries and earned a 429.
 
 
 def cached_json(name: str, key: str, ttl: float) -> dict[str, Any] | None:
