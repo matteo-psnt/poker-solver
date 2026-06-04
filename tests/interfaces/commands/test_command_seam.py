@@ -19,6 +19,7 @@ import ast
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic import BaseModel
 
 from src.interfaces.cli import headless
 from src.interfaces.cloud.config import CloudConfigError
@@ -37,8 +38,18 @@ def _add(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--all", action="store_true")
 
 
-def _echo(args: argparse.Namespace) -> dict[str, Any]:
-    return {"op": "echo", "name": args.name, "limit": args.limit, "all": args.all}
+class _Echo(BaseModel):
+    """A stub payload. A model, because `Command.run` returns one -- the union
+    that let a handler answer with a dict is gone."""
+
+    op: str = "echo"
+    name: str
+    limit: int
+    all: bool
+
+
+def _echo(args: argparse.Namespace) -> _Echo:
+    return _Echo(name=args.name, limit=args.limit, all=args.all)
 
 
 ECHO = Command(name="echo", add_arguments=_add, run=_echo, render=lambda _p: None, help="")
@@ -65,12 +76,12 @@ class TestInvokeBuildsArgumentsFromTheParser:
     """
 
     def test_defaults_come_from_the_parser(self):
-        assert ECHO.invoke(name="x") == {"op": "echo", "name": "x", "limit": 25, "all": False}
+        assert ECHO.invoke(name="x") == _Echo(name="x", limit=25, all=False)
 
     def test_overrides_win(self):
         payload = ECHO.invoke(name="x", limit=3, all=True)
-        assert isinstance(payload, dict)
-        assert (payload["limit"], payload["all"]) == (3, True)
+        assert isinstance(payload, _Echo)
+        assert (payload.limit, payload.all) == (3, True)
 
     def test_an_unknown_argument_is_refused_not_ignored(self):
         """Silently dropping it would read as a command ignoring its own flag."""

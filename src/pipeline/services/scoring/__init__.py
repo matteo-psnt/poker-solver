@@ -10,7 +10,9 @@ two months later."""
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
@@ -43,6 +45,25 @@ PROGRESS_ARTIFACT = "evaluate-progress.json"
 logger = logging.getLogger(__name__)
 
 
+class EvaluationPayload(BaseModel):
+    """What one evaluation of one checkpoint measured.
+
+    NODE-ONLY: `score` is the console's door, and the durable record is the
+    per-run document this writes, not this payload. `ledger_result_path` is
+    absent when recording failed -- which is deliberate and must stay possible,
+    because a failed WRITE must never lose the measurement that was made.
+    """
+
+    op: Literal["evaluate"] = "evaluate"
+    run_id: str
+    method: str
+    estimator: str
+    infosets: int
+    checkpoint_iteration: int | None = None
+    results: dict[str, Any] = Field(default_factory=dict)
+    ledger_result_path: str | None = None
+
+
 def evaluate_and_record(
     run_dir: Path,
     *,
@@ -53,7 +74,7 @@ def evaluate_and_record(
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     progress_file: Path | None = None,
-) -> dict[str, Any]:
+) -> EvaluationPayload:
     """Evaluate a run and persist the result to the eval ledger (best-effort).
 
     The single evaluate orchestrator every transport calls: method dispatch,
@@ -99,20 +120,19 @@ def evaluate_and_record(
         )
         estimator = LBR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_lbr_knobs(config, out.results)
-    payload: dict[str, Any] = {
-        "op": "evaluate",
-        "run_id": run_dir.name,
-        "method": method,
-        "estimator": estimator,
-        "infosets": out.infosets,
-        "checkpoint_iteration": out.checkpoint_iteration,
-        "results": out.results,
-    }
+    payload = EvaluationPayload(
+        run_id=run_dir.name,
+        method=method,
+        estimator=estimator,
+        infosets=out.infosets,
+        checkpoint_iteration=out.checkpoint_iteration,
+        results=out.results,
+    )
     try:
         metadata = load_run_metadata(run_dir)
         result_path, _ = eval_ledger.record_evaluation(
             run_dir=run_dir,
-            payload=payload,
+            payload=payload.model_dump(),
             provenance=eval_ledger.RunProvenance(
                 run_id=metadata.run_id,
                 git_commit=metadata.git_commit,
@@ -131,7 +151,7 @@ def evaluate_and_record(
             estimator=estimator,
             knobs=knobs,
         )
-        payload["ledger_result_path"] = str(result_path)
+        payload.ledger_result_path = str(result_path)
         logger.info(f"  Recorded:      {result_path}")
     except Exception as exc:  # recording must never break the eval  # noqa: BLE001 -- recording must never break the eval it records
         logger.warning(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")

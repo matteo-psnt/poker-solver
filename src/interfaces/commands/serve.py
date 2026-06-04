@@ -11,7 +11,9 @@ make.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.commands._base import Command
 
@@ -38,7 +40,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class ServePayload(BaseModel):
+    """WHERE the console will listen. `render` is what actually serves.
+
+    A server never returns, which does not fit `run() -> payload`, so the
+    payload says where it would listen and the renderer -- already the only
+    terminal-specific part -- is what blocks. Under `--json` nothing is served,
+    which is right: a machine consumer wants the address, not a process.
+    """
+
+    op: Literal["serve"] = "serve"
+    url: str
+    host: str
+    port: int
+    reload: bool = False
+
+
+def run(args: argparse.Namespace) -> ServePayload:
     """Describe where the server WILL listen; :func:`render` starts it.
 
     Same shape as `status --watch`: a server never returns, which does not fit
@@ -48,13 +66,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     the only terminal-specific part -- is what blocks. Under `--json` nothing is
     served, which is right: a machine consumer wants the address, not a process.
     """
-    return {
-        "op": "serve",
-        "url": f"http://{HOST}:{args.port}",
-        "host": HOST,
-        "port": args.port,
-        "reload": args.reload,
-    }
+    return ServePayload(
+        url=f"http://{HOST}:{args.port}", host=HOST, port=args.port, reload=args.reload
+    )
 
 
 def render(payload: dict[str, Any]) -> None:

@@ -17,6 +17,7 @@ import argparse
 from typing import Any
 
 from azure.core.exceptions import ClientAuthenticationError
+from pydantic import BaseModel
 
 from src.interfaces.cli import headless
 from src.interfaces.commands import status, tasks
@@ -32,8 +33,15 @@ def _command(name: str, run: Any) -> Command:
     return Command(name=name, add_arguments=add_arguments, run=run, render=lambda _p: None)
 
 
+class _Answer(BaseModel):
+    """A stub panel's payload. A model, because every real handler returns one."""
+
+    op: str
+    limit: int
+
+
 def _ok(name: str) -> Command:
-    return _command(name, lambda args: {"op": name, "limit": args.limit})
+    return _command(name, lambda args: _Answer(op=name, limit=args.limit))
 
 
 def _raising(name: str, error: BaseException) -> Command:
@@ -65,25 +73,25 @@ class TestOnePanelCannotTakeOutTheOthers:
         )
         payload = status.gather()
 
-        assert set(payload["panels"]) == {"pool", "jobs", "tasks"}
-        assert payload["panels"]["jobs"]["payload"] is None
-        assert payload["panels"]["pool"]["payload"]["op"] == "pool"
-        assert payload["panels"]["tasks"]["payload"]["op"] == "tasks"
+        assert set(payload.panels) == {"pool", "jobs", "tasks"}
+        assert payload.panels["jobs"].payload is None
+        assert (payload.panels["pool"].payload or {})["op"] == "pool"
+        assert (payload.panels["tasks"].payload or {})["op"] == "tasks"
 
 
 class TestGatherComposesRatherThanReads:
     def test_panel_arguments_reach_the_commands(self, monkeypatch):
         monkeypatch.setattr(status, "PANELS", (("jobs", _ok("jobs")), ("tasks", _ok("tasks"))))
         payload = status.gather(limit=3)
-        assert payload["panels"]["jobs"]["payload"]["limit"] == 3
+        assert (payload.panels["jobs"].payload or {})["limit"] == 3
         # `tasks` is limited too: it defaults to the whole history on purpose, and
         # a glanceable screen cannot carry it.
-        assert payload["panels"]["tasks"]["payload"]["limit"] == 3
+        assert (payload.panels["tasks"].payload or {})["limit"] == 3
 
     def test_tasks_can_be_skipped(self, monkeypatch):
         """It is the slowest panel by a wide margin (measured: 23s vs 0.9s)."""
         monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")), ("tasks", _ok("tasks"))))
-        assert set(status.gather(with_tasks=False)["panels"]) == {"pool"}
+        assert set(status.gather(with_tasks=False).panels) == {"pool"}
 
 
 class TestWatch:
@@ -94,11 +102,11 @@ class TestWatch:
         """A tick that cannot finish before the next is due is not a refresh
         interval, it is a queue -- every panel would show a different instant."""
         monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")),))
-        assert status.run(self._args(5))["watch"] == status.MIN_INTERVAL
+        assert status.run(self._args(5)).watch == status.MIN_INTERVAL
 
     def test_zero_means_print_once(self, monkeypatch):
         monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")),))
-        assert status.run(self._args(0))["watch"] == 0
+        assert status.run(self._args(0)).watch == 0
 
     def test_render_returns_without_watching_when_not_asked(self, monkeypatch, capsys):
         """`render` carries the loop, so 'does it terminate' is a real question."""
@@ -142,7 +150,7 @@ class TestRenderDelegates:
         So this drives `status.render` end to end and asserts something from
         each panel reached the screen.
         """
-        status.render(PAYLOADS["status"] | {"watch": 0})
+        status.render(PAYLOADS["status"].model_copy(update={"watch": 0}))
         out = capsys.readouterr().out
         assert "standard_d16als_v6" in out, "the pool panel"
         assert "poker-20260802" in out, "the jobs panel"
@@ -150,12 +158,11 @@ class TestRenderDelegates:
 
     def test_a_failed_panel_says_so_instead(self, capsys):
         status.render(
-            {
-                "at": "now",
-                "elapsed_seconds": 1.0,
-                "watch": 0,
-                "panels": {"pool": {"payload": None, "error": "boom"}},
-            }
+            status.StatusPayload(
+                at="now",
+                elapsed_seconds=1.0,
+                panels={"pool": status.StatusPanel(error="boom")},
+            )
         )
         assert "unavailable: boom" in capsys.readouterr().out
 
