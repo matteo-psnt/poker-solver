@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Play } from "./Play";
 
@@ -43,6 +43,10 @@ const HAND = {
     { token: "f", type: "fold", amount: 0 },
     { token: "c", type: "call", amount: 2 },
     { token: "r6", type: "raise", amount: 6 },
+    // The wire spelling is `all_in` (`str(ActionType.ALL_IN)` is `name.lower()`).
+    // No fixture carried one, which is why three lookups keyed on the DISPLAY
+    // spelling `all-in` went unnoticed.
+    { token: "A", type: "all_in", amount: 198 },
   ],
   payoff: null,
   showdown: false,
@@ -200,6 +204,27 @@ describe("the keys", () => {
     fireEvent.keyDown(window, { key: "f" });
     await waitFor(() => expect(acted()).toHaveLength(1));
     expect(acted()[0]?.body).toEqual({ token: "f" });
+  });
+
+  it("shoves on `a`, whose wire word is `all_in` and not `all-in`", async () => {
+    // `f`/`k`/`c` worked only because those words are identical in both
+    // spellings. Facing a shove, `a` did nothing at all.
+    await deal();
+    fireEvent.keyDown(window, { key: "a" });
+    await waitFor(() => expect(acted()).toHaveLength(1));
+    expect(acted()[0]?.body).toEqual({ token: "A" });
+  });
+
+  it("leaves space alone on a focused button, so it still activates it", async () => {
+    // `preventDefault()` used to run unconditionally, cancelling the native
+    // activation, and then declined to deal because a hand was live -- so
+    // tabbing onto an action and pressing space did nothing whatsoever.
+    await deal();
+    const [button] = screen.getAllByRole("button");
+    if (!button) throw new Error("no button to focus");
+    const event = createEvent.keyDown(button, { key: " " });
+    fireEvent(button, event);
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("ignores a digit with no action behind it", async () => {

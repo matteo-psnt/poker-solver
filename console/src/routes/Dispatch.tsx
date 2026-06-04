@@ -99,7 +99,7 @@ function Train() {
             value={sets}
             onChange={(event) => setSets(event.target.value)}
             rows={2}
-            placeholder="solver__pruning=true"
+            placeholder="solver__cfr_plus=true"
             className="w-full rounded border border-[var(--border)] bg-transparent px-2 py-1 font-mono text-[12px] outline-none placeholder:text-[var(--fg-faint)] focus:border-[var(--fg-faint)]"
           />
         </Field>
