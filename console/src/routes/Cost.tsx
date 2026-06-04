@@ -9,21 +9,18 @@ import { useMemo } from "react";
 /**
  * Two numbers, from two sources, because neither one answers both questions.
  *
- * **Billed** is Azure Cost Management — the actual invoice, the same source
- * `just credit-check` reads. It is the answer to "what has this cost", and it
- * is the headline for that reason.
+ * **Billed** is Azure Cost Management -- the actual invoice, the same source
+ * `just credit-check` reads. It is the answer to "what has this cost", and the
+ * headline for that reason.
  *
- * **Node time** is derived from the task log. It is the only one of the two
- * that can be attributed to a run, an op, or an exit cause, and it is complete
- * back to the first task because the node wrapper writes a record whether or
- * not anything is watching.
+ * **Node time** is derived from the task log. It is the only one of the two that
+ * can be attributed to a run, an op, or an exit cause, and it is complete back to
+ * the first task because the node wrapper writes a record whether or not anything
+ * is watching.
  *
- * This page used to show only the second, multiplied by a rate, presented as
- * "estimated spend". It read as authority and was wrong three ways at once: it
- * counted 455 phantom node-hours from four attempts whose end was never
- * recorded, it multiplied by a rate the biller has never charged, and it could
- * not see the 28% of the bill that is not compute. It showed $574.61 against an
- * actual $316.71, and rose every hour while the pool sat at zero nodes.
+ * Node time multiplied by a rate is NOT a spend estimate and must not be
+ * presented as one: it cannot see the ~28% of the bill that is not compute, and
+ * no single rate has ever been charged across the SKUs in the history.
  */
 export function Cost() {
   const cost = useCost(0);

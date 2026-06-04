@@ -245,18 +245,15 @@ function Table({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
 /**
  * The last thing a player did, whatever street they did it on.
  *
- * The bot's move is the thing you most need and the thing the table was worst
- * at: `POST /action` auto-plays it and returns, so the only record of it was a
- * line in the log two panels down. You could see the pot had grown and not what
- * had grown it.
+ * `POST /action` auto-plays the bot's move and returns, so without this the only
+ * record of it is a line in the log two panels down -- you see that the pot grew
+ * and not what grew it.
  *
- * This was scoped to the CURRENT street at first, on the reasoning that a move
- * from a closed street is history and the board gaining a card announces it.
- * That reasoning fails in the most common case there is: you raise, the bot
- * calls, and the flop comes — so the street has advanced, nobody has acted on
- * it, and the answer to "what did the bot do" is blank at exactly the moment
- * you are asking. The street is drawn on the chip when it is not the current
- * one, which is what makes showing it honest rather than merely reassuring.
+ * Deliberately NOT scoped to the current street. You raise, the bot calls, the
+ * flop comes: the street has advanced, nobody has acted on it, and "what did the
+ * bot do" would be blank at exactly the moment you are asking. The street is drawn
+ * on the chip when it is not the current one, which is what makes showing it
+ * honest.
  */
 function lastAction(hand: Hand, actor: "bot" | "human"): HandEvent | null {
   for (let index = hand.log.length - 1; index >= 0; index--) {

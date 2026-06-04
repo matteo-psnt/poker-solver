@@ -4,19 +4,16 @@ import { useEffect, useState } from "react";
 /**
  * A button that asks once before doing something that cannot be un-clicked.
  *
- * The console has been read-only, where a stray click cost a round trip. It is
- * not any more, so the shape of a mistake changed: cancelling the wrong task
- * throws away hours of node time, and no amount of care at the keyboard makes
- * a single-click destructive control safe next to a list that reorders as it
- * polls.
+ * Cancelling the wrong task throws away hours of node time, and no amount of care
+ * at the keyboard makes a single-click destructive control safe next to a list
+ * that reorders as it polls.
  *
  * Two clicks rather than a modal. A modal steals focus and has to be dismissed
  * even when you meant it; arming in place keeps the row you are looking at on
- * screen, which is the thing you are actually confirming — that this is the
- * task you meant.
+ * screen, which is the thing you are actually confirming.
  *
- * It disarms itself after a few seconds. An armed button left on screen is a
- * trap for the NEXT click, and the list underneath is polling.
+ * It disarms itself after a few seconds, because an armed button left on screen is
+ * a trap for the NEXT click and the list underneath is polling.
  */
 export function Confirm({
   label,
