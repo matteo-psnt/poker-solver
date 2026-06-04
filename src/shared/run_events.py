@@ -1,14 +1,10 @@
 """A run is an append-only log of what happened to it.
 
-``.run.json`` was a mutable snapshot and ``progress.jsonl`` an append-only
-series, so a run's own history lived in two files written two different ways --
-and the snapshot had to be rewritten in full on every update, which is how a
-kill during a metadata write could strand a run whose checkpoints were fine.
-
-One log instead. Every fact about a run is an event appended to
-``<run>/run.jsonl``; the current state is what you get by folding them. Nothing
-is ever rewritten, so there is no torn-write window at all, and extending the
-record means adding an event type rather than a file, a writer and a reader.
+Every fact about a run is an event appended to ``<run>/run.jsonl`` and the
+current state is what you get by folding them. Nothing is ever rewritten, so
+there is no torn-write window -- a kill during a metadata write cannot strand a
+run whose checkpoints are fine -- and extending the record means adding an event
+type rather than a file, a writer and a reader.
 
 What is NOT in here, and why:
 
@@ -17,8 +13,8 @@ What is NOT in here, and why:
   Folding a log to list runs must stay cheap, and 180K of samples per evaluation
   would end that.
 * ``STATIC_CHECKPOINT.json``. The loader resolves which arrays to mmap through
-  it, atomically, on every load. Folding a log to answer that would be slower and
-  less safe.
+  it, atomically, on every load. Folding a log to answer that would be slower
+  and less safe.
 
 Listing stays cheap despite the fold: everything a run listing needs is either
 in the FIRST event (identity, config, provenance) or the last event that carries
