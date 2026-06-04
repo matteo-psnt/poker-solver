@@ -2373,9 +2373,9 @@ export interface components {
          *     against another.
          *
          *     The node's WRITER stays dicts, deliberately: it runs under
-         *     :mod:`src.shared.cloudtask` on the pinned image's 3.10 ``python3`` before
-         *     ``uv sync``, where pydantic does not exist. This is the reading half, and
-         *     constructing it from `_row`'s output is what binds the two.
+         *     :mod:`src.shared.cloudtask` before ``uv sync``, where pydantic does not
+         *     exist yet. This is the reading half, and constructing it from `_row`'s
+         *     output is what binds the two.
          */
         TaskRow: {
             /** Attempt */

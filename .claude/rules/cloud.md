@@ -24,7 +24,11 @@ paths:
   independent round trips together; never sync `keys-*` key tables (the deleted
   dynamic backend's — 37 of the 38 MB a share read pulled).
 - **`src/shared/cloudtask/` is STDLIB ONLY.** The node runs it BEFORE
-  `uv sync`, on the pinned image's system `python3` — **3.10**, not 3.13.
+  `uv sync`, so nothing third-party exists yet. The VERSION is 3.13, the same as
+  everywhere else — the pool's start task installs it (`uv python install 3.13`,
+  `infra/main.tf`) instead of using the image's `python3`, so there is no
+  3.10 floor and no 3.11+ constructs to avoid. What must stay true is that
+  Terraform installs the version `test_node_interpreter.py` asserts against.
   Enforced twice: `test_node_interpreter.py` imports the node's whole closure on
   that interpreter, and `test_imports.py` is fail-closed (nothing outside
   `records`/`jsonio`/`cache` may be reached). It lives under `shared` because

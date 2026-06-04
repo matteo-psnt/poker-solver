@@ -26,7 +26,7 @@ that an atomic rename would.
 
 The WRITER only, and stdlib-only with it -- see `.claude/rules/cloud.md`. The
 reading half lives outside this package so the fail-closed import guard does not
-hold 260 lines of laptop-only code to the node's 3.10 floor.
+hold 260 lines of laptop-only code to the node's stdlib-only rule.
 """
 
 from __future__ import annotations

@@ -284,7 +284,7 @@ def _derived(row: TaskRow, column: str) -> Any:
         return code_label(row)
     if column == "done":
         # Dumped because `kinds` reads a Mapping: it lives under `cloudtask/`,
-        # which is held to the node's stdlib-only 3.10 floor.
+        # which is held to the node's stdlib-only rule.
         progress = kinds.Progress.from_record(row.progress.model_dump() if row.progress else None)
         return f"{progress.fraction:.0%} {progress.phrase}" if progress is not None else ""
     if column == "left":
