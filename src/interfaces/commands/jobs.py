@@ -92,8 +92,15 @@ def render(payload: JobsPayload) -> None:
     for job in payload.jobs:
         print(f"== {job.job}  [{(job.state or '').rsplit('.', 1)[-1].lower()}]")
         for task in job.tasks:
+            # The OUTCOME once it has stopped, because `finished` says only that
+            # it is over -- a cancellation and a crash both read `finished` with
+            # an exit code beside them, and the code is the half nobody
+            # remembers. `exit_meaning` explains the recurring ones; an
+            # unfamiliar code stays a bare number rather than being guessed at.
+            word = task.outcome or task.phase
             exit_code = "" if task.exit_code is None else f"  exit={task.exit_code}"
-            print(f"   {task.phase:<10} {task.task}{exit_code}")
+            because = f"  ({task.exit_meaning})" if task.exit_meaning else ""
+            print(f"   {word:<10} {task.task}{exit_code}{because}")
     if payload.hidden_jobs:
         print(f"\n  {payload.hidden_jobs} finished job(s) hidden — show with --all")
 

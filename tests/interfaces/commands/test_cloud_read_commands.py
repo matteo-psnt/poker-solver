@@ -143,3 +143,51 @@ class TestReportedLedgerPath:
             rebuild=False,
         )
         assert ledger_cmd.run(args).ledger == str(derived)
+
+
+class TestAJobListingExplainsHowATaskDied:
+    """`jobs` printed a bare exit code, and the code is the half nobody recalls.
+
+    The classification rides on the payload (`outcome`, `exit_meaning`, from
+    `src/shared/task_states.py`) so both surfaces word it identically. It shipped
+    once with no reader at all -- the console had been carrying its own copy of
+    these meanings, and deleting that left the server's version unread.
+    """
+
+    @staticmethod
+    def _finished(exit_code: int) -> batch.Job:
+        return batch.Job(
+            job="poker-20260802",
+            state="BatchJobState.ACTIVE",
+            tasks=[
+                batch.BatchTask(
+                    task="t-1",
+                    job="poker-20260802",
+                    state="BatchTaskState.COMPLETED",
+                    phase=task_states.Phase.FINISHED,
+                    outcome=task_states.outcome_of(exit_code),
+                    exit_code=exit_code,
+                    exit_meaning=task_states.exit_meaning(exit_code),
+                )
+            ],
+        )
+
+    def test_an_oom_kill_says_so_rather_than_printing_137(self, capsys):
+        jobs.render(jobs.JobsPayload(jobs=[self._finished(137)], total_jobs=1, hidden_jobs=0))
+        out = capsys.readouterr().out
+        assert "failed" in out
+        assert "OOM killer" in out
+
+    def test_a_hang_is_not_reported_as_a_crash(self, capsys):
+        """124 is the wall-clock guard; conflating it with 137 sends someone
+        hunting for memory pressure that never happened."""
+        jobs.render(jobs.JobsPayload(jobs=[self._finished(124)], total_jobs=1, hidden_jobs=0))
+        out = capsys.readouterr().out
+        assert "timed out" in out
+        assert "hang, not a crash" in out
+
+    def test_an_unfamiliar_code_stays_a_bare_number(self, capsys):
+        jobs.render(jobs.JobsPayload(jobs=[self._finished(42)], total_jobs=1, hidden_jobs=0))
+        out = capsys.readouterr().out
+        assert "exit=42" in out
+        assert "(" not in out.split("exit=42")[1]
