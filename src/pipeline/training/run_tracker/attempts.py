@@ -49,7 +49,7 @@ class AttemptRecord:
     checkpointed iteration and compute time even though ``mark_*`` never ran and
     its ``status`` stays ``running`` with ``ended_at`` null — that dangling shape
     is itself the signal that the attempt died, to be cross-referenced with the
-    client-side orchestration log's Modal exit status.
+    task record's exit cause (:mod:`src.shared.task_history`).
     """
 
     index: int

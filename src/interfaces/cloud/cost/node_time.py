@@ -41,23 +41,17 @@ def intervals(
 ) -> tuple[list[tuple[datetime, datetime]], int]:
     """One (start, end) per task that ran, plus a count of the ones dropped.
 
-    A task with no ``ended_at`` is credited up to ``now`` ONLY when its cause
-    says a node is committed right now (:data:`task_history.LIVE_CAUSES`).
-    Excluding genuinely in-flight work would make the number dip exactly when
-    the pool is busiest, which is the case the original code was written for and
-    which still holds.
+    A task with no ``ended_at`` is credited up to ``now`` ONLY when its cause says a
+    node is committed right now (:data:`task_history.LIVE_CAUSES`). Excluding
+    genuinely in-flight work would make the number dip exactly when the pool is
+    busiest.
 
-    Crediting every open record to ``now``, though, does not follow from it. An
-    open record with a non-live cause is one whose end was never written -- the
-    node died before its trap ran and Batch could not explain it either -- and
-    running that to ``now`` invents time that nothing observed. Four such
-    attempts, abandoned on 2026-08-04, were contributing 455 of the 718
-    node-hours this reported, and growing by four hours per elapsed hour: the
-    screen's total rose while the pool sat at zero nodes.
-
-    They are dropped rather than estimated, and counted so the drop is visible.
-    A module that calls itself a lower bound cannot model the unobserved half;
-    saying "4 attempts have no recorded end" is the checkable statement.
+    An open record with a NON-live cause is one whose end was never written, and
+    running that to ``now`` invents time nothing observed -- four such attempts once
+    contributed 455 of the 718 node-hours reported, growing by four hours per
+    elapsed hour while the pool sat at zero nodes. They are dropped rather than
+    estimated, and counted so the drop is visible: a module that calls itself a
+    lower bound cannot model the unobserved half.
     """
     spans: list[tuple[datetime, datetime]] = []
     unended = 0

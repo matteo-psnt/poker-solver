@@ -100,24 +100,16 @@ class Command:
     def execute(self, args: argparse.Namespace) -> Payload:
         """Run this command's handler. **The seam every surface goes through.**
 
-        `invoke` is not that seam and cannot be: the command line builds its
-        Namespace by parsing argv and calls the handler directly, so anything
-        wrapped around `invoke` would see the console and miss the CLI entirely.
-        This is one level down, where both meet.
+        `invoke` is not that seam and cannot be: the command line builds its Namespace
+        by parsing argv and calls the handler directly, so anything wrapped around
+        `invoke` would see the console and miss the CLI. Kept separate from :attr:`run`
+        so the handler stays an ordinary function a test can call; a guard test fails if
+        a surface calls `run` directly and slips past this.
 
-        Kept separate from :attr:`run` so the handler stays an ordinary function
-        a test can call. What is added here is observation and nothing else --
-        the timing, the outcome and which surface asked. A guard test fails if a
-        surface calls `run` directly and slips past it.
-
-        Preparing the observation is itself guarded, and that is not belt and
-        braces: `asked_for` evaluates ``value != default`` on caller-supplied
-        values, and a value whose ``__ne__`` returns something other than a bool
-        -- a numpy array is the obvious one, and `invoke` accepts anything --
-        would otherwise raise out of here and fail a working command.
-
-        Skipped entirely when recording is off, so a disabled log costs nothing
-        rather than two parser builds per invocation.
+        Preparing the observation is itself guarded, which is not belt and braces:
+        `asked_for` evaluates ``value != default`` on caller-supplied values, and one
+        whose ``__ne__`` returns a non-bool -- a numpy array, and `invoke` accepts
+        anything -- would raise out of here and fail a working command.
         """
         return self._observed(args) if telemetry.enabled() else self.run(args)
 

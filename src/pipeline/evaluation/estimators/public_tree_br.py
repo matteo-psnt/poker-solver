@@ -96,18 +96,16 @@ class PublicBRConfig:
         means exact enumeration for that street).
     board_seed: seeds every board draw; identical seeds give identical board
         samples and therefore exactly paired evaluations.
-    num_workers: processes over the four (responder seat, button) walks, which
-        are independent. 1 keeps everything in-process. Above 1 requires a
-        ``blueprint_factory``, since the solver is not picklable. Does NOT
-        change the result: each walk is deterministic and the aggregate is a
-        mean over the same four numbers.
+    num_workers: processes over the four (responder seat, button) walks, which are
+        independent. Above 1 requires a ``blueprint_factory``, since the solver is
+        not picklable. Does NOT change the result: each walk is deterministic and
+        the aggregate is a mean over the same four numbers.
 
     Node count scales ~linearly in num_flops * num_turns * num_rivers, but
-    wall-clock is strongly sublinear: per-context policy tables and showdown
-    evaluators amortize across boards. Measured on a 6.8M-infoset production
-    checkpoint (full 4-walk evaluation, single-core): 2 board paths -> 1.3M
-    nodes / ~7 min; 16 paths -> 9.7M nodes / ~13.5 min. Prefer the Modal
-    entrypoint for production checkpoints.
+    wall-clock is strongly sublinear -- per-context policy tables and showdown
+    evaluators amortize across boards. Measured on a 6.8M-infoset checkpoint, full
+    4-walk, single-core: 2 board paths -> 1.3M nodes / ~7 min; 16 paths -> 9.7M
+    nodes / ~13.5 min. Run production checkpoints on the pool.
     """
 
     num_flops: int = 8
