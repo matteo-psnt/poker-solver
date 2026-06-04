@@ -2,12 +2,9 @@
 
 The per-run `evals/<slug>.json` document is the ONLY thing written. There is no
 stored ledger: the index is derived from these documents on every read, which is
-what makes concurrent evaluation from several machines safe.
-
-Recording used to also append a row to `data/eval_ledger.jsonl`, defaulted at
-module scope and never overridden by the node wrapper, so every cloud eval wrote
-a stored index the architecture said did not exist. A stored index beside a
-derived one is a second answer waiting to disagree."""
+what makes concurrent evaluation from several machines safe. A stored index
+beside a derived one is a second answer waiting to disagree.
+"""
 
 from __future__ import annotations
 

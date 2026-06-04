@@ -1,24 +1,13 @@
 """Answering a question about the record without keeping a copy of it.
 
-Every reading command -- ``runinfo``, ``progress``, ``curve``, ``report``,
-``compare``, ``ledger`` -- used to require a local ``data/runs`` populated by
-``fetch``. The data was in the cloud; the questions were only answerable on the
-machine that had last synced. Two boxes could hold different answers, and a
-fresh checkout could hold none.
-
 Reading materialises the published JSON into a temporary directory, answers the
-question there, and throws it away -- unless a :func:`shared_record_cache` is in
-force, in which case one tree answers for every reader that arrives inside its
-lifetime. That is a server's concern and nothing else's; see the note above it.
-Materialising rather than
-reading in place is deliberate: the record is a few hundred KB of small JSON, so
-pulling it costs one round trip per file, while reading it in place would make
-every command an SMB client and every reader aware of two filesystems. The
-readers stay ordinary local-path code; only where the path comes from changes.
+question there, and throws it away -- so a question is answerable on any
+machine, rather than only on the one that last synced. Two boxes cannot hold
+different answers and a fresh checkout is not blind.
 
-Checkpoints are never materialised. They are ~540 MB of zarr chunks that no
-reading command opens, and the rule that the manifest defines what is complete
-stays in ``fetch``, which is the command that genuinely wants them.
+Unless a :func:`shared_record_cache` is in force, in which case one tree answers
+for every reader that arrives inside its lifetime. That is a server's concern
+and nothing else's; see the note above it.
 """
 
 from __future__ import annotations
