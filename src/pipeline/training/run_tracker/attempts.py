@@ -45,11 +45,12 @@ class AttemptRecord:
     resume chunks) be reconstructed instead of lost on every restart.
 
     ``end_iter``/``runtime_seconds`` are refreshed on each checkpoint, so an
-    attempt that is killed mid-flight (guillotine, OOM) retains its last
-    checkpointed iteration and compute time even though ``mark_*`` never ran and
-    its ``status`` stays ``running`` with ``ended_at`` null — that dangling shape
-    is itself the signal that the attempt died, to be cross-referenced with the
-    task record's exit cause (:mod:`src.shared.task_history`).
+    attempt that is killed mid-flight (cancellation, maxWallClockTime, OOM, node
+    loss) retains its last checkpointed iteration and compute time even though
+    ``mark_*`` never ran and its ``status`` stays ``running`` with ``ended_at``
+    null — that dangling shape is itself the signal that the attempt died, to be
+    cross-referenced with the task record's exit cause
+    (:mod:`src.shared.task_history`).
     """
 
     index: int

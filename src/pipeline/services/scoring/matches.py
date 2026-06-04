@@ -133,14 +133,13 @@ def record_blueprint_match(
     """Run a head-to-head match and persist a durable, self-describing payload.
 
     A blueprint match is inherently PAIRWISE, so it does not fit the single-run eval
-    ledger (``evaluate_and_record``); instead the full result is written non-clobbering
-    under run A's dir with BOTH runs' provenance embedded — the card-abstraction hashes
-    especially, since a chip edge is uninterpretable later without recording which two
-    abstractions were compared. The payload (not any ledger row) is the durable record,
-    so a client guillotine after the match commits loses nothing.
+    ledger (``evaluate_and_record``). The full result is written non-clobbering
+    under run A's ``evals/`` with BOTH runs' provenance embedded -- the
+    card-abstraction hashes especially, since a chip edge is uninterpretable later
+    without recording which two abstractions were compared.
 
-    Returns the payload; the node publishes it to the share so it outlives the
-    container.
+    The payload IS the durable record; there is no ledger row to keep in step with
+    it. Writing is best-effort and never fails the match.
     """
     metadata_a = load_run_metadata(run_dir_a)
     metadata_b = load_run_metadata(run_dir_b)
