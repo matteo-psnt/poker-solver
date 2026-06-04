@@ -25,11 +25,11 @@ from __future__ import annotations
 
 import threading
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.core.game.state import Card
 from src.engine.search.range_inference import ALL_COMBOS
@@ -83,30 +83,157 @@ def parse_board(board: str) -> tuple[Card, ...]:
     return tuple(cards)
 
 
-def grid_payload(grid: StrategyGrid) -> dict[str, Any]:
-    """The wire shape of a grid.
+class Bucket(BaseModel):
+    """One bucket's strategy at a spot.
 
-    ``buckets`` is keyed by string because JSON object keys are strings, and a
+    `strategy` is null exactly when `trained` is false: this server refuses to
+    emit the uniform that an allocated-but-unvisited row would otherwise read
+    as, and a client must be able to tell "never visited" from "plays uniform".
+    """
+
+    trained: bool
+    strategy: list[float] | None
+    reach_count: int
+
+
+class NodeGrid(BaseModel):
+    """The strategy at one spot, for every combo the board allows.
+
+    ``buckets`` is keyed by STRING because JSON object keys are strings, and a
     client that had to guess whether "41" meant the int or the str would get it
     wrong exactly once.
     """
-    return {
-        "street": grid.street,
-        "board": [_card_text(card) for card in grid.board],
-        "actor": grid.actor,
-        "actions": list(grid.actions),
-        "combo_buckets": list(grid.combo_buckets),
-        "blocked": grid.blocked,
-        "trained_buckets": grid.trained_buckets,
-        "buckets": {
-            str(bucket): {
-                "trained": entry.trained,
-                "strategy": list(entry.strategy) if entry.strategy else None,
-                "reach_count": entry.reach_count,
-            }
+
+    street: str
+    board: list[str]
+    actor: int
+    actions: list[str]
+    """-1 where the board blocks the combo, so index i is always ALL_COMBOS[i]."""
+    combo_buckets: list[int]
+    blocked: int
+    trained_buckets: int
+    buckets: dict[str, Bucket]
+
+
+class Edge(BaseModel):
+    """One action on the menu: its path token, its type, and what it costs."""
+
+    token: str
+    type: str
+    amount: float
+
+
+class SolverNode(BaseModel):
+    """One spot in the tree. `grid` is null exactly when `terminal`."""
+
+    path: str
+    terminal: bool
+    board: list[str]
+    grid: NodeGrid | None
+    children: list[Edge] = Field(default_factory=list)
+
+
+class HandEvent(BaseModel):
+    """One move in the hand log."""
+
+    seat: int
+    actor: str
+    action: str
+    amount: float
+    street: str
+    """Whether the bot had NO strategy here and played uniform-random. A human
+    explores far off the self-play distribution, so misses are common, and one
+    must not be read as a bad blueprint."""
+    untrained: bool
+    """Null until the hand is over -- see :class:`Hand`."""
+    mix: list[tuple[str, float]] | None
+
+
+class Hand(BaseModel):
+    """A hand in progress.
+
+    `bot_hole_cards` and every `mix` are null until `over`, and that is not
+    politeness: a client that received them could show them, and a sit-down
+    where you can see the opponent's cards measures nothing at all.
+    """
+
+    session: str = ""
+    over: bool
+    street: str
+    board: list[str]
+    pot: float
+    stacks: list[float]
+    human_seat: int
+    button: int
+    to_act: int | None
+    hole_cards: list[str]
+    bot_hole_cards: list[str] | None
+    legal: list[Edge]
+    payoff: float | None
+    showdown: bool
+    bot_decisions: int
+    bot_untrained_decisions: int
+    log: list[HandEvent]
+
+
+class BlueprintRun(BaseModel):
+    """What is loaded here, so a client can label what it is looking at."""
+
+    run: str
+    starting_stack: int
+    small_blind: int
+    big_blind: int
+    combos: int
+    """The run being swapped in, while one is. Null when nothing is loading."""
+    loading: str | None
+    """False on a server handed a blueprint directly -- a laptop, a test."""
+    can_switch: bool = False
+
+
+class BlueprintLoad(BaseModel):
+    """The 202 from asking for a swap. The work outlives the request."""
+
+    run: str
+    loading: bool
+
+
+class Combos(BaseModel):
+    """The canonical combo order the grid indexes into. Fetch once."""
+
+    combos: list[str]
+
+
+class LeftSession(BaseModel):
+    """Confirmation that a play session was dropped.
+
+    The session lives where the blueprint does, so leaving is a REQUEST rather
+    than a local forget -- which is also why the console's proxy holds no state
+    and a console restart does not lose a hand in progress.
+    """
+
+    session: str
+    dropped: bool
+
+
+def grid_payload(grid: StrategyGrid) -> NodeGrid:
+    """The wire shape of a grid."""
+    return NodeGrid(
+        street=grid.street,
+        board=[_card_text(card) for card in grid.board],
+        actor=grid.actor,
+        actions=list(grid.actions),
+        combo_buckets=list(grid.combo_buckets),
+        blocked=grid.blocked,
+        trained_buckets=grid.trained_buckets,
+        buckets={
+            str(bucket): Bucket(
+                trained=entry.trained,
+                strategy=list(entry.strategy) if entry.strategy else None,
+                reach_count=entry.reach_count,
+            )
             for bucket, entry in grid.buckets.items()
         },
-    }
+    )
 
 
 class StartPlay(BaseModel):
@@ -135,7 +262,7 @@ _GONE = (
 )
 
 
-def hand_payload(hand: HeadsUpHand) -> dict[str, Any]:
+def hand_payload(hand: HeadsUpHand) -> Hand:
     """One hand's visible state.
 
     The bot's hole cards are withheld until the hand is over, which is not
@@ -148,46 +275,46 @@ def hand_payload(hand: HeadsUpHand) -> dict[str, Any]:
     bad blueprint.
     """
     state = hand.state
-    return {
-        "over": hand.is_over,
-        "street": str(state.street),
-        "board": [_card_text(card) for card in state.board],
-        "pot": state.pot,
-        "stacks": list(state.stacks),
-        "human_seat": hand.human_seat,
-        "button": hand.button,
-        "to_act": None if hand.is_over else state.current_player,
-        "hole_cards": [_card_text(card) for card in state.hole_cards[hand.human_seat]],
-        "bot_hole_cards": (
+    return Hand(
+        over=hand.is_over,
+        street=str(state.street),
+        board=[_card_text(card) for card in state.board],
+        pot=state.pot,
+        stacks=list(state.stacks),
+        human_seat=hand.human_seat,
+        button=hand.button,
+        to_act=None if hand.is_over else state.current_player,
+        hole_cards=[_card_text(card) for card in state.hole_cards[hand.human_seat]],
+        bot_hole_cards=(
             [_card_text(card) for card in state.hole_cards[1 - hand.human_seat]]
             if hand.is_over
             else None
         ),
-        "legal": [
-            {"token": encode_action(action), "type": str(action.type), "amount": action.amount}
+        legal=[
+            Edge(token=encode_action(action), type=str(action.type), amount=action.amount)
             for action in hand.legal_actions()
         ],
-        "payoff": hand.human_payoff() if hand.is_over else None,
-        "showdown": hand.showdown,
-        "bot_decisions": hand.bot_decisions,
-        "bot_untrained_decisions": hand.bot_untrained_decisions,
-        "log": [
-            {
-                "seat": event.seat,
-                "actor": event.actor,
-                "action": event.action_type,
-                "amount": event.amount,
-                "street": event.street,
-                "untrained": event.untrained,
+        payoff=hand.human_payoff() if hand.is_over else None,
+        showdown=hand.showdown,
+        bot_decisions=hand.bot_decisions,
+        bot_untrained_decisions=hand.bot_untrained_decisions,
+        log=[
+            HandEvent(
+                seat=event.seat,
+                actor=event.actor,
+                action=event.action_type,
+                amount=event.amount,
+                street=event.street,
+                untrained=event.untrained,
                 # Revealed only at the end: the mix is what the bot WOULD have
                 # done, and seeing it mid-hand is seeing the opponent's strategy.
-                "mix": [[name, weight] for name, weight in event.mix]
+                mix=[(name, weight) for name, weight in event.mix]
                 if (hand.is_over and event.mix)
                 else None,
-            }
+            )
             for event in hand.log
         ],
-    }
+    )
 
 
 class _Held:
@@ -298,15 +425,15 @@ def create_app(
         """
         config = held.blueprint.config
         return JSONResponse(
-            {
-                "run": held.run_id,
-                "starting_stack": config.game.starting_stack,
-                "small_blind": config.game.small_blind,
-                "big_blind": config.game.big_blind,
-                "combos": len(_COMBO_LABELS),
-                "loading": held.loading,
-                "can_switch": load_run is not None,
-            }
+            BlueprintRun(
+                run=held.run_id,
+                starting_stack=config.game.starting_stack,
+                small_blind=config.game.small_blind,
+                big_blind=config.game.big_blind,
+                combos=len(_COMBO_LABELS),
+                loading=held.loading,
+                can_switch=load_run is not None,
+            ).model_dump()
         )
 
     def _swap(run: str, at_iteration: int | None) -> None:
@@ -372,12 +499,14 @@ def create_app(
         threading.Thread(
             target=_swap, args=(request.run, request.at), name="blueprint-swap", daemon=True
         ).start()
-        return JSONResponse({"run": request.run, "loading": True}, status_code=202)
+        return JSONResponse(
+            BlueprintLoad(run=request.run, loading=True).model_dump(), status_code=202
+        )
 
     @app.get("/api/combos")
     def _combos() -> JSONResponse:
         """The canonical combo order the grid indexes into. Fetch once."""
-        return JSONResponse({"combos": list(_COMBO_LABELS)})
+        return JSONResponse(Combos(combos=list(_COMBO_LABELS)).model_dump())
 
     @app.get("/api/node")
     def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:
@@ -387,33 +516,32 @@ def create_app(
             node = replay(held.blueprint, path, cards)
             if node.actor is None:
                 return JSONResponse(
-                    {
-                        "path": path,
-                        "terminal": True,
-                        "board": [_card_text(card) for card in node.state.board],
-                        "grid": None,
-                        "children": [],
-                    }
+                    SolverNode(
+                        path=path,
+                        terminal=True,
+                        board=[_card_text(card) for card in node.state.board],
+                        grid=None,
+                    ).model_dump()
                 )
             grid = strategy_grid(held.blueprint, node, use_average=average)
             return JSONResponse(
-                {
-                    "path": path,
-                    "terminal": False,
-                    "board": [_card_text(card) for card in node.state.board],
-                    "grid": grid_payload(grid),
+                SolverNode(
+                    path=path,
+                    terminal=False,
+                    board=[_card_text(card) for card in node.state.board],
+                    grid=grid_payload(grid),
                     # The children are here so a client can walk the tree without
                     # guessing which sizes are legal: the menu is a function of
                     # the chip configuration, not of the action model alone.
-                    "children": [
-                        {
-                            "token": encode_action(action),
-                            "type": str(action.type),
-                            "amount": action.amount,
-                        }
+                    children=[
+                        Edge(
+                            token=encode_action(action),
+                            type=str(action.type),
+                            amount=action.amount,
+                        )
                         for action in node.legal_actions
                     ],
-                }
+                ).model_dump()
             )
         except PathError as error:
             return JSONResponse({"error": str(error)}, status_code=422)
@@ -427,14 +555,15 @@ def create_app(
             )
         except ValueError as error:
             return JSONResponse({"error": str(error)}, status_code=422)
-        return JSONResponse({"session": session_id, **hand_payload(hand)})
+        return JSONResponse(
+            hand_payload(hand).model_copy(update={"session": session_id}).model_dump()
+        )
 
     @app.get("/api/play/{session_id}")
     def _hand(session_id: str) -> JSONResponse:
         try:
-            return JSONResponse(
-                {"session": session_id, **hand_payload(held.sessions.get(session_id))}
-            )
+            hand = hand_payload(held.sessions.get(session_id))
+            return JSONResponse(hand.model_copy(update={"session": session_id}).model_dump())
         except UnknownSessionError:
             return JSONResponse({"error": _GONE}, status_code=404)
 
@@ -452,11 +581,13 @@ def create_app(
             # A refusal, not a fault: the client offered a move that is not on
             # the menu, or moved when it was not their turn.
             return JSONResponse({"error": str(error)}, status_code=422)
-        return JSONResponse({"session": session_id, **hand_payload(hand)})
+        return JSONResponse(
+            hand_payload(hand).model_copy(update={"session": session_id}).model_dump()
+        )
 
     @app.delete("/api/play/{session_id}")
     def _leave(session_id: str) -> JSONResponse:
         held.sessions.drop(session_id)
-        return JSONResponse({"session": session_id, "dropped": True})
+        return JSONResponse(LeftSession(session=session_id, dropped=True).model_dump())
 
     return app
