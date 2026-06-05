@@ -84,6 +84,10 @@ class PoolStatus(BaseModel):
     """The pool's node counts, and any reason it could not reach them."""
 
     pool_id: str
+    """SHORTENED, like every other Azure enum that crosses this boundary:
+    `steady`, not `AllocationState.STEADY`. It is displayed and never branched
+    on, but leaving one raw spelling behind is how the console grew a private
+    prefix-stripper in the first place."""
     allocation_state: str | None
     current_dedicated_nodes: int | None
     target_dedicated_nodes: int | None
@@ -276,7 +280,7 @@ def pool_status(batch: BatchClient, pool_id: str) -> PoolStatus:
     pool = batch.get_pool(pool_id)
     return PoolStatus(
         pool_id=pool.id,
-        allocation_state=str(pool.allocation_state) if pool.allocation_state else None,
+        allocation_state=_short(str(pool.allocation_state)) if pool.allocation_state else None,
         current_dedicated_nodes=pool.current_dedicated_nodes,
         target_dedicated_nodes=pool.target_dedicated_nodes,
         vm_size=pool.vm_size,

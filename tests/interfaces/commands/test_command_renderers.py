@@ -512,7 +512,7 @@ PAYLOADS: dict[str, Any] = {
     "pool-status": PoolPayload(
         pool_id="train",
         hourly_cost="$0.80/hr/node",
-        allocation_state="AllocationState.STEADY",
+        allocation_state="steady",
         current_dedicated_nodes=0,
         target_dedicated_nodes=0,
         vm_size="standard_d16als_v6",
