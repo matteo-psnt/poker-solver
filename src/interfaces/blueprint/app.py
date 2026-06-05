@@ -157,7 +157,7 @@ class Hand(BaseModel):
     where you can see the opponent's cards measures nothing at all.
     """
 
-    session: str = ""
+    session: str
     over: bool
     street: str
     board: list[str]
@@ -262,8 +262,15 @@ _GONE = (
 )
 
 
-def hand_payload(hand: HeadsUpHand) -> Hand:
+def hand_payload(hand: HeadsUpHand, session_id: str) -> Hand:
     """One hand's visible state.
+
+    ``session_id`` is a PARAMETER rather than something the caller attaches
+    afterwards. Each of the three endpoints that answer with a hand used to do
+    `{"session": session_id, **hand_payload(hand)}`, so each had to remember --
+    and a hand that shipped without one is silently unusable, because every
+    subsequent action is addressed by it. Required here, forgetting is a type
+    error.
 
     The bot's hole cards are withheld until the hand is over, which is not
     politeness: a client that received them could show them, and a sit-down where
@@ -276,6 +283,7 @@ def hand_payload(hand: HeadsUpHand) -> Hand:
     """
     state = hand.state
     return Hand(
+        session=session_id,
         over=hand.is_over,
         street=str(state.street),
         board=[_card_text(card) for card in state.board],
@@ -555,15 +563,14 @@ def create_app(
             )
         except ValueError as error:
             return JSONResponse({"error": str(error)}, status_code=422)
-        return JSONResponse(
-            hand_payload(hand).model_copy(update={"session": session_id}).model_dump()
-        )
+        return JSONResponse(hand_payload(hand, session_id).model_dump())
 
     @app.get("/api/play/{session_id}")
     def _hand(session_id: str) -> JSONResponse:
         try:
-            hand = hand_payload(held.sessions.get(session_id))
-            return JSONResponse(hand.model_copy(update={"session": session_id}).model_dump())
+            return JSONResponse(
+                hand_payload(held.sessions.get(session_id), session_id).model_dump()
+            )
         except UnknownSessionError:
             return JSONResponse({"error": _GONE}, status_code=404)
 
@@ -581,9 +588,7 @@ def create_app(
             # A refusal, not a fault: the client offered a move that is not on
             # the menu, or moved when it was not their turn.
             return JSONResponse({"error": str(error)}, status_code=422)
-        return JSONResponse(
-            hand_payload(hand).model_copy(update={"session": session_id}).model_dump()
-        )
+        return JSONResponse(hand_payload(hand, session_id).model_dump())
 
     @app.delete("/api/play/{session_id}")
     def _leave(session_id: str) -> JSONResponse:
