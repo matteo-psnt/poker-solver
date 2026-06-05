@@ -58,6 +58,8 @@ from src.shared.config.loader import load_config
 if TYPE_CHECKING:
     import argparse
 
+    from src.engine.solver.vector.compiled_tree import CompiledTree
+
 # Per kernel, because they differ by ~70x in cost per iteration: board-free is
 # ~0.14 s and hand-space ~10 s on a 32-board scoring set. One shared list is how
 # a sweep ends up asking the slow kernel for 18 hours of work under an 8 h
@@ -187,7 +189,11 @@ class VectorSweepPayload(BaseModel):
     stack: int
     nodes: int
     infoset_rows: int
-    derive_seconds: float
+    """Null for the kernels that do not derive a board-free abstraction:
+    `checkpoint_reached(None)` is the scalar and hand-space path, and a
+    non-optional field here made the sweep fail validation at its FIRST
+    checkpoint on two of the three kernels."""
+    derive_seconds: float | None
     """What a UNIFORM strategy scores here -- the number every point has to be
     read against, since the tree's own size sets the scale."""
     uniform_baseline: float
@@ -366,9 +372,24 @@ def run(args: argparse.Namespace) -> VectorSweepPayload:
 
 
 def _payload(
-    args, counts, compiled, baseline, points, derive_seconds, total_checkpoints=0
+    args: argparse.Namespace,
+    counts: dict[Street, int],
+    compiled: CompiledTree,
+    baseline: tuple[float, float],
+    points: list[SweepPoint],
+    derive_seconds: float | None,
+    total_checkpoints: int = 0,
 ) -> VectorSweepPayload:
-    best = min(points, key=lambda p: p["exploitability"]) if points else None
+    """Assemble the sweep payload from what has been measured so far.
+
+    The parameters are annotated, and that is not decoration: they were bare,
+    so when `points` became a list of models `ty` had nothing to check and the
+    `p["exploitability"]` lookups below it survived the conversion. `_payload`
+    runs after EVERY scored checkpoint (see `checkpoint_reached`), so the sweep
+    died at the first one and lost the whole run's compute -- on a node, where
+    --progress-file is always set.
+    """
+    best = min(points, key=lambda p: p.exploitability) if points else None
     return VectorSweepPayload(
         done=len(points),
         total=total_checkpoints,
@@ -386,8 +407,8 @@ def _payload(
         uniform_baseline=round(baseline[0], 6),
         uniform_baseline_unconstrained=round(baseline[1], 6),
         points=list(points),
-        best_exploitability=best["exploitability"] if best else None,
-        best_at_iterations=best["iterations"] if best else None,
+        best_exploitability=best.exploitability if best else None,
+        best_at_iterations=best.iterations if best else None,
     )
 
 

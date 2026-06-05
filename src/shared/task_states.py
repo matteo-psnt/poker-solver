@@ -116,10 +116,19 @@ EXIT_MEANING: dict[int, str] = {
 }
 
 
-def outcome_of(exit_code: int | None) -> Outcome:
-    """What a finished task achieved. ``None`` reads as clean -- Batch omits the
-    code for a task that never ran a process to completion, and there is nothing
-    to report as a failure."""
+def outcome_of(exit_code: int | None, result: str | None = None) -> Outcome:
+    """What a finished task achieved, from the exit code and Batch's own verdict.
+
+    ``result`` is consulted because a null exit code is NOT evidence of success:
+    a task cancelled while still queued (`just panic`), or one whose resource
+    files failed to download, reaches ``completed`` having never run a process,
+    so Batch reports ``failure`` with no code at all. Reading the code alone
+    made `jobs` print ``done`` and paint it green for exactly those rows, while
+    `tasks` -- which branches on ``result`` through `observed_cause` -- called
+    the same row ``failed``. Two screens, one task, opposite answers.
+    """
+    if exit_code is None and (result or "").lower() == "failure":
+        return Outcome.FAILED
     if exit_code in (0, None):
         return Outcome.DONE
     if exit_code == 124:

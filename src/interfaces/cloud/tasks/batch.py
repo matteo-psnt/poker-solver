@@ -171,6 +171,10 @@ def _task_record(task: Any, job_id: str = "") -> BatchTask:
     execution = task.execution_info
     exit_code = execution.exit_code if execution is not None else None
     phase = task_states.phase_of(str(task.state) if task.state else None)
+    # SHORTENED, unlike `state`: `observed_cause` compares against a bare
+    # `success`/`failure`, and a raw `BatchTaskResult.SUCCESS` matches neither --
+    # which used to be `tasks._translate`'s job.
+    result = _short(str(execution.result)) if execution is not None and execution.result else None
     return BatchTask(
         task=task.id,
         job=job_id,
@@ -178,15 +182,10 @@ def _task_record(task: Any, job_id: str = "") -> BatchTask:
         phase=phase,
         # Only for a task that has stopped: an outcome derived from the exit code
         # of a task still running would report "done" for work in progress.
-        outcome=task_states.outcome_of(exit_code) if phase is Phase.FINISHED else None,
+        outcome=task_states.outcome_of(exit_code, result) if phase is Phase.FINISHED else None,
         exit_code=exit_code,
         exit_meaning=task_states.exit_meaning(exit_code),
-        # SHORTENED, unlike `state`: `observed_cause` compares against bare
-        # `success`/`failure`, and a raw `BatchTaskResult.SUCCESS` matches
-        # neither -- which used to be `tasks._translate`'s job.
-        result=_short(str(execution.result))
-        if execution is not None and execution.result
-        else None,
+        result=result,
         failure=_failure(execution),
         created=_isoformat(task.creation_time),
         start_time=_isoformat(execution.start_time) if execution is not None else None,

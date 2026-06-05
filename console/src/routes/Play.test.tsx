@@ -62,6 +62,19 @@ const HAND = {
       untrained: true,
       mix: null,
     },
+    {
+      // A shove in the LOG, which is a different producer from `legal` above:
+      // one carries `str(action.type)`, the other came through
+      // `_action_type_name`. No fixture had one, so the two spellings of one
+      // enum went unnoticed until a shove rendered as "all-in 99bb".
+      seat: 0,
+      actor: "human",
+      action: "all_in",
+      amount: 198,
+      street: "Preflop",
+      untrained: false,
+      mix: null,
+    },
   ],
 };
 
@@ -155,11 +168,16 @@ describe("the table", () => {
  * the cost this page cannot afford.
  */
 describe("what just happened", () => {
-  it("draws the bot's move in front of it", async () => {
+  it("draws the bot's move in front of it, a shove included", async () => {
+    // The log and the action menu are DIFFERENT producers: `legal` carries
+    // `str(action.type)` while `log` and every `mix` came through
+    // `_action_type_name`, which used to hyphenate. One enum, two spellings --
+    // so a shove fell through `label()`'s catch-all and rendered as
+    // "all-in 99bb" while the button beside it said "all-in". The server spells
+    // it one way now; this is the fixture that would have caught it.
     await deal();
     const chips = screen.getAllByTestId("did").map((chip) => chip.textContent);
-    // `r6` at a big blind of 2, and the caveat travels with the move.
-    expect(chips).toEqual(["raise to 3bbuntrained"]);
+    expect(chips).toEqual(["raise to 3bbuntrained", "all-in"]);
   });
 
   it("names the street, which the board only implies — and preflop not at all", async () => {
@@ -187,7 +205,7 @@ describe("what just happened", () => {
     const chips = screen.getAllByTestId("did").map((chip) => chip.textContent);
     // Carried, but labelled with the street it was taken on, so it cannot read
     // as something the bot did on the flop now showing.
-    expect(chips).toEqual(["raise to 3bbPreflopuntrained"]);
+    expect(chips).toEqual(["raise to 3bbPreflopuntrained", "all-inPreflop"]);
   });
 });
 

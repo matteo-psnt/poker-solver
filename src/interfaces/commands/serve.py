@@ -11,7 +11,7 @@ make.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
@@ -71,19 +71,19 @@ def run(args: argparse.Namespace) -> ServePayload:
     )
 
 
-def render(payload: dict[str, Any]) -> None:
+def render(payload: ServePayload) -> None:
     # Imported here, not at module scope: `--help` and every other subcommand
     # would otherwise pay to import uvicorn and the whole FastAPI stack.
     import uvicorn  # noqa: PLC0415 -- see above
 
-    print(f"Console on {payload['url']}   (Ctrl-C to stop)")
+    print(f"Console on {payload.url}   (Ctrl-C to stop)")
     try:
         uvicorn.run(
             "src.interfaces.web.app:create_app",
             factory=True,
-            host=payload["host"],
-            port=payload["port"],
-            reload=payload["reload"],
+            host=payload.host,
+            port=payload.port,
+            reload=payload.reload,
             log_level="warning",
         )
     except KeyboardInterrupt:

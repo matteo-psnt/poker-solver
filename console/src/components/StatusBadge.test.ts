@@ -53,9 +53,13 @@ describe("displayed names are not always the names on the wire", () => {
     expect(displayName("killed")).toBe("killed (oom)");
   });
 
-  it("no longer renames Batch's words, because the server already did", () => {
-    // `active` -> `queued` used to happen here. It happens in `phase_of` now,
-    // and a second rename on this side would be a vocabulary to keep in step.
+  it("still renames the CAUSE `active`, which is not the same as a phase", () => {
+    // `BatchTask.phase` says `queued`, so this map dropped `active` -- but every
+    // caller passes `TaskRow.cause`, whose vocabulary is frozen by the records
+    // already on the share and still spells a waiting task `active`. Dropping it
+    // labelled that task with the word that reads as its opposite.
+    expect(displayName("active")).toBe("queued");
+    // A phase that already reads correctly passes straight through.
     expect(displayName("queued")).toBe("queued");
   });
 

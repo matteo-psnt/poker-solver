@@ -6,6 +6,8 @@ here reads, and the fixtures write node records only to have something to read.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src.shared import records, task_history
@@ -572,3 +574,33 @@ class TestBundlesAreJustAnotherContainer:
 
         causes = {row.cause for row in task_history.read_tasks(tmp_path)}
         assert task_log.CAUSE_TIMEOUT in causes
+
+
+class TestOneMalformedDocumentCannotTakeDownEveryReader:
+    """`read_tasks` builds models now, and `shared` must stay tolerant.
+
+    These are untyped JSON off an SMB share, written by a wrapper that may be an
+    older version or killed halfway through a write. `read_tasks` feeds
+    `tasks`, `cost`, `runinfo` and -- through `unresolved_tasks` -- `reconcile`,
+    so one strict field would take all four down together. `kinds.Progress`
+    reads the same bytes and tolerates both of these; the model must agree, or
+    two readers of one record disagree about whether it is readable.
+    """
+
+    def test_a_progress_record_with_no_unit_still_reads(self, tmp_path):
+        _node(tmp_path, "task-a", "started")
+        (task_log.tasks_dir(tmp_path) / "task-a.progress.json").write_text(
+            json.dumps({"task_id": "task-a", "progress": {"done": 5, "total": 10}})
+        )
+        rows = task_history.read_tasks(tmp_path)
+        assert rows[0].progress is not None
+        assert rows[0].progress.unit == ""
+
+    def test_a_null_unit_is_a_blank_one(self, tmp_path):
+        """The wrapper writes the key with no value for a kind that cannot name
+        its unit, so null is a shape that occurs rather than a broken record."""
+        _node(tmp_path, "task-b", "started")
+        (task_log.tasks_dir(tmp_path) / "task-b.progress.json").write_text(
+            json.dumps({"task_id": "task-b", "progress": {"done": 1, "total": 2, "unit": None}})
+        )
+        assert task_history.read_tasks(tmp_path)[0].progress.unit == ""

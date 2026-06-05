@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from src.core.game.actions import Action, ActionType
-from src.engine.search.heads_up_session import HeadsUpHand
+from src.engine.search.heads_up_session import HeadsUpHand, _action_type_name
 from tests.test_helpers import build_trained_test_solver
 
 
@@ -160,3 +160,28 @@ class TestConstruction:
         bare 'invalid' leaves no way to tell which one was wrong."""
         with pytest.raises(ValueError, match=names):
             HeadsUpHand(blueprint, human_seat=seat, button=button, seed=1)
+
+
+class TestOneEnumHasOneWireSpelling:
+    """A hand reaches the console through TWO producers, and they must agree.
+
+    The `legal` menu carries `str(action.type)`; the `log` and every `mix` go
+    through `_action_type_name`. That helper used to hyphenate, so `ALL_IN`
+    arrived as `all_in` in one field and `all-in` in the other -- and the
+    console had to know both. When a cleanup collapsed its check to one, a shove
+    fell through to the catch-all and rendered as "all-in 99bb" in the log while
+    the button beside it read "all-in", grey against dark red.
+
+    Nothing pins the console's fixtures to the real producer, so this is the
+    guard: the two spellings are the same string, for every action there is.
+    """
+
+    def test_the_log_and_the_menu_spell_every_action_identically(self):
+        for action_type in ActionType:
+            assert _action_type_name(action_type) == str(action_type), action_type
+
+    def test_and_the_underscore_form_is_the_one(self):
+        """`str(ActionType)` is `name.lower()`, which is what the path tokens and
+        the rest of the wire already use. Naming it here so a future 'tidy'
+        rename has to argue with a test rather than a comment."""
+        assert _action_type_name(ActionType.ALL_IN) == "all_in"

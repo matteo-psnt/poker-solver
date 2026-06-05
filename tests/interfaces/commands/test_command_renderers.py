@@ -13,12 +13,15 @@ check.
 import copy
 from typing import Any
 
+import pytest
+
 from src.interfaces.cloud.cost.billing import BilledPayload, ServiceCharge, StandingCharge
 from src.interfaces.cloud.cost.node_time import ConcurrencyPoint
 from src.interfaces.cloud.tasks.batch import BatchTask, Job, ResizeError
 from src.interfaces.commands import load_all
 from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
 from src.interfaces.commands.autoscale_check import AutoscalePayload
+from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
 from src.interfaces.commands.compact_legs import CompactedPayload
 from src.interfaces.commands.compare import ComparePayload, PairedComparison
@@ -38,6 +41,7 @@ from src.interfaces.commands.report import ArmResult, ReportPayload
 from src.interfaces.commands.runinfo import RunInfoPayload
 from src.interfaces.commands.runs import RunsPayload, RunSummary
 from src.interfaces.commands.score import ScorePayload
+from src.interfaces.commands.serve import ServePayload
 from src.interfaces.commands.serve_box import BoxPayload
 from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
@@ -316,23 +320,25 @@ PAYLOADS: dict[str, Any] = {
         usable=False,
         location="swedencentral",
     ),
-    "blueprint-serve": {
-        "op": "blueprint-serve",
-        "run": "run-production-025433-1095",
-        "run_dir": "/mnt/work/runs/run-production-025433-1095",
-        "at_iteration": None,
-        "idle_timeout": 1800,
-        "url": "http://127.0.0.1:8790",
-        "host": "127.0.0.1",
-        "port": 8790,
-    },
-    "serve": {
-        "op": "serve",
-        "url": "http://127.0.0.1:8765",
-        "host": "127.0.0.1",
-        "port": 8765,
-        "reload": False,
-    },
+    "blueprint-serve": BlueprintServePayload(
+        run="run-production-025433-1095",
+        run_dir="/mnt/work/runs/run-production-025433-1095",
+        # `runs_dir` was absent while this was a literal, and `render` reads it:
+        # nothing noticed, because this command is in SIDE_EFFECTING and its
+        # renderer was never called.
+        runs_dir="/mnt/work/runs",
+        at_iteration=None,
+        idle_timeout=1800,
+        url="http://127.0.0.1:8790",
+        host="127.0.0.1",
+        port=8790,
+    ),
+    "serve": ServePayload(
+        url="http://127.0.0.1:8765",
+        host="127.0.0.1",
+        port=8765,
+        reload=False,
+    ),
     "cost": CostPayload(
         hours=0.0,
         task_hours=68.87,
@@ -654,6 +660,13 @@ BY_NAME = {command.name: command for command in load_all()}
 # commands whose render has a side effect rather than being pure formatting, so
 # they are excluded here by name and covered by `tests/interfaces/web/` and
 # `tests/interfaces/blueprint/` instead.
+# These two renderers ARE the server: `render` prints one line and then blocks
+# in `uvicorn.run`. They are skipped by the loop below and driven individually
+# in `TestTheServersStillFormatTheirPayload`, with the server stubbed -- which
+# is the part that matters, and the part that was NOT covered when the comment
+# here claimed `tests/interfaces/web/` did it. Nothing called either renderer,
+# so both kept subscripting a payload that had become a model, and
+# `poker-solver serve` died before uvicorn.
 SIDE_EFFECTING = {"serve", "blueprint-serve"}
 
 
@@ -711,3 +724,39 @@ class TestReportNamesTheWorktree:
 
         assert "from" not in out
         assert "900.0" in out, "the numbers must still be there"
+
+
+class TestTheServersStillFormatTheirPayload:
+    """The two renderers the loop above cannot call, called anyway.
+
+    `serve` and `blueprint-serve` block in `uvicorn.run`, so they are skipped by
+    `TestEveryOpRenders` -- and that skip is why both went on subscripting a
+    payload that had become a model. `poker-solver serve` (and `just console`,
+    the only way to start it) died with `TypeError: 'ServePayload' object is not
+    subscriptable` BEFORE uvicorn, and `--json` still worked, so nothing
+    noticed. `blueprint-serve` is worse: `infra/serve/main.tf` invokes it
+    without `--json`, so the unit failed and the box deallocated while
+    `/api/box/start` reported success.
+
+    Stubbing the server is the whole trick -- everything before it is ordinary
+    formatting, and that is the part that broke.
+    """
+
+    def test_serve_prints_where_it_will_listen(self, monkeypatch, capsys):
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+        BY_NAME["serve"].render(PAYLOADS["serve"])
+        assert "http://127.0.0.1:8765" in capsys.readouterr().out
+
+    def test_blueprint_serve_reads_every_field_before_it_loads(self, monkeypatch, capsys):
+        """It reads `run_dir` and `runs_dir` before touching a blueprint.
+
+        Stopped at the load rather than the listen: building one is ~a minute
+        off the share. Reaching the refusal proves the payload access above it.
+        """
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+        with pytest.raises(Exception, match=r"run-production|No such file|not found|Errno"):
+            BY_NAME["blueprint-serve"].render(PAYLOADS["blueprint-serve"])
