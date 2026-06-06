@@ -111,3 +111,6 @@ console/*.tsbuildinfo
 .coverage.*
 coverage.xml
 htmlcov/
+
+# Local-only working files; never part of a commit.
+scratch/
