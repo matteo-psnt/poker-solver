@@ -430,7 +430,13 @@ def walk(
         # Widen, add, round ONCE — numpy's `float32[i] += float64` computes in
         # float64 and rounds on the store, and narrowing the addend first
         # instead lands a different float on about one accumulation in 150,000.
-        strategy_sum[start + i] += strategy[i] * strategy_weight
+        # float32, NOT float64. `tree_traversal` does
+        # `strategy_sum[slot] += probability * weight` where `probability` came
+        # from `.tolist()` and is a PYTHON float -- and under NEP 50 a Python
+        # scalar is weak, so numpy computes that add entirely in float32.
+        # Numba types the same expression as float64 and rounds on the store,
+        # which is a different result about once in 150,000 accumulations.
+        strategy_sum[start + i] += np.float32(strategy[i] * strategy_weight)
     applied += 1
 
     draw, sample_index = random_sample(sample_state, sample_index)

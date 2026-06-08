@@ -28,9 +28,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.core.game.rules import GameRules
+from src.core.game.state import FULL_DECK
 from src.engine.solver.betting_tree import BettingTree, build_betting_tree
 from src.engine.solver.infoset.index import bucket_of
-from src.engine.solver.mccfr import policy, tree_traversal
+from src.engine.solver.mccfr import compiled_walk, policy, tree_traversal
+from src.engine.solver.mccfr.compiled_walk import CompiledContext
 from src.engine.solver.policy.source import PolicySource, TreePolicySource
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
@@ -84,6 +86,28 @@ class StaticTreeSolver(MCCFRSolver[StaticArrayStorage]):
         # Decided once here, not tested per node. `state` exists so the two
         # traversals can be A/B'd on one machine; nothing else selects it.
         self._walk_tree = config.solver.traversal == "tree"
+        # Built on first use, not here: it needs the abstraction's raw arrays,
+        # and a solver over a stub bucketer (every unit test) has none.
+        self._compiled = config.solver.traversal == "compiled"
+        self._compiled_context: CompiledContext | None = None
+
+    def train_iteration(self) -> float:
+        """One iteration, through the compiled kernel when it is selected.
+
+        Overridden here rather than at ``_cfr_external_sampling`` because the
+        kernel owns the whole iteration: it deals the hole cards, walks, and
+        advances both random generators in one crossing. Bit-identical to the
+        path it replaces (``test_compiled_walk_equivalence``), so the choice
+        changes throughput and nothing else.
+        """
+        if not self._compiled:
+            return super().train_iteration()
+
+        if self._compiled_context is None:
+            self._compiled_context = CompiledContext(self.tree, self.card_abstraction, FULL_DECK)
+        utility = compiled_walk.run_iteration(self, self._compiled_context, self.iteration)
+        self.iteration += 1
+        return utility
 
     def _cfr_external_sampling(self, state: GameState, traversing_player: int) -> float:
         """Walk node ids; ``solver.traversal="state"`` selects the other one.

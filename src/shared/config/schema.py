@@ -282,7 +282,7 @@ class SolverConfig(StrictFrozenModel):
     # comparison is two arms back to back on one machine. Without a switch
     # that has to be two code snapshots, which differ in more than the thing
     # being measured.
-    traversal: Literal["tree", "state"] = Field(default="tree")
+    traversal: Literal["tree", "state", "compiled"] = Field(default="tree")
 
 
 # ---------------------------------------------------------------------------
