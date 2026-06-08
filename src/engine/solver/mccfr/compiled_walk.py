@@ -282,6 +282,18 @@ def walk(
         hand_to_col,
         sentinel,
     )
+    if bucket < 0:
+        # `_bucket` reports "board not in the abstraction" or "hand impossible
+        # on this board" as -1, because a kernel has no exceptions to raise
+        # from the lookup itself. Unchecked, that indexes one row BEFORE the
+        # node's block and writes regrets into a neighbouring infoset --
+        # silent corruption of the shared table, which is exactly what
+        # `StaticArrayStorage.view`'s bounds check exists to stop.
+        raise ValueError(
+            "bucket lookup failed: the board is absent from the abstraction, "
+            "or the hand is not a legal combination on it"
+        )
+
     row = row_offset[node_id] + bucket
     start = slot_offset[node_id] + bucket * count
     visited[row] = 1
