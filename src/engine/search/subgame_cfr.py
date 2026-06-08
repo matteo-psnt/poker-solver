@@ -248,6 +248,37 @@ class _NodeData:
 
 
 @dataclass(frozen=True)
+class Continuation:
+    """One assumed line for the rest of the hand, past a depth-limit leaf.
+
+    The module's valuation model (see the header) drops the blueprint's
+    future-street betting and checks down. That is EXACT on the river -- there
+    is no future street, so checking down is the rest of the hand -- and is an
+    approximation only on flop and turn, which is where the ~25% of leaves that
+    stay truncated at any ``max_depth`` live. This type is what makes a
+    different assumption expressible.
+
+    ``pot_fraction`` is what EACH player is assumed to put in before showdown,
+    as a fraction of the pot at the leaf. Zero is the check-down the module has
+    always used, so :data:`CHECK_DOWN` reproduces today's numbers exactly.
+
+    NOT YET WIRED TO A CHOICE. The literature's depth-limited solving gives the
+    OPPONENT a choice among several continuations, which is what stops the hero
+    exploiting one naive assumption. Doing that properly means adding the choice
+    as a decision node in the local tree so CFR learns a strategy over it --
+    taking a max inside the leaf instead would break the zero-sum structure the
+    solve rests on. Until then this is a parameter with one production value.
+    """
+
+    name: str
+    pot_fraction: float
+
+
+CHECK_DOWN = Continuation(name="check-down", pot_fraction=0.0)
+"""Today's assumption, and the default everywhere. Exact on the river."""
+
+
+@dataclass(frozen=True)
 class _LeafSpec:
     """Iteration-invariant leaf facts, precomputed once per solve."""
 
@@ -392,11 +423,21 @@ def _leaf_values(
     ctx: _PassContext,
     reach_hero: np.ndarray,
     reach_opp: np.ndarray,
+    continuation: Continuation = CHECK_DOWN,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Counterfactual value vectors at a leaf (terminal or depth-limit)."""
+    """Counterfactual value vectors at a leaf (terminal or depth-limit).
+
+    ``continuation`` says what is ASSUMED to happen between this leaf and
+    showdown. The default reproduces the check-down valuation exactly, so this
+    parameter changes nothing until a caller passes something else.
+    """
     # Fold: pot goes to the non-folder, cards never matter — so the alive mass
     # is taken against the ROOT board (embedded in the reach vectors), not
     # against any sampled runout.
+    #
+    # A continuation does NOT apply here, and that is not an oversight: the hand
+    # is over, there is no rest-of-hand to assume anything about, and this branch
+    # is EXACT. Scaling it would replace an exact answer with a modelled one.
     if spec.is_fold:
         return (
             spec.hero_payoff * nonblocking_mass(reach_opp),
@@ -404,15 +445,21 @@ def _leaf_values(
         )
 
     hero, opp = ctx.hero, 1 - ctx.hero
-    pot = spec.pot
+    # Both players are assumed to put in the same extra amount and see the
+    # showdown, so the pot grows by twice what each commits. Symmetric on
+    # purpose: an asymmetric continuation would encode a read, and everything
+    # here must stay a function of public state + ranges.
+    extra = continuation.pot_fraction * spec.pot
+    pot = spec.pot + 2.0 * extra
+    invested = (spec.invested[0] + extra, spec.invested[1] + extra)
     v_hero = np.zeros(NUM_COMBOS)
     v_opp = np.zeros(NUM_COMBOS)
     for evaluator in ctx.evaluators:
         win_h, tie_h, alive_h = evaluator.masses(reach_opp)
-        v_hero += win_h * pot + tie_h * (pot / 2.0) - spec.invested[hero] * alive_h
+        v_hero += win_h * pot + tie_h * (pot / 2.0) - invested[hero] * alive_h
 
         win_o, tie_o, alive_o = evaluator.masses(reach_hero)
-        v_opp += win_o * pot + tie_o * (pot / 2.0) - spec.invested[opp] * alive_o
+        v_opp += win_o * pot + tie_o * (pot / 2.0) - invested[opp] * alive_o
 
     count = ctx.alive_count
     np.divide(v_hero, count, out=v_hero, where=count > 0)
