@@ -383,3 +383,38 @@ def test_resolver_blend_alpha_zero_returns_blueprint_mix():
 
     result = resolver.solve(state, time_budget_ms=25)
     assert np.allclose(result.strategy, result.blueprint_strategy)
+
+
+def test_the_leaf_continuation_knob_reaches_the_solve(monkeypatch):
+    """`resolver.leaf_continuation_fraction` must actually arrive at the leaf.
+
+    A knob that is declared, threaded and never read is the failure this repo
+    has already paid for once (`b99a799` shipped a classification with no reader
+    on either surface). Three hops separate the config field from
+    `_leaf_values`, so this asserts the value that arrives, not merely that the
+    resolver still runs.
+
+    The DEFAULT is asserted too: zero is the shipped behaviour, and a
+    continuation that silently applied itself would change every published
+    resolver number without anything failing.
+    """
+    state, rules = _make_initial_state()
+    seen: list[float] = []
+    real_solve = resolver_module.solve_subgame
+
+    def _spy(tree, **kwargs):
+        seen.append(kwargs["continuation"].pot_fraction)
+        return real_solve(tree, **kwargs)
+
+    monkeypatch.setattr(resolver_module, "solve_subgame", _spy)
+
+    for expected, overrides in ((0.0, {}), (0.5, {"resolver.leaf_continuation_fraction": 0.5})):
+        config = make_test_config(seed=42, **{"resolver.max_depth": 2, **overrides})
+        solver, _storage = build_test_solver(config, DummyCardAbstraction())
+        HUResolver(
+            blueprint=solver,
+            action_model=ActionModel(config),
+            rules=rules,
+            config=config.resolver,
+        ).solve(state, time_budget_ms=25)
+        assert seen[-1] == expected
