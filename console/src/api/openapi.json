@@ -3944,6 +3944,11 @@
       "TaskProgress": {
         "description": "How far a RUNNING task has got. Absent once it ends -- a finished task\nshowing \"62%\" is a sample that stopped arriving, not a task stuck at 62%.\n\nTOLERANT, and matched deliberately to `kinds.Progress.from_record`, which\nreads the same bytes and accepts a missing `unit` and float counts. These\nare untyped JSON off an SMB share, written by a wrapper that may be an older\nversion or may have been killed halfway through the write -- and this module\nreads `.get` with a default everywhere else for exactly that reason. A\nrequired `unit` here would turn one malformed document into a failure of\n`tasks`, `cost`, `runinfo` and `reconcile` at once.",
         "properties": {
+          "base": {
+            "default": 0.0,
+            "title": "Base",
+            "type": "number"
+          },
           "done": {
             "title": "Done",
             "type": "number"
@@ -3956,6 +3961,11 @@
             "default": "",
             "title": "Unit",
             "type": "string"
+          },
+          "window_seconds": {
+            "default": 0.0,
+            "title": "Window Seconds",
+            "type": "number"
           }
         },
         "required": [

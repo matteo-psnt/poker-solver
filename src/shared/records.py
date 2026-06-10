@@ -176,10 +176,20 @@ REGISTRY: dict[str, Artifact] = {
         kind="snapshot",
         scope="local",
         version=1,
-        what="streets clustered so far, while a card abstraction is being built",
+        what="runouts enumerated so far, while a card abstraction is being built",
         where="<abstraction_dir>/precompute-progress.json",
         growth="live-only, as above. Separate from evaluate's only because the two "
         "are written by different services into different trees; the SHAPE is identical",
+    ),
+    "train-progress.json": Artifact(
+        name="train-progress.json",
+        kind="snapshot",
+        scope="local",
+        version=1,
+        what="iterations trained so far, between checkpoints",
+        where="<node scratch>/train-progress.json",
+        growth="live-only, as above. The CHECKPOINT is the durable answer; this exists "
+        "because a checkpoint lands every million iterations and a bar cannot wait",
     ),
     "legs/*.bundle.json": Artifact(
         name="legs/*.bundle.json",

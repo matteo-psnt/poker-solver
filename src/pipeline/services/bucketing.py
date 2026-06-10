@@ -86,10 +86,10 @@ def precompute_abstraction(
     precomputer = PostflopPrecomputer(config)
     precomputer.precompute_all(
         streets=[Street.FLOP, Street.TURN, Street.RIVER],
-        # Street completion, which is the only thing that reaches the outside
-        # before `save()`. That is also why a precompute is never retried, so
-        # without a bar a multi-hour build is opaque from the first second.
-        on_street_done=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
+        # The only thing that reaches the outside before `save()`. That is also
+        # why a precompute is never retried, so without a bar a multi-hour build
+        # is opaque from the first second.
+        on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
     )
     precomputer.save(out)
     return out

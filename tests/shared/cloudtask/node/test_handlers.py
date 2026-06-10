@@ -61,6 +61,55 @@ class TestEvaluateFetch:
 
         assert handlers._evaluate(task, paths, log) == (1, None)
 
+    def test_the_evaluator_is_told_where_to_report(self, paths, log, monkeypatch):
+        """IT NEVER WAS. Only precompute and vector-sweep filled the path in, so
+        `--progress-file` never reached an evaluation's command line and the
+        branch counter it keeps had nowhere to go: every score fell back to
+        counting rungs, which is 1, so the bar read 0% for the whole ten
+        minutes."""
+        self._published(paths)
+        seen: list[list[str]] = []
+        monkeypatch.setattr(handlers, "run_guarded", lambda argv, **k: seen.append(argv) or 0)
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("2000",))
+
+        handlers._evaluate(task, paths, log)
+
+        (argv,) = seen
+        where = argv[argv.index("--progress-file") + 1]
+        assert where == str(paths.work / "evaluate-progress.json")
+
+
+class TestTrain:
+    def test_the_trainer_is_told_where_to_report(self, paths, log, monkeypatch):
+        """The same omission that blanked every evaluation's bar. Without it the
+        only thing the wrapper can read is the checkpoint manifest, which lands
+        once a million iterations -- minutes to half an hour of a bar that does
+        not move, and nothing at all before the first one."""
+        seen: list[list[str]] = []
+        monkeypatch.setattr(handlers, "run_guarded", lambda argv, **k: seen.append(argv) or 0)
+        task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a")
+
+        handlers._train(task, paths, log)
+
+        (argv,) = seen
+        assert argv[argv.index("--progress-file") + 1] == str(paths.work / "train-progress.json")
+
+    def test_a_kind_that_reports_no_file_is_not_handed_the_scratch_dir(
+        self, paths, log, monkeypatch
+    ):
+        """`paths.work / ""` is the DIRECTORY, and a command asked to write a
+        JSON document into one fails on it."""
+        seen: list[list[str]] = []
+        monkeypatch.setattr(handlers, "run_guarded", lambda argv, **k: seen.append(argv) or 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.TRAIN_VECTOR, config="quick_test", to=1000, universe_boards=10
+        )
+
+        handlers._train(task, paths, log)
+
+        (argv,) = seen
+        assert "--progress-file" not in argv
+
 
 class TestPrecompute:
     """Never probed on the pool -- it is a rare, expensive op -- so the guard

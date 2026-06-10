@@ -38,6 +38,18 @@ def _cli(argv: list[str]) -> list[str]:
     return ["uv", "run", "poker-solver", *argv]
 
 
+def _reporting(plan: TaskPlan, paths: NodePaths) -> TaskPlan:
+    """Fill in where this task reports its progress, when its kind takes one.
+
+    Only the node knows its scratch directory, so the path is filled in here and
+    the KIND puts it on the command line. A kind that declares no file is handed
+    back unchanged -- ``paths.work / ""`` is the scratch DIRECTORY, which a
+    command would then be asked to write a JSON document to.
+    """
+    declared = kinds.kind(plan.op).progress_file
+    return replace(plan, progress_path=str(paths.work / declared)) if declared else plan
+
+
 def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
     # The prior lives on the share like any other run, and fetching it is the
     # node's job -- without this the trainer resolves a run directory that was
@@ -84,6 +96,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
         log(f"fetching published checkpoint for {run_id}")
         archive.fetch_current_rung(published, paths.runs / run_id, log)
 
+    plan = _reporting(plan, paths)
     progress.note_baseline(paths, plan)
     watcher = progress.LadderWatcher(paths, log, plan=plan)
     watcher.start()
@@ -121,29 +134,41 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     if rungs is None:
         return 1, None
 
+    # WITHOUT THIS the evaluator is never told where to write, so `--progress-file`
+    # never reaches its command line and the branch counter it keeps has nowhere
+    # to go: every score fell back to counting rungs, which is 1 for a `score`
+    # task, so the bar read 0% for the whole ten minutes and then vanished.
+    plan = _reporting(plan, paths)
     progress.note_baseline(paths, plan)
+    # Progress ONLY, no ladder: this task has just fetched rungs onto the node,
+    # and a ladder tick would push ~540 MB of them straight back to the share.
+    watcher = progress.ProgressWatcher(paths, log, plan=plan)
+    watcher.start()
     ok, bad = 0, 0
     # Built from the rungs that FETCHED, not the ones requested: `fetch_for_evaluation`
     # drops what is not on the share, and a command list built from the request
     # would score the wrong rung for every drop before it.
     commands = replace(plan, eval_rungs=tuple(rungs)).commands
-    for rung, argv in zip(rungs or [""], commands, strict=True):
-        log(
-            f"evaluate: run={plan.run_id} method={plan.eval_method}"
-            + (f" at={rung}" if rung else "")
-        )
-        code = run_guarded(_cli(argv), cwd=paths.code, timeout=plan.timeout_seconds, log=log)
-        # One bad rung must not abandon the rest: a partial curve beats none,
-        # and the failure is visible in this log and absent from the ledger.
-        if code == 0:
-            ok += 1
-        else:
-            bad += 1
-            log(f"WARN rung {rung or 'latest'} failed (rc={code})")
-        # Between rungs, not on a timer: scoring one rung is opaque from out
-        # here, so this is the only moment the count actually changes.
-        progress.publish(paths, plan, {"scored": ok + bad})
-        log.publish()
+    try:
+        for rung, argv in zip(rungs or [""], commands, strict=True):
+            log(
+                f"evaluate: run={plan.run_id} method={plan.eval_method}"
+                + (f" at={rung}" if rung else "")
+            )
+            code = run_guarded(_cli(argv), cwd=paths.code, timeout=plan.timeout_seconds, log=log)
+            # One bad rung must not abandon the rest: a partial curve beats none,
+            # and the failure is visible in this log and absent from the ledger.
+            if code == 0:
+                ok += 1
+            else:
+                bad += 1
+                log(f"WARN rung {rung or 'latest'} failed (rc={code})")
+            # The rung counter the running evaluator cannot know: its file
+            # describes the walk in front of it, not the ones already scored.
+            watcher.note(scored=ok + bad)
+            log.publish()
+    finally:
+        watcher.stop()
 
     log(f"evaluate complete: {ok} scored, {bad} failed")
     # Exit 0 when ANYTHING scored: a non-zero exit retries the WHOLE task, and
@@ -192,12 +217,10 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
     running it on a laptop.
     """
     payload = paths.work / "precompute.json"
-    # Only the node knows its scratch directory, so the path is filled in here
-    # and the KIND puts it on the command line.
-    plan = replace(plan, progress_path=str(paths.work / kinds.kind(plan.op).progress_file))
+    plan = _reporting(plan, paths)
     log(f"precompute: config={plan.config} (timeout {plan.timeout_seconds}s)")
     progress.note_baseline(paths, plan)
-    watcher = progress.LadderWatcher(paths, log, plan=plan)
+    watcher = progress.ProgressWatcher(paths, log, plan=plan)
     watcher.start()
     try:
         code = run_guarded(
@@ -259,7 +282,7 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
     node's disk is discarded when the task ends, so a copy would be paid for on
     every arm and thrown away.
     """
-    plan = replace(plan, progress_path=str(paths.work / kinds.kind(plan.op).progress_file))
+    plan = _reporting(plan, paths)
     result = Path(plan.progress_path)
     destination = paths.share / "vector-sweeps"
     # The task id is the node's, not the plan's -- the plan describes the WORK
@@ -306,7 +329,7 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
 
     log(f"vector-sweep: {plan.arm or 'sweep'} on {plan.config} (timeout {plan.timeout_seconds}s)")
     progress.note_baseline(paths, plan)
-    watcher = progress.LadderWatcher(paths, log, plan=plan)
+    watcher = progress.ProgressWatcher(paths, log, plan=plan)
     watcher.start()
     stop = threading.Event()
     publisher = threading.Thread(

@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import random
+import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -40,6 +41,7 @@ from src.shared import run_events
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from src.engine.solver.protocols import BucketingStrategy
@@ -118,11 +120,14 @@ def _worker_entry(
     result_queue: mp.Queue,
     abstraction: BucketingStrategy | None = None,
     chunk_id: int = 0,
+    counters: Any = None,
 ) -> None:
     """Train ``iterations`` on the shared arrays, then report.
 
     There is no message loop: nothing needs saying between workers. The whole
-    body is attach, seed, train, report.
+    body is attach, seed, train, report -- plus a slot in ``counters``, which is
+    a write to shared memory once per full tree walk and needs no coordination
+    because no other process reads or writes this worker's slot.
     """
     # Spawned: no logging config is inherited, so without this everything
     # _build_local logs falls below lastResort's WARNING floor.
@@ -141,6 +146,12 @@ def _worker_entry(
         np.random.seed(seed)
 
         started = time.time()
+        # CUMULATIVE over the task, not the chunk: this worker's slot is written
+        # by this worker alone and chunks run in sequence, so carrying the banked
+        # value forward makes the sum monotone and leaves the coordinator nothing
+        # to reset between chunks -- and so no window where it reads a base from
+        # one chunk against counts from another.
+        banked = int(counters[worker_id]) if counters is not None else 0
         # Assign the ABSOLUTE iteration before each step: train_iteration reads
         # self.iteration as t and then increments, so leaving it to count locally
         # would give this worker t = 0..share instead of its true global indices.
@@ -149,6 +160,8 @@ def _worker_entry(
             solver.iteration = global_iteration
             solver.train_iteration()
             count += 1
+            if counters is not None:
+                counters[worker_id] = banked + count
         result_queue.put(
             {
                 "worker_id": worker_id,
@@ -164,6 +177,67 @@ def _worker_entry(
     finally:
         if storage is not None:
             storage.close()
+
+
+"""How often the workers' counters are totalled and written. Deliberately well
+under the cadence anything READS it at -- the write is a small local JSON, and
+the two intervals otherwise compound into staleness neither of them names."""
+HEARTBEAT_SECONDS = 5
+
+
+class _ProgressReporter:
+    """Totals the workers' counters on a timer and publishes the absolute
+    iteration.
+
+    A thread rather than a call at the chunk boundary because the coordinator
+    spends the whole chunk blocked on the result queue, and the chunk is the
+    interval that is too coarse in the first place.
+    """
+
+    def __init__(
+        self,
+        publish: Callable[[int, int], None] | None,
+        counters: Any,
+        start: int,
+        target: int,
+    ) -> None:
+        self._publish = publish
+        self._counters = counters
+        self._start = start
+        self._target = target
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name="train-progress", daemon=True)
+
+    def start(self) -> None:
+        if self._publish is not None:
+            self._thread.start()
+
+    def stop(self) -> None:
+        """Idempotent, and safe on a reporter that was never started -- the
+        caller stops it from a `finally` that also covers the paths where
+        nothing ran."""
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=HEARTBEAT_SECONDS)
+        self._report()
+
+    def _loop(self) -> None:
+        self._report()
+        while not self._stop.wait(HEARTBEAT_SECONDS):
+            self._report()
+
+    def _report(self) -> None:
+        if self._publish is None:
+            return
+        # Clamped: the counters are read without a lock while workers write
+        # them, and a bar drawn past its end reads as a rendering bug.
+        done = min(self._start + sum(self._counters), self._target)
+        # NEVER FATAL, exactly like the writer it is handed: this describes the
+        # training, it is not the training.
+        try:
+            self._publish(done, self._target)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not publish training progress; training continues.")
 
 
 def _append_checkpoint_event(checkpoint_dir: Path, **fields: Any) -> None:
@@ -193,6 +267,7 @@ def train_static_parallel(
     checkpoint_every: int = 0,
     start_iteration: int = 0,
     resume: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> StaticTrainingResult:
     """Train on static storage across ``num_workers`` processes.
 
@@ -200,9 +275,17 @@ def train_static_parallel(
     fans out, waits, then checkpoints. Iterations are split evenly with the
     remainder going to the first workers, so the total is exact rather than
     approximately right.
+
+    ``on_progress`` is called with (absolute iteration, target) on a timer. It
+    has to be a timer and it has to come from the workers: the coordinator is
+    blocked on the result queue for a whole chunk at a time, and a chunk is a
+    million iterations by default.
     """
     _, abstraction, tree = _build_local(config, abstraction)
     storage = StaticArrayStorage(tree, session_id=session_id)
+    # Named before the try so the `finally` can stop it on the paths that return
+    # before it exists -- an already-satisfied target is one of them.
+    reporter = _ProgressReporter(None, (), 0, num_iterations)
     logger.info(
         f"[static] {len(tree):,} nodes, {tree.num_rows:,} rows, "
         f"{storage.nbytes() / 1e6:.0f} MB shared across {num_workers} workers"
@@ -247,6 +330,12 @@ def train_static_parallel(
         chunk_id = 0
         done = start
 
+        # No lock: each slot has exactly one writer, and a sum that is a tick
+        # behind is a progress bar, not a result.
+        counters = ctx.Array("q", num_workers, lock=False)
+        reporter = _ProgressReporter(on_progress, counters, start, num_iterations)
+        reporter.start()
+
         while done < num_iterations:
             chunk_end = min(done + step, num_iterations)
             assignments = [
@@ -266,6 +355,7 @@ def train_static_parallel(
                         result_queue,
                         abstraction,
                         chunk_id,
+                        counters,
                     ),
                     daemon=False,
                 )
@@ -351,6 +441,7 @@ def train_static_parallel(
             dropped_updates=dropped,
         )
     finally:
+        reporter.stop()
         storage.close()
 
 
