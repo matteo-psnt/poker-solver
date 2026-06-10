@@ -585,7 +585,7 @@ class CompiledContext:
         "hand_to_col",
         "matrix",
         "preflop_index",
-        "sentinel",
+        "sentinels",
         "street_ids",
         "street_of_node",
         "street_offsets",
