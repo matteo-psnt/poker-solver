@@ -512,17 +512,25 @@ def main() -> int:
     parser.add_argument(
         "--daily-burn",
         type=float,
-        default=76.80,
+        default=307.20,
         help="worst-case $/day: max_nodes x per-node rate. Raise this whenever "
         "max_nodes or pool_vm_size goes up.",
     )
-    # 4 x D16als_v6 bills $0.688/hr/node = $66.05/day (measured against Cost
-    # Management, not quoted). The default is deliberately left ABOVE that: this
-    # figure divides the credit balance to produce runway, so over-stating the
-    # burn under-states the warning time, which is the safe direction. It is
-    # also the only line here that is not meant to be exact -- a runaway is not
-    # obliged to stop at max_nodes-worth of compute, and storage and egress ride
-    # along on top.
+    # 16 x D16als_v6 bills $0.688/hr/node = $264.19/day (the per-node rate is
+    # measured against Cost Management, not quoted). The default is deliberately
+    # left ABOVE that: this figure divides the credit balance to produce runway,
+    # so over-stating the burn under-states the warning time, which is the safe
+    # direction. It is also the only line here that is not meant to be exact --
+    # a runaway is not obliged to stop at max_nodes-worth of compute, and
+    # storage and egress ride along on top.
+    #
+    # Was 76.80 for max_nodes=4. Raised with `max_nodes` 4 -> 16 on 2026-08-15,
+    # once the regional quota was confirmed at 256 vCPU. THIS IS NOT DERIVED
+    # FROM TERRAFORM and nothing fails if the two drift -- the runway number
+    # simply becomes optimistic, which is the one direction that matters. At
+    # this burn a $9.6k balance is ~31 days, so `--warn-days 30` is close by
+    # design: the ceiling was chosen deliberately and the alert is meant to ask
+    # whether the credit is being spent on purpose.
     parser.add_argument(
         "--warn-days",
         type=int,

@@ -52,20 +52,40 @@ variable "max_nodes" {
     failure can burn faster than max_nodes x the per-node rate. Everything else
     bounds duration; this bounds rate.
 
-      2 x D8als_v6  ~$0.80/hr  ~$19/day
-      4 x D8als_v6  ~$1.60/hr  ~$38/day   (blows a $250 budget in ~6 days)
-      4 x D16als_v6 ~$3.20/hr  ~$77/day   (~3 days)
+      2 x D8als_v6   ~$0.80/hr   ~$19/day
+      4 x D8als_v6   ~$1.60/hr   ~$38/day   (blows a $250 budget in ~6 days)
+      4 x D16als_v6  ~$3.20/hr   ~$77/day
+     16 x D16als_v6 ~$12.80/hr  ~$307/day
 
     Raised to 4 once a real task completed end to end (30M iterations, 2.64 h,
-    no failures), which was the stated condition. 4 x D16als_v6 = 64 vCPU
-    against a 65 vCPU regional quota, so this is the ceiling the subscription
-    allows at this size -- going higher needs a quota increase, not a variable.
+    no failures), which was the stated condition. That 4 was not a judgement
+    about throughput: 4 x D16als_v6 = 64 vCPU against what was then a 65 vCPU
+    regional quota, so it was the ceiling the subscription allowed.
 
-    The parallelism is now usable: scoring submits one task per ladder rung, so
-    a curve fans out across the pool instead of queueing behind one node.
+    RAISED TO 16 ON 2026-08-15, because that quota is now 256 (verified with
+    `az vm list-usage --location swedencentral`: `standard Dalv6 Family vCPUs`
+    and `Total Regional vCPUs` both 256). 16 x 16 vCPU = 256 uses it exactly.
+    The increase had been approved for some time and bought nothing, because
+    the binding constraint had silently become this variable rather than Azure.
+
+    WHAT THIS COSTS, stated plainly because this is the rate limiter. The pool
+    holds zero nodes at rest and autoscale allocates only what is queued, so
+    the usual bill does not move. What moves is the WORST case: a wedged or
+    runaway pool now burns ~$307/day instead of ~$77. Against a $9.6k credit
+    that is ~31 days of worst-case runway instead of ~125.
+
+    `infra/credit_watch.py --daily-burn` is the other half of this and is NOT
+    derived from here -- it was raised to 307.20 in the same change. Its
+    `--warn-days` is 30, so at this ceiling the runway alert sits close to
+    firing by design: that is the guard doing its job at a ceiling chosen
+    deliberately, not a misconfiguration. If it fires, the question is whether
+    the credit is being spent on purpose, which is exactly what it should ask.
+
+    The parallelism is usable: scoring submits one task per ladder rung, so a
+    curve fans out across the pool instead of queueing behind one node.
   EOT
   type        = number
-  default     = 4
+  default     = 16
 }
 
 variable "data_disk_gb" {
@@ -148,7 +168,22 @@ variable "budget_start_date" {
 }
 
 variable "allowed_vm_skus" {
-  description = "Policy whitelist — nothing outside this list can be created, by you or by a mistaken command."
+  description = <<-EOT
+    Policy whitelist — nothing outside this list can be created, by you or by a
+    mistaken command. A SKU that is not here is refused at CREATE time with a
+    403 naming the policy rather than the size, which reads as a capacity
+    problem and is trap #4 in infra/README.md.
+
+    The single GPU size is here for the JAX kernel arm and is NOT free to use:
+    `StandardNCADSA100v4Family` quota is separate from the Dalv6 family's,
+    starts at 0, and is not self-service adjustable. Listing it only means the
+    policy will stop refusing it once that quota is granted.
+
+    One GPU SKU, not the family. NC24ads_A100_v4 is a single A100 80GB at
+    ~$4.78/hr; the 2- and 4-GPU sizes cost 2x and 4x that for a measurement
+    that needs one, and this list is a guardrail against exactly the stray
+    apply that would reach for them.
+  EOT
   type        = list(string)
   default = [
     "Standard_D8als_v6",
@@ -156,6 +191,7 @@ variable "allowed_vm_skus" {
     "Standard_D32als_v6",
     "Standard_D16_v5",
     "Standard_E16-4ads_v5",
+    "Standard_NC24ads_A100_v4",
   ]
 }
 
