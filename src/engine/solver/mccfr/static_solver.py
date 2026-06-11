@@ -104,7 +104,17 @@ class StaticTreeSolver(MCCFRSolver[StaticArrayStorage]):
             return super().train_iteration()
 
         if self._compiled_context is None:
-            self._compiled_context = CompiledContext(self.tree, self.card_abstraction, FULL_DECK)
+            context = CompiledContext.for_abstraction(self.tree, self.card_abstraction, FULL_DECK)
+            if context is None:
+                # The kernel indexes the artifact's arrays directly, and a
+                # stand-in bucketer has none to offer -- every small-game and
+                # unit-test abstraction is a plain object with `get_bucket`.
+                # Falling back is safe rather than surprising precisely because
+                # the two paths are bit-identical: the choice is throughput and
+                # nothing else, so a caller cannot observe which one ran.
+                self._compiled = False
+                return super().train_iteration()
+            self._compiled_context = context
         utility = compiled_walk.run_iteration(self, self._compiled_context, self.iteration)
         self.iteration += 1
         return utility
