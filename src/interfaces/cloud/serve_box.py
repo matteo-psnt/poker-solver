@@ -25,9 +25,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from azure.identity import AzureCliCredential
 from azure.mgmt.compute import ComputeManagementClient
 
+from src.interfaces.cloud import credential
 from src.interfaces.errors import CommandError
 
 # Azure reports power state as an instance-view status code. These are the two
@@ -57,7 +57,7 @@ class BoxState:
 
 
 def _client(subscription_id: str) -> ComputeManagementClient:
-    return ComputeManagementClient(AzureCliCredential(), subscription_id)
+    return ComputeManagementClient(credential.shared(), subscription_id)
 
 
 def _power_from(statuses: list[Any]) -> str:

@@ -28,9 +28,9 @@ from azure.batch.models import (
     EnvironmentSetting,
 )
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
-from azure.identity import AzureCliCredential
 from pydantic import BaseModel
 
+from src.interfaces.cloud import credential
 from src.interfaces.cloud.tasks.spec import TaskSpec, daily_job_id, suffixed_job_id, task_command
 from src.shared import task_states
 from src.shared.task_states import Outcome, Phase
@@ -61,8 +61,11 @@ def client(config: CloudConfig) -> BatchClient:
     ``az account get-access-token`` was healthy throughout. A credential chain
     that silently depends on how the network treats an unroutable address is not
     a credential chain worth having when the intended source is known.
+
+    A client per caller, and one shared token behind it: see
+    :mod:`src.interfaces.cloud.credential` for why the sharing stops there.
     """
-    return BatchClient(endpoint=config.batch_endpoint, credential=AzureCliCredential())
+    return BatchClient(endpoint=config.batch_endpoint, credential=credential.shared())
 
 
 class ResizeError(BaseModel):
