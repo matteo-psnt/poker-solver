@@ -24,6 +24,7 @@ quantity that was starving.
 from __future__ import annotations
 
 import functools
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,9 @@ if TYPE_CHECKING:
     from src.engine.solver.infoset.model import InfoSet
     from src.engine.solver.protocols import BucketingStrategy
     from src.shared.config import Config
+
+
+logger = logging.getLogger(__name__)
 
 
 class StaticTreeSolver(MCCFRSolver[StaticArrayStorage]):
@@ -113,6 +117,13 @@ class StaticTreeSolver(MCCFRSolver[StaticArrayStorage]):
                 # the two paths are bit-identical: the choice is throughput and
                 # nothing else, so a caller cannot observe which one ran.
                 self._compiled = False
+                logger.info(
+                    "Compiled traversal unavailable for %s (it exposes no bucket "
+                    "arrays); using the tree walk. The two are bit-identical "
+                    "(test_compiled_walk_equivalence), so this costs throughput "
+                    "and nothing else.",
+                    type(self.card_abstraction).__name__,
+                )
                 return super().train_iteration()
             self._compiled_context = context
         utility = compiled_walk.run_iteration(self, self._compiled_context, self.iteration)
