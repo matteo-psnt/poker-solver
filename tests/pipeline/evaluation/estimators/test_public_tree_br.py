@@ -168,17 +168,18 @@ class TestBranchProgress:
         assert [d for d, _ in seen] == sorted(d for d, _ in seen), "done went backwards"
         assert len({t for _, t in seen}) == 1, "the total must not move under the bar"
 
-    def test_nothing_is_published_before_the_total_is_known(self, uniform_solver):
-        """The first walk MEASURES the denominator. Publishing against a total of
-        zero is a bar with no meaning, and against a growing one is a bar that
-        slides backwards — so the first report is the honest 1-of-4."""
-        seen: list[tuple[int, int]] = []
-        engine = self._engine(uniform_solver, lambda done, total: seen.append((done, total)))
-        engine.evaluate()
+    def test_the_denominator_is_known_before_anything_is_walked(self, uniform_solver):
+        """It used to be MEASURED, so the first report was the honest 1-of-4 and
+        everything before it was blind. Under `--workers` — which is every
+        evaluation on the pool — that was fatal: the four walks that could
+        measure it all finish together."""
+        engine = self._engine(uniform_solver, lambda done, total: None)
+        assert engine.branch_total > 0
 
-        first_done, first_total = seen[0]
-        assert first_total > 0
-        assert first_done == first_total // 4, "the first report IS one walk of four"
+        seen: list[tuple[int, int]] = []
+        watched = self._engine(uniform_solver, lambda done, total: seen.append((done, total)))
+        watched.evaluate()
+        assert seen[0][0] == 1, "the FIRST branch reports, not the first walk"
 
     def test_it_finishes_on_its_own_total(self, uniform_solver):
         """A branch skipped for having no reach is still a branch DONE — the
@@ -219,23 +220,15 @@ class TestBranchProgressAcrossProcesses:
 
     PARALLEL = PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=3, num_workers=4)
 
-    def test_the_walks_report_while_they_are_still_walking(
-        self, uniform_solver, tmp_path, monkeypatch
-    ):
-        """With the denominator already known, each walk reports from its FIRST
-        branch instead of only on the way out."""
-        monkeypatch.setenv("POKER_SOLVER_CACHE", str(tmp_path / "cache"))
-        factory = partial(build_trained_test_solver, 0, starting_stack=STACK)
-        # A serial evaluation is what measures a walk's cost; the half that
-        # matters here is what the parallel path does once it HAS one.
-        PublicTreeBestResponse(uniform_solver, CONFIG, starting_stack=STACK).evaluate()
-
+    def test_the_walks_report_while_they_are_still_walking(self, uniform_solver):
+        """Each walk reports from its FIRST branch, not on the way out — on any
+        node, with nothing remembered from an earlier evaluation."""
         seen: list[tuple[int, int]] = []
         result = compute_public_tree_br(
             uniform_solver,
             self.PARALLEL,
             starting_stack=STACK,
-            blueprint_factory=factory,
+            blueprint_factory=partial(build_trained_test_solver, 0, starting_stack=STACK),
             on_branch=lambda done, total: seen.append((done, total)),
         )
 
@@ -250,38 +243,60 @@ class TestBranchProgressAcrossProcesses:
         assert seen[-1][0] == seen[-1][1], "the bar must finish on its own total"
 
 
-class TestTheRememberedWalkCost:
-    """How a walk gets a denominator before any walk has finished.
+class TestTheCountedDenominator:
+    """The count is READ off the betting tree, not measured by walking it.
 
-    It is a property of the betting tree — the top-level deal is reached once
-    per preflop line surviving to a flop — so it is the same every time and an
-    earlier evaluation can hand it over. Under `--workers` nothing else can: the
+    That is what lets the bar have a denominator before anything has been
+    walked, which under `--workers` is the only moment it could get one: the
     four walks that could measure it all finish together.
+
+    The count is structural and the walk is not — it PRUNES an action the
+    blueprint never takes — so the two agreeing is the property that matters,
+    and it is the one thing a structural count can silently get wrong.
     """
 
-    def _engine(self, solver, **kwargs):
-        return PublicTreeBestResponse(solver, CONFIG, starting_stack=STACK, **kwargs)
-
-    @pytest.mark.timeout(30)
-    def test_an_evaluation_with_no_bar_still_measures_it(
-        self, uniform_solver, tmp_path, monkeypatch
-    ):
-        """The count was tied to `on_branch`, so a run with no bar counted zero
-        and taught the next one nothing — which is every run that could have."""
-        monkeypatch.setenv("POKER_SOLVER_CACHE", str(tmp_path / "cache"))
-        engine = self._engine(uniform_solver)
-        assert engine._remembered_walk_cost() == 0
+    @pytest.mark.timeout(60)
+    @pytest.mark.parametrize("iterations", [0, 4])
+    @pytest.mark.parametrize("stack", [200, 400])
+    def test_the_count_is_exactly_what_the_walk_reaches(self, iterations, stack):
+        """The guard on the whole idea. A structural count that disagrees with
+        the walk leaves a bar that stops short or runs past its end, and neither
+        fails anything by itself."""
+        solver = build_trained_test_solver(iterations, starting_stack=stack)
+        engine = PublicTreeBestResponse(solver, CONFIG, starting_stack=stack)
+        predicted = engine.branch_total
 
         engine.evaluate()
 
-        assert engine._branches_per_walk > 0
-        assert self._engine(uniform_solver)._remembered_walk_cost() == engine._branches_per_walk
+        assert predicted > 0
+        assert engine._branches_done == predicted
 
     @pytest.mark.timeout(30)
-    def test_it_cannot_move_the_number(self, uniform_solver, tmp_path, monkeypatch):
-        """It only ever draws a bar. If it can change an exact BR value it is a
-        correctness bug, not a display one."""
-        monkeypatch.setenv("POKER_SOLVER_CACHE", str(tmp_path / "cache"))
-        cold = self._engine(uniform_solver).evaluate()
-        warm = self._engine(uniform_solver, branches_per_walk=99).evaluate()
-        assert cold.exploitability_mbb == warm.exploitability_mbb
+    def test_an_action_the_blueprint_never_takes_still_counts(self, trained_solver, monkeypatch):
+        """A pruned subtree is work that will NOT happen, so its branches are
+        DONE. Counted any other way the bar stops short of a denominator read
+        off the tree, which cannot know the policy.
+
+        Preflop CALL specifically, and the credit is asserted rather than only
+        the total: FOLD and ALL_IN have no flop deal under them, so pruning
+        either one credits nothing and would make this test vacuous. Killing
+        CALL loses 8 of these 16 branches — a bar that stops at 50%.
+        """
+        engine = PublicTreeBestResponse(trained_solver, CONFIG, starting_stack=STACK)
+        policy, credit = engine._policy_matrix, engine._skip_branches
+        credited: list[int] = []
+
+        def never_call(state, legal):
+            sigma, missing = policy(state, legal)
+            if not state.board and len(legal) > 1:
+                sigma = sigma.copy()
+                sigma[:, 0] += sigma[:, 1]  # onto FOLD, which deals no flop
+                sigma[:, 1] = 0.0
+            return sigma, missing
+
+        monkeypatch.setattr(engine, "_policy_matrix", never_call)
+        monkeypatch.setattr(engine, "_skip_branches", lambda n: credited.append(n) or credit(n))
+        engine.evaluate()
+
+        assert sum(credited) > 0, "nothing was pruned, so this proves nothing"
+        assert engine._branches_done == engine.branch_total
