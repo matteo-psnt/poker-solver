@@ -11,6 +11,8 @@ on Kuhn/Leduc. Property tests add BR-dominates-on-policy and determinism.
 
 from __future__ import annotations
 
+from functools import partial
+
 import numpy as np
 import pytest
 
@@ -200,3 +202,86 @@ class TestBranchProgress:
         watched = self._engine(uniform_solver, lambda done, total: None).evaluate()
         plain = self._engine(uniform_solver).evaluate()
         assert watched.exploitability_mbb == plain.exploitability_mbb
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(300)
+class TestBranchProgressAcrossProcesses:
+    """The bar the NODE actually draws, which is not the one above.
+
+    Every evaluation on the pool runs `--workers 16`, so it takes the parallel
+    path, and there the walks are in other processes. Reporting as each walk
+    RETURNED gave four steps that all land within seconds of the end: measured
+    on the pool, a 573-second score sat at 0% for the whole of it, which is
+    indistinguishable from a hung one -- the exact thing a bar exists to rule
+    out.
+    """
+
+    PARALLEL = PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=3, num_workers=4)
+
+    def test_the_walks_report_while_they_are_still_walking(
+        self, uniform_solver, tmp_path, monkeypatch
+    ):
+        """With the denominator already known, each walk reports from its FIRST
+        branch instead of only on the way out."""
+        monkeypatch.setenv("POKER_SOLVER_CACHE", str(tmp_path / "cache"))
+        factory = partial(build_trained_test_solver, 0, starting_stack=STACK)
+        # A serial evaluation is what measures a walk's cost; the half that
+        # matters here is what the parallel path does once it HAS one.
+        PublicTreeBestResponse(uniform_solver, CONFIG, starting_stack=STACK).evaluate()
+
+        seen: list[tuple[int, int]] = []
+        result = compute_public_tree_br(
+            uniform_solver,
+            self.PARALLEL,
+            starting_stack=STACK,
+            blueprint_factory=factory,
+            on_branch=lambda done, total: seen.append((done, total)),
+        )
+
+        assert result.exploitability_mbb is not None
+        # A quarter of the total is ONE walk, so anything strictly below it can
+        # only have come from a walk that had not finished.
+        one_walk = seen[-1][1] // 4
+        assert any(0 < done < one_walk for done, _ in seen), (
+            f"nothing reported mid-walk, only {sorted({d for d, _ in seen})}"
+        )
+        assert [d for d, _ in seen] == sorted(d for d, _ in seen), "done went backwards"
+        assert seen[-1][0] == seen[-1][1], "the bar must finish on its own total"
+
+
+class TestTheRememberedWalkCost:
+    """How a walk gets a denominator before any walk has finished.
+
+    It is a property of the betting tree — the top-level deal is reached once
+    per preflop line surviving to a flop — so it is the same every time and an
+    earlier evaluation can hand it over. Under `--workers` nothing else can: the
+    four walks that could measure it all finish together.
+    """
+
+    def _engine(self, solver, **kwargs):
+        return PublicTreeBestResponse(solver, CONFIG, starting_stack=STACK, **kwargs)
+
+    @pytest.mark.timeout(30)
+    def test_an_evaluation_with_no_bar_still_measures_it(
+        self, uniform_solver, tmp_path, monkeypatch
+    ):
+        """The count was tied to `on_branch`, so a run with no bar counted zero
+        and taught the next one nothing — which is every run that could have."""
+        monkeypatch.setenv("POKER_SOLVER_CACHE", str(tmp_path / "cache"))
+        engine = self._engine(uniform_solver)
+        assert engine._remembered_walk_cost() == 0
+
+        engine.evaluate()
+
+        assert engine._branches_per_walk > 0
+        assert self._engine(uniform_solver)._remembered_walk_cost() == engine._branches_per_walk
+
+    @pytest.mark.timeout(30)
+    def test_it_cannot_move_the_number(self, uniform_solver, tmp_path, monkeypatch):
+        """It only ever draws a bar. If it can change an exact BR value it is a
+        correctness bug, not a display one."""
+        monkeypatch.setenv("POKER_SOLVER_CACHE", str(tmp_path / "cache"))
+        cold = self._engine(uniform_solver).evaluate()
+        warm = self._engine(uniform_solver, branches_per_walk=99).evaluate()
+        assert cold.exploitability_mbb == warm.exploitability_mbb
