@@ -16,9 +16,45 @@ from src.pipeline.training.run_tracker import RunMetadata
 
 logger = logging.getLogger(__name__)
 
+RESOLVER_GATE_ESTIMATOR_LABEL = (
+    "resolver_match (duplicate-deal chip edge of blueprint+resolver over the bare "
+    "blueprint; NOT an exploitability bound)"
+)
+
 BLUEPRINT_MATCH_ESTIMATOR_LABEL = (
     "blueprint_match (duplicate-deal head-to-head chip edge; abstraction-safe, not a bound)"
 )
+
+
+def _with_resolver_overrides(
+    config: Any,
+    *,
+    leaf_continuation_fraction: float | None,
+    max_iterations: int | None,
+) -> Any:
+    """The run's config, with the two knobs an A/B over leaf valuation needs.
+
+    Overridden HERE rather than at train time because a resolver knob is a
+    property of how a checkpoint is PLAYED, not of how it was trained -- the
+    same run has to be scored under both arms or the comparison is confounded
+    by everything else that differs between two runs.
+
+    ``max_iterations`` matters more than it looks. The resolver is normally
+    WALL-CLOCK budgeted (``time_budget_ms``), so a busier or slower box does
+    fewer CFR iterations and lands on a different strategy. Two arms measured
+    that way differ by machine speed as much as by the knob under test. Pinning
+    the iteration count is what makes the two arms comparable, and the config
+    field already exists for exactly this ("a determinism knob for reproducible
+    experiments and tests").
+    """
+    if leaf_continuation_fraction is None and max_iterations is None:
+        return config
+    updates: dict[str, Any] = {}
+    if leaf_continuation_fraction is not None:
+        updates["leaf_continuation_fraction"] = leaf_continuation_fraction
+    if max_iterations is not None:
+        updates["max_iterations"] = max_iterations
+    return config.model_copy(update={"resolver": config.resolver.model_copy(update=updates)})
 
 
 def evaluate_run_resolver_gate(
@@ -27,6 +63,8 @@ def evaluate_run_resolver_gate(
     num_deals: int = 1000,
     time_budget_ms: int = 100,
     seed: int = 1,
+    leaf_continuation_fraction: float | None = None,
+    max_iterations: int | None = None,
 ) -> EvaluationOutput:
     """Head-to-head resolver gate on a run: blueprint+resolver vs bare blueprint.
 
@@ -40,7 +78,12 @@ def evaluate_run_resolver_gate(
         ValueError: Invalid configuration or checkpoint state.
     """
     metadata = load_run_metadata(run_dir)
-    solver, storage = build_static_evaluation_solver(metadata.config, checkpoint_dir=run_dir)
+    config = _with_resolver_overrides(
+        metadata.config,
+        leaf_continuation_fraction=leaf_continuation_fraction,
+        max_iterations=max_iterations,
+    )
+    solver, storage = build_static_evaluation_solver(config, checkpoint_dir=run_dir)
     result = play_resolver_match(
         solver,
         num_deals=num_deals,
@@ -59,6 +102,11 @@ def evaluate_run_resolver_gate(
         "time_budget_ms": time_budget_ms,
         "seed": seed,
         "pair_samples_mbb": result.pair_samples_mbb,
+        # The arm's identity, recorded WITH the number. Two resolver-gate rows
+        # are otherwise indistinguishable, and the whole point of running this
+        # twice is to subtract one from the other.
+        "leaf_continuation_fraction": config.resolver.leaf_continuation_fraction,
+        "resolver_max_iterations": config.resolver.max_iterations,
     }
     return EvaluationOutput(
         infosets=storage.num_infosets(),

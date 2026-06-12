@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 # repeating it: a value the submitter accepts but `evaluate` rejects is not
 # caught until the node has already been allocated, and the task then retries
 # twice on the way to failing.
-EVAL_METHODS = ("lbr", "exact_br")
+EVAL_METHODS = ("lbr", "exact_br", "resolver_match")
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -44,7 +44,32 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default="lbr",
         help="lbr = Local Best Response (trustworthy, default); exact_br = deterministic "
         "exact BR on a sampled public tree (zero eval variance; compare within a "
-        "matched board tier).",
+        "matched board tier); resolver_match = duplicate-deal chip edge of "
+        "blueprint+resolver over the bare blueprint (NOT an exploitability bound).",
+    )
+    # resolver_match options (--method resolver_match).
+    parser.add_argument(
+        "--deals",
+        type=int,
+        default=1000,
+        help="[resolver_match] Duplicate deals (each played twice, seats swapped).",
+    )
+    parser.add_argument(
+        "--leaf-continuation",
+        type=float,
+        default=None,
+        help="[resolver_match] Override resolver.leaf_continuation_fraction: what each "
+        "player is assumed to commit before showdown at a depth-limit leaf, as a "
+        "fraction of the pot. 0 is the shipped check-down. A SENSITIVITY knob -- read "
+        "the magnitude of any change, never its sign.",
+    )
+    parser.add_argument(
+        "--resolver-max-iterations",
+        type=int,
+        default=None,
+        help="[resolver_match] Pin subgame-CFR iterations instead of the wall-clock "
+        "budget. REQUIRED for a valid A/B: time-budgeted arms differ by how fast the "
+        "box was, not only by the knob under test.",
     )
     # LBR options (--method lbr).
     parser.add_argument("--hands", type=int, default=1000, help="[lbr] Number of hands.")
@@ -157,6 +182,9 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             num_workers=args.workers,
         ),
         resolver_iterations=args.resolver_iterations,
+        resolver_gate_deals=args.deals,
+        leaf_continuation_fraction=args.leaf_continuation,
+        resolver_max_iterations=args.resolver_max_iterations,
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,
@@ -169,6 +197,32 @@ def render(payload: services.EvaluationPayload) -> None:
     print(f"  Run ID:        {payload.run_id}")
     print(f"  Estimator:     {payload.estimator}")
     print(f"  Infosets:      {payload.infosets:,}")
+    # Branch on the METHOD, not on what happens to be in `results`. A resolver
+    # gate reports a chip edge and carries no `exploitability_mbb` at all; a
+    # renderer that reached for the key would die on it, which is exactly how
+    # `checkpoint-profile` once died borrowing this function.
+    if payload.method == "resolver_match":
+        # `confidence_95_mbb` is an INTERVAL (lower, upper), not a half-width --
+        # printing it as a scalar is a TypeError, which is how this line first
+        # shipped. An interval is also the more honest thing to show: it says
+        # whether zero is inside it.
+        low, high = results["confidence_95_mbb"]
+        print(
+            f"  Resolver edge: {results['resolver_mbb_per_hand']:+.2f} mbb/hand "
+            f"(95% CI {low:+.2f}..{high:+.2f}, p={results['p_value']:.4f})"
+        )
+        print(f"  Deals:         {results['num_deals']:,} ({results['num_hands']:,} hands)")
+        print(
+            f"  Leaf contin.:  {results['leaf_continuation_fraction']:g} pot"
+            f"   iterations: {results['resolver_max_iterations'] or 'wall-clock'}"
+        )
+        # A high fallback count means the number measures the FALLBACK, not the
+        # resolver -- so it is printed beside the edge, not buried in the payload.
+        print(
+            f"  Decisions:     {results['resolver_decisions']:,} "
+            f"({results['resolver_fallbacks']:,} fell back to the blueprint)"
+        )
+        return
     print(
         f"  Exploitability: {results['exploitability_mbb']:.2f} mbb/g "
         f"(± {results['std_error_mbb']:.2f})"
