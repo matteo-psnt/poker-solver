@@ -336,7 +336,8 @@ class TaskKind(abc.ABC):
            history.
         2. The rate of comparable past tasks, against the work remaining. This
            is why a sample carries units: it transfers across tasks of different
-           SIZE, where a median duration does not.
+           SIZE, where a median duration does not -- and only while the task is
+           reporting in the same unit those samples were taken in.
         3. Their median duration, for a kind that cannot report progress at all
            and so has no "remaining" to scale.
         4. Nothing, said as ``None`` rather than guessed.
@@ -352,7 +353,12 @@ class TaskKind(abc.ABC):
 
         usable = comparable(history, workers)
         rates = [sample.rate for sample in usable if sample.rate > 0]
-        if progress is not None and rates:
+        # The history is in THIS KIND'S unit, so a sample reporting some other
+        # one cannot be divided by it. An evaluation with no branch counter yet
+        # falls back to reporting rungs; one rung over a board-branch rate is
+        # ~500 branches per second applied to a count of 1, which quoted "0m
+        # left" on a score with six minutes to go.
+        if progress is not None and rates and progress.unit == self.unit:
             remaining = max(0.0, progress.total - progress.done)
             return remaining / statistics.median(rates)
         if usable:
