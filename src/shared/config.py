@@ -7,11 +7,14 @@ Validation constraints live here, next to each field — nowhere else.
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.shared.dicts import deep_merge_dicts
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Shared type aliases for common constraints
@@ -331,6 +334,58 @@ class Config(StrictFrozenModel):
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> Config:
-        """Create Config from a dict merged over defaults."""
+        """Create Config from a dict merged over defaults.
+
+        Strict: unknown keys raise (``extra="forbid"``), so typos in
+        hand-authored YAML are caught. For historical run snapshots that may
+        predate schema changes, use :meth:`from_persisted_dict` instead.
+        """
         merged = deep_merge_dicts(cls().model_dump(), config_dict)
         return cls.model_validate(merged)
+
+    @classmethod
+    def from_persisted_dict(cls, config_dict: dict[str, Any]) -> Config:
+        """Create Config from a previously saved run snapshot, tolerating drift.
+
+        A persisted run config is machine-generated history, not user input, so
+        strict validation only makes old runs unloadable when the schema evolves.
+        This prunes fields that no longer exist in the schema (logging what was
+        dropped) and then validates the remainder normally. Removed fields relate
+        to training/abstraction setup and do not affect evaluating an already
+        trained strategy.
+        """
+        pruned, dropped = _prune_to_schema(config_dict, cls)
+        if dropped:
+            logger.warning(
+                "Ignoring %d legacy config field(s) from persisted run: %s",
+                len(dropped),
+                ", ".join(sorted(dropped)),
+            )
+        return cls.from_dict(pruned)
+
+
+def _prune_to_schema(data: dict[str, Any], model_cls: type[BaseModel]) -> tuple[dict, list[str]]:
+    """Recursively drop keys absent from ``model_cls``'s schema.
+
+    Returns the pruned dict and the dotted paths of the dropped keys.
+    """
+    fields = model_cls.model_fields
+    pruned: dict[str, Any] = {}
+    dropped: list[str] = []
+    for key, value in data.items():
+        field = fields.get(key)
+        if field is None:
+            dropped.append(key)
+            continue
+        annotation = field.annotation
+        if (
+            isinstance(annotation, type)
+            and issubclass(annotation, BaseModel)
+            and isinstance(value, dict)
+        ):
+            sub_pruned, sub_dropped = _prune_to_schema(value, annotation)
+            pruned[key] = sub_pruned
+            dropped.extend(f"{key}.{path}" for path in sub_dropped)
+        else:
+            pruned[key] = value
+    return pruned, dropped
