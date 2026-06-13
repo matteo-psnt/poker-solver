@@ -66,6 +66,7 @@ class TaskLogger:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._handle = path.open("ab")
         self._lock = threading.Lock()
+        self._published_size = -1
 
     def __call__(self, message: str) -> None:
         stamp = time.strftime("%H:%M:%S", time.gmtime())
@@ -79,16 +80,30 @@ class TaskLogger:
             sys.stdout.buffer.flush()
 
     def publish(self) -> None:
-        """Copied on every publish, not only at exit, so a task later killed
-        outright still leaves its log behind."""
+        """Copy the tail to the share, skipping a copy that would change nothing.
+
+        Called on a timer as well as at exit. Training used to publish only when
+        the task ENDED, so `logs` answered "no published log yet" for the whole
+        of a multi-hour run and then produced the entire thing at once -- the
+        share copy is the only one a reader can reach, because the node-side
+        stream dies with the node.
+
+        The size guard is what makes a timer affordable: this rewrites the whole
+        2 MB tail every time, and a quiet task would otherwise send it again
+        unchanged on every tick.
+        """
         task = os.environ.get("AZ_BATCH_TASK_ID", "task")
         destination = self.share / "logs" / f"{task}.log"
         try:
+            with self._lock:
+                size = self.path.stat().st_size
+                if size == self._published_size:
+                    return
             destination.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("rb") as source:
-                size = source.seek(0, os.SEEK_END)
                 source.seek(max(0, size - PUBLISHED_LOG_BYTES))
                 destination.write_bytes(source.read())
+            self._published_size = size
         except OSError:
             pass
 
@@ -123,6 +138,12 @@ def run_guarded(
             stdout=sink if sink else subprocess.PIPE,
             stderr=subprocess.PIPE if sink else subprocess.STDOUT,
             close_fds=True,
+            # Python block-buffers stdout at 8 KB when it is a pipe rather than
+            # a terminal, and every one of these is a pipe. The tee below is
+            # prompt, but it can only forward what the child has flushed, so a
+            # `print` sat in the child until 8 KB of them had accumulated --
+            # which on a task that logs a line a minute is most of an hour.
+            env=os.environ | {"PYTHONUNBUFFERED": "1"},
             # Its OWN group, so the guard can signal the whole tree.
             # `terminate()` reaches only `uv`; the trainer and its 16 workers
             # are grandchildren, and a deadline used to return 124 with them

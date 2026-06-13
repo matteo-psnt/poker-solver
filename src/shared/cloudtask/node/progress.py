@@ -28,7 +28,7 @@ from src.shared.cloudtask.node.plan import TaskPlan, parse_environment
 from src.shared.cloudtask.node.process import GRACE_SECONDS
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from src.shared.cloudtask.node.paths import NodePaths
 
@@ -40,6 +40,12 @@ WATCH_INTERVAL_SECONDS = 120
 a bar that moves twice an hour is not a bar. The 60k probe finished between two
 ladder ticks and so published nothing at all."""
 PROGRESS_INTERVAL_SECONDS = 15
+
+"""How often the task log is copied to the share. Between the two: it rewrites a
+tail of up to `PUBLISHED_LOG_BYTES`, so it does not belong on the progress
+cadence, but the share copy is the ONLY one a reader can reach and training used
+to send it just once, at exit."""
+LOG_INTERVAL_SECONDS = 60
 
 # A module global because this process runs exactly ONE task, and because the
 # baseline cannot be taken at entry: a resumed run's checkpoint is not on the
@@ -73,12 +79,19 @@ class ProgressWatcher:
         log: archive.Log,
         interval: float = WATCH_INTERVAL_SECONDS,
         plan: TaskPlan | None = None,
+        publish_log: Callable[[], None] | None = None,
+        log_interval: float = LOG_INTERVAL_SECONDS,
     ) -> None:
         self._paths = paths
         self._log = log
         self._interval = interval
         self._plan = plan
         self._noted: dict[str, object] = {}
+        # Passed explicitly rather than reached for on `log`: every caller hands
+        # in a `TaskLogger`, but the parameter is typed as the write-a-line
+        # callable and a test may pass exactly that.
+        self._publish_log = publish_log
+        self._log_interval = log_interval
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="task-watcher", daemon=True)
 
@@ -109,13 +122,21 @@ class ProgressWatcher:
         # Progress goes out immediately and then on its OWN, much finer cadence
         # than whatever the coarse tick does. Sharing one interval meant a task
         # finishing between two ticks published nothing at all.
-        # The SMALLER of the two, so neither cadence can gate the other -- a
-        # coarse interval below the progress one would otherwise never fire.
-        waited = 0.0
-        step = min(PROGRESS_INTERVAL_SECONDS, self._interval)
+        # The SMALLEST of the three, so no cadence can gate another -- a coarse
+        # interval below the progress one would otherwise never fire.
+        waited, since_log = 0.0, 0.0
+        step = min(PROGRESS_INTERVAL_SECONDS, self._interval, self._log_interval)
         self._sample()
+        # Immediately, not after a first interval: by this point the wrapper has
+        # already logged its provenance and what it is fetching, and that is
+        # exactly what someone opening the log in the first minute wants.
+        self._send_log()
         while not self._stop.wait(step):
             self._sample()
+            since_log += step
+            if since_log >= self._log_interval:
+                since_log = 0.0
+                self._send_log()
             waited += step
             if waited >= self._interval:
                 waited = 0.0
@@ -126,6 +147,19 @@ class ProgressWatcher:
             state = node_state(self._paths, self._plan)
             state.update(self._noted)
             publish(self._paths, self._plan, state)
+
+    def _send_log(self) -> None:
+        """Here rather than on `LadderWatcher`, which is training-only: an
+        evaluation's log is exactly as unreadable while it runs, and it is the
+        one a failed rung has to be explained from.
+
+        NEVER fatal, for the same reason `publish` is not: a task must not die
+        because the account of it could not be copied.
+        """
+        if self._publish_log is None:
+            return
+        with contextlib.suppress(Exception):
+            self._publish_log()
 
     def _coarse(self) -> None:
         """The slow tick. Progress alone has nothing to do on it."""
