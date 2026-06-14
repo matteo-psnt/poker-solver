@@ -76,8 +76,8 @@ class TestTheRungIsCarried:
     """Board-free quality is NOT monotone in iterations, so seeding from the
     manifest's current rung is a different strategy than the one measured.
 
-    This was live: rung selection existed in ``warm_start_run`` but the one-leg
-    ``train-static`` path never passed it, so the pick was silently ignored and
+    This was live: the two-leg seeding path took a rung but the one-leg
+    ``train-static`` path never passed one, so the pick was silently ignored and
     the latest rung used instead.
     """
 
