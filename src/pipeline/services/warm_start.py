@@ -47,11 +47,9 @@ contribution to the reported blueprint is earned on the real game.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from pydantic import BaseModel
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
@@ -59,12 +57,11 @@ from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.pipeline.blueprint import construction
-from src.pipeline.training.run_tracker import RunTracker
-from src.pipeline.training.run_tracker.attempts import ExperimentTag
-from src.shared.config.loader import load_training_config
 from src.shared.numeric import NORMALIZE_EPS
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from src.shared.config import Config
 
 logger = logging.getLogger(__name__)
@@ -74,20 +71,6 @@ DEFAULT_EFFECTIVE_ITERATIONS = 1000
 SEEDED_MARKER = ".warm-started"
 # Written once a run is seeded, so a resume can tell "carries a prior" from
 # "asked for one and never got it" -- two 30M sweeps turned out to be controls.
-
-
-class WarmStartOutput(BaseModel):
-    """Portable summary of a seeded run."""
-
-    run_id: str
-    runs_dir: str
-    config_name: str
-    source_run_id: str
-    effective_iterations: int
-    num_rows: int
-    seeded_rows: int
-    seeded_fraction: float
-    status: str
 
 
 def _row_slot_starts(tree) -> np.ndarray:
@@ -130,9 +113,10 @@ def seed_checkpoint(
 ) -> int:
     """Write iteration-0 regrets encoding ``source_run``'s average strategy.
 
-    Lower level than :func:`warm_start_run`: the caller already owns ``run_dir``
-    and its tracker, which is what lets ``train_static`` seed and train in ONE
-    leg rather than two. Returns the number of rows that carry a prior.
+    The caller already owns ``run_dir`` and its tracker, which is what lets
+    ``train_static`` seed and train in ONE leg rather than two -- a second leg
+    could not be retried, since it would find a checkpoint already there.
+    Returns the number of rows that carry a prior.
     """
     if effective_iterations <= 0:
         raise ValueError("effective_iterations must be positive; it scales the prior's weight.")
@@ -172,96 +156,9 @@ def seed_checkpoint(
     return int(seeded.sum())
 
 
-def warm_start_run(
-    config_name: str,
-    *,
-    source_run: Path,
-    run_id: str,
-    effective_iterations: int = DEFAULT_EFFECTIVE_ITERATIONS,
-    at_iteration: int | None = None,
-    runs_dir: Path | None = None,
-    experiment: ExperimentTag | None = None,
-) -> WarmStartOutput:
-    """Write a fresh run whose regrets encode ``source_run``'s average strategy.
-
-    The result is an ordinary static checkpoint at iteration 0, so
-    ``train-static --run <id>`` continues it with no special casing anywhere in
-    the training path.
-
-    Args:
-        source_run: Run directory to take the strategy from. Its tree fingerprint
-            must match, which ``load_checkpoint`` enforces.
-        effective_iterations: How much accumulated regret the prior claims. The
-            experiment's independent variable; see the module docstring.
-        at_iteration: Source rung to seed from. Board-free quality is U-shaped,
-            so the last rung is usually NOT the best one.
-    """
-    if effective_iterations <= 0:
-        raise ValueError("effective_iterations must be positive; it scales the prior's weight.")
-
-    config = load_training_config(config_name)
-    base_dir = Path(runs_dir) if runs_dir is not None else Path(config.training.runs_dir)
-    run_dir = base_dir / run_id
-    if (run_dir / "STATIC_CHECKPOINT.json").exists():
-        raise FileExistsError(
-            f"{run_dir} already holds a checkpoint. Seeding over a run in progress would "
-            "discard its training; pick a new run id."
-        )
-
-    action_model = ActionModel(config)
-    abstraction = construction.build_card_abstraction(config)
-    abstraction_hash = construction.resolve_card_abstraction_hash(config)
-    rules = GameRules(config.game.small_blind, config.game.big_blind)
-    tree = build_betting_tree(
-        rules, action_model, abstraction, starting_stack=config.game.starting_stack
-    )
-
-    tag = experiment or ExperimentTag()
-    tracker = RunTracker(
-        run_dir=run_dir,
-        config_name=config.system.config_name,
-        config=config,
-        action_config_hash=action_model.get_config_hash(),
-        card_abstraction_hash=abstraction_hash,
-        experiment_id=tag.experiment_id,
-        arm=tag.arm,
-        parent_run_id=tag.parent_run_id or source_run.name,
-    )
-    run_dir.mkdir(parents=True, exist_ok=True)
-    tracker.initialize()
-    seeded_rows = seed_checkpoint(
-        config,
-        source_run=source_run,
-        run_dir=run_dir,
-        effective_iterations=effective_iterations,
-        abstraction_hash=abstraction_hash,
-        at_iteration=at_iteration,
-    )
-    tracker.update(
-        iterations=0,
-        runtime_seconds=0.0,
-        num_infosets=seeded_rows,
-        storage_capacity=tree.num_rows,
-    )
-    fraction = seeded_rows / tree.num_rows
-    return WarmStartOutput(
-        run_id=run_id,
-        runs_dir=str(base_dir),
-        config_name=config.system.config_name,
-        source_run_id=source_run.name,
-        effective_iterations=effective_iterations,
-        num_rows=tree.num_rows,
-        seeded_rows=seeded_rows,
-        seeded_fraction=fraction,
-        status="seeded",
-    )
-
-
 __all__ = (
     "DEFAULT_EFFECTIVE_ITERATIONS",
     "SEEDED_MARKER",
-    "WarmStartOutput",
     "regrets_encoding",
     "seed_checkpoint",
-    "warm_start_run",
 )

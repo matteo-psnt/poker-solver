@@ -47,7 +47,6 @@ from src.interfaces.commands import (
     autoscale_check,
     cancel,
     compact_legs,
-    compare,
     configs,
     cost,
     curve,
@@ -320,16 +319,6 @@ def create_app() -> FastAPI:
     @app.get("/api/experiments/{experiment_id}", response_model=contract.Report, responses=ERRORS)
     def _report(experiment_id: str) -> JSONResponse:
         return answer(cache, report.COMMAND, experiment=experiment_id)
-
-    @app.get("/api/compare", response_model=contract.Comparison, responses=ERRORS)
-    def _compare(
-        a: str, b: str, a_at: int | None = None, b_at: int | None = None, force: bool = False
-    ) -> JSONResponse:
-        # `None` is `--a-at`'s own default and means "take the newest row for
-        # this run" -- a real state, since most runs have exactly one eval. An
-        # absent query parameter has to arrive as that same sentinel rather than
-        # as 0, which the ledger would read as a rung and never match.
-        return answer(cache, compare.COMMAND, a=a, b=b, a_at=a_at, b_at=b_at, force=force)
 
     # THE FIRST WRITE THAT IS NOT ABOUT THE CONSOLE'S OWN BOX.
     #

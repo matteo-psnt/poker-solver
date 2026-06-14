@@ -48,8 +48,6 @@ from src.interfaces.commands.activity import CommandActivity, Failure
 from src.interfaces.commands.autoscale_check import AutoscalePayload as Autoscale
 from src.interfaces.commands.cancel import CancelledPayload as Cancelled
 from src.interfaces.commands.compact_legs import CompactedPayload as Compacted
-from src.interfaces.commands.compare import ComparePayload as Comparison
-from src.interfaces.commands.compare import PairedComparison
 from src.interfaces.commands.configs import ConfigKind
 from src.interfaces.commands.configs import ConfigsPayload as Configs
 from src.interfaces.commands.cost import CostPayload as Cost
@@ -94,7 +92,6 @@ __all__ = [
     "Combos",
     "CommandActivity",
     "Compacted",
-    "Comparison",
     "ConcurrencyPoint",
     "ConfigKind",
     "Configs",
@@ -112,7 +109,6 @@ __all__ = [
     "LeftSession",
     "LogLines",
     "NodeGrid",
-    "PairedComparison",
     "Pool",
     "PrecomputeDispatchPayload",
     "Progress",

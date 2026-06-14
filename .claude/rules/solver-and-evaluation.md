@@ -15,7 +15,7 @@ memory is flat in iteration count. The old dynamic backend (hashed `InfoSetKey`)
 is gone, and every checkpoint it wrote is unreadable at HEAD by design. Runs are
 loadable iff they carry `STATIC_CHECKPOINT.json`.
 
-- **Never compare arms across knob tiers.** `compare`/`report` refuse by design.
+- **Never compare arms across knob tiers.** `report` refuses by design.
   Never hand-transcribe scores.
 - **Eval records are per-run files**, not ledger appends: `evaluate` writes the
   complete row into `<run_dir>/evals/<slug>.json`. There is no stored index —

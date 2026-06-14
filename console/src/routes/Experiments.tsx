@@ -1,6 +1,6 @@
-import { useCompare, useExperimentView, usePromote, useRuns } from "@/api/queries";
+import { useExperimentView, usePromote, useRuns } from "@/api/queries";
 import type { Report, RunSummary } from "@/api/types";
-import { Actions, Field, Guard, Outcome, Run, Select, Text } from "@/components/Form";
+import { Actions, Field, Outcome, Run, Select, Text } from "@/components/Form";
 import { Panel } from "@/components/Panel";
 import { Table, Td, Th } from "@/components/Table";
 import { given } from "@/lib/body";
@@ -10,25 +10,22 @@ import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
 
 /**
- * Where a comparison is decided: every arm of an experiment, two runs head to
- * head, and the promotion that closes the loop.
+ * Where an experiment is decided: every arm of it, then the promotion that
+ * closes the loop.
  *
- * These three are one page because they are one sequence. `report` says which
- * arm won, `compare` puts the number on a pair, and `promote` moves the
- * baseline — and the last of those is the only irreversible thing on it, which
- * is easier to weigh with the evidence directly above rather than a click away.
+ * Both are one page because they are one sequence — `report` says which arm won
+ * and `promote` moves the baseline, and the second is the only irreversible
+ * thing here, which is easier to weigh with the evidence directly above rather
+ * than a click away.
  *
- * The rule the whole page obeys: **never compare across knob tiers.** Both
- * `report` and `compare` refuse to, and the console does not offer a way to
- * override the first. The second has `--force`, which is exposed and labelled
- * with what it costs — a p-value that is not trustworthy.
+ * The rule the page obeys: **never compare across knob tiers.** `report`
+ * refuses to, and the console offers no way to override it.
  */
 export function Experiments() {
   const runs = useRuns();
   return (
     <div className="space-y-3">
       <ArmReport runs={runs.data?.runs ?? []} loading={runs.isLoading} error={runs.error} />
-      <Head2Head runs={runs.data?.runs ?? []} />
       <Promote runs={runs.data?.runs ?? []} />
     </div>
   );
@@ -167,95 +164,6 @@ function Arms({ report, armRuns }: { report: Report; armRuns: Map<string, RunSum
   );
 }
 
-/** `compare`. Paired (CRN) on two runs' latest evals. */
-function Head2Head({ runs }: { runs: RunSummary[] }) {
-  const [a, setA] = useState("");
-  const [b, setB] = useState("");
-  const [force, setForce] = useState(false);
-  // Only asked once BOTH are chosen — `enabled` on the query — so the panel is
-  // empty rather than refusing while half-filled.
-  const compare = useCompare(a, b, force);
-
-  const names = runs.map((run) => run.name);
-  const result = compare.data?.comparison ?? null;
-
-  return (
-    <Panel
-      title="Compare — paired, two runs"
-      updatedAt={compare.dataUpdatedAt}
-      staleAfterMs={600_000}
-      error={errorOf(compare.error)}
-      loading={compare.isLoading && Boolean(a && b)}
-      onRefresh={() => compare.refetch()}
-      refreshing={compare.isFetching}
-    >
-      <div className="divide-y divide-[var(--border)]/50">
-        <Field label="baseline" hint="`--a`.">
-          <Select value={a} onChange={setA} options={names} />
-        </Field>
-        <Field label="candidate" hint="`--b`.">
-          <Select value={b} onChange={setB} options={names} />
-        </Field>
-      </div>
-      <div className="border-t border-[var(--border)]">
-        <Guard
-          label="--force"
-          because="compare even if the seeds or knob tiers differ. The p-value will not be trustworthy — the pairing it assumes does not exist."
-          checked={force}
-          onChange={setForce}
-        />
-      </div>
-
-      {compare.data && (
-        <div className="border-t border-[var(--border)]">
-          {compare.data.tier_warnings.length > 0 && (
-            <ul className="border-b border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-400">
-              {compare.data.tier_warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          )}
-          {result ? (
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2 p-3 sm:grid-cols-4">
-              <Stat label="baseline" value={mbb(result.mean_a)} />
-              <Stat label="candidate" value={mbb(result.mean_b)} />
-              <Stat
-                label="difference"
-                value={`${result.mean_diff > 0 ? "+" : ""}${result.mean_diff.toFixed(1)} ± ${result.se_diff.toFixed(1)}`}
-                tone={result.is_significant ? (result.mean_diff < 0 ? "good" : "bad") : undefined}
-              />
-              <Stat label="p" value={result.p_value.toFixed(4)} />
-              <Stat
-                label="95% ci"
-                value={`${result.ci_lower.toFixed(1)} … ${result.ci_upper.toFixed(1)}`}
-              />
-              {/* What the pairing BOUGHT. A correlation near zero means CRN did
-                  nothing here and the paired se is the unpaired one — worth
-                  seeing before believing a narrow interval. */}
-              <Stat
-                label="correlation"
-                value={result.correlation == null ? "—" : result.correlation.toFixed(2)}
-              />
-              <Stat
-                label="unpaired se"
-                value={result.se_unpaired == null ? "—" : result.se_unpaired.toFixed(1)}
-              />
-              <Stat
-                label="verdict"
-                value={result.is_significant ? "significant" : "not significant"}
-              />
-            </div>
-          ) : (
-            <p className="px-3 py-3 text-[var(--fg-faint)]">
-              No paired statistic. The warnings above are the reason.
-            </p>
-          )}
-        </div>
-      )}
-    </Panel>
-  );
-}
-
 /** `promote`. The only irreversible control on this page. */
 function Promote({ runs }: { runs: RunSummary[] }) {
   const promote = usePromote();
@@ -302,30 +210,5 @@ function Promote({ runs }: { runs: RunSummary[] }) {
         )}
       </Outcome>
     </Panel>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "good" | "bad";
-}) {
-  return (
-    <div>
-      <div className="text-[11px] text-[var(--fg-faint)] uppercase tracking-wider">{label}</div>
-      <div
-        className={cn(
-          "tnum",
-          tone === "good" && "text-emerald-400",
-          tone === "bad" && "text-[#E0655C]",
-        )}
-      >
-        {value}
-      </div>
-    </div>
   );
 }

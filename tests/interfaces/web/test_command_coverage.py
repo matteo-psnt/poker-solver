@@ -45,9 +45,6 @@ NODE_ONLY: dict[str, str] = {
     "evaluate": "compute, run BY the node wrapper — `score` is the door",
     "vector-sweep": "compute, run BY the node wrapper — `submit-vector` is the door",
     "train-vector": "compute, run BY the node wrapper — `submit --kernel board-free` is the door",
-    "warm-start": "seeds a checkpoint from another run's, on the node holding both — "
-    "`submit --warm-start-from` is the door, and folding it into the training leg "
-    "is what makes a Batch retry safe",
 }
 
 EXCLUDED = NO_PAYLOAD | NODE_ONLY

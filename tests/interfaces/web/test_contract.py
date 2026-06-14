@@ -45,7 +45,6 @@ MODELS: dict[str, type[BaseModel]] = {
     "logs": contract.LogLines,
     "cost": contract.Cost,
     "report": contract.Report,
-    "compare": contract.Comparison,
     "activity": contract.Activity,
     "configs": contract.Configs,
     "autoscale-check": contract.Autoscale,

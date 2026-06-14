@@ -226,23 +226,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/compare": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Compare */
-        get: operations["_compare_api_compare_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/configs": {
         parameters: {
             query?: never;
@@ -1046,42 +1029,6 @@ export interface components {
              */
             verified: boolean;
         };
-        /**
-         * ComparePayload
-         * @description A paired (common-random-numbers) comparison of two runs' latest evals.
-         *
-         *     `comparison` is null because the command REFUSES rather than guesses: two
-         *     runs with no shared seed have no paired statistic, and `tier_warnings` says
-         *     why. Both halves are needed -- a refusal with no reason is indistinguishable
-         *     from a bug.
-         */
-        ComparePayload: {
-            /** Checkpoint Iteration A */
-            checkpoint_iteration_a?: number | null;
-            /** Checkpoint Iteration B */
-            checkpoint_iteration_b?: number | null;
-            comparison?: components["schemas"]["PairedComparison"] | null;
-            /**
-             * Forced
-             * @default false
-             */
-            forced: boolean;
-            /**
-             * Op
-             * @default compare
-             * @constant
-             */
-            op: "compare";
-            /** Run A */
-            run_a: string;
-            /** Run B */
-            run_b: string;
-            /**
-             * Tier Warnings
-             * @default []
-             */
-            tier_warnings: string[];
-        };
         /** ConcurrencyPoint */
         ConcurrencyPoint: {
             /** At */
@@ -1573,38 +1520,6 @@ export interface components {
          * @enum {string}
          */
         Outcome: "done" | "failed" | "timed out" | "cancelled";
-        /**
-         * PairedComparison
-         * @description The statistic itself. Declared field by field because the console reads
-         *     it that way -- as a bare dict it crossed to TypeScript as `unknown`, and
-         *     every panel that drew a p-value had to cast.
-         */
-        PairedComparison: {
-            /** Ci Lower */
-            ci_lower: number;
-            /** Ci Upper */
-            ci_upper: number;
-            /** Correlation */
-            correlation?: number | null;
-            /** Is Significant */
-            is_significant: boolean;
-            /** Mean A */
-            mean_a: number;
-            /** Mean B */
-            mean_b: number;
-            /** Mean Diff */
-            mean_diff: number;
-            /** N */
-            n: number;
-            /** P Value */
-            p_value: number;
-            /** Se Diff */
-            se_diff: number;
-            /** Se Unpaired */
-            se_unpaired?: number | null;
-            /** T Statistic */
-            t_statistic: number;
-        };
         /** Part[AutoscalePayload] */
         Part_AutoscalePayload_: {
             /** Error */
@@ -3010,50 +2925,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CompactedPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    _compare_api_compare_get: {
-        parameters: {
-            query: {
-                a: string;
-                b: string;
-                a_at?: number | null;
-                b_at?: number | null;
-                force?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ComparePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

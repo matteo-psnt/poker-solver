@@ -16,7 +16,6 @@ import type {
   Cancelled,
   Combos,
   Compacted,
-  Comparison,
   Configs,
   Cost,
   Dispatched,
@@ -176,20 +175,6 @@ export const useActivity = (days = 7) =>
     queryKey: ["activity", days],
     queryFn: () => get(`/api/activity?days=${days}`),
     refetchInterval: SLOW,
-  });
-
-/**
- * A paired comparison. Not polled at all, and `enabled` only once BOTH runs are
- * chosen — this is a question someone asks deliberately, and the answer cannot
- * change without a new evaluation landing.
- */
-export const useCompare = (a: string, b: string, force: boolean) =>
-  useQuery<Comparison>({
-    queryKey: ["compare", a, b, force],
-    queryFn: () =>
-      get(`/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}&force=${force}`),
-    enabled: Boolean(a && b),
-    refetchInterval: false,
   });
 
 /**

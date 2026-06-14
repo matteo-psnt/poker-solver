@@ -183,12 +183,6 @@ class TestTheReadsAddedForCoverage:
         client.get("/api/experiments/exp-7")
         assert invoked[0] == ("report", {"experiment": "exp-7"})
 
-    def test_an_unspecified_rung_reaches_compare_as_none(self, client, invoked):
-        """`--a-at`'s own default. `0` would be read as a rung and match nothing."""
-        client.get("/api/compare?a=run-a&b=run-b")
-        (_, kwargs) = invoked[0]
-        assert kwargs == {"a": "run-a", "b": "run-b", "a_at": None, "b_at": None, "force": False}
-
 
 class TestFailuresBecomeStatusCodes:
     """A panel must be able to fail alone, and say why."""

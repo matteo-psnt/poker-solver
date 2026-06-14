@@ -10,7 +10,6 @@ import pytest
 
 from src.interfaces.cli import headless
 from src.interfaces.commands import _base
-from src.interfaces.commands import compare as compare_cmd
 from src.interfaces.commands import ledger as ledger_cmd
 from src.interfaces.commands import train_static as train_static_cmd
 from src.interfaces.errors import CommandError
@@ -196,126 +195,6 @@ def test_cmd_ledger_lists_rows(tmp_path, published):
     assert payload.rows[0].run_id == "run-a"
 
 
-def test_cmd_compare_valid_pairs(tmp_path, published):
-    led = tmp_path / "ledger.jsonl"
-    (tmp_path / "run-a").mkdir()
-    (tmp_path / "run-b").mkdir()
-    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[10.0, 20.0, 30.0])
-    _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=7, mbb=50.0, samples=[5.0, 10.0, 15.0])
-
-    payload = compare_cmd.run(
-        argparse.Namespace(
-            a="run-a",
-            b="run-b",
-            ledger=str(led),
-            force=False,
-            a_at=None,
-            b_at=None,
-            runs_dir=str(tmp_path),
-        )
-    )
-    assert payload.op == "compare"
-    assert payload.forced is False
-    assert payload.tier_warnings == []
-    assert payload.comparison is not None
-    assert payload.comparison.p_value is not None
-
-
-def test_cmd_compare_refuses_seed_mismatch(tmp_path, published):
-    led = tmp_path / "ledger.jsonl"
-    (tmp_path / "run-a").mkdir()
-    (tmp_path / "run-b").mkdir()
-    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
-    _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[1.0, 2.0, 3.0])
-
-    with pytest.raises(CommandError, match="Refusing to compare"):
-        compare_cmd.run(
-            argparse.Namespace(
-                a="run-a",
-                b="run-b",
-                ledger=str(led),
-                force=False,
-                a_at=None,
-                b_at=None,
-                runs_dir=str(tmp_path),
-            )
-        )
-
-
-def test_cmd_compare_force_overrides_mismatch(tmp_path, published):
-    led = tmp_path / "ledger.jsonl"
-    (tmp_path / "run-a").mkdir()
-    (tmp_path / "run-b").mkdir()
-    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
-    _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[4.0, 5.0, 6.0])
-
-    payload = compare_cmd.run(
-        argparse.Namespace(
-            a="run-a",
-            b="run-b",
-            ledger=str(led),
-            force=True,
-            a_at=None,
-            b_at=None,
-            runs_dir=str(tmp_path),
-        )
-    )
-    assert payload.forced is True
-    assert payload.tier_warnings  # non-empty: the override was recorded
-
-
-def test_cmd_compare_missing_run_raises(tmp_path, published):
-    led = tmp_path / "ledger.jsonl"
-    (tmp_path / "run-a").mkdir()
-    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=1.0, samples=[1.0, 2.0])
-
-    with pytest.raises(CommandError, match="No ledger entry"):
-        compare_cmd.run(
-            argparse.Namespace(
-                a="run-a",
-                b="ghost",
-                ledger=str(led),
-                force=False,
-                a_at=None,
-                b_at=None,
-                runs_dir=str(tmp_path),
-            )
-        )
-
-
-def test_compare_refuses_samples_free_evals_even_under_force(tmp_path, published):
-    """--force overrides a judgement, but cannot conjure samples that were never
-    recorded. exact_br is deterministic and stores none; the forced path used to
-    die on a bare KeyError."""
-    led = tmp_path / "ledger.jsonl"
-    for name in ("run-a", "run-b"):
-        run_dir = tmp_path / name
-        run_dir.mkdir()
-        _seed_eval(
-            led,
-            run_dir,
-            name,
-            base_seed=3,
-            mbb=1.0,
-            samples=None,
-            method="exact_br",
-            timestamp="2026-01-01T00:00:00+00:00",
-        )
-
-    with pytest.raises(CommandError, match="no per-hand samples"):
-        compare_cmd.run(
-            argparse.Namespace(
-                a="run-a",
-                b="run-b",
-                ledger=str(led),
-                force=True,
-                a_at=None,
-                b_at=None,
-                runs_dir=str(tmp_path),
-            )
-        )
-
-
 def _ledger_ns(led, tmp_path, **over):
     base = {
         "ledger": str(led),
@@ -349,36 +228,3 @@ def test_since_filter_compares_instants_not_strings(tmp_path, published):
 
     payload = ledger_cmd.run(_ledger_ns(led, tmp_path, since=now.isoformat()))
     assert [r.run_id for r in payload.rows] == ["new"]
-
-
-def test_missing_samples_error_names_the_right_record(tmp_path, published):
-    """When only B lacks samples, the message must report B's method, not A's."""
-    led = tmp_path / "ledger.jsonl"
-    (tmp_path / "run-a").mkdir()
-    _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=3, mbb=1.0, samples=[1.0, 2.0])
-
-    run_b = tmp_path / "run-b"
-    run_b.mkdir()
-    _seed_eval(
-        led,
-        run_b,
-        "run-b",
-        base_seed=3,
-        mbb=2.0,
-        samples=None,
-        method="exact_br",
-        timestamp="2026-01-02T00:00:00+00:00",
-    )
-
-    with pytest.raises(CommandError, match="exact_br"):
-        compare_cmd.run(
-            argparse.Namespace(
-                a="run-a",
-                b="run-b",
-                ledger=str(led),
-                force=True,
-                a_at=None,
-                b_at=None,
-                runs_dir=str(tmp_path),
-            )
-        )
