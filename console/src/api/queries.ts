@@ -19,14 +19,12 @@ import type {
   Configs,
   Cost,
   Dispatched,
-  ExperimentView,
   Hand,
   Jobs,
   LeftSession,
   LogLines,
   NowView,
   Pool,
-  Promoted,
   PushedCode,
   PushedData,
   RunView,
@@ -71,18 +69,6 @@ export const useRunView = (runId: string) =>
   useQuery<RunView>({
     queryKey: ["view", "run", runId],
     queryFn: () => get(`/api/view/run/${encodeURIComponent(runId)}`),
-    refetchInterval: SLOW,
-  });
-
-/**
- * `enabled` on the id: the page opens with no experiment selected, and a request
- * for `""` would be a share read that can only refuse.
- */
-export const useExperimentView = (experimentId: string | null) =>
-  useQuery<ExperimentView>({
-    queryKey: ["view", "experiment", experimentId],
-    queryFn: () => get(`/api/view/experiment/${encodeURIComponent(experimentId ?? "")}`),
-    enabled: Boolean(experimentId),
     refetchInterval: SLOW,
   });
 
@@ -225,14 +211,6 @@ export const useCompactLegs = () => {
   return useMutation<Compacted, Error, Record<string, unknown>>({
     mutationFn: (body) => send("/api/compact-legs", body),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
-  });
-};
-
-export const usePromote = () => {
-  const queryClient = useQueryClient();
-  return useMutation<Promoted, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/promote", body),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["runs"] }),
   });
 };
 

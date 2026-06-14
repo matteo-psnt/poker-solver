@@ -14,7 +14,7 @@ const route = getRouteApi("/operate");
  * because they are one person's job rather than one subject: queue the work,
  * publish what it needs, see the bill, see what the tool itself has been doing.
  * None of them is something you open to answer a question about the SOLVER,
- * which is what separates them from Runs and Experiments.
+ * which is what separates them from Runs.
  *
  * Cost sits here rather than beside the record for the reason the command line
  * groups it this way too: it accounts for dispatched work. The burn rate that

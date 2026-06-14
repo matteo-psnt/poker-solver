@@ -8,7 +8,6 @@
  */
 import { Shell } from "@/components/Shell";
 import { Blueprint } from "@/routes/Blueprint";
-import { Experiments } from "@/routes/Experiments";
 import { Operate } from "@/routes/Operate";
 import { Overview } from "@/routes/Overview";
 import { RunDetail } from "@/routes/RunDetail";
@@ -48,8 +47,6 @@ const routes = [
 
   createRoute({ getParentRoute: () => rootRoute, path: "/runs", component: Runs }),
   createRoute({ getParentRoute: () => rootRoute, path: "/runs/$runId", component: RunDetail }),
-
-  createRoute({ getParentRoute: () => rootRoute, path: "/experiments", component: Experiments }),
 
   /**
    * The blueprint, read as a grid or played against.

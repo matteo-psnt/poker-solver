@@ -58,11 +58,8 @@ from src.interfaces.commands.ledger import LedgerPayload as Ledger
 from src.interfaces.commands.logs import LogsPayload as LogLines
 from src.interfaces.commands.pool_status import PoolPayload as Pool
 from src.interfaces.commands.progress import ProgressPayload as Progress
-from src.interfaces.commands.promote import PromotedPayload as Promoted
 from src.interfaces.commands.push_code import PushedCodePayload as PushedCode
 from src.interfaces.commands.push_data import PushedDataPayload as PushedData
-from src.interfaces.commands.report import ArmResult as Arm
-from src.interfaces.commands.report import ReportPayload as Report
 from src.interfaces.commands.runinfo import RunInfoPayload as RunInfo
 from src.interfaces.commands.runs import RunsPayload as Runs
 from src.interfaces.commands.runs import RunSummary
@@ -80,7 +77,6 @@ from src.shared.task_history import TaskProgress, TaskRow
 # typed, and that list is meant to shrink to nothing.
 __all__ = [
     "Activity",
-    "Arm",
     "Autoscale",
     "BatchTask",
     "Billed",
@@ -112,10 +108,8 @@ __all__ = [
     "Pool",
     "PrecomputeDispatchPayload",
     "Progress",
-    "Promoted",
     "PushedCode",
     "PushedData",
-    "Report",
     "ResizeError",
     "RunInfo",
     "RunSummary",
@@ -215,18 +209,6 @@ class RunView(View):
     run_tasks: list[TaskRow] = []
     """Empty when the `tasks` part FAILED, which is not the same as no tasks --
     the part carries its own error, and that is what the UI renders."""
-
-
-class ExperimentParts(Payload):
-    report: Part[Report]
-    runs: Part[Runs]
-
-
-class ExperimentView(View):
-    """One experiment's arms, each pinned to the run record behind it."""
-
-    parts: ExperimentParts
-    arm_runs: list[RunSummary] = []
 
 
 class ApiError(Payload):

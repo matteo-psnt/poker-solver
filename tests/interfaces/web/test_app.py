@@ -112,7 +112,7 @@ class TestTheDispatchingWrites:
 
     def test_a_missing_required_field_is_refused_before_the_command(self, client, invoked):
         """422 from the model, and nothing dispatched."""
-        assert client.post("/api/promote", json={"run": "run-a"}).status_code == 422
+        assert client.post("/api/score", json={}).status_code == 422
         assert not invoked
 
     def test_compacting_defaults_to_the_dry_run(self, client, invoked):
@@ -178,10 +178,6 @@ class TestTheReadsAddedForCoverage:
         )
         web_app.answer(web_app.TtlCache(0.0), stub, command="tasks", cache="also-a-flag")
         assert invoked[0] == ("activity", {"command": "tasks", "cache": "also-a-flag"})
-
-    def test_an_experiment_id_becomes_the_report_argument(self, client, invoked):
-        client.get("/api/experiments/exp-7")
-        assert invoked[0] == ("report", {"experiment": "exp-7"})
 
 
 class TestFailuresBecomeStatusCodes:

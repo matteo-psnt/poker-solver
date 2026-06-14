@@ -103,81 +103,6 @@
         "title": "ApiError",
         "type": "object"
       },
-      "ArmResult": {
-        "description": "One arm of an experiment, scored and attributed against its control.",
-        "properties": {
-          "arm": {
-            "title": "Arm",
-            "type": "string"
-          },
-          "checkpoint_iteration": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Checkpoint Iteration"
-          },
-          "exploitability_mbb": {
-            "title": "Exploitability Mbb",
-            "type": "number"
-          },
-          "git_branch": {
-            "default": "",
-            "title": "Git Branch",
-            "type": "string"
-          },
-          "run_id": {
-            "title": "Run Id",
-            "type": "string"
-          },
-          "std_error_mbb": {
-            "title": "Std Error Mbb",
-            "type": "number"
-          },
-          "vs_control_blocked": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Vs Control Blocked",
-            "type": "array"
-          },
-          "vs_control_mbb": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vs Control Mbb"
-          },
-          "vs_control_p_value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vs Control P Value"
-          }
-        },
-        "required": [
-          "arm",
-          "run_id",
-          "checkpoint_iteration",
-          "exploitability_mbb",
-          "std_error_mbb"
-        ],
-        "title": "ArmResult",
-        "type": "object"
-      },
       "AutoscalePayload": {
         "description": "The deployed formula, evaluated against the live pool.\n\n`error` is a FIELD, not a failed request: Batch evaluates the formula and\nreports that it did not compute, which is the answer to \"why is the pool not\ngrowing\" and must reach the screen rather than blanking the panel.",
         "properties": {
@@ -1212,60 +1137,6 @@
         "title": "Edge",
         "type": "object"
       },
-      "ExperimentParts": {
-        "additionalProperties": true,
-        "properties": {
-          "report": {
-            "$ref": "#/components/schemas/Part_ReportPayload_"
-          },
-          "runs": {
-            "$ref": "#/components/schemas/Part_RunsPayload_"
-          }
-        },
-        "required": [
-          "report",
-          "runs"
-        ],
-        "title": "ExperimentParts",
-        "type": "object"
-      },
-      "ExperimentView": {
-        "additionalProperties": true,
-        "description": "One experiment's arms, each pinned to the run record behind it.",
-        "properties": {
-          "arm_runs": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/RunSummary"
-            },
-            "title": "Arm Runs",
-            "type": "array"
-          },
-          "at": {
-            "title": "At",
-            "type": "string"
-          },
-          "elapsed_seconds": {
-            "title": "Elapsed Seconds",
-            "type": "number"
-          },
-          "op": {
-            "title": "Op",
-            "type": "string"
-          },
-          "parts": {
-            "$ref": "#/components/schemas/ExperimentParts"
-          }
-        },
-        "required": [
-          "op",
-          "at",
-          "elapsed_seconds",
-          "parts"
-        ],
-        "title": "ExperimentView",
-        "type": "object"
-      },
       "Failure": {
         "description": "One recorded failure, with what was asked for when it happened.",
         "properties": {
@@ -2090,34 +1961,6 @@
         "title": "Part[ProgressPayload]",
         "type": "object"
       },
-      "Part_ReportPayload_": {
-        "additionalProperties": true,
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "payload": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReportPayload"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "title": "Part[ReportPayload]",
-        "type": "object"
-      },
       "Part_RunInfoPayload_": {
         "additionalProperties": true,
         "properties": {
@@ -2564,65 +2407,6 @@
         "title": "ProgressRow",
         "type": "object"
       },
-      "PromoteBody": {
-        "properties": {
-          "rationale": {
-            "title": "Rationale",
-            "type": "string"
-          },
-          "run": {
-            "title": "Run",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run",
-          "rationale"
-        ],
-        "title": "PromoteBody",
-        "type": "object"
-      },
-      "PromotedPayload": {
-        "description": "The new baseline, which is the conclusion of one turn of the fork loop.",
-        "properties": {
-          "checkpoint_iteration": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Checkpoint Iteration"
-          },
-          "op": {
-            "const": "promote",
-            "default": "promote",
-            "title": "Op",
-            "type": "string"
-          },
-          "promoted_at": {
-            "title": "Promoted At",
-            "type": "string"
-          },
-          "rationale": {
-            "title": "Rationale",
-            "type": "string"
-          },
-          "run_id": {
-            "title": "Run Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_id",
-          "rationale",
-          "promoted_at"
-        ],
-        "title": "PromotedPayload",
-        "type": "object"
-      },
       "PushCodeBody": {
         "properties": {
           "root": {
@@ -2707,66 +2491,6 @@
           }
         },
         "title": "PushedDataPayload",
-        "type": "object"
-      },
-      "ReportPayload": {
-        "description": "Every arm of an experiment, attributed against its control.",
-        "properties": {
-          "arms": {
-            "items": {
-              "$ref": "#/components/schemas/ArmResult"
-            },
-            "title": "Arms",
-            "type": "array"
-          },
-          "baseline_run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Baseline Run Id"
-          },
-          "control_run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Control Run Id"
-          },
-          "experiment_id": {
-            "title": "Experiment Id",
-            "type": "string"
-          },
-          "notes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Notes",
-            "type": "array"
-          },
-          "op": {
-            "const": "report",
-            "default": "report",
-            "title": "Op",
-            "type": "string"
-          }
-        },
-        "required": [
-          "experiment_id",
-          "control_run_id",
-          "baseline_run_id",
-          "arms",
-          "notes"
-        ],
-        "title": "ReportPayload",
         "type": "object"
       },
       "ResizeError": {
@@ -4849,55 +4573,6 @@
         "summary": " Evals"
       }
     },
-    "/api/experiments/{experiment_id}": {
-      "get": {
-        "operationId": "_report_api_experiments__experiment_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "experiment_id",
-            "required": true,
-            "schema": {
-              "title": "Experiment Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportPayload"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Understood, and the answer is no."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Azure did not answer."
-          }
-        },
-        "summary": " Report"
-      }
-    },
     "/api/jobs": {
       "get": {
         "operationId": "_jobs_api_jobs_get",
@@ -5101,54 +4776,6 @@
           }
         },
         "summary": " Precompute"
-      }
-    },
-    "/api/promote": {
-      "post": {
-        "operationId": "_promote_api_promote_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PromoteBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PromotedPayload"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Understood, and the answer is no."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Azure did not answer."
-          }
-        },
-        "summary": " Promote"
       }
     },
     "/api/push-code": {
@@ -5714,55 +5341,6 @@
           }
         },
         "summary": " Cancel"
-      }
-    },
-    "/api/view/experiment/{experiment_id}": {
-      "get": {
-        "operationId": "_view_experiment_api_view_experiment__experiment_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "experiment_id",
-            "required": true,
-            "schema": {
-              "title": "Experiment Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperimentView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Understood, and the answer is no."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Azure did not answer."
-          }
-        },
-        "summary": " View Experiment"
       }
     },
     "/api/view/now": {

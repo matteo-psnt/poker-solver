@@ -52,64 +52,6 @@ def summarize_samples(
     }
 
 
-def compare_paired_samples(
-    samples_a: Sequence[float],
-    samples_b: Sequence[float],
-    confidence_level: float = 0.95,
-) -> dict:
-    """Paired (common-random-numbers) comparison of two matched sample sequences.
-
-    Both sequences must come from evaluations that shared their randomness index
-    by index (e.g. two LBR evals with the same ``base_seed``: hand ``i`` sees the
-    same deal in both). The per-index differences then cancel the shared luck, so
-    the confidence interval on ``mean(a) - mean(b)`` is far tighter than what two
-    independent intervals could resolve.
-
-    Returns a dict with the paired difference (``mean_diff``, ``se_diff``,
-    ``ci_lower``/``ci_upper``, ``t_statistic``, ``p_value``, ``is_significant``),
-    the per-run means, the cross-run ``correlation``, and ``se_unpaired`` — the
-    standard error an unpaired comparison would have had, so the variance
-    reduction bought by pairing is visible in the output.
-
-    Raises:
-        ValueError: If lengths differ or fewer than two samples are given.
-    """
-    if len(samples_a) != len(samples_b):
-        raise ValueError(
-            f"Paired comparison requires equal-length samples (CRN hand-for-hand "
-            f"matching); got {len(samples_a)} vs {len(samples_b)}."
-        )
-    n = len(samples_a)
-    if n < 2:
-        raise ValueError("Paired comparison requires at least 2 samples.")
-
-    a = np.asarray(samples_a, dtype=np.float64)
-    b = np.asarray(samples_b, dtype=np.float64)
-    # A paired test IS the one-sample test on the per-index differences.
-    diff_summary = summarize_samples(a - b, confidence_level)
-
-    if float(a.std(ddof=1)) > 0 and float(b.std(ddof=1)) > 0:
-        correlation = float(stats.pearsonr(a, b)[0])
-    else:
-        correlation = 0.0
-    se_unpaired = float(np.sqrt(stats.sem(a) ** 2 + stats.sem(b) ** 2))
-
-    return {
-        "n": n,
-        "mean_a": float(a.mean()),
-        "mean_b": float(b.mean()),
-        "mean_diff": diff_summary["mean"],
-        "se_diff": diff_summary["se"],
-        "ci_lower": diff_summary["ci_lower"],
-        "ci_upper": diff_summary["ci_upper"],
-        "t_statistic": diff_summary["t_statistic"],
-        "p_value": diff_summary["p_value"],
-        "is_significant": diff_summary["is_significant"],
-        "correlation": correlation,
-        "se_unpaired": se_unpaired,
-    }
-
-
 def variance_decomposition(
     samples: Sequence[float],
     groups: Sequence[str],

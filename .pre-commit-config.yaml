@@ -53,6 +53,18 @@ repos:
         language: system
         pass_filenames: false
         args: [src, --min-confidence, "70"]
+      # The contract the console reads, regenerated from the app itself. Runs on
+      # EVERY commit and not just a console one: the models live in Python, so
+      # the change that makes this file stale is usually a change with no
+      # `console/` path in it at all -- which is exactly how it went stale while
+      # `types.gen.ts` was rebuilt by hand. Writes and fails; staging the result
+      # puts a `console/` file in the commit, which is what makes the hook below
+      # regenerate `types.gen.ts` from it.
+      - id: openapi-export
+        name: openapi.json (regenerate from the app)
+        entry: uv run python -m src.interfaces.web.schema
+        language: system
+        pass_filenames: false
       # The console's gate. Its own toolchain -- ruff/ty/deptry/vulture never
       # see JavaScript -- but it runs beside them so one command still answers
       # "is this repo clean". `files:` spares a Python-only checkout: with no

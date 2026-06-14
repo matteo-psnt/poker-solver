@@ -10,7 +10,6 @@ constructed without one, so it is a property of the type rather than a thing to
 check.
 """
 
-import copy
 from typing import Any
 
 import pytest
@@ -42,10 +41,8 @@ from src.interfaces.commands.logs import LogsPayload
 from src.interfaces.commands.pool_status import PoolPayload
 from src.interfaces.commands.precompute import PrecomputePayload
 from src.interfaces.commands.progress import ProgressPayload, ProgressRow
-from src.interfaces.commands.promote import PromotedPayload
 from src.interfaces.commands.push_code import PushedCodePayload
 from src.interfaces.commands.push_data import PushedDataPayload
-from src.interfaces.commands.report import ArmResult, ReportPayload
 from src.interfaces.commands.runinfo import RunInfoPayload
 from src.interfaces.commands.runs import RunsPayload, RunSummary
 from src.interfaces.commands.score import ScorePayload
@@ -149,12 +146,6 @@ PAYLOADS: dict[str, Any] = {
         abstraction_config="production",
         output_dir="data/combo_abstraction/production",
     ),
-    "promote": PromotedPayload(
-        run_id="run-a",
-        rationale="best so far",
-        promoted_at="2026-07-30T00:00:00+00:00",
-        checkpoint_iteration=25_000,
-    ),
     "curve": CurvePayload(
         run_id="run-a",
         tier="exact_br",
@@ -178,36 +169,6 @@ PAYLOADS: dict[str, Any] = {
         other_tiers=["lbr/myopic"],
         retained_iterations=[1000, 4000, 8000],
         unplaceable_records=1,
-    ),
-    "report": ReportPayload(
-        experiment_id="exp-1",
-        control_run_id="run-c",
-        baseline_run_id="run-b",
-        notes=["Tier: exact_br"],
-        arms=[
-            ArmResult(
-                arm="control",
-                run_id="run-c",
-                checkpoint_iteration=1000,
-                exploitability_mbb=900.0,
-                std_error_mbb=1.0,
-                git_branch="main",
-                vs_control_mbb=None,
-                vs_control_p_value=None,
-                vs_control_blocked=[],
-            ),
-            ArmResult(
-                arm="variant:pruning",
-                run_id="run-v",
-                checkpoint_iteration=1000,
-                exploitability_mbb=880.0,
-                std_error_mbb=1.0,
-                git_branch="worktree-hybrid-kernels",
-                vs_control_mbb=-20.0,
-                vs_control_p_value=0.01,
-                vs_control_blocked=["payload missing, cannot pair"],
-            ),
-        ],
     ),
     "ledger": LedgerPayload(
         ledger="data/eval_ledger.jsonl",
@@ -665,34 +626,6 @@ class TestEveryOpRenders:
         out = capsys.readouterr().out
         assert "2,000,000" in out, "the legacy row must still be shown"
         assert "10.1%" in out, "and the fields it does carry must render"
-
-
-class TestReportNamesTheWorktree:
-    """`report --experiment` pairs arms; it has to say which arm each row IS.
-
-    Arms are developed in parallel worktrees that share a commit and differ only
-    in what is uncommitted, so the branch is the only thing distinguishing two
-    rows whose provenance is otherwise identical.
-    """
-
-    def test_the_branch_is_printed_beside_the_arm(self, capsys):
-        BY_NAME["report"].render(PAYLOADS["report"])
-        out = capsys.readouterr().out
-        assert "worktree-hybrid-kernels" in out
-        assert "from" in out
-
-    def test_a_report_of_legacy_arms_drops_the_column(self, capsys):
-        """Not a column of em-dashes: those are wide enough to push the numbers
-        off a terminal, to say nothing."""
-        payload = copy.deepcopy(PAYLOADS["report"])
-        for arm in payload.arms:
-            arm.git_branch = ""
-
-        BY_NAME["report"].render(payload)
-        out = capsys.readouterr().out
-
-        assert "from" not in out
-        assert "900.0" in out, "the numbers must still be there"
 
 
 class TestTheServersStillFormatTheirPayload:

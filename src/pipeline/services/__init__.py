@@ -22,17 +22,10 @@ group by concern only:
 
 from src.pipeline.services.bucketing import precompute_abstraction, sweep_bucket_counts
 from src.pipeline.services.experiments import (
-    CONTROL_ARM,
-    ArmResult,
-    Baseline,
     CurveOutput,
     CurvePoint,
-    ExperimentReport,
     RunDigest,
-    experiment_report,
     exploitability_curve,
-    load_baseline,
-    promote_baseline,
     run_digest,
 )
 from src.pipeline.services.runs import (
@@ -65,17 +58,13 @@ from src.pipeline.training.run_tracker import ExperimentTag
 
 __all__ = [
     "BLUEPRINT_MATCH_ESTIMATOR_LABEL",
-    "CONTROL_ARM",
     "DEFAULT_EFFECTIVE_ITERATIONS",
     "EXACT_BR_ESTIMATOR_LABEL",
     "LBR_ESTIMATOR_LABEL",
-    "ArmResult",
-    "Baseline",
     "CurveOutput",
     "CurvePoint",
     "EvaluationOutput",
     "EvaluationPayload",
-    "ExperimentReport",
     "ExperimentTag",
     "RunDigest",
     "RunSummary",
@@ -88,13 +77,10 @@ __all__ = [
     "evaluate_run_exact_br",
     "evaluate_run_lbr",
     "evaluate_run_resolver_gate",
-    "experiment_report",
     "exploitability_curve",
     "list_runs",
-    "load_baseline",
     "load_run_metadata",
     "precompute_abstraction",
-    "promote_baseline",
     "record_blueprint_match",
     "run_digest",
     "sweep_bucket_counts",

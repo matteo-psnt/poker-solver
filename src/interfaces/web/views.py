@@ -23,7 +23,6 @@ from src.interfaces.commands import (
     ledger,
     pool_status,
     progress,
-    report,
     runinfo,
     tasks,
 )
@@ -124,25 +123,6 @@ def runs() -> dict[str, Any]:
     return composed
 
 
-def experiment(experiment_id: str) -> dict[str, Any]:
-    """One experiment's arms, each pinned to the run record behind it.
-
-    `report` already pairs every variant against its control at one knob tier --
-    that pairing is the command's, and this view must not second-guess it. What
-    it adds is the join `report` cannot make without becoming a different
-    command: each arm's row in `runs`, so the page can say what an arm WAS
-    (config, iterations, status) beside how it scored.
-    """
-    return compose(
-        "view-experiment",
-        [
-            Part("report", report.COMMAND, {"experiment": experiment_id}),
-            Part("runs", runs_command.COMMAND, {"limit": 0, "loadable_only": False}),
-        ],
-        join=lambda parts: {"arm_runs": _runs_in(experiment_id, parts)},
-    )
-
-
 def _summarised(part: dict[str, Any]) -> dict[str, Any]:
     """A copy of one part with its `rows` replaced by how many there were.
 
@@ -208,11 +188,3 @@ def _task_runs(parts: dict[str, dict[str, Any]]) -> dict[str, str]:
         for row in available.get("rows", [])
         if row.get("task_id") and row.get("run_id")
     }
-
-
-def _runs_in(experiment_id: str, parts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """The run records tagged with this experiment, keyed for the arms above."""
-    available = payloads(parts).get("runs")
-    if available is None:
-        return []
-    return [row for row in available.get("runs", []) if row.get("experiment_id") == experiment_id]

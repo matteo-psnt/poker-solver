@@ -64,10 +64,6 @@ export type LogLines = S["LogsPayload"];
 export type Cost = S["CostPayload"];
 export type Billed = S["BilledPayload"];
 
-/** Experiments and comparisons. */
-export type Report = S["ReportPayload"];
-export type Arm = S["ArmResult"];
-
 /** This tool's own behaviour, and the local reads. */
 export type Activity = S["ActivityPayload"];
 export type Configs = S["ConfigsPayload"];
@@ -85,7 +81,6 @@ export type DispatchedVector = S["SubmitVectorPayload"];
 export type PushedCode = S["PushedCodePayload"];
 export type PushedData = S["PushedDataPayload"];
 export type Compacted = S["CompactedPayload"];
-export type Promoted = S["PromotedPayload"];
 export type Cancelled = S["CancelledPayload"];
 export type Box = S["BoxPayload"];
 
@@ -112,7 +107,6 @@ export type LeftSession = S["LeftSession"];
 export type NowView = S["NowView"];
 export type RunsView = S["RunsView"];
 export type RunView = S["RunView"];
-export type ExperimentView = S["ExperimentView"];
 
 /**
  * One part of a view. Generic so a page can say what it is holding.

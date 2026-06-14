@@ -120,8 +120,6 @@ COMMANDS: tuple[CommandRef, ...] = (
     CommandRef(
         "runinfo", "Everything recorded about a run: provenance, curve, scores, tasks, gaps."
     ),
-    CommandRef("report", "Score every arm of an experiment, each attributed against its control."),
-    CommandRef("promote", "Make a run the new baseline (closes one turn of the base-fork loop)."),
 )
 
 BY_NAME: dict[str, CommandRef] = {ref.name: ref for ref in COMMANDS}

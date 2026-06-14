@@ -19,7 +19,7 @@ def _read(path) -> dict:
     return payload
 
 
-SNAPSHOT = records.REGISTRY["baseline.json"]
+SNAPSHOT = records.REGISTRY["STATIC_CHECKPOINT.json"]
 SHARE_SNAPSHOT = records.REGISTRY["legs/*.start.json"]
 LOG = records.REGISTRY["run.jsonl"]
 
@@ -70,7 +70,7 @@ class TestAtomicityFollowsTheDestination:
 
     def test_local_is_atomic(self):
         assert records.REGISTRY["run.jsonl"].atomic
-        assert records.REGISTRY["baseline.json"].atomic
+        assert records.REGISTRY["STATIC_CHECKPOINT.json"].atomic
 
     def test_scope_has_exactly_the_two_values_that_change_behaviour(self):
         """A third value would describe where a file lives without changing how

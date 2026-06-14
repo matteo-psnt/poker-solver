@@ -55,10 +55,8 @@ from src.interfaces.commands import (
     logs,
     pool_status,
     progress,
-    promote,
     push_code,
     push_data,
-    report,
     runinfo,
     runs,
     score,
@@ -201,11 +199,6 @@ class CompactBody(BaseModel):
     label: str | None = None
 
 
-class PromoteBody(BaseModel):
-    run: str
-    rationale: str
-
-
 def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
     """Run one command, memoised, and map its failures onto status codes.
 
@@ -241,7 +234,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     line wants the opposite: it is one-shot, so it would gain nothing and would
     lose the guarantee its readers are built on -- that an answer is against the
     record as it is NOW. A run published thirty seconds ago must not be
-    invisible to `promote`.
+    invisible to the next reader.
     """
     with workspace.shared_record_cache(RECORD_TREE_TTL_SECONDS):
         yield
@@ -316,10 +309,6 @@ def create_app() -> FastAPI:
     def _autoscale() -> JSONResponse:
         return answer(cache, autoscale_check.COMMAND)
 
-    @app.get("/api/experiments/{experiment_id}", response_model=contract.Report, responses=ERRORS)
-    def _report(experiment_id: str) -> JSONResponse:
-        return answer(cache, report.COMMAND, experiment=experiment_id)
-
     # THE FIRST WRITE THAT IS NOT ABOUT THE CONSOLE'S OWN BOX.
     #
     # Still one `Command.invoke`, and that rule matters MORE for a write than a
@@ -372,10 +361,6 @@ def create_app() -> FastAPI:
     @app.post("/api/compact-legs", response_model=contract.Compacted, responses=ERRORS)
     def _compact_legs(body: CompactBody) -> JSONResponse:
         return answer(TtlCache(0.0), compact_legs.COMMAND, **given(body))
-
-    @app.post("/api/promote", response_model=contract.Promoted, responses=ERRORS)
-    def _promote(body: PromoteBody) -> JSONResponse:
-        return answer(TtlCache(0.0), promote.COMMAND, **given(body))
 
     # These three ARE commands, so they go through `answer` like the rest -- the
     # button and `poker-solver serve-box` are then the same code path, which is
@@ -443,15 +428,6 @@ def create_app() -> FastAPI:
     def _view_run(run_id: str) -> JSONResponse:
         with telemetry.surface("console"):
             return view(views.run, run_id)
-
-    @app.get(
-        "/api/view/experiment/{experiment_id}",
-        response_model=contract.ExperimentView,
-        responses=ERRORS,
-    )
-    def _view_experiment(experiment_id: str) -> JSONResponse:
-        with telemetry.surface("console"):
-            return view(views.experiment, experiment_id)
 
     # Not `answer(...)`: these are not commands and there is nothing to memoise
     # here. The blueprint server owns one loaded run and answers in

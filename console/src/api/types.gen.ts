@@ -277,23 +277,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/experiments/{experiment_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Report */
-        get: operations["_report_api_experiments__experiment_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/jobs": {
         parameters: {
             query?: never;
@@ -356,23 +339,6 @@ export interface paths {
         put?: never;
         /** Precompute */
         post: operations["_precompute_api_precompute_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/promote": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Promote */
-        post: operations["_promote_api_promote_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -566,23 +532,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/view/experiment/{experiment_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** View Experiment */
-        get: operations["_view_experiment_api_view_experiment__experiment_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/view/now": {
         parameters: {
             query?: never;
@@ -696,33 +645,6 @@ export interface components {
             error: string;
         } & {
             [key: string]: unknown;
-        };
-        /**
-         * ArmResult
-         * @description One arm of an experiment, scored and attributed against its control.
-         */
-        ArmResult: {
-            /** Arm */
-            arm: string;
-            /** Checkpoint Iteration */
-            checkpoint_iteration: number | null;
-            /** Exploitability Mbb */
-            exploitability_mbb: number;
-            /**
-             * Git Branch
-             * @default
-             */
-            git_branch: string;
-            /** Run Id */
-            run_id: string;
-            /** Std Error Mbb */
-            std_error_mbb: number;
-            /** Vs Control Blocked */
-            vs_control_blocked?: string[];
-            /** Vs Control Mbb */
-            vs_control_mbb?: number | null;
-            /** Vs Control P Value */
-            vs_control_p_value?: number | null;
         };
         /**
          * AutoscalePayload
@@ -1222,33 +1144,6 @@ export interface components {
             /** Type */
             type: string;
         };
-        /** ExperimentParts */
-        ExperimentParts: {
-            report: components["schemas"]["Part_ReportPayload_"];
-            runs: components["schemas"]["Part_RunsPayload_"];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * ExperimentView
-         * @description One experiment's arms, each pinned to the run record behind it.
-         */
-        ExperimentView: {
-            /**
-             * Arm Runs
-             * @default []
-             */
-            arm_runs: components["schemas"]["RunSummary"][];
-            /** At */
-            at: string;
-            /** Elapsed Seconds */
-            elapsed_seconds: number;
-            /** Op */
-            op: string;
-            parts: components["schemas"]["ExperimentParts"];
-        } & {
-            [key: string]: unknown;
-        };
         /**
          * Failure
          * @description One recorded failure, with what was asked for when it happened.
@@ -1576,14 +1471,6 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** Part[ReportPayload] */
-        Part_ReportPayload_: {
-            /** Error */
-            error?: string | null;
-            payload?: components["schemas"]["ReportPayload"] | null;
-        } & {
-            [key: string]: unknown;
-        };
         /** Part[RunInfoPayload] */
         Part_RunInfoPayload_: {
             /** Error */
@@ -1753,33 +1640,6 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** PromoteBody */
-        PromoteBody: {
-            /** Rationale */
-            rationale: string;
-            /** Run */
-            run: string;
-        };
-        /**
-         * PromotedPayload
-         * @description The new baseline, which is the conclusion of one turn of the fork loop.
-         */
-        PromotedPayload: {
-            /** Checkpoint Iteration */
-            checkpoint_iteration?: number | null;
-            /**
-             * Op
-             * @default promote
-             * @constant
-             */
-            op: "promote";
-            /** Promoted At */
-            promoted_at: string;
-            /** Rationale */
-            rationale: string;
-            /** Run Id */
-            run_id: string;
-        };
         /** PushCodeBody */
         PushCodeBody: {
             /** Root */
@@ -1824,28 +1684,6 @@ export interface components {
             uploaded: {
                 [key: string]: number;
             };
-        };
-        /**
-         * ReportPayload
-         * @description Every arm of an experiment, attributed against its control.
-         */
-        ReportPayload: {
-            /** Arms */
-            arms: components["schemas"]["ArmResult"][];
-            /** Baseline Run Id */
-            baseline_run_id: string | null;
-            /** Control Run Id */
-            control_run_id: string | null;
-            /** Experiment Id */
-            experiment_id: string;
-            /** Notes */
-            notes: string[];
-            /**
-             * Op
-             * @default report
-             * @constant
-             */
-            op: "report";
         };
         /**
          * ResizeError
@@ -3065,46 +2903,6 @@ export interface operations {
             };
         };
     };
-    _report_api_experiments__experiment_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                experiment_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReportPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     _jobs_api_jobs_get: {
         parameters: {
             query?: {
@@ -3246,48 +3044,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PrecomputeDispatchPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    _promote_api_promote_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PromoteBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PromotedPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3742,46 +3498,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CancelledPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    _view_experiment_api_view_experiment__experiment_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                experiment_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExperimentView"];
                 };
             };
             /** @description Understood, and the answer is no. */

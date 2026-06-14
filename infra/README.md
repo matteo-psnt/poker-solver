@@ -91,9 +91,8 @@ poker-solver score --run <id> --at 10000000,20000000 -- --br-flops 8
 poker-solver ledger               # every evaluation, derived from the share
 poker-solver runs                 # every published run, newest first
 
-poker-solver report --experiment exp-7
 poker-solver curve --run <id>
-poker-solver promote --run <winner> --rationale "..."
+poker-solver runinfo --run <id>   # provenance, curve, scores, tasks, gaps
 ```
 
 Two things worth knowing at the seams:
