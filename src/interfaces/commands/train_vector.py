@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.commands._base import Command, parse_overrides
@@ -69,6 +70,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Continue an EXISTING run instead of starting one.",
     )
+    parser.add_argument(
+        "--progress-file",
+        default="",
+        dest="progress_file",
+        help="Write {done,total} iterations here while training. Node-local: a "
+        "heartbeat for the task bar between checkpoints, not a record.",
+    )
 
 
 class VectorBlueprintPayload(services.VectorBlueprintOutput):
@@ -89,6 +97,7 @@ def run(args: argparse.Namespace) -> VectorBlueprintPayload:
         dtype=args.dtype,
         config_overrides=parse_overrides(args.overrides),
         run_id=args.run,
+        progress_file=Path(args.progress_file) if args.progress_file else None,
         experiment=services.ExperimentTag(
             experiment_id=args.experiment,
             arm=args.arm,

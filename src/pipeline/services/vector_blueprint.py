@@ -47,8 +47,11 @@ from src.pipeline.abstraction.vector_universe import build_universe
 from src.pipeline.blueprint import construction
 from src.pipeline.training.run_tracker import RunTracker
 from src.pipeline.training.run_tracker.attempts import ExperimentTag
+from src.shared import records
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
+
+PROGRESS_ARTIFACT = "train-progress.json"
 
 if TYPE_CHECKING:
     from src.shared.config import Config
@@ -116,6 +119,7 @@ def train_vector_blueprint(
     runs_dir: Path | None = None,
     run_id: str | None = None,
     experiment: ExperimentTag | None = None,
+    progress_file: Path | None = None,
 ) -> VectorBlueprintOutput:
     """Train the board-free kernel to an ABSOLUTE iteration target.
 
@@ -134,6 +138,10 @@ def train_vector_blueprint(
         retain_every: Keep every Nth rung addressable by ``evaluate --at``.
         dtype: ``float32`` (default, measured to cost nothing in strategy
             quality) or ``float64`` (sharper zero-sum residual, 2x memory).
+        progress_file: Where to publish iterations done while they are being
+            done. A rung is the durable answer, but rungs are ``checkpoint_every``
+            apart and an iteration here updates every row of the tree -- so
+            between two of them the work is otherwise unobservable.
     """
     config: Config = load_training_config(config_name, **(config_overrides or {}))
     configure_logging(config.system.log_level)
@@ -221,11 +229,19 @@ def train_vector_blueprint(
             )
             return float((mass > 0.0).mean())
 
+        # Per ITERATION, with no timer and no thread: this kernel is one process
+        # and one iteration updates every row of the tree, so a small local write
+        # beside it is free. The scalar trainer needs both because its work is in
+        # other processes and its coordinator is blocked while they run.
+        report = records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT])
+
         coverage = 0.0
         while kernel.iteration < iterations:
             target = min(iterations, kernel.iteration + max(1, checkpoint_every))
             while kernel.iteration < target:
                 kernel.iterate(initial)
+                if report is not None:
+                    report(kernel.iteration, iterations)
             coverage = publish(kernel.iteration)
             logger.info(
                 "rung %d written, %.2f%% of rows have an answer", kernel.iteration, coverage * 100.0

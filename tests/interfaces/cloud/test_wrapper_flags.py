@@ -68,12 +68,34 @@ def _plan(**overrides) -> node_plan.TaskPlan:
 # Every optional field, present and absent. The old regex saw flags on
 # conditional branches because it read the whole file; a pure-function check
 # only sees the argv it is handed, so the matrix has to supply the branches.
+# `progress_path` is filled in by the WRAPPER, so a plan built here has it empty
+# unless a case says otherwise -- and the flag it produces was invisible to this
+# check for as long as no case did. It is now on four commands.
+REPORTING = "/mnt/work/progress.json"
+
 TRAIN_CASES = {
     "bare": _plan(),
     "tagged": _plan(experiment="exp-7", arm="control", parent="run-x"),
     "with-overrides": _plan(sets=("solver__dcfr=1.5", "system__note=two words")),
     "with-checkpoint-every": _plan(checkpoint_every=250_000),
     "continuing": _plan(run_id="run-a", checkpoint_every=1_000_000, experiment="e", arm="a"),
+    "reporting": _plan(progress_path=REPORTING),
+}
+
+VECTOR_CASES = {
+    "bare": _plan(op=TaskName.TRAIN_VECTOR, universe_boards=2000),
+    "full": _plan(
+        op=TaskName.TRAIN_VECTOR,
+        universe_boards=2000,
+        universe_seed=7,
+        checkpoint_every=25,
+        dtype="float32",
+        experiment="exp-7",
+        arm="control",
+        parent="run-x",
+        sets=("solver__dcfr=1.5",),
+    ),
+    "reporting": _plan(op=TaskName.TRAIN_VECTOR, universe_boards=2000, progress_path=REPORTING),
 }
 
 EVAL_CASES = {
@@ -83,6 +105,10 @@ EVAL_CASES = {
         _plan(op=TaskName.EVALUATE, run_id="run-a", eval_method="lookahead"),
         "500000",
     ),
+    "reporting": (
+        _plan(op=TaskName.EVALUATE, run_id="run-a", progress_path=REPORTING),
+        "1000000",
+    ),
 }
 
 
@@ -91,6 +117,16 @@ def test_every_flag_a_training_task_passes_is_declared(task):
     argv = task.commands[0]
     assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
     assert not _undeclared(argv), _message(argv)
+
+
+@pytest.mark.parametrize("task", VECTOR_CASES.values(), ids=list(VECTOR_CASES))
+def test_every_flag_a_board_free_task_passes_is_declared(task):
+    """The kind this file was WRITTEN for: `train-vector` died four seconds in,
+    three times, on a `--workers` it does not declare. It had no case here."""
+    argv = task.commands[0]
+    assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
+    assert not _undeclared(argv), _message(argv)
+    assert "--workers" not in argv, "the board-free kernel is ONE process"
 
 
 @pytest.mark.parametrize(("task", "rung"), EVAL_CASES.values(), ids=list(EVAL_CASES))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
@@ -94,11 +95,10 @@ class TestTrain:
         (argv,) = seen
         assert argv[argv.index("--progress-file") + 1] == str(paths.work / "train-progress.json")
 
-    def test_a_kind_that_reports_no_file_is_not_handed_the_scratch_dir(
-        self, paths, log, monkeypatch
-    ):
-        """`paths.work / ""` is the DIRECTORY, and a command asked to write a
-        JSON document into one fails on it."""
+    def test_the_board_free_trainer_reports_into_the_same_file(self, paths, log, monkeypatch):
+        """One task runs on a node and both trainers count the same thing
+        against the same kind of target, so they share the file rather than
+        keeping two names for one shape."""
         seen: list[list[str]] = []
         monkeypatch.setattr(handlers, "run_guarded", lambda argv, **k: seen.append(argv) or 0)
         task = node_plan.TaskPlan(
@@ -108,7 +108,17 @@ class TestTrain:
         handlers._train(task, paths, log)
 
         (argv,) = seen
-        assert "--progress-file" not in argv
+        assert argv[argv.index("--progress-file") + 1] == str(paths.work / "train-progress.json")
+
+    def test_a_kind_that_reports_no_file_is_not_handed_the_scratch_dir(self, paths, monkeypatch):
+        """`paths.work / ""` is the DIRECTORY, and a command asked to write a
+        JSON document into one fails on it. Every kind declares a file today, so
+        the guard is pinned against a stand-in rather than against whichever
+        kind happens not to."""
+        monkeypatch.setattr(handlers.kinds, "kind", lambda _op: SimpleNamespace(progress_file=""))
+        task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000)
+
+        assert handlers._reporting(task, paths).progress_path == ""
 
 
 class TestPrecompute:

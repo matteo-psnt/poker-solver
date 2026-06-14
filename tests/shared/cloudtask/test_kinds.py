@@ -213,6 +213,18 @@ class TestProgress:
         )
         assert got == Progress(2_000_000, 3_000_000, "board runouts")
 
+    def test_both_trainers_prefer_the_live_count_to_the_banked_one(self):
+        """The manifest is a rung behind by construction. It is the FLOOR --
+        for the window before the trainer's writer starts, and for a task whose
+        wrapper predates it -- never the answer when a live count exists."""
+        for name in (TaskName.TRAIN, TaskName.TRAIN_VECTOR):
+            kind = kinds.kind(name)
+            live = kind.sample(_plan(to=1000), {"iteration": 200, "done": 450, "total": 1000})
+            assert live == Progress(450, 1000, "iterations"), name
+            # And the other way round, so a stale file cannot walk the bar back.
+            banked = kind.sample(_plan(to=1000), {"iteration": 700, "done": 450})
+            assert banked == Progress(700, 1000, "iterations"), name
+
     def test_a_kind_with_nothing_yet_to_report_says_nothing(self):
         """None renders as no bar; zero renders as a bar that looks stuck."""
         assert kinds.kind(TaskName.TRAIN).sample(_plan(to=100), {}) is None
