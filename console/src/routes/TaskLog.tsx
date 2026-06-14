@@ -19,13 +19,19 @@ const route = getRouteApi("/tasks/$taskId");
  */
 export function TaskLog() {
   const { taskId } = route.useParams();
-  const log = useLog(taskId);
   const tasks = useTasks(0);
-  const lines = log.data?.lines ?? [];
   // The task's OWN record, which exists long before its log does: the log is
   // published from the node and a running task has usually published none yet,
   // so opening one used to show nothing at all.
   const row = (tasks.data?.rows ?? []).find((r) => r.task_id === taskId);
+  // No end time means it is still going, so its log is still growing. Decided
+  // here rather than in the query, because this is the component that has the
+  // row — and while `tasks` is still loading the answer is "assume finished",
+  // which costs one refetch once the row arrives instead of a poll for a task
+  // that ended last week.
+  const live = Boolean(row && !row.ended_at);
+  const log = useLog(taskId, 400, live);
+  const lines = log.data?.lines ?? [];
 
   return (
     <div className="space-y-3">
@@ -97,9 +103,12 @@ export function TaskLog() {
       </Panel>
 
       <Panel
-        title="Published log"
+        title={live ? "Published log · live" : "Published log"}
         updatedAt={log.dataUpdatedAt}
-        staleAfterMs={Number.POSITIVE_INFINITY}
+        // A finished task's log genuinely cannot go stale. A running one's can,
+        // and saying otherwise is the age badge lying about the one panel whose
+        // freshness someone is actually watching.
+        staleAfterMs={live ? 120_000 : Number.POSITIVE_INFINITY}
         error={errorOf(log.error)}
         loading={log.isLoading}
         empty={log.data && lines.length === 0 ? "The published log is empty." : null}
@@ -109,9 +118,11 @@ export function TaskLog() {
         {lines.length > 0 && (
           <pre className="max-h-[70vh] overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
             {lines.map((line, index) => (
-              // Index keys are correct here: this is an immutable, ordered
-              // snapshot of a finished log, never reordered or spliced.
-              // biome-ignore lint/suspicious/noArrayIndexKey: immutable log snapshot
+              // Index keys, on a tail that SHIFTS as a live log grows. That is
+              // still correct here because nothing is carried per row: the tone
+              // is derived from the line, so a reused node re-renders with the
+              // right content rather than keeping the previous line's state.
+              // biome-ignore lint/suspicious/noArrayIndexKey: no per-row state to preserve
               <div key={index} className={lineTone(line)}>
                 {line}
               </div>
