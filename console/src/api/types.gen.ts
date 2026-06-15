@@ -2020,6 +2020,8 @@ export interface components {
         SubmitCouplingBody: {
             /** Abstractions */
             abstractions: string[];
+            /** Board Relative */
+            board_relative?: boolean | null;
             /** Boards */
             boards?: number | null;
             /** Classes */
@@ -2084,6 +2086,8 @@ export interface components {
         SubmitVectorBody: {
             /** Abstractions */
             abstractions: string[];
+            /** Board Relative */
+            board_relative?: boolean | null;
             /** Checkpoints */
             checkpoints?: string | null;
             /** Config */

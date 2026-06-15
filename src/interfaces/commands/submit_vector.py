@@ -202,8 +202,7 @@ def run(args: argparse.Namespace) -> SubmitVectorPayload:
     return payload.extend(
         SubmitVectorPayload,
         arms=[
-            VectorArm(abstraction=a, kernel=k, derive_boards=d, score_seed=s)
-            for a, k, d, s in arms
+            VectorArm(abstraction=a, kernel=k, derive_boards=d, score_seed=s) for a, k, d, s in arms
         ],
     )
 

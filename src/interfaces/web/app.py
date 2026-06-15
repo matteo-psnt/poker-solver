@@ -201,16 +201,6 @@ class SubmitCouplingBody(BaseModel):
     timeout: str | None = None
 
 
-class SubmitCouplingBody(BaseModel):
-    # Repeatable and required for the same reason as the sweep's: WHICH
-    # abstractions to price against each other is the measurement.
-    abstractions: list[str]
-    boards: int | None = None
-    classes: str | None = None
-    seed: int | None = None
-    timeout: str | None = None
-
-
 class PrecomputeBody(BaseModel):
     config: str
     workers: int | None = None
