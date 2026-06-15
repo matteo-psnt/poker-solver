@@ -92,6 +92,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "across the arms being compared.",
     )
     parser.add_argument(
+        "--score-seed",
+        type=int,
+        action="append",
+        dest="score_seeds",
+        metavar="N",
+        help="Held-out scoring universe. Repeatable — one arm per seed, which is "
+        "how the BOARD-SAMPLING spread is measured. A paired A/B on one seed "
+        "shares its boards and mostly cancels that noise; an absolute number "
+        "does not, and must never be quoted without the spread beside it.",
+    )
+    parser.add_argument(
         "--board-relative",
         action="store_true",
         help="Renumber postflop buckets to within-board rank in every arm. "
@@ -101,7 +112,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timeout", default=VECTOR_TIMEOUT, help="Wall-clock ceiling per arm.")
 
 
-def _arms(args: argparse.Namespace) -> list[tuple[str, str, int]]:
+def _arms(args: argparse.Namespace) -> list[tuple[str, str, int, int]]:
     """Every (abstraction, kernel, derive_boards) cell this submission covers.
 
     Only the board-free kernel derives anything, so the others get exactly one
@@ -111,17 +122,19 @@ def _arms(args: argparse.Namespace) -> list[tuple[str, str, int]]:
     """
     kernels = args.kernels or [BOARD_FREE, HAND_SPACE]
     sizes = args.derive_boards or [6000]
-    arms: list[tuple[str, str, int]] = []
-    for abstraction in args.abstractions:
-        for kernel in kernels:
-            if kernel == BOARD_FREE:
-                arms.extend((abstraction, kernel, size) for size in sizes)
-            else:
-                arms.append((abstraction, kernel, 0))
+    seeds = args.score_seeds or [999]
+    arms: list[tuple[str, str, int, int]] = []
+    for seed in seeds:
+        for abstraction in args.abstractions:
+            for kernel in kernels:
+                if kernel == BOARD_FREE:
+                    arms.extend((abstraction, kernel, size, seed) for size in sizes)
+                else:
+                    arms.append((abstraction, kernel, 0, seed))
     return arms
 
 
-def _flags(args: argparse.Namespace, kernel: str, derive: int) -> tuple[str, ...]:
+def _flags(args: argparse.Namespace, kernel: str, derive: int, score_seed: int) -> tuple[str, ...]:
     """The arm's own command line, carried verbatim to the node.
 
     These ride on ``eval_flags`` rather than on new TaskSpec fields: it is
@@ -135,6 +148,8 @@ def _flags(args: argparse.Namespace, kernel: str, derive: int) -> tuple[str, ...
         str(args.score_boards),
         "--stack",
         str(args.stack),
+        "--score-seed",
+        str(score_seed),
     ]
     if args.train_boards:
         flags += ["--train-boards", str(args.train_boards)]
@@ -153,6 +168,7 @@ class VectorArm(BaseModel):
     abstraction: str
     kernel: str
     derive_boards: int
+    score_seed: int = 999
 
 
 class SubmitVectorPayload(dispatch.Dispatched):
@@ -177,15 +193,18 @@ def run(args: argparse.Namespace) -> SubmitVectorPayload:
                 op=TaskName.VECTOR_SWEEP,
                 config=abstraction,
                 arm=kernel,
-                eval_flags=_flags(args, kernel, derive),
+                eval_flags=_flags(args, kernel, derive, score_seed),
                 timeout=args.timeout,
             )
-            for abstraction, kernel, derive in arms
+            for abstraction, kernel, derive, score_seed in arms
         ]
     )
     return payload.extend(
         SubmitVectorPayload,
-        arms=[VectorArm(abstraction=a, kernel=k, derive_boards=d) for a, k, d in arms],
+        arms=[
+            VectorArm(abstraction=a, kernel=k, derive_boards=d, score_seed=s)
+            for a, k, d, s in arms
+        ],
     )
 
 
@@ -193,7 +212,7 @@ def render(payload: SubmitVectorPayload) -> None:
     print(f"Queued {len(payload.arms)} vector-sweep arm(s):")
     for arm in payload.arms:
         derive = f", {arm.derive_boards:,} boards" if arm.derive_boards else ""
-        print(f"  {arm.kernel:<11} {arm.abstraction}{derive}")
+        print(f"  {arm.kernel:<11} {arm.abstraction}{derive}, score seed {arm.score_seed}")
     dispatch.render_queued(payload)
 
 
