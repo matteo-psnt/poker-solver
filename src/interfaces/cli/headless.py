@@ -21,10 +21,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
+import textwrap
 from typing import TYPE_CHECKING
 
 from src.interfaces import telemetry
-from src.interfaces.commands import BY_NAME, COMMANDS
+from src.interfaces.commands import BY_NAME, COMMANDS, GROUPS
 from src.interfaces.errors import CommandError
 from src.shared import jsonio
 from src.shared.log import configure_logging, pin_level_for_children
@@ -43,6 +44,36 @@ def _named_command(argv: Sequence[str]) -> str | None:
     its own "invalid choice" listing every name, unchanged.
     """
     return next((token for token in argv if token in BY_NAME), None)
+
+
+# Wide enough for `abstraction-coupling`, the longest name, plus a gutter. Fixed
+# rather than measured off the terminal: `--help` output that reflows with the
+# window cannot be diffed, and the listing is what a reader compares run to run.
+_NAME_COLUMN = 22
+_HELP_WIDTH = 79 - _NAME_COLUMN - 4
+
+
+def _listing() -> str:
+    """The subcommands, under their group headings, for ``--help``'s epilog.
+
+    argparse renders subcommands as one flat block and has no notion of a group
+    among them, so the listing is built here and the block it would print is
+    suppressed by giving `add_parser` no ``help``. That also takes the 32-name
+    choice list out of ``usage:``, which `metavar` replaces with `<command>`.
+
+    NOT a second registry: it reads `GROUPS`, and a command absent from there is
+    absent from the CLI entirely.
+    """
+    lines = ["commands:"]
+    for index, group in enumerate(GROUPS):
+        lines.append(f"{'\n' if index else ''}  {group.title}")
+        for ref in group.refs:
+            wrapped = textwrap.wrap(ref.help, _HELP_WIDTH) or [""]
+            lines.append(f"    {ref.name:<{_NAME_COLUMN}}{wrapped[0]}")
+            # A continuation lines up under the first, so the name column stays
+            # a column and a two-line entry does not read as two commands.
+            lines.extend(f"    {'':<{_NAME_COLUMN}}{rest}" for rest in wrapped[1:])
+    return "\n".join(lines)
 
 
 def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
@@ -73,15 +104,22 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="poker-solver",
         description="Train, dispatch and read the record. Every operation is flag-driven.",
+        epilog=_listing(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    # `metavar` so `usage:` reads `<command>` instead of every name in one
+    # 900-character token. The "invalid choice" message still lists them all,
+    # which is what `_named_command` leans on.
+    sub = parser.add_subparsers(dest="command", required=True, metavar="<command>")
     # Two different absences, and conflating them silently undid the whole
     # thing: NO argv means "build everything" (a caller introspecting the CLI),
     # while argv that names no subcommand -- `--help`, or nothing at all --
     # needs no command's flags built at all. It only needs the listing.
     wanted = None if argv is None else _named_command(argv)
     for ref in COMMANDS:
-        subparser = sub.add_parser(ref.name, parents=[common], help=ref.help)
+        # No `help=`: that is what makes argparse print its own flat block of
+        # every subcommand, which `_listing` replaces with a grouped one.
+        subparser = sub.add_parser(ref.name, parents=[common], description=ref.help)
         if argv is not None and ref.name != wanted:
             continue
         command = ref.load()
