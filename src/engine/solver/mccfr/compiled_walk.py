@@ -99,6 +99,19 @@ def _street_context(
 
 
 @jit(nopython=True, cache=True)
+def _board_buckets(matrix, row, sentinel):
+    """One board's bucket per hand column, as int64 with -1 where the hand is
+    not a legal combination -- so the node reads one array and the matrix
+    stays the mmapped artifact, never a per-worker copy."""
+    width = matrix.shape[1]
+    out = np.empty(width, dtype=np.int64)
+    for column in range(width):
+        value = matrix[row, column]
+        out[column] = -1 if value == sentinel else value
+    return out
+
+
+@jit(nopython=True, cache=True)
 def _bucket_at(
     actor,
     is_preflop,
@@ -106,12 +119,10 @@ def _bucket_at(
     deck_rank,
     deck_suit,
     preflop_index,
-    board_row,
+    row_buckets,
     labels,
     next_label,
-    street_matrix,
     hand_to_col,
-    sentinel,
 ):
     """The acting player's bucket on an already-canonicalised board, or -1."""
     first = hole_index[actor * 2]
@@ -130,10 +141,7 @@ def _bucket_at(
     ]
     if column < 0:
         return -1
-    value = street_matrix[board_row, column]
-    if value == sentinel:
-        return -1
-    return value
+    return row_buckets[column]
 
 
 @jit(nopython=True, cache=True)
@@ -143,10 +151,9 @@ def _deal_edge(
     board_index,
     board_len,
     known,
-    board_row,
+    row_buckets,
     labels,
     next_label,
-    sentinel,
     river_winner,
     edge_deal,
     street_of_node,
@@ -155,15 +162,18 @@ def _deal_edge(
     deck_mask,
     street_board_ids,
     street_offsets,
+    matrix_flop,
+    matrix_turn,
+    matrix_river,
     sentinels,
     deal_state,
     deal_index,
 ):
     """Cross an edge: deal what it owes and canonicalise the new board ONCE.
 
-    The board is fixed for the whole street below, so its suit labels, matrix
-    row and sentinel are resolved here rather than at every decision node on
-    it -- which was ~1-3 us a node, most of the walk.
+    The board is fixed for the whole street below, so its suit labels and its
+    row of buckets are resolved here rather than at every decision node on it
+    -- which was ~1-3 us a node, most of the walk.
     """
     owed = edge_deal[slot]
     if owed == 0:
@@ -171,10 +181,9 @@ def _deal_edge(
             board_index,
             board_len,
             known,
-            board_row,
+            row_buckets,
             labels,
             next_label,
-            sentinel,
             river_winner,
             deal_index,
         )
@@ -199,6 +208,13 @@ def _deal_edge(
     )
     if child_row < 0:
         raise ValueError("bucket lookup failed: the board is absent from the abstraction")
+    local_row = child_row - street_offsets[street]
+    if street == 1:
+        child_buckets = _board_buckets(matrix_flop, local_row, sentinels[street])
+    elif street == 2:
+        child_buckets = _board_buckets(matrix_turn, local_row, sentinels[street])
+    else:
+        child_buckets = _board_buckets(matrix_river, local_row, sentinels[street])
     child_winner = river_winner
     if child_len == 5:
         child_winner = np.full(1, -2, dtype=np.int64)
@@ -206,10 +222,9 @@ def _deal_edge(
         child_board,
         child_len,
         child_known,
-        child_row,
+        child_buckets,
         child_labels,
         child_next,
-        sentinels[street],
         child_winner,
         deal_index,
     )
@@ -302,10 +317,9 @@ def walk(
     board_index,
     board_len,
     known,
-    board_row,
+    row_buckets,
     labels,
     next_label,
-    sentinel,
     river_winner,
     traverser,
     button,
@@ -339,8 +353,10 @@ def walk(
     deck_mask,
     preflop_index,
     street_board_ids,
-    street_matrix,
     street_offsets,
+    matrix_flop,
+    matrix_turn,
+    matrix_river,
     hand_to_col,
     sentinels,
     cfr_plus,
@@ -365,12 +381,10 @@ def walk(
         deck_rank,
         deck_suit,
         preflop_index,
-        board_row,
+        row_buckets,
         labels,
         next_label,
-        street_matrix,
         hand_to_col,
-        sentinel,
     )
     if bucket < 0:
         # -1 is "hand impossible on this board" (the absent-board case raised
@@ -425,10 +439,9 @@ def walk(
                 child_board,
                 child_len,
                 child_known,
-                child_row,
+                child_buckets,
                 child_labels,
                 child_next,
-                child_sentinel,
                 child_winner,
                 deal_index,
             ) = _deal_edge(
@@ -437,10 +450,9 @@ def walk(
                 board_index,
                 board_len,
                 known,
-                board_row,
+                row_buckets,
                 labels,
                 next_label,
-                sentinel,
                 river_winner,
                 edge_deal,
                 street_of_node,
@@ -449,6 +461,9 @@ def walk(
                 deck_mask,
                 street_board_ids,
                 street_offsets,
+                matrix_flop,
+                matrix_turn,
+                matrix_river,
                 sentinels,
                 deal_state,
                 deal_index,
@@ -458,10 +473,9 @@ def walk(
                 child_board,
                 child_len,
                 child_known,
-                child_row,
+                child_buckets,
                 child_labels,
                 child_next,
-                child_sentinel,
                 child_winner,
                 traverser,
                 button,
@@ -495,8 +509,10 @@ def walk(
                 deck_mask,
                 preflop_index,
                 street_board_ids,
-                street_matrix,
                 street_offsets,
+                matrix_flop,
+                matrix_turn,
+                matrix_river,
                 hand_to_col,
                 sentinels,
                 cfr_plus,
@@ -587,10 +603,9 @@ def walk(
         child_board,
         child_len,
         child_known,
-        child_row,
+        child_buckets,
         child_labels,
         child_next,
-        child_sentinel,
         child_winner,
         deal_index,
     ) = _deal_edge(
@@ -599,10 +614,9 @@ def walk(
         board_index,
         board_len,
         known,
-        board_row,
+        row_buckets,
         labels,
         next_label,
-        sentinel,
         river_winner,
         edge_deal,
         street_of_node,
@@ -611,6 +625,9 @@ def walk(
         deck_mask,
         street_board_ids,
         street_offsets,
+        matrix_flop,
+        matrix_turn,
+        matrix_river,
         sentinels,
         deal_state,
         deal_index,
@@ -621,10 +638,9 @@ def walk(
         child_board,
         child_len,
         child_known,
-        child_row,
+        child_buckets,
         child_labels,
         child_next,
-        child_sentinel,
         child_winner,
         traverser,
         button,
@@ -658,8 +674,10 @@ def walk(
         deck_mask,
         preflop_index,
         street_board_ids,
-        street_matrix,
         street_offsets,
+        matrix_flop,
+        matrix_turn,
+        matrix_river,
         hand_to_col,
         sentinels,
         cfr_plus,
@@ -707,9 +725,9 @@ def _artifact_columns(bucketer, order):
 class CompiledContext:
     """Everything the kernel needs, resolved once per solver rather than per iteration.
 
-    The per-street bucket matrices are stacked into one array with an offset
-    per street, because a kernel cannot hold a dict of them and every street
-    shares the same column space.
+    The per-street board ids are concatenated with an offset per street,
+    because a kernel cannot hold a dict of them; the bucket matrices stay
+    three arrays since their dtypes differ.
     """
 
     __slots__ = (
@@ -718,7 +736,9 @@ class CompiledContext:
         "deck_rank",
         "deck_suit",
         "hand_to_col",
-        "matrix",
+        "matrix_flop",
+        "matrix_river",
+        "matrix_turn",
         "preflop_index",
         "sentinels",
         "street_ids",
@@ -763,7 +783,9 @@ class CompiledContext:
             matrices.append(matrix)
             offsets.append(offsets[-1] + street_ids.size)
         self.street_ids = np.concatenate(ids)
-        self.matrix = np.vstack(matrices)
+        # As the artifact holds them -- mmapped, one dtype per street -- rather
+        # than stacked into a ~400 MB private copy per worker per chunk.
+        self.matrix_flop, self.matrix_turn, self.matrix_river = matrices
         self.street_offsets = np.array(offsets, dtype=np.int64)
         self.hand_to_col, self.sentinels = _artifact_columns(bucketer, order)
 
@@ -820,8 +842,10 @@ def walk_many(
     deck_mask,
     preflop_index,
     street_board_ids,
-    street_matrix,
     street_offsets,
+    matrix_flop,
+    matrix_turn,
+    matrix_river,
     hand_to_col,
     sentinels,
     cfr_plus,
@@ -846,6 +870,7 @@ def walk_many(
     hole_index = np.empty(4, dtype=np.int64)
     root_board = np.zeros(5, dtype=np.int64)
     root_labels = np.zeros(4, dtype=np.int64)
+    root_buckets = np.empty(0, dtype=np.int64)
     # Never read: no showdown happens on a five-card board the root did not deal.
     root_winner = np.full(1, -2, dtype=np.int64)
     for done, iteration in enumerate(range(first, stop, step)):
@@ -866,9 +891,8 @@ def walk_many(
             root_board,
             0,
             known,
-            -1,
+            root_buckets,
             root_labels,
-            0,
             0,
             root_winner,
             traverser,
@@ -903,8 +927,10 @@ def walk_many(
             deck_mask,
             preflop_index,
             street_board_ids,
-            street_matrix,
             street_offsets,
+            matrix_flop,
+            matrix_turn,
+            matrix_river,
             hand_to_col,
             sentinels,
             cfr_plus,
@@ -971,8 +997,10 @@ def run_iterations(solver, context, iterations: range) -> np.ndarray:
         context.deck_mask,
         context.preflop_index,
         context.street_ids,
-        context.matrix,
         context.street_offsets,
+        context.matrix_flop,
+        context.matrix_turn,
+        context.matrix_river,
         context.hand_to_col,
         context.sentinels,
         solver_config.cfr_plus,
