@@ -318,8 +318,8 @@ def walk(
     sentinels,
     cfr_plus,
     weighting,
-    alpha,
-    beta,
+    discount_positive,
+    discount_negative,
     strategy_weight,
     deal_state,
     deal_index,
@@ -470,8 +470,8 @@ def walk(
                 sentinels,
                 cfr_plus,
                 weighting,
-                alpha,
-                beta,
+                discount_positive,
+                discount_negative,
                 strategy_weight,
                 deal_state,
                 deal_index,
@@ -490,12 +490,7 @@ def walk(
         for i in range(count):
             slot = start + i
             if weighting == 2 and iteration > 1:
-                exponent = alpha if regrets[slot] > 0 else beta
-                if exponent == 0.0:
-                    regrets[slot] *= 0.5
-                else:
-                    scaled = np.float64(iteration) ** exponent
-                    regrets[slot] *= scaled / (scaled + 1.0)
+                regrets[slot] *= discount_positive if regrets[slot] > 0 else discount_negative
             weighted = utilities[i] - node_utility
             if weighting == 1:
                 weighted = weighted * iteration
@@ -634,8 +629,8 @@ def walk(
         sentinels,
         cfr_plus,
         weighting,
-        alpha,
-        beta,
+        discount_positive,
+        discount_negative,
         strategy_weight,
         deal_state,
         deal_index,
@@ -744,6 +739,20 @@ class CompiledContext:
 
 
 @jit(nopython=True, cache=True)
+def _dcfr_discount(iteration, exponent):
+    """The DCFR regret multiplier t^e / (t^e + 1) -- one value for the whole iteration.
+
+    The same float every slot used to compute for itself; hoisted, not
+    changed, so the discount is applied as it always was
+    (`numba_ops.apply_regret_updates`).
+    """
+    if exponent == 0.0:
+        return 0.5
+    scaled = np.float64(iteration) ** exponent
+    return scaled / (scaled + 1.0)
+
+
+@jit(nopython=True, cache=True)
 def walk_many(
     first,
     stop,
@@ -812,6 +821,8 @@ def walk_many(
             strategy_weight = 1.0 * iteration
         else:
             strategy_weight = 1.0
+        discount_positive = _dcfr_discount(iteration, alpha)
+        discount_negative = _dcfr_discount(iteration, beta)
         seat = 0 if traverser == button else 1
         utility, deal_index, sample_index, applied = walk(
             0,
@@ -860,8 +871,8 @@ def walk_many(
             sentinels,
             cfr_plus,
             weighting,
-            alpha,
-            beta,
+            discount_positive,
+            discount_negative,
             strategy_weight,
             deal_state,
             deal_index,
