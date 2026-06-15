@@ -130,6 +130,7 @@ def build_resolver_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         "base_seed": results["seed"],
         "leaf_continuation_fraction": results["leaf_continuation_fraction"],
         "resolver_max_iterations": results["resolver_max_iterations"],
+        "allin_runouts": results["allin_runouts"],
     }
 
 

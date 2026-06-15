@@ -155,6 +155,15 @@ class SubmitPayload(dispatch.Dispatched):
 
 def run(args: argparse.Namespace) -> SubmitPayload:
     """Stage the tree and queue one training task."""
+    # Imported here, not at module scope, so `--help` does not pay for the
+    # Azure SDK -- the same rule `_base.records_root` follows.
+    from src.interfaces.cloud.store.workspace import (  # noqa: PLC0415 -- see above
+        resolve_published_run,
+    )
+
+    # Only a CONTINUE carries a run id, and only then can it be a fragment the
+    # node cannot match. A fresh run's id does not exist yet.
+    run_id = resolve_published_run(args.run) if args.run else args.run
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
             spec.TaskSpec(
@@ -162,7 +171,7 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 op=TaskName.TRAIN if args.kernel == "scalar" else TaskName.TRAIN_VECTOR,
                 config=args.config,
                 to=args.to,
-                run_id=args.run,
+                run_id=run_id,
                 experiment=args.experiment,
                 arm=_arm(args),
                 parent=args.parent,

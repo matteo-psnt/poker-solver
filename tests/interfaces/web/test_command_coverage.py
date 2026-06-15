@@ -45,6 +45,7 @@ NODE_ONLY: dict[str, str] = {
     "evaluate": "compute, run BY the node wrapper — `score` is the door",
     "vector-sweep": "compute, run BY the node wrapper — `submit-vector` is the door",
     "train-vector": "compute, run BY the node wrapper — `submit --kernel board-free` is the door",
+    "abstraction-coupling": "compute, run BY the node wrapper — the fine abstraction is on the share",
 }
 
 EXCLUDED = NO_PAYLOAD | NODE_ONLY

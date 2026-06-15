@@ -92,13 +92,22 @@ class ScorePayload(dispatch.Dispatched):
 
 def run(args: argparse.Namespace) -> ScorePayload:
     """Stage the tree and queue one scoring task per rung."""
+    # Imported here, not at module scope, so `--help` does not pay for the
+    # Azure SDK -- the same rule `_base.records_root` follows.
+    from src.interfaces.cloud.store.workspace import (  # noqa: PLC0415 -- see above
+        resolve_published_run,
+    )
+
+    # The NODE has no fragment matcher, so a fragment must become a full id
+    # HERE or it fails after a snapshot upload and three retries.
+    run_id = resolve_published_run(args.run)
     rungs = _rungs(args.at)
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
             spec.TaskSpec(
                 code_snapshot=snapshot,
                 op=TaskName.EVALUATE,
-                run_id=args.run,
+                run_id=run_id,
                 eval_method=args.method,
                 eval_at=rung,
                 eval_flags=_passthrough(args.flags),
@@ -108,7 +117,7 @@ def run(args: argparse.Namespace) -> ScorePayload:
         ]
     )
     return ScorePayload(
-        run_id=args.run,
+        run_id=run_id,
         method=args.method,
         rungs=rungs,
         **payload.model_dump(exclude={"op"}),

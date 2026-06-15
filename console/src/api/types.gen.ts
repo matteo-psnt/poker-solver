@@ -481,6 +481,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/submit-coupling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Coupling */
+        post: operations["_submit_coupling_api_submit_coupling_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/submit-vector": {
         parameters: {
             query?: never;
@@ -1970,8 +1987,12 @@ export interface components {
             checkpoint_every?: number | null;
             /** Config */
             config?: string | null;
+            /** Dtype */
+            dtype?: string | null;
             /** Experiment */
             experiment?: string | null;
+            /** Kernel */
+            kernel?: string | null;
             /** Parent */
             parent?: string | null;
             /** Run */
@@ -1982,8 +2003,59 @@ export interface components {
             timeout?: string | null;
             /** To */
             to: number;
+            /** Universe Boards */
+            universe_boards?: number | null;
+            /** Universe Seed */
+            universe_seed?: number | null;
+            /** Warm Start At */
+            warm_start_at?: number | null;
+            /** Warm Start From */
+            warm_start_from?: string | null;
+            /** Warm Start Weight */
+            warm_start_weight?: number | null;
             /** Workers */
             workers?: number | null;
+        };
+        /** SubmitCouplingBody */
+        SubmitCouplingBody: {
+            /** Abstractions */
+            abstractions: string[];
+            /** Boards */
+            boards?: number | null;
+            /** Classes */
+            classes?: string | null;
+            /** Seed */
+            seed?: number | null;
+            /** Timeout */
+            timeout?: string | null;
+        };
+        /**
+         * SubmitCouplingPayload
+         * @description A dispatch, plus which abstractions it priced.
+         */
+        SubmitCouplingPayload: {
+            /** Abstractions */
+            abstractions?: string[];
+            /**
+             * Boards
+             * @default 0
+             */
+            boards: number;
+            /** Code Snapshot */
+            code_snapshot: string;
+            /** Job Id */
+            job_id: string;
+            /**
+             * Op
+             * @default submit-coupling
+             * @constant
+             */
+            op: "submit-coupling";
+            /**
+             * Tasks
+             * @default []
+             */
+            tasks: string[];
         };
         /**
          * SubmitPayload
@@ -3374,6 +3446,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmitPayload"];
+                };
+            };
+            /** @description Understood, and the answer is no. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Azure did not answer. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    _submit_coupling_api_submit_coupling_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitCouplingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitCouplingPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

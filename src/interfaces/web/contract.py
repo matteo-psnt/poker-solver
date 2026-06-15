@@ -66,6 +66,7 @@ from src.interfaces.commands.runs import RunSummary
 from src.interfaces.commands.score import ScorePayload
 from src.interfaces.commands.serve_box import BoxPayload as Box
 from src.interfaces.commands.submit import SubmitPayload
+from src.interfaces.commands.submit_coupling import SubmitCouplingPayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.submit_vector import SubmitVectorPayload, VectorArm
 from src.interfaces.commands.tasks import TasksPayload as Tasks
@@ -118,6 +119,7 @@ __all__ = [
     "ServiceCharge",
     "SolverNode",
     "StandingCharge",
+    "SubmitCouplingPayload",
     "SubmitPayload",
     "SubmitVectorPayload",
     "TaskProgress",
