@@ -55,19 +55,27 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Comma-separated public-class counts to sweep the dial over.",
     )
     parser.add_argument("--seed", type=int, default=7, help="Universe seed.")
+    parser.add_argument(
+        "--board-relative",
+        action="store_true",
+        help="Price the within-board-rank relabelling instead of the artifact's own bucket ids.",
+    )
     parser.add_argument("--timeout", default=COUPLING_TIMEOUT, help="Wall-clock ceiling per task.")
 
 
 def _flags(args: argparse.Namespace) -> tuple[str, ...]:
     """The task's own command line, carried verbatim on ``eval_flags``."""
-    return (
+    flags = [
         "--boards",
         str(args.boards),
         "--classes",
         args.classes,
         "--seed",
         str(args.seed),
-    )
+    ]
+    if args.board_relative:
+        flags.append("--board-relative")
+    return tuple(flags)
 
 
 class SubmitCouplingPayload(dispatch.Dispatched):

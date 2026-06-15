@@ -151,3 +151,63 @@ class TestStreaming:
         # Only this test frame and the argument tuple should hold it; a generator
         # that accumulated into a list would push the count higher.
         assert sys.getrefcount(first) <= 4
+
+
+class SparseStub(StubAbstraction):
+    """More buckets than a board has live hands, as production has.
+
+    `StubAbstraction`'s 4/5/6 postflop buckets are all occupied on any board, so
+    the relabelling would correctly be a no-op and a test built on it would pass
+    while measuring nothing.
+    """
+
+    counts: ClassVar[dict[Street, int]] = {
+        Street.PREFLOP: 169,
+        Street.FLOP: 4000,
+        Street.TURN: 5000,
+        Street.RIVER: 6000,
+    }
+
+
+class TestBoardRelativeUniverse:
+    """The relabelling as the kernels will actually consume it.
+
+    `test_coupling.py` pins the renumbering itself. What matters here is WHICH
+    streets it touches: preflop's 169 canonical classes are a function of the
+    hand alone, so ranking them within a board would inject exactly the board
+    dependence the relabelling exists to remove.
+    """
+
+    def test_preflop_is_left_alone(self) -> None:
+        plain = build_hand_context(BOARD, SparseStub())
+        ranked = build_hand_context(BOARD, SparseStub(), board_relative_buckets=True)
+        assert np.array_equal(plain.buckets_for(Street.PREFLOP), ranked.buckets_for(Street.PREFLOP))
+
+    def test_postflop_becomes_dense_from_zero(self) -> None:
+        plain = build_hand_context(BOARD, SparseStub())
+        ranked = build_hand_context(BOARD, SparseStub(), board_relative_buckets=True)
+        for street in (Street.FLOP, Street.TURN, Street.RIVER):
+            got = ranked.buckets_for(street)
+            live = np.unique(got)
+            assert np.array_equal(live, np.arange(live.shape[0]))
+            assert live.shape[0] == np.unique(plain.buckets_for(street)).shape[0]
+
+    def test_it_preserves_the_strength_order(self) -> None:
+        ranked = build_hand_context(BOARD, SparseStub(), board_relative_buckets=True)
+        plain = build_hand_context(BOARD, SparseStub())
+        for street in (Street.FLOP, Street.TURN, Street.RIVER):
+            order = np.argsort(plain.buckets_for(street), kind="stable")
+            assert np.all(np.diff(ranked.buckets_for(street)[order]) >= 0)
+
+    def test_the_hands_and_ranks_are_untouched(self) -> None:
+        """Only bucket IDENTITY changes — the board still deals the same cards."""
+        plain = build_hand_context(BOARD, SparseStub())
+        ranked = build_hand_context(BOARD, SparseStub(), board_relative_buckets=True)
+        assert np.array_equal(plain.hand_cards, ranked.hand_cards)
+        assert np.array_equal(plain.showdown_rank, ranked.showdown_rank)
+        assert np.array_equal(plain.blocks, ranked.blocks)
+
+    def test_the_flag_reaches_a_streamed_universe(self) -> None:
+        rng = np.random.default_rng(3)
+        streamed = next(iter_universe(SparseStub(), 1, rng=rng, board_relative_buckets=True))
+        assert streamed.buckets_for(Street.RIVER).min() == 0

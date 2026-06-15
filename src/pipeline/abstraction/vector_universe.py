@@ -27,6 +27,7 @@ import eval7
 import numpy as np
 
 from src.core.game.state import FULL_DECK, Card, Street
+from src.engine.solver.vector.coupling import RELABEL_STREETS, board_relative
 from src.engine.solver.vector.hand_context import (
     HandContext,
     blocking_matrix,
@@ -50,13 +51,24 @@ POSTFLOP_PREFIX: tuple[tuple[Street, int], ...] = (
 
 
 def build_hand_context(
-    board: Sequence[int] | np.ndarray, abstraction: BucketingStrategy
+    board: Sequence[int] | np.ndarray,
+    abstraction: BucketingStrategy,
+    *,
+    board_relative_buckets: bool = False,
 ) -> HandContext:
     """One board's context: live hands, per-street buckets, showdown ranks.
 
     ``board`` is five card indices into :data:`FULL_DECK`. Buckets come from the
     abstraction exactly as the solver would ask for them — same canonicalisation,
     same artifact — so a bucket id here means what it means in training.
+
+    ``board_relative_buckets`` renumbers each postflop street's occupied buckets
+    to within-board rank, which is a DIFFERENT abstraction rather than a
+    re-encoding: ids become comparable across boards, and what a bucket means is
+    strength relative to the range this board produces. It costs absolute
+    strength — rank r on a wet board is not rank r on a dry one — which is
+    exactly what `abstraction-coupling` cannot see and exploitability can.
+    Ranking is only meaningful because the artifact numbers buckets by strength.
     """
     if len(board) != 5:
         raise ValueError(f"A runout is five cards; got {len(board)}.")
@@ -79,6 +91,11 @@ def build_hand_context(
         for first, second in hands
     ]
 
+    if board_relative_buckets:
+        for street in RELABEL_STREETS:
+            row = street.value - 1
+            buckets[row] = board_relative(buckets[row])
+
     board_cards = [_EVAL7_DECK[index] for index in board]
     ranks = np.array(
         [
@@ -100,6 +117,7 @@ def build_universe(
     count: int,
     *,
     rng: np.random.Generator,
+    board_relative_buckets: bool = False,
 ) -> list[HandContext]:
     """A universe of sampled runouts under the real abstraction.
 
@@ -109,7 +127,9 @@ def build_universe(
     :func:`iter_universe` — a context holds an ``(H, H)`` blocking matrix, so a
     list of twenty thousand is 23 GB where the generator is a few megabytes.
     """
-    return list(iter_universe(abstraction, count, rng=rng))
+    return list(
+        iter_universe(abstraction, count, rng=rng, board_relative_buckets=board_relative_buckets)
+    )
 
 
 def iter_universe(
@@ -117,10 +137,11 @@ def iter_universe(
     count: int,
     *,
     rng: np.random.Generator,
+    board_relative_buckets: bool = False,
 ) -> Iterator[HandContext]:
     """The same universe, one context at a time and none of them retained."""
     for board in sample_boards(rng, count):
-        yield build_hand_context(board, abstraction)
+        yield build_hand_context(board, abstraction, board_relative_buckets=board_relative_buckets)
 
 
 __all__: Sequence[str] = (

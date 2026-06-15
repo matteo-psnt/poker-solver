@@ -143,6 +143,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--seed", type=int, default=7, help="Derivation universe seed.")
     parser.add_argument(
+        "--board-relative",
+        action="store_true",
+        help="Renumber each postflop street's occupied buckets to within-board "
+        "rank. A DIFFERENT abstraction, applied to the derivation, the training "
+        "and the scoring universes alike — a strategy table is indexed by "
+        "(node, bucket), so scoring under the other convention reads noise.",
+    )
+    parser.add_argument(
         "--score-seed",
         type=int,
         default=999,
@@ -181,6 +189,10 @@ class VectorSweepPayload(BaseModel):
     buckets: dict[str, int] = Field(default_factory=dict)
     kernel: str
     derive_boards: int
+    """True when buckets were renumbered to within-board rank. Scores are only
+    comparable across this flag through the CARD-UNCONSTRAINED number, which is
+    told its exact two cards and so does not live inside either abstraction."""
+    board_relative: bool = False
     """Which boards the score was taken on, and whether they were held out.
     `in_sample` false is the only reading worth trusting."""
     train_boards: int
@@ -229,7 +241,10 @@ def run(args: argparse.Namespace) -> VectorSweepPayload:
     compiled = compile_tree(tree, rules)
 
     boards = sample_boards(np.random.default_rng(args.score_seed), args.score_boards)
-    held_out = [build_hand_context(board, abstraction) for board in boards]
+    relative = bool(args.board_relative)
+    held_out = [
+        build_hand_context(board, abstraction, board_relative_buckets=relative) for board in boards
+    ]
     pairs = float(np.mean([(~c.blocks).sum() for c in held_out]))
     initial = np.ones(held_out[0].num_hands, dtype=np.float32)
     scorer = BoardMixtureCFR(compiled, held_out, cfr_plus=True, boards=boards)
@@ -240,7 +255,10 @@ def run(args: argparse.Namespace) -> VectorSweepPayload:
     # which is what lets one trained here be scored over there at all.
     if args.train_boards:
         train_boards = sample_boards(np.random.default_rng(args.seed), args.train_boards)
-        train_contexts = [build_hand_context(board, abstraction) for board in train_boards]
+        train_contexts = [
+            build_hand_context(board, abstraction, board_relative_buckets=relative)
+            for board in train_boards
+        ]
         train_initial = np.ones(train_contexts[0].num_hands, dtype=np.float32)
     else:
         train_boards, train_contexts, train_initial = boards, held_out, initial
@@ -335,7 +353,10 @@ def run(args: argparse.Namespace) -> VectorSweepPayload:
         def universe():
             nonlocal mass
             for context in iter_universe(
-                abstraction, args.derive_boards, rng=np.random.default_rng(args.seed)
+                abstraction,
+                args.derive_boards,
+                rng=np.random.default_rng(args.seed),
+                board_relative_buckets=relative,
             ):
                 mass = mass + np.bincount(
                     context.buckets_for(Street.PREFLOP), minlength=mass.shape[0]
@@ -397,6 +418,7 @@ def _payload(
         buckets={street.name.lower(): count for street, count in counts.items()},
         kernel=args.kernel,
         derive_boards=args.derive_boards if args.kernel == BOARD_FREE else 0,
+        board_relative=bool(args.board_relative),
         train_boards=args.train_boards or args.score_boards,
         score_boards=args.score_boards,
         in_sample=not args.train_boards,
@@ -417,7 +439,8 @@ def render(payload: VectorSweepPayload) -> None:
     print(
         f"vector-sweep {payload.kernel} on {payload.abstraction} "
         f"(F{buckets['flop']}/T{buckets['turn']}/R{buckets['river']}, "
-        f"{payload.nodes:,} nodes, {payload.infoset_rows:,} rows)"
+        f"{payload.nodes:,} nodes, {payload.infoset_rows:,} rows"
+        f"{', board-relative buckets' if payload.board_relative else ''})"
     )
     if payload.derive_seconds is not None:
         print(f"  derived from {payload.derive_boards:,} boards in {payload.derive_seconds}s")

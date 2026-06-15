@@ -91,6 +91,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the comparison is between kernels on ONE tree, so this must not vary "
         "across the arms being compared.",
     )
+    parser.add_argument(
+        "--board-relative",
+        action="store_true",
+        help="Renumber postflop buckets to within-board rank in every arm. "
+        "Pair it against a run without the flag; only the card-unconstrained "
+        "score compares across the two.",
+    )
     parser.add_argument("--timeout", default=VECTOR_TIMEOUT, help="Wall-clock ceiling per arm.")
 
 
@@ -137,6 +144,8 @@ def _flags(args: argparse.Namespace, kernel: str, derive: int) -> tuple[str, ...
         flags += ["--checkpoints", args.checkpoints]
     if args.config:
         flags += ["--config", args.config]
+    if args.board_relative:
+        flags.append("--board-relative")
     return tuple(flags)
 
 

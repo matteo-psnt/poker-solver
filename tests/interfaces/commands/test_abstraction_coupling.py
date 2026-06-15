@@ -24,20 +24,31 @@ if TYPE_CHECKING:
 COUNTS = {Street.PREFLOP: 169, Street.FLOP: 8, Street.TURN: 12, Street.RIVER: 16}
 
 
+# Fraction of a street's buckets any one board occupies. Production is ~1/6 on
+# the river (~100 of 600); a stub that filled every bucket would make the
+# board-relative relabelling a no-op and the arm testing it vacuous.
+LIVE_PER_BOARD = 4
+
+
 class StubBucketer:
     """Buckets by a cheap function of the cards, so a universe builds in ms.
 
-    Deliberately board-DEPENDENT: a bucket that ignored the board would make the
-    coupling identically zero and the test would pass while measuring nothing.
+    Two properties are load-bearing, and a stub missing either passes while
+    measuring nothing: buckets must depend on the BOARD, or the coupling is
+    identically zero; and each board must occupy a board-dependent SUBSET of the
+    bucket space, or there is no within-board rank to recover.
     """
 
     def num_buckets(self, street: Street) -> int:
         return COUNTS[street]
 
     def get_bucket(self, hole_cards, board, street: Street) -> int:
-        total = sum(card.rank_eval7() for card in hole_cards)
-        total += sum(card.rank_eval7() * (index + 2) for index, card in enumerate(board))
-        return total % COUNTS[street]
+        hand = sum(card.rank_eval7() for card in hole_cards)
+        offset = sum(card.rank_eval7() * (index + 2) for index, card in enumerate(board))
+        # The board picks WHICH buckets are live; the hand picks among them.
+        return (offset + (hand % LIVE_PER_BOARD) * (COUNTS[street] // LIVE_PER_BOARD)) % COUNTS[
+            street
+        ]
 
 
 @pytest.fixture
@@ -49,6 +60,7 @@ def args(tmp_path: Path) -> argparse.Namespace:
         boards=10,
         classes="1,2,5",
         seed=7,
+        board_relative=False,
         progress_file="",
     )
 
@@ -108,3 +120,17 @@ def test_it_writes_the_progress_file(args: argparse.Namespace, tmp_path: Path) -
     args.progress_file = str(tmp_path / "progress.json")
     abstraction_coupling.run(args)
     assert (tmp_path / "progress.json").read_text().startswith("{")
+
+
+def test_board_relative_prices_a_different_abstraction(args: argparse.Namespace) -> None:
+    """The arm is only informative if the relabelling moves the numbers."""
+    plain = abstraction_coupling.run(args)
+    args.board_relative = True
+    ranked = abstraction_coupling.run(args)
+
+    assert ranked.board_relative
+    assert not plain.board_relative
+    before = {g.name: g.relative for g in plain.gaps}
+    after = {g.name: g.relative for g in ranked.gaps}
+    assert before.keys() == after.keys()
+    assert any(abs(before[n] - after[n]) > 1e-9 for n in before), (before, after)
