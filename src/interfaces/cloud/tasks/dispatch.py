@@ -11,7 +11,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -62,6 +62,17 @@ class Dispatched(BaseModel):
     code_snapshot: str
     job_id: str
     tasks: list[str] = []
+
+    def extend[T: Dispatched](self, model: type[T], **fields: Any) -> T:
+        """These three facts, plus what the command adds, as the command's payload.
+
+        ``op`` is dropped because each subclass redeclares it as its OWN
+        ``Literal``, and this one carries the base's empty string -- which is
+        not a member of that Literal, so passing it through fails validation at
+        dispatch time and nowhere earlier. Every caller spelled that exclusion
+        out; here it is spelled once.
+        """
+        return model(**fields, **self.model_dump(exclude={"op"}))
 
 
 def stage_and_queue(

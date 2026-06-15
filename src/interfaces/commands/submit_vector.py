@@ -174,9 +174,9 @@ def run(args: argparse.Namespace) -> SubmitVectorPayload:
             for abstraction, kernel, derive in arms
         ]
     )
-    return SubmitVectorPayload(
+    return payload.extend(
+        SubmitVectorPayload,
         arms=[VectorArm(abstraction=a, kernel=k, derive_boards=d) for a, k, d in arms],
-        **payload.model_dump(exclude={"op"}),
     )
 
 
