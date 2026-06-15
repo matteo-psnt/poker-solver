@@ -54,7 +54,7 @@ from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS, blocked_co
 from src.engine.search.subgame_cfr import RunoutEvaluator, nonblocking_mass
 from src.engine.solver.infoset.encoder import get_spr_bucket
 from src.engine.solver.infoset.index import preflop_hand_index
-from src.engine.solver.policy.lookup import blueprint_action_distribution
+from src.engine.solver.policy.lookup import blueprint_policy_table
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.shared.log import configure_logging
 
@@ -506,12 +506,9 @@ class PublicTreeBestResponse:
         )
         cached = self._policy_cache.get(context_key)
         if cached is None:
-            num_buckets = self._policy_source.num_buckets(state.street)
-            rows = np.empty((num_buckets, len(legal)), dtype=np.float64)
-            row_missing = np.empty(num_buckets, dtype=bool)
-            for bucket in range(num_buckets):
-                rows[bucket], row_missing[bucket] = self._policy_row(state, legal, bucket)
-            cached = (rows, row_missing)
+            cached = blueprint_policy_table(
+                self._policy_source.rows_at(state), state, self._rules, legal
+            )
             self._policy_cache[context_key] = cached
         rows, row_missing = cached
         bucket_vec = self._bucket_vector(state.board, state.street)
@@ -521,23 +518,6 @@ class PublicTreeBestResponse:
         missing = np.zeros(NUM_COMBOS, dtype=bool)
         missing[alive] = row_missing[bucket_vec[alive]]
         return sigma, missing
-
-    def _policy_row(
-        self,
-        state: GameState,
-        legal: tuple[Action, ...],
-        bucket: int,
-    ) -> tuple[np.ndarray, bool]:
-        distribution = blueprint_action_distribution(
-            self._policy_source.infoset_at(state, bucket),
-            state,
-            self._rules,
-            legal,
-            use_average=True,
-        )
-        if distribution is None:
-            return np.full(len(legal), 1.0 / len(legal)), True
-        return np.array([distribution.get(a, 0.0) for a in legal]), False
 
     def _bucket_vector(self, board: tuple[Card, ...], street: Street) -> np.ndarray:
         """Combo -> bucket id over ALL_COMBOS (-1 where blocked by the board)."""

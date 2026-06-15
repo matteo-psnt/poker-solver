@@ -118,3 +118,67 @@ class TestBlueprintActionDistribution:
         assert dist is not None
         assert np.isclose(dist[fold()], 0.25)
         assert np.isclose(dist[call()], 0.75)
+
+
+class TestBlueprintPolicyTable:
+    """The vectorised table is the per-bucket answer, row for row, byte for byte.
+
+    Exact-BR fills one of these per betting context and its scores are a
+    zero-variance gate, so "close" is not the bar -- the same floats are.
+    """
+
+    @staticmethod
+    def _decision_states(solver, playouts: int = 40):
+        rng = np.random.default_rng(11)
+        rules = solver.rules
+        states = []
+        for _ in range(playouts):
+            state = solver.deal_initial_state()
+            while not state.is_terminal:
+                if solver.is_chance_node(state):
+                    state = solver.sample_chance_outcome(state)
+                    continue
+                states.append(state)
+                legal = rules.get_legal_actions(state, solver.action_model)
+                state = rules.apply_action(state, legal[int(rng.integers(len(legal)))])
+        return states
+
+    def _assert_table_matches(self, solver):
+        from src.engine.solver.policy.lookup import blueprint_policy_table
+
+        source = solver.policy_source
+        rules = solver.rules
+        compared = 0
+        for state in self._decision_states(solver):
+            legal = rules.get_legal_actions(state, solver.action_model)
+            table, missing = blueprint_policy_table(source.rows_at(state), state, rules, legal)
+            for bucket in range(source.num_buckets(state.street)):
+                distribution = blueprint_action_distribution(
+                    source.infoset_at(state, bucket), state, rules, legal, use_average=True
+                )
+                if distribution is None:
+                    expected = np.full(len(legal), 1.0 / len(legal))
+                else:
+                    expected = np.array([distribution.get(a, 0.0) for a in legal])
+                assert missing[bucket] == (distribution is None)
+                assert np.array_equal(table[bucket], expected), (state, bucket)
+                compared += 1
+        return compared
+
+    def test_trained_rows_match_the_per_bucket_lookup(self):
+        from tests.test_helpers import build_trained_test_solver
+
+        solver = build_trained_test_solver(6)
+        assert self._assert_table_matches(solver) > 1000
+        # The comparison must have crossed both kinds of row.
+        assert 0 < int(solver.storage.visited.sum()) < solver.storage.visited.size
+
+    def test_a_visited_row_summing_to_zero_is_uniform_over_survivors(self):
+        from tests.test_helpers import build_trained_test_solver
+
+        solver = build_trained_test_solver(0)
+        # Every row is an untouched allocation; mark them all visited so the
+        # zero-sum branch of average_strategy -- not the missing fallback -- is
+        # what the table has to reproduce.
+        solver.storage.visited[:] = 1
+        assert self._assert_table_matches(solver) > 1000
