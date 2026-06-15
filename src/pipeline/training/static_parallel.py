@@ -152,14 +152,12 @@ def _worker_entry(
         # to reset between chunks -- and so no window where it reads a base from
         # one chunk against counts from another.
         banked = int(counters[worker_id]) if counters is not None else 0
-        # Assign the ABSOLUTE iteration before each step: train_iteration reads
-        # self.iteration as t and then increments, so leaving it to count locally
-        # would give this worker t = 0..share instead of its true global indices.
+        # ABSOLUTE indices, never a local count: the solver reads each as t.
         count = 0
-        for global_iteration in indices:
-            solver.iteration = global_iteration
-            solver.train_iteration()
-            count += 1
+        for offset in range(0, len(indices), COUNTER_STRIDE):
+            stride = indices[offset : offset + COUNTER_STRIDE]
+            solver.train_iterations(stride)
+            count += len(stride)
             if counters is not None:
                 counters[worker_id] = banked + count
         result_queue.put(
@@ -177,6 +175,12 @@ def _worker_entry(
     finally:
         if storage is not None:
             storage.close()
+
+
+"""Iterations per kernel call, and so per counter write. One crossing costs the
+random-state hand-off (~280 us); at a worker's ~3,000 it/s this keeps the
+counter under half a second stale while amortising that to nothing."""
+COUNTER_STRIDE = 1000
 
 
 """How often the workers' counters are totalled and written. Deliberately well

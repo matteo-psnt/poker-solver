@@ -130,6 +130,31 @@ class StaticTreeSolver(MCCFRSolver[StaticArrayStorage]):
         self.iteration += 1
         return utility
 
+    def train_iterations(self, iterations: range) -> None:
+        """``train_iteration`` at each absolute index of ``iterations``, in one kernel call.
+
+        What the training loop should call: the per-call cost of the compiled
+        path is the random-state hand-off, not the walk, and this pays it once
+        per range. Bit-identical to the loop it replaces
+        (``test_compiled_walk_equivalence``).
+        """
+        if len(iterations) == 0:
+            return
+        if self._compiled and self._compiled_context is None:
+            # Resolve the context (or the fallback) through the single-step path.
+            self.iteration = iterations[0]
+            self.train_iteration()
+            iterations = iterations[1:]
+            if len(iterations) == 0:
+                return
+        if not self._compiled:
+            for iteration in iterations:
+                self.iteration = iteration
+                self.train_iteration()
+            return
+        compiled_walk.run_iterations(self, self._compiled_context, iterations)
+        self.iteration = iterations[-1] + 1
+
     def _cfr_external_sampling(self, state: GameState, traversing_player: int) -> float:
         """Walk node ids; ``solver.traversal="state"`` selects the other one.
 
