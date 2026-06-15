@@ -143,10 +143,6 @@ def gather(*, limit: int = 10, with_tasks: bool = True) -> StatusPayload:
     return StatusPayload(
         at=composed["at"],
         elapsed_seconds=composed["elapsed_seconds"],
-        # `panels` rather than `compose`'s `parts`: that is the word this
-        # command's renderer and its `--json` consumers already use, and
-        # renaming a published key to match an internal one is a break with
-        # nothing behind it.
         panels={name: StatusPanel.model_validate(part) for name, part in composed["parts"].items()},
     )
 

@@ -90,6 +90,9 @@ def render(payload: CurvePayload) -> None:
         print(f"  (also recorded, not mixed in: {other})")
 
 
+# `CurvePoint` is RE-EXPORTED, not used here: `.importlinter` forbids
+# `interfaces.web -> pipeline`, so a command module is the console's only legal
+# route to a service model. Deleting it as an unused import breaks `contract.py`.
 __all__ = ["COMMAND", "CurvePoint", "add_arguments", "render", "run"]
 
 COMMAND = Command(
