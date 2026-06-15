@@ -107,6 +107,14 @@ def board_id(ranks, suits, labels):
 
 @jit(nopython=True, cache=True)
 def hand_id(hole_ranks, hole_suits, labels, next_label):
+    """``hand_id_of`` over a two-card array pair."""
+    return hand_id_of(
+        hole_ranks[0], hole_suits[0], hole_ranks[1], hole_suits[1], labels, next_label
+    )
+
+
+@jit(nopython=True, cache=True)
+def hand_id_of(rank_first, suit_first, rank_second, suit_second, labels, next_label):
     """The canonical hand id against a board's labels.
 
     A hole-card suit the board never showed takes the next free label, and
@@ -114,10 +122,10 @@ def hand_id(hole_ranks, hole_suits, labels, next_label):
     cards cannot canonicalise differently depending on which was passed first.
     ``labels`` is not modified.
     """
-    rank_a = 12 - hole_ranks[0]
-    rank_b = 12 - hole_ranks[1]
-    suit_a = hole_suits[0]
-    suit_b = hole_suits[1]
+    rank_a = 12 - rank_first
+    rank_b = 12 - rank_second
+    suit_a = suit_first
+    suit_b = suit_second
     if rank_b < rank_a:  # lower index is the higher card; take it first
         rank_a, rank_b = rank_b, rank_a
         suit_a, suit_b = suit_b, suit_a

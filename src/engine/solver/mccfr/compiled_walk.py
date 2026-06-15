@@ -31,7 +31,7 @@ from numba import jit
 from src.core.game.numba_eval import hand_rank
 from src.core.game.state import Street
 from src.engine.solver.infoset.index import preflop_hand_index
-from src.engine.solver.numba_lookup import board_id, hand_id, suit_labels
+from src.engine.solver.numba_lookup import board_id, hand_id_of, suit_labels
 from src.engine.solver.numba_ops import (
     WEIGHTING_CODES,
     compute_dcfr_strategy_weight,
@@ -76,60 +76,128 @@ def _draw(deck_mask, known, count, out_index, filled, state, index):
 
 
 @jit(nopython=True, cache=True)
-def _bucket(
-    node_id,
+def _street_context(
+    board_index, board_len, street, deck_rank, deck_suit, board_ids, offsets, labels
+):
+    """Canonicalise a freshly dealt board: fills ``labels``, returns (matrix row, next label).
+
+    Row -1 means the board is absent from the abstraction.
+    """
+    ranks = np.empty(board_len, dtype=np.int64)
+    suits = np.empty(board_len, dtype=np.int64)
+    for i in range(board_len):
+        ranks[i] = deck_rank[board_index[i]]
+        suits[i] = deck_suit[board_index[i]]
+    next_label = suit_labels(ranks, suits, board_len, labels)
+    target = board_id(ranks, suits, labels)
+    low = offsets[street]
+    high = offsets[street + 1]
+    row = low + np.searchsorted(board_ids[low:high], target)
+    if row >= high or board_ids[row] != target:
+        return -1, next_label
+    return row, next_label
+
+
+@jit(nopython=True, cache=True)
+def _bucket_at(
     actor,
     is_preflop,
-    street_of_node,
     hole_index,
-    board_index,
-    board_len,
     deck_rank,
     deck_suit,
     preflop_index,
-    street_board_ids,
+    board_row,
+    labels,
+    next_label,
     street_matrix,
-    street_offsets,
     hand_to_col,
-    sentinels,
+    sentinel,
 ):
-    """The acting player's bucket: the preflop class, or the abstraction's cell."""
+    """The acting player's bucket on an already-canonicalised board, or -1."""
     first = hole_index[actor * 2]
     second = hole_index[actor * 2 + 1]
     if is_preflop == 1:
         return preflop_index[first, second]
-
-    board_ranks = np.empty(board_len, dtype=np.int64)
-    board_suits = np.empty(board_len, dtype=np.int64)
-    for i in range(board_len):
-        board_ranks[i] = deck_rank[board_index[i]]
-        board_suits[i] = deck_suit[board_index[i]]
-
-    labels = np.empty(4, dtype=np.int64)
-    next_label = suit_labels(board_ranks, board_suits, board_len, labels)
-    target = board_id(board_ranks, board_suits, labels)
-
-    street = street_of_node[node_id]
-    low = street_offsets[street]
-    high = street_offsets[street + 1]
-    row = low + np.searchsorted(street_board_ids[low:high], target)
-    if row >= high or street_board_ids[row] != target:
-        return -1
-
-    hole_ranks = np.empty(2, dtype=np.int64)
-    hole_suits = np.empty(2, dtype=np.int64)
-    hole_ranks[0] = deck_rank[first]
-    hole_suits[0] = deck_suit[first]
-    hole_ranks[1] = deck_rank[second]
-    hole_suits[1] = deck_suit[second]
-
-    column = hand_to_col[hand_id(hole_ranks, hole_suits, labels, next_label)]
+    column = hand_to_col[
+        hand_id_of(
+            deck_rank[first],
+            deck_suit[first],
+            deck_rank[second],
+            deck_suit[second],
+            labels,
+            next_label,
+        )
+    ]
     if column < 0:
         return -1
-    value = street_matrix[row, column]
-    if value == sentinels[street]:
+    value = street_matrix[board_row, column]
+    if value == sentinel:
         return -1
     return value
+
+
+@jit(nopython=True, cache=True)
+def _deal_edge(
+    slot,
+    child,
+    board_index,
+    board_len,
+    known,
+    board_row,
+    labels,
+    next_label,
+    sentinel,
+    edge_deal,
+    street_of_node,
+    deck_rank,
+    deck_suit,
+    deck_mask,
+    street_board_ids,
+    street_offsets,
+    sentinels,
+    deal_state,
+    deal_index,
+):
+    """Cross an edge: deal what it owes and canonicalise the new board ONCE.
+
+    The board is fixed for the whole street below, so its suit labels, matrix
+    row and sentinel are resolved here rather than at every decision node on
+    it -- which was ~1-3 us a node, most of the walk.
+    """
+    owed = edge_deal[slot]
+    if owed == 0:
+        return board_index, board_len, known, board_row, labels, next_label, sentinel, deal_index
+    child_board = np.empty(5, dtype=np.int64)
+    for j in range(board_len):
+        child_board[j] = board_index[j]
+    child_known, deal_index = _draw(
+        deck_mask, known, owed, child_board, board_len, deal_state, deal_index
+    )
+    child_len = board_len + owed
+    child_labels = np.empty(4, dtype=np.int64)
+    street = street_of_node[child]
+    child_row, child_next = _street_context(
+        child_board,
+        child_len,
+        street,
+        deck_rank,
+        deck_suit,
+        street_board_ids,
+        street_offsets,
+        child_labels,
+    )
+    if child_row < 0:
+        raise ValueError("bucket lookup failed: the board is absent from the abstraction")
+    return (
+        child_board,
+        child_len,
+        child_known,
+        child_row,
+        child_labels,
+        child_next,
+        sentinels[street],
+        deal_index,
+    )
 
 
 @jit(nopython=True, cache=True)
@@ -208,6 +276,10 @@ def walk(
     board_index,
     board_len,
     known,
+    board_row,
+    labels,
+    next_label,
+    sentinel,
     traverser,
     button,
     seat,
@@ -259,34 +331,27 @@ def walk(
     count = num_actions[node_id]
     actor = button if actor_is_button[node_id] == 1 else 1 - button
 
-    bucket = _bucket(
-        node_id,
+    bucket = _bucket_at(
         actor,
         is_preflop[node_id],
-        street_of_node,
         hole_index,
-        board_index,
-        board_len,
         deck_rank,
         deck_suit,
         preflop_index,
-        street_board_ids,
+        board_row,
+        labels,
+        next_label,
         street_matrix,
-        street_offsets,
         hand_to_col,
-        sentinels,
+        sentinel,
     )
     if bucket < 0:
-        # `_bucket` reports "board not in the abstraction" or "hand impossible
-        # on this board" as -1, because a kernel has no exceptions to raise
-        # from the lookup itself. Unchecked, that indexes one row BEFORE the
-        # node's block and writes regrets into a neighbouring infoset --
-        # silent corruption of the shared table, which is exactly what
+        # -1 is "hand impossible on this board" (the absent-board case raised
+        # at the deal edge). Unchecked, it indexes one row BEFORE the node's
+        # block and writes regrets into a neighbouring infoset -- silent
+        # corruption of the shared table, which is exactly what
         # `StaticArrayStorage.view`'s bounds check exists to stop.
-        raise ValueError(
-            "bucket lookup failed: the board is absent from the abstraction, "
-            "or the hand is not a legal combination on it"
-        )
+        raise ValueError("bucket lookup failed: the hand is not a legal combination on this board")
 
     row = row_offset[node_id] + bucket
     start = slot_offset[node_id] + bucket * count
@@ -327,23 +392,46 @@ def walk(
                     terminal_tie,
                 )
                 continue
-            owed = edge_deal[slot]
-            child_board = board_index
-            child_len = board_len
-            child_known = known
-            if owed > 0:
-                child_board = np.empty(5, dtype=np.int64)
-                for j in range(board_len):
-                    child_board[j] = board_index[j]
-                child_known, deal_index = _draw(
-                    deck_mask, known, owed, child_board, board_len, deal_state, deal_index
-                )
-                child_len = board_len + owed
-            utilities[i], deal_index, sample_index, applied = walk(
-                edge_child[slot],
+            child = edge_child[slot]
+            (
                 child_board,
                 child_len,
                 child_known,
+                child_row,
+                child_labels,
+                child_next,
+                child_sentinel,
+                deal_index,
+            ) = _deal_edge(
+                slot,
+                child,
+                board_index,
+                board_len,
+                known,
+                board_row,
+                labels,
+                next_label,
+                sentinel,
+                edge_deal,
+                street_of_node,
+                deck_rank,
+                deck_suit,
+                deck_mask,
+                street_board_ids,
+                street_offsets,
+                sentinels,
+                deal_state,
+                deal_index,
+            )
+            utilities[i], deal_index, sample_index, applied = walk(
+                child,
+                child_board,
+                child_len,
+                child_known,
+                child_row,
+                child_labels,
+                child_next,
+                child_sentinel,
                 traverser,
                 button,
                 seat,
@@ -467,24 +555,47 @@ def walk(
         )
         return value, deal_index, sample_index, applied
 
-    owed = edge_deal[slot]
-    child_board = board_index
-    child_len = board_len
-    child_known = known
-    if owed > 0:
-        child_board = np.empty(5, dtype=np.int64)
-        for j in range(board_len):
-            child_board[j] = board_index[j]
-        child_known, deal_index = _draw(
-            deck_mask, known, owed, child_board, board_len, deal_state, deal_index
-        )
-        child_len = board_len + owed
-
-    return walk(
-        edge_child[slot],
+    child = edge_child[slot]
+    (
         child_board,
         child_len,
         child_known,
+        child_row,
+        child_labels,
+        child_next,
+        child_sentinel,
+        deal_index,
+    ) = _deal_edge(
+        slot,
+        child,
+        board_index,
+        board_len,
+        known,
+        board_row,
+        labels,
+        next_label,
+        sentinel,
+        edge_deal,
+        street_of_node,
+        deck_rank,
+        deck_suit,
+        deck_mask,
+        street_board_ids,
+        street_offsets,
+        sentinels,
+        deal_state,
+        deal_index,
+    )
+
+    return walk(
+        child,
+        child_board,
+        child_len,
+        child_known,
+        child_row,
+        child_labels,
+        child_next,
+        child_sentinel,
         traverser,
         button,
         seat,
@@ -690,6 +801,7 @@ def walk_many(
     applied = 0
     hole_index = np.empty(4, dtype=np.int64)
     root_board = np.zeros(5, dtype=np.int64)
+    root_labels = np.zeros(4, dtype=np.int64)
     for done, iteration in enumerate(range(first, stop, step)):
         known, deal_index = _draw(deck_mask, 0, 4, hole_index, 0, deal_state, deal_index)
         traverser = iteration % 2
@@ -706,6 +818,10 @@ def walk_many(
             root_board,
             0,
             known,
+            -1,
+            root_labels,
+            0,
+            0,
             traverser,
             button,
             seat,
