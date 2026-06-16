@@ -9,7 +9,6 @@ solver:
 
 training:
   num_iterations: 3600
-  checkpoint_frequency: 1000
 
 card_abstraction:
   config: quick_test

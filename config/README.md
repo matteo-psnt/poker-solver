@@ -46,7 +46,6 @@ Sections and fields, with defaults:
 | Section | Field | Default | Notes |
 |---|---|---|---|
 | `training` | `num_iterations` | 100000 | |
-| | `checkpoint_frequency` | 50000 | iterations between checkpoints |
 | | `verbose` | true | |
 | | `runs_dir` | `data/runs` | |
 | `storage` | `initial_capacity` | 2000000 | recorded in run metadata only |

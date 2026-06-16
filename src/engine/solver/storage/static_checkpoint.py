@@ -42,10 +42,16 @@ logger = logging.getLogger(__name__)
 
 FORMAT_VERSION = "static-1"
 
-# clevel=1 / 50k chunks: benchmarked as both fastest and smallest for these
-# arrays; there is nothing left to tune here.
+# clevel=1: benchmarked as both fastest and smallest for these arrays. The
+# chunk size is set by FILE COUNT, not by the write: a snapshot is copied to
+# the share one file at a time over SMB, and at 50k rows a production table
+# was 5,507 files and 20+ minutes per rung. Measured 08-22 at production
+# size with ~85%-coverage content (838 MiB either way):
+#     50k  5,507 files  write 2.6 s  read 3.4 s
+#     4M      79 files  write 0.6 s  read 1.7 s     <- this
+#    16M      27 files  write 1.0 s  read 3.7 s
 DEFAULT_COMPRESSION_LEVEL = 1
-DEFAULT_CHUNK_SIZE = 50_000
+DEFAULT_CHUNK_SIZE = 4_000_000
 
 
 class FingerprintMismatchError(RuntimeError):
