@@ -92,4 +92,4 @@ hand-police style. What is *not* enforced by tooling:
 ## Commits
 
 Short, imperative messages; a Conventional prefix like `feat:` is fine if used
-consistently. Call out new files added under `config/`.
+consistently.

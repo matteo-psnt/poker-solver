@@ -52,40 +52,34 @@ variable "max_nodes" {
     failure can burn faster than max_nodes x the per-node rate. Everything else
     bounds duration; this bounds rate.
 
-      2 x D8als_v6   ~$0.80/hr   ~$19/day
-      4 x D8als_v6   ~$1.60/hr   ~$38/day   (blows a $250 budget in ~6 days)
       4 x D16als_v6  ~$3.20/hr   ~$77/day
      16 x D16als_v6 ~$12.80/hr  ~$307/day
+     30 x D16als_v6 ~$24.00/hr  ~$576/day
 
-    Raised to 4 once a real task completed end to end (30M iterations, 2.64 h,
-    no failures), which was the stated condition. That 4 was not a judgement
-    about throughput: 4 x D16als_v6 = 64 vCPU against what was then a 65 vCPU
-    regional quota, so it was the ceiling the subscription allowed.
+    Quota went 256 -> 512 on 2026-08-22. One `az quota update` on
+    `standardDalv6Family` moved `cores` (Total Regional vCPUs) with it, so the
+    pair does not need requesting separately, and Batch is in UserSubscription
+    mode -- `dedicatedCoreQuota` is null, so there is no second Batch-side
+    ceiling behind these.
 
-    RAISED TO 16 ON 2026-08-15, because that quota is now 256 (verified with
-    `az vm list-usage --location swedencentral`: `standard Dalv6 Family vCPUs`
-    and `Total Regional vCPUs` both 256). 16 x 16 vCPU = 256 uses it exactly.
-    The increase had been approved for some time and bought nothing, because
-    the binding constraint had silently become this variable rather than Azure.
+    NOT 32, and the missing 2 are the point. The previous 16 was justified as
+    "16 x 16 vCPU = 256 uses it exactly", and it was never reachable: the usage
+    counter runs a constant +8 above the pool's own cores -- 232 against 14
+    nodes, 136 against 8 -- and the only 8-wide VM in the subscription is the
+    DEALLOCATED `blueprint-server` D8als_v6. The offset is measured; the
+    accounting behind it is not established. Either way the pool capped at 14
+    carrying a persisted `AllocationFailed: core limit has reached` that read
+    like a live fault. Do not size this to consume the quota exactly.
 
-    WHAT THIS COSTS, stated plainly because this is the rate limiter. The pool
-    holds zero nodes at rest and autoscale allocates only what is queued, so
-    the usual bill does not move. What moves is the WORST case: a wedged or
-    runaway pool now burns ~$307/day instead of ~$77. Against a $9.6k credit
-    that is ~31 days of worst-case runway instead of ~125.
-
-    `infra/credit_watch.py --daily-burn` is the other half of this and is NOT
-    derived from here -- it was raised to 307.20 in the same change. Its
-    `--warn-days` is 30, so at this ceiling the runway alert sits close to
-    firing by design: that is the guard doing its job at a ceiling chosen
-    deliberately, not a misconfiguration. If it fires, the question is whether
-    the credit is being spent on purpose, which is exactly what it should ask.
-
-    The parallelism is usable: scoring submits one task per ladder rung, so a
-    curve fans out across the pool instead of queueing behind one node.
+    `infra/credit_watch.py --daily-burn` is the other half and is NOT derived
+    from here -- 576.00 accompanies a 30 here. WHAT 30 COSTS: ~$576/day
+    worst-case against a ~$9.0k remaining balance is ~16 days of runway, which
+    puts `--warn-days 30` permanently in alarm. That is a real trade and wants
+    a deliberate answer, not a default; 20 nodes (~$384/day, ~23 days) keeps
+    the alert closer to its intended meaning.
   EOT
   type        = number
-  default     = 16
+  default     = 30
 }
 
 variable "data_disk_gb" {
