@@ -3714,7 +3714,9 @@ export interface operations {
     };
     _view_now_api_view_now_get: {
         parameters: {
-            query?: never;
+            query?: {
+                fresh?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3752,7 +3754,9 @@ export interface operations {
     };
     _view_run_api_view_run__run_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                fresh?: boolean;
+            };
             header?: never;
             path: {
                 run_id: string;
@@ -3792,7 +3796,9 @@ export interface operations {
     };
     _view_runs_api_view_runs_get: {
         parameters: {
-            query?: never;
+            query?: {
+                fresh?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;

@@ -237,6 +237,7 @@ def _served(
     produce: Callable[[], Any],
     *,
     serve_stale_for: float = 0.0,
+    force: bool = False,
 ) -> JSONResponse:
     """One memoised answer, with its failures mapped onto status codes.
 
@@ -249,7 +250,9 @@ def _served(
     after `az login` has fixed it.
     """
     with telemetry.surface("console"):
-        payload, failure = attempt(lambda: cache.get(key, produce, serve_stale_for=serve_stale_for))
+        payload, failure = attempt(
+            lambda: cache.get(key, produce, serve_stale_for=serve_stale_for, force=force)
+        )
     if failure is not None:
         return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
     return PayloadResponse(payload)
@@ -446,25 +449,30 @@ def create_app() -> FastAPI:
     # so a screen served from ten seconds ago says so; a bare command payload
     # has no such field, and serving it stale would make the client's fetch
     # time -- the only age it can show -- a lie.
-    def view(build: Any, *key: str) -> JSONResponse:
+    #
+    # `fresh` is the refresh button. Served stale, a click answered in
+    # milliseconds with the same `at` and looked like it did nothing; a
+    # deliberate ask is worth the wait for a real sweep, spinner and all.
+    def view(build: Any, *key: str, fresh: bool = False) -> JSONResponse:
         return _served(
             cache,
             (build.__name__, key),
             lambda: build(*key),
-            serve_stale_for=VIEW_STALE_GRACE_SECONDS,
+            serve_stale_for=0.0 if fresh else VIEW_STALE_GRACE_SECONDS,
+            force=fresh,
         )
 
     @app.get("/api/view/now", response_model=contract.NowView, responses=ERRORS)
-    def _view_now() -> JSONResponse:
-        return view(views.now)
+    def _view_now(fresh: bool = False) -> JSONResponse:
+        return view(views.now, fresh=fresh)
 
     @app.get("/api/view/runs", response_model=contract.RunsView, responses=ERRORS)
-    def _view_runs() -> JSONResponse:
-        return view(views.runs)
+    def _view_runs(fresh: bool = False) -> JSONResponse:
+        return view(views.runs, fresh=fresh)
 
     @app.get("/api/view/run/{run_id}", response_model=contract.RunView, responses=ERRORS)
-    def _view_run(run_id: str) -> JSONResponse:
-        return view(views.run, run_id)
+    def _view_run(run_id: str, fresh: bool = False) -> JSONResponse:
+        return view(views.run, run_id, fresh=fresh)
 
     # Not `answer(...)`: these are not commands and there is nothing to memoise
     # here. The blueprint server owns one loaded run and answers in

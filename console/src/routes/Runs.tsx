@@ -115,7 +115,7 @@ export function Runs() {
       error={errorOf(view.error) ?? parts?.runs.error ?? null}
       loading={view.isLoading}
       empty={runs && runs.runs.length === 0 ? "No published runs." : null}
-      onRefresh={() => view.refetch()}
+      onRefresh={() => view.refresh()}
       refreshing={view.isFetching}
     >
       {runs && runs.runs.length > 0 && (

@@ -221,6 +221,14 @@ class TestOverHttp:
         client.get("/api/view/now")
         assert len(answers) == before, "the second request re-ran the whole fan-out"
 
+    def test_fresh_bypasses_the_memo(self, client, answers):
+        """The refresh button. Served from the memo it answered in milliseconds
+        with the same timestamp, which looked like a button that did nothing."""
+        client.get("/api/view/now")
+        before = len(answers)
+        client.get("/api/view/now?fresh=true")
+        assert len(answers) > before, "a forced refresh was answered from the memo"
+
     def test_an_azure_outage_is_a_503_not_a_500(self, client, monkeypatch):
         """A view fails as a whole only when the fan-out itself cannot run --
         `attempt` still classifies it, so the client can tell 'retry' from

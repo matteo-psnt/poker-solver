@@ -52,7 +52,7 @@ export function Overview() {
   const panel = {
     updatedAt: composedAt,
     loading: view.isLoading,
-    onRefresh: () => view.refetch(),
+    onRefresh: () => view.refresh(),
     refreshing: view.isFetching,
   };
 

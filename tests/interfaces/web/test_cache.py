@@ -269,3 +269,40 @@ class TestStaleWhileRevalidate:
         assert cache.get("pool", produce) == "pool-1"
         clock(1000.0 + TTL + 1)
         assert cache.get("pool", produce) == "pool-2"
+
+
+class TestForce:
+    def test_a_forced_get_produces_even_inside_the_ttl(self, clock, counted):
+        cache = TtlCache(TTL)
+        produce = counted("now")
+        assert cache.get("now", produce) == "now-1"
+        assert cache.get("now", produce, force=True) == "now-2"
+        assert cache.get("now", produce) == "now-2", "the forced value was not stored"
+
+    def test_a_forced_get_joins_a_produce_already_in_flight(self, clock):
+        """A refresh running behind a stale serve is as fresh as a new one."""
+        cache = TtlCache(TTL)
+        started, release = threading.Event(), threading.Event()
+        calls = 0
+
+        def produce() -> str:
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                started.set()
+                release.wait(timeout=2)
+            return f"v{calls}"
+
+        assert cache.get("now", produce, serve_stale_for=30.0) == "v1"
+        clock(1000.0 + TTL + 1)
+        assert cache.get("now", produce, serve_stale_for=30.0) == "v1"
+        assert started.wait(timeout=2)
+        forced: list[str] = []
+        thread = threading.Thread(
+            target=lambda: forced.append(cache.get("now", produce, force=True))
+        )
+        thread.start()
+        release.set()
+        thread.join(timeout=2)
+        assert forced == ["v2"]
+        assert calls == 2

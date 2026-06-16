@@ -60,26 +60,38 @@ const SLOW = 60_000;
  * number on the page is now the same age as every other, and the age badge is
  * telling the truth about all of them at once.
  */
-export const useNow = () =>
-  useQuery<NowView>({
-    queryKey: ["view", "now"],
-    queryFn: () => get("/api/view/now"),
-    refetchInterval: LIVE,
-  });
+export const useNow = () => useView<NowView>(["view", "now"], "/api/view/now");
 
-export const useRunsView = () =>
-  useQuery<RunsView>({
-    queryKey: ["view", "runs"],
-    queryFn: () => get("/api/view/runs"),
-    refetchInterval: SLOW,
-  });
+export const useRunsView = () => useView<RunsView>(["view", "runs"], "/api/view/runs", SLOW);
 
 export const useRunView = (runId: string) =>
-  useQuery<RunView>({
-    queryKey: ["view", "run", runId],
-    queryFn: () => get(`/api/view/run/${encodeURIComponent(runId)}`),
-    refetchInterval: SLOW,
+  useView<RunView>(["view", "run", runId], `/api/view/run/${encodeURIComponent(runId)}`, SLOW);
+
+/**
+ * A composed view, plus the refresh button's own fetch.
+ *
+ * `refetch()` is the poll: it goes to the memo and comes back in milliseconds
+ * with whatever the server last composed, which is right for a cadence and
+ * wrong for a click -- the button answered instantly with the same `at` and
+ * looked like it did nothing. `refresh()` asks for `fresh`, which bypasses the
+ * memo and waits for a real sweep. Same query key, so the answer lands in the
+ * same cache entry and every panel on the page sees it.
+ */
+function useView<T>(queryKey: readonly string[], path: string, interval = LIVE) {
+  const queryClient = useQueryClient();
+  const query = useQuery<T>({
+    queryKey,
+    queryFn: () => get(path),
+    refetchInterval: interval,
   });
+  const refresh = () =>
+    queryClient.fetchQuery<T>({
+      queryKey,
+      queryFn: () => get(`${path}?fresh=true`),
+      staleTime: 0,
+    });
+  return { ...query, refresh };
+}
 
 export const usePool = () =>
   useQuery<Pool>({

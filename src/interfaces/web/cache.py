@@ -39,12 +39,21 @@ class TtlCache:
         # A Condition rather than a Lock: it is the same mutual exclusion plus
         # the wait/notify single-flight needs, so there is still one lock here.
         self._lock = threading.Condition()
-        self._entries: dict[Hashable, tuple[float, Any]] = {}
+        self._entries: dict[Hashable, tuple[float, Any, int]] = {}
         self._producing: set[Hashable] = set()
         self._refreshers: list[threading.Thread] = []
+        # Counts stores. A forced get accepts only an entry stored after it
+        # asked, and a counter says that where a clock cannot: the refresh
+        # that finishes in the same instant is still the one that came after.
+        self._stores = 0
 
     def get(
-        self, key: Hashable, produce: Callable[[], Any], *, serve_stale_for: float = 0.0
+        self,
+        key: Hashable,
+        produce: Callable[[], Any],
+        *,
+        serve_stale_for: float = 0.0,
+        force: bool = False,
     ) -> Any:
         """Return the cached value, or produce and store a fresh one.
 
@@ -66,13 +75,19 @@ class TtlCache:
         ``ttl`` plus one sweep old, and says so through its own timestamp.
         Beyond the grace the call blocks as before, so a refresh that keeps
         failing reaches the caller as a failure within ``ttl + serve_stale_for``.
+
+        ``force`` is the refresh button: nothing stored before the call counts,
+        so it blocks on a produce -- joining one already in flight rather than
+        starting a second, since that one is as fresh as a new one would be.
         """
+        with self._lock:
+            asked = self._stores
         while True:
             now = time.monotonic()
             with self._lock:
                 entry = self._entries.get(key)
-                if entry is not None:
-                    stored_at, value = entry
+                if entry is not None and (not force or entry[2] > asked):
+                    stored_at, value, _ = entry
                     if now - stored_at < self._ttl:
                         return value
                     if now - stored_at < self._ttl + serve_stale_for:
@@ -113,7 +128,8 @@ class TtlCache:
                 for other, cached in self._entries.items()
                 if stored_at - cached[0] < self._ttl
             }
-            self._entries[key] = (stored_at, value)
+            self._stores += 1
+            self._entries[key] = (stored_at, value, self._stores)
         return value
 
     def _refresh_behind(self, key: Hashable, produce: Callable[[], Any]) -> None:
