@@ -116,6 +116,11 @@
               }
             ]
           },
+          "formula": {
+            "default": "",
+            "title": "Formula",
+            "type": "string"
+          },
           "op": {
             "const": "autoscale-check",
             "default": "autoscale-check",
@@ -127,18 +132,65 @@
             "type": "string"
           },
           "variables": {
-            "default": [],
-            "items": {
+            "additionalProperties": {
               "type": "string"
             },
+            "default": {},
             "title": "Variables",
-            "type": "array"
+            "type": "object"
           }
         },
         "required": [
           "pool_id"
         ],
         "title": "AutoscalePayload",
+        "type": "object"
+      },
+      "AutoscaleRun": {
+        "description": "The pool's own most recent evaluation of its formula -- what it DECIDED.\n\nRead off the pool, so it costs nothing beyond `get_pool` and cannot go\nstale the way a formula cached from `terraform output` can. ``variables``\nis the formula's result string split into its assignments, `$`-prefixed\nnames included, since those are the identifiers the formula itself uses.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResizeError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evaluated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluated At"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          },
+          "variables": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Variables",
+            "type": "object"
+          }
+        },
+        "title": "AutoscaleRun",
         "type": "object"
       },
       "BatchTask": {
@@ -1696,15 +1748,112 @@
         "title": "NodeGrid",
         "type": "object"
       },
+      "NodePhase": {
+        "description": "What a Batch NODE state means, in the same spirit as :class:`Phase`.\n\nSixteen states collapse into the five questions a pool screen asks: can it\ntake a task, is it running one, is it still coming up, is it broken, or is\nit on its way out. `unusable` after a failed mount and `starttaskfailed`\nare the two that matter operationally, and both read as DOWN.",
+        "enum": [
+          "idle",
+          "busy",
+          "booting",
+          "down",
+          "leaving",
+          "unknown"
+        ],
+        "title": "NodePhase",
+        "type": "string"
+      },
+      "NodeStatus": {
+        "description": "One compute node: what state it is in, since when, and what it is running.\n\n``since`` is the state's own transition time, which is what answers \"how\nlong has this been booting\" -- the question a queued task that will not\nstart comes down to. ``tasks`` are the ids Batch reports as running there,\nthe join the console draws a task onto a node by.",
+        "properties": {
+          "allocated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocated At"
+          },
+          "errors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/NodePhase"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "start_task_exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Task Exit Code"
+          },
+          "start_task_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Task State"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "tasks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "phase"
+        ],
+        "title": "NodeStatus",
+        "type": "object"
+      },
       "NowParts": {
         "additionalProperties": true,
         "properties": {
-          "autoscale": {
-            "$ref": "#/components/schemas/Part_AutoscalePayload_"
-          },
-          "cost": {
-            "$ref": "#/components/schemas/Part_CostPayload_"
-          },
           "jobs": {
             "$ref": "#/components/schemas/Part_JobsPayload_"
           },
@@ -1718,9 +1867,7 @@
         "required": [
           "pool",
           "jobs",
-          "tasks",
-          "autoscale",
-          "cost"
+          "tasks"
         ],
         "title": "NowParts",
         "type": "object"
@@ -1764,62 +1911,6 @@
         ],
         "title": "Outcome",
         "type": "string"
-      },
-      "Part_AutoscalePayload_": {
-        "additionalProperties": true,
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "payload": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AutoscalePayload"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "title": "Part[AutoscalePayload]",
-        "type": "object"
-      },
-      "Part_CostPayload_": {
-        "additionalProperties": true,
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "payload": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CostPayload"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "title": "Part[CostPayload]",
-        "type": "object"
       },
       "Part_CurvePayload_": {
         "additionalProperties": true,
@@ -2088,6 +2179,17 @@
       "PoolPayload": {
         "description": "What `pool-status` answers: the pool, plus what it costs while up.\n\nSubclasses the shape `batch.pool_status` already produces rather than\nrestating its six fields -- the command adds the op tag and the rate, which\ncome from config and not from Batch.",
         "properties": {
+          "allocation_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Since"
+          },
           "allocation_state": {
             "anyOf": [
               {
@@ -2098,6 +2200,27 @@
               }
             ],
             "title": "Allocation State"
+          },
+          "autoscale": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutoscaleRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "burn_per_hour": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Burn Per Hour"
           },
           "current_dedicated_nodes": {
             "anyOf": [
@@ -2120,6 +2243,14 @@
               }
             ],
             "title": "Hourly Cost"
+          },
+          "nodes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NodeStatus"
+            },
+            "title": "Nodes",
+            "type": "array"
           },
           "op": {
             "const": "pool-status",

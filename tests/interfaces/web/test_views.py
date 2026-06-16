@@ -67,14 +67,8 @@ def _failing(monkeypatch: pytest.MonkeyPatch, *, only: str) -> None:
 class TestOneScreenIsOneRequest:
     def test_now_asks_every_panel_it_shows(self, answers):
         composed = views.now()
-        assert sorted(name for name, _ in answers) == [
-            "autoscale-check",
-            "cost",
-            "jobs",
-            "pool-status",
-            "tasks",
-        ]
-        assert set(composed["parts"]) == {"pool", "jobs", "tasks", "autoscale", "cost"}
+        assert sorted(name for name, _ in answers) == ["jobs", "pool-status", "tasks"]
+        assert set(composed["parts"]) == {"pool", "jobs", "tasks"}
 
     def test_a_run_page_is_five_questions_in_one(self, answers):
         composed = views.run("run-a")
@@ -182,7 +176,7 @@ class TestOnePartCannotTakeOutTheScreen:
         composed = views.now()
         assert composed["parts"]["pool"]["error"] == "pool-status is unavailable"
         assert composed["parts"]["jobs"]["payload"] is not None
-        assert composed["parts"]["cost"]["payload"] is not None
+        assert composed["parts"]["tasks"]["payload"] is not None
 
     def test_a_failed_part_is_reported_not_joined_away(self, monkeypatch):
         """The trap this test exists for: the join returns `[]` when `tasks` is

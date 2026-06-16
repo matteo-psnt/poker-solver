@@ -76,9 +76,16 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from pathlib import Path
 
-# Long enough that several open tabs (or a remount) share one cloud sweep,
-# short enough that a manual refresh feels live. A sweep is 2-4s per panel.
-CACHE_TTL_SECONDS = 15.0
+# How often a polled screen is re-read from Azure, whatever the browser's
+# cadence: a view past this age is served as it is and refreshed behind the
+# answer. A sweep of the live screen is ~2-3s, so a shorter TTL would have the
+# refreshes overlapping their own results.
+CACHE_TTL_SECONDS = 10.0
+
+# How long past the TTL a view is still served stale. A refresh that keeps
+# failing (an expired `az login`, most often) blocks and reports at this point
+# rather than ageing silently behind a badge.
+VIEW_STALE_GRACE_SECONDS = 120.0
 
 # The payload memo is per (command, arguments), so five endpoints asking five
 # questions about the SAME record each paid ~120 round trips for their own copy.
@@ -224,7 +231,13 @@ class CompactBody(BaseModel):
     label: str | None = None
 
 
-def _served(cache: TtlCache, key: tuple[Any, ...], produce: Callable[[], Any]) -> JSONResponse:
+def _served(
+    cache: TtlCache,
+    key: tuple[Any, ...],
+    produce: Callable[[], Any],
+    *,
+    serve_stale_for: float = 0.0,
+) -> JSONResponse:
     """One memoised answer, with its failures mapped onto status codes.
 
     The surface goes on around the memo, not inside it: a request served from the
@@ -236,7 +249,7 @@ def _served(cache: TtlCache, key: tuple[Any, ...], produce: Callable[[], Any]) -
     after `az login` has fixed it.
     """
     with telemetry.surface("console"):
-        payload, failure = attempt(lambda: cache.get(key, produce))
+        payload, failure = attempt(lambda: cache.get(key, produce, serve_stale_for=serve_stale_for))
     if failure is not None:
         return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
     return PayloadResponse(payload)
@@ -429,8 +442,17 @@ def create_app() -> FastAPI:
     # classified and recorded exactly like the panels it is made of.
     # `build.__name__` stands in for a command name in the cache key.
 
+    # Stale-while-revalidate, for the views ONLY. A view carries its own `at`,
+    # so a screen served from ten seconds ago says so; a bare command payload
+    # has no such field, and serving it stale would make the client's fetch
+    # time -- the only age it can show -- a lie.
     def view(build: Any, *key: str) -> JSONResponse:
-        return _served(cache, (build.__name__, key), lambda: build(*key))
+        return _served(
+            cache,
+            (build.__name__, key),
+            lambda: build(*key),
+            serve_stale_for=VIEW_STALE_GRACE_SECONDS,
+        )
 
     @app.get("/api/view/now", response_model=contract.NowView, responses=ERRORS)
     def _view_now() -> JSONResponse:

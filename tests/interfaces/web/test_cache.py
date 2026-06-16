@@ -203,3 +203,69 @@ def test_a_failing_producer_stores_nothing(clock, counted):
         cache.get("pool", _fails)
 
     assert cache.get("pool", counted("pool")) == "pool-1"
+
+
+class TestStaleWhileRevalidate:
+    """A polled view answers at once from the expired entry and refreshes behind it."""
+
+    def test_inside_the_grace_the_expired_value_is_served_and_refreshed_once(self, clock, counted):
+        cache = TtlCache(TTL)
+        produce = counted("now")
+        assert cache.get("now", produce, serve_stale_for=30.0) == "now-1"
+
+        clock(1000.0 + TTL + 1)
+        assert cache.get("now", produce, serve_stale_for=30.0) == "now-1", "the poll blocked"
+        cache.drain(timeout=2)
+        assert cache.get("now", produce, serve_stale_for=30.0) == "now-2"
+
+    def test_a_refresh_already_running_is_not_started_twice(self, clock):
+        cache = TtlCache(TTL)
+        started, release = threading.Event(), threading.Event()
+        calls = 0
+
+        def produce() -> str:
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                started.set()
+                release.wait(timeout=2)
+            return f"v{calls}"
+
+        assert cache.get("now", produce, serve_stale_for=30.0) == "v1"
+        clock(1000.0 + TTL + 1)
+        for _ in range(5):
+            assert cache.get("now", produce, serve_stale_for=30.0) == "v1"
+        assert started.wait(timeout=2)
+        release.set()
+        cache.drain(timeout=2)
+        assert calls == 2
+
+    def test_past_the_grace_the_call_blocks_and_a_failure_reaches_the_caller(self, clock):
+        """A refresh that keeps failing -- an expired `az login` -- must not
+        hide behind an ageing value forever."""
+        cache = TtlCache(TTL)
+        answers: list = ["first", RuntimeError("az login has expired")]
+
+        def produce() -> str:
+            answer = answers[0] if len(answers) == 1 else answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        assert cache.get("now", produce, serve_stale_for=30.0) == "first"
+        clock(1000.0 + TTL + 1)
+        assert cache.get("now", produce, serve_stale_for=30.0) == "first"
+        cache.drain(timeout=2)
+        assert cache.get("now", produce, serve_stale_for=30.0) == "first", "still inside the grace"
+        clock(1000.0 + TTL + 31)
+        with pytest.raises(RuntimeError, match="az login"):
+            cache.get("now", produce, serve_stale_for=30.0)
+
+    def test_without_a_grace_an_expired_entry_still_blocks(self, clock, counted):
+        """`answer()` endpoints: a bare payload has no timestamp of its own, so
+        serving it stale would make the client's fetch time a lie."""
+        cache = TtlCache(TTL)
+        produce = counted("pool")
+        assert cache.get("pool", produce) == "pool-1"
+        clock(1000.0 + TTL + 1)
+        assert cache.get("pool", produce) == "pool-2"

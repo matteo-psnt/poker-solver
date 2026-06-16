@@ -65,3 +65,20 @@ class TestTheTwoDeathsThatMustStayApart:
 
     def test_an_unfamiliar_code_is_left_as_a_number(self):
         assert task_states.exit_meaning(42) is None
+
+
+class TestNodeStatesCollapseToFiveQuestions:
+    def test_the_sdk_enum_and_the_wire_word_classify_alike(self):
+        assert task_states.node_phase_of("BatchNodeState.WAITING_FOR_START_TASK") is (
+            task_states.NodePhase.BOOTING
+        )
+        assert task_states.node_phase_of("waitingforstarttask") is task_states.NodePhase.BOOTING
+
+    def test_the_two_operational_failures_both_read_as_down(self):
+        """A failed mount leaves a node `unusable`; a failed start task leaves
+        it `starttaskfailed`. Either is a node that will never take a task."""
+        assert task_states.node_phase_of("unusable") is task_states.NodePhase.DOWN
+        assert task_states.node_phase_of("starttaskfailed") is task_states.NodePhase.DOWN
+
+    def test_an_unfamiliar_state_is_unknown_rather_than_a_guess(self):
+        assert task_states.node_phase_of("hibernating") is task_states.NodePhase.UNKNOWN

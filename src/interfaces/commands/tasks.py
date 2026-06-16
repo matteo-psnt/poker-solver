@@ -15,6 +15,7 @@ explain those.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -42,6 +43,12 @@ _PARALLEL_SHARE_IO = 64
 # The shared-cache key for legs/. Its own, not the record's: they are different
 # subtrees of the share, pulled by different readers.
 _LEGS_KEY = "legs"
+
+# Which version of each record a materialised tree holds: one `etag<TAB>name`
+# line per file. BESIDE `legs/`, not inside it, where `read_documents` would
+# read it as a leg -- and not JSON, because it is not an artifact: a tree's
+# private note to its successor, gone with the tree.
+_ETAGS_NAME = "legs.etags"
 
 # Held across deciding what is new AND publishing it -- see `run`. Module-level
 # because the tree it protects is too: readers sharing one legs directory are
@@ -190,32 +197,75 @@ def _task_records(service: Any, share_name: str) -> Iterator[Path]:
             download_tasks(service, share_name, local)
             yield local
         return
-    with cache.acquire(_LEGS_KEY, lambda root: download_tasks(service, share_name, root)) as local:
+    with cache.acquire(
+        _LEGS_KEY, lambda root, previous: download_tasks(service, share_name, root, previous)
+    ) as local:
         yield local
 
 
-def download_tasks(service: Any, share_name: str, local: Path) -> None:
-    """Pull the whole legs/ directory: the join needs every record.
+def download_tasks(service: Any, share_name: str, local: Path, previous: Path | None = None) -> int:
+    """Materialise legs/ into ``local``; returns how many files were fetched.
 
-    Concurrently -- these are tiny JSON files at ~0.195s of round trip each, so
-    serially they were 9.1s of almost pure latency against 1.1s parallel. The
-    directory has since grown to 365 files and the width with it: latency is the
-    entire cost, so the pool is sized against round trips, not bytes.
+    Incremental against ``previous``, a tree this function built earlier: a file
+    whose etag is unchanged is hard-linked from there, and only what moved is
+    downloaded. The join needs every record, but a record never changes once
+    written -- so a refresh of 2,252 files is the listing plus a handful of
+    progress files, where pulling them all was 33s.
+
+    Concurrently for what IS fetched: these are tiny JSON files at ~0.195s of
+    round trip each, so latency is the entire cost and the pool is sized
+    against round trips, not bytes.
     """
     target = task_log.tasks_dir(local)
     target.mkdir(parents=True, exist_ok=True)
-    paths = list(share.walk_files(service, share_name, task_log.RECORDS_DIRNAME))
-    if not paths:
-        return
-    with ThreadPoolExecutor(max_workers=min(_PARALLEL_SHARE_IO, len(paths))) as pool:
-        list(
-            pool.map(
-                lambda path: share.download_file(
-                    service, share_name, path, target / Path(path).name
-                ),
-                paths,
+    entries = [
+        entry
+        for entry in share.list_entries(service, share_name, task_log.RECORDS_DIRNAME, etags=True)
+        if not entry.is_directory
+    ]
+    known = _etags(previous)
+    source = task_log.tasks_dir(previous) if previous is not None else None
+    fetch = []
+    for entry in entries:
+        held = source / entry.name if source is not None else None
+        if held is not None and held.is_file() and known.get(entry.name) == entry.etag:
+            _link(held, target / entry.name)
+        else:
+            fetch.append(entry.name)
+    if fetch:
+        with ThreadPoolExecutor(max_workers=min(_PARALLEL_SHARE_IO, len(fetch))) as pool:
+            list(
+                pool.map(
+                    lambda name: share.download_file(
+                        service, share_name, f"{task_log.RECORDS_DIRNAME}/{name}", target / name
+                    ),
+                    fetch,
+                )
             )
-        )
+    (local / _ETAGS_NAME).write_text(
+        "".join(f"{entry.etag or ''}\t{entry.name}\n" for entry in entries)
+    )
+    return len(fetch)
+
+
+def _etags(tree: Path | None) -> dict[str, str]:
+    """The versions a tree was built from. Empty for a tree with no manifest."""
+    if tree is None or not (tree / _ETAGS_NAME).is_file():
+        return {}
+    found: dict[str, str] = {}
+    for line in (tree / _ETAGS_NAME).read_text().splitlines():
+        etag, sep, name = line.partition("\t")
+        if sep and etag:
+            found[name] = etag
+    return found
+
+
+def _link(source: Path, destination: Path) -> None:
+    """A hard link where the filesystem allows one, a copy where it does not."""
+    try:
+        destination.hardlink_to(source)
+    except OSError:
+        shutil.copyfile(source, destination)
 
 
 def _upload_observed(service: Any, share_name: str, local: Path, explained: list[str]) -> None:

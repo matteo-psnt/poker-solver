@@ -10,16 +10,25 @@ Entries expire; they are never invalidated. The freshest thing this can serve is
 ``ttl`` seconds old, which is the honest bound and is what the UI displays.
 Expired entries are also dropped, not merely ignored -- a per-run and per-task
 key space in front of a server that stays up for days is otherwise a slow leak.
+
+A caller may ask for an expired entry to be served STALE while one refresh runs
+behind it (``serve_stale_for``). That is still request-driven: nothing sweeps on
+a timer, a closed tab stops the refreshes, and a refresher that keeps failing is
+noticed, because past the grace the request blocks and fails in the open.
 """
 
 from __future__ import annotations
 
+import contextvars
+import logging
 import threading
 import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Hashable
+
+logger = logging.getLogger(__name__)
 
 
 class TtlCache:
@@ -32,8 +41,11 @@ class TtlCache:
         self._lock = threading.Condition()
         self._entries: dict[Hashable, tuple[float, Any]] = {}
         self._producing: set[Hashable] = set()
+        self._refreshers: list[threading.Thread] = []
 
-    def get(self, key: Hashable, produce: Callable[[], Any]) -> Any:
+    def get(
+        self, key: Hashable, produce: Callable[[], Any], *, serve_stale_for: float = 0.0
+    ) -> Any:
         """Return the cached value, or produce and store a fresh one.
 
         ``produce`` runs OUTSIDE the lock. Holding it across a cloud read would
@@ -47,19 +59,36 @@ class TtlCache:
         queries on the same tick and a `refetchInterval` firing them together
         forever after. Different keys still overlap freely; that is the part
         that must not be given up.
+
+        ``serve_stale_for``: an entry past the TTL but within this many further
+        seconds is returned AT ONCE and one refresh is started behind it. A
+        polling page then never waits on a sweep; what it shows is at most
+        ``ttl`` plus one sweep old, and says so through its own timestamp.
+        Beyond the grace the call blocks as before, so a refresh that keeps
+        failing reaches the caller as a failure within ``ttl + serve_stale_for``.
         """
         while True:
             now = time.monotonic()
             with self._lock:
                 entry = self._entries.get(key)
-                if entry is not None and now - entry[0] < self._ttl:
-                    return entry[1]
+                if entry is not None:
+                    stored_at, value = entry
+                    if now - stored_at < self._ttl:
+                        return value
+                    if now - stored_at < self._ttl + serve_stale_for:
+                        if key not in self._producing:
+                            self._producing.add(key)
+                            self._refresh_behind(key, produce)
+                        return value
                 if key in self._producing:
                     self._lock.wait()
                     continue
                 self._producing.add(key)
                 break
+        return self._produce(key, produce)
 
+    def _produce(self, key: Hashable, produce: Callable[[], Any]) -> Any:
+        """Run ``produce`` for a key already marked as producing, and store it."""
         try:
             value = produce()
         except BaseException:
@@ -86,6 +115,35 @@ class TtlCache:
             }
             self._entries[key] = (stored_at, value)
         return value
+
+    def _refresh_behind(self, key: Hashable, produce: Callable[[], Any]) -> None:
+        """Produce ``key`` on a thread of its own. Caller holds the lock.
+
+        Under a COPY of the caller's context, so a command's telemetry is filed
+        under the surface that asked for it rather than a bare thread's default
+        -- the same trap `_compose._bound` documents. A failure is logged and
+        otherwise dropped: the stale entry stays, and the next request past the
+        grace is the one that reports it.
+        """
+        context = contextvars.copy_context()
+
+        def _run() -> None:
+            try:
+                context.run(self._produce, key, produce)
+            except Exception:  # noqa: BLE001 -- a thread has nobody to raise to
+                logger.warning("background refresh of %r failed", key, exc_info=True)
+
+        thread = threading.Thread(target=_run, name=f"refresh:{key!r}", daemon=True)
+        self._refreshers = [t for t in self._refreshers if t.is_alive()]
+        self._refreshers.append(thread)
+        thread.start()
+
+    def drain(self, timeout: float | None = None) -> None:
+        """Wait for every background refresh in flight. For tests and shutdown."""
+        with self._lock:
+            pending = list(self._refreshers)
+        for thread in pending:
+            thread.join(timeout)
 
     def clear(self) -> None:
         """Drop everything. For a forced refresh, and for tests."""

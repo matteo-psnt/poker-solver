@@ -39,9 +39,7 @@ class AutoscalePayload(batch.AutoscaleResult):
 def run(args: argparse.Namespace) -> AutoscalePayload:  # noqa: ARG001
     """Evaluate the deployed formula against the live pool."""
     config = CloudConfig.load()
-    result = batch.evaluate_autoscale(
-        batch.client(config), config.pool_id, config.autoscale_formula
-    )
+    result = batch.evaluate_autoscale(batch.client(config), config.pool_id)
     return AutoscalePayload(pool_id=config.pool_id, **result.model_dump())
 
 
@@ -55,8 +53,8 @@ def render(payload: AutoscalePayload) -> None:
         for name, value in payload.error.values.items():
             print(f"    {name}: {value}")
         print("  (variables below are PARTIAL — the formula did not fully evaluate)")
-    for variable in payload.variables:
-        print(f"    {variable}")
+    for name, value in payload.variables.items():
+        print(f"    {name} = {value}")
 
 
 COMMAND = Command(

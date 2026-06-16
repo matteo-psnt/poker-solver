@@ -120,7 +120,6 @@ class CloudConfig:
     storage_account: str
     share_name: str
     share_key: str
-    autoscale_formula: str
     hourly_cost: str
     subscription_id: str
 
@@ -136,7 +135,6 @@ class CloudConfig:
             storage_account=_value(str(STORE_DIR), "storage_account"),
             share_name=_value(str(STORE_DIR), "share_name"),
             share_key=_value(str(STORE_DIR), "access_key"),
-            autoscale_formula=_value(str(INFRA_DIR), "autoscale_formula"),
             hourly_cost=_value(str(INFRA_DIR), "hourly_cost"),
             subscription_id=_value(str(INFRA_DIR), "subscription_id"),
         )

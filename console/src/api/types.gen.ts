@@ -674,6 +674,11 @@ export interface components {
         AutoscalePayload: {
             error?: components["schemas"]["ResizeError"] | null;
             /**
+             * Formula
+             * @default
+             */
+            formula: string;
+            /**
              * Op
              * @default autoscale-check
              * @constant
@@ -683,9 +688,34 @@ export interface components {
             pool_id: string;
             /**
              * Variables
-             * @default []
+             * @default {}
              */
-            variables: string[];
+            variables: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * AutoscaleRun
+         * @description The pool's own most recent evaluation of its formula -- what it DECIDED.
+         *
+         *     Read off the pool, so it costs nothing beyond `get_pool` and cannot go
+         *     stale the way a formula cached from `terraform output` can. ``variables``
+         *     is the formula's result string split into its assignments, `$`-prefixed
+         *     names included, since those are the identifiers the formula itself uses.
+         */
+        AutoscaleRun: {
+            error?: components["schemas"]["ResizeError"] | null;
+            /** Evaluated At */
+            evaluated_at?: string | null;
+            /** Interval Seconds */
+            interval_seconds?: number | null;
+            /**
+             * Variables
+             * @default {}
+             */
+            variables: {
+                [key: string]: string;
+            };
         };
         /**
          * BatchTask
@@ -1398,10 +1428,53 @@ export interface components {
             /** Trained Buckets */
             trained_buckets: number;
         };
+        /**
+         * NodePhase
+         * @description What a Batch NODE state means, in the same spirit as :class:`Phase`.
+         *
+         *     Sixteen states collapse into the five questions a pool screen asks: can it
+         *     take a task, is it running one, is it still coming up, is it broken, or is
+         *     it on its way out. `unusable` after a failed mount and `starttaskfailed`
+         *     are the two that matter operationally, and both read as DOWN.
+         * @enum {string}
+         */
+        NodePhase: "idle" | "busy" | "booting" | "down" | "leaving" | "unknown";
+        /**
+         * NodeStatus
+         * @description One compute node: what state it is in, since when, and what it is running.
+         *
+         *     ``since`` is the state's own transition time, which is what answers "how
+         *     long has this been booting" -- the question a queued task that will not
+         *     start comes down to. ``tasks`` are the ids Batch reports as running there,
+         *     the join the console draws a task onto a node by.
+         */
+        NodeStatus: {
+            /** Allocated At */
+            allocated_at?: string | null;
+            /**
+             * Errors
+             * @default []
+             */
+            errors: string[];
+            /** Id */
+            id: string;
+            phase: components["schemas"]["NodePhase"];
+            /** Since */
+            since?: string | null;
+            /** Start Task Exit Code */
+            start_task_exit_code?: number | null;
+            /** Start Task State */
+            start_task_state?: string | null;
+            /** State */
+            state: string | null;
+            /**
+             * Tasks
+             * @default []
+             */
+            tasks: string[];
+        };
         /** NowParts */
         NowParts: {
-            autoscale: components["schemas"]["Part_AutoscalePayload_"];
-            cost: components["schemas"]["Part_CostPayload_"];
             jobs: components["schemas"]["Part_JobsPayload_"];
             pool: components["schemas"]["Part_PoolPayload_"];
             tasks: components["schemas"]["Part_TasksPayload_"];
@@ -1432,22 +1505,6 @@ export interface components {
          * @enum {string}
          */
         Outcome: "done" | "failed" | "timed out" | "cancelled";
-        /** Part[AutoscalePayload] */
-        Part_AutoscalePayload_: {
-            /** Error */
-            error?: string | null;
-            payload?: components["schemas"]["AutoscalePayload"] | null;
-        } & {
-            [key: string]: unknown;
-        };
-        /** Part[CostPayload] */
-        Part_CostPayload_: {
-            /** Error */
-            error?: string | null;
-            payload?: components["schemas"]["CostPayload"] | null;
-        } & {
-            [key: string]: unknown;
-        };
         /** Part[CurvePayload] */
         Part_CurvePayload_: {
             /** Error */
@@ -1535,12 +1592,22 @@ export interface components {
          *     come from config and not from Batch.
          */
         PoolPayload: {
+            /** Allocation Since */
+            allocation_since?: string | null;
             /** Allocation State */
             allocation_state: string | null;
+            autoscale?: components["schemas"]["AutoscaleRun"] | null;
+            /** Burn Per Hour */
+            burn_per_hour?: number | null;
             /** Current Dedicated Nodes */
             current_dedicated_nodes: number | null;
             /** Hourly Cost */
             hourly_cost?: string | null;
+            /**
+             * Nodes
+             * @default []
+             */
+            nodes: components["schemas"]["NodeStatus"][];
             /**
              * Op
              * @default pool-status

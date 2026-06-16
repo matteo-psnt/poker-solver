@@ -16,8 +16,6 @@ from __future__ import annotations
 from typing import Any
 
 from src.interfaces.commands import (
-    autoscale_check,
-    cost,
     curve,
     jobs,
     ledger,
@@ -42,13 +40,14 @@ RUN_LIST_JOB_LIMIT = 50
 def now() -> dict[str, Any]:
     """What is happening right now, and did anything die.
 
-    Five questions that were five requests. `cost` rides along because burn rate
-    belongs beside node count, and it is nearly free: it derives from the task log
-    this view already pays for, and the billing half is memoised server-side.
+    Three questions. `pool-status` carries the nodes and the pool's own last
+    autoscale decision, so the screen no longer pays a separate evaluation
+    whose formula could go stale; `cost` is gone because nothing on the page
+    drew it, and it re-derived the task log to not be drawn.
 
-    No join. Everything here is a panel in its own right, and the one
-    cross-reference the client draws -- a running task's progress bar -- is
-    presentation, not data.
+    No join. Everything here is a panel in its own right, and the
+    cross-references the client draws -- a task onto its node, a progress bar
+    onto a task -- are presentation, not data.
     """
     return compose(
         "view-now",
@@ -56,8 +55,6 @@ def now() -> dict[str, Any]:
             Part("pool", pool_status.COMMAND),
             Part("jobs", jobs.COMMAND, {"limit": LIVE_LIMIT}),
             Part("tasks", tasks.COMMAND, {"limit": LIVE_LIMIT}),
-            Part("autoscale", autoscale_check.COMMAND),
-            Part("cost", cost.COMMAND),
         ],
     )
 

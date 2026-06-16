@@ -1,13 +1,16 @@
-"""The `pool-status` subcommand: node counts, and why a resize failed."""
+"""The `pool-status` subcommand: every node, the last autoscale decision, and
+why a resize failed."""
 
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
+from src.shared.task_states import NodePhase
 
 if TYPE_CHECKING:
     import argparse
@@ -28,13 +31,27 @@ class PoolPayload(batch.PoolStatus):
     op: Literal["pool-status"] = "pool-status"
     """Dollars per node-hour while the pool is up. It is 0 nodes at rest."""
     hourly_cost: str | None = None
+    """`hourly_cost` times the nodes allocated now. Null when the rate is unreadable."""
+    burn_per_hour: float | None = None
 
 
 def run(args: argparse.Namespace) -> PoolPayload:  # noqa: ARG001
-    """Read the pool's allocation state and any resize errors."""
+    """Read the pool, its nodes, its last autoscale run and any resize errors."""
     config = CloudConfig.load()
     status = batch.pool_status(batch.client(config), config.pool_id)
-    return PoolPayload(hourly_cost=config.hourly_cost, **status.model_dump())
+    return PoolPayload(
+        hourly_cost=config.hourly_cost,
+        burn_per_hour=burn_per_hour(config.hourly_cost, status.current_dedicated_nodes),
+        **status.model_dump(),
+    )
+
+
+def burn_per_hour(hourly_cost: str | None, nodes: int | None) -> float | None:
+    """The number out of `$0.688/hr/node`, times the nodes -- or nothing."""
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)", hourly_cost or "")
+    if match is None or nodes is None:
+        return None
+    return round(float(match.group(1)) * nodes, 3)
 
 
 def _print_values(values: dict[str, str | None]) -> None:
@@ -61,7 +78,18 @@ def render(payload: PoolPayload) -> None:
     print(f"Pool {payload.pool_id} ({payload.vm_size})")
     print(f"  state:   {payload.allocation_state}")
     print(f"  nodes:   {payload.current_dedicated_nodes} / {payload.target_dedicated_nodes}")
-    print(f"  cost:    {payload.hourly_cost} (pool is 0 nodes at rest)")
+    burn = f" -> ${payload.burn_per_hour:.2f}/hr now" if payload.burn_per_hour is not None else ""
+    print(f"  cost:    {payload.hourly_cost} (pool is 0 nodes at rest){burn}")
+    if payload.autoscale is not None:
+        wants = payload.autoscale.variables.get("$TargetDedicatedNodes", "?")
+        print(f"  autoscale: wants {wants} nodes, evaluated {payload.autoscale.evaluated_at}")
+        if payload.autoscale.error is not None:
+            print(f"    ERROR: {payload.autoscale.error.code} {payload.autoscale.error.message}")
+    for node in payload.nodes:
+        running = ", ".join(node.tasks) if node.tasks else ""
+        detail = running or ("" if node.phase is NodePhase.IDLE else f"since {node.since}")
+        flag = "  !! " + "; ".join(node.errors) if node.errors else ""
+        print(f"    {node.phase:<8} {node.id[-12:]}  {detail}{flag}")
     if not payload.resize_errors:
         return
     print("\n  RESIZE ERRORS — Batch reports every allocation problem as a generic")
