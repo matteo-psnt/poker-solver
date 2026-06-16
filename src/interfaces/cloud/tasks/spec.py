@@ -30,7 +30,11 @@ from src.shared.cloudtask import kinds, wire
 from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
 DEFAULT_TIMEOUT = "6h"
-DEFAULT_CHECKPOINT_EVERY = 1_000_000
+# Measured 08-22 at 16 workers: a 1M chunk is ~18 s, of which ~2 s is the
+# checkpoint write and ~1-2 s the worker respawn. 5M keeps that under 5%
+# and bounds a killed run's loss at ~90 s of work -- the same bound in TIME
+# that 1M gave at the old rate.
+DEFAULT_CHECKPOINT_EVERY = 5_000_000
 
 # NOT the OS python3 (3.10 on the pinned image). The start task installs this one
 # at a fixed absolute path, so no uv is needed at task time -- `uv run` here

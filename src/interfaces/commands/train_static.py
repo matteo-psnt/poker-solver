@@ -43,12 +43,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--checkpoint-every",
         type=int,
-        default=1_000_000,
+        default=5_000_000,
         dest="checkpoint_every",
         help="Checkpoint every N iterations (0 = only at the end). This is the bound "
-        "on what a killed run loses, traded against disk and write time: a full table "
-        "is written each time, and at 250k the writes were ~17%% of a 30M run's wall "
-        "clock and left 120 snapshots on the share.",
+        "on what a killed run loses, traded against write time and a worker respawn "
+        "per chunk: at 16 workers a 1M chunk is ~18 s and its checkpoint ~2 s, so "
+        "1M paid ~20%% and 5M pays under 5%%.",
     )
     parser.add_argument(
         "--warm-start-from",
