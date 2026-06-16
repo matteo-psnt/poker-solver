@@ -134,8 +134,13 @@ class BoardMixtureCFR:
             np.maximum(self.regrets, 0.0, out=self.regrets)
 
     def best_response_value(
-        self, br_player: int, initial_range: np.ndarray, *, unconstrained: bool = False
-    ) -> float:
+        self,
+        br_player: int,
+        initial_range: np.ndarray,
+        *,
+        unconstrained: bool = False,
+        per_board: bool = False,
+    ) -> float | np.ndarray:
         """Root value of ``br_player``'s best response across the whole mixture.
 
         The backward pass is interleaved rather than run per board: at each of
@@ -154,6 +159,15 @@ class BoardMixtureCFR:
         the unconstrained one is what an opponent could actually take. Their
         difference is the abstraction's own cost, and it is the number that does
         not go away no matter how long the solver runs.
+
+        ``per_board`` returns each board's own contribution instead of their
+        mean. Read them as PAIRED samples, not independent ones: the responder
+        picks one action per ``(node, bucket)`` across the whole mixture, so a
+        board's value is its share of a jointly chosen strategy rather than a
+        best response to that board alone. That is exactly what makes them the
+        right thing to difference between two strategies scored on the SAME
+        boards — and the wrong thing to treat as i.i.d. draws when quoting a
+        single arm's absolute error bar.
 
         Raises:
             ValueError: if ``unconstrained`` and the mixture was built without
@@ -191,8 +205,16 @@ class BoardMixtureCFR:
                     for board, child in zip(self.boards, children, strict=True):
                         board.value[br_player, nodes] = child.sum(axis=-1)
 
-        total = sum(float(board.value[br_player, 0].sum()) for board in self.boards)
-        return total / self.num_boards
+        # float64 regardless of the kernel's dtype: this is a handful of numbers,
+        # and rounding them to float32 makes the decomposition disagree with the
+        # aggregate in the 8th figure -- enough to look like a real discrepancy
+        # to anyone checking that the parts sum to the whole.
+        contributions = np.array(
+            [float(board.value[br_player, 0].sum()) for board in self.boards], dtype=np.float64
+        )
+        if per_board:
+            return contributions
+        return float(contributions.sum()) / self.num_boards
 
     def _visible_partition(self, street: Street) -> list[list[int]]:
         """Board indices grouped by what is face up when ``street`` is acted on.
@@ -269,6 +291,30 @@ class BoardMixtureCFR:
         """Mean of both players' best-response gains, in chips per hand."""
         gains = [
             self.best_response_value(player, initial_range, unconstrained=unconstrained)
+            / compatible_pairs
+            for player in (0, 1)
+        ]
+        return (gains[0] + gains[1]) / 2.0
+
+    def exploitability_per_board(
+        self, initial_range: np.ndarray, compatible_pairs: float, *, unconstrained: bool = False
+    ) -> np.ndarray:
+        """The same number, decomposed onto the boards that produced it.
+
+        The aggregate is these times ``num_boards``, so nothing here is a second
+        estimate of the same quantity -- it is the one estimate, un-collapsed.
+        Keeping it is what lets a comparison carry an interval: two arms scored
+        on one board set difference board-by-board, and the spread of THAT is
+        the noise a verdict has to clear. Collapsing first throws the only
+        evidence about its own precision away, which is how a 3.3% effect came
+        to be quoted against a 7-14% spread.
+        """
+        gains = [
+            np.asarray(
+                self.best_response_value(
+                    player, initial_range, unconstrained=unconstrained, per_board=True
+                )
+            )
             / compatible_pairs
             for player in (0, 1)
         ]

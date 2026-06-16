@@ -223,3 +223,45 @@ class TestUnconstrainedBestResponse:
 
         assert constrained <= honest, "knowing your own cards cannot hurt"
         assert honest < clairvoyant, "seeing the runout early must be worth something"
+
+
+class TestPerBoardDecomposition:
+    """The un-collapsed score, which is what lets a comparison carry an interval.
+
+    The aggregate must be EXACTLY the mean of the parts. If it were merely close,
+    the parts would be a second estimate of the same quantity rather than the one
+    estimate un-collapsed, and differencing them across arms would be measuring
+    the decomposition instead of the strategies.
+    """
+
+    @pytest.fixture(scope="class")
+    def scored(self, parts):
+        compiled, _, _ = parts
+        boards = [[0, 1, 2, 3, 4], [0, 1, 2, 3, 5], [10, 11, 12, 13, 14], [20, 21, 22, 23, 24]]
+        contexts = prefix_consistent_contexts(boards, ALL_COUNTS, num_cards=DECK)
+        assert showdown_signal(contexts, ALL_COUNTS) > MIN_SHOWDOWN_SIGNAL
+        pairs = float(np.mean([(~c.blocks).sum() for c in contexts]))
+        mixture = BoardMixtureCFR(compiled, contexts, boards=boards)
+        initial = np.ones(contexts[0].num_hands, dtype=np.float32)
+        mixture.iterate(initial)
+        return mixture, initial, pairs, len(boards)
+
+    @pytest.mark.parametrize("unconstrained", [False, True])
+    def test_the_parts_average_to_the_whole(self, scored, unconstrained: bool) -> None:
+        mixture, initial, pairs, count = scored
+
+        whole = mixture.exploitability(initial, pairs, unconstrained=unconstrained)
+        per_board = mixture.exploitability_per_board(initial, pairs, unconstrained=unconstrained)
+
+        assert per_board.shape == (count,)
+        assert float(per_board.mean()) == pytest.approx(whole, rel=1e-9)
+
+    def test_the_parts_differ_from_each_other(self, scored) -> None:
+        """Guards the point of the exercise: a constant decomposition would carry
+        no information about its own precision, and every interval built on it
+        would be zero-width and wrong."""
+        mixture, initial, pairs, _ = scored
+
+        per_board = mixture.exploitability_per_board(initial, pairs, unconstrained=True)
+
+        assert float(per_board.std()) > 0.0
