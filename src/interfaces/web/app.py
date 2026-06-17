@@ -78,9 +78,9 @@ if TYPE_CHECKING:
 
 # How often a polled screen is re-read from Azure, whatever the browser's
 # cadence: a view past this age is served as it is and refreshed behind the
-# answer. A sweep of the live screen is ~2-3s, so a shorter TTL would have the
-# refreshes overlapping their own results.
-CACHE_TTL_SECONDS = 10.0
+# answer. A sweep of the live screen is ~2s warm, so a shorter TTL would have
+# the refreshes overlapping their own results.
+CACHE_TTL_SECONDS = 5.0
 
 # How long past the TTL a view is still served stale. A refresh that keeps
 # failing (an expired `az login`, most often) blocks and reports at this point

@@ -70,6 +70,23 @@ class TestOneScreenIsOneRequest:
         assert sorted(name for name, _ in answers) == ["jobs", "pool-status", "tasks"]
         assert set(composed["parts"]) == {"pool", "jobs", "tasks"}
 
+    def test_now_keeps_every_running_task_and_the_recent_ten(self, monkeypatch):
+        """Eleven of twenty-one running tasks had no progress bar: the part was
+        cut to the last ten rows, and a running task is not necessarily recent."""
+        rows = [{"task_id": f"old-{i}", "ended_at": "2026-08-01"} for i in range(30)]
+        rows += [{"task_id": f"live-{i}", "ended_at": None} for i in range(21)]
+        rows += [{"task_id": f"done-{i}", "ended_at": "2026-08-22"} for i in range(10)]
+
+        def _invoke(self: Command, **kwargs: Any) -> dict[str, Any]:
+            return {"op": self.name, "rows": rows} if self.name == "tasks" else {"op": self.name}
+
+        monkeypatch.setattr(Command, "invoke", _invoke)
+        kept = [row["task_id"] for row in views.now()["parts"]["tasks"]["payload"]["rows"]]
+        assert [t for t in kept if t.startswith("live-")] == [f"live-{i}" for i in range(21)]
+        assert [t for t in kept if t.startswith("done-")] == [f"done-{i}" for i in range(10)]
+        assert not any(t.startswith("old-") for t in kept)
+        assert len(rows) == 61, "the memoised payload was trimmed in place"
+
     def test_a_run_page_is_five_questions_in_one(self, answers):
         composed = views.run("run-a")
         assert sorted(name for name, _ in answers) == [
