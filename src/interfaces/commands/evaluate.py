@@ -68,9 +68,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="[resolver_match] Override resolver.leaf_rollouts. Leaf valuation is "
-        "~91%% of a solve and loops once per sampled runout, so this is the exchange "
-        "rate between leaf accuracy and DEPTH at a fixed budget: 31.7 ms/iteration "
-        "at 8 rollouts against 6.8 at 1, i.e. 9 iterations per 300 ms versus 44.",
+        "most of a solve and loops once per sampled runout, so this is the exchange "
+        "rate between leaf accuracy and DEPTH at a fixed budget: measured after the "
+        "compiled showdown kernels, 13.1 ms/iteration at 8 rollouts against 4.1 at 1, "
+        "i.e. 22 iterations per 300 ms versus 72.",
     )
     parser.add_argument(
         "--resolver-prior-weight",
