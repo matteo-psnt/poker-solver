@@ -64,6 +64,7 @@ def evaluate_run_lbr(
     config: LBRConfig | None = None,
     *,
     resolver_iterations: int = 64,
+    resolver_root_prior_weight: float | None = None,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
 ) -> EvaluationOutput:
@@ -100,7 +101,19 @@ def evaluate_run_lbr(
         config = replace(
             config,
             resolver=metadata.config.resolver.model_copy(
-                update={"max_iterations": resolver_iterations}
+                update={
+                    "max_iterations": resolver_iterations,
+                    # The run's own value is whatever it was TRAINED with, and
+                    # every published run predates this field -- so without an
+                    # override "deployed" means the unseeded resolver, which is
+                    # the -486 mbb/hand failure rather than the deployed one
+                    # anybody would ship.
+                    **(
+                        {"root_prior_weight": resolver_root_prior_weight}
+                        if resolver_root_prior_weight is not None
+                        else {}
+                    ),
+                }
             ),
         )
     result = compute_lbr_exploitability(solver, config, blueprint_factory=factory)
@@ -113,6 +126,7 @@ def evaluate_run_lbr(
     if config.resolver is not None:
         results["resolver_iterations"] = config.resolver.max_iterations
         results["resolver_blend_alpha"] = config.resolver.policy_blend_alpha
+        results["resolver_root_prior_weight"] = config.resolver.root_prior_weight
     return EvaluationOutput(
         infosets=storage.num_infosets(),
         results=results,
