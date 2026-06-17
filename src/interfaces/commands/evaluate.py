@@ -64,6 +64,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the magnitude of any change, never its sign.",
     )
     parser.add_argument(
+        "--resolver-prior-weight",
+        type=float,
+        default=None,
+        help="[resolver_match] Override resolver.root_prior_weight: the blueprint as a "
+        "pseudo-count on the root strategy, in units of CFR iterations. 0 is the "
+        "shipped behaviour, where a starved solve walks away from UNIFORM rather "
+        "than from the blueprint.",
+    )
+    parser.add_argument(
         "--resolver-max-iterations",
         type=int,
         default=None,
@@ -200,6 +209,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         resolver_iterations=args.resolver_iterations,
         resolver_gate_deals=args.deals,
         resolver_gate_workers=args.workers,
+        resolver_root_prior_weight=args.resolver_prior_weight,
         leaf_continuation_fraction=args.leaf_continuation,
         resolver_max_iterations=args.resolver_max_iterations,
         resolver_allin_runouts=args.resolver_allin_runouts,

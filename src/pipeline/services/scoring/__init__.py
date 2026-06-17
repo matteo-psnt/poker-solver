@@ -76,6 +76,7 @@ def evaluate_and_record(
     resolver_gate_workers: int = 1,
     leaf_continuation_fraction: float | None = None,
     resolver_max_iterations: int | None = None,
+    resolver_root_prior_weight: float | None = None,
     resolver_allin_runouts: int = 1,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
@@ -125,6 +126,7 @@ def evaluate_and_record(
             num_deals=resolver_gate_deals,
             leaf_continuation_fraction=leaf_continuation_fraction,
             max_iterations=resolver_max_iterations,
+            root_prior_weight=resolver_root_prior_weight,
             workers=resolver_gate_workers,
             allin_runouts=resolver_allin_runouts,
         )
