@@ -64,6 +64,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the magnitude of any change, never its sign.",
     )
     parser.add_argument(
+        "--resolver-leaf-rollouts",
+        type=int,
+        default=None,
+        help="[resolver_match] Override resolver.leaf_rollouts. Leaf valuation is "
+        "~91%% of a solve and loops once per sampled runout, so this is the exchange "
+        "rate between leaf accuracy and DEPTH at a fixed budget: 31.7 ms/iteration "
+        "at 8 rollouts against 6.8 at 1, i.e. 9 iterations per 300 ms versus 44.",
+    )
+    parser.add_argument(
         "--resolver-prior-weight",
         type=float,
         default=None,
@@ -210,6 +219,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         resolver_gate_deals=args.deals,
         resolver_gate_workers=args.workers,
         resolver_root_prior_weight=args.resolver_prior_weight,
+        resolver_leaf_rollouts=args.resolver_leaf_rollouts,
         leaf_continuation_fraction=args.leaf_continuation,
         resolver_max_iterations=args.resolver_max_iterations,
         resolver_allin_runouts=args.resolver_allin_runouts,
