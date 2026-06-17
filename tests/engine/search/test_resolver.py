@@ -17,9 +17,11 @@ from src.engine.search.range_inference import (
     replace_actor_hole_cards,
 )
 from src.engine.search.resolver import HUResolver
+from src.engine.search.tree_builder import build_local_tree
 from tests.test_helpers import (
     DummyCardAbstraction,
     build_test_solver,
+    build_trained_test_solver,
     make_test_config,
     skew_preflop_infoset,
 )
@@ -418,3 +420,102 @@ def test_the_leaf_continuation_knob_reaches_the_solve(monkeypatch):
             config=config.resolver,
         ).solve(state, time_budget_ms=25)
         assert seen[-1] == expected
+
+
+class TestStarvedSolveDegradesToTheBlueprint:
+    """A truncated subgame solve must fall back on the blueprint, not on uniform.
+
+    MEASURED failure this pins: `_prepare_nodes` starts regrets at ZERO, and
+    regret matching from zero regrets IS the uniform strategy. At the shipped
+    `time_budget_ms=300` the solve gets ~9 iterations (~32 ms each), which
+    barely move it -- the resolver's root row had entropy 1.604 against a 1.609
+    maximum, i.e. uniform random over {check, three bet sizes, all-in}. The
+    duplicate-deal gate scored that at -486 mbb/hand (-48.6 BB/100) against the
+    bare blueprint it wraps, over 20,000 deals, p~0.
+
+    `root_prior_weight` seeds the root's `strategy_sum` with the blueprint as a
+    pseudo-count worth that many iterations, so a starved solve returns the
+    blueprint instead.
+    """
+
+    ITERATIONS = 8
+
+    def _row(self, weight: float):
+        """The raw (unblended) resolver root row, and the blueprint's, at ``weight``.
+
+        A TRAINED blueprint, because an untrained one is itself uniform and the
+        comparison below would be vacuous.
+        """
+        solver = build_trained_test_solver(
+            300,
+            resolver={"max_iterations": self.ITERATIONS, "root_prior_weight": weight},
+        )
+        state = solver.deal_initial_state()
+        resolver = HUResolver(
+            blueprint=solver,
+            action_model=solver.action_model,
+            rules=solver.rules,
+            config=solver.config.resolver,
+            rng=np.random.default_rng(7),
+        )
+        actions, solution = resolver._solve_root(
+            state, infer_ranges(state, solver), solver.config.resolver.time_budget_ms
+        )
+        combo = combo_index_for(state.hole_cards[state.current_player])
+        blueprint = resolver._blueprint_strategy(state, list(actions), use_average=True)
+        return solution.root_strategy[combo], blueprint
+
+    @staticmethod
+    def _tv(a, b):
+        return 0.5 * float(np.abs(a - b).sum())
+
+    def test_an_unseeded_starved_solve_is_far_from_the_blueprint(self):
+        """The defect, stated as what is ROBUST across states.
+
+        WHERE it lands varies: on a flop state it was near-uniform (entropy
+        1.604 against a 1.609 maximum, i.e. uniform over check/three bets/all-in),
+        while this preflop root concentrates somewhere else entirely. What holds
+        either way is that ~8 iterations from zero regrets do not reach the
+        blueprint, so the resolver overrides a trained strategy with a
+        half-solved one. Do not re-assert "near uniform" -- that was one state.
+        """
+        unseeded, blueprint = self._row(0.0)
+        assert self._tv(unseeded, blueprint) > 0.2
+
+    def test_a_prior_pulls_a_starved_solve_onto_the_blueprint(self):
+        unseeded, blueprint = self._row(0.0)
+        seeded, _ = self._row(50.0)
+        assert self._tv(seeded, blueprint) < self._tv(unseeded, blueprint) / 2.0
+
+    def test_the_prior_does_not_lock_cfr_out(self):
+        """It is a pseudo-count, not an override: the solve still moves the row."""
+        seeded, blueprint = self._row(50.0)
+        assert self._tv(seeded, blueprint) > 0.0
+
+    def test_zero_weight_is_exactly_todays_behaviour(self):
+        first, _ = self._row(0.0)
+        second, _ = self._row(0.0)
+        assert np.array_equal(first, second)
+
+    def test_a_misshaped_prior_is_refused(self):
+        """A wrong-shaped prior is a caller bug; silently ignoring it hides the fix."""
+        from src.engine.search.subgame_cfr import solve_subgame
+
+        solver = build_trained_test_solver(20)
+        state = solver.deal_initial_state()
+        tree = build_local_tree(
+            state, action_model=solver.action_model, rules=solver.rules, max_depth=2
+        )
+        ranges = infer_ranges(state, solver)
+        with pytest.raises(ValueError, match="expected"):
+            solve_subgame(
+                tree,
+                hero=state.current_player,
+                hero_range=ranges.p0,
+                opponent_range=ranges.p1,
+                rules=solver.rules,
+                budget_ms=5,
+                max_iterations=2,
+                root_prior=np.zeros((3, 3)),
+                root_prior_weight=1.0,
+            )

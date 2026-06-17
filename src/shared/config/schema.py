@@ -270,6 +270,23 @@ class ResolverConfig(StrictFrozenModel):
     # check-down: it is a different biased guess with no choice attached. Read
     # the MAGNITUDE of the change, never its sign.
     leaf_continuation_fraction: NonNegFloat = Field(default=0.0)
+    # The blueprint as a PSEUDO-COUNT on the root's average strategy, in units
+    # of CFR iterations: the solve's `strategy_sum` accumulates
+    # `hero_range * strategy` once per iteration, so seeding it with
+    # `root_prior_weight * hero_range * blueprint` makes the blueprint worth
+    # exactly that many iterations and the root strategy an ADAPTIVE blend --
+    # blueprint-dominated when the solve is starved, CFR-dominated when it is
+    # not.
+    #
+    # MEASURED why: `_prepare_nodes` starts regrets at zero, so regret matching
+    # begins at UNIFORM and 9 iterations barely move it. At the shipped budget
+    # the resolver's root row had entropy 1.604 against a 1.609 maximum -- it
+    # was playing uniform random over {check, 3 bet sizes, all-in}, and the
+    # duplicate-deal gate scored the deployed resolver at -486 mbb/hand
+    # (-48.6 BB/100) against the bare blueprint it wraps.
+    #
+    # 0.0 is today's behaviour, so this changes nothing until it is measured.
+    root_prior_weight: NonNegFloat = Field(default=0.0)
 
 
 class SolverConfig(StrictFrozenModel):

@@ -362,6 +362,8 @@ def solve_subgame(
     max_iterations: int | None = None,
     rng: np.random.Generator | None = None,
     continuation: Continuation = CHECK_DOWN,
+    root_prior: np.ndarray | None = None,
+    root_prior_weight: float = 0.0,
 ) -> SubgameSolution:
     """Run RM+ CFR over the local tree; both players adapt per combo.
 
@@ -370,6 +372,14 @@ def solve_subgame(
     the wall-clock budget runs out (at least ``_MIN_ITERATIONS``); pass
     ``max_iterations`` to pin the iteration count instead — results become
     machine/load-independent (the wall clock is ignored entirely).
+
+    ``root_prior`` is a ``(NUM_COMBOS, n_root_actions)`` blueprint strategy
+    seeded into the root's ``strategy_sum`` as a pseudo-count worth
+    ``root_prior_weight`` iterations. Regrets start at zero, so an unseeded
+    truncated solve returns something close to UNIFORM rather than close to the
+    blueprint — which at the deployed budget is what made the resolver play
+    uniform-random over {check, three bet sizes, all-in}. The prior makes a
+    starved solve degrade toward the blueprint instead.
     """
     root = tree.root
     if not root.actions:
@@ -386,6 +396,18 @@ def solve_subgame(
     _prepare_nodes(root, hero, rules, node_data, leaf_specs)
 
     reach_hero = hero_range.astype(np.float64)
+    if root_prior is not None and root_prior_weight > 0.0:
+        expected = (NUM_COMBOS, len(root.actions))
+        if root_prior.shape != expected:
+            raise ValueError(
+                f"root_prior has shape {root_prior.shape}, expected {expected} "
+                "(one row per combo, one column per root action)."
+            )
+        # Same units the loop accumulates in (`reach_actor * strategy` per
+        # iteration), so the weight really is "worth this many iterations".
+        node_data[id(root)].strategy_sum += (
+            float(root_prior_weight) * reach_hero[:, None] * root_prior
+        )
     reach_opp = opponent_range.astype(np.float64)
     ctx = _PassContext(
         hero=hero,
