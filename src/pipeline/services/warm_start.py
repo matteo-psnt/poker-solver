@@ -116,6 +116,7 @@ def regrets_encoding(
     weight: float,
     *,
     shape: str = "flat",
+    base_regrets: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Non-negative regrets whose regret-matching is ``strategy_sum`` row-normalised.
 
@@ -148,7 +149,17 @@ def regrets_encoding(
     scale = np.full(row_starts.shape[0], float(weight))
     if shape == "confidence":
         scale = scale * row_confidence(normalised, row_starts, slot_width)
-    return normalised * np.repeat(scale, slot_width), seeded
+    regrets = normalised * np.repeat(scale, slot_width)
+    if base_regrets is not None:
+        # ADDED, not replaced. The two priors answer different questions -- an
+        # equity guess covers rows nothing reached, a trained prior covers rows
+        # it has a real opinion about -- so each contributes its own confidence
+        # and regret matching resolves the overlap. Replacing would discard the
+        # guess exactly where the trained prior is weakest.
+        base = np.asarray(base_regrets, dtype=np.float64)
+        regrets = regrets + base
+        seeded = seeded | (np.add.reduceat(base, row_starts) > NORMALIZE_EPS)
+    return regrets, seeded
 
 
 def seed_checkpoint(
@@ -160,6 +171,7 @@ def seed_checkpoint(
     abstraction_hash: str | None,
     at_iteration: int | None = None,
     shape: str = "flat",
+    base_regrets: np.ndarray | None = None,
 ) -> int:
     """Write iteration-0 regrets encoding ``source_run``'s average strategy.
 
@@ -186,7 +198,12 @@ def seed_checkpoint(
     starts = _row_slot_starts(tree)
     slot_width = np.repeat(tree.num_actions, tree.buckets_per_node)
     regrets, seeded = regrets_encoding(
-        source.strategy_sum, starts, slot_width, float(effective_iterations), shape=shape
+        source.strategy_sum,
+        starts,
+        slot_width,
+        float(effective_iterations),
+        shape=shape,
+        base_regrets=base_regrets,
     )
 
     target = StaticArrayStorage(tree)

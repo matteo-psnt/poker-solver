@@ -191,16 +191,17 @@ def train_static(
     # resuming one that never got seeded is not a smaller version of the
     # experiment -- it is a different arm wearing its label.
     seeded = False
-    if equity_prior_weight and warm_start_from is not None:
-        raise ValueError(
-            "--equity-prior and --warm-start-from are alternative seeds; passing both "
-            "would leave which one the run actually carries decided by ordering."
-        )
+    # Composable: equity is the base everywhere, the trained prior adds its own
+    # confidence where it has one. Kept as a base rather than a second seeding
+    # pass so the two never race to write the same iteration-0 checkpoint.
+    equity_base = None
     if equity_prior_weight and not resuming:
-        equity_prior.seed_checkpoint(
+        equity_base = equity_prior.tree_regrets(config, weight=equity_prior_weight)
+    if equity_base is not None and warm_start_from is None and not resuming:
+        equity_prior.write_checkpoint(
             config,
             run_dir=run_dir,
-            weight=equity_prior_weight,
+            regrets=equity_base,
             abstraction_hash=tracker.metadata.card_abstraction_hash,
         )
         (run_dir / warm_start.SEEDED_MARKER).write_text(
@@ -232,10 +233,12 @@ def train_static(
             abstraction_hash=tracker.metadata.card_abstraction_hash,
             at_iteration=warm_start_at,
             shape=warm_start_shape,
+            base_regrets=equity_base,
         )
         (run_dir / warm_start.SEEDED_MARKER).write_text(
             f"{warm_start_from}@{warm_start_at or 'current'} "
-            f"weight={warm_start_weight} shape={warm_start_shape}\n"
+            f"weight={warm_start_weight} shape={warm_start_shape} "
+            f"equity={equity_prior_weight}\n"
         )
         seeded = True
 
