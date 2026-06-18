@@ -119,6 +119,7 @@ __all__ = (
     "DEFAULT_TEMPERATURE",
     "action_aggression",
     "bucket_strength",
+    "build_tree",
     "seed_regrets",
     "strength_policy",
     "tree_policy",
@@ -156,7 +157,14 @@ def seed_regrets(tree: BettingTree, weight: float, temperature: float = DEFAULT_
     return regrets, seeded
 
 
-def _tree_for(config: Config) -> BettingTree:
+def build_tree(config: Config) -> BettingTree:
+    """The tree the guess is laid out over.
+
+    Public because building it reloads the card abstraction, which is the
+    expensive part of seeding: a caller wanting regrets, a fallback and a
+    checkpoint should build ONCE and pass it back in. Three implicit builds cost
+    ~50 minutes of setup before iteration 1.
+    """
     return build_betting_tree(
         GameRules(config.game.small_blind, config.game.big_blind),
         ActionModel(config),
@@ -165,8 +173,29 @@ def _tree_for(config: Config) -> BettingTree:
     )
 
 
+def tree_policy(
+    config: Config,
+    *,
+    temperature: float = DEFAULT_TEMPERATURE,
+    tree: BettingTree | None = None,
+) -> np.ndarray:
+    """The guess as a per-row probability distribution -- every row sums to 1.
+
+    The one quantity worth computing: regrets are this times a weight and the
+    fallback is this times a mass. They land in different arrays -- regrets steer
+    TRAINING, ``strategy_sum`` decides what is PLAYED -- so seeding one does not
+    seed the other, but both describe this single guess.
+    """
+    regrets, _ = seed_regrets(tree if tree is not None else build_tree(config), 1.0, temperature)
+    return regrets
+
+
 def tree_regrets(
-    config: Config, *, weight: int, temperature: float = DEFAULT_TEMPERATURE
+    config: Config,
+    *,
+    weight: int,
+    temperature: float = DEFAULT_TEMPERATURE,
+    tree: BettingTree | None = None,
 ) -> np.ndarray:
     """The guess as a regret vector, without writing anything.
 
@@ -175,19 +204,7 @@ def tree_regrets(
     """
     if weight <= 0:
         raise ValueError("equity prior weight must be positive; it scales the guess.")
-    regrets, _ = seed_regrets(_tree_for(config), float(weight), temperature)
-    return regrets
-
-
-def tree_policy(config: Config, *, temperature: float = DEFAULT_TEMPERATURE) -> np.ndarray:
-    """The guess as a per-row probability distribution -- every row sums to 1.
-
-    The same vector ``tree_regrets`` scales, kept separate because the two land
-    in different arrays: regrets steer TRAINING, ``strategy_sum`` decides what
-    is PLAYED. Seeding one does not seed the other.
-    """
-    regrets, _ = seed_regrets(_tree_for(config), 1.0, temperature)
-    return regrets
+    return tree_policy(config, temperature=temperature, tree=tree) * float(weight)
 
 
 def write_checkpoint(
@@ -197,6 +214,7 @@ def write_checkpoint(
     regrets: np.ndarray,
     abstraction_hash: str | None,
     fallback: np.ndarray | None = None,
+    tree: BettingTree | None = None,
 ) -> int:
     """Write an iteration-0 checkpoint holding ``regrets``.
 
@@ -211,7 +229,7 @@ def write_checkpoint(
     uniform however good the prior there was. Size it far below the mass real
     training accumulates, so it decides untouched rows and nothing else.
     """
-    tree = _tree_for(config)
+    tree = tree if tree is not None else build_tree(config)
     per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
     starts = np.zeros(tree.num_rows, dtype=np.int64)
     np.cumsum(per_row[:-1], out=starts[1:])
