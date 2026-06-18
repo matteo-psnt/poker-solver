@@ -149,6 +149,8 @@ class NodePlan(TaskFields, Protocol):
     def warm_start_at(self) -> int: ...
     @property
     def warm_start_shape(self) -> str: ...
+    @property
+    def equity_prior_weight(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -443,6 +445,8 @@ class TrainTask(TaskKind):
                 argv += ["--warm-start-at", str(plan.warm_start_at)]
             if plan.warm_start_shape:
                 argv += ["--warm-start-shape", plan.warm_start_shape]
+        if plan.equity_prior_weight:
+            argv += ["--equity-prior", str(plan.equity_prior_weight)]
         # Appended only when set: `--arm ""` records an arm literally named
         # empty string rather than an unaffiliated run.
         for flag, value in (

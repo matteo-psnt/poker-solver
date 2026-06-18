@@ -124,6 +124,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "indifferent about, so they stop braking the solver.",
     )
     parser.add_argument(
+        "--equity-prior",
+        type=int,
+        default=0,
+        dest="equity_prior_weight",
+        help="[scalar] Seed a fresh run with a strength-aware opening guess "
+        "instead of uniform. Needs no prior run.",
+    )
+    parser.add_argument(
         "--timeout",
         default=spec.DEFAULT_TIMEOUT,
         help="Wall-clock ceiling on the TRAINING process. It fires before the task-level "
@@ -195,6 +203,7 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 warm_start_weight=args.warm_start_weight,
                 warm_start_at=args.warm_start_at,
                 warm_start_shape=args.warm_start_shape,
+                equity_prior_weight=args.equity_prior_weight,
             )
         ]
     )
