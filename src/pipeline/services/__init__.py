@@ -53,7 +53,7 @@ from src.pipeline.services.vector_blueprint import (
     VectorBlueprintOutput,
     train_vector_blueprint,
 )
-from src.pipeline.services.warm_start import DEFAULT_EFFECTIVE_ITERATIONS
+from src.pipeline.services.warm_start import DEFAULT_EFFECTIVE_ITERATIONS, PRIOR_SHAPES
 from src.pipeline.training.run_tracker import ExperimentTag
 
 __all__ = [
@@ -61,6 +61,7 @@ __all__ = [
     "DEFAULT_EFFECTIVE_ITERATIONS",
     "EXACT_BR_ESTIMATOR_LABEL",
     "LBR_ESTIMATOR_LABEL",
+    "PRIOR_SHAPES",
     "CurveOutput",
     "CurvePoint",
     "EvaluationOutput",

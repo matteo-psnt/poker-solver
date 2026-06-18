@@ -68,6 +68,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EFFECTIVE_ITERATIONS = 1000
 
+PRIOR_SHAPES = ("flat", "confidence")
+"""How a prior's weight is spread across rows. See :func:`regrets_encoding`."""
+
 SEEDED_MARKER = ".warm-started"
 # Written once a run is seeded, so a resume can tell "carries a prior" from
 # "asked for one and never got it" -- two 30M sweeps turned out to be controls.
@@ -80,18 +83,61 @@ def _row_slot_starts(tree) -> np.ndarray:
     return starts
 
 
+def row_confidence(
+    normalised: np.ndarray, row_starts: np.ndarray, slot_width: np.ndarray
+) -> np.ndarray:
+    """How decisive the prior is at each row, in ``[0, 1]``.
+
+    ``1 - H/H_max``, where ``H`` is the Shannon entropy of the row's strategy.
+    A row the prior has committed to (95/3/2) scores near 1; a row it is
+    indifferent about (34/33/33) scores near 0.
+
+    Why this is not cosmetic: a FLAT weight seeds a near-uniform row at full
+    strength, and those units then have to be overcome before the solver can
+    move away from uniform. That is not a neutral prior -- it is an active brake
+    on exactly the rows where the prior had no opinion to contribute. Scaling by
+    confidence lets those rows get out of the way.
+
+    Rows of width 1 have no choice to be confident about; they score 1 so a
+    forced action is never damped.
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        terms = np.where(normalised > 0.0, -normalised * np.log(normalised), 0.0)
+    entropy = np.add.reduceat(terms, row_starts)
+    widths = slot_width.astype(np.float64)
+    max_entropy = np.log(np.maximum(widths, 2.0))
+    return np.clip(1.0 - entropy / max_entropy, 0.0, 1.0)
+
+
 def regrets_encoding(
-    strategy_sum: np.ndarray, row_starts: np.ndarray, slot_width: np.ndarray, weight: float
+    strategy_sum: np.ndarray,
+    row_starts: np.ndarray,
+    slot_width: np.ndarray,
+    weight: float,
+    *,
+    shape: str = "flat",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Non-negative regrets whose regret-matching is ``strategy_sum`` row-normalised.
 
     Pure, so the property that matters — matching these regrets reproduces the
     source strategy — is testable without a tree, a config or a disk.
 
+    ``shape`` decides how the weight is DISTRIBUTED across rows; it never changes
+    the strategy any row plays, only how hard that row resists being moved.
+
+        flat        every row claims ``weight``. One number, one meaning
+                    everywhere, and the shape every measured result so far used.
+        confidence  a row claims ``weight * row_confidence``, so a prior with no
+                    opinion does not brake the rows it has no opinion about.
+
     Returns the regrets and a mask of rows that carried any mass. A row with none
     is left at zero, which regret-matching reads as uniform; that is the honest
     answer for a row the source never gave one for.
     """
+    if shape not in PRIOR_SHAPES:
+        raise ValueError(
+            f"unknown prior shape '{shape}'; expected one of {', '.join(PRIOR_SHAPES)}"
+        )
     strategy = np.asarray(strategy_sum, dtype=np.float64)
     totals = np.add.reduceat(strategy, row_starts)
     seeded = totals > NORMALIZE_EPS
@@ -99,7 +145,10 @@ def regrets_encoding(
     normalised = np.divide(
         strategy, per_slot_total, out=np.zeros_like(strategy), where=per_slot_total > NORMALIZE_EPS
     )
-    return normalised * float(weight), seeded
+    scale = np.full(row_starts.shape[0], float(weight))
+    if shape == "confidence":
+        scale = scale * row_confidence(normalised, row_starts, slot_width)
+    return normalised * np.repeat(scale, slot_width), seeded
 
 
 def seed_checkpoint(
@@ -110,6 +159,7 @@ def seed_checkpoint(
     effective_iterations: int,
     abstraction_hash: str | None,
     at_iteration: int | None = None,
+    shape: str = "flat",
 ) -> int:
     """Write iteration-0 regrets encoding ``source_run``'s average strategy.
 
@@ -136,7 +186,7 @@ def seed_checkpoint(
     starts = _row_slot_starts(tree)
     slot_width = np.repeat(tree.num_actions, tree.buckets_per_node)
     regrets, seeded = regrets_encoding(
-        source.strategy_sum, starts, slot_width, float(effective_iterations)
+        source.strategy_sum, starts, slot_width, float(effective_iterations), shape=shape
     )
 
     target = StaticArrayStorage(tree)
@@ -158,7 +208,9 @@ def seed_checkpoint(
 
 __all__ = (
     "DEFAULT_EFFECTIVE_ITERATIONS",
+    "PRIOR_SHAPES",
     "SEEDED_MARKER",
     "regrets_encoding",
+    "row_confidence",
     "seed_checkpoint",
 )

@@ -165,6 +165,7 @@ KEYS: tuple[Key, ...] = (
     Key("RUN_WARM_START_FROM", "warm_start_from", "warm_start_from"),
     Key("RUN_WARM_START_WEIGHT", "warm_start_weight", "warm_start_weight", _number, _int),
     Key("RUN_WARM_START_AT", "warm_start_at", "warm_start_at", _number, _int),
+    Key("RUN_WARM_START_SHAPE", "warm_start_shape", "warm_start_shape"),
 )
 
 

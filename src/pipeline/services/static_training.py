@@ -76,6 +76,7 @@ def train_static(
     warm_start_weight: int = warm_start.DEFAULT_EFFECTIVE_ITERATIONS,
     warm_start_at: int | None = None,
     progress_file: Path | None = None,
+    warm_start_shape: str = "flat",
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
 
@@ -213,9 +214,11 @@ def train_static(
             effective_iterations=warm_start_weight,
             abstraction_hash=tracker.metadata.card_abstraction_hash,
             at_iteration=warm_start_at,
+            shape=warm_start_shape,
         )
         (run_dir / warm_start.SEEDED_MARKER).write_text(
-            f"{warm_start_from}@{warm_start_at or 'current'} weight={warm_start_weight}\n"
+            f"{warm_start_from}@{warm_start_at or 'current'} "
+            f"weight={warm_start_weight} shape={warm_start_shape}\n"
         )
         seeded = True
 

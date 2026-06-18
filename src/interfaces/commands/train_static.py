@@ -76,6 +76,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "ladder and name the minimum. Omitted seeds from the manifest's current.",
     )
     parser.add_argument(
+        "--warm-start-shape",
+        default="flat",
+        choices=services.PRIOR_SHAPES,
+        dest="warm_start_shape",
+        help="How the prior's weight is spread across rows. flat = every row "
+        "claims the full weight. confidence = a row claims less the more "
+        "indifferent the prior is there, so rows it had no view on stop braking "
+        "the solver. Changes resistance, never the strategy a row plays.",
+    )
+    parser.add_argument(
         "--run",
         default=None,
         help="Continue an EXISTING run instead of starting one. --iterations is an "
@@ -115,6 +125,7 @@ def run(args: argparse.Namespace) -> StaticTrainingPayload:
         warm_start_weight=args.warm_start_weight,
         warm_start_at=args.warm_start_at,
         progress_file=Path(args.progress_file) if args.progress_file else None,
+        warm_start_shape=args.warm_start_shape,
     )
     return StaticTrainingPayload(**out.model_dump())
 

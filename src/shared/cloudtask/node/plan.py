@@ -64,6 +64,7 @@ class TaskPlan:
     warm_start_from: str = ""
     warm_start_weight: int = 0
     warm_start_at: int = 0
+    warm_start_shape: str = ""
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     eval_method: str = DEFAULT_EVAL_METHOD
     eval_rungs: tuple[str, ...] = ()
