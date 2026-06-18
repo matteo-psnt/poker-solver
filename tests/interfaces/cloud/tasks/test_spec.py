@@ -160,6 +160,8 @@ class TestEnvironment:
             "RUN_WARM_START_AT",
             "RUN_WARM_START_SHAPE",
             "RUN_EQUITY_PRIOR",
+            "RUN_EQUITY_PRIOR_TEMPERATURE",
+            "RUN_EQUITY_PRIOR_FALLBACK",
             "RUN_CHECKPOINT_EVERY",
             "RUN_GIT_COMMIT",
             "RUN_GIT_DIRTY",

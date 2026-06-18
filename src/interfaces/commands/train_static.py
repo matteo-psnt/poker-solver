@@ -97,6 +97,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "ones training has not reached. 0 disables.",
     )
     parser.add_argument(
+        "--equity-prior-temperature",
+        type=float,
+        default=services.DEFAULT_EQUITY_TEMPERATURE,
+        help="How sharply the guess commits. Low sharpens toward one action; "
+        "high flattens toward uniform, which is the thing being replaced -- so a "
+        "large value is a NULL arm that must reproduce a cold control.",
+    )
+    parser.add_argument(
+        "--equity-prior-fallback",
+        type=float,
+        default=0.0,
+        help="Strategy mass the guess claims, which is what makes it PLAY on rows "
+        "training never reaches; regrets alone only steer training and those rows "
+        "still play uniform. Keep it far below the mass real training accumulates. "
+        "0 disables.",
+    )
+    parser.add_argument(
         "--run",
         default=None,
         help="Continue an EXISTING run instead of starting one. --iterations is an "
@@ -138,6 +155,8 @@ def run(args: argparse.Namespace) -> StaticTrainingPayload:
         progress_file=Path(args.progress_file) if args.progress_file else None,
         warm_start_shape=args.warm_start_shape,
         equity_prior_weight=args.equity_prior_weight,
+        equity_prior_temperature=args.equity_prior_temperature,
+        equity_prior_fallback=args.equity_prior_fallback,
     )
     return StaticTrainingPayload(**out.model_dump())
 

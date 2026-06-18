@@ -11,6 +11,11 @@ This supplies the fallback instead: play toward the aggression your hand
 strength justifies. Strong hands lean to betting and raising, weak ones to
 checking and folding, and everything in between sits in between.
 
+It reaches the table through two INDEPENDENT channels, and seeding one does not
+seed the other. Regrets steer where training goes; ``strategy_sum`` is what
+evaluation actually plays. A prior written only into regrets never plays on a
+row training does not reach -- exactly the rows it exists for.
+
 Two facts make it free to compute -- no new data, no extra pass:
 
 ``bucket index IS hand strength``. The abstraction fits its clusters with
@@ -116,6 +121,7 @@ __all__ = (
     "bucket_strength",
     "seed_regrets",
     "strength_policy",
+    "tree_policy",
     "tree_regrets",
     "write_checkpoint",
 )
@@ -173,29 +179,53 @@ def tree_regrets(
     return regrets
 
 
+def tree_policy(config: Config, *, temperature: float = DEFAULT_TEMPERATURE) -> np.ndarray:
+    """The guess as a per-row probability distribution -- every row sums to 1.
+
+    The same vector ``tree_regrets`` scales, kept separate because the two land
+    in different arrays: regrets steer TRAINING, ``strategy_sum`` decides what
+    is PLAYED. Seeding one does not seed the other.
+    """
+    regrets, _ = seed_regrets(_tree_for(config), 1.0, temperature)
+    return regrets
+
+
 def write_checkpoint(
     config: Config,
     *,
     run_dir,
     regrets: np.ndarray,
     abstraction_hash: str | None,
+    fallback: np.ndarray | None = None,
 ) -> int:
     """Write an iteration-0 checkpoint holding ``regrets``.
 
     Needs no source run: unlike a warm start this is computed from the tree and
     the abstraction alone, so it applies to a COLD run -- which is the point,
     since the rows it is meant to help are the ones nothing has reached.
+
+    ``fallback`` seeds ``strategy_sum``, which is the ONLY array evaluation
+    reads: `average_strategy` normalises `strategy_sum` and returns uniform when
+    it sums to zero, never consulting regrets. Without it the guess reaches the
+    scoreboard only by steering training, and a row training never touches plays
+    uniform however good the prior there was. Size it far below the mass real
+    training accumulates, so it decides untouched rows and nothing else.
     """
     tree = _tree_for(config)
     per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
     starts = np.zeros(tree.num_rows, dtype=np.int64)
     np.cumsum(per_row[:-1], out=starts[1:])
-    seeded = np.add.reduceat(np.asarray(regrets, dtype=np.float64), starts) > 0.0
 
     storage = StaticArrayStorage(tree)
     storage.regrets[:] = np.asarray(regrets).astype(storage.regrets.dtype)
-    # strategy_sum stays ZERO: the reported blueprint must average real training
-    # only, exactly as for a warm start.
-    storage.visited[:] = seeded
+    if fallback is not None:
+        storage.strategy_sum[:] = np.asarray(fallback).astype(storage.strategy_sum.dtype)
+    # `visited` gates whether a row answers AT ALL, so it must track playable
+    # policy -- strategy_sum -- and not regret mass. Marking a regret-only row
+    # visited makes it answer uniform while reporting itself covered, which is
+    # how the fallback-mass diagnostic came to read ~0% on a table that was
+    # playing uniform everywhere the prior was meant to help.
+    playable = np.add.reduceat(np.asarray(storage.strategy_sum, dtype=np.float64), starts) > 0.0
+    storage.visited[:] = playable
     save_checkpoint(storage, run_dir, iteration=0, abstraction_id=abstraction_hash)
-    return int(seeded.sum())
+    return int(playable.sum())
