@@ -19,6 +19,7 @@ from src.core.game.state import Card, GameState, Street
 from src.engine.search.range_inference import (
     ALL_COMBOS,
     COMBO_MASKS,
+    NUM_COMBOS,
     combo_index_for,
     replace_actor_hole_cards,
 )
@@ -826,3 +827,71 @@ class TestLookaheadScorerMode:
         )
         assert serial.exploitability_mbb == parallel.exploitability_mbb
         assert serial.hand_outcomes == parallel.hand_outcomes
+
+
+class TestScoringAnUnenumeratedProxy:
+    """Scoring must not raise on a proxy that lands off the enumerated tree.
+
+    MEASURED failure this pins: an off-tree LBR run died after 3.7 h with
+
+        KeyError: State is off-tree: street=river,
+                  betting_sequence='c-b1.00-r1.00-r0.45-c-b0.74-c-b0.32-r0.25-a'
+
+    from `_opp_fold_probs` -> `action_matrix` -> `identity` -> `node_id`.
+    `_opp_fold_probs` prices a candidate by applying each shadow proxy and
+    reading the opponent's response there. That lookahead never goes through
+    `ShadowTracker.commit`, so shadow invariant 4 does not reach it: a proxy can
+    be legal at its node and still land on a line the tree never enumerated,
+    where `TreePolicySource` raises BY DESIGN rather than averaging a uniform
+    fallback into the bound.
+
+    The `--opponent blueprint` arm survived the same off-tree menu -- its
+    trajectories never reached such a line -- so this is latent in both arms and
+    only the resolver's different actions exposed it.
+    """
+
+    @pytest.fixture(scope="class")
+    def solver(self):
+        return _build_solver(0)
+
+    def test_scoring_skips_the_proxy_instead_of_raising(self, solver):
+        engine = _engine(solver, include_off_tree=True)
+        # Stacks the tree was never enumerated for, so the response node to any
+        # aggressive proxy is genuinely unaddressable -- the same condition the
+        # river line hit, reachable without replaying eight streets of betting.
+        state = _constructed_flop_state(
+            300, (900, 1000), to_call=100, history=(call(), bet(100)), last_aggressor=1
+        )
+        engine.shadow.start(state)
+        menu = engine._action_menu(state, engine.shadow)
+        aggressive = [
+            c
+            for c in menu
+            if c.real_action.type in (ActionType.BET, ActionType.RAISE, ActionType.ALL_IN)
+        ]
+        assert aggressive, "need an aggressive candidate for this to test anything"
+
+        weights = np.ones(NUM_COMBOS)
+        for candidate in aggressive:
+            value = engine._score_action(
+                state, engine.shadow.state, 1, (Card.new("As"), Card.new("Kd")), weights, candidate
+            )
+            assert np.isfinite(value)
+
+        assert engine.unscorable_proxies > 0, (
+            "the skip counter must move, or this state no longer reproduces the failure "
+            "and the test is passing for the wrong reason"
+        )
+
+    def test_a_reachable_proxy_is_still_priced(self, solver):
+        """The skip must be narrow: an addressable line still contributes."""
+        engine = _engine(solver, include_off_tree=True)
+        state = solver.deal_initial_state()
+        engine.shadow.start(state)
+        menu = engine._action_menu(state, engine.shadow)
+        weights = np.ones(NUM_COMBOS)
+        for candidate in menu:
+            engine._score_action(
+                state, engine.shadow.state, 1, state.hole_cards[0], weights, candidate
+            )
+        assert engine.unscorable_proxies == 0

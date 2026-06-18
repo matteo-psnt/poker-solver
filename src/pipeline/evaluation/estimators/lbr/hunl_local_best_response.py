@@ -175,6 +175,10 @@ class _HUNLLocalBestResponse:
         self.card_abstraction = blueprint.card_abstraction
         self.evaluator = get_evaluator()
         self.showdown = ShowdownValuer(self)
+        # Shadow proxies skipped in scoring because they landed on a line the
+        # tree never enumerated. Counted, not silent: skipping loosens the lower
+        # bound, and a reader has to be able to see how much.
+        self.unscorable_proxies = 0
         # On-tree shadow state for rigorous off-tree play (see module docs).
         self.shadow = ShadowTracker(self.rules, self.action_model)
         if config.scorer not in ("myopic", "lookahead"):
@@ -547,6 +551,20 @@ class _HUNLLocalBestResponse:
         fold_probs = np.zeros(NUM_COMBOS)
         for proxy, weight in shadow_dist:
             resp_state = shadow_state.apply_action(proxy, self.rules)
+            # A proxy is legal at its node but the line it lands on need not be
+            # one the tree ENUMERATED -- this lookahead never goes through
+            # `ShadowTracker.commit`, so invariant 4 does not reach it, and
+            # `TreePolicySource` raises there by design rather than averaging in
+            # a uniform fallback. That killed a 3.7 h off-tree run on the river.
+            #
+            # Skip the proxy rather than crash, and do NOT renormalise the
+            # remaining weight: dropping it understates fold equity, which makes
+            # the aggressive candidate look worse and the exploiter weaker. For
+            # a LOWER bound that is the safe direction -- renormalising could
+            # tighten it on an assumption about lines we could not price.
+            if not resp_state.is_terminal and not self._blueprint_model.covers(resp_state):
+                self.unscorable_proxies += 1
+                continue
             legal, vecs = self._blueprint_model.action_matrix(resp_state, opp)
             for response in legal:
                 if response.type == ActionType.FOLD:

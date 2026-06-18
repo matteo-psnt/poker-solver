@@ -126,6 +126,17 @@ class BlueprintOpponent:
     def observe(self, state: GameState, action: Action) -> None:
         del state, action
 
+    def covers(self, state: GameState) -> bool:
+        """Whether :meth:`action_matrix` can answer at ``state`` at all.
+
+        The companion to the raise `action_matrix` inherits from
+        `TreePolicySource`: a caller exploring a HYPOTHETICAL line (the
+        scorer's one-step lookahead over shadow proxies) can ask first and skip,
+        rather than provoking a deliberate off-tree error on a line it only
+        wanted to price.
+        """
+        return self._policy_source.covers(state)
+
     def action_matrix(
         self, state: GameState, actor: int
     ) -> tuple[list[Action], dict[Action, np.ndarray]]:
