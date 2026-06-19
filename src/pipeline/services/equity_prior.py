@@ -7,14 +7,14 @@ corner case. A cold run had 15.5% of rows still unvisited at 5M iterations and
 ~0.8% at 100M, with a long tail beyond that visited two or three times, which is
 uniform in all but name.
 
-This supplies the fallback instead: play toward the aggression your hand
+This seeds the regrets instead: play toward the aggression your hand
 strength justifies. Strong hands lean to betting and raising, weak ones to
 checking and folding, and everything in between sits in between.
 
-It reaches the table through two INDEPENDENT channels, and seeding one does not
-seed the other. Regrets steer where training goes; ``strategy_sum`` is what
-evaluation actually plays. A prior written only into regrets never plays on a
-row training does not reach -- exactly the rows it exists for.
+It works by steering where TRAINING goes, not by covering the rows training
+misses. Seeding the guess into ``strategy_sum`` so it actually plays on untouched
+rows was measured and adds nothing (-4.3 +/- 8.9 mbb at 30M): by then a cold run
+already reaches 99.2% of rows, so the tail is too small to move a score.
 
 Two facts make it free to compute -- no new data, no extra pass:
 
@@ -28,8 +28,9 @@ bet < all-in is a total order on aggression, and every node's legal actions can
 be placed on it from their type and size alone.
 
 Deliberately NOT a strategy anyone should ship. It is an opening guess whose
-whole job is to be less wrong than uniform on rows training has not reached, and
-to be overwritten wherever it has.
+whole job is to be less wrong than zero, and to be overwritten wherever training
+has an opinion. Measured worth: -80.8 mbb at 30M, decaying as ~T^-0.8, so it buys
+convergence SPEED and leaves the floor where it was.
 """
 
 from __future__ import annotations
@@ -213,37 +214,25 @@ def write_checkpoint(
     run_dir,
     regrets: np.ndarray,
     abstraction_hash: str | None,
-    fallback: np.ndarray | None = None,
     tree: BettingTree | None = None,
 ) -> int:
     """Write an iteration-0 checkpoint holding ``regrets``.
 
     Needs no source run: unlike a warm start this is computed from the tree and
-    the abstraction alone, so it applies to a COLD run -- which is the point,
-    since the rows it is meant to help are the ones nothing has reached.
+    the abstraction alone, so it applies to a COLD run.
 
-    ``fallback`` seeds ``strategy_sum``, which is the ONLY array evaluation
-    reads: `average_strategy` normalises `strategy_sum` and returns uniform when
-    it sums to zero, never consulting regrets. Without it the guess reaches the
-    scoreboard only by steering training, and a row training never touches plays
-    uniform however good the prior there was. Size it far below the mass real
-    training accumulates, so it decides untouched rows and nothing else.
+    Returns the number of rows that will ANSWER, which is zero here -- see the
+    ``visited`` note below. The prior's whole effect is on where training goes.
     """
     tree = tree if tree is not None else build_tree(config)
-    per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
-    starts = np.zeros(tree.num_rows, dtype=np.int64)
-    np.cumsum(per_row[:-1], out=starts[1:])
-
     storage = StaticArrayStorage(tree)
     storage.regrets[:] = np.asarray(regrets).astype(storage.regrets.dtype)
-    if fallback is not None:
-        storage.strategy_sum[:] = np.asarray(fallback).astype(storage.strategy_sum.dtype)
-    # `visited` gates whether a row answers AT ALL, so it must track playable
-    # policy -- strategy_sum -- and not regret mass. Marking a regret-only row
-    # visited makes it answer uniform while reporting itself covered, which is
-    # how the fallback-mass diagnostic came to read ~0% on a table that was
-    # playing uniform everywhere the prior was meant to help.
-    playable = np.add.reduceat(np.asarray(storage.strategy_sum, dtype=np.float64), starts) > 0.0
-    storage.visited[:] = playable
+    # `strategy_sum` stays zero, so `visited` does too. Evaluation reads
+    # `strategy_sum` and nothing else -- `average_strategy` normalises it and
+    # returns uniform on a zero row, never consulting regrets -- and `visited`
+    # gates whether a row answers at all. Deriving it from REGRET mass instead
+    # marks every row covered while it plays uniform, which made
+    # `missing_policy_mass` read ~0% on a table that was uniform throughout.
+    storage.visited[:] = False
     save_checkpoint(storage, run_dir, iteration=0, abstraction_id=abstraction_hash)
-    return int(playable.sum())
+    return 0

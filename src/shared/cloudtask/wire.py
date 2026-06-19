@@ -184,13 +184,6 @@ KEYS: tuple[Key, ...] = (
         _number,
         _float,
     ),
-    Key(
-        "RUN_EQUITY_PRIOR_FALLBACK",
-        "equity_prior_fallback",
-        "equity_prior_fallback",
-        _number,
-        _float,
-    ),
 )
 
 
