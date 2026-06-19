@@ -50,11 +50,16 @@ from src.pipeline.blueprint import construction
 if TYPE_CHECKING:
     from src.shared.config import Config
 
-DEFAULT_TEMPERATURE = 0.25
-"""How sharply the guess commits. Low sharpens toward one action; high flattens
-toward uniform, which is the thing being replaced. Chosen to be soft: this is a
-prior, and a confident wrong prior is worse than a vague one -- the flat-vs-
-confidence result already showed that damping the prior's own uncertainty hurt.
+DEFAULT_TEMPERATURE = 0.50
+"""How sharply the guess commits. MEASURED optimum, 3 training seeds x 6 boards
+at 30M, as mbb/g against a cold control:
+
+    0.10  +17.9 | 0.25  -80.8 | 0.50 -101.7 | 0.75  -73.3
+    1.00  -66.5 | 1.50  -57.0 | uniform +18.5
+
+Unimodal, and both extremes are WORSE than not seeding at all: sharp entrenches a
+confident wrong prior, flat carries no information. The curve is asymmetric --
+overshooting costs far less than undershooting -- so err high if you must.
 """
 
 
