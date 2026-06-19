@@ -178,10 +178,18 @@ def _copy_dir(source: Path, destination: Path, log: Log, *, update: bool = True)
 
 
 def _copy_one(source: Path, destination: Path, log: Log) -> bool:
+    """A loose file, published atomically: a task killed mid-copy must not
+    leave a 0-byte ``run.jsonl`` on the share, which every later fetch of the
+    run pulls and then refuses as "no run record". Snapshots have their
+    completion markers for this; loose files had nothing (measured 08-23: two
+    reference runs' records zeroed under retrying evaluate tasks)."""
+    partial = destination.with_name(destination.name + ".partial")
     try:
-        copy_file(source, destination)
+        copy_file(source, partial)
+        partial.replace(destination)
     except OSError as error:
         log(f"WARN copying {source.name} failed: {error}")
+        _unlink(partial)
         return False
     return True
 
