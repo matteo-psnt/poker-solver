@@ -12,8 +12,14 @@ blueprint's average strategy, on a deterministic restriction of the game:
   subset of canonical flops and, per board, fixed turn/river card subsets.
   Branch weights are public (blocker-blind) probabilities; a deal incompatible
   with a sampled branch contributes zero mass on that branch (the "annulled"
-  game). Dial the sample up and the value converges to the classic
-  full-enumeration abstraction BR of Johanson et al. (2011).
+  game). Dial the sample up and the value converges to the exploitability of
+  the full-enumeration annulled game -- NOT of the real game: every deal blocks
+  four cards, so a void refunds the whole hand with probability 0.217 at the
+  flop, 4/49 at the turn and 4/48 at the river, and a postflop terminal is
+  worth 0.66-0.78 of a preflop fold. ``conditional_chance`` divides each
+  street's weights by that compatible fraction, which is exact at full
+  enumeration (the classic abstraction BR of Johanson et al. 2011) and
+  unbiased over deals at any sample.
 
 The output is a point value with zero evaluation variance: the same checkpoint
 always scores identically, and two checkpoints scored under the same
@@ -96,6 +102,9 @@ class PublicBRConfig:
         means exact enumeration for that street).
     board_seed: seeds every board draw; identical seeds give identical board
         samples and therefore exactly paired evaluations.
+    conditional_chance: weight each street by 1 / (fraction of its draws a
+        four-card deal leaves compatible), so a void is no longer a refund. A
+        different game from the annulled one: a separate comparison tier.
     num_workers: processes over the flop subtrees (one job per preflop line x
         sampled flop x walk), a fork-join BELOW the preflop best-response max,
         where the walk is a plain weighted sum. Above 1 requires a
@@ -114,6 +123,7 @@ class PublicBRConfig:
     num_turns: int = 2
     num_rivers: int = 2
     board_seed: int = 7
+    conditional_chance: bool = False
     num_workers: int = 1
     in_abstraction: bool = False
     """The responder picks ONE action per (public node, bucket), maximising the
@@ -279,6 +289,11 @@ class _FlopJob:
     line: str
 
 
+def _conditional_factor(remaining: int, drawn: int) -> float:
+    """1 / P(a ``drawn``-card draw from ``remaining`` misses the four hole cards)."""
+    return math.comb(remaining, drawn) / math.comb(remaining - 4, drawn)
+
+
 class _BoardPlan:
     """Deterministic sampled chance: fixed flop set, fixed per-board turn/river sets."""
 
@@ -288,16 +303,18 @@ class _BoardPlan:
         infos = list(enumerator.iterate())
         counts = np.array([info.raw_count for info in infos], dtype=np.float64)
         probs = counts / counts.sum()
+        scale = _conditional_factor(52, 3) if config.conditional_chance else 1.0
         if config.num_flops >= len(infos):
             self.flops = [
-                (info.representative, float(p)) for info, p in zip(infos, probs, strict=True)
+                (info.representative, float(p) * scale)
+                for info, p in zip(infos, probs, strict=True)
             ]
         else:
             rng = np.random.default_rng(np.random.SeedSequence([config.board_seed]))
             draws = rng.choice(len(infos), size=config.num_flops, replace=True, p=probs)
             unique, tallies = np.unique(draws, return_counts=True)
             self.flops = [
-                (infos[int(i)].representative, float(n) / config.num_flops)
+                (infos[int(i)].representative, float(n) / config.num_flops * scale)
                 for i, n in zip(unique, tallies, strict=True)
             ]
 
@@ -312,6 +329,8 @@ class _BoardPlan:
         else:
             raise ValueError(f"No deal extends a board of {len(board)} cards")
         weight = 1.0 / len(cards)
+        if self._config.conditional_chance:
+            weight *= _conditional_factor(52 - len(board), 1)
         return [((card,), weight) for card in cards]
 
     def _street_cards(self, board: tuple[Card, ...], stream: int, count: int) -> list[Card]:

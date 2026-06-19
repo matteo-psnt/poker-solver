@@ -31,6 +31,7 @@ CONDITIONAL_TIER_KNOBS = (
     "in_abstraction",
     "policy_threshold",
     "purify",
+    "conditional_chance",
 )
 
 
@@ -107,6 +108,7 @@ def build_exact_br_knobs_from_params(
     in_abstraction: bool = False,
     policy_threshold: float = 0.0,
     purify: bool = False,
+    conditional_chance: bool = False,
 ) -> dict[str, Any]:
     """Canonical exact-BR knob tier: the board plan IS the comparison tier.
 
@@ -114,8 +116,9 @@ def build_exact_br_knobs_from_params(
     two exact-BR evals are comparable iff they scored the same sampled boards.
     Values are deterministic points — within a matched tier a difference is
     exact, with no paired samples or p-value involved. A bucket-constrained
-    responder or a transformed blueprint is a different number, so those enter
-    the tier -- but only when set, so existing rows keep their tier.
+    responder, a transformed blueprint or conditional chance is a different
+    number, so those enter the tier -- but only when set, so existing rows
+    keep their tier.
     """
     knobs: dict[str, Any] = {
         "num_flops": num_flops,
@@ -129,6 +132,8 @@ def build_exact_br_knobs_from_params(
         knobs["purify"] = True
     elif policy_threshold > 0.0:
         knobs["policy_threshold"] = policy_threshold
+    if conditional_chance:
+        knobs["conditional_chance"] = True
     return knobs
 
 

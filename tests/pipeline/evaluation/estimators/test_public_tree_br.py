@@ -11,6 +11,8 @@ on Kuhn/Leduc. Property tests add BR-dominates-on-policy and determinism.
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
 from functools import partial
 
 import numpy as np
@@ -30,6 +32,8 @@ from tests.test_helpers import build_trained_test_solver
 
 CONFIG = PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=3)
 STACK = 400
+_DEAL = {Card.new("As"), Card.new("Kd"), Card.new("7c"), Card.new("2h")}
+_FLOP = tuple(Card.new(c) for c in ("Qs", "Jh", "3d"))
 
 
 def _combo(a: str, b: str) -> tuple[Card, Card]:
@@ -146,6 +150,52 @@ def test_untrained_blueprint_is_all_fallback(uniform_solver):
     result = compute_public_tree_br(uniform_solver, CONFIG, starting_stack=STACK)
     assert result.missing_policy_mass == pytest.approx(1.0)
     assert result.exploitability_mbb >= -1e-6
+
+
+class TestConditionalChance:
+    """The annulled measure voids a branch a deal collides with, and a void pays
+    zero -- the whole hand refunded -- so every postflop terminal is worth less
+    than a preflop fold by the street's compatible fraction. The conditional
+    plan divides that fraction back out; at full enumeration the branch
+    weights then sum to exactly one over the boards a deal can reach."""
+
+    def _compatible_mass(self, plan, board) -> float:
+        return sum(w for cards, w in plan.deal_options(board) if not _DEAL & set(cards))
+
+    @pytest.mark.timeout(30)
+    def test_weights_sum_to_one_over_compatible_boards(self):
+        from src.pipeline.evaluation.estimators.public_tree_br import _BoardPlan
+
+        plan = _BoardPlan(
+            PublicBRConfig(num_flops=1755, num_turns=49, num_rivers=48, conditional_chance=True)
+        )
+        # A canonical flop stands for its whole suit class, so "compatible with
+        # this deal" is only defined per class in expectation: the total is
+        # scaled so a deal's C(48,3)/C(52,3) share of it is exactly one.
+        total = sum(w for _, w in plan.deal_options(()))
+        assert total * math.comb(48, 3) / math.comb(52, 3) == pytest.approx(1.0)
+        assert self._compatible_mass(plan, _FLOP) == pytest.approx(1.0)
+        assert self._compatible_mass(plan, (*_FLOP, Card.new("9c"))) == pytest.approx(1.0)
+
+    @pytest.mark.timeout(30)
+    def test_annulled_weights_sum_below_one(self):
+        from src.pipeline.evaluation.estimators.public_tree_br import _BoardPlan
+
+        plan = _BoardPlan(PublicBRConfig(num_flops=1, num_turns=49, num_rivers=48))
+        assert self._compatible_mass(plan, _FLOP) == pytest.approx(45 / 49)
+
+    @pytest.mark.timeout(60)
+    def test_it_is_a_different_game(self, trained_solver):
+        annulled = compute_public_tree_br(trained_solver, CONFIG, starting_stack=STACK)
+        conditional = compute_public_tree_br(
+            trained_solver,
+            PublicBRConfig(
+                num_flops=2, num_turns=1, num_rivers=1, board_seed=3, conditional_chance=True
+            ),
+            starting_stack=STACK,
+        )
+        assert conditional.exploitability_mbb != annulled.exploitability_mbb
+        assert conditional.exploitability_mbb >= 0.0
 
 
 class TestBranchProgress:
@@ -344,8 +394,12 @@ class TestDecomposition:
             vectorized = self_play[combo_index_for(hero_combo)] / len(game.opp_combos)
             assert vectorized == pytest.approx(scalar, abs=1e-9)
 
-    def test_terms_sum_to_the_gain_on_every_walk(self, trained_solver):
-        result = compute_public_tree_br(trained_solver, self.DECOMPOSED, starting_stack=STACK)
+    @pytest.mark.parametrize("conditional", [False, True], ids=["annulled", "conditional"])
+    def test_terms_sum_to_the_gain_on_every_walk(self, trained_solver, conditional):
+        """Under BOTH chance measures: the conditional one rescales every
+        street's weights, and the identity must survive that rescaling."""
+        config = replace(self.DECOMPOSED, conditional_chance=conditional)
+        result = compute_public_tree_br(trained_solver, config, starting_stack=STACK)
         decomposition = result.decomposition
         assert decomposition is not None
         for walk in decomposition["identity"]["per_walk"]:
@@ -439,7 +493,8 @@ class TestInAbstraction:
         )
         assert vectorized == pytest.approx(scalar, abs=1e-9)
 
-    def test_decomposition_still_sums_under_the_constraint(self, trained_solver):
+    @pytest.mark.parametrize("conditional", [False, True], ids=["annulled", "conditional"])
+    def test_decomposition_still_sums_under_the_constraint(self, trained_solver, conditional):
         config = PublicBRConfig(
             num_flops=2,
             num_turns=1,
@@ -447,6 +502,7 @@ class TestInAbstraction:
             board_seed=3,
             in_abstraction=True,
             decompose=True,
+            conditional_chance=conditional,
         )
         result = compute_public_tree_br(trained_solver, config, starting_stack=STACK)
         assert result.decomposition is not None

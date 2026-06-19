@@ -191,6 +191,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="[exact_br] Record per-street coverage/entropy and the preflop tables of the "
         "checkpoint beside the score.",
     )
+    parser.add_argument(
+        "--br-conditional",
+        action="store_true",
+        help="[exact_br] Condition chance on the deal: divide each street's branch weights by "
+        "the fraction a four-card deal leaves compatible, so a voided branch is not a refund. "
+        "Exact at full enumeration; a separate comparison tier from the annulled default.",
+    )
     parser.add_argument("--seed", type=int, default=None, help="Random seed (default: random).")
 
 
@@ -223,6 +230,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             num_turns=args.br_turns,
             num_rivers=args.br_rivers,
             board_seed=args.br_board_seed,
+            conditional_chance=args.br_conditional,
             # --workers is shared with lbr; exact_br farms flop subtrees over
             # it, one blueprint per process, so memory caps it before cores do.
             num_workers=args.workers,
