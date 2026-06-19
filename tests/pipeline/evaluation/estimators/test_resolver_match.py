@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from src.core.game.actions import call
+from src.core.game.actions import call, check
 from src.core.game.state import Card, Street
 from src.pipeline.evaluation.estimators.resolver_match import (
     _allin_payoff,
@@ -34,8 +34,9 @@ class TestDuplicateDealing:
     def test_streets_deal_from_fixed_positions(self):
         solver = _build_solver(0)
         state = solver.deal_initial_state()
-        # A preflop call closes the street in this engine, leaving the flop chance node.
+        # Limp, then the big blind checks its option: the flop chance node.
         state = state.apply_action(call(), solver.rules)
+        state = state.apply_action(check(), solver.rules)
         assert solver.is_chance_node(state)
 
         deck = Card.get_full_deck()

@@ -255,11 +255,13 @@ class GameRules:
             # Note: betting_history already includes the current action
             actions_this_street = self._get_actions_on_current_street(betting_history)
 
-            # Check-check ends the street; a lone check just passes the action.
-            if (
-                len(actions_this_street) >= 2
-                and actions_this_street[-1].type == ActionType.CHECK
-                and actions_this_street[-2].type == ActionType.CHECK
+            # A check closes the street when the opponent has already acted on
+            # it without aggression: check-check anywhere, or the big blind
+            # checking its option behind a limp (the limp is the one CALL that
+            # stays on its street, see `_get_actions_on_current_street`).
+            if len(actions_this_street) >= 2 and actions_this_street[-2].type in (
+                ActionType.CHECK,
+                ActionType.CALL,
             ):
                 return self._advance_street(state, tuple(betting_history))
 
@@ -276,6 +278,19 @@ class GameRules:
             call_amount = min(to_call, stacks[current_player])
             stacks[current_player] -= call_amount
             pot += call_amount
+
+            # The small blind's limp -- the first action of the hand -- does not
+            # close the street: the big blind has its option (check to the flop
+            # or raise). Every other call closes its street.
+            if len(betting_history) == 1 and stacks[current_player] > 0:
+                return state.replace(
+                    betting_history=tuple(betting_history),
+                    pot=pot,
+                    stacks=self._stacks_to_tuple(stacks),
+                    current_player=opponent,
+                    to_call=0,
+                    last_aggressor=None,
+                )
 
             # After call, street betting is complete
             # Check if anyone is all-in
@@ -361,8 +376,9 @@ class GameRules:
         Extract actions that occurred on the current street.
 
         A street is closed by exactly one of the engine's advancement paths:
-        - CALL (always advances the street / goes to showdown; see ``apply_action``)
-        - Two consecutive CHECKs (check-check advances the street)
+        - CALL, except the small blind's limp (the hand's first action), which
+          hands the big blind its option instead (see ``apply_action``)
+        - A CHECK behind a CHECK, or behind that limp (check-check, limp-check)
 
         We reconstruct the current street by replaying ``betting_history``
         *forward*, resetting the accumulator whenever one of those closers fires
@@ -384,10 +400,10 @@ class GameRules:
         for index, action in enumerate(betting_history):
             actions_this_street.append(action)
 
-            closes_street = action.type == ActionType.CALL or (
+            closes_street = (action.type == ActionType.CALL and index > 0) or (
                 len(actions_this_street) >= 2
                 and actions_this_street[-1].type == ActionType.CHECK
-                and actions_this_street[-2].type == ActionType.CHECK
+                and actions_this_street[-2].type in (ActionType.CHECK, ActionType.CALL)
             )
             if closes_street and index != last_index:
                 actions_this_street = []

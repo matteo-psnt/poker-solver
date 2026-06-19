@@ -108,7 +108,15 @@ class GameConfig(StrictFrozenModel):
 
 
 REQUIRED_PREFLOP_TEMPLATES = frozenset(
-    {"sb_first_in", "bb_vs_limp", "bb_vs_open", "sb_vs_3bet", "bb_vs_4bet", "sb_vs_5bet"}
+    {
+        "sb_first_in",
+        "bb_vs_limp",
+        "sb_vs_limp_raise",
+        "bb_vs_open",
+        "sb_vs_3bet",
+        "bb_vs_4bet",
+        "sb_vs_5bet",
+    }
 )
 REQUIRED_POSTFLOP_TEMPLATES = frozenset(
     {"first_aggressive", "facing_bet", "after_one_raise", "after_two_raises"}
@@ -154,7 +162,11 @@ class ActionModelConfig(StrictFrozenModel):
     preflop_templates: dict[str, list[float | str]] = Field(
         default_factory=lambda: {
             "sb_first_in": ["fold", "call", 2.5, 3.5, 5.0],
-            "bb_vs_limp": ["check", 4.0],
+            # Numeric preflop sizes are the chips committed by THIS action in
+            # big blinds: `bb_vs_limp: 2.0` is a raise to 3bb total over the
+            # posted blind, as `sb_first_in: 2.5` is an open to 3bb total.
+            "bb_vs_limp": ["check", 2.0, 3.0],
+            "sb_vs_limp_raise": ["fold", "call", "2.3x_last", "jam"],
             "bb_vs_open": ["fold", "call"],
             "sb_vs_3bet": ["fold", "call"],
             "bb_vs_4bet": ["fold", "call", "jam"],
