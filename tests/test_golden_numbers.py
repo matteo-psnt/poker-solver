@@ -72,8 +72,10 @@ def test_tree_shape_is_pinned():
     tree = build_betting_tree(
         GameRules(1, 2), ActionModel(config), GoldenBuckets(), starting_stack=20
     )
-    assert len(tree) == 2140
-    assert tree.num_rows == 9432
+    # Re-pinned 2026-08-23: the game gained the big blind's option behind a
+    # limp (lineage break, deliberate). Was 2140 nodes / 9432 rows.
+    assert len(tree) == 2570
+    assert tree.num_rows == 12634
 
 
 def test_training_reaches_the_same_state():
@@ -81,8 +83,9 @@ def test_training_reaches_the_same_state():
     long before they move a rounded score."""
     solver = _trained_solver(400)
     try:
-        assert solver.storage.num_touched_infosets() == 3114
-        assert int(solver.storage.reach_counts.sum()) == 2842
+        # Re-pinned 2026-08-23 with the BB-option tree (was 3114 / 2842).
+        assert solver.storage.num_touched_infosets() == 3930
+        assert int(solver.storage.reach_counts.sum()) == 3341
     finally:
         solver.storage.close()
 
@@ -97,8 +100,10 @@ def test_exact_br_is_bit_stable():
             PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=7),
             starting_stack=20,
         )
-        assert result.exploitability_mbb == pytest.approx(1658.5536976402323, abs=1e-9)
-        assert result.missing_policy_mass == pytest.approx(0.19440688553774604, abs=1e-12)
+        # Re-pinned 2026-08-23 with the BB-option tree (was 1658.5536976402323 /
+        # 0.19440688553774604).
+        assert result.exploitability_mbb == pytest.approx(1735.5097100061157, abs=1e-9)
+        assert result.missing_policy_mass == pytest.approx(0.2195317024184147, abs=1e-12)
     finally:
         solver.storage.close()
 
@@ -113,7 +118,11 @@ def test_more_training_lowers_exploitability():
     """
     config = PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=7)
     scores = []
-    for iterations in (100, 400, 2000):
+    # 400 up, not 100: on the BB-option tree 100 and 400 iterations are both
+    # inside the fallback-dominated regime (53% / 22% uniform mass) and read
+    # 1730.9 / 1735.5 -- noise, not training. From 400 the ladder falls
+    # 1735.5 -> 1611.0 -> 1461.8 (-> 1315.2 at 4000).
+    for iterations in (400, 1000, 2000):
         solver = _trained_solver(iterations)
         try:
             scores.append(compute_public_tree_br(solver, config, starting_stack=20))
@@ -147,7 +156,8 @@ def test_lbr_is_bit_stable():
         result = compute_lbr_exploitability(
             solver, LBRConfig(num_hands=12, equity_runouts=2, seed=7)
         )
-        assert result.exploitability_mbb == pytest.approx(947.4978980029194, abs=1e-9)
+        # Re-pinned 2026-08-23 with the BB-option tree (was 947.4978980029194).
+        assert result.exploitability_mbb == pytest.approx(574.0163194436639, abs=1e-9)
         assert result.num_hands == 12
     finally:
         solver.storage.close()

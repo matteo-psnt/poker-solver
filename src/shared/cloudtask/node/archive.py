@@ -178,10 +178,29 @@ def _copy_dir(source: Path, destination: Path, log: Log, *, update: bool = True)
 
 
 def _copy_one(source: Path, destination: Path, log: Log) -> bool:
+    """A loose file, published atomically: a task killed mid-copy must not
+    leave a 0-byte ``run.jsonl`` on the share, which every later fetch of the
+    run pulls and then refuses as "no run record". Snapshots have their
+    completion markers for this; loose files had nothing (measured 08-23: two
+    reference runs' records zeroed under retrying evaluate tasks)."""
+    # An empty loose file is never content: it is the residue of a truncating
+    # publish, fetched back by a later task. Publishing it would spread the
+    # zeroing to every copy of the run (measured 08-23: a restored record was
+    # re-zeroed within minutes by tasks holding poisoned fetches). Skipping is
+    # success -- the share keeps what it has.
     try:
-        copy_file(source, destination)
+        if source.stat().st_size == 0:
+            log(f"skip publishing empty {source.name} (a record is never 0 bytes)")
+            return True
+    except OSError:
+        return True
+    partial = destination.with_name(destination.name + ".partial")
+    try:
+        copy_file(source, partial)
+        partial.replace(destination)
     except OSError as error:
         log(f"WARN copying {source.name} failed: {error}")
+        _unlink(partial)
         return False
     return True
 

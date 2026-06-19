@@ -18,6 +18,7 @@ from src.shared.config import ActionModelConfig
 PREFLOP: dict[str, list[float | str]] = {
     "sb_first_in": ["fold", "call", 2.5],
     "bb_vs_limp": ["check", 4.0],
+    "sb_vs_limp_raise": ["fold", "call", "2.3x_last", "jam"],
     "bb_vs_open": ["fold", "call"],
     "sb_vs_3bet": ["fold", "call"],
     "bb_vs_4bet": ["fold", "call", "jam"],

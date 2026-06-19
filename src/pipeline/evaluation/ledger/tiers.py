@@ -26,6 +26,12 @@ CONDITIONAL_TIER_KNOBS = (
     "num_flops",
     "num_turns",
     "num_rivers",
+    # exact_br responder/strategy variants. Present on a row only when set, so
+    # every row written before them pairs exactly as it did.
+    "in_abstraction",
+    "policy_threshold",
+    "purify",
+    "conditional_chance",
 )
 
 
@@ -94,21 +100,41 @@ def build_lbr_knobs(config: LBRConfig, results: dict[str, Any]) -> dict[str, Any
 
 
 def build_exact_br_knobs_from_params(
-    *, num_flops: int, num_turns: int, num_rivers: int, board_seed: int
+    *,
+    num_flops: int,
+    num_turns: int,
+    num_rivers: int,
+    board_seed: int,
+    in_abstraction: bool = False,
+    policy_threshold: float = 0.0,
+    purify: bool = False,
+    conditional_chance: bool = False,
 ) -> dict[str, Any]:
     """Canonical exact-BR knob tier: the board plan IS the comparison tier.
 
     ``base_seed`` mirrors ``board_seed`` so the pairing guard applies unchanged:
     two exact-BR evals are comparable iff they scored the same sampled boards.
     Values are deterministic points — within a matched tier a difference is
-    exact, with no paired samples or p-value involved.
+    exact, with no paired samples or p-value involved. A bucket-constrained
+    responder, a transformed blueprint or conditional chance is a different
+    number, so those enter the tier -- but only when set, so existing rows
+    keep their tier.
     """
-    return {
+    knobs: dict[str, Any] = {
         "num_flops": num_flops,
         "num_turns": num_turns,
         "num_rivers": num_rivers,
         "base_seed": board_seed,
     }
+    if in_abstraction:
+        knobs["in_abstraction"] = True
+    if purify:
+        knobs["purify"] = True
+    elif policy_threshold > 0.0:
+        knobs["policy_threshold"] = policy_threshold
+    if conditional_chance:
+        knobs["conditional_chance"] = True
+    return knobs
 
 
 def build_resolver_match_knobs(results: dict[str, Any]) -> dict[str, Any]:

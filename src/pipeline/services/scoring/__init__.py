@@ -82,6 +82,7 @@ def evaluate_and_record(
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     progress_file: Path | None = None,
+    policy_profile: bool = False,
 ) -> EvaluationPayload:
     """Evaluate a run and persist the result to the eval ledger (best-effort).
 
@@ -109,6 +110,7 @@ def evaluate_and_record(
             # replaced said `0 / 1 rungs`, which read 0% for the whole ~10
             # minutes and made a long score look exactly like a hung one.
             on_branch=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
+            policy_profile=policy_profile,
         )
         estimator = EXACT_BR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_exact_br_knobs_from_params(
@@ -116,6 +118,10 @@ def evaluate_and_record(
             num_turns=br_config.num_turns,
             num_rivers=br_config.num_rivers,
             board_seed=br_config.board_seed,
+            in_abstraction=br_config.in_abstraction,
+            policy_threshold=br_config.policy_threshold,
+            purify=br_config.purify,
+            conditional_chance=br_config.conditional_chance,
         )
     elif method == "resolver_match":
         # Not an exploitability estimate at all: a head-to-head chip edge of

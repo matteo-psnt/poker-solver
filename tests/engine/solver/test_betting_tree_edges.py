@@ -183,9 +183,9 @@ def test_every_edge_agrees_at_production_scale():
     """The small tree cannot produce production's edge shapes.
 
     ``production.yaml`` adds the preflop templates, `min_raise`/`pot_raise`/
-    `jam` and five raises a street — 159,507 edges, including the sizings that
-    resolve to the whole stack and the all-in-for-less that the default model
-    never reaches. One outcome column is enough here; the three-column check
+    `jam` and five raises a street — 225,055 edges, including the sizings that
+    resolve to the whole stack, the all-in-for-less that the default model
+    never reaches, and the big blind's option behind a limp. One outcome column is enough here; the three-column check
     above is what the arithmetic needs, and this is what the SHAPES need.
     """
     config = load_training_config("production")
@@ -194,8 +194,8 @@ def test_every_edge_agrees_at_production_scale():
     _, hole_cards, board, winner = OUTCOMES[0]
     reached, tally = _check_every_edge(rules, tree, hole_cards, board, winner)
 
-    assert reached == len(tree.nodes) == 57_604
-    assert sum(len(edges) for edges in tree.edges) == 159_507
+    assert reached == len(tree.nodes) == 81_518
+    assert sum(len(edges) for edges in tree.edges) == 225_055
     assert tally["fold"] > 0
     assert tally["showdown_complete"] > 0
     assert tally["showdown_owed"] > 0
