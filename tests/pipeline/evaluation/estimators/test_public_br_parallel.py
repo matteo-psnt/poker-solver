@@ -8,9 +8,17 @@ that property while still looking plausible.
 
 from __future__ import annotations
 
+from functools import partial
+
 import pytest
 
-from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
+from src.pipeline.evaluation.estimators.public_tree_br import (
+    PublicBRConfig,
+    compute_public_tree_br,
+)
+from tests.test_helpers import build_trained_test_solver
+
+STACK = 400
 
 
 class TestConfigContract:
@@ -35,6 +43,35 @@ class TestConfigContract:
         assert "num_workers" not in knobs
         # base_seed mirrors board_seed so the shared pairing guard applies.
         assert {"num_flops", "num_turns", "num_rivers", "base_seed"} <= set(knobs)
+
+
+@pytest.mark.timeout(120)
+class TestForkJoinMatchesSerial:
+    """The fork-join splits BELOW the preflop max, where the walk is a weighted
+    sum, and joins in the serial order -- so the number must be bit-identical,
+    not close. Two checkpoints scored at different worker counts are still
+    exactly paired only if this holds. No abstraction needed: the test solver
+    is seeded, so the factory rebuilds the same blueprint in every worker."""
+
+    @pytest.mark.parametrize("iterations", [0, 4])
+    def test_same_number_same_telemetry(self, iterations):
+        solver = build_trained_test_solver(iterations, starting_stack=STACK)
+        factory = partial(build_trained_test_solver, iterations, starting_stack=STACK)
+
+        def tier(workers: int) -> PublicBRConfig:
+            return PublicBRConfig(
+                num_flops=2, num_turns=1, num_rivers=1, board_seed=3, num_workers=workers
+            )
+
+        serial = compute_public_tree_br(solver, tier(1), starting_stack=STACK)
+        forked = compute_public_tree_br(
+            solver, tier(3), starting_stack=STACK, blueprint_factory=factory
+        )
+
+        assert forked.exploitability_mbb == serial.exploitability_mbb
+        assert forked.seat_results == serial.seat_results
+        assert forked.nodes_visited == serial.nodes_visited
+        assert forked.missing_policy_mass == serial.missing_policy_mass
 
 
 @pytest.mark.slow

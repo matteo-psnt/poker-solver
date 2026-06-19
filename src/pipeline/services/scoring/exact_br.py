@@ -49,8 +49,7 @@ def evaluate_run_exact_br(
             is not a retained rung (the error lists the available ones).
     """
     config = config or PublicBRConfig()
-    # The four (seat, button) walks are independent, and workers rebuild the
-    # blueprint because the solver is not picklable.
+    # Workers rebuild the blueprint because the solver is not picklable.
     metadata, solver, storage, factory = prepare_blueprint(
         run_dir, abstraction_hash, at_iteration, config.num_workers
     )
@@ -59,10 +58,8 @@ def evaluate_run_exact_br(
         config,
         starting_stack=metadata.config.game.starting_stack,
         blueprint_factory=factory,
-        # BOTH paths. Serial reports every flop branch; parallel reports each
-        # walk as it lands, in the same unit, because a walk returns what it
-        # cost. Coarser when parallel -- four steps, not hundreds -- and still
-        # the difference between a bar that moves and one that cannot.
+        # Both paths report every flop branch, serial as it is walked and
+        # forked as its job lands.
         on_branch=on_branch,
     )
     results: dict[str, Any] = {

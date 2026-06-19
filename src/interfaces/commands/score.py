@@ -7,8 +7,8 @@ SMB, which makes scoring a ladder from a laptop impractical.
 **One task per rung, not one task looping over them.** Rungs are independent,
 so Batch spreads them across the pool and queues the rest; a single looping
 task pinned an entire curve to one node however much pool was available. Each
-task also parallelises its own best-response walks, so a rung uses ~4 cores and
-a node holds one comfortably.
+task also fans its flop subtrees over the node's cores, so one rung fills one
+node.
 """
 
 from __future__ import annotations
