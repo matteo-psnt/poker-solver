@@ -75,28 +75,15 @@ build/
 # Data artifacts
 data/
 
-# Local agent config stays out; the path-scoped rules are project documentation
-# and are tracked. Git cannot re-include a path under an excluded DIRECTORY, so
-# this must exclude the contents (`.claude/*`) rather than the directory itself.
-.claude/*
-!.claude/rules/
+.claude/settings.local.json
+.claude/skills/*
+!.claude/skills/worktree/
+.claude/worktrees/
 
-# Terraform: state holds resource detail, .terraform/ is a large provider cache.
-# .terraform.lock.hcl is deliberately absent — it pins provider versions and is
-# committed, like uv.lock.
-infra/.terraform/
-infra/terraform.tfstate
-infra/terraform.tfstate.*
-infra/*.tfvars
-# infra/store is a second root module with its own state (the durable share, in
-# its own resource group, so `just destroy` cannot reach it).
-infra/store/.terraform/
-infra/store/terraform.tfstate
-infra/store/terraform.tfstate.*
-infra/serve/.terraform/
-infra/serve/terraform.tfstate
-infra/serve/terraform.tfstate.*
-infra/store/*.tfvars
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
 
 # console build output
 console/dist/
