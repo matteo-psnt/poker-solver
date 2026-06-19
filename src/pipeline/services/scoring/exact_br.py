@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig, compute_public_tree_br
+from src.pipeline.evaluation.policy_profile import profile_policy
 from src.pipeline.services.runs import checkpoint_iteration_of
 from src.pipeline.services.scoring._shared import EvaluationOutput, prepare_blueprint
 
@@ -21,6 +22,7 @@ def evaluate_run_exact_br(
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     on_branch: Callable[[int, int], None] | None = None,
+    policy_profile: bool = False,
 ) -> EvaluationOutput:
     """Exact best response on the sampled public tree (deterministic point value).
 
@@ -30,6 +32,10 @@ def evaluate_run_exact_br(
     or p-value involved. The value is the exploitability of the board-sampled
     restricted game (see :mod:`~src.pipeline.evaluation.estimators.public_tree_br`), not of
     full HUNL: compare within a tier, don't quote it as a bound.
+
+    ``policy_profile`` attaches the checkpoint's per-street entropy and
+    preflop tables (:mod:`~src.pipeline.evaluation.policy_profile`) to the
+    record; it reads the arrays already loaded for the walk.
 
     ``at_iteration`` scores a retained ladder rung instead of the published
     snapshot. Because the value is deterministic, scoring several rungs of one run
@@ -69,6 +75,8 @@ def evaluate_run_exact_br(
                 "button": r.button,
                 "value_mbb": r.value_mbb,
                 "missing_policy_mass": r.missing_policy_mass,
+                "self_play_mbb": r.self_play_mbb,
+                "gain_mbb": r.gain_mbb,
             }
             for r in result.seat_results
         ],
@@ -80,7 +88,16 @@ def evaluate_run_exact_br(
         "board_seed": config.board_seed,
         "elapsed_s": result.elapsed_s,
         "big_blind": metadata.config.game.big_blind,
+        "in_abstraction": config.in_abstraction,
+        "policy_threshold": config.policy_threshold,
+        "purify": config.purify,
     }
+    if result.decomposition is not None:
+        results["decomposition"] = result.decomposition
+    if policy_profile:
+        results["policy_profile"] = profile_policy(
+            storage, solver.rules, solver.action_model, metadata.config.game.starting_stack
+        )
     return EvaluationOutput(
         infosets=storage.num_infosets(),
         results=results,
