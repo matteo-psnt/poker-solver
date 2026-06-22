@@ -173,10 +173,14 @@ def _validate(plan: TaskPlan) -> None:
 
 
 def _node_cpus() -> int:
-    """The node is the only place that knows its own core count.
+    """Default worker count: every hardware thread but one.
 
-    Filled in HERE rather than left to the CLI's local-friendly default of 1,
-    and never allowed to fail: a missing core count must degrade, not kill the
-    task.
+    The node is the only place that knows its own core count, filled in HERE
+    rather than left to the CLI's local-friendly default of 1, and never
+    allowed to fail: a missing core count must degrade, not kill the task.
+    One thread is left free because the OS and the coordinator preempt a
+    fully subscribed box: 15 workers on a 16-vCPU node measured 59.7k it/s
+    against 16 workers' 52.0k -- +15%, three replicates each, spreads <1%
+    (worker-curve, 08-24). An explicit --workers still wins.
     """
-    return os.cpu_count() or 1
+    return max(1, (os.cpu_count() or 2) - 1)

@@ -81,10 +81,12 @@ class TestTrainArgv:
         defaults to 1, so the miss reads as a slow task, not a misconfiguration."""
         assert "--workers" in _plan().commands[0]
 
-    def test_an_empty_worker_count_falls_back_to_the_node_cpus(self, monkeypatch):
+    def test_an_empty_worker_count_falls_back_to_all_node_cpus_but_one(self, monkeypatch):
+        """One hardware thread stays free for the OS and coordinator: a fully
+        subscribed box measured 15% slower (worker-curve, 08-24)."""
         monkeypatch.setattr(node_plan.os, "cpu_count", lambda: 16)
         argv = _plan(RUN_WORKERS="").commands[0]
-        assert argv[argv.index("--workers") + 1] == "16"
+        assert argv[argv.index("--workers") + 1] == "15"
 
     def test_an_unknowable_cpu_count_degrades_rather_than_kills(self, monkeypatch):
         monkeypatch.setattr(node_plan.os, "cpu_count", lambda: None)
