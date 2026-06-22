@@ -24,7 +24,6 @@ card_abstraction:
 
 training:
   num_iterations: 1000000
-  checkpoint_frequency: 500000
 
 storage:
   initial_capacity: 4000000
