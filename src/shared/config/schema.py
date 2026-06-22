@@ -281,7 +281,9 @@ class SolverConfig(StrictFrozenModel):
 
     # DCFR parameters — only used when iteration_weighting == "dcfr"
     dcfr_alpha: PositiveFloat = Field(default=1.5)
-    dcfr_beta: NonNegFloat = Field(default=0.0)
+    # Negative beta is meaningful: the per-visit factor t^beta/(t^beta+1) falls
+    # toward 0 (the CFR+ floor); beta=0 is exactly x0.5 per visit.
+    dcfr_beta: float = Field(default=0.0)
     dcfr_gamma: PositiveFloat = Field(default=2.0)
 
     # A MEASUREMENT SEAM, not a strategy choice. `tree` walks the betting
