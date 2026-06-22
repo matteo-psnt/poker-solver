@@ -1,0 +1,18 @@
+# Twice production's bucket count on every street (F200/T600/R1200), otherwise
+# identical: same exact runouts, same histogram feature, same k-means settings.
+# Exists to measure whether a finer card abstraction lowers the exploitability
+# floor at a CONVERGED budget; at a fixed budget it dilutes visits per row.
+
+buckets:
+  flop: 200
+  turn: 600
+  river: 1200
+
+flop_runouts: null
+equity_histogram_bins: 8
+
+kmeans_max_iter: 500
+kmeans_n_init: 20
+
+num_workers: null
+seed: 42
