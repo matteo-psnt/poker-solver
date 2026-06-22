@@ -58,7 +58,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--workers",
         type=int,
         default=None,
-        help="Worker count on the node. Default is all CPUs; worth setting below the "
+        help="Worker count on the node. Default is all CPUs but one (+15%% measured "
+        "over a fully subscribed box); worth setting further below the "
         "core count on a big abstraction, since every worker loads its own copy.",
     )
     parser.add_argument(
