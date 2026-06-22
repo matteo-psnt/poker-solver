@@ -61,19 +61,20 @@ TASK_COMMAND_TEMPLATE = (
 )
 
 
-def daily_job_id(now: datetime) -> str:
-    """One job per UTC day, holding that day's tasks."""
-    return f"poker-{now:%Y%m%d}"
+def daily_job_id(now: datetime, pool_suffix: str = "") -> str:
+    """One job per UTC day AND POOL: a Batch job is bound to one pool at
+    creation, so the big pool's tasks need their own."""
+    return f"poker-{now:%Y%m%d}{pool_suffix}"
 
 
-def suffixed_job_id(now: datetime) -> str:
+def suffixed_job_id(now: datetime, pool_suffix: str = "") -> str:
     """The fallback id used when the day's job can no longer take tasks.
 
     A job that has been STOPPED answers ``JobCompleted`` to a task creation.
     Since the id is per-day, one ``just panic`` would otherwise block every
     further submission until midnight UTC.
     """
-    return f"poker-{now:%Y%m%d-%H%M%S}"
+    return f"poker-{now:%Y%m%d-%H%M%S}{pool_suffix}"
 
 
 def task_id(label: str, now: datetime, nonce: int) -> str:

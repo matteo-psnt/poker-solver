@@ -27,6 +27,12 @@ class TestJobIds:
     def test_daily_job_id_is_one_per_utc_day(self):
         assert spec.daily_job_id(NOW) == "poker-20260802"
 
+    def test_a_pool_suffix_gives_the_day_a_second_job(self):
+        """A Batch job binds to one pool at creation, so the big pool's tasks
+        cannot share the daily job."""
+        assert spec.daily_job_id(NOW, "-big") == "poker-20260802-big"
+        assert spec.suffixed_job_id(NOW, "-big") == "poker-20260802-213805-big"
+
     def test_suffixed_id_differs_so_a_stopped_job_cannot_block_the_day(self):
         """A stopped job answers JobCompleted to every task creation. Without a
         second id, one `panic` blocks all submissions until midnight UTC."""

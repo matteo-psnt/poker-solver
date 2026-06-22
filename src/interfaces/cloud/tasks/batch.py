@@ -439,7 +439,7 @@ def evaluate_autoscale(
     )
 
 
-def ensure_job(batch: BatchClient, pool_id: str, now: datetime) -> str:
+def ensure_job(batch: BatchClient, pool_id: str, now: datetime, pool_suffix: str = "") -> str:
     """Return an id for a job that can accept tasks, creating it if needed.
 
     One job per UTC day, created on demand. The fallback matters more than it
@@ -454,7 +454,7 @@ def ensure_job(batch: BatchClient, pool_id: str, now: datetime) -> str:
     retries are set per task, and a job-wide retry would re-burn a node on a
     deterministic failure.
     """
-    daily = daily_job_id(now)
+    daily = daily_job_id(now, pool_suffix)
     try:
         existing = batch.get_job(daily)
     except ResourceNotFoundError:
@@ -464,7 +464,7 @@ def ensure_job(batch: BatchClient, pool_id: str, now: datetime) -> str:
     if str(existing.state).rsplit(".", 1)[-1].lower() == "active":
         return daily
 
-    fallback = suffixed_job_id(now)
+    fallback = suffixed_job_id(now, pool_suffix)
     _create_job(batch, fallback, pool_id)
     return fallback
 

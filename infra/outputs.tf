@@ -18,6 +18,10 @@ output "pool_vm_size" {
   value = azurerm_batch_pool.train.vm_size
 }
 
+output "pool_big_id" {
+  value = azurerm_batch_pool.train_big.name
+}
+
 output "resource_group" {
   value = azurerm_resource_group.main.name
 }
