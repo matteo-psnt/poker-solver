@@ -121,6 +121,7 @@ def _worker_entry(
     abstraction: BucketingStrategy | None = None,
     chunk_id: int = 0,
     counters: Any = None,
+    merge_lock: Any = None,
 ) -> None:
     """Train ``iterations`` on the shared arrays, then report.
 
@@ -136,6 +137,15 @@ def _worker_entry(
     try:
         action_model, abstraction, tree = _build_local(config, abstraction)
         storage = StaticArrayStorage(tree, session_id=session_id, attach=True)
+        # Reach/utility are tallies nothing reads until after the join, but as
+        # shared arrays every traverser row RMWs two more cache lines that all
+        # workers ping-pong -- and racing non-atomic increments silently LOSE
+        # counts. Tally privately; merge once per chunk under the lock (int64
+        # merge is exact, so the counts stop undercounting).
+        shared_reach = storage.reach_counts
+        shared_utility = storage.cumulative_utility
+        storage.reach_counts = np.zeros_like(shared_reach)
+        storage.cumulative_utility = np.zeros_like(shared_utility)
         solver = StaticTreeSolver(action_model, abstraction, storage, config, tree=tree)
 
         # chunk_id mixed in: without it every chunk re-seeds identically and
@@ -160,6 +170,13 @@ def _worker_entry(
             count += len(stride)
             if counters is not None:
                 counters[worker_id] = banked + count
+        if merge_lock is not None:
+            with merge_lock:
+                shared_reach += storage.reach_counts
+                shared_utility += storage.cumulative_utility
+        else:
+            shared_reach += storage.reach_counts
+            shared_utility += storage.cumulative_utility
         result_queue.put(
             {
                 "worker_id": worker_id,
@@ -337,6 +354,8 @@ def train_static_parallel(
         # No lock: each slot has exactly one writer, and a sum that is a tick
         # behind is a progress bar, not a result.
         counters = ctx.Array("q", num_workers, lock=False)
+        # Serializes only the once-per-chunk tally merge, never a training write.
+        merge_lock = ctx.Lock()
         reporter = _ProgressReporter(on_progress, counters, start, num_iterations)
         reporter.start()
 
@@ -360,6 +379,7 @@ def train_static_parallel(
                         abstraction,
                         chunk_id,
                         counters,
+                        merge_lock,
                     ),
                     daemon=False,
                 )
