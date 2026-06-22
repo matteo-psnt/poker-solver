@@ -396,7 +396,11 @@ def walk(
 
     row = row_offset[node_id] + bucket
     start = slot_offset[node_id] + bucket * count
-    visited[row] = 1
+    # Test-then-set: after warm-up nearly every visit finds the flag already 1,
+    # and an unconditional store would dirty a shared cache line per visit —
+    # pure coherence traffic under Hogwild. The read leaves the line Shared.
+    if visited[row] == 0:
+        visited[row] = 1
 
     # THE function, not a copy of it. Reproducing regret matching by hand lands
     # a different float on roughly one row in 150,000 — `np.sum` does not
