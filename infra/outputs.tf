@@ -1,6 +1,15 @@
 # Consumed by submit.py and the justfile, which read `terraform output -json` once
 # rather than duplicating any of these values in a second config file.
 
+locals {
+  # MEASURED, not quoted from a price page -- see the `hourly_cost` output.
+  node_rates = {
+    "standard_d8als_v6"  = "$0.344/hr/node"
+    "standard_d16als_v6" = "$0.688/hr/node"
+    "standard_d32als_v6" = "$1.376/hr/node"
+  }
+}
+
 output "batch_account" {
   value = azurerm_batch_account.main.name
 }
@@ -48,9 +57,10 @@ output "hourly_cost" {
   #
   # RE-MEASURE rather than edit by hand if a SKU is added: `poker-solver cost`
   # prints billed dollars beside billed node-hours for exactly this purpose.
-  value = lookup({
-    "standard_d8als_v6"  = "$0.344/hr/node"
-    "standard_d16als_v6" = "$0.688/hr/node"
-    "standard_d32als_v6" = "$1.376/hr/node"
-  }, lower(azurerm_batch_pool.train.vm_size), "see the Azure price list")
+  value = lookup(local.node_rates, lower(azurerm_batch_pool.train.vm_size), "see the Azure price list")
+}
+
+output "pool_big_hourly_cost" {
+  description = "USD/hr PER NODE on the train-big pool. Same table, other SKU."
+  value       = lookup(local.node_rates, lower(azurerm_batch_pool.train_big.vm_size), "see the Azure price list")
 }

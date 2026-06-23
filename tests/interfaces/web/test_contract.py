@@ -120,7 +120,7 @@ class TestTheModelsDescribeRealPayloads:
     def test_a_removed_field_is_caught(self):
         """The guard, verified rather than assumed. Without this, a model whose
         fields were all optional would pass everything and pin nothing."""
-        without = {k: v for k, v in PAYLOADS["pool-status"].model_dump().items() if k != "pool_id"}
+        without = {k: v for k, v in PAYLOADS["pool-status"].model_dump().items() if k != "pools"}
         with pytest.raises(ValidationError):
             contract.Pool.model_validate(without)
 
@@ -154,7 +154,7 @@ class TestTheViewEnvelopes:
             }
         )
         assert view.parts.pool.payload is not None
-        assert view.parts.pool.payload.pool_id
+        assert view.parts.pool.payload.pools
 
     def test_a_failed_part_validates_and_keeps_its_reason(self):
         """The property the fan-out exists for. A view whose model REQUIRED a
