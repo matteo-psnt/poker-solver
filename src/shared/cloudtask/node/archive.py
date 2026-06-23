@@ -157,17 +157,6 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
     return True
 
 
-def publish_all(runs_root: Path, archive_root: Path, log: Log = _quiet) -> bool:
-    """Publish every run on the node's disk. Returns False if any failed."""
-    if not runs_root.is_dir():
-        return True
-    ok = True
-    for run_dir in sorted(runs_root.iterdir()):
-        if run_dir.is_dir():
-            ok &= publish_run(run_dir, archive_root / run_dir.name, log)
-    return ok
-
-
 def _copy_dir(source: Path, destination: Path, log: Log, *, update: bool = True) -> bool:
     try:
         copy_tree(source, destination, update=update)
@@ -350,31 +339,30 @@ def fetch_for_evaluation(
     return fetched
 
 
-def ladder_state(runs_root: Path) -> str:
-    """A fingerprint of every run's publishable progress, for the watcher.
+def ladder_state(run_dir: Path) -> str:
+    """A fingerprint of ONE run's publishable progress, for the watcher.
 
-    Watches the whole runs directory, so it covers a FRESH train too: that
-    run's id does not exist until the trainer creates it, and waiting for the
-    id would leave exactly the long unprotected window mid-run publishing
-    exists to close.
+    One run, never the runs directory: a node is reused, and an evaluate task
+    leaves every checkpoint it fetched under ``runs/``. A watcher that walked
+    the directory pushed all of them back to the share on every tick -- ~30
+    minutes per training task re-uploading other runs' ladders. The run's id is
+    fixed before the trainer starts (``plan.train_run_id``), so an absent
+    directory simply reads as empty until the first rung lands.
 
     ``iteration`` as well as the retained ladder: with ``checkpoint_every``
     below the retain interval the current snapshot advances while the ladder
     does not, and watching only the ladder would sit idle through exactly those
     chunks.
     """
-    if not runs_root.is_dir():
-        return ""
     parts = []
-    for run_dir in sorted(runs_root.iterdir()):
-        for name in MANIFESTS:
-            manifest = read_manifest(run_dir / name)
-            if not manifest:
-                continue
-            retained = ",".join(
-                str(entry.get("iteration", "")) for entry in _entries(manifest.get("retained"))
-            )
-            parts.append(f"{run_dir.name}:{manifest.get('iteration', '')}:{retained}")
+    for name in MANIFESTS:
+        manifest = read_manifest(run_dir / name)
+        if not manifest:
+            continue
+        retained = ",".join(
+            str(entry.get("iteration", "")) for entry in _entries(manifest.get("retained"))
+        )
+        parts.append(f"{run_dir.name}:{manifest.get('iteration', '')}:{retained}")
     return "|".join(parts)
 
 

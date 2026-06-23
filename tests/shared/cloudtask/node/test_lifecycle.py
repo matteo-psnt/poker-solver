@@ -93,6 +93,7 @@ class TestMain:
 
     def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch):
         """An operator-cancelled task still leaves its progress on the share."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")  # the task's own run is run-a
         run_dir = paths.runs / "run-a"
         run_dir.mkdir(parents=True)
         (run_dir / ".run.json").write_text("{}")
@@ -101,6 +102,32 @@ class TestMain:
 
         lifecycle.main()
         assert (paths.archive / "run-a" / ".run.json").exists()
+
+    def test_only_the_tasks_own_run_is_published(self, paths, monkeypatch):
+        """A node is reused: runs/ also holds what earlier tasks fetched. Pushing
+        those back took ~30 minutes per training task."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")
+        for name in ("run-a", "run-fetched-by-an-evaluate"):
+            (paths.runs / name).mkdir(parents=True)
+            (paths.runs / name / ".run.json").write_text("{}")
+        monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 0)
+        monkeypatch.setitem(lifecycle.HANDLERS, TaskName.TRAIN, lambda *a: (0, None))
+
+        lifecycle.main()
+        assert (paths.archive / "run-a" / ".run.json").exists()
+        assert not (paths.archive / "run-fetched-by-an-evaluate").exists()
+
+    def test_an_evaluation_publishes_nothing_at_exit(self, paths, monkeypatch):
+        """Its runs/ holds only checkpoints it fetched from the share."""
+        monkeypatch.setenv("RUN_OP", str(TaskName.EVALUATE))
+        monkeypatch.setenv("RUN_ID", "run-scored")
+        (paths.runs / "run-scored").mkdir(parents=True)
+        (paths.runs / "run-scored" / ".run.json").write_text("{}")
+        monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 0)
+        monkeypatch.setitem(lifecycle.HANDLERS, TaskName.EVALUATE, lambda *a: (0, None))
+
+        lifecycle.main()
+        assert not (paths.archive / "run-scored").exists()
 
 
 def _signalled(plan, paths, log):

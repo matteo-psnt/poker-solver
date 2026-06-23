@@ -29,6 +29,7 @@ from src.shared.cloudtask.node.process import GRACE_SECONDS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from pathlib import Path
 
     from src.shared.cloudtask.node.paths import NodePaths
 
@@ -169,11 +170,15 @@ class LadderWatcher(ProgressWatcher):
     """Also publishes mid-run, so a killed task keeps everything up to its last
     rung.
 
-    Training only. Copying to SMB is what makes the coarse cadence coarse, and
-    an evaluation -- which FETCHES rungs onto the node -- would spend the first
-    tick pushing ~540 MB of somebody else's checkpoints back where they came
-    from.
+    Training only, and THIS task's run only. Copying to SMB is what makes the
+    coarse cadence coarse; the node's ``runs/`` also holds whatever earlier
+    evaluate tasks fetched there, and pushing those back cost ~30 minutes per
+    training task.
     """
+
+    def __init__(self, paths: NodePaths, log: archive.Log, *, run_dir: Path, **kwargs: Any) -> None:
+        super().__init__(paths, log, **kwargs)
+        self._run_dir = run_dir
 
     # Starts EMPTY, so the first tick publishes whatever is already there rather
     # than treating it as seen. A resumed task pays almost nothing for that --
@@ -183,10 +188,10 @@ class LadderWatcher(ProgressWatcher):
     _seen = ""
 
     def _coarse(self) -> None:
-        state = archive.ladder_state(self._paths.runs)
+        state = archive.ladder_state(self._run_dir)
         if state and state != self._seen:
             self._log(f"retained ladder changed -> {state}")
-            archive.publish_all(self._paths.runs, self._paths.archive, self._log)
+            archive.publish_run(self._run_dir, self._paths.archive / self._run_dir.name, self._log)
             self._seen = state
 
 
