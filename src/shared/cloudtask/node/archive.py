@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import shutil
+import time
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from src.shared import records
@@ -41,6 +44,13 @@ MANIFESTS = (records.STATIC_CHECKPOINT, LEGACY_MANIFEST)
 SNAPSHOT_PREFIXES = ("static-", "checkpoint-", "keys-")
 
 MARKER_PREFIX = ".complete-"
+
+# A zarr rung is thousands of small files and a single-stream SMB copy is
+# latency-bound, not bandwidth-bound: ~750 MB took ~9 minutes (1.4 MB/s) with
+# one thread. Override with `POKER_SOLVER_PUBLISH_WORKERS` -- 1 is the serial
+# arm a throughput measurement compares against.
+COPY_WORKERS_ENV = "POKER_SOLVER_PUBLISH_WORKERS"
+DEFAULT_COPY_WORKERS = 16
 
 Log = Callable[[str], None]
 
@@ -70,28 +80,58 @@ def needs_copy(source: Path, destination: Path) -> bool:
     return source.stat().st_mtime > destination.stat().st_mtime
 
 
+def copy_workers() -> int:
+    """How many files are copied at once. Clamped to 1..64, never zero."""
+    try:
+        wanted = int(os.environ.get(COPY_WORKERS_ENV) or DEFAULT_COPY_WORKERS)
+    except ValueError:
+        wanted = DEFAULT_COPY_WORKERS
+    return max(1, min(64, wanted))
+
+
 def copy_file(source: Path, destination: Path) -> None:
     """Content only -- no mode, no timestamps. See the module docstring."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
 
 
-def copy_tree(source: Path, destination: Path, *, update: bool = True) -> None:
-    """Merge ``source`` into ``destination``, file by file.
+def copy_tree(source: Path, destination: Path, *, update: bool = True, atomic: bool = False) -> int:
+    """Merge ``source`` into ``destination`` file by file; returns bytes copied.
 
     Merging rather than replacing is what makes an interrupted publish
     resumable. ``update=False`` copies unconditionally, for the fetch
     direction -- where a file already on the node is not evidence of a complete
-    copy but of a cancelled task.
+    copy but of a cancelled task. ``atomic`` gives every file the ``.partial``
+    dance :func:`_copy_one` does, for trees a reader fetches back (``evals/``).
     """
     destination.mkdir(parents=True, exist_ok=True)
+    files = []
+    # Directories FIRST and serially, so the parallel pass below never races two
+    # threads creating one parent -- and pays no per-file `mkdir` round trip.
     for item in sorted(source.rglob("*")):
         target = destination / item.relative_to(source)
         if item.is_dir():
             target.mkdir(parents=True, exist_ok=True)
-        elif not update or needs_copy(item, target):
-            target.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            files.append((item, target))
+
+    def transfer(pair: tuple[Path, Path]) -> int:
+        item, target = pair
+        if update and not needs_copy(item, target):
+            return 0
+        size = item.stat().st_size
+        if atomic:
+            partial = target.with_name(target.name + ".partial")
+            shutil.copyfile(item, partial)
+            partial.replace(target)
+        else:
             shutil.copyfile(item, target)
+        return size
+
+    if not files:
+        return 0
+    with ThreadPoolExecutor(max_workers=min(copy_workers(), len(files))) as pool:
+        return sum(pool.map(transfer, files))
 
 
 def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
@@ -102,6 +142,12 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
     task that is still making progress on local disk.
     """
     destination.mkdir(parents=True, exist_ok=True)
+    # READ BEFORE THE LADDER, published after it. A rung takes minutes over SMB
+    # and the trainer commits new ones meanwhile, so a manifest read at the END
+    # names rungs this pass never saw and the share advertises a rung it does
+    # not hold. The snapshot always predates the manifest that names it, so a
+    # manifest read first can only name rungs `children` below already has.
+    manifests = {name: _read_bytes(run_dir / name) for name in MANIFESTS}
     children = sorted(run_dir.iterdir())
     failed = False
 
@@ -109,7 +155,7 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
         if not child.is_dir():
             continue
         if not is_snapshot(child.name):
-            failed |= not _copy_dir(child, destination / child.name, log)
+            failed |= not _copy_dir(child, destination / child.name, log, atomic=True)
             continue
 
         marker = destination / marker_for(child.name)
@@ -121,12 +167,7 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
         if marker.exists():
             continue
         _unlink(marker)
-        # UNCONDITIONAL, not the update rule. An unmarked destination is the
-        # residue of an interrupted publish, and the file that was mid-copy is
-        # TRUNCATED yet NEWER than the source -- so the update rule would skip
-        # exactly the wrong file and the marker would bless it. `cp -ru` had
-        # this hole too; a Batch retry is what triggers it.
-        if _copy_dir(child, destination / child.name, log, update=False):
+        if _publish_snapshot(child, destination / child.name, log):
             _touch(marker)
         else:
             failed = True
@@ -148,18 +189,86 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
     # by the unguarded loose-file pass above, so it was published even when a
     # snapshot copy had failed -- a manifest naming a half-copied rung, exactly
     # what publishing the manifest last exists to prevent.
-    for name in MANIFESTS:
-        manifest = run_dir / name
-        stale = manifest.is_file() and needs_copy(manifest, destination / name)
-        if stale and not _copy_one(manifest, destination / name, log):
+    for name, body in manifests.items():
+        if body is None:
+            continue
+        if not _rungs_landed(body, destination, log) or not _write_one(
+            body, destination / name, log
+        ):
             return False
     log(f"published {run_dir.name}")
     return True
 
 
-def _copy_dir(source: Path, destination: Path, log: Log, *, update: bool = True) -> bool:
+def _rungs_landed(manifest: bytes, destination: Path, log: Log) -> bool:
+    """Is every rung this manifest names actually a directory on the share?
+
+    ABSENCE only. A rung present but unmarked is refused at FETCH time by
+    :func:`require_complete`, which is where that case belongs -- refusing it
+    here would freeze manifest publishing for the run forever, since nothing in
+    a later publish can add a marker to a rung this node no longer has.
+    """
+    named = _named_rungs(manifest)
+    missing = sorted(name for name in named if not (destination / name).is_dir())
+    if missing:
+        log(f"WARN manifest names {', '.join(missing)}, not on the share -- NOT publishing it")
+        return False
+    unmarked = sorted(n for n in named if not (destination / marker_for(n)).exists())
+    if unmarked:
+        log(f"WARN manifest names unmarked rung(s) {', '.join(unmarked)}; a fetch will refuse them")
+    return True
+
+
+def _named_rungs(manifest: bytes) -> set[str]:
+    """Snapshot directory names a manifest advertises: current plus retained."""
     try:
-        copy_tree(source, destination, update=update)
+        parsed = json.loads(manifest)
+    except ValueError:
+        return set()
+    if not isinstance(parsed, dict):
+        return set()
+    entries = [parsed, *_entries(parsed.get("retained"))]
+    return {str(entry["zarr"]) for entry in entries if isinstance(entry.get("zarr"), str)}
+
+
+def _publish_snapshot(source: Path, destination: Path, log: Log) -> bool:
+    """One rung, announced before and measured after.
+
+    UNCONDITIONAL, not the update rule. An unmarked destination is the residue
+    of an interrupted publish, and the file that was mid-copy is TRUNCATED yet
+    NEWER than the source -- so the update rule would skip exactly the wrong
+    file and the marker would bless it. `cp -ru` had this hole too; a Batch
+    retry is what triggers it.
+    """
+    log(f"publishing {source.name} ({_megabytes(source):.0f} MB)")
+    started = time.monotonic()
+    try:
+        copied = copy_tree(source, destination, update=False)
+    except OSError as error:
+        log(f"WARN copying {source.name} failed: {error}")
+        return False
+    if copied == 0:
+        # Never legitimate for a checkpoint, and the marker would bless it: the
+        # trainer prunes rungs the current manifest drops, so a source can
+        # vanish between the `is_dir` above and this copy.
+        log(f"WARN {source.name} copied 0 bytes -- not marking it complete")
+        return False
+    elapsed = max(time.monotonic() - started, 1e-6)
+    rate = copied / 1e6 / elapsed
+    log(f"published {source.name}: {copied / 1e6:.0f} MB in {elapsed:.0f}s ({rate:.1f} MB/s)")
+    return True
+
+
+def _megabytes(directory: Path) -> float:
+    """Local disk, so the stats are free next to the copy they precede."""
+    with contextlib.suppress(OSError):
+        return sum(f.stat().st_size for f in directory.rglob("*") if f.is_file()) / 1e6
+    return 0.0
+
+
+def _copy_dir(source: Path, destination: Path, log: Log, *, atomic: bool = False) -> bool:
+    try:
+        copy_tree(source, destination, atomic=atomic)
     except OSError as error:
         log(f"WARN copying {source.name} failed: {error}")
         return False
@@ -189,6 +298,29 @@ def _copy_one(source: Path, destination: Path, log: Log) -> bool:
         partial.replace(destination)
     except OSError as error:
         log(f"WARN copying {source.name} failed: {error}")
+        _unlink(partial)
+        return False
+    return True
+
+
+def _read_bytes(path: Path) -> bytes | None:
+    """A file's bytes, or None when it is absent, unreadable or empty."""
+    try:
+        body = path.read_bytes()
+    except OSError:
+        return None
+    return body or None
+
+
+def _write_one(body: bytes, destination: Path, log: Log) -> bool:
+    """:func:`_copy_one` for bytes already in hand -- the captured manifest."""
+    partial = destination.with_name(destination.name + ".partial")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(body)
+        partial.replace(destination)
+    except OSError as error:
+        log(f"WARN writing {destination.name} failed: {error}")
         _unlink(partial)
         return False
     return True
