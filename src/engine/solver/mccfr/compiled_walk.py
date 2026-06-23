@@ -99,15 +99,34 @@ def _street_context(
 
 
 @jit(nopython=True, cache=True)
-def _board_buckets(matrix, row, sentinel):
-    """One board's bucket per hand column, as int64 with -1 where the hand is
-    not a legal combination -- so the node reads one array and the matrix
-    stays the mmapped artifact, never a per-worker copy."""
-    width = matrix.shape[1]
-    out = np.empty(width, dtype=np.int64)
-    for column in range(width):
-        value = matrix[row, column]
-        out[column] = -1 if value == sentinel else value
+def _seat_buckets(
+    matrix, row, sentinel, hole_index, deck_rank, deck_suit, labels, next_label, hand_to_col
+):
+    """Both seats' buckets on one board, resolved ONCE at the deal edge.
+
+    The hands are fixed for the whole iteration, so of the board's ~1,326
+    matrix columns exactly two are ever read below this edge -- copying the
+    full row here (~10 KB an edge) was most of the walk's allocation and
+    DRAM traffic. -1 where the hand is not legal on this board."""
+    out = np.empty(2, dtype=np.int64)
+    for seat_index in range(2):
+        first = hole_index[seat_index * 2]
+        second = hole_index[seat_index * 2 + 1]
+        column = hand_to_col[
+            hand_id_of(
+                deck_rank[first],
+                deck_suit[first],
+                deck_rank[second],
+                deck_suit[second],
+                labels,
+                next_label,
+            )
+        ]
+        if column < 0:
+            out[seat_index] = -1
+        else:
+            value = matrix[row, column]
+            out[seat_index] = -1 if value == sentinel else value
     return out
 
 
@@ -116,32 +135,13 @@ def _bucket_at(
     actor,
     is_preflop,
     hole_index,
-    deck_rank,
-    deck_suit,
     preflop_index,
     row_buckets,
-    labels,
-    next_label,
-    hand_to_col,
 ):
-    """The acting player's bucket on an already-canonicalised board, or -1."""
-    first = hole_index[actor * 2]
-    second = hole_index[actor * 2 + 1]
+    """The acting player's bucket, precomputed per seat at the deal edge."""
     if is_preflop == 1:
-        return preflop_index[first, second]
-    column = hand_to_col[
-        hand_id_of(
-            deck_rank[first],
-            deck_suit[first],
-            deck_rank[second],
-            deck_suit[second],
-            labels,
-            next_label,
-        )
-    ]
-    if column < 0:
-        return -1
-    return row_buckets[column]
+        return preflop_index[hole_index[actor * 2], hole_index[actor * 2 + 1]]
+    return row_buckets[actor]
 
 
 @jit(nopython=True, cache=True)
@@ -151,6 +151,8 @@ def _deal_edge(
     board_index,
     board_len,
     known,
+    hole_index,
+    hand_to_col,
     row_buckets,
     labels,
     next_label,
@@ -209,12 +211,44 @@ def _deal_edge(
     if child_row < 0:
         raise ValueError("bucket lookup failed: the board is absent from the abstraction")
     local_row = child_row - street_offsets[street]
+    # One call per branch: the street matrices carry different dtypes, so a
+    # shared `matrix` variable cannot unify under numba typing.
     if street == 1:
-        child_buckets = _board_buckets(matrix_flop, local_row, sentinels[street])
+        child_buckets = _seat_buckets(
+            matrix_flop,
+            local_row,
+            sentinels[street],
+            hole_index,
+            deck_rank,
+            deck_suit,
+            child_labels,
+            child_next,
+            hand_to_col,
+        )
     elif street == 2:
-        child_buckets = _board_buckets(matrix_turn, local_row, sentinels[street])
+        child_buckets = _seat_buckets(
+            matrix_turn,
+            local_row,
+            sentinels[street],
+            hole_index,
+            deck_rank,
+            deck_suit,
+            child_labels,
+            child_next,
+            hand_to_col,
+        )
     else:
-        child_buckets = _board_buckets(matrix_river, local_row, sentinels[street])
+        child_buckets = _seat_buckets(
+            matrix_river,
+            local_row,
+            sentinels[street],
+            hole_index,
+            deck_rank,
+            deck_suit,
+            child_labels,
+            child_next,
+            hand_to_col,
+        )
     child_winner = river_winner
     if child_len == 5:
         child_winner = np.full(1, -2, dtype=np.int64)
@@ -378,13 +412,8 @@ def walk(
         actor,
         is_preflop[node_id],
         hole_index,
-        deck_rank,
-        deck_suit,
         preflop_index,
         row_buckets,
-        labels,
-        next_label,
-        hand_to_col,
     )
     if bucket < 0:
         # -1 is "hand impossible on this board" (the absent-board case raised
@@ -454,6 +483,8 @@ def walk(
                 board_index,
                 board_len,
                 known,
+                hole_index,
+                hand_to_col,
                 row_buckets,
                 labels,
                 next_label,
@@ -618,6 +649,8 @@ def walk(
         board_index,
         board_len,
         known,
+        hole_index,
+        hand_to_col,
         row_buckets,
         labels,
         next_label,
@@ -874,7 +907,9 @@ def walk_many(
     hole_index = np.empty(4, dtype=np.int64)
     root_board = np.zeros(5, dtype=np.int64)
     root_labels = np.zeros(4, dtype=np.int64)
-    root_buckets = np.empty(0, dtype=np.int64)
+    # Per-seat, filled at the first deal edge; -1 so a preflop misread raises
+    # rather than indexing garbage.
+    root_buckets = np.full(2, -1, dtype=np.int64)
     # Never read: no showdown happens on a five-card board the root did not deal.
     root_winner = np.full(1, -2, dtype=np.int64)
     for done, iteration in enumerate(range(first, stop, step)):
