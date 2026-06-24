@@ -1,0 +1,31 @@
+# Production's exact bucket counts with the river's FEATURE swapped to OCHS.
+#
+# The other axis of the ladder. Scalar river equity is saturated at 600 buckets
+# (variance explained 0.999999), so the river's remaining error is not a counting
+# problem -- scalar equity cannot express WHICH part of the opponent's range a hand
+# beats, so a bluff-catcher and a weak made hand of equal equity share a bucket
+# while wanting opposite strategies. OCHS (Johanson et al., AAMAS 2013) buckets on
+# win rates against clustered opponent holdings instead.
+#
+# Identical rows to production (45,538,298), so this is a pure feature swap at
+# constant visits/row -- the only arm in the ladder that changes no counts at all.
+#
+# NOTE variance_explained is computed on SCALAR equity, so this arm scores WORSE on
+# that metric by construction. Judge it by exploitability, never by the metadata.
+
+buckets:
+  flop: 100
+  turn: 300
+  river: 600
+
+river_feature: ochs
+ochs_clusters: 8
+
+flop_runouts: null
+equity_histogram_bins: 8
+
+kmeans_max_iter: 500
+kmeans_n_init: 20
+
+num_workers: null
+seed: 42
