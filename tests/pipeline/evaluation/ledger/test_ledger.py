@@ -223,6 +223,42 @@ class TestTierMismatches:
         assert any("num_hands" in r for r in reasons)
 
 
+class TestWhichGameTheNumberDescribes:
+    """Two exact_br rows at identical knobs from different GAMES used to hash
+    into one tier: `tier_mismatches` checked the abstraction and action hashes
+    pairwise while `tier_key` grouped without them, and neither knew about a
+    rules change under a fixed action config (the limp fix)."""
+
+    def _row(self, **over):
+        row = {
+            "method": "exact_br",
+            "card_abstraction_hash": "a1542e88be59da97",
+            "action_config_hash": "eb598d79",
+            "eval_tree_fingerprint": "b0367ae018a58a2f",
+            "knobs": {"num_flops": 4, "num_turns": 2, "num_rivers": 2, "base_seed": 7},
+        }
+        row.update(over)
+        return row
+
+    def test_a_different_tree_is_a_different_tier(self):
+        other = self._row(eval_tree_fingerprint="0000000000000000")
+        assert ledger.tier_key(self._row()) != ledger.tier_key(other)
+
+    def test_a_different_abstraction_is_a_different_tier(self):
+        other = self._row(card_abstraction_hash="deadbeef")
+        assert ledger.tier_key(self._row()) != ledger.tier_key(other)
+
+    def test_the_label_names_every_knob_the_key_splits_on(self):
+        """Otherwise two genuinely different tiers render as one string and
+        `--tier 1` selects something the operator cannot see."""
+        label = ledger.tier_label(self._row())
+        for value in ("a1542e88", "eb598d79", "b0367ae0"):
+            assert value in label, label
+
+    def test_a_matched_pair_still_pairs(self):
+        assert ledger.tier_key(self._row()) == ledger.tier_key(self._row())
+
+
 class TestLoadPayload:
     def test_missing_payload_raises(self):
         with pytest.raises(FileNotFoundError):

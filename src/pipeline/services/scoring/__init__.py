@@ -63,6 +63,7 @@ class EvaluationPayload(BaseModel):
     checkpoint_iteration: int | None = None
     results: dict[str, Any] = Field(default_factory=dict)
     ledger_result_path: str | None = None
+    tree_fingerprint: str | None = None
 
 
 def evaluate_and_record(
@@ -159,6 +160,7 @@ def evaluate_and_record(
         infosets=out.infosets,
         checkpoint_iteration=out.checkpoint_iteration,
         results=out.results,
+        tree_fingerprint=out.tree_fingerprint,
     )
     try:
         metadata = load_run_metadata(run_dir)

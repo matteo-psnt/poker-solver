@@ -131,4 +131,5 @@ def evaluate_run_lbr(
         infosets=storage.num_infosets(),
         results=results,
         checkpoint_iteration=checkpoint_iteration_of(run_dir, at_iteration),
+        tree_fingerprint=solver.tree.fingerprint(),
     )
