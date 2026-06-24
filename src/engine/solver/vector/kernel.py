@@ -45,6 +45,7 @@ import numpy as np
 from src.core.game.state import Street
 from src.engine.solver.vector.compiled_tree import EDGE_TO_TERMINAL, CompiledTree, TerminalKind
 from src.engine.solver.vector.hand_context import HandContext, showdown_matrix
+from src.engine.solver.vector.showdown import RankWalk
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -154,40 +155,76 @@ class VectorCFR:
     already understands that layout.
     """
 
-    def __init__(self, compiled: CompiledTree, context: HandContext, *, cfr_plus: bool = True):
+    def __init__(
+        self,
+        compiled: CompiledTree,
+        context: HandContext,
+        *,
+        cfr_plus: bool = True,
+        showdown: str = "matmul",
+        groups: list[NodeGroup] | None = None,
+    ):
         self.compiled = compiled
-        self.context = context
         self.cfr_plus = cfr_plus
+        self.showdown = showdown
         self.iteration = 0
 
         tree = compiled.tree
-        num_hands = context.num_hands
+        self.num_hands = context.num_hands
         self.regrets = np.zeros(tree.num_slots, dtype=DTYPE)
         self.strategy_sum = np.zeros(tree.num_slots, dtype=DTYPE)
 
-        self.groups = build_groups(compiled)
-        self.segments = {
-            street: build_segments(context.buckets_for(street))
-            for street in (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
-        }
+        self.groups = build_groups(compiled) if groups is None else groups
 
-        shape = (2, compiled.num_nodes, num_hands)
+        shape = (2, compiled.num_nodes, self.num_hands)
         self.reach = np.zeros(shape, dtype=DTYPE)
         self.value = np.zeros(shape, dtype=DTYPE)
-        self.terminal_reach = np.zeros((2, compiled.num_terminals, num_hands), dtype=DTYPE)
-        self.terminal_value = np.zeros((2, compiled.num_terminals, num_hands), dtype=DTYPE)
+        self.terminal_reach = np.zeros((2, compiled.num_terminals, self.num_hands), dtype=DTYPE)
+        self.terminal_value = np.zeros((2, compiled.num_terminals, self.num_hands), dtype=DTYPE)
 
         self.strategy_cache: list[np.ndarray] = []
         # When set, regret increments land here instead of in ``regrets`` and the
         # CFR+ floor is the caller's business. See ``_scatter_to_buckets``.
         self.regret_target: np.ndarray | None = None
-        self.showdown_sign = showdown_matrix(context.showdown_rank, context.blocks)
+        # Per-pass controls a sampling trainer sets before each board; the
+        # defaults are plain simultaneous CFR+ and leave every write unchanged.
+        self.strategy_weight = 1.0  # multiplies the strategy_sum increment (t^gamma under DCFR)
+        self.delta_scale = 1.0  # multiplies the regret increment (t under linear weighting)
+        # (positive, negative) multipliers on stored regrets of bucket rows this
+        # board OCCUPIES, applied before the increment -- DCFR's discount placed
+        # per visit, as the scalar kernel places it.
+        self.regret_discount: tuple[float, float] | None = None
+        self.update_players: tuple[int, ...] = (0, 1)  # whose rows this pass writes
+        self.bind(context)
+
+    def bind(self, context: HandContext) -> None:
+        """Point the kernel at another board, keeping its scratch arrays.
+
+        Every five-card board leaves the same number of live hands, so a
+        sampling trainer allocates the ~3 GB of per-hand scratch once and only
+        the board-specific tables change here: bucket segments, the showdown
+        order, and which cards each hand holds.
+        """
+        if context.num_hands != self.num_hands:
+            raise ValueError(
+                f"Board has {context.num_hands} live hands; this kernel is shaped for "
+                f"{self.num_hands}. Scratch is sized once, so every board must agree."
+            )
+        self.context = context
+        self.segments = {
+            street: build_segments(context.buckets_for(street))
+            for street in (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
+        }
+        if self.showdown == "walk":
+            self.rank_walk = RankWalk(context.showdown_rank, context.hand_cards)
+        else:
+            self.showdown_sign = showdown_matrix(context.showdown_rank, context.blocks)
         # (H, 52) incidence, so per-card range mass is one matrix product. Folds
         # need only blocker-corrected mass, and going through it costs O(H x 52)
         # where the showdown path costs O(H x H) -- a ~20x difference across
         # 50,952 fold terminals, which is why they do not share a code path.
-        self.card_incidence = np.zeros((num_hands, NUM_CARDS), dtype=DTYPE)
-        self.card_incidence[np.arange(num_hands)[:, None], context.hand_cards] = 1.0
+        self.card_incidence = np.zeros((self.num_hands, NUM_CARDS), dtype=DTYPE)
+        self.card_incidence[np.arange(self.num_hands)[:, None], context.hand_cards] = 1.0
         self.hand_cards = context.hand_cards
 
     # ---- per-group shape helpers ----------------------------------------
@@ -326,6 +363,12 @@ class VectorCFR:
 
         showdowns = np.flatnonzero(kind == TerminalKind.SHOWDOWN)
         if showdowns.shape[0]:
+            scale = magnitude[showdowns][:, None]
+            if self.showdown == "walk":
+                for player in (0, 1):
+                    beaten = self.rank_walk.values(self.terminal_reach[1 - player, showdowns])
+                    self.terminal_value[player, showdowns] = scale * beaten
+                return
             count = showdowns.shape[0]
             # showdown_sign is antisymmetric, so each player reads its own
             # win/lose direction off the same matrix; only the range it is
@@ -334,7 +377,6 @@ class VectorCFR:
                 [self.terminal_reach[1, showdowns], self.terminal_reach[0, showdowns]]
             )
             beaten = stacked @ self.showdown_sign.T
-            scale = magnitude[showdowns][:, None]
             self.terminal_value[0, showdowns] = scale * beaten[:count]
             self.terminal_value[1, showdowns] = scale * beaten[count:]
 
@@ -408,6 +450,8 @@ class VectorCFR:
         of sums — and avoids materialising a second ``(nodes, hands, actions)``
         array just to hold the subtraction.
         """
+        if group.actor not in self.update_players:
+            return
         segments = self.segments[group.street]
         num_buckets = self.compiled.tree.num_buckets(group.street)
         num_actions = group.num_actions
@@ -419,13 +463,12 @@ class VectorCFR:
 
         block = np.zeros((children.shape[0], num_buckets, num_actions), dtype=DTYPE)
         block[:, segments.segment_bucket, :] = children - node[:, :, None]
+        if self.delta_scale != 1.0:
+            block *= DTYPE(self.delta_scale)
 
         index = self._slot_index(group, chunk)
         if self.regret_target is None:
-            updated = self.regrets[index] + block.reshape(children.shape[0], -1)
-            if self.cfr_plus:
-                np.maximum(updated, 0.0, out=updated)
-            self.regrets[index] = updated
+            self.apply_regret_block(index, block, segments.segment_bucket)
         else:
             # Deferred mode: this pass is one of several whose updates belong to
             # the same iteration, so the increment goes to a buffer and the
@@ -433,6 +476,30 @@ class VectorCFR:
             # contribution separately would clip a negative that a later one was
             # about to cancel, which is a different algorithm.
             self.regret_target[index] += block.reshape(children.shape[0], -1)
+
+    def apply_regret_block(
+        self, index: np.ndarray, block: np.ndarray, occupied: np.ndarray
+    ) -> None:
+        """``regrets[index] = discount(regrets[index]) + block``, then the CFR+ floor.
+
+        ``block`` is ``(n, B, A)`` and ``occupied`` the buckets this board
+        populates. Only those rows are discounted: a row no hand on this board
+        falls in received no information, and decaying it anyway is the eager
+        schedule the scalar kernel measured 12-18% worse (``numba_ops``).
+        """
+        rows = block.shape[0]
+        stored = self.regrets[index]
+        if self.regret_discount is not None:
+            positive, negative = self.regret_discount
+            current = stored.reshape(rows, block.shape[1], block.shape[2])
+            touched = current[:, occupied, :]
+            current[:, occupied, :] = np.where(
+                touched > 0, touched * DTYPE(positive), touched * DTYPE(negative)
+            )
+        updated = stored + block.reshape(rows, -1)
+        if self.cfr_plus:
+            np.maximum(updated, 0.0, out=updated)
+        self.regrets[index] = updated
 
     def _accumulate_strategy_sum(
         self, group: NodeGroup, chunk: slice, bucket_strategy: np.ndarray
@@ -446,6 +513,8 @@ class VectorCFR:
         reduction from a ``(nodes, hands, actions)`` array to a ``(nodes,
         hands)`` one and the product into the smaller bucket space.
         """
+        if group.actor not in self.update_players:
+            return
         segments = self.segments[group.street]
         nodes = group.node_ids[chunk]
         reach = self.reach[group.actor, nodes][:, segments.hand_order]
@@ -454,6 +523,8 @@ class VectorCFR:
         num_buckets = self.compiled.tree.num_buckets(group.street)
         mass = np.zeros((collapsed.shape[0], num_buckets), dtype=DTYPE)
         mass[:, segments.segment_bucket] = collapsed
+        if self.strategy_weight != 1.0:
+            mass *= DTYPE(self.strategy_weight)
 
         index = self._slot_index(group, chunk)
         self.strategy_sum[index] += (mass[:, :, None] * bucket_strategy).reshape(

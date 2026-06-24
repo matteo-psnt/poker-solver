@@ -2092,6 +2092,8 @@ export interface components {
             parent?: string | null;
             /** Pool */
             pool?: string | null;
+            /** Retain Every */
+            retain_every?: number | null;
             /** Run */
             run?: string | null;
             /** Sets */

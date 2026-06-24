@@ -58,6 +58,7 @@ from src.interfaces.commands.submit_coupling import SubmitCouplingPayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.submit_vector import SubmitVectorPayload, VectorArm
 from src.interfaces.commands.tasks import TasksPayload
+from src.interfaces.commands.train_pcs import PcsTrainingPayload
 from src.interfaces.commands.train_static import StaticTrainingPayload
 from src.interfaces.commands.train_vector import VectorBlueprintPayload
 from src.interfaces.commands.vector_sweep import SweepPoint, VectorSweepPayload
@@ -79,6 +80,20 @@ PAYLOADS: dict[str, Any] = {
         runtime_seconds=1.5,
         iterations_per_second=666.7,
         dropped_updates=0,
+        status="completed",
+    ),
+    "train-pcs": PcsTrainingPayload(
+        run_id="run-pcs-a",
+        runs_dir="data/runs",
+        config_name="production",
+        iterations=9_600,
+        board_passes=9_600,
+        workers=8,
+        num_rows=32_240_608,
+        touched_rows=32_100_000,
+        coverage=0.9956,
+        runtime_seconds=10_800.0,
+        iterations_per_second=0.89,
         status="completed",
     ),
     "abstraction-coupling": AbstractionCouplingPayload(

@@ -27,6 +27,7 @@ import eval7
 import numpy as np
 
 from src.core.game.state import FULL_DECK, Card, Street
+from src.engine.solver.infoset.index import preflop_hand_index
 from src.engine.solver.vector.coupling import RELABEL_STREETS, board_relative
 from src.engine.solver.vector.hand_context import (
     HandContext,
@@ -84,11 +85,12 @@ def build_hand_context(
             for first, second in hands
         ]
 
-    # Preflop dispatches to the 169 canonical classes inside the abstraction, so
-    # it is asked for the same way rather than special-cased here.
+    # Preflop rows are the solver's 169 classes (`infoset.index.bucket_of`),
+    # never the abstraction's: the scalar trainer and the exact-BR scorer both
+    # index them through this function, so a table written here reads back
+    # under the same row identity.
     buckets[Street.PREFLOP.value - 1] = [
-        abstraction.get_bucket((FULL_DECK[first], FULL_DECK[second]), (), Street.PREFLOP)
-        for first, second in hands
+        preflop_hand_index((FULL_DECK[first], FULL_DECK[second])) for first, second in hands
     ]
 
     if board_relative_buckets:
