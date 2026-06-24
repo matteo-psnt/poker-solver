@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 TIER_KNOBS = ("scorer", "opponent", "include_off_tree")
 
+# Read off the RECORD, not off `knobs`: they say what GAME was measured, and two
+# numbers from different games are not two measurements of one thing. A null
+# splits from a value on purpose -- `eval_tree_fingerprint` was added after the
+# limp fix changed the tree under a fixed action config, so a row without one
+# was measured on a tree nothing can now identify.
+IDENTITY_KNOBS = ("card_abstraction_hash", "action_config_hash", "eval_tree_fingerprint")
+
 CONDITIONAL_TIER_KNOBS = (
     "runouts",
     "resolver_iterations",
@@ -179,6 +186,7 @@ def tier_key(record: dict[str, Any]) -> tuple[Any, ...]:
     knobs = record.get("knobs") or {}
     return (
         record.get("method"),
+        *(record.get(k) for k in IDENTITY_KNOBS),
         *(knobs.get(k) for k in TIER_KNOBS),
         *(knobs.get(k) for k in CONDITIONAL_TIER_KNOBS),
         knobs.get("base_seed"),
@@ -196,6 +204,8 @@ def tier_label(record: dict[str, Any]) -> str:
     """
     knobs = record.get("knobs") or {}
     parts = [str(record.get("method") or "?")]
+    # Truncated: these are 16-hex digests and the label is read in a table row.
+    parts += [f"{k}={str(record[k])[:8]}" for k in IDENTITY_KNOBS if record.get(k) is not None]
     parts += [f"{k}={knobs[k]}" for k in TIER_KNOBS if knobs.get(k) is not None]
     parts += [f"{k}={knobs[k]}" for k in CONDITIONAL_TIER_KNOBS if knobs.get(k) is not None]
     if knobs.get("base_seed") is not None:
@@ -232,11 +242,11 @@ def tier_mismatches(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
             "the difference is exact and needs no p-value."
         )
 
-    for knob in ("card_abstraction_hash", "action_config_hash"):
+    for knob in IDENTITY_KNOBS:
         if a.get(knob) != b.get(knob):
             reasons.append(  # noqa: PERF401 - multi-line message reads worse as a genexp
-                f"{knob} differs ({a.get(knob)!r} vs {b.get(knob)!r}): the two runs are "
-                "bucketed differently, so their exploitability numbers are not on one scale."
+                f"{knob} differs ({a.get(knob)!r} vs {b.get(knob)!r}): the two rows measured "
+                "different games, so their exploitability numbers are not on one scale."
             )
 
     seed_a, seed_b = ka.get("base_seed"), kb.get("base_seed")

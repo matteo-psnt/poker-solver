@@ -27,7 +27,7 @@ class TestLadderWatcher:
             '{"zarr": "static-10.zarr", "iteration": 10, "retained": []}'
         )
 
-        watcher = progress.LadderWatcher(paths, log, interval=0.01)
+        watcher = progress.LadderWatcher(paths, log, run_dir=run_dir, interval=0.01)
         watcher.start()
         try:
             eventually(lambda: (paths.archive / "run-a" / "static-10.zarr").is_dir())
@@ -35,11 +35,30 @@ class TestLadderWatcher:
             watcher.stop()
         assert (paths.archive / "run-a" / "static-10.zarr" / "chunk").read_text() == "data"
 
+    def test_it_leaves_other_runs_on_the_node_alone(self, paths, log):
+        """A node is reused. An evaluate task before this one fetched a 300M
+        ladder under runs/, and the watcher re-uploaded it on every tick --
+        thirty minutes per training task."""
+        for name in ("run-mine", "run-theirs"):
+            run_dir = paths.runs / name
+            (run_dir / "static-10.zarr").mkdir(parents=True)
+            (run_dir / "static-10.zarr" / "chunk").write_text(name)
+            (run_dir / "STATIC_CHECKPOINT.json").write_text(
+                '{"zarr": "static-10.zarr", "iteration": 10, "retained": []}'
+            )
+        watcher = progress.LadderWatcher(paths, log, run_dir=paths.runs / "run-mine", interval=0.01)
+        watcher.start()
+        try:
+            eventually(lambda: (paths.archive / "run-mine" / "static-10.zarr").is_dir())
+        finally:
+            watcher.stop()
+        assert not (paths.archive / "run-theirs").exists()
+
     def test_stop_joins_the_thread(self, paths, log):
         """Not merely signalled: publishing removes a marker, copies, rewrites
         it, so a second publisher can leave a known-good rung unmarked."""
         paths.runs.mkdir(parents=True)
-        watcher = progress.LadderWatcher(paths, log, interval=0.01)
+        watcher = progress.LadderWatcher(paths, log, run_dir=paths.runs / "run-a", interval=0.01)
         watcher.start()
         watcher.stop()
         assert not watcher._thread.is_alive()
@@ -176,7 +195,9 @@ class TestTheWatcherReportsPromptly:
         plan = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000)
         monkeypatch.setattr(progress, "node_state", lambda *a: {"iteration": 400})
 
-        watcher = progress.LadderWatcher(paths, log, interval=9999, plan=plan)
+        watcher = progress.LadderWatcher(
+            paths, log, run_dir=paths.runs / "r", interval=9999, plan=plan
+        )
         watcher.start()
         watcher.stop()
 

@@ -183,6 +183,11 @@ class TestConditionalChance:
 
         plan = _BoardPlan(PublicBRConfig(num_flops=1, num_turns=49, num_rivers=48))
         assert self._compatible_mass(plan, _FLOP) == pytest.approx(45 / 49)
+        # The RIVER's own fraction, not the turn's. The two differ by 2%, and
+        # applying one street's factor at the other's depth is a silent 2% on
+        # the correction the conditional ladder's limit is read off.
+        river = self._compatible_mass(plan, (*_FLOP, Card.new("9c")))
+        assert river == pytest.approx(44 / 48)
 
     @pytest.mark.timeout(60)
     def test_it_is_a_different_game(self, trained_solver):

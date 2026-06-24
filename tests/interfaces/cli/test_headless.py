@@ -108,6 +108,7 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     fake_out = SimpleNamespace(
         infosets=42,
         checkpoint_iteration=1000,
+        tree_fingerprint="treefp0000000000",
         results={"exploitability_mbb": 1.0, "std_error_mbb": 0.1},
     )
     # Patched on the owning submodule: `evaluate_and_record` dispatches through its

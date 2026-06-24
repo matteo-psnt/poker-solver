@@ -51,6 +51,11 @@ class EvaluationOutput:
     # result, which is exactly how a 10M-iteration checkpoint was once silently
     # reported as the score of a 16M-iteration run. None only for pre-manifest runs.
     checkpoint_iteration: int | None = None
+    # The BETTING TREE this eval walked, as `BettingTree.fingerprint`. Eval-time,
+    # unlike the run's `action_config_hash`, which is the tree it was TRAINED on:
+    # a rules change moves this and leaves that alone, so without it two rows at
+    # matched knobs from either side of the limp fix are indistinguishable.
+    tree_fingerprint: str | None = None
 
 
 def effective_abstraction_hash(

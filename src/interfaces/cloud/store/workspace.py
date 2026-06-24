@@ -26,6 +26,7 @@ from src.interfaces import run_names
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
 from src.interfaces.errors import CommandError
+from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -85,8 +86,9 @@ def pull_metadata(
     # directory listings, and a listing is a round trip like any other: 18 runs
     # walked one after another was 12.4s of the ~20s a `--source share` read
     # took, before a single file had been fetched.
-    def _walk(name: str) -> list[tuple[str, Path]]:
+    def _walk(name: str) -> tuple[list[tuple[str, Path]], list[Path]]:
         found: list[tuple[str, Path]] = []
+        markers: list[Path] = []
         for remote in share.walk_files(
             service,
             share_name,
@@ -95,15 +97,28 @@ def pull_metadata(
         ):
             relative = remote[len(f"{share.ARCHIVE_DIR}/") :]
             leaf = Path(relative).name
+            # RECREATED, never downloaded: a completion marker's whole content
+            # is that it exists, so its name in this listing is the entire fact
+            # and fetching it would be a round trip per rung. Without them the
+            # local tree cannot tell a rung the share holds from one a manifest
+            # merely names -- which is the gap `runinfo` reports.
+            if leaf.startswith(archive.MARKER_PREFIX):
+                markers.append(destination / relative)
+                continue
             if share.is_snapshot_path(relative) or not share.is_metadata(leaf):
                 continue
             if leaf.endswith(DEAD_SUFFIX):
                 continue
             found.append((remote, destination / relative))
-        return found
+        return found, markers
 
     with ThreadPoolExecutor(max_workers=min(_PARALLEL_DOWNLOADS, len(published) or 1)) as pool:
-        wanted = [entry for batch in pool.map(_walk, published) for entry in batch]
+        walked = list(pool.map(_walk, published))
+    wanted = [entry for batch, _ in walked for entry in batch]
+    for _, markers in walked:
+        for marker in markers:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
 
     # One round trip per file, and a run's eval documents now carry their full
     # sample vectors -- so this is latency-bound on a link where latency is the
