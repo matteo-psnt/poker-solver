@@ -587,6 +587,7 @@ class TrainPcsTask(TaskKind):
     """
 
     name = TaskName.TRAIN_PCS
+    publishes_run = True
     unit = "iterations"
     progress_file = "train-progress.json"
 
