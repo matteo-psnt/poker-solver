@@ -3470,6 +3470,17 @@
             ],
             "title": "Pool"
           },
+          "retain_every": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Every"
+          },
           "run": {
             "anyOf": [
               {
