@@ -173,6 +173,7 @@ def train_static(
             experiment_id=tag.experiment_id,
             arm=tag.arm,
             parent_run_id=tag.parent_run_id,
+            kernel="scalar",
         )
     run_dir.mkdir(parents=True, exist_ok=True)
     # Before training, so `created` is genuinely the log's first event -- a run

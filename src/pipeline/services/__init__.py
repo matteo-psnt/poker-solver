@@ -31,6 +31,7 @@ from src.pipeline.services.experiments import (
     exploitability_curve,
     run_digest,
 )
+from src.pipeline.services.pcs_training import PcsTrainingOutput, train_pcs
 from src.pipeline.services.runs import (
     RunSummary,
     checkpoint_iteration_of,
@@ -71,6 +72,7 @@ __all__ = [
     "EvaluationOutput",
     "EvaluationPayload",
     "ExperimentTag",
+    "PcsTrainingOutput",
     "RunDigest",
     "RunSummary",
     "StaticTrainingOutput",
@@ -89,6 +91,7 @@ __all__ = [
     "record_blueprint_match",
     "run_digest",
     "sweep_bucket_counts",
+    "train_pcs",
     "train_static",
     "train_vector_blueprint",
 ]

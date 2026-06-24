@@ -154,6 +154,7 @@ class SubmitBody(BaseModel):
     sets: list[str] | None = None
     workers: int | None = None
     checkpoint_every: int | None = None
+    retain_every: int | None = None
     timeout: str | None = None
     pool: str | None = None
     # `--kernel` and the two groups it gates. Absent here for as long as they
