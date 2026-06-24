@@ -48,9 +48,12 @@ BOARD_CARDS = 5
 # Live hands on any full board: C(47, 2). Fixes every scratch shape.
 LIVE_HANDS = int(enumerate_live_hands(np.arange(BOARD_CARDS)).shape[0])
 # What a worker holds beyond its hand-space arrays: the tree and its compiled
-# form, the bucketer's caches, numba, and the interpreter. Measured on a pool
-# node at the production tree; revise from the task log, not from here.
-WORKER_OVERHEAD_BYTES = 1_000_000_000
+# form, the bucketer's caches, numba, the interpreter and one pass's
+# temporaries. Measured 08-23 on a D16als_v6 at the production tree: peak RSS
+# 5.74 GB per worker, of which ~0.8 GB is the mmapped abstraction's shared
+# pages; six workers ran on the 32 GiB node. Revise from the task log's
+# "peak RSS" line, not from here.
+WORKER_OVERHEAD_BYTES = 1_600_000_000
 # The coordinator, the shared table's page cache and the OS.
 NODE_HEADROOM_BYTES = 3_000_000_000
 
