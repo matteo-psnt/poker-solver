@@ -121,3 +121,56 @@ class TestTreeShadowMechanics:
         shadow.start(state)
         shadow._broken = True
         assert shadow.state_for(state) is state
+
+
+class TestEveryDriverAdvancesTheShadow:
+    """The shadow is useless on a path that never advances it.
+
+    MEASURED: wiring it only into `HUResolver.observe` left it dead in LBR,
+    because `ResolvedOpponent` tracks ranges itself and calls
+    `solve_strategy_matrix` directly. The off-tree re-run came back +2567.9
+    mbb/hand BIT-IDENTICAL to the pre-fix number -- the strategy had not moved.
+    A per-driver test is the only thing that catches that; a resolver-level one
+    passes while the measurement stays broken.
+    """
+
+    @pytest.fixture(scope="class")
+    def solver(self):
+        return build_trained_test_solver(400)
+
+    def test_the_lbr_deployed_opponent_advances_it(self, solver):
+        from src.pipeline.evaluation.estimators.lbr.opponent_model import ResolvedOpponent
+
+        state = _flop_node(solver)
+        off = _off_menu_bet(solver, state)
+        model = ResolvedOpponent(
+            solver,
+            solver.config.resolver.model_copy(
+                update={"max_iterations": 8, "root_prior_weight": 50.0}
+            ),
+            rng=np.random.default_rng(11),
+        )
+        model.reset(state, state.current_player)
+        model.observe(state, off)
+        assert model._resolver._shadow.diverged, (
+            "ResolvedOpponent tracks ranges itself, so it must advance the resolver's "
+            "shadow explicitly -- otherwise off-menu sizes silently erase the blueprint"
+        )
+
+    def test_the_agent_interface_advances_it(self, solver):
+        """`resolver_match` drives through BlueprintAgent, a different path again."""
+        from src.engine.search.agent import BlueprintAgent
+
+        state = _flop_node(solver)
+        off = _off_menu_bet(solver, state)
+        agent = BlueprintAgent(
+            solver,
+            use_resolver=True,
+            resolver_config=solver.config.resolver.model_copy(
+                update={"max_iterations": 8, "root_prior_weight": 50.0}
+            ),
+            rng=np.random.default_rng(11),
+        )
+        agent.observe(state, off)
+        assert agent.resolver is not None
+        assert agent.resolver._shadow.diverged
