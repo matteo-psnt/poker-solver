@@ -303,6 +303,11 @@ class HUResolver:
         driven, so a length-and-type check is the whole guard; anything else
         falls back to the real state, i.e. to the behaviour before the shadow
         existed, rather than silently pairing two different menus.
+
+        The shadow supplies the BETTING HISTORY and nothing else, so ``state``'s
+        actor cards are transplanted onto it. Callers ask about hypothetical
+        combos (`_blueprint_strategy_matrix` walks all 1,326), and returning the
+        shadow verbatim answered every one of them for the hand actually held.
         """
         shadow = self._shadow.state_for(state)
         if shadow is state:
@@ -312,7 +317,17 @@ class HUResolver:
             return state
         if any(a.type is not b.type for a, b in zip(actions, shadow_actions, strict=True)):
             return state
-        return shadow
+        actor = state.current_player
+        lookup = replace_actor_hole_cards(shadow, actor=actor, combo=tuple(state.hole_cards[actor]))
+        try:
+            self._policy_source.bucket_for(lookup, actor)
+        except KeyError:
+            # A shadow that survived every structural check can still land on a
+            # board the abstraction never enumerated. That used to escape here,
+            # OUTSIDE `TreeShadow`'s fail-soft, and killed a whole evaluation:
+            # losing sharpness on one lookup is the cheaper failure.
+            return state
+        return lookup
 
     def _blueprint_strategy(
         self,
