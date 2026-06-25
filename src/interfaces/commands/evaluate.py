@@ -83,6 +83,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "than from the blueprint.",
     )
     parser.add_argument(
+        "--resolver-blend-alpha",
+        type=float,
+        default=None,
+        help="[lbr] Override resolver.policy_blend_alpha: the weight the DEPLOYED row "
+        "puts on the resolver, the rest going to the blueprint. 0 makes deployed play "
+        "exactly the blueprint, which is the control that attributes any gap to the "
+        "resolver row rather than to the lookup path around it.",
+    )
+    parser.add_argument(
         "--resolver-max-iterations",
         type=int,
         default=None,
@@ -262,6 +271,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         resolver_gate_deals=args.deals,
         resolver_gate_workers=args.workers,
         resolver_root_prior_weight=args.resolver_prior_weight,
+        resolver_blend_alpha=args.resolver_blend_alpha,
         resolver_leaf_rollouts=args.resolver_leaf_rollouts,
         leaf_continuation_fraction=args.leaf_continuation,
         resolver_max_iterations=args.resolver_max_iterations,

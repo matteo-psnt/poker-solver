@@ -78,6 +78,7 @@ def evaluate_and_record(
     leaf_continuation_fraction: float | None = None,
     resolver_max_iterations: int | None = None,
     resolver_root_prior_weight: float | None = None,
+    resolver_blend_alpha: float | None = None,
     resolver_leaf_rollouts: int | None = None,
     resolver_allin_runouts: int = 1,
     abstraction_hash: str | None = None,
@@ -135,6 +136,7 @@ def evaluate_and_record(
             leaf_continuation_fraction=leaf_continuation_fraction,
             max_iterations=resolver_max_iterations,
             root_prior_weight=resolver_root_prior_weight,
+            blend_alpha=resolver_blend_alpha,
             leaf_rollouts=resolver_leaf_rollouts,
             workers=resolver_gate_workers,
             allin_runouts=resolver_allin_runouts,
@@ -148,6 +150,7 @@ def evaluate_and_record(
             config,
             resolver_iterations=resolver_iterations,
             resolver_root_prior_weight=resolver_root_prior_weight,
+            resolver_blend_alpha=resolver_blend_alpha,
             abstraction_hash=abstraction_hash,
             at_iteration=at_iteration,
         )
