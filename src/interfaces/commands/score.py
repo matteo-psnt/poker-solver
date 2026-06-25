@@ -96,12 +96,16 @@ def run(args: argparse.Namespace) -> ScorePayload:
     # Azure SDK -- the same rule `_base.records_root` follows.
     from src.interfaces.cloud.store.workspace import (  # noqa: PLC0415 -- see above
         resolve_published_run,
+        verify_published_rungs,
     )
 
     # The NODE has no fragment matcher, so a fragment must become a full id
     # HERE or it fails after a snapshot upload and three retries.
     run_id = resolve_published_run(args.run)
     rungs = _rungs(args.at)
+    # Same rule, one step further: a rung the manifest advertises may have been
+    # pruned off the share, and the node only finds out after `uv sync`.
+    verify_published_rungs(run_id, rungs)
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
             spec.TaskSpec(
