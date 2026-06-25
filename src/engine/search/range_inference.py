@@ -92,27 +92,18 @@ def update_ranges(
     ranges: PlayerRanges,
     observed_action: Action,
     blueprint: ScorableBlueprint,
-    *,
-    lookup_state: GameState | None = None,
 ) -> PlayerRanges:
     """
     Update ranges after an observed action using Bayesian likelihood weighting.
 
     The resolver still adapts through re-solving each node; this keeps the opponent
     range tracking calibrated to observed actions.
-
-    ``lookup_state`` is where the LIKELIHOOD is read -- the resolver's on-tree
-    shadow. Off-tree the blueprint has no infoset, every combo falls through to
-    the same uniform likelihood, and the posterior stops discriminating for the
-    rest of the hand; the shadow gives the lookup a betting history that exists.
     """
 
     actor = state.current_player
     blocked = blocked_combos(state.board)
-    if lookup_state is not None and lookup_state.current_player != actor:
-        lookup_state = None
     likelihood = _action_likelihood_vector(
-        state=lookup_state if lookup_state is not None else state,
+        state=state,
         actor=actor,
         observed_action=observed_action,
         blueprint=blueprint,
