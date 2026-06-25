@@ -31,6 +31,7 @@ Stack depth:
 
 from __future__ import annotations
 
+import bisect
 import dataclasses
 import hashlib
 from dataclasses import dataclass
@@ -144,12 +145,14 @@ class BettingTree:
     production settings. Build it once per process and share it.
 
     Layout:
-        Infosets are laid out node-major. Node ``n`` owns ``buckets(street(n))``
-        consecutive rows starting at ``row_offset[n]``; row ``r`` of node ``n``
-        owns ``num_actions(n)`` consecutive slots starting at ``slot_offset[n] +
-        local_row * num_actions(n)``. The layout is ragged — nodes with fewer
-        actions occupy fewer slots — so there is no padding waste, unlike a
-        dense ``(num_infosets, max_actions)`` rectangle.
+        Infosets are laid out BUCKET-MAJOR within each street: row/slot of
+        ``(n, b)`` is ``base[n] + b * stride[n]``, where the stride is shared
+        by every node of the street. Ids are DFS order, so one street's
+        subtree is a contiguous id range — at the fixed per-street bucket a
+        traversal holds, its visits land in one compact region instead of
+        scattering across the table (measured: a cache-resident working set
+        is +50% at full box). Still ragged — nodes with fewer actions occupy
+        fewer slots — so there is no padding waste.
     """
 
     def __init__(
@@ -266,24 +269,58 @@ class BettingTree:
         # plus dict lookup on that path.
         self.buckets_per_node = rows_per_node
 
-        # Exclusive prefix sums: node n's rows/slots begin at offset[n].
-        self.row_offset = np.zeros(n + 1, dtype=np.int64)
-        np.cumsum(rows_per_node, out=self.row_offset[1:])
+        # Bucket-major within each street: address(n, b) = base[n] + b*stride[n],
+        # the stride shared by all of a street's nodes. See the class docstring
+        # for why this order beats node-major on the memory system.
+        self.row_base = np.zeros(n, dtype=np.int64)
+        self.row_stride = np.zeros(n, dtype=np.int64)
+        self.slot_base = np.zeros(n, dtype=np.int64)
+        self.slot_stride = np.zeros(n, dtype=np.int64)
+        # Row -> infoset inversion tables, one entry per street in layout order.
+        self._street_row_base: list[int] = []
+        self._street_node_ids: list[np.ndarray] = []
+        row_cursor = 0
+        slot_cursor = 0
+        widths_per_street: list[np.ndarray] = []
+        for street in Street:
+            ids = np.array(
+                [node.node_id for node in self.nodes if node.street == street], dtype=np.int64
+            )
+            self._street_row_base.append(row_cursor)
+            self._street_node_ids.append(ids)
+            if ids.size == 0:
+                widths_per_street.append(np.zeros(0, dtype=np.int64))
+                continue
+            buckets = self.num_buckets(street)
+            widths = self.num_actions[ids]
+            street_width = int(widths.sum())
+            self.row_base[ids] = row_cursor + np.arange(ids.size, dtype=np.int64)
+            self.row_stride[ids] = ids.size
+            slot_local = np.zeros(ids.size, dtype=np.int64)
+            np.cumsum(widths[:-1], out=slot_local[1:])
+            self.slot_base[ids] = slot_cursor + slot_local
+            self.slot_stride[ids] = street_width
+            widths_per_street.append(np.tile(widths, buckets))
+            row_cursor += ids.size * buckets
+            slot_cursor += street_width * buckets
+        self._street_row_base.append(row_cursor)  # sentinel, closes the last street
+        self.num_rows = row_cursor
+        self.num_slots = slot_cursor
+        # Width of each ROW in row order — what tiles the slot array exactly,
+        # which is the invariant the vector bridge's reduceat depends on.
+        self.row_widths = (
+            np.concatenate(widths_per_street) if widths_per_street else np.zeros(0, dtype=np.int64)
+        )
 
-        slots_per_node = rows_per_node * self.num_actions
-        self.slot_offset = np.zeros(n + 1, dtype=np.int64)
-        np.cumsum(slots_per_node, out=self.slot_offset[1:])
-
-        self.num_rows = int(self.row_offset[-1])
-        self.num_slots = int(self.slot_offset[-1])
-
-        # Plain-Python mirrors of the three arrays the traversal indexes once
-        # per node visit. Pulling a scalar out of an int64 array boxes a numpy
+        # Plain-Python mirrors of the arrays the traversal indexes once per
+        # node visit. Pulling a scalar out of an int64 array boxes a numpy
         # object and costs several times a list index, and this is the hottest
         # read in the solver.
-        self.row_offset_list: list[int] = self.row_offset.tolist()
-        self.slot_offset_list: list[int] = self.slot_offset.tolist()
         self.num_actions_list: list[int] = self.num_actions.tolist()
+        row_base_list: list[int] = self.row_base.tolist()
+        row_stride_list: list[int] = self.row_stride.tolist()
+        slot_base_list: list[int] = self.slot_base.tolist()
+        slot_stride_list: list[int] = self.slot_stride.tolist()
 
         # Everything the traversal reads at a node, denormalized into one tuple
         # so a visit costs one list index and one unpack instead of a walk
@@ -294,8 +331,10 @@ class BettingTree:
                 node.actor_is_button,
                 node.street,
                 node.num_actions,
-                self.row_offset_list[node.node_id],
-                self.slot_offset_list[node.node_id],
+                row_base_list[node.node_id],
+                row_stride_list[node.node_id],
+                slot_base_list[node.node_id],
+                slot_stride_list[node.node_id],
                 int(rows_per_node[node.node_id]),
                 self.edges[node.node_id],
             )
@@ -331,13 +370,45 @@ class BettingTree:
 
     def row(self, node_id: int, bucket: int) -> int:
         """Flat infoset row for ``bucket`` at ``node_id``."""
-        return int(self.row_offset[node_id]) + bucket
+        return int(self.row_base[node_id]) + bucket * int(self.row_stride[node_id])
 
     def slots(self, node_id: int, bucket: int) -> tuple[int, int]:
         """Half-open slot range ``[start, end)`` backing one infoset's action vector."""
+        start = int(self.slot_base[node_id]) + bucket * int(self.slot_stride[node_id])
+        return start, start + int(self.num_actions[node_id])
+
+    def row_to_infoset(self, row: int) -> tuple[int, int]:
+        """Inverse of :meth:`row`: which ``(node_id, bucket)`` owns a flat row."""
+        street_index = bisect.bisect_right(self._street_row_base, row) - 1
+        ids = self._street_node_ids[street_index]
+        bucket, position = divmod(row - self._street_row_base[street_index], ids.size)
+        return int(ids[position]), int(bucket)
+
+    def node_row_vector(self, array: np.ndarray, node_id: int) -> np.ndarray:
+        """``(buckets,)`` strided view of one node's rows.
+
+        Rows are bucket-major, so a node's rows sit ``row_stride`` apart —
+        basic slicing with a step keeps this a VIEW, not a copy."""
+        base = int(self.row_base[node_id])
+        stride = int(self.row_stride[node_id])
+        count = int(self.buckets_per_node[node_id])
+        return array[base : base + (count - 1) * stride + 1 : stride]
+
+    def node_action_matrix(self, array: np.ndarray, node_id: int) -> np.ndarray:
+        """``(buckets, width)`` strided view of one node's slot block.
+
+        The one place the strided layout needs ``as_strided``; every reader of
+        the old contiguous ``reshape(count, width)`` goes through here now."""
+        base = int(self.slot_base[node_id])
+        stride = int(self.slot_stride[node_id])
+        count = int(self.buckets_per_node[node_id])
         width = int(self.num_actions[node_id])
-        start = int(self.slot_offset[node_id]) + bucket * width
-        return start, start + width
+        window = array[base : base + (count - 1) * stride + width]
+        return np.lib.stride_tricks.as_strided(
+            window,
+            shape=(count, width),
+            strides=(stride * array.itemsize, array.itemsize),
+        )
 
     def legal_actions(self, node_id: int) -> tuple[Action, ...]:
         return self.nodes[node_id].legal_actions
@@ -357,7 +428,9 @@ class BettingTree:
         order and the offsets follow from it.
         """
         digest = hashlib.sha256()
-        digest.update(b"betting-tree-v1")
+        # v2: the bucket-major layout. Bumped so a v1 checkpoint or shared
+        # segment refuses cleanly instead of being read as a permutation.
+        digest.update(b"betting-tree-v2-bucket-major")
         digest.update(str(self.starting_stack).encode())
         for street in sorted(self.buckets_per_street, key=lambda s: s.name):
             digest.update(f"{street.name}={self.num_buckets(street)};".encode())

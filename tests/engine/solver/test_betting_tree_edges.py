@@ -293,7 +293,18 @@ def test_node_spec_and_the_layout_accessors_cannot_disagree():
 
     for node in tree.nodes:
         spec = tree.node_spec[node.node_id]
-        is_preflop, actor_is_button, street, num_actions, row_base, slot_base, buckets, edges = spec
+        (
+            is_preflop,
+            actor_is_button,
+            street,
+            num_actions,
+            row_base,
+            row_stride,
+            slot_base,
+            slot_stride,
+            buckets,
+            edges,
+        ) = spec
 
         assert is_preflop == (node.street == Street.PREFLOP)
         assert actor_is_button == node.actor_is_button
@@ -303,8 +314,8 @@ def test_node_spec_and_the_layout_accessors_cannot_disagree():
         assert edges is tree.edges[node.node_id]
 
         for bucket in range(buckets):
-            assert row_base + bucket == tree.row(node.node_id, bucket)
+            assert row_base + bucket * row_stride == tree.row(node.node_id, bucket)
             assert (
-                slot_base + bucket * num_actions,
-                slot_base + bucket * num_actions + num_actions,
+                slot_base + bucket * slot_stride,
+                slot_base + bucket * slot_stride + num_actions,
             ) == tree.slots(node.node_id, bucket)

@@ -3,7 +3,7 @@
 The board-free kernel updates every row of the tree on every iteration, where
 external sampling touches 88-95. ``BucketVectorCFR`` and ``StaticArrayStorage``
 both store ``regrets``/``strategy_sum`` as flat arrays of ``tree.num_slots``
-under the identical ``slot_offset[n] + b*num_actions[n] + a`` layout, so the
+under the identical ``slot_base[n] + b*slot_stride[n] + a`` layout, so the
 strategy is already in the shape a checkpoint wants. This service is that
 bridge: train board-free, write a real ``STATIC_CHECKPOINT.json`` ladder, and
 ``evaluate``, ``curve`` and ``report`` all work on it unchanged.
@@ -82,10 +82,9 @@ class VectorBlueprintOutput(BaseModel):
 
 
 def _row_slot_starts(tree: BettingTree) -> np.ndarray:
-    """First slot of each row. Rows sit contiguously per node, ``num_actions`` wide."""
-    per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
+    """First slot of each row -- ``tree.row_widths`` tiles the slot array in row order."""
     starts = np.zeros(tree.num_rows, dtype=np.int64)
-    np.cumsum(per_row[:-1], out=starts[1:])
+    np.cumsum(tree.row_widths[:-1], out=starts[1:])
     return starts
 
 

@@ -53,16 +53,13 @@ def _street_profiles(storage: StaticArrayStorage) -> dict[str, dict[str, Any]]:
     top_mass: dict[Street, list[np.ndarray]] = {street: [] for street in Street}
     no_positive_regret: dict[Street, int] = dict.fromkeys(Street, 0)
     for node in tree.nodes:
-        width = node.num_actions
         count = int(tree.buckets_per_node[node.node_id])
-        first_row = int(tree.row_offset[node.node_id])
-        start = int(tree.slot_offset[node.node_id])
-        visited = storage.visited[first_row : first_row + count].astype(bool)
+        visited = tree.node_row_vector(storage.visited, node.node_id).astype(bool)
         rows_total[node.street] += count
         if not visited.any():
             continue
-        sums = storage.strategy_sum[start : start + count * width].reshape(count, width)
-        regrets = storage.regrets[start : start + count * width].reshape(count, width)
+        sums = tree.node_action_matrix(storage.strategy_sum, node.node_id)
+        regrets = tree.node_action_matrix(storage.regrets, node.node_id)
         average = _normalised(sums[visited].astype(np.float64))
         positive = np.maximum(regrets[visited].astype(np.float64), 0.0)
         no_positive_regret[node.street] += int((positive.sum(axis=1) <= 0.0).sum())
@@ -176,14 +173,9 @@ def _node_table(
     node_id = tree.node_id(state)
     legal = rules.get_legal_actions(state, action_model)
     tokens = [_label(action, state, rules) for action in legal]
-    width = int(tree.num_actions[node_id])
     count = int(tree.buckets_per_node[node_id])
-    start = int(tree.slot_offset[node_id])
-    first_row = int(tree.row_offset[node_id])
-    rows = _normalised(
-        storage.strategy_sum[start : start + count * width].reshape(count, width).astype(np.float64)
-    )
-    visited = storage.visited[first_row : first_row + count].astype(bool)
+    rows = _normalised(tree.node_action_matrix(storage.strategy_sum, node_id).astype(np.float64))
+    visited = tree.node_row_vector(storage.visited, node_id).astype(bool)
     classes = [preflop_hand_string_at(index) for index in range(count)]
     weights = np.array([_combos_in_class(name) for name in classes], dtype=np.float64)
     return {

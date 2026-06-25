@@ -182,14 +182,10 @@ class TreePolicySource:
     def rows_at(self, state: GameState) -> StoredRows:
         node_id = self._tree.node_id(state)
         tree = self._tree
-        count = int(tree.buckets_per_node[node_id])
-        width = int(tree.num_actions[node_id])
-        start = int(tree.slot_offset[node_id])
-        first_row = int(tree.row_offset[node_id])
         return StoredRows(
             tree.legal_actions(node_id),
-            self._storage.strategy_sum[start : start + count * width].reshape(count, width),
-            self._storage.visited[first_row : first_row + count],
+            tree.node_action_matrix(self._storage.strategy_sum, node_id),
+            tree.node_row_vector(self._storage.visited, node_id),
         )
 
     def infoset_at(self, state: GameState, bucket: int) -> InfoSet | None:

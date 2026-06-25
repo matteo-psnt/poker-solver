@@ -221,7 +221,9 @@ def _walk_node(walk: _Walk, node_id: int, board: tuple[Card, ...], known: int) -
         street,
         num_actions,
         row_base,
+        row_stride,
         slot_base,
+        slot_stride,
         num_buckets,
         edges,
     ) = walk.node_spec[node_id]
@@ -232,8 +234,8 @@ def _walk_node(walk: _Walk, node_id: int, board: tuple[Card, ...], known: int) -
     else:
         bucket = walk.get_bucket(walk.hole[actor], board, street)
         if not 0 <= bucket < num_buckets:
-            # Rows are contiguous per node, so an out-of-range bucket does not
-            # fall off the array — it lands on another node's infoset and the
+            # An out-of-range bucket does not fall off the array — under
+            # base + bucket*stride it lands on another node's infoset and the
             # two silently share storage. Only a custom or broken
             # BucketingStrategy can get here; the production one raises first.
             raise IndexError(
@@ -242,8 +244,8 @@ def _walk_node(walk: _Walk, node_id: int, board: tuple[Card, ...], known: int) -
                 "An out-of-range bucket would alias another node's infoset."
             )
 
-    row = row_base + bucket
-    start = slot_base + bucket * num_actions
+    row = row_base + bucket * row_stride
+    start = slot_base + bucket * slot_stride
     end = start + num_actions
     # Test-then-set, mirroring `compiled_walk`: identical arrays either way,
     # but the store only happens on first touch.

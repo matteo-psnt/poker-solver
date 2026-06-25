@@ -218,9 +218,9 @@ class TestSharedMemory:
 class TestBucketBounds:
     """An out-of-range bucket must fail loudly, not alias another node's rows.
 
-    Rows are contiguous per node, so `row_offset[n] + oversized_bucket` lands on
-    a real row owned by a later node. Without a check, two unrelated infosets
-    silently share storage and nothing anywhere reports an error.
+    An oversized bucket does not fall off the array — `base[n] + bucket *
+    stride[n]` lands on a real row owned by another node. Without a check, two
+    unrelated infosets silently share storage and nothing anywhere reports it.
     """
 
     def test_bucket_past_the_end_raises(self, storage, tree):
@@ -237,7 +237,7 @@ class TestBucketBounds:
         """Shows the check is load-bearing: the bad index is otherwise valid."""
         node = tree.nodes[0]
         n = tree.num_buckets(node.street)
-        aliased = int(tree.row_offset[node.node_id]) + n
+        aliased = int(tree.row_base[node.node_id]) + n * int(tree.row_stride[node.node_id])
         assert aliased < tree.num_rows, "expected the bad index to be in-array"
 
     def test_last_valid_bucket_still_works(self, storage, tree):

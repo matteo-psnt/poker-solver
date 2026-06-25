@@ -137,7 +137,7 @@ def test_a_one_slot_layout_shift_is_caught():
         count = 0
         for node_id in range(len(tree.nodes) - 1):
             spec = tree.node_spec[node_id]
-            tree.node_spec[node_id] = (*spec[:5], spec[5] + 1, *spec[6:])
+            tree.node_spec[node_id] = (*spec[:6], spec[6] + 1, *spec[7:])
             count += 1
         return count
 
@@ -177,5 +177,5 @@ def _resync(tree) -> None:
     mutation would silently do nothing.
     """
     tree.node_spec[:] = [
-        (*spec[:7], tree.edges[node_id]) for node_id, spec in enumerate(tree.node_spec)
+        (*spec[:9], tree.edges[node_id]) for node_id, spec in enumerate(tree.node_spec)
     ]
