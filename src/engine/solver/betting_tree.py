@@ -427,10 +427,20 @@ class BettingTree:
         Node ORDER matters as much as membership, since ids are assigned by DFS
         order and the offsets follow from it.
         """
-        digest = hashlib.sha256()
         # v2: the bucket-major layout. Bumped so a v1 checkpoint or shared
         # segment refuses cleanly instead of being read as a permutation.
-        digest.update(b"betting-tree-v2-bucket-major")
+        return self._digest(b"betting-tree-v2-bucket-major")
+
+    def legacy_fingerprint(self) -> str:
+        """The same tree under the retired node-major (v1) layout.
+
+        What a pre-bucket-major checkpoint carries; ``static_checkpoint``
+        recognises it and permutes the arrays on load instead of refusing."""
+        return self._digest(b"betting-tree-v1")
+
+    def _digest(self, version: bytes) -> str:
+        digest = hashlib.sha256()
+        digest.update(version)
         digest.update(str(self.starting_stack).encode())
         for street in sorted(self.buckets_per_street, key=lambda s: s.name):
             digest.update(f"{street.name}={self.num_buckets(street)};".encode())

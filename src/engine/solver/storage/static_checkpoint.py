@@ -243,7 +243,12 @@ def load_checkpoint(
         raise FileNotFoundError(f"No static checkpoint manifest in {checkpoint_dir}")
 
     expected = storage.tree.fingerprint()
-    if manifest.fingerprint != expected:
+    # A v1 (node-major) checkpoint of the SAME tree is loadable: the values
+    # per infoset are identical, only their addresses moved, so the load
+    # permutes rather than refuses. Any other fingerprint still refuses.
+    legacy = storage.tree.legacy_fingerprint()
+    translate = manifest.fingerprint == legacy
+    if manifest.fingerprint != expected and not translate:
         raise FingerprintMismatchError(
             f"Checkpoint in {checkpoint_dir} was written against betting tree "
             f"{manifest.fingerprint}, but this storage indexes tree {expected}. "
@@ -267,12 +272,16 @@ def load_checkpoint(
     root = zarr.open(zarr.DirectoryStore(checkpoint_dir / entry["zarr"]), mode="r")
 
     stored = root.attrs.get("fingerprint")
-    if stored != expected:
+    if stored != (legacy if translate else expected):
         raise FingerprintMismatchError(
-            f"Snapshot {entry['zarr']} carries fingerprint {stored}, expected {expected}. "
+            f"Snapshot {entry['zarr']} carries fingerprint {stored}, expected "
+            f"{legacy if translate else expected}. "
             "The manifest and the arrays disagree; the directory is corrupt."
         )
 
+    row_source, slot_source = _legacy_index_maps(storage.tree) if translate else (None, None)
+    if translate:
+        logger.info("Checkpoint is v1 node-major; permuting arrays into the bucket-major layout.")
     for name in _ARRAYS:
         target = getattr(storage, name)
         source = root[name][:]
@@ -281,7 +290,11 @@ def load_checkpoint(
                 f"Checkpoint array {name!r} has shape {source.shape}, storage expects "
                 f"{target.shape} — fingerprints matched, so this is a format bug."
             )
-        target[:] = source
+        if translate:
+            gather = slot_source if name in ("regrets", "strategy_sum") else row_source
+            target[:] = source[gather]
+        else:
+            target[:] = source
 
     loaded = int(entry["iteration"])
     logger.info(
@@ -289,6 +302,44 @@ def load_checkpoint(
         f"({storage.num_touched_infosets():,} rows touched, tree {expected})"
     )
     return loaded
+
+
+def _legacy_index_maps(tree) -> tuple[np.ndarray, np.ndarray]:
+    """For each NEW (bucket-major) index, the OLD (v1 node-major) index.
+
+    v1 laid rows/slots out node-major: node ``n`` owned ``buckets`` contiguous
+    rows from ``cumsum`` offsets, each row ``num_actions`` contiguous slots.
+    Gathering ``old_array[map]`` therefore lands every infoset's values at its
+    new address. Built per load; loads are rare and this is seconds.
+    """
+    buckets = tree.buckets_per_node
+    widths = tree.num_actions
+    row_offset_v1 = np.zeros(len(tree.nodes) + 1, dtype=np.int64)
+    np.cumsum(buckets, out=row_offset_v1[1:])
+    slot_offset_v1 = np.zeros(len(tree.nodes) + 1, dtype=np.int64)
+    np.cumsum(buckets * widths, out=slot_offset_v1[1:])
+
+    row_source = np.empty(tree.num_rows, dtype=np.int64)
+    slot_source = np.empty(tree.num_slots, dtype=np.int64)
+    for node in tree.nodes:
+        n = node.node_id
+        count = int(buckets[n])
+        width = int(widths[n])
+        bucket_axis = np.arange(count, dtype=np.int64)
+        new_rows = int(tree.row_base[n]) + bucket_axis * int(tree.row_stride[n])
+        row_source[new_rows] = row_offset_v1[n] + bucket_axis
+        if width == 0:
+            continue
+        new_slots = (
+            int(tree.slot_base[n])
+            + bucket_axis[:, None] * int(tree.slot_stride[n])
+            + np.arange(width, dtype=np.int64)[None, :]
+        )
+        old_slots = slot_offset_v1[n] + np.arange(count * width, dtype=np.int64).reshape(
+            count, width
+        )
+        slot_source[new_slots] = old_slots
+    return row_source, slot_source
 
 
 def retained_iterations(checkpoint_dir: Path) -> list[int]:
