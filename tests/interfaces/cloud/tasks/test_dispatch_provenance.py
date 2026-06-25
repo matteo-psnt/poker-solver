@@ -281,8 +281,10 @@ class TestPoolBinding:
     the D16 pool silently."""
 
     @staticmethod
-    def _stub(monkeypatch, calls, big=""):
-        config = SimpleNamespace(share_name="share", pool_id="pool", pool_big_id=big)
+    def _stub(monkeypatch, calls, big="", huge=""):
+        config = SimpleNamespace(
+            share_name="share", pool_id="pool", pool_big_id=big, pool_huge_id=huge
+        )
         monkeypatch.setattr(dispatch.CloudConfig, "load", staticmethod(lambda: config))
         monkeypatch.setattr(dispatch.share, "share_client", lambda _c: object())
         monkeypatch.setattr(dispatch.share, "publish_code_snapshot", lambda *a: "snap-1")
@@ -311,4 +313,16 @@ class TestPoolBinding:
         self._stub(monkeypatch, calls)
         with pytest.raises(CommandError, match="train-big"):
             dispatch.stage_and_queue(lambda snap: [_task()], pool="big")
+
+    def test_huge_selects_the_huge_pool_and_its_own_job(self, monkeypatch):
+        calls: list = []
+        self._stub(monkeypatch, calls, huge="pool-huge")
+        dispatch.stage_and_queue(lambda snap: [_task()], pool="huge")
+        assert calls == [("pool-huge", "-huge")]
+
+    def test_huge_without_the_applied_infra_refuses_before_staging(self, monkeypatch):
+        calls: list = []
+        self._stub(monkeypatch, calls)
+        with pytest.raises(CommandError, match="train-huge"):
+            dispatch.stage_and_queue(lambda snap: [_task()], pool="huge")
         assert calls == []
