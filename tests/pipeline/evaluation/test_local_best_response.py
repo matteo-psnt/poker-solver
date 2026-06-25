@@ -52,6 +52,42 @@ class TestLbrBridge:
         assert local_exploitability(game, TabularStrategy()) > 0.0
 
 
+class TestLbrPassiveContinuation:
+    """Validate the myopic-continuation variant used by the HUNL LBR.
+
+    The HUNL LBR scores each candidate action assuming a fixed *passive*
+    continuation (check/call to showdown) rather than the opponent's own policy.
+    Leduc has a check/call action ``"c"`` available at every betting node, so we
+    can express exactly that continuation and confirm the bound property still
+    holds in a game with real betting and a mid-tree public card. This transfers
+    trust to the continuation codepath the HUNL variant relies on.
+    """
+
+    @staticmethod
+    def _passive_call_down(_key, legal):
+        # All mass on check/call; never fold, never raise. "c" is always legal.
+        return [1.0 if action == "c" else 0.0 for action in legal]
+
+    def test_passive_continuation_still_bounds_exact_br(self):
+        game = LeducPoker()
+        uniform = TabularStrategy()
+        for player in range(game.num_players):
+            lbr = local_best_response_value(
+                game, player, uniform, continuation=self._passive_call_down
+            )
+            exact = best_response_value(game, player, uniform)
+            assert lbr <= exact + _TOL
+
+    def test_passive_continuation_detects_exploitable_strategy(self):
+        game = LeducPoker()
+        lbr_exploit = local_exploitability(
+            game, TabularStrategy(), continuation=self._passive_call_down
+        )
+        exact_exploit = exploitability(game, TabularStrategy())
+        assert lbr_exploit > 0.0
+        assert lbr_exploit <= exact_exploit + _TOL
+
+
 class TestLbrAtEquilibrium:
     @pytest.mark.slow
     @pytest.mark.timeout(60)

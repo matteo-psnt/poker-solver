@@ -29,6 +29,12 @@ for i in range(len(_deck.cards)):
 _NUM_COMBOS = len(_ALL_COMBOS)
 _EPS = 1e-12
 
+# Public, canonical hole-card combo enumeration. Range vectors produced by
+# `infer_ranges`/`update_ranges` are indexed by this ordering; consumers that
+# reason over individual combos (e.g. the LBR evaluator) must use it too.
+ALL_COMBOS: list[tuple[Card, Card]] = _ALL_COMBOS
+NUM_COMBOS: int = _NUM_COMBOS
+
 
 def infer_ranges(state: GameState, blueprint) -> PlayerRanges:
     """
