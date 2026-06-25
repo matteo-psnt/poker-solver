@@ -52,11 +52,13 @@ class TreeShadow:
         self._shadow: GameState | None = None
         self._diverged = False
         self._broken = False
+        self.break_reason: str | None = None
 
     def start(self, state: GameState) -> None:
         self._shadow = state
         self._diverged = False
         self._broken = False
+        self.break_reason = None
 
     @property
     def started(self) -> bool:
@@ -99,17 +101,23 @@ class TreeShadow:
         mirroring across that mismatch asks for a board of the wrong length.
         """
         shadow = self._shadow
-        if shadow is None or self._broken or not self._diverged:
+        # NOT gated on `_diverged`: the on-tree branch stores
+        # `real_state.apply_action(...)`, which is mid-transition when the
+        # action closed a street -- street advanced, board not yet dealt. The
+        # shadow then carries an empty board while still on-tree, and the first
+        # divergence applies a proxy to it: measured as 91 of 228 breaks,
+        # `ValueError: Board should have 3 cards on flop, got 0`.
+        if shadow is None or self._broken:
             return
         if shadow.board == real_state.board:
             return
         if shadow.street is not real_state.street:
-            self._broken = True
+            self._break("street-drift")
             return
         try:
             self._shadow = shadow.replace(board=real_state.board)
         except (ValueError, KeyError, AssertionError):
-            self._broken = True
+            self._break("board-replace")
 
     def observe(self, real_state: GameState, action: Action) -> None:
         """Advance the shadow by an on-menu proxy of a realized ``action``."""
@@ -132,7 +140,7 @@ class TreeShadow:
             # follow. `ShadowTracker` rules this out for the EXPLOITER by a
             # structural argument (its invariant 3); here the opponent's sizes
             # are arbitrary, so it is simply possible and must be survivable.
-            self._broken = True
+            self._break("shadow-terminal")
             return
 
         # ADVISORY, so it degrades instead of raising. Everything this touches
@@ -144,21 +152,27 @@ class TreeShadow:
         try:
             proxy = self._proxy(shadow, action)
             if proxy is None:
-                self._broken = True
+                self._break("no-proxy")
                 return
             if not self._diverged and proxy == action:
                 self._shadow = real_state.apply_action(action, self._rules)
                 return
             legal = self._rules.get_legal_actions(shadow, action_model=self._action_model)
             if proxy not in legal:
-                self._broken = True
+                self._break("proxy-illegal")
                 return
             advanced = shadow.apply_action(proxy, self._rules)
         except (ValueError, KeyError, AssertionError):
-            self._broken = True
+            self._break("apply-raised")
             return
         self._diverged = True
         self._shadow = advanced
+
+    def _break(self, reason: str) -> None:
+        """Mark the shadow unusable, recording WHY -- the reasons are not
+        equally fixable and summing them hid that for a whole investigation."""
+        self._broken = True
+        self.break_reason = reason
 
     def _proxy(self, shadow: GameState, action: Action) -> Action | None:
         """The on-menu action the shadow takes in place of ``action``."""
