@@ -121,6 +121,78 @@ class TestTrain:
         assert handlers._reporting(task, paths).progress_path == ""
 
 
+class TestAbstractionRefresh:
+    """A node that booted before an abstraction was precomputed must still see it.
+
+    `infra/main.tf`'s start task copies the share's abstractions once per BOOT, so
+    before this the precompute-then-train ordering could not work on a warm pool:
+    the task died in the resolver minutes deep, after `uv sync`. Three abstractions
+    sat published-but-unused on the share.
+    """
+
+    def _published_abstraction(self, paths, name="buckets-F400T1200R600-rexact-e5c873dc"):
+        directory = paths.share / "combo_abstraction" / name
+        directory.mkdir(parents=True)
+        (directory / "metadata.json").write_text('{"config_hash": "e5c873dc4eabc925"}')
+        return directory
+
+    def test_training_pulls_an_abstraction_the_node_has_never_seen(self, paths, log, monkeypatch):
+        self._published_abstraction(paths)
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a")
+
+        handlers._train(task, paths, log)
+
+        landed = (
+            paths.data
+            / "combo_abstraction"
+            / "buckets-F400T1200R600-rexact-e5c873dc"
+            / "metadata.json"
+        )
+        assert landed.exists()
+
+    def test_evaluation_pulls_it_too(self, paths, log, monkeypatch):
+        """Scoring resolves the abstraction the checkpoint is PINNED to, so the
+        same boot order breaks evaluation and not only training."""
+        self._published_abstraction(paths)
+        share = paths.archive / "run-a"
+        (share / "static-2000.zarr").mkdir(parents=True)
+        (share / "static-2000.zarr" / "chunk").write_text("data")
+        (share / ".complete-static-2000.zarr").write_text("")
+        (share / "STATIC_CHECKPOINT.json").write_text(
+            '{"zarr": "static-2000.zarr", "iteration": 2000, "retained": []}'
+        )
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a")
+
+        handlers._evaluate(task, paths, log)
+
+        assert (paths.data / "combo_abstraction" / "buckets-F400T1200R600-rexact-e5c873dc").is_dir()
+
+    def test_a_share_without_abstractions_is_a_warning_not_a_failure(self, paths, log, monkeypatch):
+        """The node may already hold what this task needs, and the resolver says
+        so precisely if it does not -- refusing here would only move the error."""
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a")
+
+        assert handlers._train(task, paths, log)[0] == 0
+        assert "no" in log.path.read_text()
+
+    def test_an_abstraction_already_on_the_node_is_not_recopied(self, paths, log, monkeypatch):
+        """`update=True` is the whole reason the steady-state cost is a directory
+        walk rather than 400 MB per task on a busy pool."""
+        self._published_abstraction(paths)
+        landed = paths.data / "combo_abstraction" / "buckets-F400T1200R600-rexact-e5c873dc"
+        landed.mkdir(parents=True)
+        (landed / "metadata.json").write_text("newer-on-the-node")
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a")
+
+        handlers._train(task, paths, log)
+
+        assert (landed / "metadata.json").read_text() == "newer-on-the-node"
+
+
 class TestPrecompute:
     """Never probed on the pool -- it is a rare, expensive op -- so the guard
     that makes it safe to run in the cloud is only checked here."""

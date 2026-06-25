@@ -50,6 +50,30 @@ def _reporting(plan: TaskPlan, paths: NodePaths) -> TaskPlan:
     return replace(plan, progress_path=str(paths.work / declared)) if declared else plan
 
 
+def _refresh_abstractions(paths: NodePaths, log: TaskLogger) -> None:
+    """Merge the share's abstractions onto this node before training.
+
+    `infra/main.tf`'s START TASK is the only other thing that does this, and it
+    runs once per node BOOT -- so a node that came up before an abstraction was
+    precomputed can never see it, and the task dies in the resolver several
+    minutes deep, after `uv sync`. That is a trap for exactly the case the
+    precompute path exists to serve: build a new abstraction, then train on it.
+    Merging here makes the two orderings equivalent.
+    """
+    source = paths.share / "combo_abstraction"
+    if not source.is_dir():
+        log(f"WARN no {source} on the share; trusting the node's own copy")
+        return
+    try:
+        # update=True is `cp -u`: an abstraction already on the node is not
+        # recopied, so the steady-state cost is a directory walk, not 400 MB.
+        archive.copy_tree(source, paths.data / "combo_abstraction", update=True)
+    except OSError as error:
+        # Not fatal. The node may already hold the abstraction this task wants,
+        # and the resolver says so precisely if it does not.
+        log(f"WARN could not refresh abstractions from the share ({error})")
+
+
 def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
     # The prior lives on the share like any other run, and fetching it is the
     # node's job -- without this the trainer resolves a run directory that was
@@ -90,6 +114,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             log(f"fetched warm-start rung {name}")
         else:
             archive.fetch_current_rung(prior, destination, log)
+    _refresh_abstractions(paths, log)
     run_id = plan.train_run_id
     published = paths.archive / run_id
     if published.is_dir():
@@ -137,6 +162,10 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     rungs = _fetch_rungs(plan, paths, published, log)
     if rungs is None:
         return 1, None
+    # Same boot-order trap as training: evaluation resolves the abstraction the
+    # checkpoint is PINNED to, so a node that predates that abstraction cannot
+    # score the run at all.
+    _refresh_abstractions(paths, log)
 
     # WITHOUT THIS the evaluator is never told where to write, so `--progress-file`
     # never reaches its command line and the branch counter it keeps has nowhere
