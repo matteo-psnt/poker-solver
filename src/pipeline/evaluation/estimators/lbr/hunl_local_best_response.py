@@ -66,6 +66,8 @@ References:
 
 from __future__ import annotations
 
+import atexit
+import logging
 import multiprocessing
 import random
 import sys
@@ -769,6 +771,9 @@ _WORKER_ENGINE: _HUNLLocalBestResponse | None = None
 _WORKER_CTX: tuple[int, int] | None = None  # (base_seed, starting_stack)
 
 
+logger = logging.getLogger(__name__)
+
+
 def _init_worker(
     blueprint_factory: Callable[[], ScorableBlueprint],
     config: LBRConfig,
@@ -785,6 +790,32 @@ def _init_worker(
     blueprint = blueprint_factory()
     _WORKER_ENGINE = _HUNLLocalBestResponse(blueprint, config, np.random.default_rng(base_seed))
     _WORKER_CTX = (base_seed, starting_stack)
+    atexit.register(_log_lookup_counters, _WORKER_ENGINE)
+
+
+def _log_lookup_counters(engine: _HUNLLocalBestResponse) -> None:
+    """Per-worker tally of WHY a blueprint lookup missed, at worker exit.
+
+    Diagnostic for the 2394 mbb/hand gap between `--opponent blueprint` and the
+    same blueprint reached through the resolver. Logged rather than returned:
+    the workers are a spawn Pool and the counters are whole-run totals, not
+    per-hand values the reduction could carry.
+    """
+    resolver = getattr(engine.opponent, "_resolver", None)
+    if resolver is None:
+        return
+    logger.info(
+        "resolver lookups: calls=%d on_tree=%d shadow=%d fell_back(broken=%d menu=%d bucket=%d) "
+        "rows=%d uniform=%d",
+        resolver.lookup_calls,
+        resolver.lookup_on_tree,
+        resolver.lookup_used_shadow,
+        resolver.lookup_fell_back_broken,
+        resolver.lookup_fell_back_menu,
+        resolver.lookup_fell_back_bucket,
+        resolver.rows_total,
+        resolver.rows_uniform,
+    )
 
 
 def _worker_play_hand(hand: int) -> tuple[HandOutcome, HandOutcome]:
