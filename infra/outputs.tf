@@ -7,6 +7,9 @@ locals {
     "standard_d8als_v6"  = "$0.344/hr/node"
     "standard_d16als_v6" = "$0.688/hr/node"
     "standard_d32als_v6" = "$1.376/hr/node"
+    # 64 x the $0.043/vCPU-hr line the three measured SKUs all land on;
+    # re-measure with `poker-solver cost` once the pool has billing history.
+    "standard_d64als_v6" = "$2.752/hr/node"
   }
 }
 
@@ -67,4 +70,9 @@ output "hourly_cost" {
 output "pool_big_hourly_cost" {
   description = "USD/hr PER NODE on the train-big pool. Same table, other SKU."
   value       = lookup(local.node_rates, lower(azurerm_batch_pool.train_big.vm_size), "see the Azure price list")
+}
+
+output "pool_huge_hourly_cost" {
+  description = "USD/hr PER NODE on the train-huge pool. Same table, other SKU."
+  value       = lookup(local.node_rates, lower(azurerm_batch_pool.train_huge.vm_size), "see the Azure price list")
 }

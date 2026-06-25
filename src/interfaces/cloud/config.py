@@ -137,6 +137,7 @@ class CloudConfig:
     share_key: str
     hourly_cost: str
     pool_big_hourly_cost: str
+    pool_huge_hourly_cost: str
     subscription_id: str
 
     @classmethod
@@ -155,5 +156,6 @@ class CloudConfig:
             share_key=_value(str(STORE_DIR), "access_key"),
             hourly_cost=_value(str(INFRA_DIR), "hourly_cost"),
             pool_big_hourly_cost=_optional_value(str(INFRA_DIR), "pool_big_hourly_cost"),
+            pool_huge_hourly_cost=_optional_value(str(INFRA_DIR), "pool_huge_hourly_cost"),
             subscription_id=_value(str(INFRA_DIR), "subscription_id"),
         )

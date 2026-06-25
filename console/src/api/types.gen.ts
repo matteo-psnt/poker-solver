@@ -1602,6 +1602,8 @@ export interface components {
         PoolPayload: {
             /** Burn Per Hour */
             burn_per_hour?: number | null;
+            /** Max Vcpus */
+            max_vcpus?: number | null;
             /**
              * Op
              * @default pool-status
@@ -1612,6 +1614,11 @@ export interface components {
             pools: components["schemas"]["PoolView"][];
             /** Total Nodes */
             total_nodes: number;
+            /**
+             * Total Vcpus
+             * @default 0
+             */
+            total_vcpus: number;
         };
         /**
          * PoolView
@@ -1633,6 +1640,10 @@ export interface components {
             current_dedicated_nodes: number | null;
             /** Hourly Cost */
             hourly_cost?: string | null;
+            /** Max Nodes */
+            max_nodes?: number | null;
+            /** Max Vcpus */
+            max_vcpus?: number | null;
             /**
              * Nodes
              * @default []
@@ -1647,6 +1658,10 @@ export interface components {
             resize_errors: components["schemas"]["ResizeError"][];
             /** Target Dedicated Nodes */
             target_dedicated_nodes: number | null;
+            /** Vcpus */
+            vcpus?: number | null;
+            /** Vcpus Per Node */
+            vcpus_per_node?: number | null;
             /** Vm Size */
             vm_size: string | null;
         };
