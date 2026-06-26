@@ -16,7 +16,7 @@ Nothing here is per-node Python. Nodes are grouped by ``(level, action count,
 street, acting seat)`` — all four fixed by the public tree, none of them
 data-dependent — and each group is a handful of array operations on a dense
 ``(nodes, hands, actions)`` block. There are at most a few hundred such groups
-against 57,604 nodes, which is the whole point: the interpreter runs a few
+against 81,518 nodes, which is the whole point: the interpreter runs a few
 hundred times per iteration instead of tens of millions.
 
 Player indexing is button-relative throughout, matching the tree's

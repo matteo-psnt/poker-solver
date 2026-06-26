@@ -12,7 +12,7 @@ decompresses.
 Reads the share IN PLACE rather than copying to the node -- verification reads
 every byte regardless, so a copy-then-read is pure duplicate I/O. The tree,
 abstraction and storage are built ONCE and reused across rungs; per-rung they
-cost a 57,604-node rebuild and a 385 MB reload.
+cost an 81,518-node rebuild and a 385 MB reload.
 """
 
 from __future__ import annotations

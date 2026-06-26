@@ -19,9 +19,9 @@ a live run (`infosets ~ 1.96 * iters^1.058`):
 
 A 30M-iteration run needs ~98 GB on 8 workers. No node we have reaches that,
 and no worker count fixes it, because the growth was in the **keying**, not the
-parallelism. The public tree is small and finite — 57,604 decision nodes under
+parallelism. The public tree is small and finite — 81,518 decision nodes under
 `config/training/production.yaml` — so enumerating it statically removes the
-growth instead of budgeting for it: ~16.8M rows, ~1.7 GB, fixed.
+growth instead of budgeting for it: 45.5M rows, 125.5M slots, fixed.
 
 Everything else here follows from that. Because the row index is a pure
 function of the tree and the tree is a pure function of config, every process
@@ -79,7 +79,12 @@ interruption.
     reach / utility          flat, length tree.num_rows
 
     infoset (node n, bucket b) owns slots
-        [slot_offset[n] + b*num_actions[n], ... + num_actions[n])
+        [slot_base[n] + b*slot_stride[n], ... + num_actions[n])
+
+`slot_stride` is the STREET's total slot width, not this node's action count:
+the layout is bucket-major, so one street's rows for a given bucket are
+contiguous. `[slot_offset[n] + b*num_actions[n], ...)` is the retired
+node-major order.
 
 Ragged rather than a dense rectangle: at the production tree's mean of ~2.6
 actions against a 10-action row cap, dense would waste roughly 4x the memory.

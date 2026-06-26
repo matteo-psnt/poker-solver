@@ -1,8 +1,8 @@
 """Knob tiers: which evaluations are comparable at all.
 
 A score is only meaningful against another taken with the same instrument.
-These define "same instrument", which is why `compare` and `report` refuse
-mismatched tiers by design."""
+These define "same instrument", which is why `ledger` refuses mismatched
+tiers by design."""
 
 from __future__ import annotations
 
@@ -174,7 +174,7 @@ def build_resolver_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
     `leaf_continuation_fraction` is IN the tier because a different leaf
     valuation is a different game to score -- the same reason the resolver's
     `max_depth` change was recorded as a tier break. Pairing two arms across it
-    is the comparison being made, and `compare`/`report` refusing to do it
+    is the comparison being made, and `ledger` refusing to do it
     silently is correct.
     """
     return {

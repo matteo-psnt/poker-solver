@@ -2,7 +2,7 @@
 
 :mod:`src.shared.cloudtask.task_log` WRITES a task's account, on the node,
 before ``uv sync``, on the pinned image's ``python3``. This READS it, and runs
-nowhere near a node -- a laptop, the console, `report`. The two halves shared a
+nowhere near a node -- a laptop, the console, `ledger`. The two halves shared a
 file for a while and the cost was not length: it put a stdlib-only constraint on
 260 lines that never execute under it, and it made "what does the node load"
 unanswerable from the directory.

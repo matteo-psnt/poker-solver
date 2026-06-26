@@ -1,7 +1,7 @@
 """Does the flat ragged layout store exactly what a naive layout would?
 
-The risky part of ``StaticArrayStorage`` is arithmetic: ``slot_offset[n] +
-bucket * num_actions[n]``. An off-by-one there does not crash — it silently
+The risky part of ``StaticArrayStorage`` is arithmetic: ``slot_base[n] +
+bucket * slot_stride[n]``. An off-by-one there does not crash — it silently
 leaks regret between unrelated infosets, and training still "works". So the
 check here is against an oracle with no layout at all: a dict of independently
 allocated arrays, one per ``(node_id, bucket)``. Both back the same solver
