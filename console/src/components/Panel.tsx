@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
-import type { ReactNode } from "react";
+import { Children, type ReactNode } from "react";
 import { Age } from "./Age";
 
 /**
@@ -35,7 +35,11 @@ export function Panel({
   refreshing?: boolean;
   children?: ReactNode;
 }) {
-  const hasContent = children != null;
+  // `children != null` was true for `false` (a guard that did not fire) and for
+  // any array (two or more child expressions), so `empty`/`loading` never
+  // rendered in 13 panels -- a fresh share showed a titled panel with a blank
+  // body. Children.toArray discards null/undefined/booleans and keeps elements.
+  const hasContent = Children.toArray(children).length > 0;
   return (
     <section
       className={cn(

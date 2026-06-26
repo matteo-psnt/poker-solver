@@ -58,9 +58,14 @@ function Train() {
   return (
     <Panel
       title="Train — submit"
-      error={errorOf(configs.error)}
-      onRefresh={() => configs.refetch()}
-      refreshing={configs.isFetching}
+      // Both: `continue` and `parent` are fed by `runs`, so a failed run list
+      // rendered as two empty pickers and read as "there is nothing to continue".
+      error={errorOf(configs.error) ?? errorOf(runs.error)}
+      onRefresh={() => {
+        configs.refetch();
+        runs.refetch();
+      }}
+      refreshing={configs.isFetching || runs.isFetching}
     >
       <div className="divide-y divide-[var(--border)]/50">
         <Field

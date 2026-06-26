@@ -44,7 +44,10 @@ export function Tasks() {
       title={`Tasks${cause ? ` · ${cause}` : ""}`}
       updatedAt={tasks.dataUpdatedAt}
       staleAfterMs={120_000}
-      error={errorOf(tasks.error)}
+      // The cancel too: it is the console's one destructive write, and a
+      // refusal (expired login, task already terminal) left the row running
+      // with nothing anywhere saying the click had failed.
+      error={errorOf(tasks.error) ?? errorOf(cancel.error)}
       loading={tasks.isLoading}
       empty={tasks.data && rows.length === 0 ? "No tasks match." : null}
       onRefresh={() => tasks.refetch()}

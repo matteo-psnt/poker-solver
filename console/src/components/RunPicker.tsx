@@ -134,7 +134,11 @@ export function RunPicker({
             ))}
             {matches.length === 0 && (
               <li className="px-3 py-6 text-center text-[12px] text-[var(--fg-faint)]">
-                {runs.isLoading ? "loading runs…" : "No run matches."}
+                {runs.isLoading
+                  ? "loading runs…"
+                  : runs.error
+                    ? `unavailable: ${String(runs.error.message)}`
+                    : "No run matches."}
               </li>
             )}
           </ul>
