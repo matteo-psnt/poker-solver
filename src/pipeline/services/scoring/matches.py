@@ -146,6 +146,7 @@ def evaluate_run_resolver_gate(
         "leaf_continuation_fraction": config.resolver.leaf_continuation_fraction,
         "resolver_max_iterations": config.resolver.max_iterations,
         "allin_runouts": allin_runouts,
+        "resolver_blend_alpha": config.resolver.policy_blend_alpha,
     }
     return EvaluationOutput(
         infosets=storage.num_infosets(),

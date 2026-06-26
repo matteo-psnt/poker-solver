@@ -39,6 +39,18 @@ CONDITIONAL_TIER_KNOBS = (
     "policy_threshold",
     "purify",
     "conditional_chance",
+    # Resolver knobs. These decide what the resolver PLAYS, so two rows across
+    # any of them measure different strategies -- `policy_blend_alpha` most of
+    # all (alpha=0 scored +2140 where the shipped alpha scored -781.6). Both
+    # builders recorded them in `knobs`/`results` while neither guard listed
+    # them here, so every resolver A/B paired and grouped as one instrument.
+    "leaf_continuation_fraction",
+    "resolver_max_iterations",
+    "resolver_blend_alpha",
+    "resolver_root_prior_weight",
+    "root_prior_weight",
+    "leaf_rollouts",
+    "allin_runouts",
 )
 
 
@@ -57,6 +69,8 @@ def build_lbr_knobs_from_params(
     include_off_tree: bool,
     base_seed: Any,
     resolver_iterations: int | None = None,
+    resolver_blend_alpha: float | None = None,
+    resolver_root_prior_weight: float | None = None,
     lookahead_depth: int | None = None,
     lookahead_top_k: int | None = None,
 ) -> dict[str, Any]:
@@ -77,6 +91,9 @@ def build_lbr_knobs_from_params(
     }
     if opponent == "deployed":
         knobs["resolver_iterations"] = resolver_iterations
+        # What the deployed row PLAYS, not just how long it searched.
+        knobs["resolver_blend_alpha"] = resolver_blend_alpha
+        knobs["resolver_root_prior_weight"] = resolver_root_prior_weight
     if scorer == "lookahead":
         knobs["lookahead_depth"] = lookahead_depth
         knobs["lookahead_top_k"] = lookahead_top_k
@@ -101,6 +118,8 @@ def build_lbr_knobs(config: LBRConfig, results: dict[str, Any]) -> dict[str, Any
         include_off_tree=config.include_off_tree,
         base_seed=results.get("base_seed"),
         resolver_iterations=results.get("resolver_iterations"),
+        resolver_blend_alpha=results.get("resolver_blend_alpha"),
+        resolver_root_prior_weight=results.get("resolver_root_prior_weight"),
         lookahead_depth=config.lookahead_depth,
         lookahead_top_k=config.lookahead_top_k,
     )
@@ -170,6 +189,9 @@ def build_resolver_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         # Sampled runouts ARE the leaf valuation, so they define the game being
         # solved exactly as `leaf_continuation_fraction` does.
         "leaf_rollouts": results.get("leaf_rollouts", 8),
+        # How much of the resolver's answer is actually PLAYED. The largest
+        # single lever on this number, and it was absent from the tier.
+        "resolver_blend_alpha": results.get("resolver_blend_alpha"),
     }
 
 
@@ -271,8 +293,8 @@ def tier_mismatches(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
     for knob in CONDITIONAL_TIER_KNOBS:
         if (knob in ka or knob in kb) and ka.get(knob) != kb.get(knob):
             reasons.append(  # noqa: PERF401 - multi-line message reads worse as a genexp
-                f"{knob} differs ({ka.get(knob)!r} vs {kb.get(knob)!r}): the exploiter "
-                "searched to a different depth/width, so the two numbers are not comparable."
+                f"{knob} differs ({ka.get(knob)!r} vs {kb.get(knob)!r}): the two rows were "
+                "measured with a different instrument setting, so they are not comparable."
             )
 
     na = a.get("results", {}).get("num_hands")

@@ -259,6 +259,73 @@ class TestWhichGameTheNumberDescribes:
         assert ledger.tier_key(self._row()) == ledger.tier_key(self._row())
 
 
+RESOLVER_RESULTS = {
+    "num_deals": 1000,
+    "seed": 7,
+    "leaf_continuation_fraction": 0.5,
+    "resolver_max_iterations": 64,
+    "allin_runouts": 1,
+    "root_prior_weight": 100.0,
+    "leaf_rollouts": 8,
+    "resolver_blend_alpha": 0.35,
+}
+
+
+def _resolver_row(**over):
+    return {
+        "method": "resolver_match",
+        "knobs": ledger.build_resolver_match_knobs(RESOLVER_RESULTS | over),
+        "results": {"num_hands": 2000},
+    }
+
+
+class TestEveryRecordedKnobIsActuallyTiered:
+    """A knob a builder records but neither guard lists is worse than no knob:
+    the row LOOKS identified while `tier_key` groups it with its own control and
+    `tier_mismatches` pairs them. Every resolver knob was in that state -- the
+    A/B those knobs exist to express was the one comparison silently mixed.
+    """
+
+    def _covered(self, knobs):
+        listed = set(ledger.TIER_KNOBS) | set(ledger.CONDITIONAL_TIER_KNOBS) | {"base_seed"}
+        # `hands`/`num_deals` are precision, not instrument, and `num_hands` is
+        # checked separately by tier_mismatches.
+        return {k for k in knobs if k not in listed and k not in ("hands", "num_deals")}
+
+    def test_resolver_match_knobs_are_all_tiered(self):
+        knobs = ledger.build_resolver_match_knobs(RESOLVER_RESULTS)
+        assert self._covered(knobs) == set()
+
+    def test_deployed_lbr_knobs_are_all_tiered(self):
+        knobs = ledger.build_lbr_knobs(
+            _lbr_config(opponent="deployed"),
+            _results()
+            | {
+                "resolver_iterations": 64,
+                "resolver_blend_alpha": 0.35,
+                "resolver_root_prior_weight": 100.0,
+            },
+        )
+        assert self._covered(knobs) == set()
+
+    def test_a_different_blend_alpha_is_a_different_tier(self):
+        """alpha=0 scored +2140 where the shipped alpha scored -781.6, so these
+        two rows are not two measurements of one thing."""
+        shipped, bare = _resolver_row(), _resolver_row(resolver_blend_alpha=0.0)
+        assert ledger.tier_key(shipped) != ledger.tier_key(bare)
+        assert any("resolver_blend_alpha" in r for r in ledger.tier_mismatches(shipped, bare))
+
+    def test_a_different_leaf_valuation_is_a_different_tier(self):
+        a, b = _resolver_row(), _resolver_row(leaf_continuation_fraction=1.0)
+        assert ledger.tier_key(a) != ledger.tier_key(b)
+        assert any("leaf_continuation_fraction" in r for r in ledger.tier_mismatches(a, b))
+
+    def test_the_label_names_the_resolver_knobs(self):
+        label = ledger.tier_label(_resolver_row())
+        assert "resolver_blend_alpha=0.35" in label, label
+        assert "leaf_continuation_fraction=0.5" in label, label
+
+
 class TestLoadPayload:
     def test_missing_payload_raises(self):
         with pytest.raises(FileNotFoundError):
