@@ -161,16 +161,20 @@ class HUResolver:
         ``root_actions[a]`` holding combo ``c`` (canonical ``ALL_COMBOS`` order).
         Rows of board-blocked combos are uniform placeholders.
 
-        Unlike :meth:`solve` this samples nothing and mutates nothing — repeated
-        calls are side-effect free — and it never consults ANY dealt hole cards
-        (``solve`` reads the hero's actual combo to pick its row; here every row
-        is produced). That makes it usable as an opponent model in range-based
-        evaluators (LBR), which need action distributions per opponent combo.
+        Unlike :meth:`solve` it never consults ANY dealt hole cards (``solve``
+        reads the hero's actual combo to pick its row; here every row is
+        produced), which is what makes it usable as an opponent model in
+        range-based evaluators (LBR).
+
+        It is NOT side-effect free: the solve samples leaf runouts from the
+        resolver's own generator, so two identical back-to-back calls differ
+        (measured: 0.165 in action probability, iterations pinned). A run is
+        reproducible from the resolver's seed only WITH its call order.
 
         ``ranges`` is the resolver's view of both players' ranges at this public
         node; ``None`` means fresh inference (uniform today), matching a resolver
-        that just entered the hand. Pass ``config.max_iterations`` for
-        reproducible output — budget-driven iteration counts vary with wall clock.
+        that just entered the hand. Pass ``config.max_iterations`` to remove the
+        wall-clock variability — it does not make the call deterministic.
         """
         budget = int(time_budget_ms or self.config.time_budget_ms)
         if ranges is None:
@@ -382,8 +386,14 @@ class HUResolver:
             # raises by design (an enumerating scorer reaching an unknown node
             # IS a bug); for search it just means no prior.
             infoset = None
+        # ``lookup``, not ``state``: once the shadow diverges the two carry
+        # different pots and stacks, and the filter's all-in test is an exact
+        # `amount == current_stack`. Validating the SHADOW's menu against REAL
+        # chips silently dropped actions -- measured at 40% of shadow-backed
+        # lookups -- collapsing rows like {fold .02, jam .98} to a pure fold.
+        # On-tree ``lookup is state``, so this is a no-op there.
         distribution = blueprint_action_distribution(
-            infoset, state, self.rules, actions, use_average=use_average
+            infoset, lookup, self.rules, actions, use_average=use_average
         )
         self.rows_total += 1
         if distribution is None:
