@@ -239,13 +239,28 @@ def write_progress_record(
     directory.mkdir(parents=True, exist_ok=True)
     record = {
         "task_id": task_id,
-        "attempt": _latest_attempt(directory, task_id),
+        "attempt": _this_attempt(directory, task_id),
         "progress": progress.as_record(),
         "ts": utcnow(),
     }
     path = directory / f"{task_id}{PROGRESS_SUFFIX}"
     records.write_snapshot(path, record, records.REGISTRY[f"legs/*{PROGRESS_SUFFIX}"])
     return path
+
+
+# The attempt number cannot change inside one process -- a Batch retry is a NEW
+# process -- and deriving it walks every document in `legs/`. Uncached, the
+# 15-second progress write re-globbed and re-parsed the whole share directory
+# (thousands of files, each a round trip) for a number that was already known.
+_ATTEMPT_MEMO: dict[tuple[str, str], int] = {}
+
+
+def _this_attempt(directory: Path, task_id: str) -> int:
+    """:func:`_latest_attempt`, resolved once per process."""
+    key = (str(directory), task_id)
+    if key not in _ATTEMPT_MEMO:
+        _ATTEMPT_MEMO[key] = _latest_attempt(directory, task_id)
+    return _ATTEMPT_MEMO[key]
 
 
 def _next_attempt(directory: Path, task_id: str) -> int:

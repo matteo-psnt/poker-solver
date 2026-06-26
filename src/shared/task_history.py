@@ -205,15 +205,12 @@ def compactable(directory: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
     }
 
     sealed: set[str] = set()
-    unsealed: set[str] = set()
     for name, document in documents.items():
         task_id = document.get("task_id")
         if not task_id:
             continue
         if name.endswith(EXIT_SUFFIX) and document.get("cause") in TERMINAL_CAUSES:
             sealed.add(task_id)
-        elif name.endswith((START_SUFFIX, PROGRESS_SUFFIX)):
-            unsealed.add(task_id)
     # A task is sealed only if EVERY attempt of it is: a retry in flight shares
     # the id with the failed attempt before it.
     for name, document in documents.items():
@@ -224,7 +221,6 @@ def compactable(directory: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
         exit_record = documents.get(exit_name, {})
         if exit_record.get("cause") not in TERMINAL_CAUSES:
             sealed.discard(str(task_id))
-    unsealed -= sealed
 
     movable = {
         name: document

@@ -183,7 +183,16 @@ KEYS: tuple[Key, ...] = (
         _dump_list,
         lambda raw: json_list(raw, "RUN_EVAL_FLAGS_JSON"),
     ),
-    Key("RUN_FORCE_PUBLISH", "force_publish", "force_publish", lambda v: "1" if v else "", bool),
+    # Decoded against "1", never bare `bool`: `bool("0")` is True, so an operator
+    # spelling "off" as 0 would overwrite a published abstraction and silently
+    # invalidate every run trained against the old copy.
+    Key(
+        "RUN_FORCE_PUBLISH",
+        "force_publish",
+        "force_publish",
+        lambda v: "1" if v else "",
+        lambda raw: str(raw).strip().lower() in ("1", "true", "yes"),
+    ),
     Key("RUN_GIT_COMMIT", "git_commit", "git_commit"),
     # Three-state ("1"/"0"/""), unlike the boolean above: `gitinfo` distinguishes
     # "verified clean" from "unknown", and that distinction is what makes a bare

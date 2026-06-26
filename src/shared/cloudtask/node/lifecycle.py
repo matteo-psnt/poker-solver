@@ -220,6 +220,13 @@ def main() -> int:
         log(f"FATAL {refusal}")
         code = 1
     finally:
+        # Hand the signals back to the OS first: `Killed` is a BaseException and
+        # `_record` suppresses only Exception, so a second SIGTERM arriving while
+        # the publish below copies a ladder over SMB would escape this block and
+        # leave the task `unresolved` forever -- exactly the zombie state the
+        # cost screen then bills against.
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
         # Publish on ANY exit -- success, failure, or cancellation. An
         # operator-cancelled task still leaves its progress on the share. Its
         # OWN run only: the disk also holds what earlier tasks fetched.

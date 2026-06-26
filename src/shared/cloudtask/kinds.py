@@ -293,17 +293,22 @@ class TaskKind(abc.ABC):
 
     name: ClassVar[TaskName]
     unit: ClassVar[str]
-    """A file this kind writes its progress into, relative to the node's scratch.
-    Empty when the work is observable another way; the wrapper branches on it."""
+    # A file this kind writes its progress into, relative to the node's scratch.
+    # Empty when the work is observable another way; the wrapper branches on it.
     progress_file: ClassVar[str] = ""
-    """Batch retries. Work cheap to repeat wants them -- training resumes from
-    its last published rung, scoring is idempotent. Work with no
-    partial-progress marker does not."""
+    # Batch retries. Work cheap to repeat wants them -- training resumes from its
+    # last published rung, scoring is idempotent. Work with no partial-progress
+    # marker does not (a retry once billed three full runs to fail three times).
     retries: ClassVar[int] = 3
-    """Whether the task's run directory is ITS OWN to publish. True for the
-    trainers; an evaluation FETCHES other runs under the same directory, and
-    publishing those back cost ~30 minutes per task on a reused node."""
+    # Whether the task's run directory is ITS OWN to publish. True for the
+    # trainers; an evaluation FETCHES other runs under the same directory, and
+    # publishing those back cost ~30 minutes per task on a reused node.
     publishes_run: ClassVar[bool] = False
+    # Rung interval when the submitter does not name one. Per KIND because the
+    # unit is the kernel's iteration: 5M suits scalar, where a run is 30M, and
+    # would leave a board-free run (hundreds) or a pcs run (thousands) as ONE
+    # chunk -- no mid-run rung to resume from, and no ladder to score.
+    default_checkpoint_every: ClassVar[int] = 5_000_000
 
     @abc.abstractmethod
     def validate(self, task: TaskFields) -> None:
@@ -490,6 +495,33 @@ class TrainTask(TaskKind):
         return _iterations_done(plan, state, self.unit)
 
 
+def _refuse_scalar_only_priors(task: Any, kernel: str) -> None:
+    """Refuse a prior only `train-static` can apply.
+
+    These kernels' argv carries no ``--warm-start-*``/``--equity-prior*``, so a
+    submission naming one would train a plain CONTROL under the variant's arm
+    label -- the failure that has twice cost a whole sweep, and the reason the
+    scalar path refuses temperature-without-weight at submit.
+    """
+    named = [
+        flag
+        for flag, value in (
+            ("--warm-start-from", task.warm_start_from),
+            ("--warm-start-weight", task.warm_start_weight),
+            ("--warm-start-at", task.warm_start_at),
+            ("--equity-prior", task.equity_prior_weight),
+            ("--equity-prior-temperature", task.equity_prior_temperature),
+        )
+        if value
+    ]
+    if named:
+        raise BadTaskError(
+            f"--kernel {kernel} cannot apply {', '.join(named)}: only the scalar "
+            "trainer seeds a prior. This would train a control under a variant's "
+            "arm name. Drop the flag, or submit the arm with --kernel scalar."
+        )
+
+
 class TrainVectorTask(TaskKind):
     """Train a board-free blueprint over the whole tree at once.
 
@@ -509,6 +541,8 @@ class TrainVectorTask(TaskKind):
     name = TaskName.TRAIN_VECTOR
     publishes_run = True
     unit = "iterations"
+    # The trainer's own default; a board-free run is hundreds of iterations.
+    default_checkpoint_every = 25
     """The SAME file as the scalar trainer's, and deliberately: one task runs on
     a node, it counts the same thing against the same kind of target, and two
     names for one shape is a second thing to keep true."""
@@ -519,6 +553,7 @@ class TrainVectorTask(TaskKind):
             raise BadTaskError("a training task needs a config, even when continuing a run")
         if task.to <= 0:
             raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
+        _refuse_scalar_only_priors(task, "board-free")
         if task.universe_boards <= 0:
             raise BadTaskError(
                 "a board-free task needs --universe-boards: the sampled boards define "
@@ -535,9 +570,12 @@ class TrainVectorTask(TaskKind):
             "--run",
             plan.train_run_id,
         ]
+        # Always stated, never guarded on truthiness: seed 0 is a seed, and the
+        # universe IS the game this task solves -- letting the trainer's own
+        # default stand in would silently solve a different one.
+        argv += ["--universe-seed", str(plan.universe_seed)]
         for flag, value in (
             ("--universe-boards", plan.universe_boards),
-            ("--universe-seed", plan.universe_seed),
             ("--checkpoint-every", plan.checkpoint_every),
         ):
             if value:
@@ -589,6 +627,8 @@ class TrainPcsTask(TaskKind):
     name = TaskName.TRAIN_PCS
     publishes_run = True
     unit = "iterations"
+    # The trainer's own default; a pcs run is thousands of iterations.
+    default_checkpoint_every = 200
     progress_file = "train-progress.json"
 
     def validate(self, task: TaskFields) -> None:
@@ -596,6 +636,7 @@ class TrainPcsTask(TaskKind):
             raise BadTaskError("a training task needs a config, even when continuing a run")
         if task.to <= 0:
             raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
+        _refuse_scalar_only_priors(task, "pcs")
 
     def commands(self, plan: NodePlan) -> list[list[str]]:
         argv = [
@@ -750,6 +791,8 @@ class PrecomputeTask(TaskKind):
 
     def commands(self, plan: NodePlan) -> list[list[str]]:
         argv = ["precompute", "--config", plan.config, "--json"]
+        if plan.workers:
+            argv += ["--workers", str(plan.workers)]
         # Where the build reports street completion, and where `sample` reads it
         # back. Node-local: it is a heartbeat, not a record.
         work = plan.progress_path
