@@ -55,6 +55,35 @@ class TestSampling:
         assert pcs_parallel.LIVE_HANDS == 47 * 46 // 2
 
 
+class TestVisitedDerivation:
+    def test_marks_exactly_the_rows_holding_mass(self):
+        """Against the tree's own accessors, not a rebuilt row order.
+
+        This function once rebuilt the row boundaries with ``np.repeat`` --
+        node-major, the retired layout -- so it summed mass over the wrong
+        slot ranges and flagged the wrong rows, while its only test asserted
+        ``touched_rows > 0``, which the scramble does not break.
+        """
+        config = make_test_config(seed=1, starting_stack=20)
+        tree = build_betting_tree(
+            GameRules(config.game.small_blind, config.game.big_blind),
+            ActionModel(config),
+            Buckets(),
+            starting_stack=config.game.starting_stack,
+        )
+        storage = StaticArrayStorage(tree)
+        try:
+            marked = [(5, 1), (len(tree.nodes) // 2, 0)]
+            for node_id, bucket in marked:
+                lo, _hi = tree.slots(node_id, bucket)
+                storage.strategy_sum[lo] = 1.0
+            pcs_parallel.mark_visited_from_strategy(storage)
+            expected = sorted(tree.row(n, b) for n, b in marked)
+            assert sorted(np.flatnonzero(storage.visited).tolist()) == expected
+        finally:
+            storage.close()
+
+
 class TestWorkerSizing:
     def test_the_count_is_clamped_by_memory_not_cores(self):
         config = make_test_config(seed=1, starting_stack=20)

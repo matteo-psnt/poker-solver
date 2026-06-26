@@ -77,9 +77,14 @@ SEEDED_MARKER = ".warm-started"
 
 
 def _row_slot_starts(tree) -> np.ndarray:
-    per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
+    """First slot of each row, IN ROW ORDER — which is bucket-major now.
+
+    ``np.repeat(num_actions, buckets_per_node)`` was this function once: that
+    is node-major row order, and under the bucket-major layout it scrambles
+    which infoset a boundary belongs to. ``tree.row_widths`` is the layout's
+    own per-row width table; never rebuild it here."""
     starts = np.zeros(tree.num_rows, dtype=np.int64)
-    np.cumsum(per_row[:-1], out=starts[1:])
+    np.cumsum(tree.row_widths[:-1], out=starts[1:])
     return starts
 
 
@@ -196,7 +201,7 @@ def seed_checkpoint(
     load_checkpoint(source, source_run, at_iteration=at_iteration)
 
     starts = _row_slot_starts(tree)
-    slot_width = np.repeat(tree.num_actions, tree.buckets_per_node)
+    slot_width = tree.row_widths
     regrets, seeded = regrets_encoding(
         source.strategy_sum,
         starts,

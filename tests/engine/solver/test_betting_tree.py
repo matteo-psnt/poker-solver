@@ -301,6 +301,10 @@ class TestProductionScale:
         # moved address, so checkpoints against b0367ae018a58a2f refuse to
         # load rather than being read as a permutation.
         assert production_tree.fingerprint() == "37c7818a12cf353c"
+        # The v1 value every pre-layout checkpoint on the share carries; the
+        # checkpoint translator fires on exactly this string, so if it drifts
+        # the translation silently never runs and every legacy load refuses.
+        assert production_tree.legacy_fingerprint() == "b0367ae018a58a2f"
         assert len(production_tree.nodes) == 81_518
         assert production_tree.num_rows == 45_538_298
         assert production_tree.num_slots == 125_463_187
