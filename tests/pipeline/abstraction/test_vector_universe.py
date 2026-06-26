@@ -10,6 +10,7 @@ the one that ships.
 
 from __future__ import annotations
 
+import zlib
 from typing import ClassVar
 
 import eval7
@@ -42,9 +43,13 @@ class StubAbstraction:
     }
 
     def get_bucket(self, hole_cards, board, street):
+        # crc32, never `hash()` of a str: that is PYTHONHASHSEED-randomized, so
+        # WHICH buckets a run exercises would change every process. Passing
+        # either way makes the coverage here a lottery, and the repo has lost an
+        # experiment to exactly this.
         if street == Street.PREFLOP:
             return (repr(hole_cards[0])[0].encode()[0] * 3) % 169
-        seed = sum(card.__hash__() for card in board) + hash(repr(hole_cards[0]))
+        seed = sum(card.mask for card in board) + zlib.crc32(repr(hole_cards[0]).encode())
         return abs(seed) % self.counts[street]
 
     def num_buckets(self, street):

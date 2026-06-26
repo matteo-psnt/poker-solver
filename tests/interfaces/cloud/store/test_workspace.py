@@ -232,7 +232,10 @@ class TestSharedTrees:
         def explode(root, _previous):
             raise RuntimeError("Azure said no")
 
-        with pytest.raises(RuntimeError), trees.acquire("record", explode):
+        with (
+            pytest.raises(RuntimeError, match="Azure said no"),
+            trees.acquire("record", explode),
+        ):
             pass
         with trees.acquire(
             "record", lambda root, _previous: (root / "marker").write_text("x")
@@ -269,7 +272,10 @@ class TestSharedTrees:
         def explode(_root, _previous):
             raise RuntimeError("Azure said no")
 
-        with pytest.raises(RuntimeError), trees.acquire("record", explode):
+        with (
+            pytest.raises(RuntimeError, match="Azure said no"),
+            trees.acquire("record", explode),
+        ):
             pass
         handed: list = []
         with trees.acquire("record", lambda _root, previous: handed.append(previous)):
