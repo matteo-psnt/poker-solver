@@ -75,7 +75,7 @@ BUNDLE_SUFFIX = ".bundle.json"
 TASK_ID_ENV = "AZ_BATCH_TASK_ID"
 
 
-def _utcnow() -> str:
+def utcnow() -> str:
     return datetime.now(UTC).isoformat()
 
 
@@ -208,7 +208,7 @@ def write_node_record(
         "git_dirty": git_dirty,
         "git_branch": git_branch,
         "event": event,
-        "ts": _utcnow(),
+        "ts": utcnow(),
         "exit_code": exit_code,
         "cause": cause,
     }
@@ -241,7 +241,7 @@ def write_progress_record(
         "task_id": task_id,
         "attempt": _latest_attempt(directory, task_id),
         "progress": progress.as_record(),
-        "ts": _utcnow(),
+        "ts": utcnow(),
     }
     path = directory / f"{task_id}{PROGRESS_SUFFIX}"
     records.write_snapshot(path, record, records.REGISTRY[f"legs/*{PROGRESS_SUFFIX}"])

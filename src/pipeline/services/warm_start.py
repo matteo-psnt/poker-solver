@@ -53,7 +53,7 @@ import numpy as np
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
-from src.engine.solver.betting_tree import build_betting_tree
+from src.engine.solver.betting_tree import BettingTree, build_betting_tree
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.pipeline.blueprint import construction
@@ -68,24 +68,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EFFECTIVE_ITERATIONS = 1000
 
+# How a prior's weight is spread across rows. See :func:`regrets_encoding`.
 PRIOR_SHAPES = ("flat", "confidence")
-"""How a prior's weight is spread across rows. See :func:`regrets_encoding`."""
 
 SEEDED_MARKER = ".warm-started"
 # Written once a run is seeded, so a resume can tell "carries a prior" from
 # "asked for one and never got it" -- two 30M sweeps turned out to be controls.
-
-
-def _row_slot_starts(tree) -> np.ndarray:
-    """First slot of each row, IN ROW ORDER — which is bucket-major now.
-
-    ``np.repeat(num_actions, buckets_per_node)`` was this function once: that
-    is node-major row order, and under the bucket-major layout it scrambles
-    which infoset a boundary belongs to. ``tree.row_widths`` is the layout's
-    own per-row width table; never rebuild it here."""
-    starts = np.zeros(tree.num_rows, dtype=np.int64)
-    np.cumsum(tree.row_widths[:-1], out=starts[1:])
-    return starts
 
 
 def row_confidence(
@@ -177,6 +165,7 @@ def seed_checkpoint(
     at_iteration: int | None = None,
     shape: str = "flat",
     base_regrets: np.ndarray | None = None,
+    tree: BettingTree | None = None,
 ) -> int:
     """Write iteration-0 regrets encoding ``source_run``'s average strategy.
 
@@ -188,19 +177,22 @@ def seed_checkpoint(
     if effective_iterations <= 0:
         raise ValueError("effective_iterations must be positive; it scales the prior's weight.")
 
-    action_model = ActionModel(config)
-    abstraction = construction.build_card_abstraction(config)
-    rules = GameRules(config.game.small_blind, config.game.big_blind)
-    tree = build_betting_tree(
-        rules, action_model, abstraction, starting_stack=config.game.starting_stack
-    )
+    if tree is None:
+        # Each implicit build reloads the card abstraction (~minutes); callers
+        # that already hold the tree pass it instead.
+        action_model = ActionModel(config)
+        abstraction = construction.build_card_abstraction(config)
+        rules = GameRules(config.game.small_blind, config.game.big_blind)
+        tree = build_betting_tree(
+            rules, action_model, abstraction, starting_stack=config.game.starting_stack
+        )
 
     source = StaticArrayStorage(tree)
     # Verifies the tree fingerprint, so a strategy from a different tree is
     # refused rather than reinterpreted row-for-row.
     load_checkpoint(source, source_run, at_iteration=at_iteration)
 
-    starts = _row_slot_starts(tree)
+    starts = tree.row_slot_starts
     slot_width = tree.row_widths
     regrets, seeded = regrets_encoding(
         source.strategy_sum,

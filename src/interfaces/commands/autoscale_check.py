@@ -50,7 +50,12 @@ def run(args: argparse.Namespace) -> AutoscalePayload:  # noqa: ARG001
     """Evaluate each deployed formula against its own pool, concurrently."""
     config = CloudConfig.load()
     client = batch.client(config)
-    wanted = [pool_id for pool_id in (config.pool_id, config.pool_big_id) if pool_id]
+    # ALL pools, same set pool-status walks — checking a subset is the exact
+    # half-blind failure the payload docstring warns about (train-big was once
+    # missing here; train-huge repeated it).
+    wanted = [
+        pool_id for pool_id in (config.pool_id, config.pool_big_id, config.pool_huge_id) if pool_id
+    ]
     with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
         evaluated = list(
             pool.map(lambda pool_id: batch.evaluate_autoscale(client, pool_id), wanted)

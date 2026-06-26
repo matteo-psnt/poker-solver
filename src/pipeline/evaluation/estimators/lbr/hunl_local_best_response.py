@@ -106,8 +106,6 @@ if TYPE_CHECKING:
     from src.core.game.rules import GameRules
     from src.engine.solver.policy.source import ScorableBlueprint
 
-_DECK_MASKS: np.ndarray = np.array([card.mask for card in FULL_DECK], dtype=np.int64)
-
 
 @dataclass(frozen=True)
 class HandOutcome:

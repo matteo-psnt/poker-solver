@@ -16,9 +16,8 @@ Layout (ragged, zero padding, bucket-major within each street):
     infoset (node n, bucket b) owns slots
         [slot_base[n] + b*slot_stride[n],  ... + num_actions[n])
 
-Ragged rather than a dense ``(num_infosets, max_actions)`` rectangle, which at
-the production tree's mean of ~2.6 actions against ``max_actions=10`` would cost
-roughly 4x the memory.
+Ragged rather than a dense rectangle, which at the production tree's mean of
+~2.6 actions against a 10-action row cap would cost roughly 4x the memory.
 
 Workers Hogwild-write shared memory -- lock-free and racy by design, unchanged
 in its convergence argument. The arrays are mapped once at a fixed size and

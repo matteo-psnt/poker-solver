@@ -189,6 +189,10 @@ class TaskSpec:
         for override in self.sets:
             if "=" not in override:
                 raise BadTaskError(f"--set expects key=value, got '{override}'.")
+        # The node-side parse falls back to the DEFAULT on anything malformed,
+        # so an unvalidated '1.5h' would run under 6h with zero diagnostics.
+        if (why := wire.duration_error(self.timeout)) is not None:
+            raise BadTaskError(why)
         # Both shape a guess that only exists when a weight asks for one, and
         # the argv builder skips them without it. Silently dropping them would
         # train a plain control under the variant's arm label -- the failure

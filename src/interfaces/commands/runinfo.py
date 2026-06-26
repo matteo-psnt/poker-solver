@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 
 from src.interfaces.commands._base import (
     Command,
     ledger_for,
+    num,
+    pct,
     records_root,
     resolve_run_dir,
 )
@@ -106,9 +108,9 @@ def render(payload: RunInfoPayload) -> None:
         for row in rows:
             print(
                 f"    {row.get('iteration', 0):>12,}"
-                f"{_pct(row.get('coverage')):>10}"
-                f"{_num(row.get('mean_visits_per_touched'), '{:.1f}'):>9}"
-                f"{_num(row.get('iters_per_sec'), '{:.0f}'):>8}"
+                f"{pct(row.get('coverage')):>10}"
+                f"{num(row.get('mean_visits_per_touched'), '{:.1f}'):>9}"
+                f"{num(row.get('iters_per_sec'), '{:.0f}'):>8}"
             )
         flat = payload.coverage_flat_from
         if flat is not None:
@@ -133,14 +135,6 @@ def render(payload: RunInfoPayload) -> None:
     print("\n  gaps" if gaps else "\n  no gaps: scored, complete, reproducible")
     for gap in gaps:
         print(f"    - {gap}")
-
-
-def _pct(value: Any) -> str:
-    return f"{value:.1%}" if isinstance(value, int | float) else ""
-
-
-def _num(value: Any, fmt: str) -> str:
-    return fmt.format(value) if isinstance(value, int | float) else ""
 
 
 COMMAND = Command(

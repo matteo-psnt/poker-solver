@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Street
-from src.engine.solver.betting_tree import BettingTree, build_betting_tree
+from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.engine.solver.vector import bucket_game, compile_tree
@@ -79,13 +79,6 @@ class VectorBlueprintOutput(BaseModel):
     universe_seed: int
     dtype: str
     status: str
-
-
-def _row_slot_starts(tree: BettingTree) -> np.ndarray:
-    """First slot of each row -- ``tree.row_widths`` tiles the slot array in row order."""
-    starts = np.zeros(tree.num_rows, dtype=np.int64)
-    np.cumsum(tree.row_widths[:-1], out=starts[1:])
-    return starts
 
 
 def _verify_universe(run_dir: Path, boards: int, seed: int) -> None:
@@ -202,16 +195,13 @@ def train_vector_blueprint(
         kernel = BucketVectorCFR(compiled, game, cfr_plus=True, dtype=getattr(np, dtype))
         storage = StaticArrayStorage(tree)
         if resuming:
-            load_checkpoint(storage, run_dir)
+            kernel.iteration = load_checkpoint(storage, run_dir)
             kernel.regrets[:] = storage.regrets
             kernel.strategy_sum[:] = storage.strategy_sum
-            kernel.iteration = int(
-                json.loads((run_dir / "STATIC_CHECKPOINT.json").read_text())["iteration"]
-            )
             logger.info("resumed board-free run at iteration %d", kernel.iteration)
 
         initial = np.ones(counts[Street.PREFLOP], dtype=kernel.dtype)
-        row_starts = _row_slot_starts(tree)
+        row_starts = tree.row_slot_starts
 
         def publish(at: int) -> float:
             storage.regrets[:] = kernel.regrets

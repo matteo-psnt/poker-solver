@@ -64,7 +64,6 @@ class TrainingConfig(StrictFrozenModel):
     """Training loop configuration."""
 
     num_iterations: PositiveInt = Field(default=100_000)
-    verbose: bool = Field(default=True)
     runs_dir: str = Field(default=DEFAULT_RUNS_DIR)
 
 
@@ -72,8 +71,6 @@ class StorageConfig(StrictFrozenModel):
     """Storage and checkpoint configuration."""
 
     initial_capacity: PositiveInt = Field(default=2_000_000)
-    max_actions: PositiveInt = Field(default=10)
-    zarr_compression_level: Annotated[int, Field(ge=1, le=9)] = Field(default=1)
     # Spare one checkpoint per this many iterations from pruning, so the run ends
     # holding a ladder of snapshots instead of only its last one (0 = keep only the
     # last). Costs a full copy of the table per retained point, so keep it a large

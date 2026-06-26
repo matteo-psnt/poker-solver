@@ -112,12 +112,7 @@ def mark_visited_from_strategy(storage: StaticArrayStorage) -> None:
     untrained, and a checkpoint that never set the flag scores like an empty one.
     """
     tree = storage.tree
-    # tree.row_widths, never a np.repeat over buckets_per_node: that rebuilds
-    # the retired node-major row order and marks the WRONG rows visited under
-    # the bucket-major layout.
-    starts = np.zeros(tree.num_rows, dtype=np.int64)
-    np.cumsum(tree.row_widths[:-1], out=starts[1:])
-    mass = np.add.reduceat(np.asarray(storage.strategy_sum, dtype=np.float64), starts)
+    mass = np.add.reduceat(np.asarray(storage.strategy_sum, dtype=np.float64), tree.row_slot_starts)
     storage.visited[:] = mass > 0.0
 
 
@@ -129,7 +124,7 @@ def pcs_worker(
     base_seed: int,
     result_queue: Any,
     abstraction: BucketingStrategy | None = None,
-    chunk_id: int = 0,
+    chunk_start: int = 0,
     counters: Any = None,
     _merge_lock: Any = None,  # the scalar worker's tally merge; PCS writes stay Hogwild
 ) -> None:
@@ -158,7 +153,7 @@ def pcs_worker(
             alternating=pcs.alternating,
             showdown=pcs.showdown,
         )
-        rng = np.random.default_rng(worker_seed(base_seed, worker_id, chunk_id))
+        rng = np.random.default_rng(worker_seed(base_seed, worker_id, chunk_start))
 
         started = time.time()
         banked = int(counters[worker_id]) if counters is not None else 0

@@ -1614,19 +1614,16 @@ export interface components {
             pools: components["schemas"]["PoolView"][];
             /** Total Nodes */
             total_nodes: number;
-            /**
-             * Total Vcpus
-             * @default 0
-             */
-            total_vcpus: number;
+            /** Total Vcpus */
+            total_vcpus?: number | null;
         };
         /**
          * PoolView
          * @description One pool, plus what it costs while up.
          *
          *     Subclasses the shape `batch.pool_status` already produces rather than
-         *     restating its six fields -- what is added is the rate, which comes from
-         *     config and not from Batch.
+         *     restating its fields -- what is added is the rate and capacity, which come
+         *     from config and the autoscale formula, not from Batch.
          */
         PoolView: {
             /** Allocation Since */

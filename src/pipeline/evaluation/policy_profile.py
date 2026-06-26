@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from src.core.game.rules import GameRules
     from src.engine.solver.storage.static_array import StaticArrayStorage
 
+# A row whose top action carries at least this much is counted as pure.
 PURE_CUTOFF = 0.99
-"""A row whose top action carries at least this much is counted as pure."""
 
 NAMED_HANDS = ("AA", "KK", "QQ", "AKs", "AKo", "JTs", "T9s", "55", "22", "A2o", "K2o", "72o")
 _QUANTILES = (0.1, 0.5, 0.9)

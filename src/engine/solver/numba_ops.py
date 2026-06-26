@@ -74,7 +74,7 @@ def apply_regret_updates(
     way.
 
     ``regrets`` is mutated in place, ``target_indices`` must be ASCENDING,
-    ``iteration`` is 1-indexed, and ``weighting`` takes ``WEIGHTING_CODES``:
+    ``iteration`` is the 0-based absolute iteration, and ``weighting`` takes ``WEIGHTING_CODES``:
     0 = none, 1 = linear, 2 = DCFR.
     """
     # DISCOUNT PLACEMENT (deliberate deviation from the paper — do not "fix").

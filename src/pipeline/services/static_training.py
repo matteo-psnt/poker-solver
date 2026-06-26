@@ -207,11 +207,11 @@ def train_static(
             config, temperature=equity_prior_temperature, tree=equity_tree
         )
         equity_base = equity_policy * float(equity_prior_weight)
-    if equity_policy is not None and warm_start_from is None and not resuming:
+    if equity_base is not None and warm_start_from is None and not resuming:
         equity_prior.write_checkpoint(
             config,
             run_dir=run_dir,
-            regrets=equity_policy * float(equity_prior_weight),
+            regrets=equity_base,
             abstraction_hash=tracker.metadata.card_abstraction_hash,
             tree=equity_tree,
         )
@@ -245,6 +245,7 @@ def train_static(
             at_iteration=warm_start_at,
             shape=warm_start_shape,
             base_regrets=equity_base,
+            tree=equity_tree,
         )
         (run_dir / warm_start.SEEDED_MARKER).write_text(
             f"{warm_start_from}@{warm_start_at or 'current'} "

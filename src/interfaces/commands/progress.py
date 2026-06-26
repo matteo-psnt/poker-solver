@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.interfaces.commands._base import (
     Command,
+    num,
+    pct,
     records_root,
     resolve_run_dir,
 )
@@ -111,26 +113,17 @@ def render(payload: ProgressPayload) -> None:
     for row in rows:
         print(
             f"    {(row.iteration or 0):>12,}"
-            f"{_pct(row.coverage):>10}"
-            f"{_num(row.mean_visits_per_touched, '{:.1f}'):>9}"
-            f"{_num(row.iters_per_sec, '{:.0f}'):>8}"
-            f"{_num(row.task_elapsed_s, '{:.0f}s'):>10}"
-            f"{_num(row.checkpoint_seconds, '{:.1f}'):>8}"
+            f"{pct(row.coverage):>10}"
+            f"{num(row.mean_visits_per_touched, '{:.1f}'):>9}"
+            f"{num(row.iters_per_sec, '{:.0f}'):>8}"
+            f"{num(row.task_elapsed_s, '{:.0f}s'):>10}"
+            f"{num(row.checkpoint_seconds, '{:.1f}'):>8}"
         )
     plateau = payload.coverage_plateau_iteration
     if plateau is not None:
         print(f"  coverage flat from iteration {plateau:,} (2+ intervals under 1% gain)")
     else:
         print("  coverage still climbing at the last checkpoint")
-
-
-def _pct(value: Any) -> str:
-    return f"{value:.1%}" if isinstance(value, int | float) else ""
-
-
-def _num(value: Any, fmt: str) -> str:
-    """Blank rather than a placeholder when a field predates its schema version."""
-    return fmt.format(value) if isinstance(value, int | float) else ""
 
 
 COMMAND = Command(

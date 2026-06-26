@@ -209,8 +209,9 @@ function PoolFacts({ pool, now }: { pool: PoolView; now: number }) {
               : undefined
           }
         />
-        {pool.resize_errors.map((e) => (
-          <p key={e.code} className="col-span-full font-mono text-[12px] text-red-400">
+        {pool.resize_errors.map((e, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: every entry is AllocationFailed with a nullable code — no stable identity to key on
+          <p key={i} className="col-span-full font-mono text-[12px] text-red-400">
             {e.code}: {e.message}
           </p>
         ))}

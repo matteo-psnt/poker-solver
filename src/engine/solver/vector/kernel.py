@@ -65,25 +65,50 @@ DTYPE = np.float32
 class NodeGroup:
     """Nodes that share a shape, so one array op covers all of them.
 
-    Attributes:
-        level: Depth; every node in a group is processed in the same pass step.
-        num_actions: Action count, fixing the last axis of every block.
-        street: Fixes the bucket count and which bucket map applies.
-        actor: 0 when the button acts at these nodes, else 1.
-        node_ids: The nodes themselves.
-        slot_base: ``tree.slot_base`` per node — where its ragged storage begins.
-        edge_base: ``edge_offset`` per node — where its child pointers begin.
+    Per node: ``node_ids``, ``slot_base`` (``tree.slot_base``) and ``edge_base``
+    (``edge_offset``). ``slot_stride`` is one scalar — a street shares it.
     """
 
     level: int
     num_actions: int
     street: Street
-    actor: int
+    actor: int  # 0 when the button acts at these nodes, else 1
     node_ids: np.ndarray
     slot_base: np.ndarray
     slot_stride: int
-    # Shared by the whole group: nodes of one street share one stride.
     edge_base: np.ndarray
+
+
+def slot_index(compiled: CompiledTree, group: NodeGroup, chunk: slice) -> np.ndarray:
+    """``(n, B * A)`` storage indices for a chunk's ragged rows."""
+    num_buckets = compiled.tree.num_buckets(group.street)
+    span = (
+        np.arange(num_buckets, dtype=np.int64)[:, None] * group.slot_stride
+        + np.arange(group.num_actions, dtype=np.int64)[None, :]
+    ).ravel()
+    return group.slot_base[chunk][:, None] + span[None, :]
+
+
+def child_targets(
+    compiled: CompiledTree, group: NodeGroup, chunk: slice
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-action child ids and a terminal mask, shaped ``(n, A)``."""
+    base = group.edge_base[chunk]
+    edges = base[:, None] + np.arange(group.num_actions, dtype=np.int64)[None, :]
+    return compiled.edge_target[edges], compiled.edge_kind[edges] == EDGE_TO_TERMINAL
+
+
+def strategy_block(
+    source: np.ndarray, compiled: CompiledTree, group: NodeGroup, chunk: slice, uniform: np.floating
+) -> np.ndarray:
+    """Regret matching over ``source``, shaped ``(n, B, A)``; both kernels share it."""
+    num_actions = group.num_actions
+    num_buckets = compiled.tree.num_buckets(group.street)
+    block = source[slot_index(compiled, group, chunk)].reshape(-1, num_buckets, num_actions)
+
+    positive = np.maximum(block, 0.0)
+    total = positive.sum(axis=-1, keepdims=True)
+    return np.where(total > 0, positive / np.where(total > 0, total, 1.0), uniform)
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,38 +264,21 @@ class VectorCFR:
         return [slice(start, min(start + step, total)) for start in range(0, total, step)]
 
     def _slot_index(self, group: NodeGroup, chunk: slice) -> np.ndarray:
-        """``(n, B * A)`` storage indices for a chunk's ragged rows."""
-        num_buckets = self.compiled.tree.num_buckets(group.street)
-        span = (
-            np.arange(num_buckets, dtype=np.int64)[:, None] * group.slot_stride
-            + np.arange(group.num_actions, dtype=np.int64)[None, :]
-        ).ravel()
-        return group.slot_base[chunk][:, None] + span[None, :]
+        return slot_index(self.compiled, group, chunk)
 
     def _strategy_block(
         self, group: NodeGroup, chunk: slice, *, use_average: bool = False
     ) -> np.ndarray:
-        """Strategy for a chunk of a group, shaped ``(n, B, A)``.
-
-        The current iterate is regret matching over stored regrets; the average
-        is the normalised strategy sum. Only the average carries CFR's
-        convergence guarantee, so anything scoring the solver must ask for it.
-        """
-        num_actions = group.num_actions
-        num_buckets = self.compiled.tree.num_buckets(group.street)
+        """The current iterate, or with ``use_average`` the normalised strategy
+        sum — the only form carrying CFR's convergence guarantee, so anything
+        scoring the solver must ask for it."""
         source = self.strategy_sum if use_average else self.regrets
-        block = source[self._slot_index(group, chunk)].reshape(-1, num_buckets, num_actions)
-
-        positive = np.maximum(block, 0.0)
-        total = positive.sum(axis=-1, keepdims=True)
-        uniform = np.float32(1.0 / num_actions)
-        return np.where(total > 0, positive / np.where(total > 0, total, 1.0), uniform)
+        return strategy_block(
+            source, self.compiled, group, chunk, np.float32(1.0 / group.num_actions)
+        )
 
     def child_targets(self, group: NodeGroup, chunk: slice) -> tuple[np.ndarray, np.ndarray]:
-        """Per-action child ids and a terminal mask, shaped ``(n, A)``."""
-        base = group.edge_base[chunk]
-        edges = base[:, None] + np.arange(group.num_actions, dtype=np.int64)[None, :]
-        return self.compiled.edge_target[edges], self.compiled.edge_kind[edges] == EDGE_TO_TERMINAL
+        return child_targets(self.compiled, group, chunk)
 
     # ---- the three passes ------------------------------------------------
 

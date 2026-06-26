@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from src.pipeline.evaluation.estimators.resolver_match import (
-    _complete_board,
-    _deal_from_stack,
+    complete_board,
     deal_for,
+    deal_from_stack,
 )
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.pipeline.evaluation.units import pair_mean_mbb
@@ -129,13 +129,13 @@ def _play_game(
 
     while not state.is_terminal:
         if solver_a.is_chance_node(state):
-            state = _deal_from_stack(state, board_stack)
+            state = deal_from_stack(state, board_stack)
             continue
         actor = solver_a if state.current_player == a_seat else solver_b
         action = actor.sample_action_from_strategy(state, use_average=True)
         state = state.apply_action(action, rules)
 
     if not state.ended_by_fold and len(state.board) < 5:
-        state = _complete_board(state, board_stack)
+        state = complete_board(state, board_stack)
 
     return float(state.get_payoff(a_seat, rules))

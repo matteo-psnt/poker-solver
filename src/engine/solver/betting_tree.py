@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import bisect
 import dataclasses
+import functools
 import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -281,7 +282,6 @@ class BettingTree:
         self._street_node_ids: list[np.ndarray] = []
         row_cursor = 0
         slot_cursor = 0
-        widths_per_street: list[np.ndarray] = []
         for street in Street:
             ids = np.array(
                 [node.node_id for node in self.nodes if node.street == street], dtype=np.int64
@@ -289,7 +289,6 @@ class BettingTree:
             self._street_row_base.append(row_cursor)
             self._street_node_ids.append(ids)
             if ids.size == 0:
-                widths_per_street.append(np.zeros(0, dtype=np.int64))
                 continue
             buckets = self.num_buckets(street)
             widths = self.num_actions[ids]
@@ -300,23 +299,16 @@ class BettingTree:
             np.cumsum(widths[:-1], out=slot_local[1:])
             self.slot_base[ids] = slot_cursor + slot_local
             self.slot_stride[ids] = street_width
-            widths_per_street.append(np.tile(widths, buckets))
             row_cursor += ids.size * buckets
             slot_cursor += street_width * buckets
         self._street_row_base.append(row_cursor)  # sentinel, closes the last street
         self.num_rows = row_cursor
         self.num_slots = slot_cursor
-        # Width of each ROW in row order — what tiles the slot array exactly,
-        # which is the invariant the vector bridge's reduceat depends on.
-        self.row_widths = (
-            np.concatenate(widths_per_street) if widths_per_street else np.zeros(0, dtype=np.int64)
-        )
 
         # Plain-Python mirrors of the arrays the traversal indexes once per
         # node visit. Pulling a scalar out of an int64 array boxes a numpy
         # object and costs several times a list index, and this is the hottest
         # read in the solver.
-        self.num_actions_list: list[int] = self.num_actions.tolist()
         row_base_list: list[int] = self.row_base.tolist()
         row_stride_list: list[int] = self.row_stride.tolist()
         slot_base_list: list[int] = self.slot_base.tolist()
@@ -367,6 +359,27 @@ class BettingTree:
                 "a different stack depth or action abstraction needs its own tree."
             )
         return node_id
+
+    @functools.cached_property
+    def row_widths(self) -> np.ndarray:
+        """Width of each ROW in row order — what tiles the slot array exactly,
+        the invariant the vector bridge's reduceat depends on. On demand: only
+        pipeline seeding/bridging reads it, so workers never pay num_rows int64s."""
+        parts = [
+            np.tile(self.num_actions[ids], self.num_buckets(street))
+            for street, ids in zip(Street, self._street_node_ids, strict=True)
+            if ids.size
+        ]
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.int64)
+
+    @functools.cached_property
+    def row_slot_starts(self) -> np.ndarray:
+        """First slot of each row, in row order. Use this, never a rebuild via
+        ``np.repeat`` over ``buckets_per_node`` — that is the retired node-major
+        order, and it scrambles which infoset a boundary belongs to."""
+        starts = np.zeros(self.num_rows, dtype=np.int64)
+        np.cumsum(self.row_widths[:-1], out=starts[1:])
+        return starts
 
     def row(self, node_id: int, bucket: int) -> int:
         """Flat infoset row for ``bucket`` at ``node_id``."""
