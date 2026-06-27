@@ -76,10 +76,6 @@ class SuitMapping:
         """Get canonical label for a suit (must exist)."""
         return self.mapping[suit]
 
-    def has(self, suit: str) -> bool:
-        """Check if suit is in mapping."""
-        return suit in self.mapping
-
 
 @dataclass(frozen=True)
 class CanonicalCard:
@@ -162,7 +158,7 @@ def _suit_labels(cards_info: list[tuple[int, str]]) -> dict[str, int]:
 
 
 def canonicalize_board(
-    board: tuple[Card, ...], initial_mapping: SuitMapping | None = None
+    board: tuple[Card, ...],
 ) -> tuple[tuple[CanonicalCard, ...], SuitMapping]:
     """Canonicalize a board under suit isomorphism, with the mapping it used.
 
@@ -174,10 +170,6 @@ def canonicalize_board(
     Callers that only want the id -- the runtime bucket lookup -- should use
     :func:`canonical_board_id`, which skips the ``CanonicalCard`` objects.
     """
-    if initial_mapping is not None and len(initial_mapping.mapping) > 0:
-        # If we have an existing mapping, use the simple left-to-right approach
-        return _canonicalize_board_with_mapping(board, initial_mapping)
-
     # Extract (rank_idx, suit_char) for each card
     cards_info = []
     for card in board:
@@ -189,28 +181,6 @@ def canonicalize_board(
     codes = sorted(rank_idx * 4 + labels[suit] for rank_idx, suit in cards_info)
     canonical = tuple(CanonicalCard(code >> 2, code & 3) for code in codes)
     return canonical, SuitMapping(labels, len(labels))
-
-
-def _canonicalize_board_with_mapping(
-    board: tuple[Card, ...], mapping: SuitMapping
-) -> tuple[tuple[CanonicalCard, ...], SuitMapping]:
-    """
-    Canonicalize board with a pre-existing suit mapping.
-
-    Used when extending a board (e.g., turn card added to flop).
-    Cards are processed in order, preserving the original board structure.
-    """
-    canonical_cards = []
-    current_mapping = mapping
-
-    for card in board:
-        suit = get_card_suit(card)
-        rank_idx = get_card_rank_idx(card)
-
-        current_mapping, suit_label = current_mapping.get_or_assign(suit)
-        canonical_cards.append(CanonicalCard(rank_idx, suit_label))
-
-    return tuple(sorted(canonical_cards)), current_mapping
 
 
 def canonicalize_hand(

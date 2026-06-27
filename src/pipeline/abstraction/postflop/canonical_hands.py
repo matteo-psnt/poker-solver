@@ -18,7 +18,6 @@ from src.pipeline.abstraction.postflop.suit_isomorphism import (
     RANKS,
     SUITS,
     CanonicalCard,
-    SuitMapping,
     canonicalize_board,
     canonicalize_hand,
     get_canonical_board_id,
@@ -54,10 +53,6 @@ class CanonicalHand:
         """Unique ID for the canonical board."""
         return get_canonical_board_id(self.board)
 
-    def to_key(self) -> tuple[int, int]:
-        """Get (board_id, hand_id) tuple for dictionary keys."""
-        return (self.board_id, self.hand_id)
-
     def __repr__(self) -> str:
         hand_str = f"({self.hand[0]}, {self.hand[1]})"
         board_str = " ".join(str(c) for c in self.board)
@@ -73,13 +68,6 @@ class HandClass:
     canonical: CanonicalHand
     representative: tuple[Card, Card]
     multiplicity: int
-
-
-def canonicalize_combo(hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -> CanonicalHand:
-    """Canonicalize a (hand, board) pair."""
-    canonical_board, suit_mapping = canonicalize_board(board)
-    canonical_hand = canonicalize_hand(hole_cards, suit_mapping)
-    return CanonicalHand(hand=canonical_hand, board=canonical_board)
 
 
 def generate_all_cards() -> list[Card]:
@@ -154,30 +142,3 @@ def get_all_canonical_hands(
             seen_canonical.add(canonical_key)
 
             yield CanonicalHand(hand=canonical_hand, board=canonical_board)
-
-
-def get_representative_hand(
-    canonical_hand: tuple[CanonicalCard, CanonicalCard], suit_mapping: SuitMapping
-) -> tuple[Card, Card]:
-    """A canonical hand back as concrete cards, through the inverse of the suit
-    mapping that canonicalized it.
-    """
-    # Invert the mapping
-    inv_mapping = {v: k for k, v in suit_mapping.mapping.items()}
-
-    # Assign remaining suits for any canonical labels not in mapping
-    available_suits = [s for s in SUITS if s not in suit_mapping.mapping]
-    for label in range(4):
-        if label not in inv_mapping:
-            if available_suits:
-                inv_mapping[label] = available_suits.pop(0)
-            else:
-                inv_mapping[label] = "s"  # Fallback
-
-    cards = []
-    for cc in canonical_hand:
-        rank_char = RANKS[cc.rank_idx]
-        suit_char = inv_mapping[cc.suit_label]
-        cards.append(Card.new(f"{rank_char}{suit_char}"))
-
-    return (cards[0], cards[1])
