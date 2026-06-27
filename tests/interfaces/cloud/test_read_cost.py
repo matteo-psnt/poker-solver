@@ -302,19 +302,21 @@ class TestBillingIsOneRoundTripAtMost:
         monkeypatch.setattr(
             billing,
             "_query",
-            lambda subscription_id, since, until: calls.append(1)
-            or {
-                "properties": {
-                    "columns": [
-                        {"name": "Cost"},
-                        {"name": "UsageQuantity"},
-                        {"name": "UsageDate"},
-                        {"name": "ServiceName"},
-                        {"name": "ResourceGroupName"},
-                    ],
-                    "rows": [[1.0, 1.0, 20260806, "Virtual Machines", "azurebatch-a-c"]],
+            lambda subscription_id, since, until: (
+                calls.append(1)
+                or {
+                    "properties": {
+                        "columns": [
+                            {"name": "Cost"},
+                            {"name": "UsageQuantity"},
+                            {"name": "UsageDate"},
+                            {"name": "ServiceName"},
+                            {"name": "ResourceGroupName"},
+                        ],
+                        "rows": [[1.0, 1.0, 20260806, "Virtual Machines", "azurebatch-a-c"]],
+                    }
                 }
-            },
+            ),
         )
         return calls
 

@@ -148,7 +148,7 @@ class TestNamingACommandImportsNothing:
             "print(' '.join(sorted(loaded)))"
         )
         done = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False
         )
         assert done.returncode == 0, done.stderr
         assert done.stdout.split() == [], (
@@ -168,7 +168,7 @@ class TestNamingACommandImportsNothing:
             " & {'scipy','sklearn','numba'})), file=sys.stderr)"
         )
         done = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False
         )
         assert done.returncode == 0, done.stdout + done.stderr
         assert done.stderr.split() == [], f"`--help` imported: {done.stderr}"

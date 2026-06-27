@@ -66,6 +66,7 @@ def _run_git(*args: str) -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

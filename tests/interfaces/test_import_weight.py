@@ -49,7 +49,9 @@ def _closure(module: str, heavy: tuple[str, ...] = HEAVY) -> set[str]:
         f"importlib.import_module({module!r});"
         f"print(' '.join(sorted({{m.split('.')[0] for m in sys.modules}} & set({heavy!r}))))"
     )
-    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    done = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False
+    )
     assert done.returncode == 0, f"importing {module} failed:\n{done.stderr}"
     return set(done.stdout.split())
 

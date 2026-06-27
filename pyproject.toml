@@ -8,12 +8,18 @@ authors = [
     { name = "Matteo Pesenti" }
 ]
 dependencies = [
-    "numpy>=1.24.0",
+    # Upper-bounded, and NOT because either version is known bad. `compiled_walk`
+    # reproduces MT19937 inside a numba kernel to stay bit-identical to the
+    # traversal it replaced, so a codegen change in either library can re-baseline
+    # every published number. The golden-numbers test is the tripwire; these bounds
+    # are what stop `uv lock --upgrade` from tripping it as a side effect. Raising
+    # them is a deliberate step, gated on that test.
+    "numpy>=2.3.5,<2.4",
     "pyyaml>=6.0",
     "tqdm>=4.65.0",
     "scipy>=1.15.3",
     "scikit-learn==1.7.2",
-    "numba>=0.63.1",
+    "numba>=0.63.1,<0.64",
     "xxhash>=3.6.0",
     "zarr<3",
     "numcodecs<0.16",
@@ -64,6 +70,7 @@ select = [
     "PGH",  # blanket noqa / type: ignore with no code
     "PIE",
     "PLC0415", # import inside a function -- deliberate ones carry `# noqa: PLC0415 -- <why>`
+    "PLW1510", # subprocess.run without check= -- a swallowed exit code, again
     "PT",   # pytest style
     "PTH",  # os.path -> pathlib
     "Q",    # quote style
@@ -125,13 +132,20 @@ markers = [
     "timeout: test timeout in seconds",
 ]
 # `-n auto` because the suite is dominated by a handful of genuinely expensive
-# tests -- 86% of the wall clock is 50 of the ~1460 tests, and the other ~1260
-# are free. Serial, that is 2m53s full / 1m27s fast gate; across 12 workers it
-# is 41s / 26s. `--dist load` (the default) is what wins: `loadfile`/`loadscope`
-# would pin the 44s LBR file to one worker and set the floor there, and
-# `worksteal` measured no better. Do NOT add `--maxschedchunk=1` -- finer
-# scheduling measured SLOWER (2m17s), because these tests are CPU-bound and
-# oversubscribing them costs more than the packing saves.
+# tests: 57 `slow`-marked ones carry 6m25s of the wall clock and the other ~2400
+# are nearly free. Re-measured 08-24 at 2453 tests -- serial 12m22s full / 4m12s
+# fast gate, across 12 workers 6m25s / 58s.
+#
+# Only the FAST GATE parallelises (4m12s -> 58s). The full suite does not, and
+# the 6m25s is not a scheduling result: ONE test, `test_every_seven_card_hand`,
+# runs 6m00s of it by itself. No worker count moves that floor -- splitting that
+# test is the only thing that would.
+#
+# `--dist load` (the default) is what wins: `loadfile`/`loadscope` would pin a
+# whole slow file to one worker and set the floor there, and `worksteal`
+# measured no better. Do NOT add `--maxschedchunk=1` -- finer scheduling
+# measured SLOWER, because these tests are CPU-bound and oversubscribing them
+# costs more than the packing saves.
 #
 # To debug one test, `-n0` turns it off: worker startup and interleaved output
 # are pure cost when there is nothing to parallelise.
@@ -154,8 +168,13 @@ timeout_func_only = true
 # Development, testing, and code quality tools
 dev = [
     "pytest>=9.0.2",
-    "ruff>=0.14.9",
-    "ty",
+    "ruff>=0.16.4",
+    # Pinned exactly: `ty` is pre-1.0 and moves fast enough that a lockfile
+    # refresh can swap the type gate underneath a commit. 0.0.74 exits 1 with 71
+    # diagnostics here -- about half of them lines that already carry a
+    # `# type: ignore[...]`, whose mypy codes are not `ty` rule names -- so the
+    # upgrade is a triage pass, not a version bump.
+    "ty==0.0.12",
     "pre-commit>=4.5.1",
     "types-pyyaml>=6.0.12.20250915",
     "types-tqdm>=4.67.0.20250809",
@@ -166,6 +185,7 @@ dev = [
     "vulture>=2.14",
     "pytest-cov>=7.1.0",
     "pytest-xdist>=3.6",
+    "hypothesis>=6.140",
 ]
 
 [tool.coverage.run]

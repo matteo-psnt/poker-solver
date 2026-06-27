@@ -278,8 +278,10 @@ def _ladder_gaps(run_dir: Path) -> list[str]:
     manifest = archive.read_manifest(run_dir / records.STATIC_CHECKPOINT)
     if not manifest:
         return [
-            f"{len(published)} rung(s) are published but no manifest names them — "
-            f"scoring will refuse. Re-publish from the node that trained the run."
+            (
+                f"{len(published)} rung(s) are published but no manifest names them — "
+                f"scoring will refuse. Re-publish from the node that trained the run."
+            )
         ]
     entries = [manifest, *(e for e in manifest.get("retained") or [] if isinstance(e, dict))]
     named = {str(e["zarr"]) for e in entries if isinstance(e.get("zarr"), str)}
@@ -287,9 +289,11 @@ def _ladder_gaps(run_dir: Path) -> list[str]:
     if not unusable:
         return []
     return [
-        f"the manifest names {', '.join(unusable)}, which the share cannot supply "
-        f"(no completion marker) — scoring those rungs will be refused. Re-publish "
-        f"from the node that trained them."
+        (
+            f"the manifest names {', '.join(unusable)}, which the share cannot supply "
+            f"(no completion marker) — scoring those rungs will be refused. Re-publish "
+            f"from the node that trained them."
+        )
     ]
 
 
