@@ -9,10 +9,6 @@ including the all-negative rows that DCFR's negative-regret halving keeps
 around and the exhausted rows a starved solve leaves at exactly zero (a
 `_prepare_nodes` bug once turned those into a uniform strategy worth -486 mbb,
 so "zero regrets means uniform" is deliberate, load-bearing behaviour).
-
-Storage is float32 (`REGRET_DTYPE`) while a standalone `InfoSet` allocates
-float64, so both dtypes are generated: the kernels upcast, and the contract
-holds for either.
 """
 
 from __future__ import annotations
@@ -21,22 +17,38 @@ import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from hypothesis.extra import numpy as hnp
 
 from src.engine.solver.numba_ops import average_strategy, regret_matching
 
+# Storage is float32 (`REGRET_DTYPE`) while a standalone `InfoSet` allocates
+# float64. The kernels upcast, and the contract holds for either, so both are
+# generated rather than picked.
 DTYPES = st.sampled_from([np.float32, np.float64])
 
 
 def _vectors(min_value: float = -1e6) -> st.SearchStrategy[np.ndarray]:
-    """Action vectors of 1-8 entries. Bounded well inside float32 so the
-    property under test is the kernel's, not the format's."""
-    values = st.floats(
-        min_value=min_value, max_value=1e6, allow_nan=False, allow_infinity=False, width=32
-    )
-    return st.builds(
-        lambda xs, dtype: np.array(xs, dtype=dtype),
-        st.lists(values, min_size=1, max_size=8),
-        DTYPES,
+    """Action vectors of 1-8 entries, in either storage dtype.
+
+    `hypothesis.extra.numpy` rather than a list of floats built by hand: it
+    generates the array directly in the requested dtype, so a float32 row is a
+    real float32 row and not a float64 one rounded on the way in -- and it
+    reaches the values a hand-rolled range does not think to, denormals and
+    signed zero included. Bounds stay well inside float32 so what fails is the
+    kernel, not the format.
+    """
+    return DTYPES.flatmap(
+        lambda dtype: hnp.arrays(
+            dtype=dtype,
+            shape=hnp.array_shapes(min_dims=1, max_dims=1, min_side=1, max_side=8),
+            elements=st.floats(
+                min_value=min_value,
+                max_value=1e6,
+                allow_nan=False,
+                allow_infinity=False,
+                width=32,
+            ),
+        )
     )
 
 
