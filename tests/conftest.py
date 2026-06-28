@@ -1,6 +1,7 @@
 """Suite-wide fixtures.
 
-The card-abstraction guard, and the telemetry kill switch.
+The card-abstraction guard, the telemetry kill switch, and the hypothesis
+profile.
 
 The abstraction guard is the older of the two. A test that trains for real
 needs a precomputed combo abstraction on this machine, and that artifact is
@@ -12,8 +13,27 @@ must say "not run", never "broken".
 from __future__ import annotations
 
 import pytest
+from hypothesis import HealthCheck, settings
 
 from src.interfaces import telemetry
+
+# `derandomize=True` is the whole reason property tests are allowed in here.
+# `pytest-randomly` was rejected for this suite because random order x xdist x a
+# 5s wall-clock budget is a flake generator, and a hypothesis default profile
+# reproduces exactly that failure mode -- a new input set every run, under a
+# timeout, on 12 workers. Derandomized, a property test is a fixed set of
+# examples derived from the source: it fails for everyone or for nobody.
+# `deadline=None` because the numba kernels JIT-compile on the first example and
+# nothing else in the file is slow; the per-test `@pytest.mark.timeout` is the
+# real budget.
+settings.register_profile(
+    "suite",
+    derandomize=True,
+    deadline=None,
+    max_examples=100,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+settings.load_profile("suite")
 
 
 @pytest.fixture(autouse=True, scope="session")
