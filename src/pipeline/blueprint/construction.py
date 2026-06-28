@@ -13,12 +13,14 @@ it, which is exactly the coupling that contract exists to prevent.
 """
 
 from pathlib import Path
+from typing import Any
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.protocols import BucketingStrategy
+from src.engine.solver.storage.policy_assembly import PolicyIterate, assemble_policy
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
@@ -73,12 +75,17 @@ def build_static_evaluation_solver(
     abstractions_dir: Path | None = None,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
-) -> tuple[StaticTreeSolver, StaticArrayStorage]:
+    policy_iterate: PolicyIterate = "average",
+    avg_window_from: int | None = None,
+) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Build a read-only blueprint over a STATIC checkpoint.
 
     ``session_id=None`` allocates process-local arrays rather than shared memory:
     an evaluation is a single read-only process, and taking a named segment would
     collide with a training run of the same id.
+
+    The third return value is what the eval record needs to tell a non-default
+    ``policy_iterate``/``avg_window_from`` apart from the plain average.
     """
     action_model = ActionModel(config)
     card_abstraction = build_card_abstraction(
@@ -94,5 +101,8 @@ def build_static_evaluation_solver(
     # Verifies the tree fingerprint, so a checkpoint written against a different
     # tree is refused rather than silently reinterpreted row-for-row.
     load_checkpoint(storage, checkpoint_dir, at_iteration=at_iteration)
+    policy_record = assemble_policy(
+        storage, checkpoint_dir, iterate=policy_iterate, window_from=avg_window_from
+    )
     solver = StaticTreeSolver(action_model, card_abstraction, storage, config, tree=tree)
-    return solver, storage
+    return solver, storage, policy_record
