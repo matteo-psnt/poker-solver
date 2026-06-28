@@ -273,3 +273,65 @@ console-dev:
     supervisor=$!
     trap 'kill "$supervisor" 2>/dev/null || true' EXIT
     npm --prefix console run dev
+
+# --------------------------------------------------------------------------- #
+# mutation testing
+# --------------------------------------------------------------------------- #
+
+# Break ONE module a few hundred ways; report what the suite fails to notice.
+mutate module +tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A COPY, never this tree: cosmic-ray rewrites the module in place between
+    # runs, and `submit*` tarballs the working tree -- a dispatch racing a
+    # mutation run would seal a deliberately-broken file into a job. The copy is
+    # also what makes `-n0` honest, since each mutant gets the suite to itself.
+    work="${TMPDIR:-/tmp}/poker-solver-mutation"
+    rm -rf "$work"; mkdir -p "$work"
+    cp -R src tests config pyproject.toml uv.lock .python-version README.md "$work"/
+    find "$work" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+    cd "$work"
+    # cosmic-ray comes in via `--with` rather than the dev group on purpose: the
+    # nodes sync that group and have no use for it.
+    {
+      echo '[cosmic-ray]'
+      echo 'module-path = "{{module}}"'
+      echo 'timeout = 60.0'
+      echo 'excluded-modules = []'
+      echo 'test-command = "uv run python -m pytest -n0 -q -x {{tests}}"'
+      echo
+      echo '[cosmic-ray.distributor]'
+      echo 'name = "local"'
+    } > session.toml
+    uv run --with cosmic-ray cosmic-ray init session.toml session.sqlite
+    uv run --with cosmic-ray cosmic-ray exec session.toml session.sqlite
+    uv run --with cosmic-ray cr-report session.sqlite | tail -3
+    echo
+    # Read the survivors, do not chase the score: most of what survives is
+    # equivalent -- a fast path whose else-branch computes the same value, a
+    # `>=` where the domain makes it identical, `cache=True` on a jit decorator.
+    echo "surviving mutants:"
+    cat > report.py <<'PY'
+    import sqlite3
+
+    # A mutant that only rewrites a signature is unkillable here: `from __future__
+    # import annotations` makes every annotation a string, so `str | None` ->
+    # `str & None` is never evaluated. On an annotated module these outnumber the
+    # real survivors, and a report nobody can act on is a report nobody reads.
+    hidden = 0
+    for (diff,) in sqlite3.connect("session.sqlite").execute(
+        "SELECT diff FROM work_results WHERE test_outcome='SURVIVED'"
+    ):
+        changed = [
+            line[1:].strip()
+            for line in (diff or "").splitlines()
+            if line[:1] in "-+" and not line.startswith(("---", "+++")) and line.strip(" -+")
+        ]
+        if changed and all(c.startswith(("def ", "async def ", "@")) for c in changed):
+            hidden += 1
+            continue
+        print("  ·", " ==> ".join(changed)[:200])
+    if hidden:
+        print(f"  ({hidden} signature-only mutants hidden -- annotations are never evaluated)")
+    PY
+    uv run python report.py
