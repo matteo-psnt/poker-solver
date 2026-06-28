@@ -151,6 +151,10 @@ class PublicBRConfig:
     avg_window_from: int | None = None
     """Average only over iterations after this retained rung, which is exactly
     the difference of the two rungs' `strategy_sum`. A separate tier."""
+    avg_gamma: float | None = None
+    """Reweight the average as if training had used this `dcfr_gamma`, band by
+    retained band. Reads the whole ladder off the share once per PROCESS, so
+    score it at `num_workers=1`. A separate tier."""
 
 
 @dataclass(frozen=True)

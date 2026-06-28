@@ -234,6 +234,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "difference of the two rungs' strategy sums. A separate tier.",
     )
     parser.add_argument(
+        "--avg-gamma",
+        type=float,
+        default=None,
+        help="[exact_br] Reweight the average as if training had used this dcfr_gamma, band by "
+        "retained ladder band. Reads the whole ladder per process — pass --workers 1. "
+        "A separate tier.",
+    )
+    parser.add_argument(
         "--br-conditional",
         action="store_true",
         help="[exact_br] Condition chance on the deal: divide each street's branch weights by "
@@ -282,6 +290,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             decompose=args.decompose,
             policy_iterate=args.policy_iterate,
             avg_window_from=args.avg_window_from,
+            avg_gamma=args.avg_gamma,
         ),
         resolver_iterations=args.resolver_iterations,
         resolver_gate_deals=args.deals,

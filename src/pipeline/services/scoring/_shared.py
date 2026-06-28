@@ -32,6 +32,7 @@ def build_blueprint_for(
     at_iteration: int | None,
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
+    avg_gamma: float | None = None,
 ) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Load a scoreable blueprint from a run's static checkpoint."""
     return build_static_evaluation_solver(
@@ -41,6 +42,7 @@ def build_blueprint_for(
         at_iteration=at_iteration,
         policy_iterate=policy_iterate,
         avg_window_from=avg_window_from,
+        avg_gamma=avg_gamma,
     )
 
 
@@ -87,6 +89,7 @@ def load_blueprint(
     at_iteration: int | None = None,
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
+    avg_gamma: float | None = None,
 ) -> ScorableBlueprint:
     """Build a fresh evaluation blueprint (solver) from a checkpoint.
 
@@ -101,6 +104,7 @@ def load_blueprint(
         at_iteration=at_iteration,
         policy_iterate=policy_iterate,
         avg_window_from=avg_window_from,
+        avg_gamma=avg_gamma,
     )
     return solver
 
@@ -128,6 +132,7 @@ def prepare_blueprint(
     num_workers: int,
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
+    avg_gamma: float | None = None,
 ) -> PreparedBlueprint:
     """Everything an estimator needs before it can score: metadata, blueprint, factory.
 
@@ -144,7 +149,7 @@ def prepare_blueprint(
     metadata = load_run_metadata(run_dir)
     effective_hash = effective_abstraction_hash(run_dir, metadata, abstraction_hash)
     solver, storage, policy_record = build_blueprint_for(
-        run_dir, metadata, effective_hash, at_iteration, policy_iterate, avg_window_from
+        run_dir, metadata, effective_hash, at_iteration, policy_iterate, avg_window_from, avg_gamma
     )
     factory = (
         functools.partial(
@@ -155,6 +160,7 @@ def prepare_blueprint(
             at_iteration,
             policy_iterate,
             avg_window_from,
+            avg_gamma,
         )
         if num_workers > 1
         else None
