@@ -1,0 +1,35 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        // Off, not silenced site by site: every one of the six hits is a
+        // COMPOSITE key (`${index}-${name}`) on a list whose values legitimately
+        // repeat -- a board with two empty slots, a strategy mix with two arms
+        // of the same name. There the index IS the identity, and the rule cannot
+        // tell that from a bare `key={index}`.
+        "noArrayIndexKey": "off"
+      }
+    }
+  },
+  "files": {
+    // `types.gen.ts`/`openapi.json` are generated from the app -- biome would be
+    // linting a code generator's output. `index.css` is Tailwind v4 syntax
+    // (`@theme`), which biome 2's CSS parser rejects outright; the only rule it
+    // did reach there objected to the `!important` in a `prefers-reduced-motion`
+    // block, which is exactly where `!important` is correct.
+    "includes": [
+      "**",
+      "!**/src/api/types.gen.ts",
+      "!**/src/api/openapi.json",
+      "!**/src/index.css"
+    ]
+  }
+}

@@ -69,8 +69,10 @@ export function StepChart({
               border: "1px solid var(--border)",
               fontSize: 11,
             }}
-            labelFormatter={(at: number) => new Date(at).toLocaleString()}
-            formatter={(running: number) => [running, label]}
+            // recharts 3 hands the formatters `ReactNode`/`ValueType`, not the
+            // datum's own type -- the coercion is where that widening stops.
+            labelFormatter={(at) => new Date(Number(at)).toLocaleString()}
+            formatter={(running) => [Number(running), label]}
           />
           {/* Filled, because the AREA is the quantity: node-hours is the
               integral of this curve, and the page says so directly underneath. */}

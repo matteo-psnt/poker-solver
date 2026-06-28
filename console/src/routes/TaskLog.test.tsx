@@ -1,8 +1,8 @@
-import { routeTree } from "@/routes/tree";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
+import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { routeTree } from "@/routes/tree";
 
 /**
  * A running task's log has to keep arriving.

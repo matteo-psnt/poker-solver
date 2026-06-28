@@ -6,6 +6,9 @@
  * nothing exercises is one that quietly stops being true. `routes.test.tsx`
  * mounts this tree against a memory history and follows every old path.
  */
+
+import { createRootRoute, createRoute, redirect } from "@tanstack/react-router";
+import { z } from "zod";
 import { Shell } from "@/components/Shell";
 import { Blueprint } from "@/routes/Blueprint";
 import { Operate } from "@/routes/Operate";
@@ -14,8 +17,6 @@ import { RunDetail } from "@/routes/RunDetail";
 import { Runs } from "@/routes/Runs";
 import { TaskLog } from "@/routes/TaskLog";
 import { Tasks } from "@/routes/Tasks";
-import { createRootRoute, createRoute, redirect } from "@tanstack/react-router";
-import { z } from "zod";
 
 const rootRoute = createRootRoute({ component: Shell });
 

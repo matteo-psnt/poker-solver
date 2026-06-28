@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { useRunsView } from "@/api/queries";
 import type { Phase } from "@/api/types";
 import { Panel } from "@/components/Panel";
@@ -5,8 +7,6 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { count, runLabel } from "@/lib/format";
-import { Link } from "@tanstack/react-router";
-import { useMemo } from "react";
 
 /**
  * Phases that mean this run still has work in the pool.

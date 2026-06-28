@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { useNow } from "@/api/queries";
 import type { NodePhase, NodeStatus, PoolView, TaskRow } from "@/api/types";
 import { Panel } from "@/components/Panel";
@@ -5,10 +7,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { useClock } from "@/lib/clock";
 import { clock, count, duration, instant, since, span, taskLabel } from "@/lib/format";
-import { type PoolShape, type Slot, elapsed, nodeLabel, poolShape } from "@/lib/pool";
+import { elapsed, nodeLabel, type PoolShape, poolShape, type Slot } from "@/lib/pool";
 import { cn } from "@/lib/utils";
-import { Link } from "@tanstack/react-router";
-import { useMemo } from "react";
 
 /** How many finished tasks the Now page lists. Mirrors `views.LIVE_LIMIT`. */
 const RECENT = 10;
@@ -210,7 +210,8 @@ function PoolFacts({ pool, now }: { pool: PoolView; now: number }) {
           }
         />
         {pool.resize_errors.map((e, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: every entry is AllocationFailed with a nullable code — no stable identity to key on
+          // Every entry is AllocationFailed with a nullable code — there is no
+          // stable identity to key on.
           <p key={i} className="col-span-full font-mono text-[12px] text-red-400">
             {e.code}: {e.message}
           </p>

@@ -1,9 +1,9 @@
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { Activity, Grid3x3, LayoutDashboard, Rocket, ScrollText } from "lucide-react";
 import { useNow } from "@/api/queries";
 import type { Phase } from "@/api/types";
 import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { Activity, Grid3x3, LayoutDashboard, Rocket, ScrollText } from "lucide-react";
 
 /**
  * Six destinations, one per SUBJECT -- see `routes/tree.tsx` for the test each one

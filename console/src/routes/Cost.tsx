@@ -1,10 +1,10 @@
+import { useMemo } from "react";
 import { useCost } from "@/api/queries";
 import type { Billed } from "@/api/types";
 import { Panel } from "@/components/Panel";
 import { StepChart } from "@/components/StepChart";
 import { errorOf } from "@/lib/error";
 import { count, since } from "@/lib/format";
-import { useMemo } from "react";
 
 /**
  * Two numbers, from two sources, because neither one answers both questions.

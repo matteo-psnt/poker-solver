@@ -1,7 +1,7 @@
-import { PlayingCard } from "@/components/PlayingCard";
-import { BOARD_SIZE, BOARD_SLOTS, RANKS, deck, readBoard, writeBoard } from "@/lib/cards";
-import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { PlayingCard } from "@/components/PlayingCard";
+import { BOARD_SIZE, BOARD_SLOTS, deck, RANKS, readBoard, writeBoard } from "@/lib/cards";
+import { cn } from "@/lib/utils";
 
 /**
  * Choosing the runout, by clicking cards.

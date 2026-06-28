@@ -1,14 +1,14 @@
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { useCancelTask, useTasks } from "@/api/queries";
 import type { TaskRow } from "@/api/types";
 import { Confirm } from "@/components/Confirm";
 import { Panel } from "@/components/Panel";
-import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
+import { displayName, StatusBadge, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { clock, count, duration, runLabel, since, span, taskLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Link, getRouteApi, useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
 
 const route = getRouteApi("/tasks");
 

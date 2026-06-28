@@ -1,13 +1,13 @@
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { ApiError } from "@/api/client";
 import { useBlueprintRun, useCombos, useSolverNode } from "@/api/queries";
 import { BoardPicker } from "@/components/BoardPicker";
 import { Panel } from "@/components/Panel";
 import { RangeGrid } from "@/components/RangeGrid";
 import { type ActionLabel, describeAction, describeActions } from "@/lib/actions";
-import { type Cell, type RangeSummary, actionColours, aggregate, summarise } from "@/lib/range";
+import { actionColours, aggregate, type Cell, type RangeSummary, summarise } from "@/lib/range";
 import { cn } from "@/lib/utils";
-import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
 
 const route = getRouteApi("/blueprint");
 
@@ -423,7 +423,11 @@ function Crumb({
   label,
   onClick,
   active,
-}: { label: string; onClick: () => void; active: boolean }) {
+}: {
+  label: string;
+  onClick: () => void;
+  active: boolean;
+}) {
   return (
     <button
       type="button"

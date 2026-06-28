@@ -1,5 +1,5 @@
-import { Tabs } from "@/components/Tabs";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
+import { Tabs } from "@/components/Tabs";
 import { Activity } from "./Activity";
 import { Cost } from "./Cost";
 import { Dispatch } from "./Dispatch";
