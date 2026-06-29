@@ -239,7 +239,7 @@ def _fetch_rungs(
         return None
     support = _support_rungs(plan.eval_flags, destination, fetched)
     if support:
-        log(f"eval also READS rungs {', '.join(support)} (a reassembled average)")
+        log(f"eval also READS {len(support)} more rung(s): {', '.join(support)}")
         if len(archive.fetch_for_evaluation(published, destination, support, log)) != len(support):
             log("FATAL a rung the reassembled average reads is missing")
             return None

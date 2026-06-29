@@ -238,8 +238,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         help="[exact_br] Reweight the average as if training had used this dcfr_gamma, band by "
-        "retained ladder band. Reads the whole ladder per process — pass --workers 1. "
-        "A separate tier.",
+        "retained ladder band. Costs one rung FETCH and one read per band, per process: pass "
+        "--workers 1, and check the run's retention first (a 5M-retention 300M run is 60 "
+        "rungs, tens of GB onto the node). A separate tier.",
     )
     parser.add_argument(
         "--br-conditional",
