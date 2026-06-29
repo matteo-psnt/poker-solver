@@ -95,8 +95,12 @@ def evaluate_run_lbr(
     config = config or LBRConfig()
     # Each parallel LBR worker rebuilds its own solver from the checkpoint --
     # the solver is not picklable across processes.
-    metadata, solver, storage, factory = prepare_blueprint(
-        run_dir, abstraction_hash, at_iteration, config.num_workers
+    prepared = prepare_blueprint(run_dir, abstraction_hash, at_iteration, config.num_workers)
+    metadata, solver, storage, factory = (
+        prepared.metadata,
+        prepared.solver,
+        prepared.storage,
+        prepared.factory,
     )
     if config.opponent == "deployed":
         config = replace(

@@ -50,8 +50,20 @@ def evaluate_run_exact_br(
     """
     config = config or PublicBRConfig()
     # Workers rebuild the blueprint because the solver is not picklable.
-    metadata, solver, storage, factory = prepare_blueprint(
-        run_dir, abstraction_hash, at_iteration, config.num_workers
+    prepared = prepare_blueprint(
+        run_dir,
+        abstraction_hash,
+        at_iteration,
+        config.num_workers,
+        config.policy_iterate,
+        config.avg_window_from,
+        config.avg_gamma,
+    )
+    metadata, solver, storage, factory = (
+        prepared.metadata,
+        prepared.solver,
+        prepared.storage,
+        prepared.factory,
     )
     result = compute_public_tree_br(
         solver,
@@ -92,6 +104,9 @@ def evaluate_run_exact_br(
         # Attribution only -- it changes what is TALLIED, never a value -- so it
         # is recorded to tell two rows apart and stays out of the knob tier.
         "decompose": config.decompose,
+        # Which strategy of the checkpoint was measured. Empty for the plain
+        # average, so every row written before this pairs exactly as it did.
+        **prepared.policy_record,
     }
     if result.decomposition is not None:
         results["decomposition"] = result.decomposition

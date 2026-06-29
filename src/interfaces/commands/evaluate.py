@@ -220,6 +220,29 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "checkpoint beside the score.",
     )
     parser.add_argument(
+        "--policy-iterate",
+        choices=("average", "current"),
+        default="average",
+        help="[exact_br] Which strategy of the checkpoint to score: the DCFR average, or "
+        "the current regret-matched iterate. A separate tier.",
+    )
+    parser.add_argument(
+        "--avg-window-from",
+        type=int,
+        default=None,
+        help="[exact_br] Average only over iterations AFTER this retained rung — exactly the "
+        "difference of the two rungs' strategy sums. A separate tier.",
+    )
+    parser.add_argument(
+        "--avg-gamma",
+        type=float,
+        default=None,
+        help="[exact_br] Reweight the average as if training had used this dcfr_gamma, band by "
+        "retained ladder band. Costs one rung FETCH and one read per band, per process: pass "
+        "--workers 1, and check the run's retention first (a 5M-retention 300M run is 60 "
+        "rungs, tens of GB onto the node). A separate tier.",
+    )
+    parser.add_argument(
         "--br-conditional",
         action="store_true",
         help="[exact_br] Condition chance on the deal: divide each street's branch weights by "
@@ -266,6 +289,9 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             policy_threshold=args.policy_threshold,
             purify=args.purify,
             decompose=args.decompose,
+            policy_iterate=args.policy_iterate,
+            avg_window_from=args.avg_window_from,
+            avg_gamma=args.avg_gamma,
         ),
         resolver_iterations=args.resolver_iterations,
         resolver_gate_deals=args.deals,

@@ -62,6 +62,45 @@ class TestEvaluateFetch:
 
         assert handlers._evaluate(task, paths, log) == (1, None)
 
+    def test_a_reassembled_average_fetches_the_rungs_it_reads(self, paths, log, monkeypatch):
+        """MEASURED: `--avg-window-from 400000000` died in zarr with
+        `nothing found at path ''`. Fetching is selective -- a rung nobody asked
+        to SCORE is simply absent on the node -- so a policy that reads a second
+        rung has to say so here or fail minutes later in the loader."""
+        share = self._published(paths)
+        (share / "static-1000.zarr").mkdir()
+        (share / "static-1000.zarr" / "chunk").write_text("d")
+        (share / ".complete-static-1000.zarr").write_text("")
+        (share / "STATIC_CHECKPOINT.json").write_text(
+            '{"zarr": "static-2000.zarr", "iteration": 2000, '
+            '"retained": [{"iteration": 1000, "zarr": "static-1000.zarr"}]}'
+        )
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE,
+            run_id="run-a",
+            eval_rungs=("2000",),
+            eval_flags=("--avg-window-from", "1000"),
+        )
+
+        assert handlers._evaluate(task, paths, log) == (0, None)
+        assert (paths.runs / "run-a" / "static-1000.zarr" / "chunk").exists()
+
+    def test_a_reweighted_average_fetches_the_whole_ladder_below_it(self, paths):
+        """`--avg-gamma` recombines every retained band, not just one."""
+        destination = paths.runs / "run-a"
+        destination.mkdir(parents=True)
+        (destination / "STATIC_CHECKPOINT.json").write_text(
+            '{"zarr": "static-2000.zarr", "iteration": 2000, "retained": ['
+            '{"iteration": 500, "zarr": "static-500.zarr"},'
+            '{"iteration": 1000, "zarr": "static-1000.zarr"}]}'
+        )
+        assert handlers._support_rungs(("--avg-gamma", "0"), destination, ["2000"]) == [
+            "500",
+            "1000",
+        ]
+        assert handlers._support_rungs((), destination, ["2000"]) == []
+
     def test_the_evaluator_is_told_where_to_report(self, paths, log, monkeypatch):
         """IT NEVER WAS. Only precompute and vector-sweep filled the path in, so
         `--progress-file` never reached an evaluation's command line and the
