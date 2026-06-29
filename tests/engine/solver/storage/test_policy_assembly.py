@@ -10,8 +10,11 @@ would pass on a version of either that quietly measured something else.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
+import zarr
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
@@ -19,8 +22,12 @@ from src.core.game.state import Street
 from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.numba_ops import average_strategy, regret_matching
 from src.engine.solver.storage.policy_assembly import WINDOW_SHRINKAGE, assemble_policy
-from src.engine.solver.storage.static_array import StaticArrayStorage
-from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
+from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
+from src.engine.solver.storage.static_checkpoint import (
+    _legacy_index_maps,
+    load_checkpoint,
+    save_checkpoint,
+)
 from tests.test_helpers import make_test_config
 
 BUCKETS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 4}
@@ -174,3 +181,34 @@ def test_gamma_needs_the_ladder(tree, tmp_path):
     load_checkpoint(storage, tmp_path)
     with pytest.raises(ValueError, match="retained ladder"):
         assemble_policy(storage, tmp_path, avg_gamma=0.0, source_gamma=2.0, loaded_iteration=100)
+
+
+def test_a_window_reads_a_node_major_rung_in_the_new_order(tree, tmp_path):
+    """MEASURED: every published run predates the bucket-major layout, so the
+    window base is a v1 snapshot. Reading it without the permutation combined
+    two different orderings and the task died on the fingerprint instead."""
+    early, late, _ = _ladder(tree, tmp_path)
+    row_source, slot_source = _legacy_index_maps(tree)
+    for rung in (100, 200):
+        root = zarr.open(zarr.DirectoryStore(str(tmp_path / f"static-{rung}.zarr")), mode="r+")
+        for name in _ARRAYS:
+            gather = slot_source if name in ("regrets", "strategy_sum") else row_source
+            current = root[name][:]
+            scattered = np.empty_like(current)
+            scattered[gather] = current
+            root[name][:] = scattered
+        root.attrs["fingerprint"] = tree.legacy_fingerprint()
+    manifest = tmp_path / "STATIC_CHECKPOINT.json"
+    raw = json.loads(manifest.read_text())
+    raw["fingerprint"] = tree.legacy_fingerprint()
+    manifest.write_text(json.dumps(raw))
+
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, tmp_path)
+    assemble_policy(storage, tmp_path, window_from=100)
+
+    np.testing.assert_allclose(
+        storage.strategy_sum,
+        np.maximum(late - early, 0.0) + WINDOW_SHRINKAGE * early,
+        rtol=1e-5,
+    )
