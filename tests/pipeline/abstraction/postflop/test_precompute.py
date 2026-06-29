@@ -136,6 +136,7 @@ class TestEquityWorker:
             # Columns are unique: one cell per class
             assert len(np.unique(cols)) == n_classes
             # Realization histograms: one distribution per class, rows sum to 1
+            assert hists is not None, "asked for histogram bins and got no features"
             assert hists.shape == (n_classes, 8)
             np.testing.assert_allclose(hists.sum(axis=1).astype(np.float64), 1.0, atol=2e-3)
 

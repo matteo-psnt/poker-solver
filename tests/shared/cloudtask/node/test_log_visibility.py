@@ -125,7 +125,7 @@ class TestTheChildIsNotBlockBuffered:
             seen.append(chunk)
             original(chunk)
 
-        logger.write = _record  # type: ignore[method-assign]
+        logger.write = _record  # ty: ignore[invalid-assignment]
 
         code = run_guarded(
             [

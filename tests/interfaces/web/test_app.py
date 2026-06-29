@@ -9,15 +9,34 @@ the web code and nothing else.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.interfaces.web import app as web_app
+
+if TYPE_CHECKING:
+    import argparse
+
+
+class _Nothing(BaseModel):
+    """A payload for a stub whose payload is not what is under test.
+
+    `Payload` is `BaseModel` and a bare `{}` is not one -- the union with `dict`
+    was removed so that a handler returning a shape nobody checks fails the gate.
+    A stub gets to be minimal, not exempt.
+    """
+
+
+def _takes_command(parser: argparse.ArgumentParser) -> None:
+    """`parser.add_argument` returns the Action it built, and `add_arguments` is
+    declared to return None -- which a lambda cannot do."""
+    parser.add_argument("--command", default="")
 
 
 @pytest.fixture
@@ -172,8 +191,8 @@ class TestTheReadsAddedForCoverage:
         """
         stub = Command(
             name="activity",
-            add_arguments=lambda parser: parser.add_argument("--command", default=""),
-            run=lambda args: {},
+            add_arguments=_takes_command,
+            run=lambda args: _Nothing(),
             render=lambda payload: None,
         )
         web_app.answer(web_app.TtlCache(0.0), stub, command="tasks", cache="also-a-flag")

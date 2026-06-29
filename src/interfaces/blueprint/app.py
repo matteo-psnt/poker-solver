@@ -444,8 +444,18 @@ def create_app(
             ).model_dump()
         )
 
-    def _swap(run: str, at_iteration: int | None) -> None:
+    def _swap(
+        resolve: Callable[[str, int | None], tuple[ScorableBlueprint, str]],
+        run: str,
+        at_iteration: int | None,
+    ) -> None:
         """Do the load. Runs on its own thread; never raises to the caller.
+
+        Takes the resolver rather than closing over it: `/api/load` refuses
+        before starting this thread when the server has none, and passing it in
+        is what makes that refusal the only way in. Closed over, the guarantee
+        was a `# type: ignore` on a call that is None on a server started with a
+        blueprint handed to it directly.
 
         The new blueprint is BUILT before the old one is let go, so this server
         keeps answering from the run it already has for the whole minute-plus a
@@ -461,7 +471,7 @@ def create_app(
         a client polls to WATCH the swap -- read straight through it.
         """
         try:
-            blueprint, resolved = load_run(run, at_iteration)  # type: ignore[misc]
+            blueprint, resolved = resolve(run, at_iteration)
             # Sessions die with the blueprint they were dealt from. Carrying one
             # across would leave a half-played hand whose next bot action comes
             # from a different run -- silently, and mid-hand.
@@ -505,7 +515,10 @@ def create_app(
         # `daemon`, so an idle expiry or a Ctrl-C during a load does not hang the
         # process waiting for a minute of numpy to finish.
         threading.Thread(
-            target=_swap, args=(request.run, request.at), name="blueprint-swap", daemon=True
+            target=_swap,
+            args=(load_run, request.run, request.at),
+            name="blueprint-swap",
+            daemon=True,
         ).start()
         return JSONResponse(
             BlueprintLoad(run=request.run, loading=True).model_dump(), status_code=202

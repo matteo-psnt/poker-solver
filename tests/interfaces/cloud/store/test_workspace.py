@@ -4,11 +4,25 @@ from __future__ import annotations
 
 import json
 import threading
+from typing import TYPE_CHECKING
 
 import pytest
 
 from src.interfaces.cloud.store import share, workspace
 from src.interfaces.errors import CommandError
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+def _mark(root: Path, _previous: Path | None) -> None:
+    """A build that writes one marker file.
+
+    A named function rather than a lambda because `write_text` returns a
+    character count and `build` is declared `-> None`; a lambda body is an
+    expression, so it cannot help returning it.
+    """
+    (root / "marker").write_text("x")
 
 
 class _FakeShare:
@@ -205,12 +219,8 @@ class TestSharedTrees:
         """The hazard refcounting exists for: expiry alone pulls the directory
         out from under a reader mid-answer."""
         trees = workspace.SharedTrees(ttl=0.0)  # every lookup is a miss
-        with trees.acquire(
-            "record", lambda root, _previous: (root / "marker").write_text("x")
-        ) as held:
-            with trees.acquire(
-                "record", lambda root, _previous: (root / "marker").write_text("x")
-            ) as fresh:
+        with trees.acquire("record", _mark) as held:
+            with trees.acquire("record", _mark) as fresh:
                 assert fresh != held
             assert (held / "marker").is_file(), "the first reader's tree was deleted under it"
         assert not held.exists(), "a released tree was never cleaned up"
@@ -218,9 +228,7 @@ class TestSharedTrees:
 
     def test_close_removes_what_nobody_holds(self):
         trees = workspace.SharedTrees(ttl=60.0)
-        with trees.acquire(
-            "record", lambda root, _previous: (root / "marker").write_text("x")
-        ) as root:
+        with trees.acquire("record", _mark) as root:
             pass
         assert root.is_dir()
         trees.close()
@@ -237,9 +245,7 @@ class TestSharedTrees:
             trees.acquire("record", explode),
         ):
             pass
-        with trees.acquire(
-            "record", lambda root, _previous: (root / "marker").write_text("x")
-        ) as root:
+        with trees.acquire("record", _mark) as root:
             assert (root / "marker").is_file()
         trees.close()
 
@@ -266,7 +272,7 @@ class TestSharedTrees:
 
     def test_a_failed_refresh_keeps_the_expired_tree_for_the_next_attempt(self):
         trees = workspace.SharedTrees(ttl=0.0)
-        with trees.acquire("record", lambda root, _p: (root / "marker").write_text("x")) as first:
+        with trees.acquire("record", _mark) as first:
             pass
 
         def explode(_root, _previous):

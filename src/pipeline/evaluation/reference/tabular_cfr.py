@@ -12,7 +12,7 @@ large games; the production solver is :class:`~src.engine.solver.mccfr.MCCFRSolv
 
 from __future__ import annotations
 
-from collections.abc import Hashable
+from collections.abc import Hashable, Sequence
 
 import numpy as np
 
@@ -42,7 +42,7 @@ class TabularCFRSolver[StateT: Hashable, ActionT: Hashable]:
         self.strategy_sum: dict[InfoKey, np.ndarray] = {}
         self.actions: dict[InfoKey, list[Action]] = {}
 
-    def _node(self, info_key: InfoKey, legal: list[Action]) -> tuple[np.ndarray, np.ndarray]:
+    def _node(self, info_key: InfoKey, legal: Sequence[Action]) -> tuple[np.ndarray, np.ndarray]:
         regret = self.regret_sum.get(info_key)
         if regret is None:
             n = len(legal)

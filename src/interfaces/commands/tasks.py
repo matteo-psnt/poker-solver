@@ -197,9 +197,12 @@ def _task_records(service: Any, share_name: str) -> Iterator[Path]:
             download_tasks(service, share_name, local)
             yield local
         return
-    with cache.acquire(
-        _LEGS_KEY, lambda root, previous: download_tasks(service, share_name, root, previous)
-    ) as local:
+
+    def _refresh(root: Path, previous: Path | None) -> None:
+        """The count `download_tasks` returns is not part of the cache protocol."""
+        download_tasks(service, share_name, root, previous)
+
+    with cache.acquire(_LEGS_KEY, _refresh) as local:
         yield local
 
 
@@ -323,7 +326,7 @@ def format_table(rows: Iterable[TaskRow]) -> str:
     if not materialised:
         return "  no task records on the share"
     widths = {c: max(len(c), *(len(r[c]) for r in materialised)) for c in columns}
-    lines = ["  " + "  ".join(c.ljust(widths[c]) for c in columns)]
+    lines: list[str] = ["  " + "  ".join(c.ljust(widths[c]) for c in columns)]
     lines.append("  " + "  ".join("-" * widths[c] for c in columns))
     lines += ["  " + "  ".join(r[c].ljust(widths[c]) for c in columns) for r in materialised]
     return "\n".join(lines)

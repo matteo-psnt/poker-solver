@@ -81,7 +81,7 @@ def test_resolved_opponent_reseed_replaces_the_resolver_generator():
     from src.pipeline.evaluation.estimators.lbr.opponent_model import ResolvedOpponent
 
     opponent = object.__new__(ResolvedOpponent)
-    opponent._resolver = SimpleNamespace(rng=None)
+    opponent._resolver = SimpleNamespace(rng=None)  # ty: ignore[invalid-assignment]
 
     opponent.reseed(12345)
     drawn_first = opponent._resolver.rng.random()

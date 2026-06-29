@@ -86,13 +86,16 @@ def run(args: argparse.Namespace) -> PoolPayload:  # noqa: ARG001
         statuses = list(pool.map(lambda pool_id: batch.pool_status(client, pool_id), wanted))
     views = [_view(status, rates.get(status.pool_id)) for status in statuses]
     burns = [view.burn_per_hour for view in views if view.burn_per_hour is not None]
-    ceilings = [view.max_vcpus for view in views]
-    live = [view.vcpus for view in views]
+    # Kept as "every view reported one, or the total is unknown": a partial sum
+    # would read as a real vCPU count. Filtered rather than tested with
+    # `None not in ...`, which no type checker can narrow through.
+    ceilings = [view.max_vcpus for view in views if view.max_vcpus is not None]
+    live = [view.vcpus for view in views if view.vcpus is not None]
     return PoolPayload(
         pools=views,
         total_nodes=sum(view.current_dedicated_nodes or 0 for view in views),
-        total_vcpus=sum(live) if views and None not in live else None,  # type: ignore[arg-type]
-        max_vcpus=sum(ceilings) if views and None not in ceilings else None,  # type: ignore[arg-type]
+        total_vcpus=sum(live) if views and len(live) == len(views) else None,
+        max_vcpus=sum(ceilings) if views and len(ceilings) == len(views) else None,
         burn_per_hour=round(sum(burns), 3) if burns else None,
     )
 

@@ -24,7 +24,7 @@ comes back.
 import logging
 import math
 import multiprocessing as mp
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -71,7 +71,7 @@ _MAX_CHUNK_BOARDS = 512
 
 def _worker_compute_board_chunk(
     args: tuple[
-        list[tuple[int, tuple[Card, ...]]],
+        Sequence[tuple[int, tuple[Card, ...]]],
         int | None,
         int,
         int | None,

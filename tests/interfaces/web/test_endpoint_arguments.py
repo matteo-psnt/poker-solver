@@ -53,7 +53,7 @@ def _answer_calls() -> list[ast.Call]:
 
 
 def _command_of(call: ast.Call) -> str:
-    module = call.args[1].value  # type: ignore[attr-defined]
+    module = call.args[1].value  # ty: ignore[unresolved-attribute]
     return module.id.replace("_", "-")
 
 
