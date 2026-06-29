@@ -21,7 +21,11 @@ from src.core.game.rules import GameRules
 from src.core.game.state import Street
 from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.numba_ops import average_strategy, regret_matching
-from src.engine.solver.storage.policy_assembly import WINDOW_SHRINKAGE, assemble_policy
+from src.engine.solver.storage.policy_assembly import (
+    WINDOW_SHRINKAGE,
+    _window_coefficients,
+    assemble_policy,
+)
 from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import (
     _legacy_index_maps,
@@ -212,3 +216,40 @@ def test_a_window_reads_a_node_major_rung_in_the_new_order(tree, tmp_path):
         np.maximum(late - early, 0.0) + WINDOW_SHRINKAGE * early,
         rtol=1e-5,
     )
+
+
+def test_gamma_reweighting_survives_production_magnitudes(tree, tmp_path):
+    """The float32 table holds `sum_t t^2 * reach`, which at 600M iterations is
+    ~1e20 per slot while the band coefficients span 1 .. 2.5e-3. A test whose
+    values are all O(1) cannot see whether that combination still resolves, and
+    the combination is what the whole reweighting rests on."""
+    rungs = tuple(i * 50_000_000 for i in range(1, 13))
+    rng = np.random.default_rng(3)
+    storage = StaticArrayStorage(tree)
+    storage.visited[:] = 1
+    reference = np.zeros(storage.strategy_sum.shape, dtype=np.float64)
+    bands = []
+    for index, rung in enumerate(rungs):
+        low = rungs[index - 1] if index else 0
+        # A band's real contribution: its iterations' t^2 weight times a reach.
+        band = ((rung**3 - low**3) / 3.0) * rng.random(storage.strategy_sum.shape)
+        bands.append(band)
+        reference += band
+        storage.strategy_sum[:] = reference.astype(np.float32)
+        save_checkpoint(storage, tmp_path, rung, retain_every=50_000_000)
+
+    fresh = StaticArrayStorage(tree)
+    load_checkpoint(fresh, tmp_path)
+    assemble_policy(fresh, tmp_path, avg_gamma=0.0, source_gamma=2.0, loaded_iteration=rungs[-1])
+
+    coefficients = _window_coefficients(list(rungs), 0.0, 2.0)
+    expected = sum(c * band for c, band in zip(coefficients, bands, strict=True))
+    # Row-normalised at read time, so only the ratio within a row matters.
+    for node_id in range(len(tree)):
+        for bucket in range(int(tree.buckets_per_node[node_id])):
+            start, stop = tree.slots(node_id, bucket)
+            np.testing.assert_allclose(
+                average_strategy(fresh.strategy_sum[start:stop]),
+                expected[start:stop] / expected[start:stop].sum(),
+                rtol=1e-4,
+            )

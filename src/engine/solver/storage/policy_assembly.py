@@ -13,6 +13,7 @@ and ``max(regret, 0)`` under it IS regret matching.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from src.engine.solver.storage.static_array import StaticArrayStorage
+
+logger = logging.getLogger(__name__)
 
 PolicyIterate = Literal["average", "current"]
 
@@ -142,6 +145,15 @@ def _apply_gamma(
     coefficients = _window_coefficients(rungs, target_gamma, source_gamma)
     # Abel: sum_k c_k (S_k - S_{k-1}) = c_n S_n + sum_{k<n} (c_k - c_{k+1}) S_k.
     weights = [coefficients[k] - coefficients[k + 1] for k in range(len(rungs) - 1)]
+    logger.info(
+        "reweighting the average from gamma=%g to gamma=%g over %d bands; band coefficients %s",
+        source_gamma,
+        target_gamma,
+        len(rungs),
+        ", ".join(
+            f"{rung // 1_000_000}M:{c:.4g}" for rung, c in zip(rungs, coefficients, strict=True)
+        ),
+    )
     storage.strategy_sum *= np.float32(coefficients[-1])
     for rung, weight in zip(rungs[:-1], weights, strict=True):
         _accumulate(storage, checkpoint_dir, rung, weight)
