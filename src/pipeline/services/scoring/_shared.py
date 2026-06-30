@@ -17,6 +17,7 @@ from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.policy.source import ScorableBlueprint
 from src.engine.solver.storage.policy_assembly import PolicyIterate
 from src.engine.solver.storage.static_array import StaticArrayStorage
+from src.engine.solver.storage.static_checkpoint import AbstractionMismatchError
 from src.pipeline.blueprint.construction import build_static_evaluation_solver
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
@@ -33,6 +34,7 @@ def build_blueprint_for(
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
+    mix: tuple[Path | None, int | None, float] = (None, None, 0.5),
 ) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Load a scoreable blueprint from a run's static checkpoint."""
     return build_static_evaluation_solver(
@@ -43,6 +45,9 @@ def build_blueprint_for(
         policy_iterate=policy_iterate,
         avg_window_from=avg_window_from,
         avg_gamma=avg_gamma,
+        mix_run=mix[0],
+        mix_at=mix[1],
+        mix_weight=mix[2],
     )
 
 
@@ -82,6 +87,25 @@ def effective_abstraction_hash(
     return effective
 
 
+def verify_mixable(run_dir: Path, effective_hash: str, mix_run: Path) -> None:
+    """Refuse a mixture of two runs that bucket hands differently.
+
+    Read off the RUN METADATA, not the checkpoint manifest: ordinary training
+    runs leave the manifest's ``abstraction_id`` unset (``static_parallel``
+    never passes it), so the manifest guard is inert for every real run, while
+    ``card_abstraction_hash`` is recorded at run creation and is what the whole
+    eval path already pins to. Blending two differently-bucketed tables would
+    line the rows up perfectly and add a different hand's strategy into each.
+    """
+    other = load_run_metadata(mix_run)
+    theirs = effective_abstraction_hash(mix_run, other, None)
+    if theirs != effective_hash:
+        raise AbstractionMismatchError(
+            f"{mix_run.name} buckets by {theirs} but {run_dir.name} buckets by "
+            f"{effective_hash}. The rows would line up and hold different hands."
+        )
+
+
 def load_blueprint(
     config: Config,
     checkpoint_dir: Path,
@@ -90,6 +114,7 @@ def load_blueprint(
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
+    mix: tuple[Path | None, int | None, float] = (None, None, 0.5),
 ) -> ScorableBlueprint:
     """Build a fresh evaluation blueprint (solver) from a checkpoint.
 
@@ -105,6 +130,9 @@ def load_blueprint(
         policy_iterate=policy_iterate,
         avg_window_from=avg_window_from,
         avg_gamma=avg_gamma,
+        mix_run=mix[0],
+        mix_at=mix[1],
+        mix_weight=mix[2],
     )
     return solver
 
@@ -133,6 +161,7 @@ def prepare_blueprint(
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
+    mix: tuple[Path | None, int | None, float] = (None, None, 0.5),
 ) -> PreparedBlueprint:
     """Everything an estimator needs before it can score: metadata, blueprint, factory.
 
@@ -148,8 +177,17 @@ def prepare_blueprint(
     """
     metadata = load_run_metadata(run_dir)
     effective_hash = effective_abstraction_hash(run_dir, metadata, abstraction_hash)
+    if mix[0] is not None:
+        verify_mixable(run_dir, effective_hash, mix[0])
     solver, storage, policy_record = build_blueprint_for(
-        run_dir, metadata, effective_hash, at_iteration, policy_iterate, avg_window_from, avg_gamma
+        run_dir,
+        metadata,
+        effective_hash,
+        at_iteration,
+        policy_iterate,
+        avg_window_from,
+        avg_gamma,
+        mix,
     )
     factory = (
         functools.partial(
@@ -161,6 +199,7 @@ def prepare_blueprint(
             policy_iterate,
             avg_window_from,
             avg_gamma,
+            mix,
         )
         if num_workers > 1
         else None
