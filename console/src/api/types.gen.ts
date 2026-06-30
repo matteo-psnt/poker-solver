@@ -1125,6 +1125,11 @@ export interface components {
             /** Tier */
             tier: string | null;
             /**
+             * Tier Index
+             * @default 0
+             */
+            tier_index: number;
+            /**
              * Unplaceable Records
              * @default 0
              */
@@ -1166,6 +1171,11 @@ export interface components {
             run_id: string;
             /** Tier */
             tier: string | null;
+            /**
+             * Tier Index
+             * @default 0
+             */
+            tier_index: number;
             /**
              * Unplaceable Records
              * @default 0

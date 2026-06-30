@@ -431,7 +431,9 @@ class TestTheAbstractionGuardIsArmed:
     def test_a_fresh_manifest_records_the_bucket_assignment(self, tree, tmp_path):
         storage = StaticArrayStorage(tree)
         save_checkpoint(storage, tmp_path, 10, abstraction_id="abs-1")
-        assert StaticCheckpointManifest.read(tmp_path).abstraction_id == "abs-1"
+        manifest = StaticCheckpointManifest.read(tmp_path)
+        assert manifest is not None
+        assert manifest.abstraction_id == "abs-1"
 
     def test_a_genuine_mismatch_is_refused(self, tree, tmp_path):
         storage = StaticArrayStorage(tree)
