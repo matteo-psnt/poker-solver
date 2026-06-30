@@ -308,7 +308,7 @@ def test_a_window_at_the_source_gamma_matches_the_plain_window(tree, tmp_path):
     assert sums[-1] is not None
 
 
-def _run_with(tree: BettingTree, path, seed: int, abstraction: str = "abs-1"):
+def _run_with(tree: BettingTree, path, seed: int, abstraction: str | None = "abs-1"):
     """A one-rung run whose strategy_sum is distinctive to ``seed``."""
     rng = np.random.default_rng(seed)
     storage = StaticArrayStorage(tree)
@@ -374,3 +374,21 @@ def test_a_mixture_is_scored_plain(tree, tmp_path):
     load_checkpoint(storage, tmp_path)
     with pytest.raises(ValueError, match="scored plain"):
         assemble_policy(storage, tmp_path, mix_run=tmp_path, mix_at=800, avg_gamma=0.0)
+
+
+def test_mixing_runs_that_never_recorded_an_abstraction_is_allowed(tree, tmp_path):
+    """MEASURED on the pool: the first real mixture was refused because NO
+    ordinary training run records `abstraction_id` in its checkpoint manifest
+    (`static_parallel` never passes it), so a manifest-only guard rejects every
+    real pair. The caller verifies the abstraction off the run metadata."""
+    a_dir = tmp_path / "a"
+    b_dir = tmp_path / "b"
+    a = _run_with(tree, a_dir, seed=5, abstraction=None)
+    b = _run_with(tree, b_dir, seed=9, abstraction=None)
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, a_dir)
+    record = assemble_policy(storage, a_dir, mix_run=b_dir, mix_at=800, mix_weight=0.5)
+
+    assert record["mix_run"] == "b"
+    expected = 0.5 * a / a.sum(dtype=np.float64) + 0.5 * b / b.sum(dtype=np.float64)
+    np.testing.assert_allclose(storage.strategy_sum, expected, rtol=1e-4, atol=1e-12)
