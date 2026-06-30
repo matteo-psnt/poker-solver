@@ -14,18 +14,18 @@ and ``max(regret, 0)`` under it IS regret matching.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 from src.engine.solver.storage.static_checkpoint import (
+    AbstractionMismatchError,
     StaticCheckpointManifest,
     read_strategy_sum,
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from src.engine.solver.storage.static_array import StaticArrayStorage
     from src.shared.config.schema import SolverConfig
 
@@ -39,6 +39,63 @@ PolicyIterate = Literal["average", "current"]
 # no window evidence shrinks back toward the average, which is the honest
 # answer where the window has nothing to say.
 WINDOW_SHRINKAGE = 1e-3
+
+
+def _abstraction_of(checkpoint_dir: Path) -> tuple[StaticCheckpointManifest, str]:
+    """A run's manifest and the bucket ASSIGNMENT its rows are written under."""
+    manifest = StaticCheckpointManifest.read(checkpoint_dir)
+    if manifest is None:
+        raise FileNotFoundError(f"No static checkpoint manifest in {checkpoint_dir}")
+    if manifest.abstraction_id is None:
+        raise AbstractionMismatchError(
+            f"{checkpoint_dir.name} does not record which bucket assignment it was trained "
+            "under, so a mixture with it cannot be shown to be adding the same hands."
+        )
+    return manifest, manifest.abstraction_id
+
+
+def _apply_mix(
+    storage: StaticArrayStorage,
+    checkpoint_dir: Path,
+    mix_run: Path,
+    mix_at: int | None,
+    weight: float,
+) -> dict[str, Any]:
+    """Blend another run's average into this one: ``(1-w)*A/|A| + w*B/|B|``.
+
+    Each side is divided by its own total mass first, so ``w`` is a weight on
+    the STRATEGIES rather than on whichever run happened to accumulate more.
+    That also makes mixing a run with ITSELF the exact identity at every ``w``,
+    which is the guard this operation needs: rows are normalised per row at
+    read time, so a common scale factor cannot change the policy.
+
+    The tree fingerprint is checked by the read; the bucket ASSIGNMENT is
+    checked here, and it is the one that matters -- two runs can share a tree,
+    a layout and bucket COUNTS while row `i` holds a different hand in each,
+    and nothing about the arrays would reveal it.
+    """
+    if not 0.0 <= weight <= 1.0:
+        raise ValueError(f"a mixture weight is a proportion, got {weight}")
+    _, mine = _abstraction_of(checkpoint_dir)
+    other_manifest, theirs = _abstraction_of(Path(mix_run))
+    if mine != theirs:
+        raise AbstractionMismatchError(
+            f"{Path(mix_run).name} buckets by {theirs} but {checkpoint_dir.name} buckets by "
+            f"{mine}. The rows would line up and hold different hands."
+        )
+    rung = other_manifest.iteration if mix_at is None else mix_at
+    other = read_strategy_sum(storage, Path(mix_run), rung)
+    mine_total = float(storage.strategy_sum.sum(dtype=np.float64))
+    other_total = float(other.sum(dtype=np.float64))
+    if mine_total <= 0.0 or other_total <= 0.0:
+        raise ValueError("a checkpoint with no accumulated strategy cannot be mixed")
+    storage.strategy_sum *= np.float32((1.0 - weight) / mine_total)
+    storage.strategy_sum += np.float32(weight / other_total) * other
+    return {
+        "mix_run": Path(mix_run).name,
+        "mix_at": int(rung),
+        "mix_weight": float(weight),
+    }
 
 
 def source_gamma_of(solver: SolverConfig) -> float:
@@ -63,12 +120,22 @@ def assemble_policy(
     avg_gamma: float | None = None,
     source_gamma: float = 2.0,
     loaded_iteration: int | None = None,
+    mix_run: Path | None = None,
+    mix_at: int | None = None,
+    mix_weight: float = 0.5,
 ) -> dict[str, Any]:
     """Rewrite ``storage.strategy_sum`` as the requested strategy. In place.
 
     Returns what the record needs to tell two rows apart, empty for the
     identity. ``window_from`` must be a retained rung of the same run.
     """
+    if mix_run is not None:
+        if iterate != "average" or window_from is not None or avg_gamma is not None:
+            raise ValueError(
+                "a blueprint mixture is scored plain: combining it with a reweighted or "
+                "windowed average would make the result impossible to attribute"
+            )
+        return _apply_mix(storage, checkpoint_dir, mix_run, mix_at, mix_weight)
     if iterate == "current" and (window_from is not None or avg_gamma is not None):
         raise ValueError(
             "policy_iterate='current' has no averaging weight: the current iterate is "

@@ -115,6 +115,41 @@ class TestEvaluateFetch:
         flags = ("--avg-gamma", "0", "--avg-window-from", "1000")
         assert handlers._support_rungs(flags, destination, ["2000"]) == ["1000", "1500"]
 
+    def test_a_mixture_fetches_the_other_run_too(self, paths, log, monkeypatch):
+        """Rung fetching is per-run and the mixture partner is a different run
+        entirely, so without this the mixture dies in the loader exactly as a
+        windowed average did before its support rungs were fetched."""
+        self._published(paths)
+        partner = paths.archive / "run-b"
+        (partner / "static-800.zarr").mkdir(parents=True)
+        (partner / "static-800.zarr" / "chunk").write_text("d")
+        (partner / ".complete-static-800.zarr").write_text("")
+        (partner / "STATIC_CHECKPOINT.json").write_text(
+            '{"zarr": "static-800.zarr", "iteration": 800, "retained": []}'
+        )
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE,
+            run_id="run-a",
+            eval_rungs=("2000",),
+            eval_flags=("--mix-run", "run-b", "--mix-at", "800"),
+        )
+
+        assert handlers._evaluate(task, paths, log) == (0, None)
+        assert (paths.runs / "run-b" / "static-800.zarr" / "chunk").exists()
+
+    def test_a_mixture_naming_no_such_run_is_fatal(self, paths, log, monkeypatch):
+        self._published(paths)
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE,
+            run_id="run-a",
+            eval_rungs=("2000",),
+            eval_flags=("--mix-run", "run-nope"),
+        )
+        assert handlers._evaluate(task, paths, log) == (1, None)
+        assert "names no run on the share" in log.path.read_text()
+
     def test_the_evaluator_is_told_where_to_report(self, paths, log, monkeypatch):
         """IT NEVER WAS. Only precompute and vector-sweep filled the path in, so
         `--progress-file` never reached an evaluation's command line and the
