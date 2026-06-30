@@ -12,6 +12,7 @@ single-worker smoke test.
 
 from __future__ import annotations
 
+import json
 import os
 
 import numpy as np
@@ -244,3 +245,23 @@ class TestGlobalIterationNumbering:
             abstraction=Buckets(),
         )
         assert result.iterations == 97
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(180)
+class TestCheckpointsRecordTheBucketAssignment:
+    def test_the_trainer_passes_the_abstraction_id_through(self, tmp_path):
+        """The wiring, not just the storage layer: this call site is the one that
+        omitted it, which left `load_checkpoint`'s AbstractionMismatchError
+        unable to fire on any run this trainer ever wrote."""
+        train_static_parallel(
+            _config(),
+            num_iterations=40,
+            num_workers=2,
+            session_id=session("static-par-absid"),
+            checkpoint_dir=tmp_path,
+            abstraction_id="abs-under-test",
+            abstraction=Buckets(),
+        )
+        raw = json.loads((tmp_path / "STATIC_CHECKPOINT.json").read_text())
+        assert raw["abstraction_id"] == "abs-under-test"
