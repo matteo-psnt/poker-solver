@@ -267,3 +267,41 @@ def test_the_source_exponent_follows_the_weighting_not_the_gamma_field(weighting
     flagship is a linear run, so this is the reachable case, not a hypothetical."""
     solver = SolverConfig(iteration_weighting=weighting, dcfr_gamma=gamma)
     assert source_gamma_of(solver) == expected
+
+
+def test_gamma_over_a_window_is_the_windows_bands_only(tree, tmp_path):
+    """A fixed-WIDTH uniform window is the one comparison that holds averaging
+    noise constant while the endpoint moves, so it separates "the solver is
+    still learning" from "averaging more iterates shrinks the average's
+    variance". Both make the all-history gamma=0 curve fall."""
+    rungs = (100, 200, 300, 400)
+    sums = _ladder_of(tree, tmp_path, rungs)
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, tmp_path)
+    record = assemble_policy(
+        storage, tmp_path, avg_gamma=0.0, source_gamma=2.0, loaded_iteration=400, window_from=200
+    )
+
+    assert record["avg_gamma_rungs"] == 2
+    assert record["avg_window_from"] == 200
+    coefficients = _window_coefficients([300, 400], 0.0, 2.0, 200)
+    bands = [sums[2] - sums[1], sums[3] - sums[2]]
+    expected = sum(c * b for c, b in zip(coefficients, bands, strict=True))
+    expected = np.maximum(expected, 0.0) + WINDOW_SHRINKAGE * sums[1]
+    np.testing.assert_allclose(storage.strategy_sum, expected, rtol=1e-4, atol=1e-6)
+
+
+def test_a_window_at_the_source_gamma_matches_the_plain_window(tree, tmp_path):
+    """Target == source over a window must reduce to the plain subtraction, or
+    the two window arms are not on the same footing."""
+    sums = _ladder_of(tree, tmp_path, (100, 200, 300))
+    a = StaticArrayStorage(tree)
+    load_checkpoint(a, tmp_path)
+    assemble_policy(
+        a, tmp_path, avg_gamma=2.0, source_gamma=2.0, loaded_iteration=300, window_from=100
+    )
+    b = StaticArrayStorage(tree)
+    load_checkpoint(b, tmp_path)
+    assemble_policy(b, tmp_path, window_from=100)
+    np.testing.assert_allclose(a.strategy_sum, b.strategy_sum, rtol=1e-4, atol=1e-6)
+    assert sums[-1] is not None
