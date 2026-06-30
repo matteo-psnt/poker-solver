@@ -101,6 +101,20 @@ class TestEvaluateFetch:
         ]
         assert handlers._support_rungs((), destination, ["2000"]) == []
 
+    def test_a_windowed_reweight_fetches_only_the_bands_it_spans(self, paths):
+        """Without the floor a 1.2B run would drag its whole ladder onto the
+        node to recombine the last quarter of it."""
+        destination = paths.runs / "run-a"
+        destination.mkdir(parents=True)
+        (destination / "STATIC_CHECKPOINT.json").write_text(
+            '{"zarr": "static-2000.zarr", "iteration": 2000, "retained": ['
+            '{"iteration": 500, "zarr": "static-500.zarr"},'
+            '{"iteration": 1000, "zarr": "static-1000.zarr"},'
+            '{"iteration": 1500, "zarr": "static-1500.zarr"}]}'
+        )
+        flags = ("--avg-gamma", "0", "--avg-window-from", "1000")
+        assert handlers._support_rungs(flags, destination, ["2000"]) == ["1000", "1500"]
+
     def test_the_evaluator_is_told_where_to_report(self, paths, log, monkeypatch):
         """IT NEVER WAS. Only precompute and vector-sweep filled the path in, so
         `--progress-file` never reached an evaluation's command line and the

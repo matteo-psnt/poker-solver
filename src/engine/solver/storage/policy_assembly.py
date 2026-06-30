@@ -74,17 +74,17 @@ def assemble_policy(
             "policy_iterate='current' has no averaging weight: the current iterate is "
             "one iteration's strategy, not an average over any range of them."
         )
-    if window_from is not None and avg_gamma is not None:
-        raise ValueError("avg_window_from truncates the average and avg_gamma reweights it")
     if iterate == "current":
         np.maximum(storage.regrets, 0, out=storage.strategy_sum)
         return {"policy_iterate": "current"}
-    if window_from is not None:
-        return _apply_window(storage, checkpoint_dir, window_from)
     if avg_gamma is not None:
         if loaded_iteration is None:
             raise ValueError("avg_gamma needs the iteration that was loaded to bound the ladder")
-        return _apply_gamma(storage, checkpoint_dir, avg_gamma, source_gamma, loaded_iteration)
+        return _apply_gamma(
+            storage, checkpoint_dir, avg_gamma, source_gamma, loaded_iteration, window_from
+        )
+    if window_from is not None:
+        return _apply_window(storage, checkpoint_dir, window_from)
     return {}
 
 
@@ -110,7 +110,9 @@ def _apply_window(
     }
 
 
-def _window_coefficients(rungs: list[int], target: float, source: float) -> list[float]:
+def _window_coefficients(
+    rungs: list[int], target: float, source: float, floor: int = 0
+) -> list[float]:
     """Per-window rescaling that turns a `t^source` average into a `t^target` one.
 
     Piecewise: within one window the weight ratio still varies as
@@ -123,7 +125,7 @@ def _window_coefficients(rungs: list[int], target: float, source: float) -> list
     def mass(exponent: float, low: int, high: int) -> float:
         return (high ** (exponent + 1) - low ** (exponent + 1)) / (exponent + 1)
 
-    edges = [0, *rungs]
+    edges = [floor, *rungs]
     coefficients = [
         mass(target, edges[k], edges[k + 1]) / mass(source, edges[k], edges[k + 1])
         for k in range(len(rungs))
@@ -138,8 +140,16 @@ def _apply_gamma(
     target_gamma: float,
     source_gamma: float,
     loaded_iteration: int,
+    window_from: int | None = None,
 ) -> dict[str, Any]:
     """Reweight the average from `t^source_gamma` to `t^target_gamma`.
+
+    With ``window_from`` the reweighting runs over ``(window_from, loaded]``
+    only. `gamma=0` over a FIXED-WIDTH window is the one comparison that holds
+    the averaging noise constant while moving the endpoint, which is what
+    separates "the solver is still learning" from "averaging more iterates
+    keeps shrinking the average's variance" -- two mechanisms that both make
+    the all-history gamma=0 curve fall.
 
     Each retained rung's band is a difference of two rungs, so the reweighted
     average is a positive combination of the rungs themselves (Abel summation)
@@ -150,13 +160,14 @@ def _apply_gamma(
     manifest = StaticCheckpointManifest.read(checkpoint_dir)
     if manifest is None:
         raise FileNotFoundError(f"No static checkpoint manifest in {checkpoint_dir}")
-    rungs = [rung for rung in manifest.ladder() if rung <= loaded_iteration]
+    floor = window_from or 0
+    rungs = [rung for rung in manifest.ladder() if floor < rung <= loaded_iteration]
     if len(rungs) < 2 or rungs[-1] != loaded_iteration:
         raise ValueError(
-            f"Reweighting the average needs a retained ladder up to {loaded_iteration:,}; "
-            f"this run has {manifest.ladder()}."
+            f"Reweighting the average needs a retained ladder from {floor:,} to "
+            f"{loaded_iteration:,}; this run has {manifest.ladder()}."
         )
-    coefficients = _window_coefficients(rungs, target_gamma, source_gamma)
+    coefficients = _window_coefficients(rungs, target_gamma, source_gamma, floor)
     # Abel: sum_k c_k (S_k - S_{k-1}) = c_n S_n + sum_{k<n} (c_k - c_{k+1}) S_k.
     weights = [coefficients[k] - coefficients[k + 1] for k in range(len(rungs) - 1)]
     logger.info(
@@ -171,10 +182,25 @@ def _apply_gamma(
     storage.strategy_sum *= np.float32(coefficients[-1])
     for rung, weight in zip(rungs[:-1], weights, strict=True):
         _accumulate(storage, checkpoint_dir, rung, weight)
+    record: dict[str, Any] = {"avg_gamma": float(target_gamma), "avg_gamma_rungs": len(rungs)}
+    if window_from is not None:
+        # The Abel sum's S_0 term: everything before the window leaves with the
+        # first band's coefficient. Shrunk back in afterwards on the same terms
+        # as the plain window, so the two window arms stay comparable.
+        base = read_strategy_sum(storage, checkpoint_dir, window_from)
+        storage.strategy_sum -= np.float32(coefficients[0]) * base
+        np.maximum(storage.strategy_sum, 0, out=storage.strategy_sum)
+        had = base > 0
+        trained = int(np.count_nonzero(had))
+        empty = int(np.count_nonzero(had & (storage.strategy_sum <= 0)))
+        storage.strategy_sum += WINDOW_SHRINKAGE * base
+        record["avg_window_from"] = int(window_from)
+        record["avg_window_shrinkage"] = WINDOW_SHRINKAGE
+        record["avg_window_empty_slot_fraction"] = (empty / trained) if trained else 0.0
     # A target above the source makes some weight negative; a negative stored
     # row is not a strategy, and the normaliser reads it as one.
     np.maximum(storage.strategy_sum, 0, out=storage.strategy_sum)
-    return {"avg_gamma": float(target_gamma), "avg_gamma_rungs": len(rungs)}
+    return record
 
 
 def _accumulate(
