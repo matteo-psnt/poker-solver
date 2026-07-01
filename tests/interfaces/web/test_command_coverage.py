@@ -37,6 +37,9 @@ NO_PAYLOAD: dict[str, str] = {
     "serve": "it IS this server; invoking it from inside would bind the port again",
     "blueprint-serve": "blocks serving one run; the console reaches it through "
     "`blueprint_proxy` and controls its host through `serve-box`",
+    "chipzen-seat": "blocks holding a seat on someone else's arena, and needs a "
+    "`cz_extbot_` token this server has no business reading; its `--replay` mode "
+    "returns, but answers about a LOCAL run dir on the reader box",
 }
 
 NODE_ONLY: dict[str, str] = {

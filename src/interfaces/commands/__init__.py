@@ -85,6 +85,9 @@ GROUPS: tuple[CommandGroup, ...] = (
             CommandRef("serve", "Serve the console on localhost."),
             CommandRef("blueprint-serve", "Serve one trained run for reading, on localhost."),
             CommandRef("serve-box", "Report, wake, or stop the blueprint host."),
+            CommandRef(
+                "chipzen-seat", "Play a run on chipzen.ai, or replay one recorded turn offline."
+            ),
         ),
     ),
     CommandGroup(

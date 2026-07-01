@@ -1,0 +1,30 @@
+{
+  "_comment": "A recorded Chipzen turn, in the shape `chipzen-seat --replay` reads: match_start's game_config, which seat is ours, and turn_request's state verbatim. Amounts follow the protocol - a raise's `amount` is the actor's total wager for the round.",
+  "game_config": {
+    "variant": "nlhe",
+    "starting_stack": 1000,
+    "small_blind": 5,
+    "big_blind": 10,
+    "ante": 0,
+    "num_players": 2
+  },
+  "seat": 1,
+  "state": {
+    "hand_number": 1,
+    "phase": "flop",
+    "board": ["Ts", "7h", "2d"],
+    "your_hole_cards": ["Ah", "Kd"],
+    "pot": 60,
+    "your_stack": 970,
+    "opponent_stacks": [970],
+    "to_call": 0,
+    "min_raise": 10,
+    "max_raise": 970,
+    "action_history": [
+      {"seat": 0, "action": "post_small_blind", "amount": 5, "phase": "preflop", "is_timeout": false},
+      {"seat": 1, "action": "post_big_blind", "amount": 10, "phase": "preflop", "is_timeout": false},
+      {"seat": 0, "action": "raise", "amount": 30, "phase": "preflop", "is_timeout": false},
+      {"seat": 1, "action": "call", "amount": 30, "phase": "preflop", "is_timeout": false}
+    ]
+  }
+}
