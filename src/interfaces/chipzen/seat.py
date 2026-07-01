@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from src.interfaces.chipzen.adapter import (
     AdapterError,
@@ -196,9 +196,9 @@ def run_seat(
     env: str,
     use_resolver: bool = False,
     budget_ms: int = DEFAULT_BUDGET_MS,
-    loop: bool = True,
+    max_matches: int | None = None,
 ) -> None:
-    """Hold a seat on Chipzen until interrupted.
+    """Hold a seat on Chipzen until interrupted, or for ``max_matches`` matches.
 
     ``blueprint_factory`` is called at ``match_start``, not here: loading a
     checkpoint takes about a minute and allocates the full table, and their
@@ -206,10 +206,15 @@ def run_seat(
     """
     try:
         import asyncio  # noqa: PLC0415 -- deferred with the optional SDK below
+        import importlib  # noqa: PLC0415 -- see below
 
-        # Optional extra, so a base `uv sync --group dev` resolves none of these.
-        # Used through the module rather than aliased, so the names stay theirs.
-        import chipzen  # noqa: PLC0415  # ty: ignore[unresolved-import]
+        # Resolved by name so the checker behaves the same whether or not the
+        # optional extra is installed: a plain `import chipzen` is an unresolved
+        # import without it and a typed call site with it, and no single
+        # suppression is correct in both. What the static check would have bought
+        # is bought better by `tests/interfaces/chipzen/test_sdk_contract.py`,
+        # which asserts against the SDK actually installed on this box.
+        chipzen = importlib.import_module("chipzen")
     except ImportError as exc:
         raise CommandError(
             "The Chipzen SDK is not installed. `uv sync --extra chipzen`, or "
@@ -242,14 +247,29 @@ def run_seat(
             assert self._seat is not None
             self._seat.seat = state.your_seat
             frame = self._seat.decide_frame(sdk_state_payload(state))
-            return chipzen.Action(action=frame["action"], params=frame.get("params", {}))
+            # Their Action is (action, amount) and builds the nested `params`
+            # itself in `to_wire`; handing it our params dict is a TypeError.
+            return chipzen.Action(
+                action=frame["action"], amount=int(frame.get("params", {}).get("amount", 0))
+            )
 
         def on_match_end(self, results: dict) -> None:  # noqa: ARG002 -- their signature
             if self._seat is not None:
                 logger.info("Match over: %s", self._seat.tally.summary())
             self._seat = None
 
-    asyncio.run(chipzen.run_external_bot(_Seat(), bot_id=bot_id, token=token, env=env, loop=loop))
+    asyncio.run(
+        chipzen.run_external_bot(
+            _Seat(),
+            bot_id=bot_id,
+            # Their `env` is a Literal of three names. Narrowed by the command's
+            # `choices=`, which is where a wrong one should be refused -- with a
+            # usage message rather than a stack trace three frames into an SDK.
+            env=cast("Any", env),
+            token=token,
+            max_matches=max_matches,
+        )
+    )
 
 
 def _implied_config(state: Any) -> dict[str, Any]:

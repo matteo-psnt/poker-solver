@@ -28,10 +28,13 @@ if TYPE_CHECKING:
 
 TOKEN_ENV = "CHIPZEN_EXTBOT_TOKEN"
 BOT_ENV = "CHIPZEN_BOT_ID"
-# Staging, not production. Every external-API instruction in their SDK points at
-# staging.chipzen.ai, and their protocol spec says a 404 on the matchmaking
-# endpoints means "not deployed on that environment yet" -- so production is the
-# likelier first-run 404, on a path that cannot be debugged without an account.
+# Their names, not ours -- the SDK resolves exactly these three and "production"
+# is not one of them. Staging is the default because every external-API
+# instruction in their docs points at staging.chipzen.ai, and their protocol spec
+# says a 404 on the matchmaking endpoints means "not deployed on that environment
+# yet" -- so prod is the likelier first-run 404, on a path that cannot be
+# debugged without an account.
+ENVIRONMENTS = ("staging", "prod", "local")
 DEFAULT_ENV = "staging"
 
 
@@ -55,8 +58,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--env",
         default=DEFAULT_ENV,
-        help=f"Chipzen environment (default {DEFAULT_ENV}, which is the one their "
-        "external-API docs actually document; pass production once it is live there).",
+        choices=ENVIRONMENTS,
+        help=f"Chipzen environment (default {DEFAULT_ENV}, the one their "
+        "external-API docs actually document; switch to prod once it is live there).",
     )
     parser.add_argument(
         "--resolver",
@@ -240,7 +244,7 @@ def _play(payload: ChipzenSeatPayload) -> None:
         env=payload.env or DEFAULT_ENV,
         use_resolver=payload.resolver,
         budget_ms=payload.budget_ms,
-        loop=not payload.once,
+        max_matches=1 if payload.once else None,
     )
 
 

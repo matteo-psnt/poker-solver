@@ -41,9 +41,15 @@ dependencies = [
 chipzen = ["chipzen-bot>=0.3.3"]
 
 [tool.deptry.package_module_name_map]
-# The wheel is `chipzen-bot`; the module it installs is `chipzen`. Without the
-# mapping deptry reports the extra as unused AND its import as undeclared.
+# The wheel is `chipzen-bot`; the module it installs is `chipzen`.
 chipzen-bot = "chipzen"
+
+[tool.deptry.per_rule_ignores]
+# `seat.py` reaches the SDK through `importlib.import_module`, which deptry
+# cannot see, so it reads the extra as unused. The indirection is deliberate --
+# see the comment at that import for why a plain one cannot be checked
+# consistently whether or not the extra is installed.
+DEP002 = ["chipzen-bot"]
 
 [project.scripts]
 poker-solver = "src.interfaces.cli.headless:main"
