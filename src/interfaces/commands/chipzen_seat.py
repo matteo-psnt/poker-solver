@@ -7,8 +7,11 @@ wire. That is the only way to exercise this against a real payload without an
 account, and the only way to diff a decision after a retrain.
 
 Live play needs the SDK (`uv sync --extra chipzen`) and a `cz_extbot_` token for
-a bot you own. The token is read from the environment by default: it is shown
-once at creation and never again, and a shell history is a bad place for it.
+a bot you own. There is deliberately no `--token`: it is shown once at creation
+and never again, and a shell history is a bad place for it. Supply it through
+``$CHIPZEN_EXTBOT_TOKEN`` or the SDK's own ``~/.chipzen/chipzen.toml`` -- NOT a
+file in this tree, which a dispatch would seal into the code snapshot and upload
+to the share.
 """
 
 from __future__ import annotations
@@ -36,6 +39,28 @@ BOT_ENV = "CHIPZEN_BOT_ID"
 # debugged without an account.
 ENVIRONMENTS = ("staging", "prod", "local")
 DEFAULT_ENV = "staging"
+
+# The SDK's own config, searched in this order. The repo root is on their list
+# and NOT on ours by preference: a snapshot seals the working tree, so a token
+# left there rides a dispatch up to the share. `~/.chipzen/` is outside every
+# tree and is the one to tell people about.
+PREFERRED_CONFIG = "~/.chipzen/chipzen.toml"
+CONFIG_SEARCH = (
+    Path.cwd() / "chipzen.toml",
+    Path.home() / ".chipzen" / "chipzen.toml",
+    Path("/etc/chipzen/chipzen.toml"),
+)
+
+
+def sdk_config_path() -> Path | None:
+    """The `chipzen.toml` the SDK would find, if any -- so we can refuse before it."""
+    for path in CONFIG_SEARCH:
+        try:
+            if path.is_file():
+                return path
+        except OSError:
+            continue
+    return None
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -117,12 +142,18 @@ def run(args: argparse.Namespace) -> ChipzenSeatPayload:
         return _replay_payload(args, run_dir)
 
     bot_id = args.bot_id or os.environ.get(BOT_ENV)
-    if not bot_id:
-        raise CommandError(f"Pass --bot-id, or set ${BOT_ENV}.")
-    if not os.environ.get(TOKEN_ENV):
+    configured = sdk_config_path()
+    if not bot_id and not configured:
         raise CommandError(
-            f"Set ${TOKEN_ENV} to a cz_extbot_ token for this bot. It is shown "
-            "once at creation and cannot be read back."
+            f"Pass --bot-id, set ${BOT_ENV}, or put `bot_id` under [external_api] "
+            f"in {PREFERRED_CONFIG}. The bot's UUID is the last path segment when "
+            "you open it at chipzen.ai/bots/<botId>."
+        )
+    if not os.environ.get(TOKEN_ENV) and not configured:
+        raise CommandError(
+            f"Set ${TOKEN_ENV} to a cz_extbot_ token, or put `token` under "
+            f"[external_api] in {PREFERRED_CONFIG}. It is shown once at creation "
+            "and cannot be read back."
         )
     return ChipzenSeatPayload(
         run=run_dir.name,
@@ -230,17 +261,22 @@ def _render_replay(payload: ChipzenSeatPayload) -> None:
 
 
 def _play(payload: ChipzenSeatPayload) -> None:
-    """Hold the seat. Does not return until interrupted."""
-    from pathlib import Path  # noqa: PLC0415 -- deferred with the rest of the play path
+    """Hold the seat. Does not return until interrupted.
 
-    from src.interfaces.chipzen.seat import run_seat  # noqa: PLC0415 -- see above
+    Either credential may be ``None``: the SDK then reads it from the
+    ``chipzen.toml`` :func:`sdk_config_path` already confirmed exists, which is
+    how a file-based setup works without us ever parsing the file.
+    """
+    from src.interfaces.chipzen.seat import run_seat  # noqa: PLC0415 -- the play path
 
     run_dir = Path(payload.run_dir)
-    print(f"Seating {payload.run} on chipzen {payload.env} as {payload.bot_id}.")
+    print(
+        f"Seating {payload.run} on chipzen {payload.env} as {payload.bot_id or 'the configured bot'}."
+    )
     run_seat(
         lambda: _build_blueprint(run_dir, payload.at_iteration),
-        bot_id=payload.bot_id or "",
-        token=os.environ[TOKEN_ENV],
+        bot_id=payload.bot_id,
+        token=os.environ.get(TOKEN_ENV),
         env=payload.env or DEFAULT_ENV,
         use_resolver=payload.resolver,
         budget_ms=payload.budget_ms,

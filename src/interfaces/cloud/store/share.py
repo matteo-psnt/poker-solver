@@ -60,8 +60,19 @@ SNAPSHOT_EXCLUDES = frozenset(
         ".idea",
         ".vscode",
         ".DS_Store",
+        # Credential files. A snapshot seals the WORKING TREE, not the index, so
+        # an untracked secrets file in the root would ride up to the share and
+        # sit in `code/` readable by every node. `chipzen.toml` is here because
+        # it is the Chipzen SDK's own config, which carries a bot token verbatim.
+        "chipzen.toml",
+        ".chipzen",
     }
 )
+
+"""Whole families of credential file, matched by prefix rather than by name --
+`.env`, `.env.local`, `.env.production`. An exact-name set cannot express this,
+and the variant that gets forgotten is the one that leaks."""
+SNAPSHOT_EXCLUDE_PREFIXES = (".env",)
 
 
 @dataclass(frozen=True)
@@ -334,6 +345,8 @@ def _snapshot_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
     """
     parts = Path(info.name).parts
     if any(part in SNAPSHOT_EXCLUDES for part in parts):
+        return None
+    if any(part.startswith(SNAPSHOT_EXCLUDE_PREFIXES) for part in parts):
         return None
     info.uid = info.gid = 0
     info.uname = info.gname = ""
