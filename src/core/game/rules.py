@@ -400,38 +400,37 @@ class GameRules:
         """
         Extract actions that occurred on the current street.
 
-        Streets are separated by:
-        - CALL (closes betting, advances street)
-        - Two consecutive CHECKs (check-check advances street)
-        - Start of hand (preflop is first street)
+        A street is closed by exactly one of the engine's advancement paths:
+        - CALL (always advances the street / goes to showdown; see ``apply_action``)
+        - Two consecutive CHECKs (check-check advances the street)
+
+        We reconstruct the current street by replaying ``betting_history``
+        *forward*, resetting the accumulator whenever one of those closers fires
+        on a non-final action. Forward replay is consistent-by-construction with
+        the engine's own advancement and, unlike a backward heuristic, can never
+        straddle a boundary: a reset clears the accumulator, so a check-check
+        pair is only ever matched within a single street. (A backward scan
+        mismatched the boundary-straddling pair when two consecutive streets both
+        ended check-check, leaving the second street unable to advance.)
+
+        The final action is never treated as a closer here: it is the in-progress
+        action whose closer status the caller is deciding.
 
         Returns actions in chronological order (oldest first).
         """
         actions_this_street: list[Action] = []
+        last_index = len(betting_history) - 1
 
-        # Walk backwards through history to find where current street started
-        for i in range(len(betting_history) - 1, -1, -1):
-            action = betting_history[i]
-            actions_this_street.insert(0, action)
+        for index, action in enumerate(betting_history):
+            actions_this_street.append(action)
 
-            # Stop if we hit a CALL (previous street ended with call)
-            if action.type == ActionType.CALL:
-                # This CALL is on previous street, remove it
-                actions_this_street.pop(0)
-                break
-
-            # Stop if we hit check-check that's followed by more actions
-            # (meaning it ended a previous street, not the current one)
-            if len(actions_this_street) >= 3:
-                # Check if positions 0 and 1 are both checks
-                if (
-                    actions_this_street[0].type == ActionType.CHECK
-                    and actions_this_street[1].type == ActionType.CHECK
-                ):
-                    # These two checks ended previous street, remove them
-                    actions_this_street.pop(0)
-                    actions_this_street.pop(0)
-                    break
+            closes_street = action.type == ActionType.CALL or (
+                len(actions_this_street) >= 2
+                and actions_this_street[-1].type == ActionType.CHECK
+                and actions_this_street[-2].type == ActionType.CHECK
+            )
+            if closes_street and index != last_index:
+                actions_this_street = []
 
         return actions_this_street
 
