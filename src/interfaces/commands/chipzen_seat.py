@@ -47,6 +47,10 @@ DEFAULT_ENV = "prod"
 # and NOT on ours by preference: a snapshot seals the working tree, so a token
 # left there rides a dispatch up to the share. `~/.chipzen/` is outside every
 # tree and is the one to tell people about.
+#
+# The cwd entry is bound at IMPORT, so it is where the process started rather
+# than where it is running -- true of the SDK's own discovery too, and harmless
+# for the path we document. Tests inject this tuple rather than write to $HOME.
 PREFERRED_CONFIG = "~/.chipzen/chipzen.toml"
 CONFIG_SEARCH = (
     Path.cwd() / "chipzen.toml",
