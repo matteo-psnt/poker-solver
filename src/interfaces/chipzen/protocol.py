@@ -149,6 +149,12 @@ class TurnState:
     min_raise: int
     max_raise: int
     action_history: tuple[ActionEntry, ...]
+    # The server's own list of what it will accept THIS turn. Authoritative and
+    # not derivable: facing an all-in, `max_raise` can still be positive while
+    # `raise` is absent, and sending one earns an `action_rejected` and a safe
+    # default chosen by them rather than by the blueprint. Empty means the frame
+    # did not carry it -- a recorded fixture, typically -- and nothing is filtered.
+    valid_actions: tuple[str, ...] = ()
 
     @classmethod
     def parse(cls, payload: dict[str, Any]) -> Self:
@@ -172,7 +178,16 @@ class TurnState:
             action_history=tuple(
                 ActionEntry.parse(entry) for entry in payload.get("action_history", ())
             ),
+            valid_actions=tuple(str(a) for a in payload.get("valid_actions", ())),
         )
+
+    def allows(self, action: str) -> bool:
+        """Whether the server will accept ``action`` this turn.
+
+        True when the frame carried no list at all, so a recorded fixture that
+        predates the field is answered rather than refused.
+        """
+        return not self.valid_actions or action in self.valid_actions
 
     def button_seat(self) -> int:
         """The seat on the button, read off the synthetic blind rather than remembered.

@@ -295,6 +295,12 @@ def wire_action(chosen: Action, turn: TurnState, spot: Spot) -> dict[str, Any]:
     than from our reconstructed pot, then clamped into ``[min_raise, max_raise]``
     -- so a replay that drifted costs us a slightly odd size and never a rejected
     frame. An all-in is their ``max_raise``, since their wire has no all-in.
+
+    Aggression is filtered through ``turn.valid_actions`` last. Facing an all-in
+    their frame still carries a positive ``max_raise`` while offering only fold
+    and call, and sending a raise there is an ``action_rejected`` -- after which
+    THEY pick a safe default and the blueprint's choice is thrown away. Measured
+    on the first live hand against PluriBot.
     """
     if chosen.type is ActionType.FOLD:
         return {"action": FOLD, "params": {}}
@@ -302,6 +308,10 @@ def wire_action(chosen: Action, turn: TurnState, spot: Spot) -> dict[str, Any]:
         return {"action": CHECK, "params": {}}
     if chosen.type is ActionType.CALL:
         return {"action": CALL, "params": {}}
+
+    if not turn.allows(RAISE):
+        return _passive(turn)
+
     if chosen.type is ActionType.ALL_IN:
         return {"action": RAISE, "params": {"amount": turn.max_raise}}
 
@@ -309,6 +319,19 @@ def wire_action(chosen: Action, turn: TurnState, spot: Spot) -> dict[str, Any]:
     increment = spot.scale.to_theirs(chosen.amount)
     total = mine + turn.to_call + increment if chosen.type is ActionType.RAISE else increment
     return {"action": RAISE, "params": {"amount": _clamp_raise(total, turn)}}
+
+
+def _passive(turn: TurnState) -> dict[str, Any]:
+    """The strongest non-aggressive action still on offer.
+
+    Where the blueprint wanted to raise, calling is the nearer intent than
+    folding -- it keeps the hand alive at the price the server will take.
+    """
+    if turn.allows(CALL) and turn.to_call > 0:
+        return {"action": CALL, "params": {}}
+    if turn.allows(CHECK) and turn.to_call <= 0:
+        return {"action": CHECK, "params": {}}
+    return {"action": FOLD, "params": {}}
 
 
 def _clamp_raise(total: int, turn: TurnState) -> int:
