@@ -270,9 +270,13 @@ def run_seat(
 ) -> None:
     """Hold a seat on Chipzen until interrupted, or for ``max_matches`` matches.
 
-    ``blueprint_factory`` is called at ``match_start``, not here: loading a
-    checkpoint takes about a minute and allocates the full table, and their
-    handshake will not wait for it.
+    ``blueprint_factory`` is called HERE, before the lobby is dialled, and not at
+    ``match_start``. It used to be the other way round, reasoning that their
+    handshake would not wait for a load -- but the server starts a turn's clock
+    when it SENDS the request, and `on_match_start` runs while that clock is
+    already running. Measured on the box: 3.28 s to load the 300M checkpoint plus
+    0.40 s to warm, which is the whole of the 4.1 s first decision seen in two
+    live matches. Loading before connecting spends it where nothing is timing us.
 
     ``bot_id`` and ``token`` may each be ``None``, which hands that one to the
     SDK's own ``chipzen.toml`` discovery rather than to a default.
@@ -294,18 +298,45 @@ def run_seat(
             "`pip install chipzen-bot`."
         ) from exc
 
+    started = time.perf_counter()
+    blueprint = blueprint_factory()
+    # Warm against the blueprint's OWN game -- a 1:1 table, so no real match is
+    # needed to compile the decision path. What gets compiled does not depend on
+    # the denomination, so the per-match warm that follows costs nothing.
+    game = blueprint.config.game
+    BlueprintSeat.for_match(
+        blueprint,
+        {
+            "game_config": {
+                "variant": "nlhe",
+                "starting_stack": game.starting_stack,
+                "small_blind": game.small_blind,
+                "big_blind": game.big_blind,
+                "ante": 0,
+                "num_players": 2,
+            }
+        },
+        seat=0,
+        use_resolver=use_resolver,
+        budget_ms=budget_ms,
+    )
+    logger.info(
+        "Blueprint loaded and warm in %.1f s, before dialling the lobby.",
+        time.perf_counter() - started,
+    )
+
     class _Seat(chipzen.ChipzenBot):
         """Their lifecycle, our blueprint. Deliberately almost empty."""
 
         def __init__(self) -> None:
-            self._blueprint: Any = None
             self._seat: BlueprintSeat | None = None
 
         def on_match_start(self, match_info: dict) -> None:
-            if self._blueprint is None:
-                self._blueprint = blueprint_factory()
+            # Cheap now: the table is already in memory, so this is a config
+            # parse and one warm decision, both inside the clock the server
+            # started when it sent the first turn.
             self._seat = BlueprintSeat.for_match(
-                self._blueprint,
+                blueprint,
                 match_info,
                 seat=int(match_info.get("your_seat", 0)),
                 use_resolver=use_resolver,
