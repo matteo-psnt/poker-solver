@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from src.interfaces.chipzen.seat import DEFAULT_BUDGET_MS
+from src.interfaces.chipzen.seat import BUDGET_FRACTION, TIGHT_CLOCK_MS
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
 
@@ -113,11 +113,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--budget-ms",
         type=int,
-        default=DEFAULT_BUDGET_MS,
-        help=f"Per-decision budget, which the RESOLVER spends all of (measured "
-        f"1231 ms against a 1200 ms budget). Their ranked and tournament clock is "
-        f"2000 ms round-trip and the frame costs ~120 ms of it; casual and the "
-        f"rated queue allow 30 s, so raise it there (default {DEFAULT_BUDGET_MS}).",
+        default=None,
+        help="Per-decision budget. Default sizes itself from the clock each match "
+        f"says it enforces ({int(BUDGET_FRACTION * 100)}%% of it), assuming the "
+        f"tight {TIGHT_CLOCK_MS} ms one when the frame does not say -- which is "
+        "exactly when it is tight. The RESOLVER spends the whole budget and then "
+        "some: worst observed was 1.9x it.",
     )
     parser.add_argument(
         "--once",
@@ -137,7 +138,8 @@ class ChipzenSeatPayload(BaseModel):
     mode: Literal["replay", "live"]
     resolver: bool | None = None
     """None follows `resolver.enabled`; False is an explicit `--no-resolver`."""
-    budget_ms: int
+    budget_ms: int | None = None
+    """None lets each match size it from the clock it enforces."""
     env: str | None = None
     bot_id: str | None = None
     once: bool = False
