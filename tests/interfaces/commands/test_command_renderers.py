@@ -35,6 +35,7 @@ from src.interfaces.commands.activity import ActivityPayload, CommandActivity, F
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
+from src.interfaces.commands.chart import ChartPayload
 from src.interfaces.commands.chipzen_seat import ChipzenSeatPayload
 from src.interfaces.commands.compact_legs import CompactedPayload
 from src.interfaces.commands.configs import ConfigKind, ConfigsPayload
@@ -320,6 +321,32 @@ PAYLOADS: dict[str, Any] = {
     # Replay, not live: holding a seat never returns, so only this mode has a
     # payload a renderer can be handed. The warning fields are set so the
     # renderer's three conditional lines are the ones under test.
+    # Two trained classes and one never visited, so the renderer's blank cell and
+    # its shaded ones are both exercised.
+    "chart": ChartPayload(
+        run="run-production-025433-1095",
+        path="",
+        actor=0,
+        actions=["f", "c", "r200", "A"],
+        trained=2,
+        untrained=167,
+        rows={
+            "AA": {
+                "strategy": [0.0, 0.0, 0.6, 0.4],
+                "aggression": 1.0,
+                "fold": 0.0,
+                "passive": 0.0,
+                "reach_count": 41234,
+            },
+            "72o": {
+                "strategy": [0.9, 0.1, 0.0, 0.0],
+                "aggression": 0.0,
+                "fold": 0.9,
+                "passive": 0.1,
+                "reach_count": 118,
+            },
+        },
+    ),
     "chipzen-seat": ChipzenSeatPayload(
         run="run-production-025433-1095",
         run_dir="/mnt/work/runs/run-production-025433-1095",
