@@ -31,7 +31,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from src.interfaces.chipzen.adapter import (
-    AdapterError,
     Spot,
     TableScale,
     reconstruct,
@@ -60,11 +59,24 @@ TIGHT_CLOCK_MS = 2000
 BUDGET_FRACTION = 0.30
 
 # What a fixed default costs when nothing says otherwise. Assumes the TIGHT
-# clock, because `decision_timeout_ms` is absent on exactly the matches that
-# enforce it -- ranked challenges and tournaments -- and present (30000) on the
-# two relaxed token-initiated paths. Guessing the generous clock is the guess
-# that auto-folds.
+# clock: `turn_timeout_ms` rides `match_start` on the relaxed paths and is
+# omitted on the fast ones, so silence means fast. Guessing the generous clock
+# is the guess that auto-folds.
 DEFAULT_BUDGET_MS = int(TIGHT_CLOCK_MS * BUDGET_FRACTION)
+
+
+def _self_seat(match_info: dict[str, Any]) -> int:
+    """Our seat, from the ``seats`` entry flagged ``is_self``.
+
+    There is no ``your_seat`` on ``match_start`` -- the SDK derives ours the same
+    way. Reading a field they do not send meant the seat was always built as 0
+    and only corrected on the first ``decide``, so ``warm()`` ran as the wrong
+    seat half the time.
+    """
+    for entry in match_info.get("seats") or ():
+        if entry.get("is_self"):
+            return int(entry.get("seat", 0))
+    return 0
 
 
 def budget_for(clock_ms: int | None) -> int:
@@ -145,12 +157,15 @@ class BlueprintSeat:
     ) -> BlueprintSeat:
         """Build a seat from ``match_start``, refusing a table we cannot denominate.
 
-        ``budget_ms=None`` sizes the budget from the clock this match enforces,
-        which the frame carries as ``decision_timeout_ms`` on the relaxed paths
-        and omits on the fast ones. An explicit value overrides it.
+        ``budget_ms=None`` sizes the budget from ``match_start.turn_timeout_ms``,
+        the clock this match enforces; absent means the fast one. An explicit
+        value overrides it.
         """
-        config = GameConfig.parse(match_info["game_config"])
-        clock = match_info.get("decision_timeout_ms")
+        seats = match_info.get("seats") or ()
+        config = GameConfig.parse(match_info["game_config"], seats=len(seats) or None)
+        # `turn_timeout_ms`, THEIR name -- `decision_timeout_ms` appears nowhere
+        # in the SDK and always read as None, so this sized nothing.
+        clock = match_info.get("turn_timeout_ms")
         budget = budget_ms if budget_ms is not None else budget_for(clock)
         logger.info(
             "Clock %s ms; per-decision budget %s ms.",
@@ -228,9 +243,16 @@ class BlueprintSeat:
     def decide_frame(self, state_payload: dict[str, Any]) -> dict[str, Any]:
         """The ``turn_action`` payload answering one ``turn_request.state``.
 
-        Never raises for a spot it cannot read. A decision that does not arrive
-        is scored as a timeout fold, so a spot we cannot name is answered with
-        the cheapest legal action instead and counted in the tally.
+        Never raises, for anything. A decision that does not arrive is scored as
+        a timeout fold, so a spot we cannot name is answered with the cheapest
+        legal action instead and counted in the tally.
+
+        The catches are deliberately bare: they were `(AdapterError,
+        ProtocolError, ValueError)`, which is narrower than the promise -- the
+        resolver and the numba kernels beneath `_choose` can surface a `KeyError`
+        or an `IndexError`, and a seat index outside 0-1 would index a two-slot
+        list. Each of those escaped into the SDK, which folded the hand under
+        `safe_mode` and left the contract reading stronger than it was.
         """
         self.tally.decisions += 1
         try:
@@ -242,7 +264,7 @@ class BlueprintSeat:
 
         try:
             spot = reconstruct(self.blueprint, turn, self.seat, self.scale)
-        except (AdapterError, ProtocolError, ValueError):
+        except Exception:
             logger.exception("Could not replay hand %s; passing.", turn.hand_number)
             self.tally.fallbacks += 1
             return self._pass(turn)
@@ -257,7 +279,7 @@ class BlueprintSeat:
         try:
             chosen = self._choose(spot)
             return wire_action(chosen, turn, spot)
-        except (AdapterError, ValueError):
+        except Exception:
             logger.exception("No usable action for hand %s; passing.", turn.hand_number)
             self.tally.fallbacks += 1
             return self._pass(turn)
@@ -385,7 +407,7 @@ def run_seat(
             self._seat = BlueprintSeat.for_match(
                 blueprint,
                 match_info,
-                seat=int(match_info.get("your_seat", 0)),
+                seat=_self_seat(match_info),
                 use_resolver=use_resolver,
                 budget_ms=budget_ms,
             )
@@ -422,7 +444,13 @@ def run_seat(
 
     asyncio.run(
         chipzen.run_external_bot(
-            _Seat(),
+            # The CLASS, not an instance: the SDK runs each dispatched match in
+            # its own task and calls this per match. `_Seat` keeps mutable
+            # per-match state, so one shared instance would let a second match's
+            # `match_start` overwrite the first's table -- and its `match_end`
+            # blank it, dropping the first back onto the reconnect path
+            # mid-hand. A tournament bracket is exactly where that happens.
+            _Seat,
             bot_id=bot_id,
             # Their `env` is a Literal of three names. Narrowed by the command's
             # `choices=`, which is where a wrong one should be refused -- with a

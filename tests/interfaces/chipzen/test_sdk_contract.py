@@ -121,6 +121,49 @@ class TestWhatDecideIsHanded:
         assert turn.hand_number == 2
 
 
+class TestTheMatchStartFrame:
+    """The field names we read off ``match_start``, against the SDK's own fixture.
+
+    Every one of these was invented. `num_players` and `decision_timeout_ms` and
+    `your_seat` appear NOWHERE in the SDK -- requiring the first raised on every
+    real match (swallowed by `safe_mode`, so the seat silently rebuilt itself
+    from a guessed config), the second made the budget sizing inert, and the
+    third pinned our seat to 0 until the first decide corrected it.
+    """
+
+    @pytest.fixture(scope="class")
+    def match_start(self):
+        conformance = pytest.importorskip("chipzen.conformance")
+        return conformance._match_start()
+
+    def test_the_table_size_is_in_seats_not_game_config(self, match_start):
+        assert "num_players" not in match_start["game_config"]
+        assert len(match_start["seats"]) == 2
+
+    def test_the_clock_is_turn_timeout_ms(self, match_start):
+        assert "decision_timeout_ms" not in match_start
+        assert isinstance(match_start["turn_timeout_ms"], int)
+
+    def test_our_seat_comes_from_the_is_self_flag(self, match_start):
+        assert "your_seat" not in match_start
+        assert [s["seat"] for s in match_start["seats"] if s.get("is_self")] == [0]
+
+    def test_their_game_config_parses_as_ours(self, match_start):
+        """The whole point: their real frame, through our parser, unmodified."""
+        from src.interfaces.chipzen.protocol import GameConfig
+
+        config = GameConfig.parse(match_start["game_config"], seats=len(match_start["seats"]))
+        assert config.num_players == 2
+        assert config.depth_in_blinds == 100.0
+
+    def test_a_seat_builds_from_their_real_frame(self, match_start):
+        """End to end: no invented field, no swallowed exception."""
+        from src.interfaces.chipzen.seat import _self_seat, budget_for
+
+        assert _self_seat(match_start) == 0
+        assert budget_for(match_start["turn_timeout_ms"]) == 1500
+
+
 class TestRunExternalBot:
     @pytest.fixture(scope="class")
     def parameters(self):

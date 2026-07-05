@@ -74,14 +74,25 @@ class GameConfig:
     num_players: int
 
     @classmethod
-    def parse(cls, payload: dict[str, Any]) -> Self:
+    def parse(cls, payload: dict[str, Any], *, seats: int | None = None) -> Self:
+        """Read a ``game_config``, with the table size from ``seats`` if known.
+
+        ``num_players`` is NOT a field they send: their `match_start.game_config`
+        is variant/starting_stack/blinds/ante/total_hands, and the table size
+        lives in the sibling ``seats`` array. Requiring it here raised on every
+        real match -- the SDK swallowed that under `safe_mode` and the seat then
+        rebuilt itself from a guessed config on the first turn instead. It stays
+        on the model because the protocol spec documents it and a caller may pass
+        one; absent both, heads-up is the only table this blueprint plays anyway.
+        """
+        players = payload.get("num_players", seats)
         config = cls(
             variant=str(_require(payload, "variant")),
             starting_stack=int(_require(payload, "starting_stack")),
             small_blind=int(_require(payload, "small_blind")),
             big_blind=int(_require(payload, "big_blind")),
             ante=int(payload.get("ante", 0)),
-            num_players=int(_require(payload, "num_players")),
+            num_players=int(players) if players is not None else 2,
         )
         if config.num_players != 2:
             raise ProtocolError(
