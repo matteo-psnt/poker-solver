@@ -91,6 +91,14 @@ class GameConfig:
             raise ProtocolError(
                 f"big_blind {config.big_blind} is below small_blind {config.small_blind}."
             )
+        if config.ante:
+            # `GameRules` takes a small and a big blind and nothing else, so an
+            # ante is dead money our tree cannot represent -- every pot would be
+            # the wrong size from the first decision, silently. Refusing costs a
+            # match we would have misplayed anyway.
+            raise ProtocolError(
+                f"This table posts an ante of {config.ante}; the blueprint's game has none."
+            )
         return config
 
     @property
@@ -164,10 +172,23 @@ class TurnState:
         phase = str(_require(payload, "phase"))
         if phase not in PHASES:
             raise ProtocolError(f"'{phase}' is not a betting phase.")
+        board = parse_cards(payload.get("board", ()))
+        # One deck, so a card appears once. Probed 2026-08-24: a board of
+        # `2c 2c 9h`, and a hand holding a card already on the board, both came
+        # back with a confident action -- the bucket for a state that cannot
+        # exist. A real server never sends either, which is exactly why nothing
+        # downstream checks and why a garbage frame would be answered rather
+        # than caught.
+        seen = [*board, *hole]
+        if len({card.mask for card in seen}) != len(seen):
+            raise ProtocolError(
+                f"A card repeats across board {[str(c) for c in board]} and "
+                f"hand {[str(c) for c in hole]}."
+            )
         return cls(
             hand_number=int(_require(payload, "hand_number")),
             phase=phase,
-            board=parse_cards(payload.get("board", ())),
+            board=board,
             hole_cards=(hole[0], hole[1]),
             pot=int(_require(payload, "pot")),
             your_stack=int(_require(payload, "your_stack")),
@@ -203,7 +224,14 @@ class TurnState:
         raise ProtocolError("No post_small_blind in action_history; cannot locate the button.")
 
     def round_wager(self, seat: int) -> int:
-        """What ``seat`` already has in for the current phase, in their chips."""
+        """What ``seat`` already has in for the current phase, in their chips.
+
+        A player entry carries that seat's cumulative total for the round, so the
+        largest is the current one -- not the sum, which would count a call after
+        a raise twice. Synthetic postings are the exception and would need adding
+        together; :meth:`GameConfig.parse` refuses the only case where more than
+        one of them lands on a seat, so a max is right for every table we accept.
+        """
         wager = 0
         for entry in self.action_history:
             if entry.phase == self.phase and entry.seat == seat:
