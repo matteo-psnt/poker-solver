@@ -104,25 +104,41 @@ cp -ru "$SHARE/combo_abstraction/." "$WORK/data/combo_abstraction/"
 echo "==> checkpoint (thousands of small files, a few minutes on first copy)"
 mkdir -p "$WORK/data/runs/$RUN_ID"
 cp -u "$SHARE/archive/$RUN_ID/STATIC_CHECKPOINT.json" "$WORK/data/runs/$RUN_ID/"
-cp -u "$SHARE/archive/$RUN_ID/run.jsonl" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
 cp -ru "$SHARE/archive/$RUN_ID/evals" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
+# Every small file beside the manifest: `run.jsonl` OR the older `.run.json`
+# (`RunTracker.load` takes either, and a legacy run has only the latter), plus
+# `progress.jsonl`. Copying just `run.jsonl` staged a legacy run "successfully"
+# and then failed at load with `No run record`.
+for small in run.jsonl .run.json progress.jsonl; do
+    cp -u "$SHARE/archive/$RUN_ID/$small" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
+done
 
+# The ladder key is `retained` (`static_checkpoint.py` writes it; `staging.py`
+# and `archive.py` read it). `checkpoints` is not a key, so $AT always missed and
+# `set -e` turned that into an aborted deploy.
 rung=$(AT="${AT:-}" python3 - "$SHARE/archive/$RUN_ID/STATIC_CHECKPOINT.json" <<'PY'
 import json, os, sys
 manifest = json.load(open(sys.argv[1]))
-rungs = manifest.get("checkpoints") or []
+rungs = manifest.get("retained") or []
 at = os.environ.get("AT") or ""
 if at:
     match = [r for r in rungs if str(r.get("iteration")) == at]
     if not match:
-        sys.exit(f"no rung at iteration {at}")
+        sys.exit(f"no rung at iteration {at}; have {[r.get('iteration') for r in rungs]}")
     print(match[0]["zarr"])
-else:
-    print(manifest.get("zarr") or rungs[-1]["zarr"])
+    raise SystemExit
+head = manifest.get("zarr") or (rungs[-1]["zarr"] if rungs else "")
+if not head:
+    sys.exit("manifest names no head checkpoint")
+print(head)
 PY
 )
 echo "==> rung $rung"
 cp -ru "$SHARE/archive/$RUN_ID/$rung" "$WORK/data/runs/$RUN_ID/"
+# The writer's own completion sentinel. `staging._complete` requires it, so
+# without it the console's next `stage_run` for this run decides nothing is here
+# and re-copies the whole ~850 MB rung over SMB.
+cp -u "$SHARE/archive/$RUN_ID/.complete-$rung" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
 
 # --------------------------------------------------------------------------- #
 # dependencies

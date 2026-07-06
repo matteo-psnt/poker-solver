@@ -69,9 +69,10 @@ SNAPSHOT_EXCLUDES = frozenset(
     }
 )
 
-"""Whole families of credential file, matched by prefix rather than by name --
-`.env`, `.env.local`, `.env.production`. An exact-name set cannot express this,
-and the variant that gets forgotten is the one that leaks."""
+# Whole families of credential file, matched by prefix rather than by name --
+# `.env`, `.env.local`, `.env.production`. An exact-name set cannot express this,
+# and the variant that gets forgotten is the one that leaks. A comment, not a
+# string: a string here is not a docstring and would bind to SNAPSHOT_EXCLUDES.
 SNAPSHOT_EXCLUDE_PREFIXES = (".env",)
 
 
