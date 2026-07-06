@@ -14,7 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.interfaces.chipzen.protocol import TurnState
 from src.interfaces.chipzen.seat import (
+    CLOCK_FRACTION,
+    OVERSHOOT_ALLOWANCE_MS,
     TIGHT_CLOCK_MS,
     WARM_BUDGET_MS,
     BlueprintSeat,
@@ -22,8 +25,11 @@ from src.interfaces.chipzen.seat import (
     sdk_state_payload,
 )
 from tests.interfaces.chipzen.test_adapter import (
+    BB,
     BIG_BLIND_ENTRY,
+    SB,
     SMALL_BLIND_ENTRY,
+    STACK,
     raise_entry,
     turn_payload,
 )
@@ -95,9 +101,9 @@ class TestBudget:
     """One constant cannot serve clocks that differ by 15x.
 
     Casual and the rated queue allow 30 s; ranked challenges and tournaments
-    allow 2 s. The budget is not a cap either -- at 900 ms the resolver ran
-    1033 ms median and 1695 ms worst live, so the fraction is set against the
-    worst case rather than the median.
+    allow 2 s. The overshoot is ADDITIVE, not proportional -- 900 ms ran 1695 ms
+    worst (+795) and 9000 ms ran 9380 ms (+380) -- so the headroom kept is a
+    constant, which is what lets a long clock be nearly all used.
     """
 
     def test_a_stated_clock_sizes_the_budget(self, blueprint):
@@ -105,12 +111,12 @@ class TestBudget:
         the SDK ever sends, so pinning it made this test assert nothing."""
         relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
         built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
-        assert built.budget_ms == 9000
+        assert built.budget_ms == 26_200
 
     def test_an_unstated_clock_assumes_the_tight_one(self, blueprint):
         """`decision_timeout_ms` is absent on exactly the fast-clock matches."""
         built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, use_resolver=False)
-        assert built.budget_ms == 600
+        assert built.budget_ms == 1000
 
     def test_an_explicit_budget_wins(self, blueprint):
         relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
@@ -121,14 +127,131 @@ class TestBudget:
 
     @pytest.mark.parametrize(
         ("clock", "expected"),
-        [(2000, 600), (30_000, 9000), (None, 600), (0, 600), (100, 50)],
+        [(2000, 1000), (30_000, 26_200), (None, 1000), (0, 1000), (100, 50)],
     )
     def test_the_rule_across_clocks(self, clock, expected):
         assert budget_for(clock) == expected
 
     def test_the_worst_case_stays_clear_of_the_tight_clock(self):
-        """1.9x the budget was the worst live ratio; it must still fit."""
-        assert budget_for(None) * 1.9 < TIGHT_CLOCK_MS * 0.7
+        """Budget plus the measured additive overshoot must fit the clock."""
+        assert budget_for(None) + OVERSHOOT_ALLOWANCE_MS <= TIGHT_CLOCK_MS * CLOCK_FRACTION
+
+    def test_a_long_clock_is_nearly_all_used(self):
+        """Compute is not the constraint; leaving 70% of a 30 s clock idle was."""
+        assert budget_for(30_000) > 25_000
+
+
+class TestEffectiveDepth:
+    """The mismatch that actually matters, measured off a real match.
+
+    Match 3 ran twenty hands: 1-11 at 96-99 bb and 12-19 at 4.5-8 bb, every one
+    answered by a tree cut for 100 bb. Nine of twenty hands -- 45% -- were a
+    different game. Nothing here fixes it; a ladder of blueprints does. This is
+    about the seat knowing, and saying.
+    """
+
+    def shortstacked(self, mine, theirs):
+        """A preflop turn where the two seats hold uneven stacks."""
+        return turn_payload(
+            hand_number=12,
+            your_stack=mine - SB,
+            opponent_stacks=[theirs - BB],
+            pot=SB + BB,
+        )
+
+    def test_the_depth_is_the_shorter_stack(self, seat):
+        """Nobody can win or lose more than the shorter stack."""
+        seat.decide_frame(self.shortstacked(mine=19_300, theirs=700))
+        assert seat.tally.depth_by_hand[12] == pytest.approx(700 / BB)
+
+    def test_an_even_table_is_its_own_depth(self, seat):
+        seat.decide_frame(turn_payload())
+        assert seat.tally.depth_by_hand[1] == pytest.approx(STACK / BB)
+
+    def test_a_shallow_hand_warns_once(self, seat, caplog):
+        """The test table is only 4 bb, so "shallow" here is under 2.4 bb."""
+        assert seat.scale.our_depth == 4.0
+        with caplog.at_level(logging.WARNING, logger="src.interfaces.chipzen.seat"):
+            for _ in range(3):
+                seat.decide_frame(self.shortstacked(mine=1500, theirs=300))
+        assert caplog.text.count("effective against a blueprint") == 1
+
+    def test_a_hand_at_our_depth_says_nothing(self, seat, caplog):
+        with caplog.at_level(logging.WARNING, logger="src.interfaces.chipzen.seat"):
+            seat.decide_frame(turn_payload())
+        assert "effective against a blueprint" not in caplog.text
+
+    def test_the_summary_reports_the_range(self, seat):
+        seat.decide_frame(turn_payload())
+        seat.decide_frame(self.shortstacked(mine=1500, theirs=300))
+        summary = seat.tally.summary()
+        assert "depth" in summary
+        assert "bb" in summary
+
+    def test_committed_chips_count_toward_the_hand_start_stack(self):
+        """`your_stack` is what is LEFT; the depth is what was there."""
+        turn = TurnState.parse(
+            turn_payload(
+                your_stack=STACK - 600,
+                opponent_stacks=[STACK - 600],
+                action_history=[
+                    SMALL_BLIND_ENTRY,
+                    BIG_BLIND_ENTRY,
+                    raise_entry(0, 600),
+                    raise_entry(1, 600),
+                ],
+            )
+        )
+        assert turn.committed(0) == 600
+        assert turn.effective_stack(0) == STACK
+        assert turn.depth_in_blinds(0) == pytest.approx(STACK / BB)
+
+    def test_no_opponent_stack_means_no_claim(self):
+        turn = TurnState.parse(turn_payload(opponent_stacks=[]))
+        assert turn.effective_stack(0) is None
+        assert turn.depth_in_blinds(0) is None
+
+
+class TestBlindEscalation:
+    """A shallower table than the one we sat down at must not pass unremarked.
+
+    Their COMMON-PITFALLS #11 -- tournaments and longer matches escalate, their
+    example breaking at hand 30 on 200/400. Nothing here fixes it: the blueprint
+    is cut for one depth. But `depth_matches` is computed once at `match_start`,
+    so before this the seat played a 100 bb strategy into a 25 bb spot silently.
+    """
+
+    def escalated_turn(self, big_blind):
+        small = big_blind // 2
+        return turn_payload(
+            hand_number=30,
+            pot=small + big_blind,
+            to_call=big_blind - small,
+            min_raise=2 * big_blind,
+            action_history=[
+                {**SMALL_BLIND_ENTRY, "amount": small},
+                {**BIG_BLIND_ENTRY, "amount": big_blind},
+            ],
+        )
+
+    def test_the_seated_level_is_not_flagged(self, seat):
+        seat.decide_frame(self.escalated_turn(200))
+        assert seat.tally.escalated == 0
+
+    def test_a_raised_level_is_counted_and_warned_once(self, seat, caplog):
+        with caplog.at_level(logging.WARNING, logger="src.interfaces.chipzen.seat"):
+            for _ in range(3):
+                seat.decide_frame(self.escalated_turn(800))
+        assert seat.tally.escalated == 3
+        assert caplog.text.count("Blinds escalated") == 1, "warn once, count every time"
+
+    def test_the_summary_says_so(self, seat):
+        seat.decide_frame(self.escalated_turn(800))
+        assert "past a blind escalation" in seat.tally.summary()
+
+    def test_a_quiet_match_says_nothing_about_it(self, seat):
+        seat.decide_frame(turn_payload())
+        assert "escalation" not in seat.tally.summary()
 
 
 class TestWarmUp:
@@ -160,7 +283,7 @@ class TestWarmUp:
             built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
 
         assert seen == [WARM_BUDGET_MS], "the warm decision must not use the match budget"
-        assert built.budget_ms == 9000, "and the match budget must survive it"
+        assert built.budget_ms == 26_200, "and the match budget must survive it"
 
     def test_a_seat_arrives_already_warm(self, blueprint, caplog):
         with caplog.at_level(logging.INFO, logger="src.interfaces.chipzen.seat"):

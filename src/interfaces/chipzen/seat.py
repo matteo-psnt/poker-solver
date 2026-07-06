@@ -51,18 +51,25 @@ logger = logging.getLogger(__name__)
 # both. A fixed 900 ms was measured at max 1695 ms against the 2 s clock: SAFE by
 # the letter and 85% of it, which is luck rather than margin.
 #
-# BUDGET IS NOT A CAP. The resolver spends all of it and then some: at 900 ms it
-# ran 1033 ms median and 1695 ms worst, so worst ~= 1.9x the budget. Thirty
-# percent keeps the worst case near 57% of the clock, which leaves room for a
-# slow frame.
+# BUDGET IS NOT A CAP -- the resolver spends all of it and then overshoots, and
+# the overshoot is ADDITIVE rather than proportional: 900 ms budget ran 1695 ms
+# worst (+795), 9000 ms ran 9380 ms worst (+380). So the headroom to keep is a
+# constant, not a percentage, and a fraction alone wastes most of a long clock.
+#
+# Compute is not the constraint here, so take nearly all of the clock: 90% of it
+# less the overshoot allowance. That is 26.2 s of a 30 s casual clock and 1.0 s
+# of a 2 s tournament one. Whether more resolver time actually plays better is
+# NOT measured -- the -527 mbb/hand that justifies arming it at all was taken
+# near the shipped 300 ms.
 TIGHT_CLOCK_MS = 2000
-BUDGET_FRACTION = 0.30
+CLOCK_FRACTION = 0.90
+OVERSHOOT_ALLOWANCE_MS = 800
 
 # What a fixed default costs when nothing says otherwise. Assumes the TIGHT
 # clock: `turn_timeout_ms` rides `match_start` on the relaxed paths and is
 # omitted on the fast ones, so silence means fast. Guessing the generous clock
 # is the guess that auto-folds.
-DEFAULT_BUDGET_MS = int(TIGHT_CLOCK_MS * BUDGET_FRACTION)
+DEFAULT_BUDGET_MS = max(50, int(TIGHT_CLOCK_MS * CLOCK_FRACTION) - OVERSHOOT_ALLOWANCE_MS)
 
 
 # Warming compiles code paths; it does not need to think. Sizing it from the
@@ -95,7 +102,7 @@ def budget_for(clock_ms: int | None) -> int:
     anything roomier.
     """
     clock = int(clock_ms) if clock_ms else TIGHT_CLOCK_MS
-    return max(50, int(clock * BUDGET_FRACTION))
+    return max(50, int(clock * CLOCK_FRACTION) - OVERSHOOT_ALLOWANCE_MS)
 
 
 @dataclass
@@ -117,6 +124,12 @@ class SeatTally:
     truncated: int = 0
     fallbacks: int = 0
     per_hand: dict[int, int] = field(default_factory=dict)
+    #: Decisions taken after the blinds escalated away from the seated level.
+    escalated: int = 0
+    #: Effective depth in big blinds, per hand. The blueprint is cut for ONE
+    #: depth and an elimination match sweeps through many -- match 3 ran nine of
+    #: twenty hands between 4.5 and 8 bb against a tree built for 100.
+    depth_by_hand: dict[int, float] = field(default_factory=dict)
 
     @property
     def off_tree(self) -> int:
@@ -131,6 +144,13 @@ class SeatTally:
             f"{self.decisions} decisions over {len(self.per_hand)} hands, "
             f"{self.off_tree} off-tree opponent actions, "
             f"{self.truncated} truncated replays, {self.fallbacks} safe defaults"
+            + (f", {self.escalated} past a blind escalation" if self.escalated else "")
+            + (
+                f", depth {min(self.depth_by_hand.values()):.0f}-"
+                f"{max(self.depth_by_hand.values()):.0f} bb"
+                if self.depth_by_hand
+                else ""
+            )
         )
 
 
@@ -279,6 +299,8 @@ class BlueprintSeat:
             self.tally.fallbacks += 1
             return self._pass(turn)
 
+        self._note_depth(turn)
+        self._note_escalation(turn)
         self.tally.saw(turn.hand_number, spot.off_tree)
         if spot.truncated:
             self.tally.truncated += 1
@@ -293,6 +315,60 @@ class BlueprintSeat:
             logger.exception("No usable action for hand %s; passing.", turn.hand_number)
             self.tally.fallbacks += 1
             return self._pass(turn)
+
+    #: Below this fraction of the trained depth, a spot is a different game
+    #: rather than a slightly shallower one -- at 5 bb the whole stack goes in
+    #: preflop while the tree is still offering pot control.
+    SHALLOW_FRACTION = 0.6
+
+    def _note_depth(self, turn: TurnState) -> None:
+        """Record how deep this hand actually is, and say so when it is not ours.
+
+        The blueprint is cut for ONE depth; an elimination match sweeps through
+        many. Measured on a real 20-hand match: hands 1-11 ran 96-99 bb and hands
+        12-19 ran 4.5-8 bb, all answered by a tree built for 100 bb. Nothing here
+        fixes that -- it needs a ladder of blueprints -- but the seat should not
+        be the last to know.
+        """
+        depth = turn.depth_in_blinds(self.seat)
+        if depth is None:
+            return
+        first = turn.hand_number not in self.tally.depth_by_hand
+        self.tally.depth_by_hand[turn.hand_number] = depth
+        if first and depth < self.scale.our_depth * self.SHALLOW_FRACTION:
+            logger.warning(
+                "Hand %s is %.1f bb effective against a blueprint cut for %.0f bb. "
+                "Playing it anyway, extrapolating.",
+                turn.hand_number,
+                depth,
+                self.scale.our_depth,
+            )
+
+    def _note_escalation(self, turn: TurnState) -> None:
+        """Say so when the blinds have moved off the level we were seated at.
+
+        Their COMMON-PITFALLS #11: tournaments and longer matches escalate, the
+        example breaking at hand 30 on 200/400. Nothing here can FIX it -- the
+        blueprint is cut for one depth and a shallower table needs a shallower
+        tree -- but `depth_matches` is computed once at `match_start`, so without
+        this the seat plays a 100 bb strategy into a 25 bb spot and says nothing.
+        Every match observed so far ran 8-20 hands at a flat level, which is why
+        it has never fired.
+        """
+        big_blind = turn.big_blind()
+        if big_blind is None or big_blind == self.config.big_blind:
+            return
+        self.tally.escalated += 1
+        if self.tally.escalated == 1:
+            depth = (turn.your_stack + turn.pot) / big_blind
+            logger.warning(
+                "Blinds escalated to %s (seated at %s): about %.0f bb deep now, "
+                "against a blueprint cut for %.0f. Play continues, extrapolating.",
+                big_blind,
+                self.config.big_blind,
+                depth,
+                self.scale.our_depth,
+            )
 
     def _choose(self, spot: Spot) -> Action:
         """Ask the blueprint (or the resolver) what to do at ``spot``.

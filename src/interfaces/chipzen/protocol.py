@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 SYNTHETIC_ACTIONS = frozenset({"post_small_blind", "post_big_blind", "post_ante"})
 
 POST_SMALL_BLIND = "post_small_blind"
+POST_BIG_BLIND = "post_big_blind"
 
 PHASES = ("preflop", "flop", "turn", "river")
 
@@ -233,6 +234,55 @@ class TurnState:
             if entry.action == POST_SMALL_BLIND:
                 return entry.seat
         raise ProtocolError("No post_small_blind in action_history; cannot locate the button.")
+
+    def big_blind(self) -> int | None:
+        """The big blind THIS hand, from the synthetic posting.
+
+        Their COMMON-PITFALLS #11 is exactly this: tournaments and longer matches
+        escalate, and a bot that read the blinds once at `match_start` mis-sizes
+        from the level it never noticed. Re-read per hand, never cached.
+        """
+        for entry in self.action_history:
+            if entry.action == POST_BIG_BLIND:
+                return entry.amount
+        return None
+
+    def committed(self, seat: int) -> int:
+        """Everything ``seat`` has put in this HAND, across every street.
+
+        Per-phase wagers are cumulative within their phase, so the hand's total
+        is the sum of each phase's largest -- not the sum of every entry, which
+        would count a call after a raise twice.
+        """
+        by_phase: dict[str, int] = {}
+        for entry in self.action_history:
+            if entry.seat == seat:
+                by_phase[entry.phase] = max(by_phase.get(entry.phase, 0), entry.amount)
+        return sum(by_phase.values())
+
+    def effective_stack(self, seat: int) -> int | None:
+        """The shorter of the two stacks as the hand STARTED, in their chips.
+
+        What a hand is actually played for: nobody can win or lose more than the
+        shorter stack. Reconstructed as `remaining + committed` per seat, because
+        a `turn_request` reports what is left rather than what was there.
+
+        ``None`` when the frame carries no opponent stack, which is the only
+        thing that makes it underivable.
+        """
+        if not self.opponent_stacks:
+            return None
+        ours = self.your_stack + self.committed(seat)
+        theirs = self.opponent_stacks[0] + self.committed(1 - seat)
+        return min(ours, theirs)
+
+    def depth_in_blinds(self, seat: int) -> float | None:
+        """The effective stack in big blinds -- the axis our tree is cut on."""
+        effective = self.effective_stack(seat)
+        big_blind = self.big_blind()
+        if effective is None or not big_blind:
+            return None
+        return effective / big_blind
 
     def round_wager(self, seat: int) -> int:
         """What ``seat`` already has in for the current phase, in their chips.
