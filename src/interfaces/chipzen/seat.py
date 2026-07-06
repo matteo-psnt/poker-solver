@@ -65,6 +65,14 @@ BUDGET_FRACTION = 0.30
 DEFAULT_BUDGET_MS = int(TIGHT_CLOCK_MS * BUDGET_FRACTION)
 
 
+# Warming compiles code paths; it does not need to think. Sizing it from the
+# match budget cost a forfeited match: a 30 s clock gave a 9 s budget, the
+# resolver spent all of it INSIDE `on_match_start` on the event loop thread, the
+# lobby heartbeat starved, and the reconnect hit `duplicate_participant` against
+# our own still-live socket. Fifty ms compiles exactly the same code.
+WARM_BUDGET_MS = 50
+
+
 def _self_seat(match_info: dict[str, Any]) -> int:
     """Our seat, from the ``seats`` entry flagged ``is_self``.
 
@@ -231,11 +239,13 @@ class BlueprintSeat:
             ],
         }
         started = time.perf_counter()
+        budget, self.budget_ms = self.budget_ms, WARM_BUDGET_MS
         try:
             self.decide_frame(opening)
         except Exception:
             logger.exception("Warm-up decision failed; play continues cold.")
         finally:
+            self.budget_ms = budget
             # The throwaway must not show up as a real decision.
             self.tally = SeatTally()
         logger.info("Warmed the decision path in %.0f ms.", (time.perf_counter() - started) * 1000)
