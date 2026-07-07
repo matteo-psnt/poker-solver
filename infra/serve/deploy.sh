@@ -184,6 +184,7 @@ EOF
 #
 # Only the two pieces that encode the shutdown contract are written here. The
 # rest of the unit is first-boot territory and does not change.
+sudo install -m 0755 "$WORK/code/infra/serve/box-may-sleep" /usr/local/bin/
 sudo tee /usr/local/bin/deallocate-if-idle >/dev/null <<'EOF'
 #!/bin/bash
 # 42 is IDLE_EXIT_CODE: nobody was here, switch the box off. NOT 0 (a deliberate
@@ -192,9 +193,21 @@ if [ "${EXIT_STATUS:-1}" != "42" ]; then
   echo "blueprint exited ${EXIT_STATUS} -- not deallocating"
   exit 0
 fi
+/usr/local/bin/box-may-sleep || exit 0
 exec /usr/local/bin/deallocate-box
 EOF
 sudo chmod 0755 /usr/local/bin/deallocate-if-idle
+
+# The OTHER route to the same deallocate. `OnFailure=blueprint-deallocate` runs
+# `deallocate-box` directly and has never consulted `deallocate-if-idle` -- this
+# file says so eleven lines up, about a bug that switched the box off after every
+# deploy. An ExecCondition rather than a wrapper: a refused condition SKIPS the
+# unit instead of failing it, so a seated box does not accumulate failed units.
+sudo mkdir -p /etc/systemd/system/blueprint-deallocate.service.d
+sudo tee /etc/systemd/system/blueprint-deallocate.service.d/seat-guard.conf >/dev/null <<'EOF'
+[Service]
+ExecCondition=/usr/local/bin/box-may-sleep
+EOF
 
 # `SuccessExitStatus=42` as a drop-in, so the idle exit is not read as a failure
 # and restarted before the deallocate lands. A drop-in rather than a rewrite of
