@@ -1,0 +1,33 @@
+[Unit]
+Description=Chipzen external-API seat (Blueprint)
+After=network-online.target mnt-work.mount
+Wants=network-online.target
+# NO OnFailure=blueprint-deallocate.service, and no ExecStopPost. The reader
+# server going idle means switch the box off; the seat going quiet means the
+# opposite -- it is waiting for a match and must still be there when one lands.
+#
+# The rate limiter is DISABLED rather than tuned. Its whole job is to stop
+# retrying eventually, and a seat that stops retrying is the 26-hour outage of
+# 08-25 all over again. Chipzen being down for an hour must not cost the ladder
+# slot; RestartSec below is what keeps the retries cheap.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=solver
+EnvironmentFile=/etc/chipzen-seat.env
+Environment=POKER_SOLVER_CACHE=/mnt/work/cache
+WorkingDirectory=/mnt/work/code
+ExecStart=/home/solver/.local/bin/uv run poker-solver chipzen-seat \
+  --run ${RUN} --runs-dir ${RUNS_DIR} --env ${CHIPZEN_ENV} --log-level INFO
+# ALWAYS, not on-failure. A standing seat has no successful exit: the one
+# observed exit took none of the SDK's three documented paths and left no
+# traceback, so "it returned 0" is not evidence it meant to stop.
+Restart=always
+# Loading the blueprint is ~7 s of the 30, so this is a pause between attempts
+# rather than a throttle. Long enough that an outage at the far end costs a
+# reconnect every half minute, not a spin.
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

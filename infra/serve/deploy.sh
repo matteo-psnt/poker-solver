@@ -214,9 +214,41 @@ sudo tee /etc/systemd/system/blueprint.service.d/idle-exit.conf >/dev/null <<'EO
 SuccessExitStatus=42 143
 EOF
 
+# --------------------------------------------------------------------------- #
+# the chipzen seat
+# --------------------------------------------------------------------------- #
+# INSTALLED, never enabled or started here. Seating puts a bot on a live public
+# ladder, and `serve-deploy` is run to stage a checkpoint -- those are different
+# decisions and a deploy must not silently make the second one. `just seat-on`
+# is the deliberate act; `enable` is what carries it across a reboot.
+#
+# These come out of the extracted snapshot rather than a heredoc, because this
+# script reaches the box down a pipe with no siblings, but the tree it just
+# unpacked has them.
+units="$WORK/code/infra/serve"
+sudo install -m 0644 "$units/chipzen-seat.service" /etc/systemd/system/
+sudo install -m 0644 "$units/chipzen-seat-watchdog.service" /etc/systemd/system/
+sudo install -m 0644 "$units/chipzen-seat-watchdog.timer" /etc/systemd/system/
+sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
+
+sudo tee /etc/chipzen-seat.env >/dev/null <<EOF
+RUN=$RUN_ID
+RUNS_DIR=$WORK/data/runs
+CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
+EOF
+
 sudo systemctl daemon-reload
 sudo systemctl enable blueprint
 sudo systemctl restart blueprint
+
+# A running seat imported the code it started with, so after the tree underneath
+# it is replaced its behaviour no longer matches what is on disk -- and checking
+# the disk is how you would try to find that out. Only when already seated:
+# `is-enabled` is the record of the human decision above.
+if systemctl is-enabled --quiet chipzen-seat 2>/dev/null; then
+    echo "==> restarting the seat onto the new code"
+    sudo systemctl restart chipzen-seat chipzen-seat-watchdog.timer
+fi
 
 echo "==> waiting for it to load (a production run takes ~1 min)"
 for _ in $(seq 1 90); do
