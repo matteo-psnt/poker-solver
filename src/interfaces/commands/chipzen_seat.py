@@ -250,7 +250,7 @@ def _build_blueprint(run_dir: Path, at_iteration: int | None):
     from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415 -- see above
 
     metadata = RunTracker.load(run_dir).metadata
-    solver, _storage = build_blueprint_for(
+    solver, _storage, _policy = build_blueprint_for(
         run_dir,
         metadata,
         abstraction_hash=metadata.card_abstraction_hash,

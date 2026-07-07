@@ -81,7 +81,7 @@ def run(args: argparse.Namespace) -> ChartPayload:
 
     run_dir = resolve_run_dir(args.run, args.runs_dir)
     metadata = RunTracker.load(run_dir).metadata
-    blueprint, _storage = build_blueprint_for(
+    blueprint, _storage, _policy = build_blueprint_for(
         run_dir,
         metadata,
         abstraction_hash=metadata.card_abstraction_hash,

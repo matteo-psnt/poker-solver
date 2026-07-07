@@ -84,6 +84,31 @@ DEFAULT_BUDGET_MS = max(50, int(TIGHT_CLOCK_MS * CLOCK_FRACTION) - OVERSHOOT_ALL
 WARM_BUDGET_MS = 50
 
 
+def surface_sdk_logs(level: int | None = None) -> None:
+    """Let the SDK's own logger through at the level we are running at.
+
+    `configure_logging` attaches to the `src` package logger and cuts
+    propagation, so `chipzen`'s records reach only Python's last-resort handler
+    -- WARNING and above. That is why a 42-hand match reported
+    `reconnect budget exhausted (...)` and NOT the three
+    `reconnecting in Xs (attempt N/3; REASON)` lines before it, each of which
+    carries the reason the socket closed. Without them a disconnect can only be
+    guessed at, and one was: `closed without match_end` and a websocket
+    exception read identically from the outside.
+
+    Borrows our handler when there is one, and otherwise only lowers the level
+    and leaves propagation alone -- under pytest that is what puts the records
+    in front of `caplog` rather than nowhere.
+    """
+    ours = logging.getLogger("src")
+    theirs = logging.getLogger("chipzen")
+    theirs.setLevel(level if level is not None else (ours.level or logging.INFO))
+    if ours.handlers and not theirs.handlers:
+        for handler in ours.handlers:
+            theirs.addHandler(handler)
+        theirs.propagate = False
+
+
 def _self_seat(match_info: dict[str, Any]) -> int:
     """Our seat, from the ``seats`` entry flagged ``is_self``.
 
@@ -457,6 +482,7 @@ def run_seat(
             "`pip install chipzen-bot`."
         ) from exc
 
+    surface_sdk_logs()
     started = time.perf_counter()
     blueprint = blueprint_factory()
     # Warm against the blueprint's OWN game -- a 1:1 table, so no real match is
