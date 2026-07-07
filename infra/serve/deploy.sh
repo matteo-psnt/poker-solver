@@ -116,6 +116,12 @@ cp -ru "$SHARE/combo_abstraction/." "$WORK/data/combo_abstraction/"
 # $AT names a rung to stage instead of the head, mirroring `--at`.
 echo "==> checkpoint (thousands of small files, a few minutes on first copy)"
 mkdir -p "$WORK/data/runs/$RUN_ID"
+# The share serves the archive read-only (444 files, 555 directories) and `cp`
+# carries that mode across, so the SECOND deploy of a run cannot overwrite what
+# the first one staged: `cp -u` fails EACCES on a file this user owns, and the
+# script's `set -e` turns that into an aborted deploy. Restore write on our own
+# copy first -- it is a cache, not a source of truth, and nothing reads its mode.
+chmod -R u+w "$WORK/data/runs/$RUN_ID" 2>/dev/null || true
 cp -u "$SHARE/archive/$RUN_ID/STATIC_CHECKPOINT.json" "$WORK/data/runs/$RUN_ID/"
 cp -ru "$SHARE/archive/$RUN_ID/evals" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
 # Every small file beside the manifest: `run.jsonl` OR the older `.run.json`
