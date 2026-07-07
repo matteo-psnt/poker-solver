@@ -483,3 +483,71 @@ class TestSdkConversion:
         assert payload["your_hole_cards"] == ["Ah", "Kd"]
         assert payload["hand_number"] == 3
         assert payload["action_history"] == [SMALL_BLIND_ENTRY]
+
+
+class TestDepthAgainstTheLevelRatherThanThePost:
+    """A big blind shorter than the level is a player all-in, not a level.
+
+    `big_blind()` reads the posted amount, so a short all-in blind divides the
+    effective stack by too small a number and reports the shallowest hands in a
+    match as the deepest. Live evidence: `Blinds escalated to 52 (seated at
+    100)` -- a level that appeared to go backwards, which cannot happen.
+    """
+
+    def short_blind_turn(self, posted):
+        """Both seats 400 deep behind a big blind posted for ``posted``."""
+        return turn_payload(
+            hand_number=7,
+            your_stack=300,
+            opponent_stacks=[400 - posted],
+            pot=SB + posted,
+            action_history=[SMALL_BLIND_ENTRY, {**BIG_BLIND_ENTRY, "amount": posted}],
+        )
+
+    def test_a_short_post_does_not_deepen_the_table(self, seat):
+        seat.decide_frame(self.short_blind_turn(posted=50))
+        # 400 chips at the real 200 level is 2 bb. Read off the post it is 8 bb,
+        # which is deeper than the whole table and cannot be true.
+        assert seat.tally.depth_by_hand[7] == pytest.approx(2.0)
+
+    def test_a_full_post_is_unaffected(self, seat):
+        seat.decide_frame(self.short_blind_turn(posted=BB))
+        assert seat.tally.depth_by_hand[7] == pytest.approx(2.0)
+
+    def test_the_level_only_ever_rises(self, seat):
+        seat.decide_frame(self.short_blind_turn(posted=400))
+        assert seat.blind_level == 400
+        seat.decide_frame(self.short_blind_turn(posted=50))
+        assert seat.blind_level == 400, "a short post is not a level"
+
+
+class TestTheDepthCensus:
+    """Decisions per depth band -- the number that sizes a ladder.
+
+    `depth_by_hand` counts a 40-decision hand and a 1-decision hand alike, so it
+    cannot say what share of PLAY happens off the trained depth.
+    """
+
+    def shallow_turn(self):
+        return turn_payload(hand_number=3, your_stack=200, opponent_stacks=[300])
+
+    def test_every_decision_lands_in_a_band(self, seat):
+        for _ in range(3):
+            seat.decide_frame(turn_payload())
+        assert sum(seat.tally.by_band.values()) == 3
+
+    def test_a_shallow_decision_is_counted_out_of_tree(self, seat):
+        seat.decide_frame(self.shallow_turn())
+        assert seat.tally.out_of_tree == 1
+
+    def test_a_decision_at_the_trained_depth_is_not(self, seat):
+        seat.decide_frame(turn_payload())
+        assert seat.tally.out_of_tree == 0
+        assert "below the trained depth" not in seat.tally.summary()
+
+    def test_the_summary_reports_the_share_and_the_census(self, seat):
+        seat.decide_frame(turn_payload())
+        seat.decide_frame(self.shallow_turn())
+        summary = seat.tally.summary()
+        assert "1/2 decisions below the trained depth" in summary
+        assert "<=10bb:2" in summary

@@ -88,6 +88,17 @@ DEFAULT_BUDGET_MS = max(50, int(TIGHT_CLOCK_MS * CLOCK_FRACTION) - OVERSHOOT_ALL
 # our own still-live socket. Fifty ms compiles exactly the same code.
 WARM_BUDGET_MS = 50
 
+# Zeroing the residue of early iterations measured 940.1 -> 854.0 mbb/hand on the
+# programme gate (three seeds). 0.10 measured WORSE, so this is a verified point
+# rather than a direction. See `engine/solver/policy/threshold.py`.
+DEFAULT_POLICY_THRESHOLD = 0.02
+
+# Depth bands, in big blinds, for the per-decision census. The edges are where
+# the game changes shape rather than round numbers: below 10 bb a stack goes in
+# preflop and the tree is still offering pot control, and 60% of the trained
+# depth is where `SHALLOW_FRACTION` already draws the line.
+DEPTH_BANDS = ((10.0, "<=10bb"), (25.0, "<=25bb"), (50.0, "<=50bb"))
+
 
 def surface_sdk_logs(level: int | None = None) -> None:
     """Let the SDK's own logger through at the level we are running at.
@@ -164,6 +175,14 @@ class SeatTally:
     #: depth and an elimination match sweeps through many -- match 3 ran nine of
     #: twenty hands between 4.5 and 8 bb against a tree built for 100.
     depth_by_hand: dict[int, float] = field(default_factory=dict)
+    #: DECISIONS per depth band, which is what sizes a ladder -- `depth_by_hand`
+    #: counts a 40-decision hand and a 1-decision hand the same. Keyed by
+    #: `DEPTH_BANDS`, plus the trained band for everything above them.
+    by_band: dict[str, int] = field(default_factory=dict)
+    #: Decisions taken below the trained depth. The replay that answers them is
+    #: built from `blueprint.config.game.starting_stack` whatever the table
+    #: holds, so each one is a 100 bb strategy fielded in a spot that is not one.
+    out_of_tree: int = 0
 
     @property
     def off_tree(self) -> int:
@@ -185,7 +204,17 @@ class SeatTally:
                 if self.depth_by_hand
                 else ""
             )
+            + (
+                f", {self.out_of_tree}/{self.decisions} decisions below the "
+                f"trained depth ({self.band_census()})"
+                if self.out_of_tree
+                else ""
+            )
         )
+
+    def band_census(self) -> str:
+        """Decisions per depth band, deepest first -- what a ladder has to cover."""
+        return " ".join(f"{band}:{count}" for band, count in self.by_band.items())
 
 
 @dataclass
@@ -206,6 +235,12 @@ class BlueprintSeat:
     use_resolver: bool | None = None
     budget_ms: int = DEFAULT_BUDGET_MS
     tally: SeatTally = field(default_factory=SeatTally)
+    #: Highest big blind seen this match. NOT the last one posted: a big blind
+    #: shorter than the level is a player all-in for less, and reading that as
+    #: the level divides the effective stack by too small a number and reports a
+    #: shallow hand as a deep one. Measured live -- `Blinds escalated to 52
+    #: (seated at 100)` is a short post, not a blind level that went backwards.
+    blind_level: int = 0
 
     @classmethod
     def for_match(
@@ -355,6 +390,29 @@ class BlueprintSeat:
     #: preflop while the tree is still offering pot control.
     SHALLOW_FRACTION = 0.6
 
+    def _depth(self, turn: TurnState) -> float | None:
+        """Effective depth in big blinds, against the level rather than the post."""
+        posted = turn.big_blind()
+        if posted:
+            self.blind_level = max(self.blind_level, posted)
+        # The seated level is a FLOOR: blinds escalate and never come back, so a
+        # posting below it is a short all-in rather than a level.
+        level = max(self.blind_level, self.config.big_blind)
+        effective = turn.effective_stack(self.seat)
+        if effective is None or not level:
+            return None
+        return effective / level
+
+    def _census(self, depth: float) -> None:
+        """Count this decision into its depth band, and against the trained one."""
+        band = next(
+            (name for edge, name in DEPTH_BANDS if depth <= edge),
+            f">{DEPTH_BANDS[-1][0]:.0f}bb",
+        )
+        self.tally.by_band[band] = self.tally.by_band.get(band, 0) + 1
+        if depth < self.scale.our_depth * self.SHALLOW_FRACTION:
+            self.tally.out_of_tree += 1
+
     def _note_depth(self, turn: TurnState) -> None:
         """Record how deep this hand actually is, and say so when it is not ours.
 
@@ -364,9 +422,10 @@ class BlueprintSeat:
         fixes that -- it needs a ladder of blueprints -- but the seat should not
         be the last to know.
         """
-        depth = turn.depth_in_blinds(self.seat)
+        depth = self._depth(turn)
         if depth is None:
             return
+        self._census(depth)
         first = turn.hand_number not in self.tally.depth_by_hand
         self.tally.depth_by_hand[turn.hand_number] = depth
         if first and depth < self.scale.our_depth * self.SHALLOW_FRACTION:
@@ -394,7 +453,10 @@ class BlueprintSeat:
             return
         self.tally.escalated += 1
         if self.tally.escalated == 1:
-            depth = (turn.your_stack + turn.pot) / big_blind
+            # `(your_stack + pot) / bb` printed 385 bb on a 100 bb table: it is
+            # our remaining stack plus the WHOLE pot, over one seat, and misses
+            # what we have already committed. Effective depth is the quantity.
+            depth = self._depth(turn) or 0.0
             logger.warning(
                 "Blinds escalated to %s (seated at %s): about %.0f bb deep now, "
                 "against a blueprint cut for %.0f. Play continues, extrapolating.",
