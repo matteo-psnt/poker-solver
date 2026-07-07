@@ -24,11 +24,14 @@ The measurement above was made the same way, so it prices that in.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 
 from src.interfaces.chipzen.adapter import (
     Spot,
@@ -41,6 +44,8 @@ from src.interfaces.chipzen.protocol import GameConfig, ProtocolError, TurnState
 from src.interfaces.errors import CommandError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from src.core.game.actions import Action
     from src.engine.solver.policy.source import ScorableBlueprint
 
@@ -442,6 +447,74 @@ def sdk_state_payload(state: Any) -> dict[str, Any]:
     }
 
 
+# Their queue entry EXPIRES -- `matchmaking/status` reports
+# `queue_ttl_seconds: 60` -- so being queued is a thing you keep doing, not a
+# thing you did. Re-joining at half the TTL leaves a whole period of slack for a
+# slow round trip.
+_QUEUE_TTL_FRACTION = 0.5
+_QUEUE_MIN_PERIOD_S = 5.0
+
+
+def _rest_base(lobby_url: str) -> str:
+    """The REST origin behind a lobby WebSocket URL.
+
+    Derived rather than mapped from ``env``: the SDK already owns that mapping
+    and a second copy of it is a second thing to get wrong when they add a host.
+    """
+    parts = urlsplit(lobby_url)
+    return f"{'https' if parts.scheme in ('wss', 'https') else 'http'}://{parts.netloc}"
+
+
+async def _keep_queued(
+    base: str,
+    token: str,
+    in_flight: Callable[[], int],
+) -> None:
+    """Keep asking for a match for as long as we are not in one.
+
+    THE SEAT DOES NOT PLAY WITHOUT THIS. Holding the lobby only makes the bot
+    reachable; `POST matchmaking/join` is what makes it wanted, and their SDK
+    never calls it. Measured 08-26: nine hours connected, healthy, zero matches.
+
+    Silent by design once steady -- it logs the queue's state only when that
+    state changes, because a line every half minute forever is how a log stops
+    being read.
+    """
+    import httpx  # noqa: PLC0415 -- only the live socket path needs a client
+
+    headers = {"Authorization": f"Bearer {token}"}
+    period = _QUEUE_MIN_PERIOD_S
+    last_state: str | None = None
+
+    async with httpx.AsyncClient(base_url=base, headers=headers, timeout=15.0) as http:
+        while True:
+            try:
+                # Never queue while playing: a second match would be dealt into
+                # the same process against the same in-memory table.
+                if in_flight() > 0:
+                    state = "playing"
+                else:
+                    status = (await http.get("/api/external-api/matchmaking/status")).json()
+                    state = str(status.get("status", "unknown"))
+                    ttl = float(status.get("queue_ttl_seconds") or 0.0)
+                    period = max(_QUEUE_MIN_PERIOD_S, ttl * _QUEUE_TTL_FRACTION)
+                    if state == "idle":
+                        reply = await http.post("/api/external-api/matchmaking/join", json={})
+                        reply.raise_for_status()
+                        state = "queued"
+            except Exception as exc:  # noqa: BLE001 -- a seat must outlive its queue
+                # Their side being down must never take the socket with it: the
+                # lobby can still be handed a challenge while the queue is out.
+                if last_state != "error":
+                    logger.warning("queue: unreachable (%s); still holding the lobby", exc)
+                    last_state = "error"
+            else:
+                if state != last_state:
+                    logger.info("queue: %s", state)
+                    last_state = state
+            await asyncio.sleep(period)
+
+
 def run_seat(
     blueprint_factory,
     *,
@@ -451,6 +524,7 @@ def run_seat(
     use_resolver: bool | None = None,
     budget_ms: int | None = None,
     max_matches: int | None = None,
+    seek_matches: bool = True,
 ) -> None:
     """Hold a seat on Chipzen until interrupted, or for ``max_matches`` matches.
 
@@ -466,7 +540,6 @@ def run_seat(
     SDK's own ``chipzen.toml`` discovery rather than to a default.
     """
     try:
-        import asyncio  # noqa: PLC0415 -- deferred with the optional SDK below
         import importlib  # noqa: PLC0415 -- see below
 
         # Resolved by name so the checker behaves the same whether or not the
@@ -510,6 +583,11 @@ def run_seat(
         time.perf_counter() - started,
     )
 
+    # Matches in flight. A COUNT, not a flag: the SDK runs each dispatched match
+    # in its own task and a bracket can overlap two. The queue keeper reads it to
+    # know when to stop asking for more.
+    playing = 0
+
     class _Seat(chipzen.ChipzenBot):
         """Their lifecycle, our blueprint. Deliberately almost empty."""
 
@@ -517,6 +595,8 @@ def run_seat(
             self._seat: BlueprintSeat | None = None
 
         def on_match_start(self, match_info: dict) -> None:
+            nonlocal playing
+            playing += 1
             # Cheap now: the table is already in memory, so this is a config
             # parse and one warm decision, both inside the clock the server
             # started when it sent the first turn.
@@ -549,6 +629,8 @@ def run_seat(
             logger.info("Hand: %s", json.dumps(result, default=str, sort_keys=True))
 
         def on_match_end(self, results: dict) -> None:
+            nonlocal playing
+            playing = max(0, playing - 1)
             # Logged whole rather than picked apart: the tally says the client
             # worked, and only this says whether the blueprint WON. Their
             # `match_end` shape is not in the specs we hold, so reading it as
@@ -558,24 +640,54 @@ def run_seat(
             logger.info("Result: %s", json.dumps(results, default=str, sort_keys=True))
             self._seat = None
 
-    asyncio.run(
-        chipzen.run_external_bot(
-            # The CLASS, not an instance: the SDK runs each dispatched match in
-            # its own task and calls this per match. `_Seat` keeps mutable
-            # per-match state, so one shared instance would let a second match's
-            # `match_start` overwrite the first's table -- and its `match_end`
-            # blank it, dropping the first back onto the reconnect path
-            # mid-hand. A tournament bracket is exactly where that happens.
-            _Seat,
-            bot_id=bot_id,
-            # Their `env` is a Literal of three names. Narrowed by the command's
-            # `choices=`, which is where a wrong one should be refused -- with a
-            # usage message rather than a stack trace three frames into an SDK.
-            env=cast("Any", env),
-            token=token,
-            max_matches=max_matches,
-        )
-    )
+    async def _hold() -> None:
+        keeper = None
+        if seek_matches:
+            # Resolved the way the SDK resolves it, so the queue and the lobby
+            # cannot end up pointed at different environments or bots. Missing
+            # credentials are NOT raised here: `run_external_bot` below refuses
+            # them with a message written for this, and a seat that cannot dial
+            # the lobby has a bigger problem than an empty queue.
+            config = chipzen.load_chipzen_config()
+            seat_id = bot_id or (config.bot_id if config is not None else None)
+            conn = (
+                chipzen.connect_to_chipzen(seat_id, cast("Any", env), config=config)
+                if seat_id
+                else None
+            )
+            queue_token = (token if token is not None else conn.token) if conn else None
+            if conn is not None and queue_token:
+                keeper = asyncio.create_task(
+                    _keep_queued(_rest_base(conn.url), queue_token, lambda: playing)
+                )
+            else:
+                logger.warning("queue: no credentials to join with; expecting a challenge")
+        try:
+            await chipzen.run_external_bot(
+                # The CLASS, not an instance: the SDK runs each dispatched match
+                # in its own task and calls this per match. `_Seat` keeps mutable
+                # per-match state, so one shared instance would let a second
+                # match's `match_start` overwrite the first's table -- and its
+                # `match_end` blank it, dropping the first back onto the
+                # reconnect path mid-hand. A tournament bracket is exactly where
+                # that happens.
+                _Seat,
+                bot_id=bot_id,
+                # Their `env` is a Literal of three names. Narrowed by the
+                # command's `choices=`, which is where a wrong one should be
+                # refused -- with a usage message rather than a stack trace three
+                # frames into an SDK.
+                env=cast("Any", env),
+                token=token,
+                max_matches=max_matches,
+            )
+        finally:
+            if keeper is not None:
+                keeper.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await keeper
+
+    asyncio.run(_hold())
 
 
 def _implied_config(state: Any) -> dict[str, Any]:
