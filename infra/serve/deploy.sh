@@ -114,28 +114,20 @@ cp -ru "$SHARE/combo_abstraction/." "$WORK/data/combo_abstraction/"
 # the lot bought nothing and made staging a run an afternoon's job.
 #
 # $AT names a rung to stage instead of the head, mirroring `--at`.
-echo "==> checkpoint (thousands of small files, a few minutes on first copy)"
-mkdir -p "$WORK/data/runs/$RUN_ID"
-# The share serves the archive read-only (444 files, 555 directories) and `cp`
-# carries that mode across, so the SECOND deploy of a run cannot overwrite what
-# the first one staged: `cp -u` fails EACCES on a file this user owns, and the
-# script's `set -e` turns that into an aborted deploy. Restore write on our own
-# copy first -- it is a cache, not a source of truth, and nothing reads its mode.
-chmod -R u+w "$WORK/data/runs/$RUN_ID" 2>/dev/null || true
-cp -u "$SHARE/archive/$RUN_ID/STATIC_CHECKPOINT.json" "$WORK/data/runs/$RUN_ID/"
-cp -ru "$SHARE/archive/$RUN_ID/evals" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
-# Every small file beside the manifest: `run.jsonl` OR the older `.run.json`
-# (`RunTracker.load` takes either, and a legacy run has only the latter), plus
-# `progress.jsonl`. Copying just `run.jsonl` staged a legacy run "successfully"
-# and then failed at load with `No run record`.
-for small in run.jsonl .run.json progress.jsonl; do
-    cp -u "$SHARE/archive/$RUN_ID/$small" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
-done
-
-# The ladder key is `retained` (`static_checkpoint.py` writes it; `staging.py`
-# and `archive.py` read it). `checkpoints` is not a key, so $AT always missed and
-# `set -e` turned that into an aborted deploy.
-rung=$(AT="${AT:-}" python3 - "$SHARE/archive/$RUN_ID/STATIC_CHECKPOINT.json" <<'PY'
+# Staging is a FUNCTION because the depth ladder stages several runs the same
+# way. Every rule below was learned the hard way once; a second hand-rolled copy
+# of it would relearn them.
+stage_run() {
+    local run="$1" at="$2" dest="$WORK/data/runs/$1"
+    mkdir -p "$dest"
+    chmod -R u+w "$dest" 2>/dev/null || true
+    cp -u "$SHARE/archive/$run/STATIC_CHECKPOINT.json" "$dest/"
+    cp -ru "$SHARE/archive/$run/evals" "$dest/" 2>/dev/null || true
+    for small in run.jsonl .run.json progress.jsonl; do
+        cp -u "$SHARE/archive/$run/$small" "$dest/" 2>/dev/null || true
+    done
+    local zarr
+    zarr=$(AT="$at" python3 - "$SHARE/archive/$run/STATIC_CHECKPOINT.json" <<'PY'
 import json, os, sys
 manifest = json.load(open(sys.argv[1]))
 rungs = manifest.get("retained") or []
@@ -151,13 +143,34 @@ if not head:
     sys.exit("manifest names no head checkpoint")
 print(head)
 PY
-)
-echo "==> rung $rung"
-cp -ru "$SHARE/archive/$RUN_ID/$rung" "$WORK/data/runs/$RUN_ID/"
-# The writer's own completion sentinel. `staging._complete` requires it, so
-# without it the console's next `stage_run` for this run decides nothing is here
-# and re-copies the whole ~850 MB rung over SMB.
-cp -u "$SHARE/archive/$RUN_ID/.complete-$rung" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
+    )
+    echo "==> staging $run rung $zarr"
+    cp -ru "$SHARE/archive/$run/$zarr" "$dest/"
+    cp -u "$SHARE/archive/$run/.complete-$zarr" "$dest/" 2>/dev/null || true
+    chmod -R u+w "$dest" 2>/dev/null || true
+}
+
+echo "==> checkpoint (thousands of small files, a few minutes on first copy)"
+mkdir -p "$WORK/data/runs/$RUN_ID"
+stage_run "$RUN_ID" "${AT:-}"
+
+# $RUNGS is a comma-separated `run[:at]` list: the SHALLOWER blueprints of the
+# depth ladder. Each is staged exactly like the deepest, and each becomes a
+# `--rung` on the seat's command line.
+SEAT_RUNGS=""
+if [ -n "${RUNGS:-}" ]; then
+    IFS=',' read -ra _rungs <<< "$RUNGS"
+    for spec in "${_rungs[@]}"; do
+        [ -n "$spec" ] || continue
+        # `run` with no colon means the head rung; `${spec##*:}` would hand the
+        # run NAME back as the iteration and fail the manifest lookup.
+        case "$spec" in
+            *:*) stage_run "${spec%%:*}" "${spec##*:}" ;;
+            *)   stage_run "$spec" "" ;;
+        esac
+        SEAT_RUNGS="$SEAT_RUNGS --rung $spec"
+    done
+fi
 
 # --------------------------------------------------------------------------- #
 # dependencies
@@ -263,7 +276,7 @@ RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
 POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
-SEAT_EXTRA=${AT:+--at $AT}
+SEAT_EXTRA=${AT:+--at $AT}$SEAT_RUNGS
 EOF
 
 sudo systemctl daemon-reload
