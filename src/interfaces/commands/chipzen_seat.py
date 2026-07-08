@@ -139,6 +139,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "table too -- a composite the gate has NOT measured.",
     )
     parser.add_argument(
+        "--rung",
+        action="append",
+        default=None,
+        metavar="RUN[:AT]",
+        help="A SHALLOWER blueprint to add to the depth ladder, repeatable. "
+        "`--run` is the deepest rung; each `--rung` is another, and the seat "
+        "plays whichever sits at or below the hand's effective stack. MEASURED "
+        "over 40,000 duplicate deals, a native rung beats the 100 bb blueprint "
+        "by 466 mbb/hand at 6 bb, 316 at 10 bb and 218 at 15 bb.",
+    )
+    parser.add_argument(
         "--once",
         action="store_true",
         help="Play a single match and exit, rather than holding the seat.",
@@ -168,6 +179,8 @@ class ChipzenSeatPayload(BaseModel):
     """None lets each match size it from the clock it enforces."""
     env: str | None = None
     bot_id: str | None = None
+    rungs: list[str] = []
+    """Shallower rungs beside `run`, as `run[:at]`. Empty is a single blueprint."""
     policy_threshold: float = DEFAULT_POLICY_THRESHOLD
     """Zeroed below this share of a row, at load. 0 fields the table as trained."""
     once: bool = False
@@ -217,6 +230,7 @@ def run(args: argparse.Namespace) -> ChipzenSeatPayload:
         budget_ms=args.budget_ms,
         env=args.env,
         bot_id=bot_id,
+        rungs=list(args.rung or []),
         policy_threshold=args.policy_threshold,
         once=args.once,
         seek=not args.no_seek,
@@ -275,7 +289,13 @@ def _load_recording(path: Path) -> dict[str, Any]:
     return recorded
 
 
-def _build_blueprint(run_dir: Path, at_iteration: int | None, policy_threshold: float = 0.0):
+def _build_blueprint(
+    run_dir: Path,
+    at_iteration: int | None,
+    policy_threshold: float = 0.0,
+    *,
+    play_only: bool = False,
+):
     """A run directory on local disk -> a blueprint. ~1 min in production.
 
     ``policy_threshold`` is spent HERE, once, rather than per decision: the
@@ -297,6 +317,7 @@ def _build_blueprint(run_dir: Path, at_iteration: int | None, policy_threshold: 
         metadata,
         abstraction_hash=metadata.card_abstraction_hash,
         at_iteration=at_iteration,
+        play_only=play_only,
     )
     if policy_threshold > 0.0:
         changed, trained = apply_policy_threshold(storage, solver.tree, policy_threshold)
@@ -308,6 +329,30 @@ def _build_blueprint(run_dir: Path, at_iteration: int | None, policy_threshold: 
             100.0 * changed / trained if trained else 0.0,
         )
     return solver
+
+
+def _build_ladder(payload: ChipzenSeatPayload):
+    """The deepest rung from `--run`, plus every `--rung`, as one ladder.
+
+    Loaded `play_only`: a player reads `strategy_sum` and `visited` and nothing
+    else, so the three resume-only arrays -- 1.23 GB of a 2.7 GB blueprint -- are
+    never faulted in. That is what lets several rungs sit in memory at once.
+    """
+    from src.interfaces.chipzen.ladder import DepthLadder  # noqa: PLC0415 -- see above
+
+    specs = [(Path(payload.run_dir), payload.at_iteration), *_parse_rungs(payload)]
+    return DepthLadder(
+        [_build_blueprint(d, at, payload.policy_threshold, play_only=True) for d, at in specs]
+    )
+
+
+def _parse_rungs(payload: ChipzenSeatPayload) -> list[tuple[Path, int | None]]:
+    out: list[tuple[Path, int | None]] = []
+    for spec in payload.rungs:
+        name, _, at = spec.partition(":")
+        run_dir = resolve_run_dir(name, payload.runs_dir)
+        out.append((run_dir, int(at) if at else None))
+    return out
 
 
 def render(payload: ChipzenSeatPayload) -> None:
@@ -347,7 +392,9 @@ def _play(payload: ChipzenSeatPayload) -> None:
         f"Seating {payload.run} on chipzen {payload.env} as {payload.bot_id or 'the configured bot'}."
     )
     run_seat(
-        lambda: _build_blueprint(run_dir, payload.at_iteration, payload.policy_threshold),
+        (lambda: _build_ladder(payload))
+        if payload.rungs
+        else (lambda: _build_blueprint(run_dir, payload.at_iteration, payload.policy_threshold)),
         bot_id=payload.bot_id,
         token=os.environ.get(TOKEN_ENV),
         env=payload.env or DEFAULT_ENV,

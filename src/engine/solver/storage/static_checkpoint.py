@@ -30,6 +30,7 @@ import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numcodecs
 import numpy as np
@@ -37,6 +38,9 @@ import zarr
 
 from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
 from src.shared import records
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -224,10 +228,19 @@ def _prune(checkpoint_dir: Path, manifest: dict) -> None:
             shutil.rmtree(path, ignore_errors=True)
 
 
+#: What a PLAYER reads. `regrets`, `reach_counts` and `cumulative_utility` exist
+#: so a run can RESUME, and nothing on the decision path touches them — measured
+#: on the serve box, they are 1.23 GB of a 2.7 GB resident blueprint. `np.zeros`
+#: is lazily backed, so an array that is never written never costs a page: not
+#: loading them is the whole saving, and the storage class is unchanged.
+PLAY_ARRAYS: tuple[str, ...] = ("strategy_sum", "visited")
+
+
 def load_checkpoint(
     storage: StaticArrayStorage,
     checkpoint_dir: Path,
     *,
+    arrays: Sequence[str] | None = None,
     at_iteration: int | None = None,
     abstraction_id: str | None = None,
 ) -> int:
@@ -273,7 +286,10 @@ def load_checkpoint(
     row_source, slot_source = _legacy_index_maps(storage.tree) if translate else (None, None)
     if translate:
         logger.info("Checkpoint is v1 node-major; permuting arrays into the bucket-major layout.")
+    wanted = set(arrays) if arrays is not None else None
     for name in _ARRAYS:
+        if wanted is not None and name not in wanted:
+            continue
         target = getattr(storage, name)
         source = root[name][:]
         if source.shape != target.shape:

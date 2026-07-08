@@ -551,3 +551,62 @@ class TestTheDepthCensus:
         summary = seat.tally.summary()
         assert "1/2 decisions below the trained depth" in summary
         assert "<=10bb:2" in summary
+
+
+class TestTheLadderInPlay:
+    """A seat handed several rungs plays the one that fits the hand.
+
+    The table is 4 bb, so a hand whose effective stack halves is a 2 bb hand and
+    must be answered by the 2 bb rung. Selection is per HAND, and the effective
+    stack is fixed once a hand starts, so it cannot move under a hand in play.
+    """
+
+    @pytest.fixture
+    def laddered(self, blueprint):
+        from src.interfaces.chipzen.ladder import DepthLadder
+
+        # The BLUEPRINT's blinds are 50/100 while the TABLE's are 100/200, so a
+        # 200-chip blueprint is the 2 bb rung against the table's 4 bb.
+        shallow = build_trained_test_solver(iterations=4, starting_stack=200)
+        return BlueprintSeat.for_match(
+            DepthLadder([blueprint, shallow]), MATCH_INFO, seat=0, use_resolver=False
+        )
+
+    def shortstacked(self, mine, theirs, hand=9):
+        return turn_payload(
+            hand_number=hand,
+            your_stack=mine - SB,
+            opponent_stacks=[theirs - BB],
+            pot=SB + BB,
+        )
+
+    def test_a_full_stack_opens_on_the_deepest_rung(self, laddered):
+        assert laddered.scale.our_depth == 4.0
+        laddered.decide_frame(turn_payload())
+        assert laddered.tally.rung_switches == 0
+
+    def test_a_halved_stack_drops_to_the_shallow_rung(self, laddered):
+        laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2))
+        assert laddered.scale.our_depth == 2.0
+        assert laddered.tally.rung_switches == 1
+
+    def test_it_switches_back_when_the_stacks_come_back(self, laddered):
+        laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2, hand=9))
+        laddered.decide_frame(turn_payload(hand_number=10))
+        assert laddered.scale.our_depth == 4.0
+        assert laddered.tally.rung_switches == 2
+
+    def test_the_rung_is_chosen_once_within_one_hand(self, laddered):
+        # Three turns of ONE hand at one depth: the rung is chosen once and the
+        # spot cannot move under the hand in play.
+        for _ in range(3):
+            laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2))
+        assert laddered.tally.rung_switches == 1
+
+    def test_the_summary_reports_the_switches(self, laddered):
+        laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2))
+        assert "1 rung switches" in laddered.tally.summary()
+
+    def test_a_laddered_seat_still_answers_legally(self, laddered):
+        frame = laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2))
+        assert frame["action"] in LEGAL
