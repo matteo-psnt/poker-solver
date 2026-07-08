@@ -158,10 +158,14 @@ class TestTheMatchStartFrame:
 
     def test_a_seat_builds_from_their_real_frame(self, match_start):
         """End to end: no invented field, no swallowed exception."""
-        from src.interfaces.chipzen.seat import _self_seat, budget_for
+        from src.interfaces.chipzen.seat import MAX_BUDGET_MS, _self_seat, budget_for
 
         assert _self_seat(match_start) == 0
-        assert budget_for(match_start["turn_timeout_ms"]) == 1700
+        # Their frame carries a 5,000 ms clock -- a THIRD value beside the 2 s
+        # ranked one and the 30 s queue one. Half of it less the overshoot
+        # allowance is 1,700, but `MAX_BUDGET_MS` caps it at 900 so a decision
+        # cannot hold the GIL long enough to time out a concurrent match.
+        assert budget_for(match_start["turn_timeout_ms"]) == MAX_BUDGET_MS
 
 
 class TestRunExternalBot:

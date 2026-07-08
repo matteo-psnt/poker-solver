@@ -17,6 +17,7 @@ import pytest
 from src.interfaces.chipzen.protocol import TurnState
 from src.interfaces.chipzen.seat import (
     CLOCK_FRACTION,
+    MAX_BUDGET_MS,
     OVERSHOOT_ALLOWANCE_MS,
     TIGHT_CLOCK_MS,
     WARM_BUDGET_MS,
@@ -104,15 +105,21 @@ class TestBudget:
     Casual and the rated queue allow 30 s; ranked challenges and tournaments
     allow 2 s. The overshoot is ADDITIVE, not proportional -- 900 ms ran 1695 ms
     worst (+795) and 9000 ms ran 9380 ms (+380) -- so the headroom kept is a
-    constant, which is what lets a long clock be nearly all used.
+    constant rather than a fraction.
+
+    A roomy clock no longer buys all of that room: `MAX_BUDGET_MS` caps it, so
+    that a match on the generous clock cannot hold the GIL long enough to time
+    out a concurrent match on the tight one.
     """
 
     def test_a_stated_clock_sizes_the_budget(self, blueprint):
         """THEIR name is `turn_timeout_ms`; `decision_timeout_ms` is not a field
         the SDK ever sends, so pinning it made this test assert nothing."""
+        from src.interfaces.chipzen.seat import MAX_BUDGET_MS
+
         relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
         built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
-        assert built.budget_ms == 14_200
+        assert built.budget_ms == MAX_BUDGET_MS
 
     def test_an_unstated_clock_assumes_the_tight_one(self, blueprint):
         """`decision_timeout_ms` is absent on exactly the fast-clock matches."""
@@ -128,7 +135,7 @@ class TestBudget:
 
     @pytest.mark.parametrize(
         ("clock", "expected"),
-        [(2000, 200), (30_000, 14_200), (None, 200), (0, 200), (100, 50)],
+        [(2000, 200), (30_000, 900), (None, 200), (0, 200), (100, 50)],
     )
     def test_the_rule_across_clocks(self, clock, expected):
         assert budget_for(clock) == expected
@@ -137,9 +144,14 @@ class TestBudget:
         """Budget plus the measured additive overshoot must fit the clock."""
         assert budget_for(None) + OVERSHOOT_ALLOWANCE_MS <= TIGHT_CLOCK_MS * CLOCK_FRACTION
 
-    def test_a_long_clock_buys_real_thinking_time(self):
-        """Much more than the shipped 300 ms, without eating the clock."""
-        assert budget_for(30_000) > 10_000
+    def test_a_long_clock_still_buys_more_than_the_measured_setting(self):
+        """The resolver's 528 mbb/hand gain was measured near a 300 ms budget.
+
+        The cap has to stay clear of THAT, not of the clock: spending 14.2 s was
+        never measured to beat 300 ms, it was only what the clock allowed.
+        """
+        assert budget_for(30_000) > 300
+        assert budget_for(30_000) > budget_for(TIGHT_CLOCK_MS)
 
     @pytest.mark.parametrize("clock", [2000, 5000, 30_000])
     def test_the_worst_case_never_exceeds_half_the_clock(self, clock):
@@ -316,7 +328,8 @@ class TestWarmUp:
         Sizing it from the budget forfeited a live match: a 30 s clock gave a
         9 s budget, the resolver spent all of it inside `on_match_start` on the
         event loop, the lobby heartbeat starved, and the reconnect collided with
-        our own still-live socket as `duplicate_participant`.
+        our own still-live socket as `duplicate_participant`. The budget is
+        capped now, but WARM_BUDGET_MS must still be below it rather than equal.
         """
         relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
         seen: list[int] = []
@@ -331,7 +344,7 @@ class TestWarmUp:
             built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
 
         assert seen == [WARM_BUDGET_MS], "the warm decision must not use the match budget"
-        assert built.budget_ms == 14_200, "and the match budget must survive it"
+        assert built.budget_ms == MAX_BUDGET_MS, "and the match budget must survive it"
 
     def test_a_seat_arrives_already_warm(self, blueprint, caplog):
         with caplog.at_level(logging.INFO, logger="src.interfaces.chipzen.seat"):
@@ -610,3 +623,34 @@ class TestTheLadderInPlay:
     def test_a_laddered_seat_still_answers_legally(self, laddered):
         frame = laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2))
         assert frame["action"] in LEGAL
+
+
+class TestTheBudgetCeiling:
+    """No decision may hold the GIL long enough to time out a concurrent one.
+
+    Two matches can be in flight, and although the SDK decides each in its own
+    thread, none of the numba kernels under a decision sets `nogil=True` -- so
+    concurrent decisions serialise. A 30 s-clock match at half its clock would
+    hold the interpreter for 14.2 s and forfeit any 2 s fixture decision waiting
+    behind it.
+    """
+
+    def test_a_generous_clock_is_capped(self):
+        from src.interfaces.chipzen.seat import MAX_BUDGET_MS
+
+        assert budget_for(30_000) == MAX_BUDGET_MS
+
+    def test_a_concurrent_pair_still_fits_the_tight_clock(self):
+        from src.interfaces.chipzen.seat import MAX_BUDGET_MS
+
+        # Measured overshoot is ~+35 ms and a frame is ~120 ms, so the pair is
+        # the capped decision plus the tight one plus two frames.
+        pair = MAX_BUDGET_MS + 35 + budget_for(TIGHT_CLOCK_MS) + 35 + 2 * 120
+        assert pair < TIGHT_CLOCK_MS
+
+    def test_the_tight_clock_is_untouched_by_the_cap(self):
+        # The cap must only bind on the roomy clock; the fast path was already
+        # well under it.
+        assert budget_for(TIGHT_CLOCK_MS) == max(
+            50, int(TIGHT_CLOCK_MS * CLOCK_FRACTION) - OVERSHOOT_ALLOWANCE_MS
+        )

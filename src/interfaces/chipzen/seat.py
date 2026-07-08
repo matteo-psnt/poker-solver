@@ -89,6 +89,21 @@ DEFAULT_BUDGET_MS = max(50, int(TIGHT_CLOCK_MS * CLOCK_FRACTION) - OVERSHOOT_ALL
 # our own still-live socket. Fifty ms compiles exactly the same code.
 WARM_BUDGET_MS = 50
 
+# A CEILING on the per-decision budget, whatever the clock allows.
+#
+# Two matches can be in flight at once, and although the SDK decides each in its
+# own thread (`asyncio.to_thread`), NONE of the 28 numba kernels under a decision
+# sets `nogil=True` -- so concurrent decisions serialise on the GIL. A 30 s-clock
+# queue match spending 14.2 s per decision therefore delays a concurrent 2 s
+# ranked decision past its clock, which is a forfeited fixture.
+#
+# 900 ms keeps a concurrent PAIR inside the tight clock (935 + 233 + ~120 ms of
+# frame against 2,000) and stays well above the only budget at which the
+# resolver's 528 mbb/hand gain was ever measured, which was ~300 ms. Spending
+# 14.2 s was never measured to be better than 300 ms -- it was just what the
+# clock allowed.
+MAX_BUDGET_MS = 900
+
 # Zeroing the residue of early iterations measured 940.1 -> 854.0 mbb/hand on the
 # programme gate (three seeds). 0.10 measured WORSE, so this is a verified point
 # rather than a direction. See `engine/solver/policy/threshold.py`.
@@ -148,7 +163,8 @@ def budget_for(clock_ms: int | None) -> int:
     anything roomier.
     """
     clock = int(clock_ms) if clock_ms else TIGHT_CLOCK_MS
-    return max(50, int(clock * CLOCK_FRACTION) - OVERSHOOT_ALLOWANCE_MS)
+    sized = max(50, int(clock * CLOCK_FRACTION) - OVERSHOOT_ALLOWANCE_MS)
+    return min(sized, MAX_BUDGET_MS)
 
 
 @dataclass
