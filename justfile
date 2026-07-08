@@ -82,10 +82,11 @@ serve-ssh:
 # version in this repo and keeps none of it. Args: run (id or fragment), and
 # optionally the code snapshot `push-code` echoed -- PIN IT when another session
 # might be pushing, because the default is whichever snapshot is newest on the
-# share and that is not necessarily yours.
-serve-deploy run code="":
+# share and that is not necessarily yours -- and `at`, the rung to stage and seat.
+# Without `at` both the reader and the seat take the manifest head.
+serve-deploy run code="" at="":
     ssh solver@$({{tfv}} output -raw public_ip) \
-        "CODE={{code}} bash -s" -- {{run}} < infra/serve/deploy.sh
+        "CODE={{code}} AT={{at}} bash -s" -- {{run}} < infra/serve/deploy.sh
 
 # Wake the box, or put it back to sleep. The console does this too; these are
 # for when the console is what you are trying to fix.
