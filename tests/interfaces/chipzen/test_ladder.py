@@ -1,9 +1,13 @@
 """Choosing which blueprint answers a hand.
 
-Snap-down is the rule, and the tests state it as behaviour rather than as
-arithmetic: what matters is that a rung is never asked about a table SHALLOWER
-than the one it was cut for, because that is the direction the depth measurement
-showed hurts.
+NEAREST IN LOG SPACE. Depth error is proportional -- a 25 bb blueprint is as
+wrong at 50 bb as a 50 bb one is at 100 -- so the midpoint between two rungs is
+their geometric mean, not their average. Measured across the 25-100 bb gap the
+crossover lands near sqrt(25 x 100) = 50, and the rule calls all four sampled
+tables correctly.
+
+The earlier rule snapped DOWN, and a live probe caught it answering an 80 bb
+table with the 25 bb rung -- worth -140 mbb/hand.
 """
 
 from __future__ import annotations
@@ -31,19 +35,41 @@ class TestSelection:
     def test_an_exact_depth_takes_its_own_rung(self, ladder):
         assert ladder.select(10.0).depth == 10.0
 
-    @pytest.mark.parametrize(("table", "expected"), [(39.9, 10.0), (10.1, 10.0), (4.5, 4.0)])
-    def test_a_depth_between_rungs_snaps_downward(self, ladder, table, expected):
-        # Never up: a blueprint that thinks it holds more than the table does
-        # plans a bet it cannot complete and strands itself halfway through.
+    @pytest.mark.parametrize(
+        ("table", "expected"),
+        [
+            (39.9, 40.0),  # all but on the deep rung
+            (10.1, 10.0),  # all but on the middle one
+            (4.5, 4.0),  # nearer 4 than 10 either way you measure
+            (6.4, 10.0),  # sqrt(4 x 10) = 6.32, so just above it is the DEEP side
+            (6.2, 4.0),  # and just below it is the shallow one
+            (20.1, 40.0),  # sqrt(10 x 40) = 20, so the deep side
+            (19.9, 10.0),  # and the shallow side
+        ],
+    )
+    def test_the_nearest_rung_in_log_space_answers(self, ladder, table, expected):
+        # The boundary is the GEOMETRIC mean of the neighbouring rungs. Snapping
+        # down instead answered an 80 bb table with a 25 bb blueprint, measured
+        # at -140 mbb/hand against the 100 bb one.
         assert ladder.select(table).depth == expected
+
+    def test_a_table_in_a_wide_gap_is_not_stranded_on_the_far_rung(self, ladder):
+        # The failure the live probe found: rungs at 10 and 40 with a table at
+        # 35 must not be answered by 10 merely because 10 is below it.
+        assert ladder.select(35.0).depth == 40.0
 
     def test_a_table_deeper_than_every_rung_takes_the_deepest(self, ladder):
         assert ladder.select(500.0).depth == 40.0
 
     def test_a_table_shallower_than_every_rung_takes_the_shallowest(self, ladder):
-        # There is nothing below to snap to, and answering is better than not:
-        # the alternative is a safe default, which at 1 bb folds every hand.
+        # Answering is better than not: the alternative is a safe default, which
+        # at 1 bb folds every hand.
         assert ladder.select(0.5).depth == 4.0
+
+    def test_a_zero_or_negative_depth_does_not_blow_up(self, ladder):
+        # `log(0)` is a crash, and a frame CAN report a zero effective stack.
+        assert ladder.select(0.0).depth == 4.0
+        assert ladder.select(-1.0).depth == 4.0
 
     def test_the_deepest_is_reachable_for_the_default_seat(self, ladder):
         assert ladder.deepest.depth == 40.0

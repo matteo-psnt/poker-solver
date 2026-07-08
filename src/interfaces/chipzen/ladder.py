@@ -14,6 +14,7 @@ reads ~0, which is what rules out a harness artefact.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -41,10 +42,18 @@ class Rung:
 class DepthLadder:
     """Picks the blueprint to answer a hand of a given effective depth.
 
-    SNAPS DOWN: the deepest rung at or below the table. A blueprint that thinks
-    it has less money than it does cannot plan a bet it has no chips to
-    complete, while one that thinks it has more strands itself half way through.
-    Below the shallowest rung there is nothing to snap to, so that rung answers.
+    NEAREST IN LOG SPACE, because depth error is proportional: a 25 bb blueprint
+    is as wrong at 50 bb as a 50 bb one is at 100. MEASURED across the 25-100 bb
+    gap, the 100 bb rung against the 25 bb rung at each table:
+
+        30 bb  -99.5 +/- 14.8   40 bb  -82.9 +/- 18.7   (the 25 bb rung wins)
+        60 bb  +42.6 +/- 28.2   80 bb +140.5 +/- 37.4   (the 100 bb rung wins)
+
+    The crossover is near sqrt(25 x 100) = 50, and log-nearest calls all four
+    correctly. Snapping DOWN would have answered an 80 bb table with the 25 bb
+    rung and given up 140 mbb/hand; between ADJACENT rungs 1.67x apart the choice
+    measures as nothing, so this only matters where the ladder has a gap -- which
+    is exactly when it is easy to get wrong.
     """
 
     def __init__(self, blueprints: Sequence[ScorableBlueprint]) -> None:
@@ -61,11 +70,12 @@ class DepthLadder:
         return self.rungs[-1]
 
     def select(self, depth: float) -> Rung:
-        """The rung to answer a hand ``depth`` big blinds deep."""
-        chosen = self.rungs[0]
-        for rung in self.rungs:
-            if rung.depth <= depth:
-                chosen = rung
-            else:
-                break
-        return chosen
+        """The rung to answer a hand ``depth`` big blinds deep.
+
+        A depth at or below zero cannot be logged and cannot be played either;
+        the shallowest rung is the honest answer to it.
+        """
+        if depth <= 0:
+            return self.rungs[0]
+        target = math.log(depth)
+        return min(self.rungs, key=lambda rung: abs(math.log(rung.depth) - target))
