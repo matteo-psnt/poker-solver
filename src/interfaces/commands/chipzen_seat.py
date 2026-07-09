@@ -142,12 +142,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--rung",
         action="append",
         default=None,
-        metavar="RUN[:AT]",
+        metavar="RUN[:AT[:THRESHOLD]]",
         help="A SHALLOWER blueprint to add to the depth ladder, repeatable. "
-        "`--run` is the deepest rung; each `--rung` is another, and the seat "
-        "plays whichever sits at or below the hand's effective stack. MEASURED "
-        "over 40,000 duplicate deals, a native rung beats the 100 bb blueprint "
-        "by 466 mbb/hand at 6 bb, 316 at 10 bb and 218 at 15 bb.",
+        "`--run` is the deepest rung; the seat plays whichever rung is nearest "
+        "in LOG depth to the hand's effective stack. MEASURED over 40,000 "
+        "duplicate deals, a native rung beats the 100 bb blueprint by 466 "
+        "mbb/hand at 6 bb, 316 at 10 bb, 218 at 15 bb, 235 at 25 bb and 93 at "
+        "35 bb; at 50 bb they are even. THRESHOLD overrides --policy-threshold "
+        "for that rung, because the optimum moves with depth: 0.10 beat 0.02 "
+        "by 38.0 +/- 15.6 mbb/hand at 25 bb and 0.05 beat it by 19.1 +/- 6.4 "
+        "at 6 bb, while 0.02 stays the measured point at 100 bb.",
     )
     parser.add_argument(
         "--once",
@@ -340,11 +344,14 @@ def _build_ladder(payload: ChipzenSeatPayload):
     """
     from src.interfaces.chipzen.ladder import DepthLadder  # noqa: PLC0415 -- see above
 
-    specs = [(Path(payload.run_dir), payload.at_iteration), *_parse_rungs(payload)]
+    specs = [
+        (Path(payload.run_dir), payload.at_iteration, payload.policy_threshold),
+        *_parse_rungs(payload),
+    ]
     loaded = []
-    for index, (run_dir, at) in enumerate(specs):
+    for index, (run_dir, at, threshold) in enumerate(specs):
         try:
-            loaded.append(_build_blueprint(run_dir, at, payload.policy_threshold, play_only=True))
+            loaded.append(_build_blueprint(run_dir, at, threshold, play_only=True))
         except Exception:
             # A SHALLOW rung that will not load costs coverage at that depth; the
             # seat playing on without it is strictly better than a seat that
@@ -360,12 +367,19 @@ def _build_ladder(payload: ChipzenSeatPayload):
     return DepthLadder(loaded)
 
 
-def _parse_rungs(payload: ChipzenSeatPayload) -> list[tuple[Path, int | None]]:
-    out: list[tuple[Path, int | None]] = []
+def _parse_rungs(payload: ChipzenSeatPayload) -> list[tuple[Path, int | None, float]]:
+    """``run[:at[:threshold]]`` per rung, falling back to `--policy-threshold`."""
+    out: list[tuple[Path, int | None, float]] = []
     for spec in payload.rungs:
-        name, _, at = spec.partition(":")
-        run_dir = resolve_run_dir(name, payload.runs_dir)
-        out.append((run_dir, int(at) if at else None))
+        name, _, rest = spec.partition(":")
+        at, _, threshold = rest.partition(":")
+        out.append(
+            (
+                resolve_run_dir(name, payload.runs_dir),
+                int(at) if at else None,
+                float(threshold) if threshold else payload.policy_threshold,
+            )
+        )
     return out
 
 
