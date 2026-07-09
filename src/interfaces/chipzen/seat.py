@@ -45,7 +45,7 @@ from src.interfaces.chipzen.protocol import GameConfig, ProtocolError, TurnState
 from src.interfaces.errors import CommandError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from src.core.game.actions import Action
     from src.engine.solver.policy.source import ScorableBlueprint
@@ -575,6 +575,28 @@ def sdk_state_payload(state: Any) -> dict[str, Any]:
 _QUEUE_TTL_FRACTION = 0.5
 _QUEUE_MIN_PERIOD_S = 5.0
 
+# A 429 on `join` is not the queue being down, and must not be paid for at the
+# poll period: measured 09-01, a third of joins were limited and each one bought
+# a full ~30 s of sitting unqueued. Retry in seconds, not in a poll.
+TOO_MANY_REQUESTS = 429
+_QUEUE_BACKOFF_START_S = 2.0
+_QUEUE_BACKOFF_MAX_S = 30.0
+
+
+def _retry_after(headers: Mapping[str, str], previous: float) -> float:
+    """Seconds to wait after a rate-limited join -- their header, else doubling.
+
+    Capped at the poll period it replaces, so a backoff can never cost more
+    queue time than the rate limit it is answering.
+    """
+    header = headers.get("retry-after")
+    if header:
+        try:
+            return max(1.0, min(float(header), _QUEUE_BACKOFF_MAX_S))
+        except ValueError:
+            pass  # a date-form Retry-After; the doubling below is the fallback
+    return min(max(previous * 2.0, _QUEUE_BACKOFF_START_S), _QUEUE_BACKOFF_MAX_S)
+
 
 def _rest_base(lobby_url: str) -> str:
     """The REST origin behind a lobby WebSocket URL.
@@ -606,6 +628,7 @@ async def _keep_queued(
     headers = {"Authorization": f"Bearer {token}"}
     period = _QUEUE_MIN_PERIOD_S
     last_state: str | None = None
+    backoff = 0.0
 
     async with httpx.AsyncClient(base_url=base, headers=headers, timeout=15.0) as http:
         while True:
@@ -624,16 +647,25 @@ async def _keep_queued(
                         reply.raise_for_status()
                         state = "queued"
             except Exception as exc:  # noqa: BLE001 -- a seat must outlive its queue
+                if (
+                    isinstance(exc, httpx.HTTPStatusError)
+                    and exc.response.status_code == TOO_MANY_REQUESTS
+                ):
+                    backoff = _retry_after(exc.response.headers, backoff)
+                    if last_state != "limited":
+                        logger.warning("queue: rate limited; retrying in %.0fs", backoff)
+                        last_state = "limited"
                 # Their side being down must never take the socket with it: the
                 # lobby can still be handed a challenge while the queue is out.
-                if last_state != "error":
+                elif last_state != "error":
                     logger.warning("queue: unreachable (%s); still holding the lobby", exc)
                     last_state = "error"
             else:
+                backoff = 0.0
                 if state != last_state:
                     logger.info("queue: %s", state)
                     last_state = state
-            await asyncio.sleep(period)
+            await asyncio.sleep(backoff or period)
 
 
 def run_seat(

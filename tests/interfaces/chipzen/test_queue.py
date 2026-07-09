@@ -17,7 +17,7 @@ import httpx
 import pytest
 
 from src.interfaces.chipzen import seat as seat_module
-from src.interfaces.chipzen.seat import _keep_queued, _rest_base
+from src.interfaces.chipzen.seat import _keep_queued, _rest_base, _retry_after
 
 
 class TestRestBase:
@@ -74,6 +74,9 @@ class _Chipzen:
 def chipzen(monkeypatch):
     """A fake Chipzen, with the keeper's pacing removed."""
     monkeypatch.setattr(seat_module, "_QUEUE_MIN_PERIOD_S", 0.0)
+    # ...and its rate-limit backoff, which is real seconds by design.
+    monkeypatch.setattr(seat_module, "_QUEUE_BACKOFF_START_S", 0.0)
+    monkeypatch.setattr(seat_module, "_QUEUE_BACKOFF_MAX_S", 0.0)
     server = _Chipzen()
     original = httpx.AsyncClient
 
@@ -144,3 +147,47 @@ class TestKeepQueued:
 
         chipzen.handle = _refuse  # type: ignore[method-assign]
         _run(playing=0, passes=2)
+
+
+class TestRateLimitBackoff:
+    """A 429 must be paid for in seconds, not in a poll period.
+
+    Measured live on 09-01: a third of joins were rate limited, and because a
+    429 fell through to the generic error path the keeper then slept the FULL
+    ~30 s poll period each time -- about 14% of wall clock spent unqueued for a
+    limit that clears in seconds.
+    """
+
+    def test_their_retry_after_is_obeyed(self) -> None:
+        assert _retry_after({"retry-after": "3"}, 0.0) == 3.0
+
+    def test_a_date_form_retry_after_falls_back_to_doubling(self) -> None:
+        # HTTP allows an HTTP-date here. Parsing it is not worth it; not
+        # CRASHING on it is.
+        assert _retry_after({"retry-after": "Wed, 01 Sep 2026 06:00:00 GMT"}, 0.0) == (
+            seat_module._QUEUE_BACKOFF_START_S
+        )
+
+    def test_it_doubles_without_a_header(self) -> None:
+        assert _retry_after({}, 0.0) == seat_module._QUEUE_BACKOFF_START_S
+        assert _retry_after({}, 2.0) == 4.0
+
+    def test_the_backoff_is_bounded_by_the_period_it_replaces(self) -> None:
+        assert _retry_after({}, 1e6) == seat_module._QUEUE_BACKOFF_MAX_S
+        assert _retry_after({"retry-after": "99999"}, 0.0) == seat_module._QUEUE_BACKOFF_MAX_S
+
+    def test_a_limited_join_is_retried_rather_than_abandoned(self, chipzen) -> None:
+        # The seat must keep asking: a rate limit is the queue working, not the
+        # queue being down.
+        attempts = 0
+
+        def _limit(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            if request.url.path.endswith("/matchmaking/join"):
+                attempts += 1
+                return httpx.Response(429, json={"error_code": "RATE_LIMIT"})
+            return _Chipzen.handle(chipzen, request)
+
+        chipzen.handle = _limit  # type: ignore[method-assign]
+        _run(playing=0, passes=3)
+        assert attempts == 3
