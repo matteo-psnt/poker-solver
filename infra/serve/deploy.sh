@@ -162,12 +162,13 @@ if [ -n "${RUNGS:-}" ]; then
     IFS=',' read -ra _rungs <<< "$RUNGS"
     for spec in "${_rungs[@]}"; do
         [ -n "$spec" ] || continue
-        # `run` with no colon means the head rung; `${spec##*:}` would hand the
-        # run NAME back as the iteration and fail the manifest lookup.
-        case "$spec" in
-            *:*) stage_run "${spec%%:*}" "${spec##*:}" ;;
-            *)   stage_run "$spec" "" ;;
-        esac
+        # `run[:at[:threshold]]`. Split on ALL THREE fields: `${spec##*:}` took
+        # the LAST one, so a spec carrying a threshold staged "0.20" as the
+        # iteration, the manifest lookup failed, and `set -e` aborted the deploy
+        # after the env file had already been left alone -- which looks exactly
+        # like a deploy that worked and changed nothing.
+        IFS=':' read -r _name _at _thr <<< "$spec"
+        stage_run "$_name" "${_at:-}"
         SEAT_RUNGS="$SEAT_RUNGS --rung $spec"
     done
 fi
