@@ -570,10 +570,19 @@ def sdk_state_payload(state: Any) -> dict[str, Any]:
 
 # Their queue entry EXPIRES -- `matchmaking/status` reports
 # `queue_ttl_seconds: 60` -- so being queued is a thing you keep doing, not a
-# thing you did. Re-joining at half the TTL leaves a whole period of slack for a
-# slow round trip.
-_QUEUE_TTL_FRACTION = 0.5
-_QUEUE_MIN_PERIOD_S = 5.0
+# thing you did.
+#
+# MEASURED 09-01 against the live endpoint: a join while ALREADY queued
+# REFRESHES the entry -- `waiting_seconds` 33 -> 2, HTTP 200, no error. So the
+# entry never has to lapse. Joining only on `idle` meant waiting for expiry and
+# then noticing it a poll later: 63 s between joins against a 60 s TTL, leaving
+# us OUT of the queue ~24% of the time.
+#
+# Refresh at 60% of the TTL: late enough that joins stay roughly as frequent as
+# they were (their limiter already pushes back, see `_retry_after`), early
+# enough that a poll and a slow round trip both fit before it lapses.
+_QUEUE_REFRESH_FRACTION = 0.6
+_QUEUE_POLL_S = 10.0
 
 # A 429 on `join` is not the queue being down, and must not be paid for at the
 # poll period: measured 09-01, a third of joins were limited and each one bought
@@ -626,7 +635,7 @@ async def _keep_queued(
     import httpx  # noqa: PLC0415 -- only the live socket path needs a client
 
     headers = {"Authorization": f"Bearer {token}"}
-    period = _QUEUE_MIN_PERIOD_S
+    period = _QUEUE_POLL_S
     last_state: str | None = None
     backoff = 0.0
 
@@ -641,8 +650,11 @@ async def _keep_queued(
                     status = (await http.get("/api/external-api/matchmaking/status")).json()
                     state = str(status.get("status", "unknown"))
                     ttl = float(status.get("queue_ttl_seconds") or 0.0)
-                    period = max(_QUEUE_MIN_PERIOD_S, ttl * _QUEUE_TTL_FRACTION)
-                    if state == "idle":
+                    waiting = float(status.get("waiting_seconds") or 0.0)
+                    # Enter when out, refresh before the entry lapses. Waiting
+                    # for `idle` is what left the seat unqueued between expiry
+                    # and the next poll.
+                    if state == "idle" or waiting >= ttl * _QUEUE_REFRESH_FRACTION:
                         reply = await http.post("/api/external-api/matchmaking/join", json={})
                         reply.raise_for_status()
                         state = "queued"

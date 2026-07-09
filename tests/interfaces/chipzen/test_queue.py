@@ -38,9 +38,20 @@ class TestRestBase:
 class _Chipzen:
     """Their matchmaking endpoints, enough of them to drive the keeper."""
 
-    def __init__(self, *, status: str = "idle", expires: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        status: str = "idle",
+        expires: bool = False,
+        waiting: float = 0.0,
+        ttl: float = 60.0,
+    ) -> None:
         self.status = status
         self.expires = expires
+        # Their real numbers: an entry lives 60 s and reports its own age, which
+        # is what tells the keeper to refresh before it lapses.
+        self.waiting = waiting
+        self.ttl = ttl
         self.joins = 0
         self.status_reads = 0
         self.fail_with: Exception | None = None
@@ -54,15 +65,17 @@ class _Chipzen:
                 200,
                 json={
                     "status": self.status,
-                    "position": None,
-                    "waiting_seconds": None,
-                    # Zero, so the keeper's period collapses to the floor the
-                    # fixture has already pinned to nothing.
-                    "queue_ttl_seconds": 0,
+                    "position": 1 if self.status == "queued" else None,
+                    "waiting_seconds": self.waiting if self.status == "queued" else None,
+                    "queue_ttl_seconds": self.ttl,
                 },
             )
         if request.url.path.endswith("/matchmaking/join"):
             self.joins += 1
+            # MEASURED 09-01: a join REFRESHES a live entry rather than being
+            # refused -- `waiting_seconds` 33 -> 2. That is the whole reason the
+            # keeper may refresh instead of waiting for expiry.
+            self.waiting = 0.0
             # Their entry expires on its own; `expires` is whether this fake
             # models that or holds the queued state.
             self.status = "idle" if self.expires else "queued"
@@ -73,7 +86,7 @@ class _Chipzen:
 @pytest.fixture
 def chipzen(monkeypatch):
     """A fake Chipzen, with the keeper's pacing removed."""
-    monkeypatch.setattr(seat_module, "_QUEUE_MIN_PERIOD_S", 0.0)
+    monkeypatch.setattr(seat_module, "_QUEUE_POLL_S", 0.0)
     # ...and its rate-limit backoff, which is real seconds by design.
     monkeypatch.setattr(seat_module, "_QUEUE_BACKOFF_START_S", 0.0)
     monkeypatch.setattr(seat_module, "_QUEUE_BACKOFF_MAX_S", 0.0)
@@ -191,3 +204,50 @@ class TestRateLimitBackoff:
         chipzen.handle = _limit  # type: ignore[method-assign]
         _run(playing=0, passes=3)
         assert attempts == 3
+
+
+class TestEntryRefresh:
+    """The entry is REFRESHED before it lapses, not re-created after it has.
+
+    Joining only on `idle` meant the keeper waited for the 60 s entry to expire
+    and then noticed a poll later. Measured live 09-01: 63 s between joins
+    against a 60 s TTL, so the seat sat OUT of the queue ~24% of the time and
+    every join landed in the window their rate limiter is touchiest.
+
+    A join while queued refreshes rather than being refused -- measured against
+    the live endpoint, `waiting_seconds` 33 -> 2 with HTTP 200 -- which is what
+    makes refreshing safe.
+    """
+
+    def test_an_aging_entry_is_refreshed(self, chipzen) -> None:
+        chipzen.status = "queued"
+        chipzen.waiting = 45.0  # past 60% of a 60 s TTL
+        _run(playing=0, passes=1)
+        assert chipzen.joins == 1
+        assert chipzen.waiting == 0.0
+
+    def test_a_fresh_entry_is_left_alone(self, chipzen) -> None:
+        # Refreshing every pass would multiply the join rate against a limiter
+        # that already pushes back with 429s.
+        chipzen.status = "queued"
+        chipzen.waiting = 5.0
+        _run(playing=0, passes=3)
+        assert chipzen.joins == 0
+
+    def test_the_entry_never_lapses_across_many_passes(self, chipzen) -> None:
+        # The whole point: drive the keeper for a while and the queue entry is
+        # never once allowed to age out.
+        chipzen.status = "queued"
+        aged = []
+
+        original = _Chipzen.handle
+
+        def _age(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/matchmaking/status"):
+                chipzen.waiting += 20.0  # 20 s of ageing per poll
+                aged.append(chipzen.waiting)
+            return original(chipzen, request)
+
+        chipzen.handle = _age  # type: ignore[method-assign]
+        _run(playing=0, passes=10)
+        assert max(aged) < chipzen.ttl, f"entry reached {max(aged)}s of a {chipzen.ttl}s TTL"
