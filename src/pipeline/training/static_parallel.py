@@ -41,7 +41,7 @@ from src.shared import run_events
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from src.engine.solver.protocols import BucketingStrategy
@@ -295,6 +295,7 @@ def train_static_parallel(
     worker: Callable[..., None] = _worker_entry,
     worker_args: tuple[Any, ...] = (),
     before_checkpoint: Callable[[StaticArrayStorage], None] | None = None,
+    extra_arrays: Mapping[str, int] | None = None,
 ) -> StaticTrainingResult:
     """Train on static storage across ``num_workers`` processes.
 
@@ -315,7 +316,7 @@ def train_static_parallel(
     million iterations by default.
     """
     _, abstraction, tree = _build_local(config, abstraction)
-    storage = StaticArrayStorage(tree, session_id=session_id)
+    storage = StaticArrayStorage(tree, session_id=session_id, extra=extra_arrays)
     # Named before the try so the `finally` can stop it on the paths that return
     # before it exists -- an already-satisfied target is one of them.
     reporter = _ProgressReporter(None, (), 0, num_iterations)
