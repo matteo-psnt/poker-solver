@@ -206,56 +206,17 @@ class TestRateLimitBackoff:
         assert attempts == 3
 
 
-class TestEntryRefresh:
-    """The entry is REFRESHED before it lapses, not re-created after it has.
-
-    Joining only on `idle` meant the keeper waited for the 60 s entry to expire
-    and then noticed a poll later. Measured live 09-01: 63 s between joins
-    against a 60 s TTL, so the seat sat OUT of the queue ~24% of the time and
-    every join landed in the window their rate limiter is touchiest.
-
-    A join while queued refreshes rather than being refused -- measured against
-    the live endpoint, `waiting_seconds` 33 -> 2 with HTTP 200 -- which is what
-    makes refreshing safe.
+class TestKeepsJoiningOnIdleOnly:
+    """Refreshing a live entry early was tried and measured WORSE; see the
+    comment on `_QUEUE_POLL_S`. Live over 40 status samples per arm:
+    join-on-idle 70% queued, refresh-at-25s 60%, refresh-at-15s 60%.
     """
 
-    def test_an_aging_entry_is_refreshed(self, chipzen) -> None:
+    def test_a_live_entry_is_left_alone_however_old(self, chipzen) -> None:
         chipzen.status = "queued"
-        chipzen.waiting = seat_module._QUEUE_REFRESH_AFTER_S + 1.0
-        _run(playing=0, passes=1)
-        assert chipzen.joins == 1
-        assert chipzen.waiting == 0.0
-
-    def test_a_fresh_entry_is_left_alone(self, chipzen) -> None:
-        # Refreshing every pass would multiply the join rate against a limiter
-        # that already pushes back with 429s.
-        chipzen.status = "queued"
-        chipzen.waiting = seat_module._QUEUE_REFRESH_AFTER_S - 1.0
+        chipzen.waiting = 55.0  # nearly the advertised ttl, still not our business
         _run(playing=0, passes=3)
         assert chipzen.joins == 0
-
-    def test_the_entry_never_lapses_across_many_passes(self, chipzen) -> None:
-        # The whole point: drive the keeper for a while and the queue entry is
-        # never once allowed to age out.
-        chipzen.status = "queued"
-        step = seat_module._QUEUE_POLL_S
-        aged = []
-
-        original = _Chipzen.handle
-
-        def _age(request: httpx.Request) -> httpx.Response:
-            if request.url.path.endswith("/matchmaking/status"):
-                chipzen.waiting += step  # one poll period of ageing per poll
-                aged.append(chipzen.waiting)
-            return original(chipzen, request)
-
-        chipzen.handle = _age  # type: ignore[method-assign]
-        _run(playing=0, passes=10)
-        # The worst age the keeper can leave an entry at is the threshold plus
-        # one poll. 35 s is the SHORTEST lifetime measured live -- their
-        # advertised 60 s ttl is not a safe bound and must not be asserted on.
-        assert max(aged) <= seat_module._QUEUE_REFRESH_AFTER_S + step
-        assert max(aged) < 35.0, f"entry reached {max(aged)}s; live entries died at 12-46s"
 
 
 class TestStatusFailuresAreNotSilent:
