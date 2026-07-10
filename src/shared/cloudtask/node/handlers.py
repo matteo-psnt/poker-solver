@@ -20,7 +20,7 @@ from pathlib import Path
 from src.shared import records
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
-from src.shared.cloudtask.node import archive, progress
+from src.shared.cloudtask.node import archive, profile, progress
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import TaskPlan
 from src.shared.cloudtask.node.process import TaskLogger, run_guarded
@@ -141,6 +141,9 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             cwd=paths.code,
             timeout=plan.timeout_seconds,
             log=log,
+            # Training is the long one, and the only task anybody watches for
+            # hours wondering where the time is going.
+            profile_dir=paths.share / profile.PROFILES_DIRNAME,
         )
     finally:
         watcher.stop()
