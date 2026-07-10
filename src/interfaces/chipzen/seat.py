@@ -586,12 +586,16 @@ def sdk_state_payload(state: Any) -> dict[str, Any]:
 # inside the expiry window and the seat still went idle three times in two
 # minutes.
 #
-# A fixed, conservative age instead: refresh once an entry is 15 s old, polling
-# every 7 s, so a refresh lands by ~22 s. That covers the common 35-46 s
-# lifetimes with margin without joining on every single poll -- their limiter
-# already pushes back at a far lower rate than that (see `_retry_after`).
-_QUEUE_REFRESH_AFTER_S = 15.0
-_QUEUE_POLL_S = 7.0
+# A fixed, conservative age instead: refresh once an entry is 25 s old, polling
+# every 20 s, so a refresh lands by ~45 s.
+#
+# ⚠️ DO NOT poll harder than this to close the remaining gap. A 7 s poll was
+# tried and measured WORSE -- 60% queued against the ~76% of the join-on-idle
+# original -- because four times the status traffic drew silent error responses
+# (see `raise_for_status` below). Their limiter, not the entry lifetime, is what
+# bounds queue presence, so the equilibrium is found by asking LESS often.
+_QUEUE_REFRESH_AFTER_S = 25.0
+_QUEUE_POLL_S = 20.0
 
 # A 429 on `join` is not the queue being down, and must not be paid for at the
 # poll period: measured 09-01, a third of joins were limited and each one bought
@@ -656,7 +660,15 @@ async def _keep_queued(
                 if in_flight() > 0:
                     state = "playing"
                 else:
-                    status = (await http.get("/api/external-api/matchmaking/status")).json()
+                    # RAISE on a bad status read. Without this a 429 or a 5xx
+                    # was `.json()`-parsed into an error body, `status` came back
+                    # None, and the state read "unknown" -- which is neither
+                    # `idle` nor aged, so the keeper skipped the re-join and
+                    # logged NOTHING. Polling faster turned that silent skip
+                    # into 40% of samples unqueued with an empty journal.
+                    reply = await http.get("/api/external-api/matchmaking/status")
+                    reply.raise_for_status()
+                    status = reply.json()
                     state = str(status.get("status", "unknown"))
                     waiting = float(status.get("waiting_seconds") or 0.0)
                     # Enter when out, refresh before the entry lapses. Waiting

@@ -221,7 +221,7 @@ class TestEntryRefresh:
 
     def test_an_aging_entry_is_refreshed(self, chipzen) -> None:
         chipzen.status = "queued"
-        chipzen.waiting = 20.0  # older than _QUEUE_REFRESH_AFTER_S
+        chipzen.waiting = seat_module._QUEUE_REFRESH_AFTER_S + 1.0
         _run(playing=0, passes=1)
         assert chipzen.joins == 1
         assert chipzen.waiting == 0.0
@@ -230,7 +230,7 @@ class TestEntryRefresh:
         # Refreshing every pass would multiply the join rate against a limiter
         # that already pushes back with 429s.
         chipzen.status = "queued"
-        chipzen.waiting = 5.0
+        chipzen.waiting = seat_module._QUEUE_REFRESH_AFTER_S - 1.0
         _run(playing=0, passes=3)
         assert chipzen.joins == 0
 
@@ -238,18 +238,55 @@ class TestEntryRefresh:
         # The whole point: drive the keeper for a while and the queue entry is
         # never once allowed to age out.
         chipzen.status = "queued"
+        step = seat_module._QUEUE_POLL_S
         aged = []
 
         original = _Chipzen.handle
 
         def _age(request: httpx.Request) -> httpx.Response:
             if request.url.path.endswith("/matchmaking/status"):
-                chipzen.waiting += 20.0  # 20 s of ageing per poll
+                chipzen.waiting += step  # one poll period of ageing per poll
                 aged.append(chipzen.waiting)
             return original(chipzen, request)
 
         chipzen.handle = _age  # type: ignore[method-assign]
         _run(playing=0, passes=10)
-        # 35 s is the shortest entry lifetime measured live; their advertised
-        # 60 s ttl is NOT a safe bound and must not be asserted against.
+        # The worst age the keeper can leave an entry at is the threshold plus
+        # one poll. 35 s is the SHORTEST lifetime measured live -- their
+        # advertised 60 s ttl is not a safe bound and must not be asserted on.
+        assert max(aged) <= seat_module._QUEUE_REFRESH_AFTER_S + step
         assert max(aged) < 35.0, f"entry reached {max(aged)}s; live entries died at 12-46s"
+
+
+class TestStatusFailuresAreNotSilent:
+    """A bad `status` read must not skip the re-join without saying so.
+
+    It did: the response was `.json()`-parsed regardless of code, so an error
+    body yielded `status=None` -> state "unknown", which is neither `idle` nor
+    aged. The keeper then did nothing, logged nothing, and the seat quietly fell
+    out of the queue. Measured 09-01 at a 7 s poll: 40% of samples unqueued with
+    an EMPTY journal.
+    """
+
+    def test_a_failing_status_read_is_surfaced(self, chipzen, caplog) -> None:
+        def _sick(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/matchmaking/status"):
+                return httpx.Response(503, json={"detail": "upstream"})
+            return _Chipzen.handle(chipzen, request)
+
+        chipzen.handle = _sick  # type: ignore[method-assign]
+        with caplog.at_level("WARNING"):
+            _run(playing=0, passes=2)
+        assert "still holding the lobby" in caplog.text
+
+    def test_a_rate_limited_status_read_backs_off(self, chipzen, caplog) -> None:
+        # It must take the 429 path, not be swallowed as an unknown state.
+        def _limited(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/matchmaking/status"):
+                return httpx.Response(429, json={"error_code": "RATE_LIMIT"})
+            return _Chipzen.handle(chipzen, request)
+
+        chipzen.handle = _limited  # type: ignore[method-assign]
+        with caplog.at_level("WARNING"):
+            _run(playing=0, passes=2)
+        assert "rate limited" in caplog.text
