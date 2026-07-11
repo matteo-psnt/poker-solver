@@ -145,7 +145,11 @@ def save_checkpoint(
         cname="zstd", clevel=DEFAULT_COMPRESSION_LEVEL, shuffle=numcodecs.Blosc.BITSHUFFLE
     )
     root = zarr.open(zarr.DirectoryStore(zarr_path), mode="w")
-    for name in _ARRAYS:
+    # A trainer's own scaffolding rides along beside the five. It is not part of
+    # the answer and nothing reading a checkpoint needs it, but a run reaching
+    # its target in several tasks would otherwise restart it from zero at every
+    # task boundary -- and CFR-BR's opponent lives in there.
+    for name in (*_ARRAYS, *storage.extra):
         array = getattr(storage, name)
         root.create_dataset(
             name,
@@ -273,7 +277,7 @@ def load_checkpoint(
     row_source, slot_source = _legacy_index_maps(storage.tree) if translate else (None, None)
     if translate:
         logger.info("Checkpoint is v1 node-major; permuting arrays into the bucket-major layout.")
-    for name in _ARRAYS:
+    for name in (*_ARRAYS, *(name for name in storage.extra if name in root)):
         target = getattr(storage, name)
         source = root[name][:]
         if source.shape != target.shape:
