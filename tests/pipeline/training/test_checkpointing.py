@@ -37,13 +37,22 @@ class _RecordingExecutor:
 
 
 def _session(
-    *, freq=100_000, last=0, enabled=True, ckpt_seconds=0.0, ckpt_end=0.0, executor=None
+    *,
+    freq=100_000,
+    last=0,
+    enabled=True,
+    ckpt_seconds=0.0,
+    ckpt_end=0.0,
+    executor=None,
+    overhead=0.1,
 ) -> "TrainingSession":
     return cast(
         "TrainingSession",
         SimpleNamespace(
             config=SimpleNamespace(
-                storage=SimpleNamespace(checkpoint_enabled=enabled),
+                storage=SimpleNamespace(
+                    checkpoint_enabled=enabled, max_checkpoint_overhead=overhead
+                ),
                 training=SimpleNamespace(checkpoint_frequency=freq),
             ),
             last_checkpoint_iteration=last,
@@ -67,19 +76,34 @@ def test_should_checkpoint_disabled_or_iteration_zero():
     assert not checkpointing.should_checkpoint(_session(), 0, 10_000)
 
 
-def test_back_pressure_defers_right_after_an_expensive_checkpoint():
+def test_back_pressure_defers_within_the_overhead_window():
+    # 10% overhead → must wait 9x the last checkpoint's cost (900s) before the next.
     executor = _RecordingExecutor()
-    session = _session(ckpt_seconds=100.0, ckpt_end=time.time(), executor=executor)
+    session = _session(
+        ckpt_seconds=100.0, ckpt_end=time.time() - 200.0, executor=executor, overhead=0.1
+    )
     checkpointing.async_checkpoint(session, _NO_WM, 200_000, 0, 0, 0.0)
-    assert executor.submits == 0  # a 100s checkpoint just finished → defer
+    assert executor.submits == 0  # only 200s elapsed, need 900s
 
 
-def test_back_pressure_allows_after_enough_training_elapsed():
+def test_back_pressure_allows_after_the_overhead_window():
     executor = _RecordingExecutor()
-    session = _session(ckpt_seconds=100.0, ckpt_end=time.time() - 200.0, executor=executor)
+    session = _session(
+        ckpt_seconds=100.0, ckpt_end=time.time() - 1000.0, executor=executor, overhead=0.1
+    )
+    checkpointing.async_checkpoint(session, _NO_WM, 200_000, 0, 0, 0.0)
+    assert executor.submits == 1  # 1000s > 900s
+    assert session.last_checkpoint_iteration == 200_000
+
+
+def test_higher_overhead_allowance_checkpoints_sooner():
+    # At 50% overhead the wait is only 1x cost, so the same 200s gap is enough.
+    executor = _RecordingExecutor()
+    session = _session(
+        ckpt_seconds=100.0, ckpt_end=time.time() - 200.0, executor=executor, overhead=0.5
+    )
     checkpointing.async_checkpoint(session, _NO_WM, 200_000, 0, 0, 0.0)
     assert executor.submits == 1
-    assert session.last_checkpoint_iteration == 200_000
 
 
 def test_first_checkpoint_is_not_back_pressured():
