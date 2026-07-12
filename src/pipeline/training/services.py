@@ -1,5 +1,6 @@
 """Service-layer APIs for training and evaluation orchestration."""
 
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -173,6 +174,17 @@ def resume_training(run_dir: Path, additional_iterations: int) -> tuple[Training
     return session, latest_iteration
 
 
+def _load_blueprint(config: Config, checkpoint_dir: Path) -> object:
+    """Build a fresh evaluation blueprint (solver) from a checkpoint.
+
+    Used as a picklable factory (via ``functools.partial``) so parallel-LBR worker
+    processes each construct their own solver — the solver holds a non-picklable
+    Cython member and cannot be sent across a process boundary.
+    """
+    solver, _ = build_evaluation_solver(config, checkpoint_dir=checkpoint_dir)
+    return solver
+
+
 def evaluate_run_lbr(
     run_dir: Path,
     *,
@@ -180,12 +192,14 @@ def evaluate_run_lbr(
     equity_runouts: int = 24,
     include_off_tree: bool = False,
     seed: int | None = None,
+    num_workers: int = 1,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
     LBR is a rigorous lower bound on true exploitability (LBR <= exact BR, validated
     on Kuhn/Leduc). ``include_off_tree`` stays False by default: off-tree bet sizes
     leak into a uniform-random opponent on later streets and bias the number.
+    ``num_workers`` parallelizes over hands; the result is identical for any count.
 
     Raises:
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
@@ -196,6 +210,12 @@ def evaluate_run_lbr(
         metadata.config,
         checkpoint_dir=run_dir,
     )
+    # For parallel LBR each worker rebuilds its own solver from the checkpoint (the
+    # solver is not picklable across processes); the factory captures only picklable
+    # args (config + checkpoint dir).
+    factory = (
+        functools.partial(_load_blueprint, metadata.config, run_dir) if num_workers > 1 else None
+    )
     result = compute_lbr_exploitability(
         solver,
         LBRConfig(
@@ -203,7 +223,9 @@ def evaluate_run_lbr(
             equity_runouts=equity_runouts,
             include_off_tree=include_off_tree,
             seed=seed,
+            num_workers=num_workers,
         ),
+        blueprint_factory=factory,
     )
     results = {
         "exploitability_mbb": result.exploitability_mbb,

@@ -85,12 +85,14 @@ def train(
     return dataclasses.asdict(out)
 
 
-# LBR is single-threaded, so evaluate does not benefit from many cores; the long
-# timeout covers the minutes-scale default (num_hands=2000 ~ 10+ min).
+# LBR parallelizes over hands (embarrassingly parallel), so evaluate reserves
+# DEFAULT_CPU cores and pins num_workers to match (same reason as train — the
+# container reports host cores, not the reservation). The long timeout covers the
+# minutes-scale default (num_hands=2000).
 @app.function(
     image=image,
     volumes={DATA_MOUNT: data_volume},
-    cpu=2,
+    cpu=DEFAULT_CPU,
     memory=DEFAULT_MEMORY_MB,
     timeout=3600,
 )
@@ -99,6 +101,7 @@ def evaluate(
     method: str = "lbr",
     num_hands: int = 2000,
     equity_runouts: int = 24,
+    num_workers: int | None = None,
     num_samples: int = 500,
     num_rollouts: int = 50,
     use_average_strategy: bool = True,
@@ -126,6 +129,7 @@ def evaluate(
             num_hands=num_hands,
             equity_runouts=equity_runouts,
             seed=seed,
+            num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
         )
         estimator = LBR_ESTIMATOR_LABEL
     return {

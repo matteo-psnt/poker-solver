@@ -59,7 +59,10 @@ References:
 
 from __future__ import annotations
 
+import multiprocessing
 import random
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -98,6 +101,9 @@ class LBRConfig:
     # the trustworthy default. Enable only for exploratory action-abstraction probing.
     include_off_tree: bool = False
     seed: int | None = None
+    # Parallel workers for hand evaluation. LBR is embarrassingly parallel over hands;
+    # each hand is seeded independently so the result is identical for any worker count.
+    num_workers: int = 1
 
 
 @dataclass
@@ -558,7 +564,12 @@ class _HUNLLocalBestResponse:
         return state.betting_history[-1].type != ActionType.FOLD
 
 
-def compute_lbr_exploitability(blueprint, config: LBRConfig | None = None) -> LBRResult:
+def compute_lbr_exploitability(
+    blueprint,
+    config: LBRConfig | None = None,
+    *,
+    blueprint_factory: Callable[[], object] | None = None,
+) -> LBRResult:
     """Estimate the blueprint's exploitability via Local Best Response.
 
     Plays ``config.num_hands`` deals; on each, the LBR player exploits from both
@@ -570,27 +581,38 @@ def compute_lbr_exploitability(blueprint, config: LBRConfig | None = None) -> LB
     """
     if config is None:
         config = LBRConfig()
-    if config.seed is not None:
-        # The blueprint deals the board via the ``random`` module; seed it too so
-        # the whole evaluation is reproducible, not just our own sampling.
-        random.seed(config.seed)
-    rng = np.random.default_rng(config.seed)
-    engine = _HUNLLocalBestResponse(blueprint, config, rng)
-
+    # A base seed anchors per-hand seeding. Each hand is seeded from (base_seed, hand),
+    # so the set of per-hand results — and thus the aggregate — is identical for any
+    # worker count (num_workers only changes how the hands are distributed).
+    base_seed = (
+        config.seed
+        if config.seed is not None
+        else int(np.random.SeedSequence().generate_state(1)[0])
+    )
     starting_stack = blueprint.config.game.starting_stack
     big_blind = blueprint.config.game.big_blind
 
-    utilities_p0: list[float] = []
-    utilities_p1: list[float] = []
-    samples: list[float] = []
-    for hand in range(config.num_hands):
-        button = hand % 2
-        state = _deal_initial_state(engine, starting_stack, button, rng)
-        u0 = engine.play_hand(0, state)
-        u1 = engine.play_hand(1, state)
-        utilities_p0.append(u0)
-        utilities_p1.append(u1)
-        samples.append((u0 + u1) / 2.0)
+    num_workers = max(1, config.num_workers)
+    if num_workers == 1:
+        engine = _HUNLLocalBestResponse(blueprint, config, np.random.default_rng(base_seed))
+        pairs = [
+            _play_hand_pair(engine, hand, base_seed, starting_stack)
+            for hand in range(config.num_hands)
+        ]
+    else:
+        if blueprint_factory is None:
+            raise ValueError(
+                "num_workers > 1 requires blueprint_factory: the solver holds a "
+                "non-picklable Cython member, so each worker must build its own from "
+                "a picklable spec (e.g. config + checkpoint dir)."
+            )
+        pairs = _run_hands_parallel(
+            blueprint_factory, config, base_seed, starting_stack, num_workers
+        )
+
+    utilities_p0 = [u0 for u0, _ in pairs]
+    utilities_p1 = [u1 for _, u1 in pairs]
+    samples = [(u0 + u1) / 2.0 for u0, u1 in pairs]
 
     exploitability = float(np.mean(samples)) if samples else float("nan")
     if len(samples) >= 2:
@@ -626,3 +648,83 @@ def _deal_initial_state(
         hole_cards=hole_cards,
         button=button,
     )
+
+
+def _hand_seed(base_seed: int, hand: int) -> int:
+    """Per-hand seed, independent of worker assignment, for reproducible parallel LBR."""
+    return int(np.random.SeedSequence([base_seed, hand]).generate_state(1)[0])
+
+
+def _play_hand_pair(
+    engine: _HUNLLocalBestResponse,
+    hand: int,
+    base_seed: int,
+    starting_stack: int,
+) -> tuple[float, float]:
+    """Play one deal from both positions under a per-hand deterministic RNG.
+
+    Reseeds every randomness source consumed during the hand — the engine's own
+    ``rng`` and the global ``random`` module (the blueprint deals the board via
+    ``random.shuffle``) — from ``(base_seed, hand)``, so the result is independent of
+    which worker runs the hand or in what order. ``np.random`` is reseeded defensively
+    (no global ``np.random`` is used in the current LBR path, but this guards new ones).
+    """
+    s_h = _hand_seed(base_seed, hand)
+    random.seed(s_h)
+    np.random.seed(s_h)
+    engine.rng = np.random.default_rng(s_h)
+    button = hand % 2
+    state = _deal_initial_state(engine, starting_stack, button, engine.rng)
+    u0 = engine.play_hand(0, state)
+    u1 = engine.play_hand(1, state)
+    return u0, u1
+
+
+# --- Parallel execution -------------------------------------------------------
+# Workers use the "spawn" start method, never fork: building the blueprint spins up
+# numba/BLAS thread pools, and forking a threaded process deadlocks on inherited locks.
+# The solver is NOT picklable (Cython member), so each worker builds its OWN blueprint
+# from the picklable factory. Per-hand seeding makes the result identical to serial.
+_WORKER_ENGINE: _HUNLLocalBestResponse | None = None
+_WORKER_CTX: tuple[int, int] | None = None  # (base_seed, starting_stack)
+
+
+def _init_worker(
+    blueprint_factory: Callable[[], object],
+    config: LBRConfig,
+    base_seed: int,
+    starting_stack: int,
+) -> None:
+    global _WORKER_ENGINE, _WORKER_CTX
+    # Worker subprocess stdout (e.g. checkpoint-load logs from building the blueprint)
+    # cannot be captured by the parent's stdout redirect; route it to stderr so the
+    # parent's --json output on stdout stays clean.
+    sys.stdout = sys.stderr
+    blueprint = blueprint_factory()
+    _WORKER_ENGINE = _HUNLLocalBestResponse(blueprint, config, np.random.default_rng(base_seed))
+    _WORKER_CTX = (base_seed, starting_stack)
+
+
+def _worker_play_hand(hand: int) -> tuple[float, float]:
+    assert _WORKER_ENGINE is not None and _WORKER_CTX is not None
+    base_seed, starting_stack = _WORKER_CTX
+    return _play_hand_pair(_WORKER_ENGINE, hand, base_seed, starting_stack)
+
+
+def _run_hands_parallel(
+    blueprint_factory: Callable[[], object],
+    config: LBRConfig,
+    base_seed: int,
+    starting_stack: int,
+    num_workers: int,
+) -> list[tuple[float, float]]:
+    ctx = multiprocessing.get_context("spawn")
+    chunksize = max(1, config.num_hands // (num_workers * 4))
+    with ctx.Pool(
+        num_workers,
+        initializer=_init_worker,
+        initargs=(blueprint_factory, config, base_seed, starting_stack),
+    ) as pool:
+        # pool.map preserves input order → results are in canonical hand order, so the
+        # mean/std reduction is bitwise-identical to the serial path.
+        return pool.map(_worker_play_hand, range(config.num_hands), chunksize=chunksize)
