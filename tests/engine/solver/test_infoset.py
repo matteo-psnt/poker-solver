@@ -11,6 +11,32 @@ from src.engine.solver.infoset import InfoSet, InfoSetKey, create_infoset_key
 class TestInfoSetKey:
     """Tests for InfoSetKey."""
 
+    def test_pickle_recomputes_hash_and_survives_dict_lookup(self):
+        """A key pickled with a stale cached hash (as if from another process's
+        PYTHONHASHSEED) must recompute its hash on load and still match a fresh
+        equivalent. Regression: pickled InfoSetKeys caused 100% checkpoint-lookup
+        misses across processes, so LBR/resume never found the trained strategy."""
+        import pickle
+
+        fresh = InfoSetKey(1, Street.PREFLOP, "r1.33", "22", None, 2)
+        stale = InfoSetKey(1, Street.PREFLOP, "r1.33", "22", None, 2)
+        object.__setattr__(stale, "_hash", 123456789)  # a different process's hash
+
+        restored = pickle.loads(pickle.dumps(stale))
+
+        assert restored == fresh
+        assert hash(restored) == hash(fresh)
+        assert {fresh: "value"}[restored] == "value"
+
+    def test_legacy_list_state_loads_and_drops_stale_hash(self):
+        """Legacy default-pickled keys are a 7-element list ``[*fields, stale_hash]``."""
+        key = InfoSetKey.__new__(InfoSetKey)
+        key.__setstate__([0, Street.FLOP, "c-b0.25", None, 4, 2, 999999])
+
+        fresh = InfoSetKey(0, Street.FLOP, "c-b0.25", None, 4, 2)
+        assert key == fresh
+        assert hash(key) == hash(fresh)
+
     def test_create_infoset_key_preflop(self):
         """Test creating preflop InfoSetKey with hand string."""
         key = InfoSetKey(

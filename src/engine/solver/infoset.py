@@ -84,6 +84,37 @@ class InfoSetKey:
             ),
         )
 
+    def __getstate__(self) -> tuple:
+        # Exclude the cached ``_hash``: Python randomizes string hashing per process
+        # (PYTHONHASHSEED), so a hash pickled in one process is invalid in another.
+        # Pickling it caused checkpointed keys to never match freshly-encoded keys on
+        # load, so blueprint lookups (eval/resume) missed 100% of the time.
+        return (
+            self.player_position,
+            self.street,
+            self.betting_sequence,
+            self.preflop_hand,
+            self.postflop_bucket,
+            self.spr_bucket,
+        )
+
+    def __setstate__(self, state: tuple | list) -> None:
+        # New pickles are the 6-field tuple above; legacy default-pickled keys are a
+        # 7-element list ``[*fields, stale_hash]``. Take the six fields (dropping any
+        # stale hash) and recompute the hash in the CURRENT process.
+        values = tuple(state[:6])
+        names = (
+            "player_position",
+            "street",
+            "betting_sequence",
+            "preflop_hand",
+            "postflop_bucket",
+            "spr_bucket",
+        )
+        for name, value in zip(names, values):
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, "_hash", hash(values))
+
     def __hash__(self) -> int:
         """Hash for dictionary storage."""
         return self._hash
