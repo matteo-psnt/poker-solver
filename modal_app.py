@@ -277,6 +277,44 @@ def main(
 
 
 @app.local_entrypoint()
+def run_train(
+    config: str = "production",
+    cpu: int = 32,
+    iterations: int = 0,
+    seed: int = 42,
+    eval_hands: int = 2000,
+    eval_cpu: int = 16,
+) -> None:
+    """Train a real run and evaluate it with LBR — the improvement-loop primitive.
+
+    ``iterations=0`` uses the config's own count (production = 1M). Training runs at
+    the ~32-core sweet spot; LBR eval uses fewer workers (each rebuilds the blueprint).
+    """
+    train_result = train.with_options(cpu=cpu, memory=16384).remote(
+        config_name=config,
+        num_workers=cpu,
+        num_iterations=iterations or None,
+        seed=seed,
+    )
+    print("TRAINING RESULT:")
+    for key, value in train_result.items():
+        print(f"  {key}: {value}")
+
+    run_id = train_result["run_id"]
+    print(f"\nEvaluating {run_id} with LBR ({eval_hands} hands, {eval_cpu} workers)...")
+    eval_result = evaluate.with_options(cpu=eval_cpu, memory=16384).remote(
+        run_id=run_id, num_hands=eval_hands, num_workers=eval_cpu, seed=1
+    )
+    results = eval_result["results"]
+    print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
+    print(
+        f"  {results['exploitability_mbb']:.1f} mbb/g "
+        f"(± {results['std_error_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
+    )
+    print(f"  infosets: {eval_result['infosets']:,}")
+
+
+@app.local_entrypoint()
 def run_precompute(config: str = "production", workers: int = 32, overwrite: bool = False) -> None:
     """Precompute an abstraction on Modal and persist it to the poker-data Volume."""
     result = precompute.remote(abstraction_config=config, num_workers=workers, overwrite=overwrite)
