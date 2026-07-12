@@ -114,10 +114,9 @@ def train(
 ) -> TrainingOutput:
     """Run a full training session from a named config and return a portable summary.
 
-    This is the headless, non-interactive training entrypoint used by scripts, the
-    agent-driven improvement loop, and cloud (Modal) execution. It loads the config,
-    verifies the card abstraction is present, trains, and returns a
-    :class:`TrainingOutput` — no stdout parsing required.
+    This is the headless, non-interactive training entrypoint used by scripts and
+    cloud (Modal) execution. It loads the config, verifies the card abstraction is
+    present, trains, and returns a :class:`TrainingOutput` — no stdout parsing required.
 
     Args:
         config_name: Stem of a config under ``config/training`` (e.g. ``"quick_test"``).

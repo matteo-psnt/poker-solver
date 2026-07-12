@@ -3,13 +3,9 @@
 A run's *representation version* identifies the on-disk checkpoint layout plus the
 infoset-encoding format it was produced under. It is the anchor for detecting —
 loudly, at build time — when a code change would silently render existing runs
-unloadable (the failure mode that orphaned pre-``src.bucketing`` artifacts).
-
-Scope note: the full migration applier/registry is deliberately deferred until a
-real format change needs one (there is nothing yet to migrate). What exists today
-is the stamp plus the enforcement tripwire — a committed golden run that must keep
-loading under current code, so a format break fails the test suite instead of
-silently orphaning runs. See the iteration-and-migration design memo.
+unloadable (the failure mode that orphaned pre-``src.bucketing`` artifacts). A
+committed golden run must keep loading under current code, so a format break fails
+the test suite instead of orphaning runs; ``migrations`` provides the forward path.
 """
 
 from __future__ import annotations
