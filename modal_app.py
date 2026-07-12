@@ -315,6 +315,61 @@ def run_train(
 
 
 @app.local_entrypoint()
+def run_eval(
+    run_id: str,
+    hands: int = 2000,
+    cpu: int = 6,
+    memory: int = 32768,
+    seed: int = 1,
+) -> None:
+    """LBR-evaluate an existing Volume run. Fewer workers + more memory for large
+    blueprints, since each parallel worker rebuilds the full blueprint."""
+    eval_result = evaluate.with_options(cpu=cpu, memory=memory).remote(
+        run_id=run_id, num_hands=hands, num_workers=cpu, seed=seed
+    )
+    results = eval_result["results"]
+    print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
+    print(
+        f"  {results['exploitability_mbb']:.1f} mbb/g "
+        f"(± {results['std_error_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
+    )
+    print(f"  infosets: {eval_result['infosets']:,}")
+
+
+@app.local_entrypoint()
+def resume_eval(
+    run_id: str,
+    additional: int = 9_000_000,
+    cpu: int = 32,
+    eval_hands: int = 2000,
+    eval_cpu: int = 16,
+) -> None:
+    """Resume an existing Volume run for more iterations, then re-evaluate with LBR.
+
+    Warm-start from a base checkpoint (no retrain from scratch); compare the LBR
+    number before and after to see whether more training helped.
+    """
+    resume_result = resume.with_options(cpu=cpu, memory=16384).remote(
+        run_id=run_id, additional_iterations=additional, num_workers=cpu
+    )
+    print("RESUME RESULT:")
+    for key, value in resume_result.items():
+        print(f"  {key}: {value}")
+
+    print(f"\nEvaluating {run_id} with LBR ({eval_hands} hands, {eval_cpu} workers)...")
+    eval_result = evaluate.with_options(cpu=eval_cpu, memory=16384).remote(
+        run_id=run_id, num_hands=eval_hands, num_workers=eval_cpu, seed=1
+    )
+    results = eval_result["results"]
+    print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
+    print(
+        f"  {results['exploitability_mbb']:.1f} mbb/g "
+        f"(± {results['std_error_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
+    )
+    print(f"  infosets: {eval_result['infosets']:,}")
+
+
+@app.local_entrypoint()
 def run_precompute(config: str = "production", workers: int = 32, overwrite: bool = False) -> None:
     """Precompute an abstraction on Modal and persist it to the poker-data Volume."""
     result = precompute.remote(abstraction_config=config, num_workers=workers, overwrite=overwrite)
