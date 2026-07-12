@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.core.game.state import Street
+from src.pipeline.abstraction.config import PrecomputeConfig
+from src.pipeline.abstraction.paths import abstraction_output_path
+from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 from src.pipeline.evaluation.hunl_local_best_response import (
     LBRConfig,
     compute_lbr_exploitability,
@@ -172,6 +176,31 @@ def resume_training(run_dir: Path, additional_iterations: int) -> tuple[Training
     session, latest_iteration = create_resumed_session(run_dir)
     run_training(session, num_iterations=additional_iterations)
     return session, latest_iteration
+
+
+def precompute_abstraction(
+    abstraction_config: str,
+    *,
+    num_workers: int | None = None,
+    base_dir: Path | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Headless precompute of a combo abstraction; return the output directory.
+
+    Output goes to ``<base_dir>/data/combo_abstraction/<name>`` (``base_dir`` defaults
+    to the working directory, matching the resolver's lookup). Skips work if a complete
+    abstraction already exists there unless ``overwrite`` is set.
+    """
+    config = PrecomputeConfig.from_yaml(abstraction_config)
+    if num_workers is not None:
+        config = config.model_copy(update={"num_workers": num_workers})
+    out = abstraction_output_path(base_dir or Path.cwd(), config)
+    if not overwrite and (out / "combo_abstraction.pkl").exists():
+        return out
+    precomputer = PostflopPrecomputer(config)
+    precomputer.precompute_all(streets=[Street.FLOP, Street.TURN, Street.RIVER])
+    precomputer.save(out)
+    return out
 
 
 def _load_blueprint(config: Config, checkpoint_dir: Path) -> object:

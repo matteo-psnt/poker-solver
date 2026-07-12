@@ -120,6 +120,58 @@ def test_train_reraises_unrelated_value_error(monkeypatch):
         services.train("quick_test")
 
 
+def test_precompute_abstraction_skips_when_present(monkeypatch, tmp_path):
+    """A complete abstraction on disk is reused (no rebuild) unless overwrite=True."""
+    out = tmp_path / "data" / "combo_abstraction" / "buckets-x"
+    out.mkdir(parents=True)
+    (out / "combo_abstraction.pkl").write_text("stub")
+
+    monkeypatch.setattr(services.PrecomputeConfig, "from_yaml", lambda name: SimpleNamespace())
+    monkeypatch.setattr(services, "abstraction_output_path", lambda base, cfg: out)
+    built = {"n": 0}
+    monkeypatch.setattr(services, "PostflopPrecomputer", lambda cfg: built.update(n=built["n"] + 1))
+
+    result = services.precompute_abstraction("quick_test", base_dir=tmp_path)
+
+    assert result == out
+    assert built["n"] == 0  # never constructed the precomputer
+
+
+def test_precompute_abstraction_runs_and_saves(monkeypatch, tmp_path):
+    """When missing, apply num_workers, run all three streets, and save to the dir."""
+    out = tmp_path / "data" / "combo_abstraction" / "buckets-y"
+    seen: dict = {}
+    base_cfg = SimpleNamespace(
+        model_copy=lambda update: seen.update(update=update) or SimpleNamespace(tag="copied")
+    )
+    monkeypatch.setattr(services.PrecomputeConfig, "from_yaml", lambda name: base_cfg)
+    monkeypatch.setattr(services, "abstraction_output_path", lambda base, cfg: out)
+
+    events: list = []
+
+    class _FakePrecomputer:
+        def __init__(self, cfg):
+            events.append(("init", cfg))
+
+        def precompute_all(self, streets):
+            events.append(("all", tuple(streets)))
+
+        def save(self, path):
+            events.append(("save", path))
+
+    monkeypatch.setattr(services, "PostflopPrecomputer", _FakePrecomputer)
+
+    result = services.precompute_abstraction("quick_test", num_workers=8, base_dir=tmp_path)
+
+    assert result == out
+    assert seen["update"] == {"num_workers": 8}
+    kind, init_cfg = events[0]
+    assert kind == "init"
+    assert getattr(init_cfg, "tag", None) == "copied"  # the num_workers-overridden config
+    assert any(k == "all" and len(streets) == 3 for k, streets in events)
+    assert ("save", out) in events
+
+
 def test_load_training_config_reads_named_yaml_and_applies_overrides():
     """load_training_config should resolve config/training/<name>.yaml and apply overrides."""
     config = load_training_config("quick_test", system__seed=123)

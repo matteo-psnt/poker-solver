@@ -56,6 +56,34 @@ DEFAULT_MEMORY_MB = 8192
 @app.function(
     image=image,
     volumes={DATA_MOUNT: data_volume},
+    cpu=32,
+    memory=16384,
+    timeout=10800,
+)
+def precompute(
+    abstraction_config: str,
+    num_workers: int | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Precompute a combo abstraction on a big-core box and persist it to the Volume.
+
+    Output lands under /root/data/combo_abstraction (the Volume). num_workers is pinned
+    to the cpu reservation (the container reports host cores, not the reservation).
+    """
+    from src.pipeline.training import services
+
+    out = services.precompute_abstraction(
+        abstraction_config,
+        num_workers=num_workers if num_workers is not None else 32,
+        overwrite=overwrite,
+    )
+    data_volume.commit()
+    return {"abstraction_config": abstraction_config, "output_dir": str(out)}
+
+
+@app.function(
+    image=image,
+    volumes={DATA_MOUNT: data_volume},
     cpu=DEFAULT_CPU,
     memory=DEFAULT_MEMORY_MB,
     timeout=3600,
@@ -246,6 +274,15 @@ def main(
     print(f"  estimator:      {eval_result['estimator']}")
     print(f"  infosets:       {eval_result['infosets']:,}")
     print(f"  exploitability: {results['exploitability_mbb']:.2f} mbb/g")
+
+
+@app.local_entrypoint()
+def run_precompute(config: str = "production", workers: int = 32, overwrite: bool = False) -> None:
+    """Precompute an abstraction on Modal and persist it to the poker-data Volume."""
+    result = precompute.remote(abstraction_config=config, num_workers=workers, overwrite=overwrite)
+    print("PRECOMPUTE RESULT:")
+    for key, value in result.items():
+        print(f"  {key}: {value}")
 
 
 @app.local_entrypoint()
