@@ -41,8 +41,25 @@ image = (
 
 app = modal.App("poker-solver")
 
+# Modal RESERVES `cpu` cores but does NOT cap the container to them: inside the
+# container mp.cpu_count(), os.sched_getaffinity, AND the cgroup CPU quota all report
+# the HOST's cores (measured: 24 in a cpu=8 container), not the reservation. There is
+# therefore no reliable in-container signal for the allocation, so num_workers must be
+# pinned by the caller. If it fell through to services.train's default
+# (mp.cpu_count()), a run would spawn ~24 workers regardless of the reservation — 3x the
+# per-worker memory and a real OOM risk. Callers using with_options(cpu=n) must pass a
+# matching num_workers=n (the calibrate sweep does).
+DEFAULT_CPU = 8
+DEFAULT_MEMORY_MB = 8192
 
-@app.function(image=image, volumes={DATA_MOUNT: data_volume}, cpu=2, timeout=3600)
+
+@app.function(
+    image=image,
+    volumes={DATA_MOUNT: data_volume},
+    cpu=DEFAULT_CPU,
+    memory=DEFAULT_MEMORY_MB,
+    timeout=3600,
+)
 def train(
     config_name: str,
     num_workers: int | None = None,
@@ -56,7 +73,7 @@ def train(
 
     out = services.train(
         config_name,
-        num_workers=num_workers,
+        num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
         num_iterations=num_iterations,
         seed=seed,
         config_overrides=config_overrides,
@@ -98,7 +115,13 @@ def evaluate(
     }
 
 
-@app.function(image=image, volumes={DATA_MOUNT: data_volume}, cpu=4, timeout=3600)
+@app.function(
+    image=image,
+    volumes={DATA_MOUNT: data_volume},
+    cpu=DEFAULT_CPU,
+    memory=DEFAULT_MEMORY_MB,
+    timeout=3600,
+)
 def resume(
     run_id: str,
     additional_iterations: int,
@@ -114,7 +137,11 @@ def resume(
     data_volume.reload()
     run_dir = Path("data/runs") / run_id
     session, resumed_from = services.create_resumed_session(run_dir)
-    services.run_training(session, num_workers=num_workers, num_iterations=additional_iterations)
+    services.run_training(
+        session,
+        num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
+        num_iterations=additional_iterations,
+    )
     data_volume.commit()
 
     metadata = services.load_run_metadata(run_dir)
@@ -165,7 +192,7 @@ def resume_test(
 @app.local_entrypoint()
 def main(
     config: str = "quick_test",
-    workers: int = 2,
+    workers: int | None = None,
     iterations: int = 1200,
     seed: int = 42,
 ) -> None:
@@ -173,6 +200,7 @@ def main(
 
     Exercises multiprocessing/SharedMemory training, checkpoint persistence to the
     Volume, and cross-container reads (evaluate reloads the Volume the trainer committed).
+    Leaving ``workers`` unset uses the pinned DEFAULT_CPU so the safe default is exercised.
     """
     train_result = train.remote(
         config_name=config,
