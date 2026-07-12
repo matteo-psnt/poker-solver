@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.pipeline.evaluation.hunl_local_best_response import (
+    LBRConfig,
+    compute_lbr_exploitability,
+)
 from src.pipeline.training.components import (
     build_evaluation_solver,
     evaluate_solver_exploitability,
@@ -13,11 +17,15 @@ from src.pipeline.training.trainer import TrainingSession
 from src.shared.config import Config
 from src.shared.config_loader import load_training_config
 
-# The current `evaluate_run` metric is the legacy one-ply rollout estimator, which
-# understates true exploitability (see the eval-harness effort). Callers that surface
-# the number to humans or an optimization loop must label it as such and NOT treat it
-# as a trustworthy best-response value until the LBR/exact harness replaces it.
-ROLLOUT_ESTIMATOR_LABEL = "rollout_one_ply (uninformative lower bound; not a true best response)"
+# Local Best Response: a rigorous lower bound on exploitability (LBR <= exact BR,
+# validated on Kuhn/Leduc). This is the trustworthy default metric.
+LBR_ESTIMATOR_LABEL = "local_best_response (rigorous lower bound on exploitability)"
+
+# The legacy `evaluate_run` metric is a one-ply rollout that both understates the
+# structure it explores AND is upward-biased by a recursive max over noisy MC
+# estimates — it is not a valid bound in either direction. Kept as an explicit
+# opt-in for diagnostics/comparison only; do NOT treat it as exploitability.
+ROLLOUT_ESTIMATOR_LABEL = "rollout_one_ply (uninformative; not a valid bound — diagnostic only)"
 
 
 @dataclass(frozen=True)
@@ -165,15 +173,61 @@ def resume_training(run_dir: Path, additional_iterations: int) -> tuple[Training
     return session, latest_iteration
 
 
-def evaluate_run(
+def evaluate_run_lbr(
+    run_dir: Path,
+    *,
+    num_hands: int = 2000,
+    equity_runouts: int = 24,
+    include_off_tree: bool = False,
+    seed: int | None = None,
+) -> EvaluationOutput:
+    """Evaluate a run's exploitability via Local Best Response (trustworthy default).
+
+    LBR is a rigorous lower bound on true exploitability (LBR <= exact BR, validated
+    on Kuhn/Leduc). ``include_off_tree`` stays False by default: off-tree bet sizes
+    leak into a uniform-random opponent on later streets and bias the number.
+
+    Raises:
+        FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
+        ValueError: Invalid configuration or checkpoint state.
+    """
+    metadata = load_run_metadata(run_dir)
+    solver, storage = build_evaluation_solver(
+        metadata.config,
+        checkpoint_dir=run_dir,
+    )
+    result = compute_lbr_exploitability(
+        solver,
+        LBRConfig(
+            num_hands=num_hands,
+            equity_runouts=equity_runouts,
+            include_off_tree=include_off_tree,
+            seed=seed,
+        ),
+    )
+    results = {
+        "exploitability_mbb": result.exploitability_mbb,
+        "exploitability_bb": result.exploitability_bb,
+        "std_error_mbb": result.std_error_mbb,
+        "confidence_95_mbb": result.confidence_95_mbb,
+        "lbr_utility_p0": result.lbr_utility_p0,
+        "lbr_utility_p1": result.lbr_utility_p1,
+        "num_hands": result.num_hands,
+    }
+    return EvaluationOutput(infosets=storage.num_infosets(), results=results)
+
+
+def evaluate_run_rollout(
     run_dir: Path,
     num_samples: int,
     num_rollouts: int,
     use_average_strategy: bool,
     seed: int | None,
 ) -> EvaluationOutput:
-    """
-    Evaluate a run and return exploitability metrics.
+    """Evaluate a run with the legacy one-ply rollout estimator (diagnostic opt-in only).
+
+    NOT a valid exploitability bound (see ``ROLLOUT_ESTIMATOR_LABEL``); prefer
+    :func:`evaluate_run_lbr`. Kept for comparison/diagnostics.
 
     Raises:
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.

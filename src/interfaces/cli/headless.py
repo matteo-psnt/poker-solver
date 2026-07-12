@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.training import services
-from src.pipeline.training.services import ROLLOUT_ESTIMATOR_LABEL
+from src.pipeline.training.services import LBR_ESTIMATOR_LABEL, ROLLOUT_ESTIMATOR_LABEL
 
 
 def _json_default(obj: Any) -> Any:
@@ -66,17 +66,28 @@ def _cmd_train(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = _resolve_run_dir(args.run, args.runs_dir)
-    out = services.evaluate_run(
-        run_dir=run_dir,
-        num_samples=args.samples,
-        num_rollouts=args.rollouts,
-        use_average_strategy=not args.current,
-        seed=args.seed,
-    )
+    if args.method == "rollout":
+        out = services.evaluate_run_rollout(
+            run_dir=run_dir,
+            num_samples=args.samples,
+            num_rollouts=args.rollouts,
+            use_average_strategy=not args.current,
+            seed=args.seed,
+        )
+        estimator = ROLLOUT_ESTIMATOR_LABEL
+    else:  # "lbr" (default, trustworthy)
+        out = services.evaluate_run_lbr(
+            run_dir=run_dir,
+            num_hands=args.hands,
+            equity_runouts=args.runouts,
+            seed=args.seed,
+        )
+        estimator = LBR_ESTIMATOR_LABEL
     payload: dict[str, Any] = {
         "op": "evaluate",
         "run_id": run_dir.name,
-        "estimator": ROLLOUT_ESTIMATOR_LABEL,
+        "method": args.method,
+        "estimator": estimator,
         "infosets": out.infosets,
         "results": out.results,
     }
@@ -137,16 +148,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.set_defaults(func=_cmd_train)
 
     p_eval = sub.add_parser(
-        "evaluate", parents=[common], help="Evaluate a run's exploitability (rollout estimator)."
+        "evaluate",
+        parents=[common],
+        help="Evaluate a run's exploitability (Local Best Response by default).",
     )
     p_eval.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
     p_eval.add_argument("--runs-dir", default="data/runs", help="Base runs dir for id resolution.")
-    p_eval.add_argument("--samples", type=int, default=500, help="Number of samples.")
-    p_eval.add_argument("--rollouts", type=int, default=50, help="Rollouts per infoset.")
+    p_eval.add_argument(
+        "--method",
+        choices=["lbr", "rollout"],
+        default="lbr",
+        help="lbr = Local Best Response (trustworthy, default); rollout = legacy diagnostic.",
+    )
+    # LBR options (--method lbr).
+    p_eval.add_argument("--hands", type=int, default=2000, help="[lbr] Number of hands.")
+    p_eval.add_argument("--runouts", type=int, default=24, help="[lbr] Equity runouts per node.")
+    # Rollout options (--method rollout).
+    p_eval.add_argument("--samples", type=int, default=500, help="[rollout] Number of samples.")
+    p_eval.add_argument("--rollouts", type=int, default=50, help="[rollout] Rollouts per infoset.")
     p_eval.add_argument(
         "--current",
         action="store_true",
-        help="Evaluate the current strategy instead of the average (default: average).",
+        help="[rollout] Evaluate the current strategy instead of the average.",
     )
     p_eval.add_argument("--seed", type=int, default=None, help="Random seed (default: random).")
     p_eval.set_defaults(func=_cmd_evaluate)
