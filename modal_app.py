@@ -292,6 +292,7 @@ def calibrate(
     capacity: int = 8_000_000,
     memory: int = 16384,
     cpus: str = "8,16,32,64",
+    ipw: int = 0,
 ) -> None:
     """Sweep worker/core counts to measure throughput scaling and the $/run curve.
 
@@ -299,6 +300,11 @@ def calibrate(
     ``/dev/shm`` risk at every core count. Checkpointing is disabled so timing
     reflects pure solver throughput. Note: reported it/s includes a fixed ~3.5s
     worker-pool startup, so high-core numbers are conservative.
+
+    ``ipw`` overrides ``iterations_per_worker``: a run must span several batches
+    (batch = num_workers*ipw) to reach steady state, so for configs with a large
+    native ipw (e.g. production=5000) set a smaller value plus enough ``iterations``
+    or high-core counts never fill a batch and the measurement is startup-dominated.
     """
     import time
 
@@ -307,6 +313,8 @@ def calibrate(
         "storage__initial_capacity": capacity,
         "storage__checkpoint_enabled": False,
     }
+    if ipw > 0:
+        overrides["training__iterations_per_worker"] = ipw
     rows: list[tuple[int, float, float, float]] = []
     for n in cpu_list:
         print(f"\n--- cpu={n}, memory={memory}MB, capacity={capacity:,} ---")
