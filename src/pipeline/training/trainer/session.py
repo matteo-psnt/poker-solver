@@ -41,6 +41,12 @@ class TrainingSession:
 
         self.checkpoint_executor: concurrent.futures.ThreadPoolExecutor | None = None
         self.pending_checkpoint: concurrent.futures.Future[float] | None = None
+        # Checkpoint back-pressure: iteration of the last submitted checkpoint, and the
+        # wall-clock cost / finish time of the last completed one. Used to keep
+        # checkpointing from dominating compute on large (slow-to-serialize) runs.
+        self.last_checkpoint_iteration: int = 0
+        self.last_checkpoint_seconds: float = 0.0
+        self.last_checkpoint_end_time: float = 0.0
 
         try:
             self.action_model = ActionModel(config)

@@ -9,7 +9,7 @@ solver:
 
 training:
   num_iterations: 10000000
-  checkpoint_frequency: 10000
+  checkpoint_frequency: 2000000
   iterations_per_worker: 500
 
 card_abstraction:
