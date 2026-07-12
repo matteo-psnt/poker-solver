@@ -1,0 +1,252 @@
+"""Tests for the HUNL Local Best Response evaluator.
+
+The generic LBR bridge (``test_local_best_response.py``) already proves the
+``LBR <= exact_BR`` and ``>= 0`` properties on Kuhn/Leduc. These tests lock the
+HUNL-specific machinery that bridge never exercised: equity-vs-range, the
+analytic terminal valuation over the surviving range, the off-tree action
+mapping, determinism, and the end-to-end lower bound on a weak blueprint.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from src.core.actions.action_model import ActionModel
+from src.core.game.actions import Action, ActionType, call, check, fold
+from src.core.game.state import Card
+from src.engine.solver.mccfr import MCCFRSolver
+from src.engine.solver.storage.shared_array import SharedArrayStorage
+from src.pipeline.evaluation.hunl_local_best_response import (
+    ALL_COMBOS,
+    LBRConfig,
+    _deal_initial_state,
+    _HUNLLocalBestResponse,
+    compute_lbr_exploitability,
+)
+from tests.test_helpers import DummyCardAbstraction, make_test_config
+
+
+def _build_solver(
+    iterations: int, *, starting_stack: int = 2000, session_id: str = "lbr-test"
+) -> MCCFRSolver:
+    """A minimally trained (deliberately weak) blueprint.
+
+    Training is seeded (config seed=42) so repeated builds are strategy-identical;
+    ``session_id`` only names the backing shared memory (unique per process avoids
+    collisions when rebuilt inside parallel workers).
+    """
+    config = make_test_config(seed=42, small_blind=50, big_blind=100, starting_stack=starting_stack)
+    storage = SharedArrayStorage(
+        num_workers=1, worker_id=0, session_id=session_id, is_coordinator=True
+    )
+    solver = MCCFRSolver(ActionModel(config), DummyCardAbstraction(), storage, config=config)
+    for _ in range(iterations):
+        solver.train_iteration()
+    return solver
+
+
+def _rebuild_parallel_test_blueprint() -> MCCFRSolver:
+    """Picklable factory: rebuild the deterministic test blueprint inside a worker.
+
+    Must match the serial blueprint's params exactly (same seed/stack/iterations) so
+    the strategies are identical; a unique session_id avoids shared-memory collisions.
+    """
+    import os
+
+    return _build_solver(4, starting_stack=400, session_id=f"lbr-par-{os.getpid()}")
+
+
+def _engine(solver: MCCFRSolver, **cfg) -> _HUNLLocalBestResponse:
+    cfg.setdefault("seed", 7)
+    cfg.setdefault("equity_runouts", 8)
+    config = LBRConfig(**cfg)
+    return _HUNLLocalBestResponse(solver, config, np.random.default_rng(config.seed))
+
+
+def _combo_index(a: str, b: str) -> int:
+    target = Card.new(a).mask | Card.new(b).mask
+    for idx, (c1, c2) in enumerate(ALL_COMBOS):
+        if (c1.mask | c2.mask) == target:
+            return idx
+    raise AssertionError(f"combo {a}{b} not found")
+
+
+class TestEquity:
+    """`_equity` must track real hand strength vs a range with board rollout."""
+
+    @pytest.fixture(scope="class")
+    def engine(self):
+        return _engine(_build_solver(0), equity_runouts=200)
+
+    def test_strength_ordering_on_dry_flop(self, engine):
+        board = (Card.new("Kh"), Card.new("8d"), Card.new("3c"))
+        uniform = np.ones(len(ALL_COMBOS))
+        top_set = engine._equity((Card.new("Kd"), Card.new("Ks")), board, uniform)
+        overpair = engine._equity((Card.new("As"), Card.new("Ac")), board, uniform)
+        air = engine._equity((Card.new("7s"), Card.new("2h")), board, uniform)
+        assert top_set > overpair > air
+        assert overpair > 0.80
+        assert air < 0.35
+
+    def test_river_is_exact(self, engine):
+        # On a complete board equity is a deterministic count over the range.
+        river = (Card.new("Kh"), Card.new("8d"), Card.new("3c"), Card.new("Qs"), Card.new("2d"))
+        uniform = np.ones(len(ALL_COMBOS))
+        nut = engine._equity((Card.new("Ks"), Card.new("Kd")), river, uniform)  # trip kings
+        assert nut > 0.95
+        # Determinism: no runout sampling on a full board.
+        again = engine._equity((Card.new("Ks"), Card.new("Kd")), river, uniform)
+        assert nut == again
+
+    def test_delta_range_equity_is_pairwise(self, engine):
+        # Against a single opponent combo, equity is a clean win/tie/lose verdict.
+        board = (Card.new("Kh"), Card.new("8d"), Card.new("3c"), Card.new("Qs"), Card.new("2d"))
+        weights = np.zeros(len(ALL_COMBOS))
+        weights[_combo_index("7c", "2s")] = 1.0  # opponent has air
+        assert engine._equity((Card.new("Ks"), Card.new("Kd")), board, weights) == 1.0
+
+
+class TestTerminalValue:
+    """`_terminal_value` integrates out the opponent hand analytically."""
+
+    @pytest.fixture(scope="class")
+    def engine(self):
+        return _engine(_build_solver(5))
+
+    def _bet_call_to_river(self, engine, state):
+        """Drive a small-bet / call line, guaranteeing a river showdown.
+
+        Every street ends in a CALL (a clean street boundary), so the terminal
+        has a full (deterministic) 5-card board — no ``deal_remaining_cards`` —
+        which lets us assert exact analytic values. (A pure check/check line
+        would trigger a latent rules bug where a second consecutive check-check
+        street fails to advance.)
+        """
+        s = state
+        while not s.is_terminal:
+            if engine.blueprint.is_chance_node(s):
+                s = engine.blueprint.sample_chance_outcome(s)
+                continue
+            if s.to_call > 0:
+                move = call()
+            else:
+                legal = engine.rules.get_legal_actions(s, action_model=engine.action_model)
+                bets = [a for a in legal if a.type == ActionType.BET]
+                move = min(bets, key=lambda a: a.amount)  # smallest bet keeps it non-all-in
+            s = s.apply_action(move, engine.rules)
+        return s
+
+    def _reference_showdown_value(self, engine, terminal, lbr_player, opp, belief):
+        """Belief-weighted mean of per-combo payoffs over the surviving range."""
+        known = engine._known_mask(terminal, opp)
+        weights = np.where((engine._masks & known) == 0, belief, 0.0)
+        total = weights.sum()
+        acc = 0.0
+        for idx in np.nonzero(weights)[0]:
+            payoff = engine._with_opponent_hole(terminal, opp, ALL_COMBOS[idx]).get_payoff(
+                lbr_player, engine.rules
+            )
+            acc += float(weights[idx]) * float(payoff)
+        return acc / float(total)
+
+    def test_showdown_delta_belief_equals_exact_payoff(self, engine):
+        """A point-mass belief must reproduce that exact hand's payoff."""
+        rng = np.random.default_rng(3)
+        for _ in range(3):
+            terminal = self._bet_call_to_river(engine, _deal_initial_state(engine, 2000, 0, rng))
+            assert engine._is_showdown(terminal) and len(terminal.board) == 5
+            known = engine._known_mask(terminal, opp=1)
+            idx = next(i for i in range(len(ALL_COMBOS)) if not (engine._masks[i] & known))
+            belief = np.zeros(len(ALL_COMBOS))
+            belief[idx] = 1.0
+            expected = float(
+                engine._with_opponent_hole(terminal, 1, ALL_COMBOS[idx]).get_payoff(0, engine.rules)
+            )
+            assert engine._terminal_value(terminal, 0, 1, belief) == expected
+
+    @pytest.mark.timeout(30)
+    def test_showdown_range_value_matches_weighted_mean(self, engine):
+        """The range-weighted showdown value equals the direct weighted mean."""
+        rng = np.random.default_rng(11)
+        terminal = self._bet_call_to_river(engine, _deal_initial_state(engine, 2000, 0, rng))
+        belief = engine._initial_belief(terminal, opp=1)
+        got = engine._terminal_value(terminal, 0, 1, belief)
+        expected = self._reference_showdown_value(engine, terminal, 0, 1, belief)
+        assert got == pytest.approx(expected)
+
+    def test_fold_terminal_is_card_independent(self, engine):
+        """Fold terminals return the plain payoff regardless of belief."""
+        rng = np.random.default_rng(7)
+        state = _deal_initial_state(engine, 2000, 0, rng)
+        # SB folds preflop immediately.
+        terminal = state.apply_action(fold(), engine.rules)
+        assert terminal.is_terminal and not engine._is_showdown(terminal)
+        belief = engine._initial_belief(terminal, opp=1)
+        assert engine._terminal_value(terminal, 0, 1, belief) == float(
+            terminal.get_payoff(0, engine.rules)
+        )
+
+
+class TestActionMapping:
+    """`_map_to_real` projects a proxy response onto the real legal menu."""
+
+    def test_fold_and_call_carry_across(self):
+        engine = _engine(_build_solver(0))
+        # For actions already in the legal menu the state is unused; any valid
+        # state satisfies the signature.
+        state = _deal_initial_state(engine, 400, 0, np.random.default_rng(0))
+        legal = [fold(), call(), Action(ActionType.RAISE, 300)]
+        assert engine._map_to_real(state, fold(), legal) == [(fold(), 1.0)]
+        assert engine._map_to_real(state, call(), legal) == [(call(), 1.0)]
+
+    def test_check_maps_to_itself_when_legal(self):
+        engine = _engine(_build_solver(0))
+        state = _deal_initial_state(engine, 400, 0, np.random.default_rng(0))
+        legal = [check(), Action(ActionType.BET, 200)]
+        assert engine._map_to_real(state, check(), legal) == [(check(), 1.0)]
+
+
+class TestExploitability:
+    """End-to-end: the leak-free bound is a positive, reproducible number."""
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(60)
+    def test_weak_blueprint_is_exploitable(self):
+        solver = _build_solver(5, starting_stack=600)
+        result = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=60, equity_runouts=2, seed=13)
+        )
+        # A barely trained blueprint is grossly exploitable; the bound is well
+        # clear of zero even at this sample size.
+        assert result.exploitability_mbb > 0.0
+        assert result.num_hands == 60
+
+    def test_deterministic_under_fixed_seed(self):
+        solver = _build_solver(3, starting_stack=400)
+        cfg = LBRConfig(num_hands=8, equity_runouts=2, seed=99)
+        first = compute_lbr_exploitability(solver, cfg)
+        second = compute_lbr_exploitability(solver, cfg)
+        assert first.exploitability_mbb == second.exploitability_mbb
+        assert first.lbr_utility_p0 == second.lbr_utility_p0
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_parallel_matches_serial_bitwise(self):
+        """num_workers must not change the result: per-hand seeding + ordered
+        aggregation make parallel bitwise-identical to serial. Failure here means a
+        global RNG isn't reseeded per-hand or aggregation order leaked."""
+        solver = _build_solver(4, starting_stack=400, session_id="lbr-par-serial")
+        serial = compute_lbr_exploitability(
+            solver, LBRConfig(num_hands=16, equity_runouts=2, seed=123, num_workers=1)
+        )
+        parallel = compute_lbr_exploitability(
+            solver,
+            LBRConfig(num_hands=16, equity_runouts=2, seed=123, num_workers=4),
+            blueprint_factory=_rebuild_parallel_test_blueprint,
+        )
+        assert serial.exploitability_mbb == parallel.exploitability_mbb
+        assert serial.lbr_utility_p0 == parallel.lbr_utility_p0
+        assert serial.lbr_utility_p1 == parallel.lbr_utility_p1
+        assert serial.std_error_mbb == parallel.std_error_mbb
+        assert serial.num_hands == parallel.num_hands == 16

@@ -5,8 +5,117 @@ Verifies that actions are normalized with the pot size at the time
 they were made, not the current pot size.
 """
 
+from itertools import pairwise
+
 from src.core.game.actions import bet, call, check, raises
-from src.core.game.state import GameState, Street
+from src.core.game.rules import GameRules
+from src.core.game.state import Card, GameState, Street
+
+
+def _deal_board_to(state: GameState, board: list[Card], size: int) -> GameState:
+    """Deal the board up to ``size`` cards, mirroring the traversal chance path
+    (which preserves pot and blind_to_call but resets the actor to OOP)."""
+    return GameState(
+        street=state.street,
+        pot=state.pot,
+        stacks=state.stacks,
+        board=tuple(board[:size]),
+        hole_cards=state.hole_cards,
+        betting_history=state.betting_history,
+        button_position=state.button_position,
+        current_player=1 - state.button_position,
+        is_terminal=False,
+        to_call=0,
+        last_aggressor=None,
+        blind_to_call=state.blind_to_call,
+    )
+
+
+class TestCrossStreetInvariance:
+    """The corrected normalization values each bet against its own
+    contemporaneous pot, so a historical action's token is identical no matter
+    which later street we observe it from. Both defects fixed here violated
+    this: postflop first bets collapsed to b0.00, and prior-street tokens
+    re-based against the wrong (dropped-to-0) street_start_pot."""
+
+    def _drive_full_street_bets(self):
+        """Preflop raise, then bet+call on flop/turn/river, recording the
+        normalized sequence at every decision node reached."""
+        rules = GameRules()  # SB=1, BB=2
+        board = [Card.new(c) for c in ("2c", "7d", "Th", "Js", "Ac")]
+        expected = {Street.PREFLOP: 0, Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}
+        hole = (
+            (Card.new("Kd"), Card.new("Qc")),
+            (Card.new("8s"), Card.new("9h")),
+        )
+        state = rules.create_initial_state(starting_stack=200, hole_cards=hole, button=0)
+
+        # Preflop: button raises 4, BB calls.
+        state = rules.apply_action(state, raises(4))
+        state = rules.apply_action(state, call())
+
+        sequences: list[str] = []
+        for _ in range(30):
+            if state.is_terminal:
+                break
+            if len(state.board) < expected[state.street]:
+                state = _deal_board_to(state, board, expected[state.street])
+                continue
+            sequences.append(state.normalized_betting_sequence())
+            # OOP checks, IP bets half pot, facing a bet calls -> advance street.
+            if state.to_call > 0:
+                action = call()
+            elif state.current_player == 1 - state.button_position:
+                action = check()
+            else:
+                action = bet(max(2, state.pot // 2))
+            state = rules.apply_action(state, action)
+        sequences.append(state.normalized_betting_sequence())
+        return [s for s in sequences if s]
+
+    def test_tokens_are_prefix_stable_across_streets(self):
+        """Every recorded sequence must be a token-prefix of every longer one:
+        appending actions / crossing streets never re-normalizes an earlier
+        token."""
+        sequences = self._drive_full_street_bets()
+        assert len(sequences) >= 4, "drive should span multiple streets"
+
+        chain = sorted(set(sequences), key=lambda s: len(s.split("-")))
+        for shorter, longer in pairwise(chain):
+            s_tokens = shorter.split("-")
+            l_tokens = longer.split("-")
+            assert l_tokens[: len(s_tokens)] == s_tokens, (
+                f"token re-normalized across streets: {shorter!r} is not a prefix of {longer!r}"
+            )
+
+    def test_no_zero_fraction_postflop_tokens(self):
+        """The catastrophic bug rendered every first postflop bet as b0.00 /
+        r0.00. Distinct real sizes must now produce non-zero fractions."""
+        sequences = self._drive_full_street_bets()
+        for seq in sequences:
+            for token in seq.split("-"):
+                if token and token[0] in "br":
+                    assert token not in ("b0.00", "r0.00"), (
+                        f"zero-fraction token {token!r} in {seq!r}"
+                    )
+
+    def test_preflop_raise_token_stable_from_river(self):
+        """Concrete cross-street check: the preflop raise token seen preflop
+        equals the one seen from a later street."""
+        rules = GameRules()
+        hole = ((Card.new("Kd"), Card.new("Qc")), (Card.new("8s"), Card.new("9h")))
+        state = rules.create_initial_state(starting_stack=200, hole_cards=hole, button=0)
+        state = rules.apply_action(state, raises(4))  # button raises preflop
+        preflop_token = state.normalized_betting_sequence().split("-")[0]
+
+        state = rules.apply_action(state, call())  # BB calls -> flop
+        state = _deal_board_to(state, [Card.new(c) for c in ("2c", "7d", "Th")], 3)
+        later_view_token = state.normalized_betting_sequence().split("-")[0]
+
+        assert preflop_token == later_view_token, (
+            f"preflop raise token changed across streets: {preflop_token!r} vs {later_view_token!r}"
+        )
+        assert preflop_token not in ("r0.00", "b0.00")
 
 
 class TestBettingNormalization:
@@ -27,7 +136,6 @@ class TestBettingNormalization:
             to_call=50,
             last_aggressor=0,
             betting_history=(bet(50),),
-            street_start_pot=100,  # Pot at start of betting round
         )
 
         normalized = state.normalized_betting_sequence()
@@ -51,7 +159,6 @@ class TestBettingNormalization:
             to_call=75,
             last_aggressor=1,
             betting_history=(bet(50), raises(75)),
-            street_start_pot=100,  # Pot at start of betting round
         )
 
         normalized = state.normalized_betting_sequence()
@@ -74,7 +181,6 @@ class TestBettingNormalization:
             to_call=75,
             last_aggressor=1,
             betting_history=(bet(50), raises(75)),
-            street_start_pot=100,
         )
 
         # Scenario 2: Bet 100 into 200, raise 150 into 300 → pot 550
@@ -90,7 +196,6 @@ class TestBettingNormalization:
             to_call=150,
             last_aggressor=1,
             betting_history=(bet(100), raises(150)),
-            street_start_pot=200,
         )
 
         norm1 = state1.normalized_betting_sequence()
@@ -120,7 +225,6 @@ class TestBettingNormalization:
             to_call=0,
             last_aggressor=None,
             betting_history=(check(), bet(50), call()),
-            street_start_pot=100,
         )
 
         normalized = state.normalized_betting_sequence()
@@ -141,7 +245,6 @@ class TestBettingNormalization:
             to_call=0,
             last_aggressor=None,
             betting_history=(),
-            street_start_pot=100,
         )
 
         normalized = state.normalized_betting_sequence()
@@ -165,7 +268,6 @@ class TestBettingNormalization:
             to_call=0,
             last_aggressor=None,
             betting_history=(bet(30), raises(60), call()),
-            street_start_pot=100,
         )
 
         normalized = state.normalized_betting_sequence()
@@ -193,7 +295,6 @@ class TestBettingNormalization:
             to_call=75,
             last_aggressor=1,
             betting_history=(bet(25), raises(50), raises(75)),
-            street_start_pot=100,
         )
 
         normalized = state.normalized_betting_sequence()

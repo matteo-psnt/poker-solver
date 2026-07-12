@@ -53,6 +53,30 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
     return config
 
 
+def load_training_config(config_name: str, **overrides: Any) -> Config:
+    """
+    Load a training config by name from ``config/training/<name>.yaml``.
+
+    Resolves the repository ``config/training`` directory relative to this
+    module so headless and cloud entrypoints do not depend on the interactive
+    CLI's working-directory conventions.
+
+    Args:
+        config_name: Stem of a YAML file under ``config/training`` (e.g. ``"quick_test"``).
+        **overrides: Programmatic overrides forwarded to :func:`load_config`
+            (``__`` nesting separator), e.g. ``system__seed=7``.
+
+    Returns:
+        Validated, frozen :class:`Config` instance.
+
+    Raises:
+        FileNotFoundError: If ``config/training/<config_name>.yaml`` does not exist.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    config_path = repo_root / "config" / "training" / f"{config_name}.yaml"
+    return load_config(config_path, **overrides)
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     """
     Load a YAML file and recursively resolve any ``extends`` chain.

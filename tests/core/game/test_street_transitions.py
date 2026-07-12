@@ -209,3 +209,79 @@ class TestStreetTransitions:
 
         assert len(actions) == 1, "Should only have current street bet"
         assert actions[0].amount == 75
+
+    def test_consecutive_check_check_streets_do_not_straddle(self):
+        """Two streets that both end check-check must each be isolated.
+
+        Regression: a backward scan mis-matched the boundary-straddling pair
+        (previous street's last check + current street's first check), so the
+        current street's second check saw only itself and could not advance.
+        Here betting_history is CALL (preflop limp) + flop check-check + the
+        two turn checks; the current (turn) street must contain both checks.
+        """
+        rules = GameRules()
+
+        # Preflop limp-call, flop check-check, turn check-check (second check pending).
+        betting_history = [call(), check(), check(), check(), check()]
+
+        actions = rules._get_actions_on_current_street(betting_history)
+
+        assert [a.type.name for a in actions] == ["CHECK", "CHECK"], (
+            "Current (turn) street must contain both turn checks so it can advance"
+        )
+
+    def test_full_check_down_hand_reaches_showdown(self):
+        """End-to-end: a pure check-down driven through the real engine must
+        terminate, not loop forever on the turn.
+
+        This mirrors the MCCFR traversal path (apply_action + external board
+        dealing) from a real ``create_initial_state``. Before the fix this hung
+        on the turn (perpetual check-check that never advanced), affecting both
+        evaluation and training. A step cap turns any regression into a clean
+        assertion failure instead of a real hang.
+        """
+        rules = GameRules()
+        board = [Card.new(c) for c in ("2c", "7d", "Th", "Js", "Ac")]
+        expected_board = {
+            Street.PREFLOP: 0,
+            Street.FLOP: 3,
+            Street.TURN: 4,
+            Street.RIVER: 5,
+        }
+
+        hole = (
+            (Card.new("Kd"), Card.new("Qc")),
+            (Card.new("8s"), Card.new("9h")),
+        )
+        state = rules.create_initial_state(starting_stack=100, hole_cards=hole, button=0)
+
+        streets_seen: list[Street] = []
+        for _ in range(40):  # generous cap; a real check-down needs ~9 steps
+            if state.is_terminal:
+                break
+            if len(state.board) < expected_board[state.street]:
+                # Deal the next board cards exactly as the traversal layer does.
+                state = GameState(
+                    street=state.street,
+                    pot=state.pot,
+                    stacks=state.stacks,
+                    board=tuple(board[: expected_board[state.street]]),
+                    hole_cards=state.hole_cards,
+                    betting_history=state.betting_history,
+                    button_position=state.button_position,
+                    current_player=1 - state.button_position,
+                    is_terminal=False,
+                    to_call=0,
+                    last_aggressor=None,
+                )
+                continue
+            streets_seen.append(state.street)
+            # Pure check-down: check when possible, else limp the preflop blind.
+            action = check() if state.to_call == 0 else call()
+            state = rules.apply_action(state, action)
+
+        assert state.is_terminal, "Pure check-down must reach a terminal state, not hang"
+        assert state.street == Street.RIVER, "Check-down should terminate on the river"
+        assert Street.TURN in streets_seen, "Hand must actually reach and pass the turn"
+        # CALL (limp) + three check-check pairs = 7 actions.
+        assert len(state.betting_history) == 7

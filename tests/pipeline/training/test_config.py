@@ -300,3 +300,36 @@ class TestValidation:
         # Boundary values are valid
         StorageConfig(zarr_compression_level=1)
         StorageConfig(zarr_compression_level=9)
+
+
+# Fields present in real pre-refactor run snapshots that no longer exist.
+LEGACY_SNAPSHOT = {
+    "solver": {"cfr_plus": True, "linear_cfr": True, "enable_dcfr": False},
+    "action_model": {"spr_buckets": [2.0, 6.0]},
+    "resolver": {"leaf_value_mode": "blueprint_rollout"},
+    "card_abstraction": {"config": "default", "abstraction_path": None},
+}
+
+
+class TestPersistedConfigTolerance:
+    """Persisted run snapshots must load across schema drift; YAML stays strict."""
+
+    def test_from_dict_rejects_unknown_fields(self):
+        """Hand-authored config stays strict so typos are caught."""
+        with pytest.raises(ValidationError):
+            Config.from_dict({"solver": {"linear_cfr": True}})
+
+    def test_from_persisted_dict_drops_legacy_fields(self):
+        """A legacy run snapshot loads by pruning removed fields."""
+        cfg = Config.from_persisted_dict(LEGACY_SNAPSHOT)
+        # Surviving fields are applied; dropped ones fall back to schema defaults.
+        assert cfg.solver.cfr_plus is True
+        assert cfg.card_abstraction.config == "default"
+        assert not hasattr(cfg.solver, "linear_cfr")
+
+    def test_from_persisted_dict_preserves_valid_overrides(self):
+        """Pruning must not discard fields that still exist in the schema."""
+        cfg = Config.from_persisted_dict(
+            {"game": {"starting_stack": 500}, "solver": {"enable_dcfr": True}}
+        )
+        assert cfg.game.starting_stack == 500

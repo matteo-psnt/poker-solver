@@ -26,6 +26,7 @@ dependencies = [
 
 [project.scripts]
 poker-solver = "src.interfaces.cli.app:main"
+poker-solver-run = "src.interfaces.cli.headless:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -60,6 +61,9 @@ timeout = 5
 timeout_func_only = true
 
 [dependency-groups]
+cloud = [
+    "modal>=1.5.2",
+]
 # Development, testing, and code quality tools
 dev = [
     "pytest>=9.0.2",

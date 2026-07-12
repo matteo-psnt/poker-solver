@@ -212,7 +212,9 @@ class GameState:
     is_terminal: bool
     to_call: int = 0
     last_aggressor: int | None = None
-    street_start_pot: int = 0  # Pot at start of current betting round (for normalization)
+    # Preflop blind gap (big_blind - small_blind); constant for the hand.
+    # Seeds pot reconstruction in _normalize_betting_sequence.
+    blind_to_call: int = 0
     _skip_validation: bool = False
     _cached_betting_sequence: str | None = field(
         default=None, init=False, repr=False, compare=False
@@ -319,14 +321,14 @@ class GameState:
 
     def _normalize_betting_sequence(self) -> str:
         """
-        Normalize betting history to string for infoset key.
+        Normalize betting history to a string for the infoset key.
 
-        Each action is normalized using the pot size at the time the action was made,
-        not the current pot size. This ensures equivalent betting sequences produce
-        the same normalized string regardless of when we observe them.
-
-        We reconstruct forward from street_start_pot through the betting history,
-        tracking both pot and to_call to correctly handle all action types.
+        Each bet/raise is normalized against the pot at the time it was made
+        (fold/check/call/all-in are pot-independent), so a sequence normalizes
+        identically regardless of which street we observe it from. ``to_call``
+        is seeded with ``blind_to_call`` (blind posts are absent from
+        ``betting_history``) and the pot level is anchored on the authoritative
+        current ``pot``, which every constructor preserves.
         """
         if self._cached_betting_sequence is not None:
             return self._cached_betting_sequence
@@ -335,57 +337,46 @@ class GameState:
             object.__setattr__(self, "_cached_betting_sequence", "")
             return ""
 
-        # Reconstruct pot sizes by walking forward from street_start_pot
-        # This correctly handles RAISE actions which add (to_call + raise_amount)
-        pot_at_action: list[int] = []
-        current_pot = self.street_start_pot
-        current_to_call = 0  # Track to_call as we go forward
-
-        # Walk forward through betting history
+        # Pass 1: each action's contribution relative to the (as-yet-unknown)
+        # starting pot, plus the running pot before each action.
+        contributed_before: list[int] = []
+        contributed = 0
+        to_call = self.blind_to_call
         for action in self.betting_history:
-            # Record the pot BEFORE this action
-            pot_at_action.append(current_pot)
+            contributed_before.append(contributed)
 
-            # Update pot and to_call based on action type
             if action.type == ActionType.BET:
-                # BET: adds amount to pot, sets to_call
-                current_pot += action.amount
-                current_to_call = action.amount
+                contributed += action.amount
+                to_call = action.amount
             elif action.type == ActionType.RAISE:
-                # RAISE: calls previous bet + raises by amount
-                # Total chips added: to_call + action.amount
-                bet_amount = current_to_call + action.amount
-                current_pot += bet_amount
-                current_to_call = action.amount  # New amount to call is the raise size
+                # RAISE commits the call plus the raise-over amount.
+                contributed += to_call + action.amount
+                to_call = action.amount
             elif action.type == ActionType.CALL:
-                # CALL: adds to_call to pot
-                current_pot += current_to_call
-                current_to_call = 0  # Betting is now even
+                contributed += to_call
+                to_call = 0
             elif action.type == ActionType.ALL_IN:
-                # ALL_IN: Player commits their entire remaining stack.
-                # The amount field is the TOTAL stack being committed (not relative to to_call).
-                #
-                # For pot calculation: all chips go into pot
-                current_pot += action.amount
-                #
-                # For to_call calculation:
-                # - If amount > current_to_call: This is an all-in raise
-                #   The excess (amount - current_to_call) becomes the new to_call
-                # - If amount <= current_to_call: This is an all-in call (possibly for less)
-                #   to_call becomes 0 (betting closed, goes to showdown)
-                #
-                # Note: "All-in for less" means player can't cover the full call.
-                # The uncalled portion is returned to the bettor at showdown.
-                if action.amount > current_to_call:
-                    current_to_call = action.amount - current_to_call
-                else:
-                    current_to_call = 0
-            # FOLD and CHECK don't change pot or to_call
+                # amount is the TOTAL stack committed. Excess over the call
+                # becomes the new to_call; an all-in call (possibly for less)
+                # closes the action.
+                contributed += action.amount
+                to_call = action.amount - to_call if action.amount > to_call else 0
+            # FOLD and CHECK contribute nothing and leave to_call unchanged.
 
-        # Now normalize each action with its contemporaneous pot size
-        normalized = []
-        for action, pot_before in zip(self.betting_history, pot_at_action):
-            normalized.append(action.normalize(pot_before))
+        # Anchor on the authoritative current pot. initial_pot is the post-blind
+        # starting pot (small_blind + big_blind); a negative value can only come
+        # from broken contribution accounting.
+        initial_pot = self.pot - contributed
+        if initial_pot < 0:
+            raise ValueError(
+                f"Betting-history reconstruction overshoots pot={self.pot} "
+                f"(contributions={contributed}); accounting is inconsistent."
+            )
+
+        normalized = [
+            action.normalize(initial_pot + pot_before)
+            for action, pot_before in zip(self.betting_history, contributed_before)
+        ]
 
         sequence = "-".join(normalized)
         object.__setattr__(self, "_cached_betting_sequence", sequence)

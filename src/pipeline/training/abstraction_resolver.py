@@ -30,14 +30,6 @@ def _read_metadata(path: Path) -> dict | None:
         return None
 
 
-def _parse_saved_config(config_data: dict) -> PrecomputeConfig | None:
-    """Parse saved metadata config as PrecomputeConfig; return None if invalid."""
-    try:
-        return PrecomputeConfig.model_validate(config_data)
-    except Exception:
-        return None
-
-
 class ComboAbstractionResolver:
     """Resolves configured abstraction references into concrete filesystem paths."""
 
@@ -118,11 +110,12 @@ class ComboAbstractionResolver:
             config_data = metadata.get("config", {})
             if not isinstance(config_data, dict):
                 continue
-            saved_config = _parse_saved_config(config_data)
-            if saved_config is None:
-                continue
-            saved_config_name = saved_config.config_name
-            if saved_config_name != config_name:
+            # Match on the abstraction's name only. A precomputed abstraction is
+            # identified by name here; the actual artifact is validated on load.
+            # Requiring a full strict re-parse of the saved config would silently
+            # skip abstractions whose metadata predates a schema change, surfacing
+            # as a misleading "not found" instead of a real match.
+            if config_data.get("config_name") != config_name:
                 continue
             saved_hash = metadata.get("config_hash")
             matching.append(

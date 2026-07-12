@@ -61,30 +61,13 @@ def evaluate_solver(ctx: CliContext) -> None:
 
     run_dir = ctx.runs_dir / selected_run
 
-    num_samples = prompts.prompt_int(
+    num_hands = prompts.prompt_int(
         ctx,
-        "Num samples:",
-        default=500,
+        "LBR hands (more = tighter bound but slower, ~0.3s/hand):",
+        default=2000,
         min_value=1,
     )
-    if num_samples is None:
-        return
-
-    num_rollouts = prompts.prompt_int(
-        ctx,
-        "Rollouts per infoset:",
-        default=50,
-        min_value=1,
-    )
-    if num_rollouts is None:
-        return
-
-    strategy_choice = prompts.select(
-        ctx,
-        "Strategy to evaluate:",
-        choices=["Average (recommended)", "Current"],
-    )
-    if strategy_choice is None:
+    if num_hands is None:
         return
 
     def _validate_seed(value: str) -> bool | str:
@@ -103,16 +86,13 @@ def evaluate_solver(ctx: CliContext) -> None:
     if seed_text is None:
         return
 
-    use_average = strategy_choice.startswith("Average")
     seed = int(seed_text) if seed_text.strip() else None
 
-    print("\nLoading solver and running exploitability estimate...")
+    print("\nRunning Local Best Response (rigorous lower bound; this can take minutes)...")
     try:
-        output = services.evaluate_run(
+        output = services.evaluate_run_lbr(
             run_dir=run_dir,
-            num_samples=num_samples,
-            num_rollouts=num_rollouts,
-            use_average_strategy=use_average,
+            num_hands=num_hands,
             seed=seed,
         )
     except FileNotFoundError as e:
@@ -137,16 +117,16 @@ def _print_evaluation_results(output: EvaluationOutput) -> None:
     print()
     results = output.results
 
-    print("Exploitability Results")
+    print("Exploitability (Local Best Response — rigorous lower bound)")
     print("-" * 60)
     print(f"Exploitability: {results['exploitability_mbb']:.2f} mbb/g")
     print(f"Std Error:      {results['std_error_mbb']:.2f} mbb/g")
     confidence_interval = cast(tuple[float, float], results["confidence_95_mbb"])
     ci_lower, ci_upper = confidence_interval[0], confidence_interval[1]
     print(f"95% CI:         [{ci_lower:.2f}, {ci_upper:.2f}] mbb/g")
-    print(f"BR Utility P0:  {results['player_0_br_utility']:.4f}")
-    print(f"BR Utility P1:  {results['player_1_br_utility']:.4f}")
-    print(f"Samples:        {results['num_samples']}")
+    print(f"LBR Utility P0: {results['lbr_utility_p0']:.4f}")
+    print(f"LBR Utility P1: {results['lbr_utility_p1']:.4f}")
+    print(f"Hands:          {results['num_hands']}")
     print(
         "\nRule of thumb (mbb/g): 100+ very exploitable, 20-100 weak, 5-20 decent, "
         "1-5 good, 0.1-1 strong, <0.1 near-optimal."
