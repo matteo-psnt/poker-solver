@@ -86,6 +86,7 @@ def sample_chance_outcome(self: MCCFRSolver, state: GameState) -> GameState:
         is_terminal=False,
         to_call=0,
         last_aggressor=None,
+        blind_to_call=state.blind_to_call,
     )
 
 
@@ -109,4 +110,5 @@ def deal_remaining_cards(self: MCCFRSolver, state: GameState) -> GameState:
         is_terminal=True,
         to_call=0,
         last_aggressor=state.last_aggressor,
+        blind_to_call=state.blind_to_call,
     )

@@ -105,7 +105,6 @@ def test_encoder_matches_reference_postflop():
         betting_history=(bet(6), call()),
         to_call=0,
         current_player=0,
-        street_start_pot=8,
         _skip_validation=True,
     )
     card_abstraction = DummyCardAbstraction()

@@ -370,6 +370,7 @@ class HeadToHeadEvaluator:
             is_terminal=False,
             to_call=0,
             last_aggressor=None,
+            blind_to_call=state.blind_to_call,
         )
 
     def _deal_remaining_cards(self, state: GameState) -> GameState:
@@ -407,4 +408,5 @@ class HeadToHeadEvaluator:
             is_terminal=True,
             to_call=0,
             last_aggressor=state.last_aggressor,
+            blind_to_call=state.blind_to_call,
         )
