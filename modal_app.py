@@ -487,6 +487,49 @@ def resume_eval(
 
 
 @app.local_entrypoint()
+def run_pruning_calibration(
+    iterations: int = 1_000_000,
+    cpu: int = 32,
+    memory: int = 24576,
+    seed: int = 42,
+    timeout: int = 7200,
+) -> None:
+    """Train two production runs — regret-based pruning off vs on — and compare throughput.
+
+    Same seed and iteration count, parallel containers. Prints both run_ids; quality
+    is then compared with a paired eval (run_compare) on those ids. Only flip
+    enable_pruning in the production config if throughput wins AND quality holds.
+    """
+    fn = train.with_options(cpu=cpu, memory=memory, timeout=timeout)
+    call_off = fn.spawn(
+        config_name="production", num_workers=cpu, num_iterations=iterations, seed=seed
+    )
+    call_on = fn.spawn(
+        config_name="production",
+        num_workers=cpu,
+        num_iterations=iterations,
+        seed=seed,
+        config_overrides={"solver__enable_pruning": True},
+    )
+    result_off, result_on = call_off.get(), call_on.get()
+
+    for label, result in (("pruning OFF", result_off), ("pruning ON ", result_on)):
+        print(
+            f"{label}: run_id={result['run_id']} "
+            f"it/s={result['iterations_per_second']:.0f} "
+            f"infosets={result['num_infosets']:,} "
+            f"train_s={result['runtime_seconds']:.0f}"
+        )
+    ratio = result_on["iterations_per_second"] / max(result_off["iterations_per_second"], 1e-9)
+    print(f"\nPRUNING THROUGHPUT: {ratio:.2f}x")
+    print("Quality check (paired eval) — run next:")
+    print(
+        f"  uv run modal run modal_app.py::run_compare "
+        f"--run-a {result_off['run_id']} --run-b {result_on['run_id']}"
+    )
+
+
+@app.local_entrypoint()
 def run_resolver_gate(
     run_id: str,
     deals: int = 1000,
