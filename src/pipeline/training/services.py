@@ -15,6 +15,7 @@ from src.pipeline.evaluation.hunl_local_best_response import (
     LBRResult,
     compute_lbr_exploitability,
 )
+from src.pipeline.evaluation.resolver_match import play_resolver_match
 from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.training.components import (
     build_evaluation_solver,
@@ -314,6 +315,48 @@ def evaluate_run_lbr(
         blueprint_factory=factory,
     )
     results = _lbr_results_dict(result, big_blind=metadata.config.game.big_blind)
+    return EvaluationOutput(infosets=storage.num_infosets(), results=results)
+
+
+def evaluate_run_resolver_gate(
+    run_dir: Path,
+    *,
+    num_deals: int = 1000,
+    time_budget_ms: int = 100,
+    seed: int = 1,
+) -> EvaluationOutput:
+    """Head-to-head resolver gate on a run: blueprint+resolver vs bare blueprint.
+
+    Duplicate deals (seat-swapped pairs off a fixed deck) cancel card luck, so the
+    resolver's chip edge is measurable in ~1k deals. Positive edge means the
+    resolver improves on the blueprint it wraps — the go/no-go signal for
+    investing in the search path.
+
+    Raises:
+        FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
+        ValueError: Invalid configuration or checkpoint state.
+    """
+    metadata = load_run_metadata(run_dir)
+    solver, storage = build_evaluation_solver(metadata.config, checkpoint_dir=run_dir)
+    result = play_resolver_match(
+        solver,
+        num_deals=num_deals,
+        time_budget_ms=time_budget_ms,
+        seed=seed,
+    )
+    results = {
+        "resolver_mbb_per_hand": result.resolver_mbb_per_hand,
+        "se_mbb": result.se_mbb,
+        "confidence_95_mbb": result.confidence_95_mbb,
+        "p_value": result.p_value,
+        "num_deals": result.num_deals,
+        "num_hands": result.num_hands,
+        "resolver_decisions": result.resolver_decisions,
+        "resolver_fallbacks": result.resolver_fallbacks,
+        "time_budget_ms": time_budget_ms,
+        "seed": seed,
+        "pair_samples_mbb": result.pair_samples_mbb,
+    }
     return EvaluationOutput(infosets=storage.num_infosets(), results=results)
 
 

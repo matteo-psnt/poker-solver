@@ -171,6 +171,34 @@ def evaluate(
     }
 
 
+# Serial (single-process) match: one blueprint copy in memory, resolver decisions
+# dominate the runtime. cpu=4 covers numpy/leaf-rollout parallelism within a decision.
+@app.function(
+    image=image,
+    volumes={DATA_MOUNT: data_volume},
+    cpu=4,
+    memory=24576,
+    timeout=10800,
+)
+def resolver_gate(
+    run_id: str,
+    num_deals: int = 1000,
+    time_budget_ms: int = 100,
+    seed: int = 1,
+) -> dict[str, Any]:
+    """Duplicate-deal head-to-head: blueprint+resolver vs bare blueprint."""
+    from src.pipeline.training import services
+
+    data_volume.reload()
+    out = services.evaluate_run_resolver_gate(
+        run_dir=Path("data/runs") / run_id,
+        num_deals=num_deals,
+        time_budget_ms=time_budget_ms,
+        seed=seed,
+    )
+    return {"run_id": run_id, "infosets": out.infosets, "results": out.results}
+
+
 @app.function(
     image=image,
     volumes={DATA_MOUNT: data_volume},
@@ -456,6 +484,43 @@ def resume_eval(
         f"(± {results['std_error_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
     )
     print(f"  infosets: {eval_result['infosets']:,}")
+
+
+@app.local_entrypoint()
+def run_resolver_gate(
+    run_id: str,
+    deals: int = 1000,
+    budget_ms: int = 100,
+    seed: int = 1,
+) -> None:
+    """Resolver gate on a Volume run: does blueprint+resolver beat the bare blueprint?
+
+    Positive edge = the search path is alive; negative = the MVP resolver still
+    hurts on this blueprint (leaf values). Duplicate seat-swapped deals cancel
+    card luck, so ~1k deals resolve sub-bb/hand edges.
+    """
+    gate_result = resolver_gate.remote(
+        run_id=run_id, num_deals=deals, time_budget_ms=budget_ms, seed=seed
+    )
+    results = gate_result["results"]
+    print(f"\nRESOLVER GATE on {run_id} ({gate_result['infosets']:,} infosets):")
+    print(
+        f"  resolver edge: {results['resolver_mbb_per_hand']:+.1f} mbb/hand "
+        f"(± {results['se_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
+    )
+    print(
+        f"  p-value: {results['p_value']:.4f} | deals: {results['num_deals']} "
+        f"(paired, seat-swapped) | budget: {results['time_budget_ms']}ms"
+    )
+    print(
+        f"  resolver decisions: {results['resolver_decisions']:,} "
+        f"({results['resolver_fallbacks']} fell back to blueprint)"
+    )
+    if results["p_value"] < 0.05:
+        verdict = "WINS" if results["resolver_mbb_per_hand"] > 0 else "LOSES"
+        print(f"  VERDICT: resolver {verdict} significantly (95% level).")
+    else:
+        print("  VERDICT: no significant edge either way at this sample size.")
 
 
 @app.local_entrypoint()
