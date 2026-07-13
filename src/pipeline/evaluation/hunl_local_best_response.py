@@ -118,13 +118,20 @@ class HandOutcome:
 
     ``terminal`` is ``"fold"`` (hand ended on a fold), ``"allin"`` (showdown reached
     with the board incomplete — an early all-in), or ``"showdown"`` (river showdown).
-    ``pot`` is the final pot in chips. Both exist so eval variance can be decomposed
-    by terminal type offline without re-running hands.
+    When the hand ends in a branched final decision (see ``play_hand``), the label
+    and ``pot`` come from the highest-variance branch with positive probability
+    (allin > showdown > fold), since that branch dominates the payoff spread.
+    ``pot`` is in chips. Both exist so eval variance can be decomposed by terminal
+    type offline without re-running hands.
     """
 
     value: float
     terminal: str
     pot: int
+
+
+# Severity order for attributing a branched terminal to its dominant type.
+_TERMINAL_SEVERITY = {"fold": 0, "showdown": 1, "allin": 2}
 
 
 @dataclass
@@ -176,8 +183,12 @@ class _HUNLLocalBestResponse:
         The opponent is carried as a **range** (``belief``), never a sampled
         hand: its actions are drawn from the range-aggregate distribution and
         Bayes-update the range, and terminals are valued analytically against the
-        surviving range. Only public chance (the board) and the LBR player's own
-        hand are sampled, which removes the dominant opponent-hand variance.
+        surviving range. When *every* legal opponent action ends the hand (facing
+        an all-in, or closing the river), the action itself is integrated out
+        instead of sampled — the fold-vs-call coinflip on jams is the largest
+        payoff spread in the game, so branching it removes the dominant remaining
+        opponent variance at the cost of valuing each branch once. Only public
+        chance (the board) and the LBR player's own hand are sampled.
         """
         opp = 1 - lbr_player
         state = initial_state
@@ -197,18 +208,67 @@ class _HUNLLocalBestResponse:
                 prev_state, prev_lbr_action = state, action
             else:
                 legal, vecs = self._opp_action_matrix(state, opp, prev_state, prev_lbr_action)
+                branched = self._branch_terminal_decision(
+                    state, lbr_player, opp, legal, vecs, belief
+                )
+                if branched is not None:
+                    return branched
                 action, belief = self._sample_opponent(legal, vecs, belief)
 
             state = state.apply_action(action, self.rules)
 
         value = self._terminal_value(state, lbr_player, opp, belief)
+        return HandOutcome(value=value, terminal=self._terminal_kind(state), pot=state.pot)
+
+    def _branch_terminal_decision(
+        self,
+        state: GameState,
+        lbr_player: int,
+        opp: int,
+        legal: list[Action],
+        vecs: dict[Action, np.ndarray],
+        belief: np.ndarray,
+    ) -> HandOutcome | None:
+        """Integrate out an opponent decision whose every action ends the hand.
+
+        Returns the probability-weighted mix of per-branch terminal values (each
+        branch valued against its own Bayes-posterior range), or ``None`` when any
+        action continues the hand — then the caller samples as usual. Replacing
+        the sample with its exact conditional expectation is a Rao-Blackwellization:
+        the estimator's expectation (and the LBR bound) is unchanged.
+        """
+        if not legal:
+            return None
+        next_states = [state.apply_action(action, self.rules) for action in legal]
+        if not all(s.is_terminal for s in next_states):
+            return None
+
+        probs = np.array([float(np.dot(belief, vecs[action])) for action in legal])
+        total = probs.sum()
+        if total <= _EPS:
+            return None  # degenerate belief: let the caller's uniform fallback handle it
+
+        value = 0.0
+        terminal, pot = "fold", 0
+        for weight, action, next_state in zip(probs / total, legal, next_states):
+            if weight <= 0.0:
+                continue
+            posterior = belief * vecs[action]
+            mass = posterior.sum()
+            branch_belief = posterior / mass if mass > _EPS else belief
+            value += weight * self._terminal_value(next_state, lbr_player, opp, branch_belief)
+            kind = self._terminal_kind(next_state)
+            if _TERMINAL_SEVERITY[kind] >= _TERMINAL_SEVERITY[terminal]:
+                terminal, pot = kind, next_state.pot
+        return HandOutcome(value=value, terminal=terminal, pot=pot)
+
+    def _terminal_kind(self, state: GameState) -> str:
+        """Variance-attribution label of a terminal state."""
         if not self._is_showdown(state):
-            terminal = "fold"
-        elif len(state.board) < 5:
-            terminal = "allin"
-        else:
-            terminal = "showdown"
-        return HandOutcome(value=value, terminal=terminal, pot=state.pot)
+            return "fold"
+        if len(state.board) < 5:
+            return "allin"
+        return "showdown"
 
     def _initial_belief(self, state: GameState, opp: int) -> np.ndarray:
         """Uniform opponent range vector masked by the LBR player's known cards."""
