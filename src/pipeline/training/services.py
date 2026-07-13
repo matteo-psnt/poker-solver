@@ -10,9 +10,12 @@ from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 from src.pipeline.evaluation.hunl_local_best_response import (
+    HandOutcome,
     LBRConfig,
+    LBRResult,
     compute_lbr_exploitability,
 )
+from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.training.components import (
     build_evaluation_solver,
     evaluate_solver_exploitability,
@@ -213,6 +216,54 @@ def _load_blueprint(config: Config, checkpoint_dir: Path) -> object:
     return solver
 
 
+def _deal_terminal_group(outcome_p0: HandOutcome, outcome_p1: HandOutcome) -> str:
+    """Terminal-type label of a deal, taking the higher-variance position's type.
+
+    Severity order all-in > showdown > fold: an all-in on either side dominates the
+    deal's payoff variance, a fold contributes almost none.
+    """
+    terminals = {outcome_p0.terminal, outcome_p1.terminal}
+    if "allin" in terminals:
+        return "allin"
+    if "showdown" in terminals:
+        return "showdown"
+    return "fold"
+
+
+def _lbr_results_dict(result: LBRResult, big_blind: int) -> dict[str, Any]:
+    """Map an LBRResult into the portable results dict.
+
+    Per-hand records and the base seed travel with the aggregate so a later paired
+    (common-random-numbers) comparison against another run — or an offline variance
+    decomposition — never requires re-running the eval.
+    """
+    samples = [(o0.value + o1.value) / 2.0 for o0, o1 in result.hand_outcomes]
+    groups = [_deal_terminal_group(o0, o1) for o0, o1 in result.hand_outcomes]
+    return {
+        "exploitability_mbb": result.exploitability_mbb,
+        "exploitability_bb": result.exploitability_bb,
+        "std_error_mbb": result.std_error_mbb,
+        "confidence_95_mbb": result.confidence_95_mbb,
+        "lbr_utility_p0": result.lbr_utility_p0,
+        "lbr_utility_p1": result.lbr_utility_p1,
+        "num_hands": result.num_hands,
+        "base_seed": result.base_seed,
+        "big_blind": big_blind,
+        "hand_records": [
+            {
+                "u0": o0.value,
+                "u1": o1.value,
+                "terminal_p0": o0.terminal,
+                "terminal_p1": o1.terminal,
+                "pot_p0": o0.pot,
+                "pot_p1": o1.pot,
+            }
+            for o0, o1 in result.hand_outcomes
+        ],
+        "variance_decomposition": (variance_decomposition(samples, groups) if samples else None),
+    }
+
+
 def evaluate_run_lbr(
     run_dir: Path,
     *,
@@ -221,6 +272,7 @@ def evaluate_run_lbr(
     include_off_tree: bool = False,
     seed: int | None = None,
     num_workers: int = 1,
+    allin_runouts: int = 50,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
@@ -228,6 +280,11 @@ def evaluate_run_lbr(
     on Kuhn/Leduc). ``include_off_tree`` stays False by default: off-tree bet sizes
     leak into a uniform-random opponent on later streets and bias the number.
     ``num_workers`` parallelizes over hands; the result is identical for any count.
+
+    The results dict carries per-hand records plus the base seed; evaluate two runs
+    with the same explicit ``seed`` and feed the per-hand samples to
+    :func:`~src.pipeline.evaluation.statistics.compare_paired_samples` for a paired
+    comparison that resolves far smaller gaps than two independent intervals.
 
     Raises:
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
@@ -252,18 +309,11 @@ def evaluate_run_lbr(
             include_off_tree=include_off_tree,
             seed=seed,
             num_workers=num_workers,
+            allin_runouts=allin_runouts,
         ),
         blueprint_factory=factory,
     )
-    results = {
-        "exploitability_mbb": result.exploitability_mbb,
-        "exploitability_bb": result.exploitability_bb,
-        "std_error_mbb": result.std_error_mbb,
-        "confidence_95_mbb": result.confidence_95_mbb,
-        "lbr_utility_p0": result.lbr_utility_p0,
-        "lbr_utility_p1": result.lbr_utility_p1,
-        "num_hands": result.num_hands,
-    }
+    results = _lbr_results_dict(result, big_blind=metadata.config.game.big_blind)
     return EvaluationOutput(infosets=storage.num_infosets(), results=results)
 
 

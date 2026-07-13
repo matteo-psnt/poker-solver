@@ -71,7 +71,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
 from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
-from src.core.game.state import Card, GameState
+from src.core.game.state import Card, GameState, Street
 from src.engine.search.action_translation import translate_action_distribution
 from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS
 from src.engine.solver.infoset_encoder import encode_infoset_key
@@ -104,11 +104,40 @@ class LBRConfig:
     # Parallel workers for hand evaluation. LBR is embarrassingly parallel over hands;
     # each hand is seeded independently so the result is identical for any worker count.
     num_workers: int = 1
+    # Board runouts averaged at all-in showdown terminals (board incomplete). All-in
+    # pots are the largest payoffs in the game, so valuing them on a single sampled
+    # runout was the dominant remaining variance source; averaging is a pure
+    # Rao-Blackwellization (same expectation, lower variance). When exactly one card
+    # is missing the runout is enumerated instead.
+    allin_runouts: int = 50
+
+
+@dataclass(frozen=True)
+class HandOutcome:
+    """Per-position outcome of one deal: realized value plus variance-attribution tags.
+
+    ``terminal`` is ``"fold"`` (hand ended on a fold), ``"allin"`` (showdown reached
+    with the board incomplete — an early all-in), or ``"showdown"`` (river showdown).
+    ``pot`` is the final pot in chips. Both exist so eval variance can be decomposed
+    by terminal type offline without re-running hands.
+    """
+
+    value: float
+    terminal: str
+    pot: int
 
 
 @dataclass
 class LBRResult:
-    """LBR exploitability estimate with statistical uncertainty."""
+    """LBR exploitability estimate with statistical uncertainty.
+
+    ``base_seed`` is the seed that actually anchored per-hand seeding (recorded even
+    when the config seed was ``None``), and ``hand_outcomes`` holds the per-deal
+    ``(p0, p1)`` outcome pair. Together they enable paired common-random-numbers
+    comparisons across checkpoints: two evals run with the same ``base_seed`` see
+    identical deals, so the difference of per-hand samples has far lower variance
+    than the two independent estimates.
+    """
 
     exploitability_mbb: float
     exploitability_bb: float
@@ -117,6 +146,8 @@ class LBRResult:
     std_error_mbb: float
     confidence_95_mbb: tuple[float, float]
     num_hands: int
+    base_seed: int
+    hand_outcomes: list[tuple[HandOutcome, HandOutcome]]
 
 
 class _HUNLLocalBestResponse:
@@ -139,8 +170,8 @@ class _HUNLLocalBestResponse:
 
     # -- Realized play -----------------------------------------------------
 
-    def play_hand(self, lbr_player: int, initial_state: GameState) -> float:
-        """Play one hand with ``lbr_player`` using LBR; return its realized payoff.
+    def play_hand(self, lbr_player: int, initial_state: GameState) -> HandOutcome:
+        """Play one hand with ``lbr_player`` using LBR; return its realized outcome.
 
         The opponent is carried as a **range** (``belief``), never a sampled
         hand: its actions are drawn from the range-aggregate distribution and
@@ -170,7 +201,14 @@ class _HUNLLocalBestResponse:
 
             state = state.apply_action(action, self.rules)
 
-        return self._terminal_value(state, lbr_player, opp, belief)
+        value = self._terminal_value(state, lbr_player, opp, belief)
+        if not self._is_showdown(state):
+            terminal = "fold"
+        elif len(state.board) < 5:
+            terminal = "allin"
+        else:
+            terminal = "showdown"
+        return HandOutcome(value=value, terminal=terminal, pot=state.pot)
 
     def _initial_belief(self, state: GameState, opp: int) -> np.ndarray:
         """Uniform opponent range vector masked by the LBR player's known cards."""
@@ -197,16 +235,21 @@ class _HUNLLocalBestResponse:
         """Realized LBR payoff at a terminal, valued against the surviving range.
 
         A fold ends the hand independently of the cards, so the pot-based payoff
-        is exact. A showdown is valued as the belief-weighted payoff over every
-        opponent combo still in range, with the board rolled out if the hand went
-        all-in early — integrating out the opponent hand rather than sampling it.
+        is exact. A river showdown is valued as the belief-weighted payoff over
+        every opponent combo still in range. An early all-in (board incomplete)
+        additionally averages that value over board runouts — integrating out both
+        the opponent hand and (approximately) the runout rather than sampling them.
         """
         if not self._is_showdown(state):
             return float(state.get_payoff(lbr_player, self.rules))
+        if len(state.board) == 5:
+            return self._showdown_value(state, lbr_player, opp, belief)
+        return self._allin_showdown_value(state, lbr_player, opp, belief)
 
-        if len(state.board) < 5:
-            state = self.blueprint.deal_remaining_cards(state)
-
+    def _showdown_value(
+        self, state: GameState, lbr_player: int, opp: int, belief: np.ndarray
+    ) -> float:
+        """Belief-weighted payoff over the surviving range on a complete board."""
         known = self._known_mask(state, opp)
         weights = np.where((self._masks & known) == 0, belief, 0.0)
         total = weights.sum()
@@ -218,6 +261,54 @@ class _HUNLLocalBestResponse:
             opp_state = self._with_opponent_hole(state, opp, ALL_COMBOS[idx])
             ev += float(weights[idx]) * float(opp_state.get_payoff(lbr_player, self.rules))
         return ev / float(total)
+
+    def _allin_showdown_value(
+        self, state: GameState, lbr_player: int, opp: int, belief: np.ndarray
+    ) -> float:
+        """All-in showdown value averaged over board runouts.
+
+        Runouts draw from the cards the LBR player cannot see (its holes + board);
+        the opponent's *dealt* hand is deliberately not excluded — it is a fiction
+        this evaluator integrates out, so letting runouts cover those cards matches
+        the range convention (combos colliding with a runout drop out per runout,
+        exactly as on a real river). One missing card is enumerated exactly; more
+        are sampled ``allin_runouts`` times from the per-hand deterministic RNG.
+        """
+        known = self._known_mask(state, opp)
+        missing = 5 - len(state.board)
+        unseen = [card for card in _DECK if not (card.mask & known)]
+        runouts: list[tuple[Card, ...]]
+        if missing == 1:
+            runouts = [(card,) for card in unseen]
+        else:
+            count = max(1, self.config.allin_runouts)
+            runouts = []
+            for _ in range(count):
+                picks = self.rng.choice(len(unseen), size=missing, replace=False)
+                runouts.append(tuple(unseen[int(i)] for i in picks))
+
+        total = 0.0
+        for extra in runouts:
+            runout_state = self._with_runout(state, extra)
+            total += self._showdown_value(runout_state, lbr_player, opp, belief)
+        return total / len(runouts)
+
+    def _with_runout(self, state: GameState, extra: tuple[Card, ...]) -> GameState:
+        """Terminal copy of ``state`` with the board completed by ``extra``."""
+        return GameState(
+            street=Street.RIVER,
+            pot=state.pot,
+            stacks=state.stacks,
+            board=state.board + extra,
+            hole_cards=state.hole_cards,
+            betting_history=state.betting_history,
+            button_position=state.button_position,
+            current_player=state.current_player,
+            is_terminal=True,
+            to_call=0,
+            last_aggressor=state.last_aggressor,
+            blind_to_call=state.blind_to_call,
+        )
 
     # -- LBR action choice -------------------------------------------------
 
@@ -578,6 +669,12 @@ def compute_lbr_exploitability(
     :func:`~src.pipeline.evaluation.exploitability.compute_exploitability`,
     which assumes button-symmetrized on-policy value is ~0, so the two figures
     are directly comparable — LBR should never report *less*.
+
+    To *compare* two blueprints, run both evals with the same explicit seed and
+    feed the per-hand samples (``result.hand_outcomes``) to
+    :func:`~src.pipeline.evaluation.statistics.compare_paired_samples` — the
+    deals match hand-for-hand, so the paired difference resolves far smaller
+    gaps than two independent confidence intervals.
     """
     if config is None:
         config = LBRConfig()
@@ -610,9 +707,9 @@ def compute_lbr_exploitability(
             blueprint_factory, config, base_seed, starting_stack, num_workers
         )
 
-    utilities_p0 = [u0 for u0, _ in pairs]
-    utilities_p1 = [u1 for _, u1 in pairs]
-    samples = [(u0 + u1) / 2.0 for u0, u1 in pairs]
+    utilities_p0 = [o0.value for o0, _ in pairs]
+    utilities_p1 = [o1.value for _, o1 in pairs]
+    samples = [(o0.value + o1.value) / 2.0 for o0, o1 in pairs]
 
     exploitability = float(np.mean(samples)) if samples else float("nan")
     if len(samples) >= 2:
@@ -630,6 +727,8 @@ def compute_lbr_exploitability(
         std_error_mbb=se_mbb,
         confidence_95_mbb=(exploitability_mbb - 1.96 * se_mbb, exploitability_mbb + 1.96 * se_mbb),
         num_hands=len(samples),
+        base_seed=base_seed,
+        hand_outcomes=pairs,
     )
 
 
@@ -660,7 +759,7 @@ def _play_hand_pair(
     hand: int,
     base_seed: int,
     starting_stack: int,
-) -> tuple[float, float]:
+) -> tuple[HandOutcome, HandOutcome]:
     """Play one deal from both positions under a per-hand deterministic RNG.
 
     Reseeds every randomness source consumed during the hand — the engine's own
@@ -675,9 +774,9 @@ def _play_hand_pair(
     engine.rng = np.random.default_rng(s_h)
     button = hand % 2
     state = _deal_initial_state(engine, starting_stack, button, engine.rng)
-    u0 = engine.play_hand(0, state)
-    u1 = engine.play_hand(1, state)
-    return u0, u1
+    outcome_p0 = engine.play_hand(0, state)
+    outcome_p1 = engine.play_hand(1, state)
+    return outcome_p0, outcome_p1
 
 
 # --- Parallel execution -------------------------------------------------------
@@ -705,7 +804,7 @@ def _init_worker(
     _WORKER_CTX = (base_seed, starting_stack)
 
 
-def _worker_play_hand(hand: int) -> tuple[float, float]:
+def _worker_play_hand(hand: int) -> tuple[HandOutcome, HandOutcome]:
     assert _WORKER_ENGINE is not None and _WORKER_CTX is not None
     base_seed, starting_stack = _WORKER_CTX
     return _play_hand_pair(_WORKER_ENGINE, hand, base_seed, starting_stack)
@@ -717,7 +816,7 @@ def _run_hands_parallel(
     base_seed: int,
     starting_stack: int,
     num_workers: int,
-) -> list[tuple[float, float]]:
+) -> list[tuple[HandOutcome, HandOutcome]]:
     ctx = multiprocessing.get_context("spawn")
     chunksize = max(1, config.num_hands // (num_workers * 4))
     with ctx.Pool(
