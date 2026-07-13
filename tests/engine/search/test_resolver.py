@@ -59,7 +59,11 @@ def test_solver_act_with_resolver_enabled():
     assert action in rules.get_legal_actions(state, action_model=action_model)
 
 
-def test_resolver_uses_depth_cutoff_leaves(monkeypatch):
+def test_resolver_solves_subgame_with_per_combo_strategy(monkeypatch):
+    """solve() routes through the range-vs-range subgame CFR and picks the
+    hero-combo row of the average root strategy."""
+    from src.engine.search import resolver as resolver_module
+
     state, rules = _make_initial_state()
     config = make_test_config(seed=42, **{"resolver.max_depth": 2})
     action_model = ActionModel(config)
@@ -76,17 +80,24 @@ def test_resolver_uses_depth_cutoff_leaves(monkeypatch):
         config=config.resolver,
     )
 
-    observed = {"leaf_count": 0}
+    observed = {}
+    real_solve = resolver_module.solve_subgame
 
-    def _fake_leaf_values(leaves, **_kwargs):
-        observed["leaf_count"] = len(leaves)
-        return {i: 0.0 for i in range(len(leaves))}
+    def _spy(tree, **kwargs):
+        solution = real_solve(tree, **kwargs)
+        observed["solution"] = solution
+        observed["hero"] = kwargs["hero"]
+        return solution
 
-    monkeypatch.setattr("src.engine.search.resolver.estimate_leaf_values", _fake_leaf_values)
+    monkeypatch.setattr(resolver_module, "solve_subgame", _spy)
 
     result = resolver.solve(state, time_budget_ms=25)
-    assert observed["leaf_count"] >= len(result.root_actions)
-    assert observed["leaf_count"] > 0
+    solution = observed["solution"]
+    assert solution.iterations >= 8
+    assert len(result.root_actions) == len(solution.root_actions)
+    # The played resolver strategy is the hero-combo row (renormalized).
+    assert result.strategy.shape == (len(result.root_actions),)
+    assert result.action_values.shape == (len(result.root_actions),)
 
 
 @pytest.mark.timeout(60)
@@ -101,7 +112,9 @@ def test_resolver_is_not_clairvoyant():
     from src.engine.search.range_inference import replace_actor_hole_cards
 
     state, rules = _make_initial_state()
-    config = make_test_config(seed=42)
+    # Fixed iteration count: budget-driven iterations vary with wall clock and
+    # would break bitwise comparison.
+    config = make_test_config(seed=42, **{"resolver.max_iterations": 20})
     action_model = ActionModel(config)
     from src.engine.solver.storage.shared_array import SharedArrayStorage
 
