@@ -9,42 +9,36 @@ mapping, determinism, and the end-to-end lower bound on a weak blueprint.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType, call, check, fold
 from src.core.game.state import Card, GameState, Street
-from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.shared_array import SharedArrayStorage
-from src.pipeline.evaluation.hunl_local_best_response import (
+from src.engine.search.range_inference import (
     ALL_COMBOS,
+    COMBO_MASKS,
+    combo_index_for,
+    replace_actor_hole_cards,
+)
+from src.engine.solver.mccfr import MCCFRSolver
+from src.pipeline.evaluation.hunl_local_best_response import (
     LBRConfig,
     _deal_initial_state,
     _HUNLLocalBestResponse,
     compute_lbr_exploitability,
 )
 from src.pipeline.evaluation.statistics import compare_paired_samples
-from tests.test_helpers import DummyCardAbstraction, make_test_config
+from tests.test_helpers import build_trained_test_solver
 
 
 def _build_solver(
     iterations: int, *, starting_stack: int = 2000, session_id: str = "lbr-test"
 ) -> MCCFRSolver:
-    """A minimally trained (deliberately weak) blueprint.
-
-    Training is seeded (config seed=42) so repeated builds are strategy-identical;
-    ``session_id`` only names the backing shared memory (unique per process avoids
-    collisions when rebuilt inside parallel workers).
-    """
-    config = make_test_config(seed=42, small_blind=50, big_blind=100, starting_stack=starting_stack)
-    storage = SharedArrayStorage(
-        num_workers=1, worker_id=0, session_id=session_id, is_coordinator=True
+    return build_trained_test_solver(
+        iterations, starting_stack=starting_stack, session_id=session_id
     )
-    solver = MCCFRSolver(ActionModel(config), DummyCardAbstraction(), storage, config=config)
-    for _ in range(iterations):
-        solver.train_iteration()
-    return solver
 
 
 def _rebuild_parallel_test_blueprint() -> MCCFRSolver:
@@ -53,8 +47,6 @@ def _rebuild_parallel_test_blueprint() -> MCCFRSolver:
     Must match the serial blueprint's params exactly (same seed/stack/iterations) so
     the strategies are identical; a unique session_id avoids shared-memory collisions.
     """
-    import os
-
     return _build_solver(4, starting_stack=400, session_id=f"lbr-par-{os.getpid()}")
 
 
@@ -66,11 +58,7 @@ def _engine(solver: MCCFRSolver, **cfg) -> _HUNLLocalBestResponse:
 
 
 def _combo_index(a: str, b: str) -> int:
-    target = Card.new(a).mask | Card.new(b).mask
-    for idx, (c1, c2) in enumerate(ALL_COMBOS):
-        if (c1.mask | c2.mask) == target:
-            return idx
-    raise AssertionError(f"combo {a}{b} not found")
+    return combo_index_for((Card.new(a), Card.new(b)))
 
 
 class TestEquity:
@@ -145,13 +133,13 @@ class TestTerminalValue:
     def _reference_showdown_value(self, engine, terminal, lbr_player, opp, belief):
         """Belief-weighted mean of per-combo payoffs over the surviving range."""
         known = engine._known_mask(terminal, opp)
-        weights = np.where((engine._masks & known) == 0, belief, 0.0)
+        weights = np.where((COMBO_MASKS & known) == 0, belief, 0.0)
         total = weights.sum()
         acc = 0.0
         for idx in np.nonzero(weights)[0]:
-            payoff = engine._with_opponent_hole(terminal, opp, ALL_COMBOS[idx]).get_payoff(
-                lbr_player, engine.rules
-            )
+            payoff = replace_actor_hole_cards(
+                terminal, actor=opp, combo=ALL_COMBOS[idx]
+            ).get_payoff(lbr_player, engine.rules)
             acc += float(weights[idx]) * float(payoff)
         return acc / float(total)
 
@@ -162,11 +150,13 @@ class TestTerminalValue:
             terminal = self._bet_call_to_river(engine, _deal_initial_state(engine, 2000, 0, rng))
             assert engine._is_showdown(terminal) and len(terminal.board) == 5
             known = engine._known_mask(terminal, opp=1)
-            idx = next(i for i in range(len(ALL_COMBOS)) if not (engine._masks[i] & known))
+            idx = next(i for i in range(len(ALL_COMBOS)) if not (COMBO_MASKS[i] & known))
             belief = np.zeros(len(ALL_COMBOS))
             belief[idx] = 1.0
             expected = float(
-                engine._with_opponent_hole(terminal, 1, ALL_COMBOS[idx]).get_payoff(0, engine.rules)
+                replace_actor_hole_cards(terminal, actor=1, combo=ALL_COMBOS[idx]).get_payoff(
+                    0, engine.rules
+                )
             )
             assert engine._terminal_value(terminal, 0, 1, belief) == expected
 
@@ -231,9 +221,9 @@ class TestAllInRunoutAveraging:
         known = engine._known_mask(allin_state, opp=1)
         used = known
         for idx in range(len(ALL_COMBOS)):
-            if not (engine._masks[idx] & used):
+            if not (COMBO_MASKS[idx] & used):
                 combo_indices.append(idx)
-                used |= int(engine._masks[idx])
+                used |= int(COMBO_MASKS[idx])
             if len(combo_indices) == 3:
                 break
         belief = np.zeros(len(ALL_COMBOS))
@@ -247,11 +237,11 @@ class TestAllInRunoutAveraging:
             river_state = engine._with_runout(allin_state, (card,))
             acc, total = 0.0, 0.0
             for idx in combo_indices:
-                if engine._masks[idx] & card.mask:
+                if COMBO_MASKS[idx] & card.mask:
                     continue
-                payoff = engine._with_opponent_hole(river_state, 1, ALL_COMBOS[idx]).get_payoff(
-                    0, engine.rules
-                )
+                payoff = replace_actor_hole_cards(
+                    river_state, actor=1, combo=ALL_COMBOS[idx]
+                ).get_payoff(0, engine.rules)
                 acc += belief[idx] * float(payoff)
                 total += belief[idx]
             values.append(acc / total)

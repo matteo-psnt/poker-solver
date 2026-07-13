@@ -4,16 +4,39 @@ import numpy as np
 import pytest
 
 from src.pipeline.evaluation.statistics import (
-    MatchStatisticsAnalyzer,
     compare_paired_samples,
     compute_confidence_interval,
     compute_percentiles,
     compute_variance,
     compute_win_rate_confidence_interval,
     estimate_required_sample_size,
+    summarize_samples,
     t_test_difference,
     variance_decomposition,
 )
+
+
+class TestSummarizeSamples:
+    """One-sample summary: t-based CI and the degenerate zero-variance convention."""
+
+    def test_basic_summary(self):
+        result = summarize_samples([1.0, 2.0, 3.0, 4.0, 5.0])
+
+        assert result["mean"] == pytest.approx(3.0)
+        assert result["ci_lower"] < 3.0 < result["ci_upper"]
+        assert 0.0 < result["p_value"] < 1.0
+
+    def test_zero_variance_conventions(self):
+        null = summarize_samples([0.0, 0.0, 0.0])
+        assert null["p_value"] == 1.0 and not null["is_significant"]
+
+        shifted = summarize_samples([2.0, 2.0, 2.0])
+        assert shifted["p_value"] == 0.0 and shifted["is_significant"]
+        assert shifted["ci_lower"] == shifted["ci_upper"] == pytest.approx(2.0)
+
+    def test_too_few_samples_raises(self):
+        with pytest.raises(ValueError, match="at least 2"):
+            summarize_samples([1.0])
 
 
 class TestComparePairedSamples:
@@ -274,71 +297,3 @@ class TestSampleSize:
         required_n = estimate_required_sample_size(values, target_margin_of_error=0.5)
 
         assert required_n == 100  # Default
-
-
-class TestMatchStatisticsAnalyzer:
-    """Tests for MatchStatisticsAnalyzer."""
-
-    def test_create_analyzer(self):
-        analyzer = MatchStatisticsAnalyzer(confidence_level=0.95)
-
-        assert analyzer.confidence_level == 0.95
-
-    def test_analyze_payoffs(self):
-        analyzer = MatchStatisticsAnalyzer()
-
-        payoffs = [10, 20, 30, 40, 50]  # In chips
-        analysis = analyzer.analyze_payoffs(payoffs, big_blind=2)
-
-        assert "mean" in analysis
-        assert "ci_lower" in analysis
-        assert "ci_upper" in analysis
-        assert "std_dev" in analysis
-        assert "variance" in analysis
-        assert "bb_per_hand" in analysis
-
-        # Mean should be 30 chips = 15 bb
-        assert analysis["mean"] == pytest.approx(15.0)
-
-    def test_analyze_payoffs_empty(self):
-        analyzer = MatchStatisticsAnalyzer()
-
-        payoffs = []
-        analysis = analyzer.analyze_payoffs(payoffs)
-
-        assert analysis["mean"] == 0.0
-        assert analysis["bb_per_hand"] == 0.0
-
-    def test_compare_strategies(self):
-        analyzer = MatchStatisticsAnalyzer()
-
-        payoffs1 = [10, 20, 30, 40, 50]
-        payoffs2 = [5, 15, 25, 35, 45]
-
-        comparison = analyzer.compare_strategies(payoffs1, payoffs2)
-
-        assert "t_statistic" in comparison
-        assert "p_value" in comparison
-        assert "is_significant" in comparison
-        assert "mean_difference" in comparison
-
-        # payoffs1 should be higher
-        assert comparison["mean_difference"] > 0
-
-    def test_compare_strategies_empty(self):
-        analyzer = MatchStatisticsAnalyzer()
-
-        payoffs1 = []
-        payoffs2 = []
-
-        comparison = analyzer.compare_strategies(payoffs1, payoffs2)
-
-        assert comparison["t_statistic"] == 0.0
-        assert comparison["p_value"] == 1.0
-        assert not comparison["is_significant"]
-
-    def test_str_representation(self):
-        analyzer = MatchStatisticsAnalyzer()
-
-        s = str(analyzer)
-        assert "MatchStatisticsAnalyzer" in s

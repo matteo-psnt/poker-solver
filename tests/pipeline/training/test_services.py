@@ -346,9 +346,14 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     assert output.results["confidence_95_mbb"] == (39.0, 45.0)
     assert output.results["lbr_utility_p0"] == 0.02
     assert output.results["num_hands"] == 2000
-    # Per-hand records + base seed travel with the aggregate for paired comparisons.
+    # Per-hand records + ready-made paired samples + base seed travel with the
+    # aggregate for paired comparisons.
     assert output.results["base_seed"] == 7
     assert output.results["big_blind"] == 100
+    assert output.results["pair_samples_mbb"] == [
+        pytest.approx((150.0 - 50.0) / 2 / 100 * 1000),
+        pytest.approx((800.0 + 100.0) / 2 / 100 * 1000),
+    ]
     assert output.results["hand_records"] == [
         {
             "u0": 150.0,

@@ -12,8 +12,8 @@ from src.core.game.actions import Action
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState
 from src.engine.search.range_inference import (
-    COMBO_MASKS,
     PlayerRanges,
+    combo_index_for,
     infer_ranges,
     update_ranges,
 )
@@ -21,14 +21,6 @@ from src.engine.search.subgame_cfr import solve_subgame
 from src.engine.search.tree_builder import build_local_tree
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.shared.config import ResolverConfig
-
-# Combo lookup by the pair's card bitmask, aligned with ALL_COMBOS ordering.
-_COMBO_INDEX_BY_MASK: dict[int, int] = {int(mask): i for i, mask in enumerate(COMBO_MASKS)}
-
-
-def _combo_index_for(combo) -> int:
-    """Index of a hole-card pair in the canonical ALL_COMBOS enumeration."""
-    return _COMBO_INDEX_BY_MASK[int(combo[0].mask | combo[1].mask)]
 
 
 @dataclass
@@ -59,6 +51,9 @@ class HUResolver:
         self.rules = rules
         self.config = config
         self._ranges: PlayerRanges | None = None
+        # Decisions where solve() raised and act() fell back to the blueprint.
+        # Harnesses read this directly; the warning below is for humans only.
+        self.fallback_count: int = 0
 
     def act(self, state: GameState, *, time_budget_ms: int | None = None) -> Action:
         """Resolve local subgame and sample an action at the root."""
@@ -67,6 +62,7 @@ class HUResolver:
             result = self.solve(state, time_budget_ms=budget)
             return result.action
         except Exception as exc:  # pragma: no cover - defensive runtime fallback
+            self.fallback_count += 1
             warnings.warn(
                 f"Resolver failed at runtime, falling back to blueprint strategy: {exc}",
                 RuntimeWarning,
@@ -98,9 +94,6 @@ class HUResolver:
         )
 
         root_actions = tree.root.actions
-        if not root_actions:
-            raise ValueError("Resolver found no legal root actions.")
-
         solution = solve_subgame(
             tree,
             hero=hero,
@@ -112,20 +105,12 @@ class HUResolver:
             max_iterations=self.config.max_iterations,
         )
 
-        hero_combo = _combo_index_for(state.hole_cards[hero])
+        hero_combo = combo_index_for(state.hole_cards[hero])
+        # Rows of root_strategy are already normalized distributions.
         resolver_strategy = solution.root_strategy[hero_combo]
-        total = resolver_strategy.sum()
-        if total <= 1e-12 or not np.all(np.isfinite(resolver_strategy)):
-            resolver_strategy = np.full(len(root_actions), 1.0 / len(root_actions))
-        else:
-            resolver_strategy = resolver_strategy / total
         action_values = solution.root_values[hero_combo]
 
-        blueprint_strategy = self._blueprint_strategy(
-            state,
-            root_actions,
-            use_average=self.config.leaf_use_average_strategy,
-        )
+        blueprint_strategy = self._blueprint_strategy(state, root_actions, use_average=True)
         strategy = self._blend_strategies(resolver_strategy, blueprint_strategy)
 
         idx = int(np.random.choice(len(root_actions), p=strategy))

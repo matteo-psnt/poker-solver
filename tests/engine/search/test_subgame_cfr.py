@@ -15,18 +15,19 @@ from src.core.game.actions import call, check
 from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
-from src.engine.search.range_inference import ALL_COMBOS, COMBO_MASKS, NUM_COMBOS
+from src.engine.search.range_inference import (
+    ALL_COMBOS,
+    COMBO_MASKS,
+    NUM_COMBOS,
+    combo_index_for,
+)
 from src.engine.search.subgame_cfr import RunoutEvaluator, solve_subgame
 from src.engine.search.tree_builder import build_local_tree
 from tests.test_helpers import make_test_config
 
 
 def _combo_index(a: str, b: str) -> int:
-    target = Card.new(a).mask | Card.new(b).mask
-    for idx in range(NUM_COMBOS):
-        if int(COMBO_MASKS[idx]) == target:
-            return idx
-    raise AssertionError(f"combo {a}{b} not found")
+    return combo_index_for((Card.new(a), Card.new(b)))
 
 
 class TestRunoutEvaluatorMasses:
@@ -152,7 +153,7 @@ class TestSolveSubgame:
         sums = solution.root_strategy[[quads, air]].sum(axis=1)
         np.testing.assert_allclose(sums, 1.0, atol=1e-9)
 
-        aggressive = [i for i, action in enumerate(solution.root_actions) if action.amount > 0]
+        aggressive = [i for i, action in enumerate(tree.root.actions) if action.amount > 0]
         assert aggressive, "river root should offer bet actions"
         bet_quads = solution.root_strategy[quads, aggressive].sum()
         bet_air = solution.root_strategy[air, aggressive].sum()

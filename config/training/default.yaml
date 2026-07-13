@@ -35,7 +35,6 @@
 #   # max_depth: 2
 #   # max_raises_per_street: 2
 #   # leaf_rollouts: 8
-#   # leaf_use_average_strategy: true
 #   # policy_blend_alpha: 0.35
 #   # min_strategy_prob: 1.0e-6
 

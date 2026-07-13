@@ -31,12 +31,26 @@ _EPS = 1e-12
 
 # Public, canonical hole-card combo enumeration. Range vectors produced by
 # `infer_ranges`/`update_ranges` are indexed by this ordering; consumers that
-# reason over individual combos (e.g. the LBR evaluator) must use it too.
+# reason over individual combos (e.g. the LBR evaluator, the subgame CFR) must
+# use it too. All derived lookup tables live HERE — don't rebuild them locally.
 ALL_COMBOS: list[tuple[Card, Card]] = _ALL_COMBOS
 NUM_COMBOS: int = _NUM_COMBOS
 
 # Per-combo card bitmasks in ALL_COMBOS order, for fast dead-card filtering.
 COMBO_MASKS: np.ndarray = np.array([c1.mask | c2.mask for c1, c2 in _ALL_COMBOS], dtype=np.int64)
+
+# Per-combo (card_a, card_b) deck indices in ALL_COMBOS order.
+_CARD_INDEX: dict[int, int] = {card.mask: i for i, card in enumerate(Card.get_full_deck())}
+COMBO_CARDS: np.ndarray = np.array(
+    [(_CARD_INDEX[c1.mask], _CARD_INDEX[c2.mask]) for c1, c2 in _ALL_COMBOS], dtype=np.int64
+)
+
+_COMBO_INDEX_BY_MASK: dict[int, int] = {int(mask): i for i, mask in enumerate(COMBO_MASKS)}
+
+
+def combo_index_for(combo: tuple[Card, Card]) -> int:
+    """Index of a hole-card pair in the canonical ALL_COMBOS enumeration."""
+    return _COMBO_INDEX_BY_MASK[int(combo[0].mask | combo[1].mask)]
 
 
 def infer_ranges(state: GameState, blueprint) -> PlayerRanges:
@@ -180,21 +194,7 @@ def replace_actor_hole_cards(
     """
     hole_cards = list(state.hole_cards)
     hole_cards[actor] = combo
-    return GameState(
-        street=state.street,
-        pot=state.pot,
-        stacks=state.stacks,
-        board=state.board,
-        hole_cards=(hole_cards[0], hole_cards[1]),
-        betting_history=state.betting_history,
-        button_position=state.button_position,
-        current_player=state.current_player,
-        is_terminal=state.is_terminal,
-        to_call=state.to_call,
-        last_aggressor=state.last_aggressor,
-        blind_to_call=state.blind_to_call,
-        _skip_validation=True,
-    )
+    return state.replace(hole_cards=(hole_cards[0], hole_cards[1]), validate=False)
 
 
 def _masked_uniform(board_masks: set[int]) -> np.ndarray:

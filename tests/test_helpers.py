@@ -2,8 +2,40 @@
 
 from typing import Any
 
+from src.core.actions.action_model import ActionModel
+from src.engine.solver.mccfr import MCCFRSolver
+from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.abstraction.base import BucketingStrategy
 from src.shared.config import Config
+
+
+def build_trained_test_solver(
+    iterations: int,
+    *,
+    starting_stack: int = 400,
+    session_id: str = "test-solver",
+    **config_overrides,
+):
+    """A minimally trained (deliberately weak) blueprint on shared-array storage.
+
+    Training is seeded (config seed=42) so repeated builds are strategy-identical;
+    ``session_id`` only names the backing shared memory — pass a unique one when
+    solvers are rebuilt inside parallel worker processes.
+    """
+    config = make_test_config(
+        seed=42,
+        small_blind=50,
+        big_blind=100,
+        starting_stack=starting_stack,
+        **config_overrides,
+    )
+    storage = SharedArrayStorage(
+        num_workers=1, worker_id=0, session_id=session_id, is_coordinator=True
+    )
+    solver = MCCFRSolver(ActionModel(config), DummyCardAbstraction(), storage, config=config)
+    for _ in range(iterations):
+        solver.train_iteration()
+    return solver
 
 
 def make_test_config(**overrides) -> Config:

@@ -560,6 +560,16 @@ class GameRules:
             blind_to_call=state.blind_to_call,
         )
 
+    @staticmethod
+    def invested_chips(state: GameState) -> tuple[float, float]:
+        """Chips each player has committed this hand.
+
+        Reconstructed from pot conservation: both players start with the same
+        stack, so ``starting = (pot + s0 + s1) / 2`` and invested = starting - s_i.
+        """
+        starting = (state.pot + state.stacks[0] + state.stacks[1]) / 2
+        return starting - state.stacks[0], starting - state.stacks[1]
+
     def get_payoff(self, state: GameState, player: int) -> float:
         """
         Get payoff for a player in a terminal state.
@@ -577,7 +587,7 @@ class GameRules:
         starting_stack = (state.pot + state.stacks[0] + state.stacks[1]) / 2
 
         # Determine winner if fold or showdown
-        if state.betting_history and state.betting_history[-1].type == ActionType.FOLD:
+        if state.ended_by_fold:
             # current_player is the folder at time of fold
             winner = state.opponent(state.current_player)
         else:
