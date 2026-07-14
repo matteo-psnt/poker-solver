@@ -47,6 +47,24 @@ class TestCanonicalBoardEnumerator:
         # C(52, 3) = 22100
         assert total_raw == 22100
 
+    def test_disk_cache_roundtrip(self, tmp_path):
+        """A cache-loaded enumeration is identical to a fresh one."""
+        fresh = CanonicalBoardEnumerator(Street.FLOP, cache_dir=tmp_path)
+        fresh.enumerate()
+        assert (tmp_path / "flop_v1.npz").exists()
+
+        cached = CanonicalBoardEnumerator(Street.FLOP, cache_dir=tmp_path)
+        cached.enumerate()
+
+        fresh_infos = {info.board_id: info for info in fresh.iterate()}
+        cached_infos = {info.board_id: info for info in cached.iterate()}
+        assert fresh_infos.keys() == cached_infos.keys()
+        for board_id, info in fresh_infos.items():
+            loaded = cached_infos[board_id]
+            assert loaded.raw_count == info.raw_count
+            assert loaded.representative == info.representative
+            assert loaded.canonical_board == info.canonical_board
+
 
 class TestCanonicalComboGeneration:
     """Tests for canonical combo generation."""
