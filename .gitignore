@@ -71,3 +71,5 @@ build/
 # Data artifacts
 data/runs/
 data/profiles/
+data/combo_abstraction/
+data/cache/
