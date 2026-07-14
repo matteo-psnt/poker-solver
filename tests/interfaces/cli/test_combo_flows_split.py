@@ -21,7 +21,7 @@ def test_combo_menu_uses_precompute_handlers():
     assert callable(combo_precompute_module.handle_combo_precompute)
     assert callable(combo_precompute_module.handle_combo_info)
     assert callable(combo_precompute_module.handle_combo_test_lookup)
-    assert callable(combo_precompute_module.handle_combo_coverage)
+    assert callable(combo_precompute_module.handle_combo_quality)
     assert callable(combo_precompute_module.handle_combo_analyze_bucketing)
 
 
@@ -45,5 +45,5 @@ def test_combo_menu_builds_expected_entries(tmp_path, monkeypatch):
         "View Abstraction Info",
         "Test Bucket Lookup",
         "Analyze Bucketing Patterns",
-        "Analyze Coverage (Fallback Rate)",
+        "View Abstraction Quality",
     ]

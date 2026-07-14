@@ -106,7 +106,6 @@ def train_partitioned(
         completed_iterations = 0
         total_infosets = 0
         interrupted = False
-        fallback_stats: dict[str, float] | None = None
         last_capacity: int | None = None
         loop_state = BatchLoopState()
         batch_coordinator = TrainingBatchCoordinator(
@@ -137,7 +136,6 @@ def train_partitioned(
         completed_iterations = loop_state.completed_iterations
         total_infosets = loop_state.total_infosets
         interrupted = loop_state.interrupted
-        fallback_stats = loop_state.fallback_stats
         last_capacity = loop_state.last_capacity
 
         elapsed_time = time.time() - training_start_time
@@ -177,7 +175,6 @@ def train_partitioned(
             total_infosets,
             elapsed_time,
             interrupted,
-            fallback_stats,
         )
 
     return {

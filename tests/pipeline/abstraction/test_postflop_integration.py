@@ -1,303 +1,178 @@
 """
-Integration tests for board clustering in combo abstraction.
+Integration tests for the full-coverage combo abstraction pipeline.
 
-Tests the full pipeline:
-1. Load config with clustering parameters
-2. Precompute with board clustering
-3. Save to disk
-4. Load from disk
-5. Runtime bucket lookup via cluster prediction
+Covers precompute → save → load → runtime lookup on a truncated board set
+(board_limit keeps tests fast; production runs cover every canonical board).
 """
 
 import json
-import tempfile
-from pathlib import Path
 
+import numpy as np
 import pytest
 
 from src.core.game.rules import Street
 from src.core.game.state import Card
 from src.pipeline.abstraction.config import PrecomputeConfig, StreetBucketConfig
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
-from src.pipeline.abstraction.postflop.hand_bucketing import PostflopBucketer
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 pytestmark = pytest.mark.slow
 
+N_TEST_BOARDS = 40
 
-class TestClusteringIntegration:
-    """Test complete clustering pipeline."""
 
-    @pytest.fixture(scope="session")
-    def test_config(self):
-        """Create minimal config for testing."""
-        return PrecomputeConfig(
-            board_clusters=StreetBucketConfig(flop=5, turn=10, river=15),
-            representatives_per_cluster=1,  # Reduced from 2
-            flop_runouts=25,  # Small runout sample for speed (each is an exact river pass)
-            buckets=StreetBucketConfig(flop=10, turn=15, river=20),
-            seed=42,
+def _test_config() -> PrecomputeConfig:
+    return PrecomputeConfig(
+        buckets=StreetBucketConfig(flop=10, turn=15, river=20),
+        flop_runouts=20,  # Small runout sample for speed (each is an exact river pass)
+        num_workers=2,
+        seed=42,
+        kmeans_max_iter=50,
+        kmeans_n_init=2,
+    )
+
+
+def _covered_flop_boards() -> list[tuple[Card, ...]]:
+    """Concrete representatives of the canonical flops covered by board_limit."""
+    enumerator = CanonicalBoardEnumerator(Street.FLOP)
+    enumerator.enumerate()
+    infos = sorted(enumerator.iterate(), key=lambda info: info.board_id)
+    return [info.representative for info in infos[:N_TEST_BOARDS]]
+
+
+@pytest.fixture(scope="module")
+def flop_artifact(tmp_path_factory):
+    """Precompute a truncated flop abstraction once and save it to disk."""
+    precomputer = PostflopPrecomputer(_test_config())
+    precomputer.precompute_street(Street.FLOP, board_limit=N_TEST_BOARDS)
+
+    out_dir = tmp_path_factory.mktemp("abstraction")
+    precomputer.save(out_dir)
+    return out_dir
+
+
+@pytest.fixture(scope="module")
+def bucketer(flop_artifact):
+    return PostflopPrecomputer.load(flop_artifact)
+
+
+class TestFullCoveragePipeline:
+    @pytest.mark.timeout(60)
+    def test_lookup_works_for_every_covered_board(self, bucketer):
+        """Every covered board resolves every legal hand with no fallback path."""
+        num_buckets = bucketer.num_buckets(Street.FLOP)
+        assert num_buckets > 0
+
+        for board in _covered_flop_boards():
+            board_set = set(board)
+            deck = [c for c in Card.get_full_deck() if c not in board_set]
+            for hole in [(deck[0], deck[1]), (deck[10], deck[30]), (deck[-2], deck[-1])]:
+                bucket = bucketer.get_bucket(hole, board, Street.FLOP)
+                assert 0 <= bucket < num_buckets
+
+    def test_isomorphic_boards_get_same_bucket(self, bucketer):
+        """Suit-permuted (board, hand) pairs must resolve identically."""
+        boards = _covered_flop_boards()
+        board = boards[5]
+
+        # Swap hearts <-> spades consistently across board and hand.
+        swap = {"h": "s", "s": "h", "d": "d", "c": "c"}
+        rank_chars = "23456789TJQKA"  # eval7 rank encoding 0..12
+        suit_chars = "cdhs"  # eval7 suit encoding 0..3
+
+        def swap_card(card: Card) -> Card:
+            rank = rank_chars[card.rank_eval7()]
+            suit = suit_chars[card.suit_eval7()]
+            return Card.new(rank + swap[suit])
+
+        board_iso = tuple(swap_card(c) for c in board)
+        deck = [c for c in Card.get_full_deck() if c not in set(board)]
+        hole = (deck[3], deck[17])
+        hole_iso = (swap_card(hole[0]), swap_card(hole[1]))
+
+        assert bucketer.get_bucket(hole, board, Street.FLOP) == bucketer.get_bucket(
+            hole_iso, board_iso, Street.FLOP
         )
 
-    @pytest.fixture(scope="session")
-    def precomputed_abstraction(self, test_config):
-        """Precompute abstraction with clustering (session-scoped for speed)."""
-        precomputer = PostflopPrecomputer(test_config)
+    def test_hole_card_order_is_irrelevant(self, bucketer):
+        board = _covered_flop_boards()[0]
+        deck = [c for c in Card.get_full_deck() if c not in set(board)]
+        hole = (deck[4], deck[40])
 
-        # Precompute one street for testing
-        precomputer.precompute_street(Street.FLOP)
+        assert bucketer.get_bucket(hole, board, Street.FLOP) == bucketer.get_bucket(
+            (hole[1], hole[0]), board, Street.FLOP
+        )
 
-        return precomputer.abstraction, precomputer
+    def test_illegal_hand_raises(self, bucketer):
+        board = _covered_flop_boards()[0]
+        overlapping = (board[0], Card.new("2c") if board[0] != Card.new("2c") else Card.new("3c"))
+        with pytest.raises(KeyError):
+            bucketer.get_bucket(overlapping, board, Street.FLOP)
 
-    def test_config_loading_from_yaml(self):
-        """Test loading config from YAML file."""
-        config = PrecomputeConfig.from_yaml("quick_test")
-
-        # Check clustering parameters loaded
-        assert Street.FLOP in config.num_board_clusters
-        assert Street.TURN in config.num_board_clusters
-        assert Street.RIVER in config.num_board_clusters
-        assert config.representatives_per_cluster > 0
-
-        # Check bucket numbers
-        assert Street.FLOP in config.num_buckets
-        assert Street.TURN in config.num_buckets
-        assert Street.RIVER in config.num_buckets
-
-    def test_precomputation_creates_clusters(self, precomputed_abstraction):
-        """Test that precomputation creates cluster-based storage."""
-        abstraction, _precomputer = precomputed_abstraction
-
-        # Check board_clusterer was created
-        assert abstraction._board_clusterer is not None
-
-        # Check storage is cluster-based (not board-based)
-        assert Street.FLOP in abstraction._buckets
-
-        flop_buckets = abstraction._buckets[Street.FLOP]
-
-        # Should have ~10 clusters (from config), not ~1755 boards
-        num_clusters = len(flop_buckets)
-        assert 5 <= num_clusters <= 15, f"Expected ~10 clusters, got {num_clusters}"
-
-        # Each cluster should have buckets for many hands
-        first_cluster_id = next(iter(flop_buckets.keys()))
-        num_hands_in_cluster = len(flop_buckets[first_cluster_id])
-        assert num_hands_in_cluster > 100, "Should have many hands per cluster"
-
-    def test_runtime_bucket_lookup(self, precomputed_abstraction):
-        """Test runtime lookup predicts cluster and finds bucket."""
-        abstraction, _ = precomputed_abstraction
-
-        # Sample board and hand
-        hole_cards = (Card.new("Ah"), Card.new("Kd"))
-        board = (Card.new("Qs"), Card.new("Jc"), Card.new("9h"))
-
-        # Should successfully predict cluster and return bucket
-        bucket = abstraction.get_bucket(hole_cards, board, Street.FLOP)
-
-        # Bucket should be valid
-        assert isinstance(bucket, int)
-        assert 0 <= bucket < 20  # 20 buckets in test config
-
-    def test_canonicalization_same_cluster(self, precomputed_abstraction):
-        """Test that identical canonical boards map to same bucket."""
-        abstraction, _ = precomputed_abstraction
-
-        # Use the exact same canonical form (not just isomorphic)
-        # With fewer clusters, isomorphic boards might map differently
-        hole_cards = (Card.new("Ah"), Card.new("Kd"))
-        board = (Card.new("Qs"), Card.new("Jc"), Card.new("9h"))
-
-        # Get bucket twice - should be consistent
-        bucket1 = abstraction.get_bucket(hole_cards, board, Street.FLOP)
-        bucket2 = abstraction.get_bucket(hole_cards, board, Street.FLOP)
-
-        # Should map to same bucket (deterministic)
-        assert bucket1 == bucket2
-
-    @pytest.mark.timeout(20)
-    def test_save_and_load_with_clustering(self, test_config):
-        """Test saving cluster-based abstraction."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            save_dir = Path(tmpdir)
-
-            # Precompute
-            precomputer = PostflopPrecomputer(test_config)
-            precomputer.precompute_street(Street.FLOP)
-
-            # Save
-            precomputer.save(save_dir)
-
-            # Verify files exist
-            assert (save_dir / "metadata.json").exists()
-            assert (save_dir / "combo_abstraction.pkl").exists()
-
-            # Verify board_clusterer was saved
-            assert precomputer.abstraction._board_clusterer is not None
-            assert Street.FLOP in precomputer.abstraction._buckets
-
-    @pytest.mark.timeout(10)
-    def test_metadata_includes_clustering_info(self, test_config):
-        """Test that saved metadata includes clustering statistics."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            save_dir = Path(tmpdir)
-
-            # Precompute and save
-            precomputer = PostflopPrecomputer(test_config)
-            precomputer.precompute_street(Street.FLOP)
-            precomputer.save(save_dir)
-
-            metadata_path = save_dir / "metadata.json"
-            with open(metadata_path) as f:
-                metadata = json.load(f)
-
-            # Check clustering info present in statistics
-            assert "statistics" in metadata
-            assert "FLOP" in metadata["statistics"]
-            assert "num_clusters" in metadata["statistics"]["FLOP"]
-
-            # Check config has clustering parameters
-            config = metadata["config"]
-            assert "board_clusters" in config
-            assert "buckets" in config
-            assert "representatives_per_cluster" in config
-            assert "config_hash" in metadata
-
-    def test_different_boards_span_multiple_clusters(self, precomputed_abstraction):
-        """Test that texturally different boards are not all mapped to one cluster."""
-        abstraction, _ = precomputed_abstraction
-
-        # Very different board textures
-        paired_board = (Card.new("Qs"), Card.new("Qc"), Card.new("9h"))  # Paired
-        straight_board = (Card.new("Ts"), Card.new("9c"), Card.new("8h"))  # Connected
-        rainbow_board = (Card.new("As"), Card.new("7c"), Card.new("2h"))  # Rainbow high card
-
-        clusterer = abstraction._board_clusterer
-        assert clusterer is not None
-
-        cluster_ids = {
-            clusterer.predict(paired_board, Street.FLOP),
-            clusterer.predict(straight_board, Street.FLOP),
-            clusterer.predict(rainbow_board, Street.FLOP),
-        }
-        assert len(cluster_ids) >= 2, "Expected different textures to span multiple clusters"
-
-    def test_computational_savings(self, test_config):
-        """Verify clustering reduces computation vs full enumeration."""
-        # Count equity computations needed
+    def test_uncovered_board_raises(self, bucketer):
+        """A board outside the truncated set fails loudly, not silently."""
         enumerator = CanonicalBoardEnumerator(Street.FLOP)
         enumerator.enumerate()
+        infos = sorted(enumerator.iterate(), key=lambda info: info.board_id)
+        uncovered = infos[-1].representative
 
-        # Full enumeration: compute equity for all canonical boards
-        num_canonical_boards = len(enumerator._cache)
+        deck = [c for c in Card.get_full_deck() if c not in set(uncovered)]
+        with pytest.raises(KeyError):
+            bucketer.get_bucket((deck[0], deck[1]), uncovered, Street.FLOP)
 
-        # Clustering: compute equity for representatives only
-        num_clusters = test_config.num_board_clusters[Street.FLOP]
-        reps_per_cluster = test_config.representatives_per_cluster
-        num_equity_computations = num_clusters * reps_per_cluster
+    def test_preflop_uses_169_classes(self, bucketer):
+        assert bucketer.num_buckets(Street.PREFLOP) == 169
+        bucket = bucketer.get_bucket((Card.new("As"), Card.new("Ah")), (), Street.PREFLOP)
+        assert 0 <= bucket < 169
 
-        # Clustering should be ~10-100x fewer computations
-        speedup = num_canonical_boards / num_equity_computations
-        assert speedup >= 10, f"Expected 10x speedup, got {speedup:.1f}x"
+    def test_lookup_is_deterministic(self, bucketer):
+        board = _covered_flop_boards()[2]
+        deck = [c for c in Card.get_full_deck() if c not in set(board)]
+        hole = (deck[7], deck[22])
 
-    def test_error_on_missing_clusterer(self):
-        """Test error when board_clusterer not initialized."""
-        abstraction = PostflopBucketer()
-        # Don't precompute, so _board_clusterer is None
-
-        hole_cards = (Card.new("Ah"), Card.new("Kd"))
-        board = (Card.new("Qs"), Card.new("Jc"), Card.new("9h"))
-
-        with pytest.raises(ValueError, match="Board clusterer not initialized"):
-            abstraction.get_bucket(hole_cards, board, Street.FLOP)
+        first = bucketer.get_bucket(hole, board, Street.FLOP)
+        assert all(bucketer.get_bucket(hole, board, Street.FLOP) == first for _ in range(5))
 
 
-class TestClusterPrediction:
-    """Test board cluster prediction specifically."""
+class TestArtifactFormat:
+    def test_artifact_files(self, flop_artifact):
+        assert (flop_artifact / "metadata.json").exists()
+        assert (flop_artifact / "hand_id_to_col.npy").exists()
+        assert (flop_artifact / "flop_board_ids.npy").exists()
+        assert (flop_artifact / "flop_buckets.npy").exists()
 
-    @pytest.fixture(scope="session")
-    def clustered_abstraction(self):
-        """Create abstraction with fitted board clusterer (session-scoped for speed)."""
-        config = PrecomputeConfig(
-            board_clusters=StreetBucketConfig(flop=8, turn=15, river=20),  # Reduced
-            representatives_per_cluster=1,  # Reduced from 2
-            flop_runouts=50,
-            buckets=StreetBucketConfig(flop=15, turn=20, river=30),  # Reduced
-            seed=42,
-        )
+    def test_board_ids_sorted_and_matrix_shape(self, flop_artifact):
+        board_ids = np.load(flop_artifact / "flop_board_ids.npy")
+        buckets = np.load(flop_artifact / "flop_buckets.npy")
 
-        precomputer = PostflopPrecomputer(config)
-        precomputer.precompute_street(Street.FLOP)
+        assert board_ids.size == N_TEST_BOARDS
+        assert np.all(np.diff(board_ids) > 0)
+        assert buckets.shape[0] == N_TEST_BOARDS
 
-        return precomputer.abstraction
+    def test_metadata_has_quality_stats(self, flop_artifact):
+        with open(flop_artifact / "metadata.json") as f:
+            metadata = json.load(f)
 
-    def test_cluster_prediction_consistent(self, clustered_abstraction):
-        """Test that cluster prediction is consistent for same board."""
-        board = (Card.new("Qs"), Card.new("Jc"), Card.new("9h"))
+        assert metadata["storage_version"] == 2
+        flop_stats = metadata["streets"]["FLOP"]
+        assert flop_stats["num_boards"] == N_TEST_BOARDS
+        assert flop_stats["num_buckets"] > 0
 
-        # Predict cluster multiple times
-        cluster1 = clustered_abstraction._board_clusterer.predict(board, Street.FLOP)
-        cluster2 = clustered_abstraction._board_clusterer.predict(board, Street.FLOP)
+        quality = flop_stats["quality"]
+        assert 0.0 < quality["variance_explained"] <= 1.0
+        assert quality["within_bucket_std"] < quality["equity_std"]
+        assert quality["combo_count"] > quality["class_count"] > 0
 
-        assert cluster1 == cluster2, "Cluster prediction should be deterministic"
+    def test_buckets_ordered_by_equity(self, bucketer):
+        """Bucket 0 must be the weakest: nut-ish hands land in high buckets."""
+        board = _covered_flop_boards()[0]
+        deck = [c for c in Card.get_full_deck() if c not in set(board)]
 
-    def test_cluster_prediction_is_isomorphism_invariant(self, clustered_abstraction):
-        """CRITICAL: Suit-isomorphic boards must predict same cluster."""
-
-        # Test case 1: Monotone boards with different suits
-        board1 = (Card.new("Ah"), Card.new("Kh"), Card.new("Qh"))  # Hearts
-        board2 = (Card.new("As"), Card.new("Ks"), Card.new("Qs"))  # Spades
-
-        cluster1 = clustered_abstraction._board_clusterer.predict(board1, Street.FLOP)
-        cluster2 = clustered_abstraction._board_clusterer.predict(board2, Street.FLOP)
-
-        assert cluster1 == cluster2, (
-            "Monotone AKQ boards must predict same cluster regardless of suit"
-        )
-
-        # Test case 2: Two-tone boards with permuted suits
-        board3 = (Card.new("Ah"), Card.new("Kh"), Card.new("Qc"))  # Hearts + Club
-        board4 = (Card.new("Ad"), Card.new("Kd"), Card.new("Qs"))  # Diamonds + Spade
-
-        cluster3 = clustered_abstraction._board_clusterer.predict(board3, Street.FLOP)
-        cluster4 = clustered_abstraction._board_clusterer.predict(board4, Street.FLOP)
-
-        assert cluster3 == cluster4, (
-            "Two-tone AKQ boards must predict same cluster regardless of specific suits"
-        )
-
-        # Test case 3: Paired boards
-        board5 = (Card.new("Ah"), Card.new("As"), Card.new("Kh"))  # AA with different suits
-        board6 = (Card.new("Ad"), Card.new("Ac"), Card.new("Ks"))  # AA with different suits
-
-        cluster5 = clustered_abstraction._board_clusterer.predict(board5, Street.FLOP)
-        cluster6 = clustered_abstraction._board_clusterer.predict(board6, Street.FLOP)
-
-        assert cluster5 == cluster6, (
-            "Paired boards must predict same cluster regardless of suit distribution"
-        )
-
-    def test_cluster_prediction_returns_valid_id(self, clustered_abstraction):
-        """Test that predicted cluster ID is valid."""
-        board = (Card.new("Qs"), Card.new("Jc"), Card.new("9h"))
-
-        cluster_id = clustered_abstraction._board_clusterer.predict(board, Street.FLOP)
-
-        # Cluster ID should be in range [0, num_clusters)
-        assert isinstance(cluster_id, int)
-        assert 0 <= cluster_id < 10  # 10 clusters in config
-
-    def test_canonical_boards_predict_to_fitted_clusters(self, clustered_abstraction):
-        """Test that canonical boards predict to clusters we fitted on."""
-        enumerator = CanonicalBoardEnumerator(Street.FLOP)
-        enumerator.enumerate()
-
-        # Get some canonical boards
-        canonical_boards = [info.representative for info in list(enumerator._cache.values())[:50]]
-
-        for board in canonical_boards:
-            cluster_id = clustered_abstraction._board_clusterer.predict(board, Street.FLOP)
-
-            # Cluster should be valid and have buckets
-            assert cluster_id in clustered_abstraction._buckets[Street.FLOP]
+        num_buckets = bucketer.num_buckets(Street.FLOP)
+        buckets = [
+            bucketer.get_bucket((deck[i], deck[j]), board, Street.FLOP)
+            for i, j in [(0, 1), (5, 20), (12, 33), (40, 41), (-1, -2)]
+        ]
+        # Not all hands can share one bucket on any reasonable abstraction.
+        assert len(set(buckets)) > 1
+        assert all(0 <= b < num_buckets for b in buckets)

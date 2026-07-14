@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,27 +35,17 @@ class StreetBucketConfig(StrictFrozenModel):
 
 
 class PrecomputeConfig(StrictFrozenModel):
-    """Configuration for board clustering and postflop bucket precomputation."""
+    """Configuration for full-coverage postflop bucket precomputation."""
 
-    board_clusters: StreetBucketConfig = Field(
-        default_factory=lambda: StreetBucketConfig(flop=8, turn=8, river=8)
-    )
     buckets: StreetBucketConfig = Field(
         default_factory=lambda: StreetBucketConfig(flop=50, turn=100, river=200)
     )
-    representatives_per_cluster: PositiveInt = 3
-    representative_selection: Literal["closest", "diverse", "random"] = "closest"
     flop_runouts: PositiveInt | None = None
     num_workers: PositiveInt | None = None
     seed: int = 42
     kmeans_max_iter: PositiveInt = 300
     kmeans_n_init: PositiveInt = 10
     config_name: str | None = None
-
-    @property
-    def num_board_clusters(self) -> dict[Street, int]:
-        """Board cluster counts keyed by street enum."""
-        return self.board_clusters.as_street_dict()
 
     @property
     def num_buckets(self) -> dict[Street, int]:
@@ -83,10 +73,7 @@ class PrecomputeConfig(StrictFrozenModel):
         Excludes non-abstraction identity fields like ``config_name``.
         """
         config_dict = {
-            "board_clusters": self.board_clusters.model_dump(),
             "buckets": self.buckets.model_dump(),
-            "representatives_per_cluster": self.representatives_per_cluster,
-            "representative_selection": self.representative_selection,
             "flop_runouts": self.flop_runouts,
         }
         stable_json = json.dumps(config_dict, sort_keys=True)

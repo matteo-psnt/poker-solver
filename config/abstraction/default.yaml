@@ -1,16 +1,6 @@
 # Default Research Configuration
-# Balanced between speed and accuracy
-# Estimated precomputation time: ~15-20 minutes
-
-# Board clustering (public-state abstraction)
-board_clusters:
-  flop: 50    # 50 clusters × 5 reps × ~450 hands = ~112.5k equity computations
-  turn: 100   # 100 clusters × 5 reps × ~450 hands = ~225k equity computations
-  river: 200  # 200 clusters × 5 reps × ~450 hands = ~450k equity computations
-
-# Representatives per cluster (for equity computation)
-representatives_per_cluster: 5
-representative_selection: closest
+# Full coverage: every canonical board on every street is precomputed exactly.
+# Estimated precomputation time: ~10 minutes
 
 # Equity buckets per street
 buckets:
@@ -23,7 +13,7 @@ buckets:
 # runouts). Turn and river equities are always exact.
 flop_runouts: null
 
-# Clustering algorithm settings
+# Clustering algorithm settings (weighted 1D k-means over equities)
 kmeans_max_iter: 300
 kmeans_n_init: 10
 

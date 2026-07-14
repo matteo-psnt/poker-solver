@@ -2,9 +2,9 @@
 
 from src.interfaces.cli.flows.combo_precompute import (
     handle_combo_analyze_bucketing,
-    handle_combo_coverage,
     handle_combo_info,
     handle_combo_precompute,
+    handle_combo_quality,
     handle_combo_test_lookup,
 )
 from src.interfaces.cli.ui.context import CliContext
@@ -18,7 +18,7 @@ def combo_menu(ctx: CliContext) -> None:
         MenuItem("View Abstraction Info", handle_combo_info),
         MenuItem("Test Bucket Lookup", handle_combo_test_lookup),
         MenuItem("Analyze Bucketing Patterns", handle_combo_analyze_bucketing),
-        MenuItem("Analyze Coverage (Fallback Rate)", handle_combo_coverage),
+        MenuItem("View Abstraction Quality", handle_combo_quality),
     ]
 
     run_menu(ctx, "Combo Abstraction Tools:", items, exit_label="Back")

@@ -8,7 +8,7 @@ from src.interfaces.cli.flows.combo_precompute.common import (
 )
 from src.interfaces.cli.ui import prompts
 from src.interfaces.cli.ui.context import CliContext
-from src.pipeline.abstraction.postflop.hand_bucketing import PostflopBucketer
+from src.pipeline.abstraction.postflop.bucketer import DenseBucketer
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 
@@ -25,7 +25,7 @@ def handle_combo_test_lookup(ctx: CliContext) -> None:
 
     print(f"\nLoading abstraction from {abstraction_path.name}...")
     try:
-        abstraction: PostflopBucketer = PostflopPrecomputer.load(abstraction_path)
+        abstraction: DenseBucketer = PostflopPrecomputer.load(abstraction_path)
         print("✓ Loaded successfully")
     except Exception as exc:
         print(f"✗ Failed to load: {exc}")

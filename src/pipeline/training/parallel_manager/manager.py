@@ -83,7 +83,6 @@ class SharedArrayWorkerManager:
         self.checkpoint_dir = checkpoint_dir
 
         self.processes: list[mp.Process] = []
-        self.fallback_stats_by_worker: dict[int, dict[str, float]] = {}
 
         lifecycle.initialize_runtime(self)
         self._start_workers()

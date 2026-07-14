@@ -228,23 +228,6 @@ class TestMetricsTracker:
         entropy_2action = MetricsTracker._compute_normalized_entropy(uniform_2action)
         assert entropy_2action == pytest.approx(1.0, rel=0.01)
 
-    def test_fallback_rate_tracking(self):
-        """Test fallback rate tracking."""
-        tracker = MetricsTracker()
-
-        # Log iterations with fallback rate
-        tracker.log_iteration(1, 10.0, 100, fallback_rate=0.05)
-        tracker.log_iteration(2, 15.0, 150, fallback_rate=0.10)
-
-        # Verify fallback rate is tracked
-        assert tracker.get_fallback_rate() > 0
-        avg_fallback = tracker.get_fallback_rate()
-        assert avg_fallback == pytest.approx(0.075)  # Average of 0.05 and 0.10
-
-        # Verify summary includes fallback rate
-        summary = tracker.get_summary()
-        assert "fallback_rate" in summary
-
     def test_compact_summary_format(self):
         """Test compact summary format for progress bars."""
         tracker = MetricsTracker()
@@ -265,7 +248,7 @@ class TestMetricsTracker:
             return [infoset]
 
         # Log with quality metrics
-        tracker.log_iteration(1, 10.0, 100, infoset_sampler=mock_sampler, fallback_rate=0.02)
+        tracker.log_iteration(1, 10.0, 100, infoset_sampler=mock_sampler)
 
         # Get compact summary
         compact = tracker.get_compact_summary()

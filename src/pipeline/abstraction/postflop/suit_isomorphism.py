@@ -248,7 +248,13 @@ def canonicalize_hand(
     mapping = suit_mapping
     canonical_cards = []
 
-    for card in hole_cards:
+    # Assign new labels in rank order (high card first) so the canonical form
+    # is independent of the input order of the hole cards. Without this,
+    # (A♦, K♥) and (K♥, A♦) would canonicalize differently whenever both
+    # suits are new to the mapping (A₂K₃ vs A₃K₂).
+    ordered_cards = sorted(hole_cards, key=get_card_rank_idx)
+
+    for card in ordered_cards:
         suit = get_card_suit(card)
         rank_idx = get_card_rank_idx(card)
 

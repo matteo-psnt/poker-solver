@@ -21,7 +21,6 @@ class BatchLoopState:
     completed_iterations: int = 0
     total_infosets: int = 0
     interrupted: bool = False
-    fallback_stats: dict[str, float] | None = None
     last_capacity: int | None = None
 
 
@@ -73,9 +72,6 @@ class TrainingBatchCoordinator:
         max_worker_capacity = batch_result.get("max_worker_capacity", 0.0)
         state.last_capacity = batch_result.get("capacity", state.last_capacity)
         state.interrupted = bool(batch_result.get("interrupted"))
-
-        if "fallback_stats" in batch_result:
-            state.fallback_stats = batch_result["fallback_stats"]
 
         if batch_idx < self.num_batches - 1:
             inter_batch_timeout = max(60.0, batch_result["batch_time"] * 2.0)

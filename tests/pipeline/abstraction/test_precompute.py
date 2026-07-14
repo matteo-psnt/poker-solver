@@ -1,22 +1,19 @@
 """Tests for the precomputation pipeline."""
 
-import pytest
+import numpy as np
 
 from src.core.game.state import Card, Street
 from src.pipeline.abstraction.config import PrecomputeConfig
-from src.pipeline.abstraction.postflop.board_enumeration import (
-    CanonicalBoardEnumerator,
-    CanonicalBoardInfo,
+from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.pipeline.abstraction.postflop.canonical_hands import (
+    enumerate_hand_classes,
+    get_all_canonical_hands,
 )
-from src.pipeline.abstraction.postflop.hand_bucketing import get_all_canonical_hands
 from src.pipeline.abstraction.postflop.precompute import (
     PostflopPrecomputer,
-    _worker_compute_cluster_equities,
+    _worker_compute_board_chunk,
 )
-from src.pipeline.abstraction.postflop.suit_isomorphism import (
-    canonicalize_board,
-    get_canonical_board_id,
-)
+from src.pipeline.abstraction.postflop.suit_isomorphism import canonicalize_board
 
 
 class TestCanonicalBoardEnumerator:
@@ -78,63 +75,63 @@ class TestCanonicalComboGeneration:
     def test_combos_dont_overlap_board(self):
         """Test that combo hands don't share cards with board."""
         board = (Card.new("As"), Card.new("Ks"), Card.new("Qs"))
-        _board_set = set(board)
 
         for combo in get_all_canonical_hands(board):
-            # The representative hand should not overlap with board
-            # (This is checked internally but let's verify the canonical form)
             assert combo.board == canonicalize_board(board)[0]
 
+    def test_hand_class_multiplicities_cover_all_combos(self):
+        """Class multiplicities must sum to the concrete combo count."""
+        board = (Card.new("Ts"), Card.new("9s"), Card.new("8c"))
+        classes = enumerate_hand_classes(board)
 
-def _make_board_info(board: tuple[Card, ...]) -> CanonicalBoardInfo:
-    canonical, _ = canonicalize_board(board)
-    return CanonicalBoardInfo(
-        canonical_board=canonical,
-        board_id=get_canonical_board_id(canonical),
-        raw_count=1,
-        representative=board,
-    )
+        # C(49, 2) concrete combos on a flop
+        assert sum(c.multiplicity for c in classes) == 1176
+        assert len(classes) == len(list(get_all_canonical_hands(board)))
+        # Every representative is a legal concrete hand
+        board_set = set(board)
+        for hand_class in classes:
+            assert hand_class.representative[0] not in board_set
+            assert hand_class.representative[1] not in board_set
 
 
 class TestEquityWorker:
-    """Tests for the per-representative-board equity worker."""
+    """Tests for the per-board equity worker."""
 
-    def test_worker_covers_all_canonical_combos(self):
-        """One worker call yields an equity for every canonical combo."""
-        board = (Card.new("As"), Card.new("Kh"), Card.new("2c"))
-        board_info = _make_board_info(board)
+    def test_worker_covers_all_hand_classes(self):
+        """One worker call yields an equity for every class on every board."""
+        boards = [
+            (0, (Card.new("As"), Card.new("Kh"), Card.new("2c"))),
+            (1, (Card.new("2s"), Card.new("7h"), Card.new("Qc"))),
+        ]
+        results = _worker_compute_board_chunk((boards, 20, 42))
 
-        results = _worker_compute_cluster_equities((board_info, 3, 20, 42))
-
-        num_combos = sum(1 for _ in get_all_canonical_hands(board))
-        assert len(results) == num_combos
-
-        hand_ids = set()
-        for cluster_id, board_id, hand_id, equity in results:
-            assert cluster_id == 3
-            assert board_id == board_info.board_id
-            assert 0.0 <= equity <= 1.0
-            hand_ids.add(hand_id)
-        assert len(hand_ids) == num_combos
+        assert len(results) == 2
+        for (row, _board), (result_row, cols, equities, multiplicities) in zip(boards, results):
+            assert result_row == row
+            n_classes = len(enumerate_hand_classes(_board))
+            assert len(cols) == len(equities) == len(multiplicities) == n_classes
+            assert np.all((equities >= 0.0) & (equities <= 1.0))
+            assert np.all(cols >= 0)
+            assert np.all(multiplicities >= 1)
+            # Columns are unique: one cell per class
+            assert len(np.unique(cols)) == n_classes
 
     def test_worker_is_deterministic(self):
         """Same args produce identical equities (seeded runout sampling)."""
-        board = (Card.new("2s"), Card.new("7h"), Card.new("Qc"))
-        board_info = _make_board_info(board)
+        boards = [(0, (Card.new("2s"), Card.new("7h"), Card.new("Qc")))]
 
-        results1 = _worker_compute_cluster_equities((board_info, 0, 25, 42))
-        results2 = _worker_compute_cluster_equities((board_info, 0, 25, 42))
+        _, cols1, eq1, _ = _worker_compute_board_chunk((boards, 25, 42))[0]
+        _, cols2, eq2, _ = _worker_compute_board_chunk((boards, 25, 42))[0]
 
-        assert results1 == results2
+        assert np.array_equal(cols1, cols2)
+        assert np.array_equal(eq1, eq2)
 
     def test_premium_hands_have_high_equity(self):
         """Some hands on a dry board must be strong (sanity of equity scale)."""
-        board = (Card.new("2s"), Card.new("7h"), Card.new("Qc"))
-        board_info = _make_board_info(board)
+        boards = [(0, (Card.new("2s"), Card.new("7h"), Card.new("Qc")))]
+        _, _, equities, _ = _worker_compute_board_chunk((boards, 25, 42))[0]
 
-        results = _worker_compute_cluster_equities((board_info, 0, 25, 42))
-
-        assert max(equity for _, _, _, equity in results) > 0.8
+        assert float(equities.max()) > 0.8
 
 
 class TestPrecomputeConfig:
@@ -156,15 +153,4 @@ class TestComboPrecomputer:
         config = PrecomputeConfig.from_yaml("quick_test")
         precomputer = PostflopPrecomputer(config)
 
-        assert precomputer.abstraction is not None
         assert precomputer.config == config
-
-    @pytest.mark.skip(reason="Full precomputation is too slow for unit tests")
-    def test_full_precomputation(self):
-        """Test full precomputation (skipped by default)."""
-        config = PrecomputeConfig.from_yaml("quick_test")
-        precomputer = PostflopPrecomputer(config)
-
-        abstraction = precomputer.precompute_all(streets=[Street.FLOP])
-
-        assert abstraction.num_buckets(Street.FLOP) > 0

@@ -52,12 +52,23 @@ def _get_config_choice(ctx: CliContext) -> PrecomputeConfig | None:
         return None
 
 
-# Measured single-core seconds per representative board with the exact
-# range-vs-range engine (flop scales linearly with enumerated runouts).
-TIME_PER_ITEM_BASELINE = {
+# Measured single-core seconds per canonical board with the exact
+# range-vs-range engine (flop scales linearly with enumerated runouts),
+# plus per-street constants for canonical board enumeration.
+TIME_PER_BOARD_BASELINE = {
     Street.FLOP: 1.1,
     Street.TURN: 0.05,
-    Street.RIVER: 0.01,
+    Street.RIVER: 0.012,
+}
+BOARD_ENUMERATION_SECONDS = {
+    Street.FLOP: 1.0,
+    Street.TURN: 8.0,
+    Street.RIVER: 55.0,
+}
+CANONICAL_BOARD_COUNTS = {
+    Street.FLOP: 1755,
+    Street.TURN: 16432,
+    Street.RIVER: 134459,
 }
 FLOP_TOTAL_RUNOUTS = 1176
 
@@ -74,24 +85,20 @@ def _estimate_time(config: PrecomputeConfig) -> None:
     total_seconds = 0.0
 
     for street in [Street.FLOP, Street.TURN, Street.RIVER]:
-        num_clusters = config.num_board_clusters[street]
-        reps = config.representatives_per_cluster
-        num_items = num_clusters * reps
+        num_boards = CANONICAL_BOARD_COUNTS[street]
 
-        seconds_per_item = TIME_PER_ITEM_BASELINE[street] / workers
+        seconds_per_board = TIME_PER_BOARD_BASELINE[street] / workers
         if street == Street.FLOP:
-            seconds_per_item *= flop_runout_factor
-        street_seconds = num_items * seconds_per_item
+            seconds_per_board *= flop_runout_factor
+        street_seconds = BOARD_ENUMERATION_SECONDS[street] + num_boards * seconds_per_board
 
         estimates[street] = {
-            "clusters": num_clusters,
-            "reps": reps,
-            "items": num_items,
+            "boards": num_boards,
             "est_minutes": street_seconds / 60,
         }
         total_seconds += street_seconds
 
-    print("\nEstimated precomputation:")
+    print("\nEstimated precomputation (full coverage):")
     print("-" * 50)
     for street, est in estimates.items():
         minutes = est["est_minutes"]
@@ -102,10 +109,7 @@ def _estimate_time(config: PrecomputeConfig) -> None:
         else:
             time_str = f"{minutes / 60:.1f}h"
 
-        print(
-            f"  {street.name:6s}: {est['items']:3d} items "
-            f"({est['clusters']} clusters × {est['reps']} reps) → ~{time_str}"
-        )
+        print(f"  {street.name:6s}: {est['boards']:6d} canonical boards → ~{time_str}")
 
     print("-" * 50)
     total_minutes = total_seconds / 60
@@ -163,13 +167,7 @@ def handle_combo_precompute(ctx: CliContext) -> None:
         f"T={config.num_buckets[Street.TURN]}, "
         f"R={config.num_buckets[Street.RIVER]}"
     )
-    print(
-        f"Board Clusters: F={config.num_board_clusters[Street.FLOP]}, "
-        f"T={config.num_board_clusters[Street.TURN]}, "
-        f"R={config.num_board_clusters[Street.RIVER]}"
-    )
-    print(f"Representatives/cluster: {config.representatives_per_cluster}")
-    print(f"Representative selection: {config.representative_selection}")
+    print("Coverage: all canonical boards (no clustering)")
     flop_runouts = "exact (1176)" if config.flop_runouts is None else str(config.flop_runouts)
     print(f"Flop runouts: {flop_runouts} (turn/river exact)")
     print(f"Workers: {config.num_workers or mp.cpu_count()}")

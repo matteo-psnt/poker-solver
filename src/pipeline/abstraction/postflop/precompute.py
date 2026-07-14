@@ -1,20 +1,17 @@
 """
-Precomputation pipeline for combo-level abstraction.
+Full-coverage precomputation pipeline for combo-level abstraction.
 
-This module handles the computation-heavy task of:
-1. Enumerating all canonical boards
-2. For each canonical board, enumerating all canonical hand combos
-3. Computing equity for each (canonical_board, canonical_hand) pair
-4. Clustering combos into buckets using K-means on equity values
+For every canonical board on every street:
+1. Compute exact equity for every canonical hand class (range-vs-range engine)
+2. Bucket all (board, class) equities per street with weighted 1D k-means
+3. Store dense bucket matrices keyed by canonical board ID
 
-The result is a sparse lookup table:
-    street -> canonical_board_id -> canonical_hand_id -> bucket_id
+Every legal postflop state resolves to a bucket computed on its own board —
+there is no board clustering, no representative sampling, and no fallback.
 """
 
 import json
 import multiprocessing as mp
-import pickle
-from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -22,324 +19,241 @@ import numpy as np
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
-from src.core.game.state import Street
+from src.core.game.state import Card, Street
 from src.pipeline.abstraction.config import PrecomputeConfig
-from src.pipeline.abstraction.postflop.board_clustering import BoardClusterer
-from src.pipeline.abstraction.postflop.board_enumeration import (
-    CanonicalBoardEnumerator,
-    CanonicalBoardInfo,
+from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.pipeline.abstraction.postflop.bucketer import (
+    METADATA_FILENAME,
+    N_HAND_COLUMNS,
+    POSTFLOP_STREETS,
+    STORAGE_VERSION,
+    DenseBucketer,
+    bucket_dtype,
+    build_hand_column_index,
 )
-from src.pipeline.abstraction.postflop.hand_bucketing import (
-    PostflopBucketer,
-    get_all_canonical_hands,
-    get_representative_hand,
-)
-from src.pipeline.abstraction.postflop.suit_isomorphism import (
-    canonicalize_board,
-    get_canonical_board_id,
-)
+from src.pipeline.abstraction.postflop.canonical_hands import enumerate_hand_classes
+from src.pipeline.abstraction.postflop.quality import compute_street_quality
 from src.pipeline.abstraction.utils.equity import RangeEquityEngine
 
+_HAND_ID_TO_COL = build_hand_column_index()
 
-def _worker_compute_cluster_equities(args) -> list[tuple[int, int, int, float]]:
+# Equity quantization grid for the weighted 1D k-means fit. 2^16 bins keep the
+# fit exact to ~1.5e-5 equity while bounding its input size.
+_KMEANS_EQUITY_BINS = 65536
+
+_MAX_CHUNK_BOARDS = 512
+
+
+def _worker_compute_board_chunk(
+    args: tuple[list[tuple[int, tuple[Card, ...]]], int | None, int],
+) -> list[tuple[int, np.ndarray, np.ndarray, np.ndarray]]:
     """
-    Worker that computes equities for one representative board, tagged with cluster_id.
+    Compute per-class equities for a chunk of boards.
 
-    One exact range-vs-range pass covers every combo on the board; canonical
-    combos are then looked up from that shared table.
+    Returns one (row, columns, equities, multiplicities) tuple per board.
     """
-    board_info, cluster_id, flop_runouts, seed = args
-
+    boards, flop_runouts, seed = args
     engine = RangeEquityEngine(max_runouts=flop_runouts, seed=seed)
-    table = engine.board_equities(board_info.representative)
 
-    _, suit_mapping = canonicalize_board(board_info.representative)
     results = []
-    for combo in get_all_canonical_hands(board_info.representative):
-        rep_hand = get_representative_hand(combo.hand, suit_mapping)
-        results.append((cluster_id, board_info.board_id, combo.hand_id, table.equity(rep_hand)))
+    for row, board in boards:
+        table = engine.board_equities(board)
+        classes = enumerate_hand_classes(board)
+
+        cols = np.empty(len(classes), dtype=np.int32)
+        equities = np.empty(len(classes), dtype=np.float32)
+        multiplicities = np.empty(len(classes), dtype=np.uint8)
+        for k, hand_class in enumerate(classes):
+            cols[k] = _HAND_ID_TO_COL[hand_class.canonical.hand_id]
+            equities[k] = table.equity(hand_class.representative)
+            multiplicities[k] = hand_class.multiplicity
+
+        results.append((row, cols, equities, multiplicities))
 
     return results
 
 
 class PostflopPrecomputer:
     """
-    Precomputes combo-level abstraction data using board clustering.
+    Precomputes full-coverage combo abstraction tables.
 
-    This is the main entry point for generating abstraction tables.
-    Uses public-state (board) clustering to make precomputation tractable.
+    This is the main entry point for generating abstraction artifacts.
     """
 
     def __init__(self, config: PrecomputeConfig):
-        """
-        Initialize precomputer.
-
-        Args:
-            config: Precomputation configuration
-        """
         self.config = config
 
-        # Initialize board clusterer
-        self.board_clusterer = BoardClusterer(config=self.config)
+        # Per-street outputs, filled by precompute_street.
+        self._board_ids: dict[Street, np.ndarray] = {}
+        self._bucket_matrices: dict[Street, np.ndarray] = {}
+        self._num_buckets: dict[Street, int] = {}
+        self._quality: dict[Street, dict] = {}
 
-        # Storage for computed equities: street -> cluster_id -> hand_id -> equity
-        self._equities: dict[Street, dict[int, dict[int, float]]] = {
-            Street.FLOP: {},
-            Street.TURN: {},
-            Street.RIVER: {},
-        }
-
-        # Final abstraction object
-        self.abstraction = PostflopBucketer()
-
-        # Attach board clusterer to abstraction for runtime use
-        self.abstraction.set_board_clusterer(self.board_clusterer)
-
-    def precompute_street(
-        self,
-        street: Street,
-        progress_callback: Callable[[int, int], None] | None = None,
-    ) -> None:
+    def precompute_street(self, street: Street, board_limit: int | None = None) -> None:
         """
-        Precompute abstraction for a single street using board clustering.
-
-        Pipeline:
-        1. Enumerate all canonical boards
-        2. Cluster boards by texture
-        3. Compute equity only for representative boards
-        4. Cluster hands into buckets per cluster
-        5. Store by cluster_id (not board_id)
+        Precompute buckets for every canonical board on a street.
 
         Args:
-            street: Which street to precompute
-            progress_callback: Optional callback(current, total) for progress
+            street: Which street to precompute.
+            board_limit: Optional cap on the number of canonical boards
+                (lowest board IDs first). Test hook — production runs cover
+                every board.
         """
         print(f"Starting precomputation for {street.name}")
 
-        # Step 1: Enumerate all canonical boards
         print("Step 1: Enumerating canonical boards...")
         enumerator = CanonicalBoardEnumerator(street)
         enumerator.enumerate()
+        board_infos = sorted(enumerator.iterate(), key=lambda info: info.board_id)
+        if board_limit is not None:
+            board_infos = board_infos[:board_limit]
 
-        board_infos = list(enumerator.iterate())
-        total_boards = len(board_infos)
-        print(f"Found {total_boards} canonical boards for {street.name}")
+        n_boards = len(board_infos)
+        board_ids = np.array([info.board_id for info in board_infos], dtype=np.int64)
+        print(f"Covering {n_boards} canonical boards for {street.name}")
 
-        # Step 2: Cluster boards by texture
-        print(
-            f"Step 2: Clustering boards into {self.config.num_board_clusters[street]} clusters..."
-        )
-        canonical_boards = [info.canonical_board for info in board_infos]
-        representative_boards = [info.representative for info in board_infos]
-
-        self.board_clusterer.fit(
-            canonical_boards=canonical_boards,
-            representative_boards=representative_boards,
-            street=street,
-        )
-
-        clusters = self.board_clusterer.get_all_clusters(street)
-        print(f"Created {len(clusters)} clusters")
-
-        # Step 3: Compute equities only for representative boards
-        print(
-            f"Step 3: Computing equities for representatives ({self.config.representatives_per_cluster} per cluster)..."
-        )
+        print("Step 2: Computing exact equities for every board...")
+        equity_matrix = np.full((n_boards, N_HAND_COLUMNS), np.nan, dtype=np.float32)
+        weight_matrix = np.zeros((n_boards, N_HAND_COLUMNS), dtype=np.uint8)
 
         num_workers = self.config.num_workers or mp.cpu_count()
+        flop_runouts = self.config.flop_runouts if street == Street.FLOP else None
 
-        # Collect all representative boards from all clusters
-        work_items = []
-        for cluster in clusters:
-            for rep_board in cluster.representative_boards:
-                canonical_rep, _ = canonicalize_board(rep_board)
-                board_info = CanonicalBoardInfo(
-                    canonical_board=canonical_rep,
-                    board_id=get_canonical_board_id(canonical_rep),
-                    raw_count=1,
-                    representative=rep_board,
-                )
-                work_items.append(
-                    (board_info, cluster.cluster_id, self.config.flop_runouts, self.config.seed)
-                )
-
-        total_work = len(work_items)
-        print(
-            f"Computing equity for {total_work} representative boards (vs {total_boards} without clustering)"
-        )
-
-        # Process in parallel
-        all_equities: list[
-            tuple[int, int, int, float]
-        ] = []  # (cluster_id, board_id, hand_id, equity)
+        boards = [(row, info.representative) for row, info in enumerate(board_infos)]
+        chunk_size = min(_MAX_CHUNK_BOARDS, max(1, n_boards // (num_workers * 8)))
+        chunks = [boards[i : i + chunk_size] for i in range(0, n_boards, chunk_size)]
 
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = {
-                executor.submit(_worker_compute_cluster_equities, item): i
-                for i, item in enumerate(work_items)
-            }
-
+            futures = [
+                executor.submit(
+                    _worker_compute_board_chunk, (chunk, flop_runouts, self.config.seed)
+                )
+                for chunk in chunks
+            ]
             for future in tqdm(
                 as_completed(futures),
                 total=len(futures),
                 desc=f"Computing {street.name} equities",
             ):
-                board_results = future.result()
-                all_equities.extend(board_results)
+                for row, cols, equities, multiplicities in future.result():
+                    equity_matrix[row, cols] = equities
+                    weight_matrix[row, cols] = multiplicities
 
-                if progress_callback:
-                    progress_callback(len(all_equities) // 500, total_work)
+        print(f"Step 3: Bucketing into {self.config.num_buckets[street]} buckets...")
+        self._bucket_street(street, board_ids, equity_matrix, weight_matrix)
 
-        # Step 4: Organize equities by cluster (aggregate across representatives)
-        print("Step 4: Aggregating equities by cluster...")
+        quality = self._quality[street]
+        print(
+            f"Completed {street.name}: {quality['class_count']:,} classes "
+            f"({quality['combo_count']:,} combos) into {quality['num_buckets']} buckets, "
+            f"variance explained {quality['variance_explained']:.4f}"
+        )
 
-        # Aggregate: for each (cluster_id, hand_id), average equity across representatives
-        cluster_hand_equities: dict[int, dict[int, list[float]]] = {}
+    def _bucket_street(
+        self,
+        street: Street,
+        board_ids: np.ndarray,
+        equity_matrix: np.ndarray,
+        weight_matrix: np.ndarray,
+    ) -> None:
+        """Weighted 1D k-means over all (board, class) equities on a street."""
+        valid = ~np.isnan(equity_matrix)
+        values = equity_matrix[valid].astype(np.float64)
+        weights = weight_matrix[valid].astype(np.float64)
 
-        for cluster_id, board_id, hand_id, equity in all_equities:
-            if cluster_id not in cluster_hand_equities:
-                cluster_hand_equities[cluster_id] = {}
-            if hand_id not in cluster_hand_equities[cluster_id]:
-                cluster_hand_equities[cluster_id][hand_id] = []
+        if values.size == 0:
+            raise ValueError(f"No equity data computed for {street.name}")
 
-            cluster_hand_equities[cluster_id][hand_id].append(equity)
+        # Weighted k-means on the quantized equity histogram: exact up to the
+        # grid resolution, independent of how many (board, class) pairs exist.
+        quantized = np.clip(
+            (values * (_KMEANS_EQUITY_BINS - 1)).astype(np.int64), 0, _KMEANS_EQUITY_BINS - 1
+        )
+        histogram = np.bincount(quantized, weights=weights, minlength=_KMEANS_EQUITY_BINS)
+        occupied_bins = np.nonzero(histogram)[0]
+        points = (occupied_bins / (_KMEANS_EQUITY_BINS - 1)).reshape(-1, 1)
 
-        # Average equities for each (cluster, hand)
-        for cluster_id, hands in cluster_hand_equities.items():
-            if cluster_id not in self._equities[street]:
-                self._equities[street][cluster_id] = {}
-
-            for hand_id, equity_list in hands.items():
-                self._equities[street][cluster_id][hand_id] = float(np.mean(equity_list))
-
-        # Step 5: Cluster into buckets using K-means
-        print(f"Step 5: Clustering into {self.config.num_buckets[street]} buckets...")
-        self._cluster_street(street)
-
-        print(f"Completed precomputation for {street.name}")
-
-    def _cluster_street(self, street: Street) -> None:
-        """
-        Cluster equity values into buckets using K-means.
-
-        Uses global clustering across all clusters for consistency.
-        Now operates on (cluster_id, hand_id) pairs instead of (board_id, hand_id).
-        """
-        num_buckets = self.config.num_buckets[street]
-
-        # Collect all equity values with their (cluster_id, hand_id) keys
-        all_data = []
-        for cluster_id, hands in self._equities[street].items():
-            for hand_id, equity in hands.items():
-                all_data.append((cluster_id, hand_id, equity))
-
-        if not all_data:
-            print(f"Warning: No data to cluster for {street.name}")
-            return
-
-        # Extract just the equity values for clustering
-        equities = np.array([x[2] for x in all_data]).reshape(-1, 1)
-
-        # Fit K-means
         kmeans = KMeans(
-            n_clusters=min(num_buckets, len(all_data)),
+            n_clusters=min(self.config.num_buckets[street], len(occupied_bins)),
             max_iter=self.config.kmeans_max_iter,
             n_init=self.config.kmeans_n_init,
             random_state=self.config.seed,
         )
-        labels = kmeans.fit_predict(equities)
+        kmeans.fit(points, sample_weight=histogram[occupied_bins])
 
-        # Sort cluster centers and remap labels so bucket 0 = lowest equity
-        center_order = np.argsort(kmeans.cluster_centers_.flatten())
-        label_map = {old: new for new, old in enumerate(center_order)}
+        # Bucket 0 = lowest equity; assignment by nearest center = boundary search.
+        centers = np.unique(kmeans.cluster_centers_.ravel())
+        boundaries = (centers[1:] + centers[:-1]) / 2
+        num_buckets = len(centers)
 
-        # Assign buckets to abstraction (indexed by cluster_id, not board_id)
-        for (cluster_id, hand_id, equity), label in zip(all_data, labels):
-            bucket = label_map[label]
-            self.abstraction.assign_bucket(street, cluster_id, hand_id, bucket)
+        dtype = bucket_dtype(num_buckets)
+        matrix = np.full(equity_matrix.shape, np.iinfo(dtype).max, dtype=dtype)
+        bucket_flat = np.searchsorted(boundaries, values)
+        matrix[valid] = bucket_flat
 
-        self.abstraction.set_num_buckets(street, len(set(labels)))
+        self._board_ids[street] = board_ids
+        self._bucket_matrices[street] = matrix
+        self._num_buckets[street] = num_buckets
+        self._quality[street] = compute_street_quality(
+            equities=values,
+            buckets=bucket_flat,
+            weights=weights,
+            num_buckets=num_buckets,
+        )
 
-        print(f"Clustered {len(all_data)} combos into {len(set(labels))} buckets for {street.name}")
-
-    def precompute_all(
-        self,
-        streets: list[Street] | None = None,
-    ) -> PostflopBucketer:
-        """
-        Precompute abstraction for all streets.
-
-        Args:
-            streets: Which streets to precompute (default: all postflop)
-
-        Returns:
-            Fitted PostflopBucketer object
-        """
+    def precompute_all(self, streets: list[Street] | None = None) -> DenseBucketer:
+        """Precompute all (or the given) postflop streets and return the bucketer."""
         if streets is None:
-            streets = [Street.FLOP, Street.TURN, Street.RIVER]
+            streets = list(POSTFLOP_STREETS)
 
         for street in streets:
             self.precompute_street(street)
 
-        return self.abstraction
+        return self.build_bucketer()
+
+    def build_bucketer(self) -> DenseBucketer:
+        """Assemble the runtime bucketer from precomputed matrices."""
+        return DenseBucketer(
+            num_buckets_by_street=self._num_buckets,
+            board_ids_by_street=self._board_ids,
+            buckets_by_street=self._bucket_matrices,
+            hand_id_to_col=_HAND_ID_TO_COL,
+        )
 
     def save(self, path: Path) -> None:
         """
-        Save precomputed abstraction to disk.
+        Save the abstraction artifact.
 
-        Creates:
-        - combo_abstraction.pkl: The PostflopBucketer object (includes board_clusterer)
-        - metadata.json: Configuration and statistics
+        Creates ``metadata.json`` plus mmap-friendly ``.npy`` arrays per street
+        (see ``bucketer.py`` for the storage layout).
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
-        # Save abstraction (includes board_clusterer)
-        with open(path / "combo_abstraction.pkl", "wb") as f:
-            pickle.dump(self.abstraction, f)
+        self.build_bucketer().save_arrays(path)
 
-        # Save metadata
-        statistics: dict[str, dict[str, int]] = {}
+        streets = {
+            street.name: {
+                "num_buckets": self._num_buckets[street],
+                "num_boards": int(self._board_ids[street].size),
+                "quality": self._quality[street],
+            }
+            for street in POSTFLOP_STREETS
+            if street in self._num_buckets
+        }
         metadata = {
+            "storage_version": STORAGE_VERSION,
             "config": self.config.model_dump(),
             "config_hash": self.config.get_config_hash(),
-            "statistics": statistics,
+            "num_preflop_buckets": 169,
+            "streets": streets,
         }
-
-        for street in [Street.FLOP, Street.TURN, Street.RIVER]:
-            if self._equities.get(street):
-                num_clusters = len(self._equities[street])
-                num_combos = sum(len(h) for h in self._equities[street].values())
-                statistics[street.name] = {
-                    "num_clusters": num_clusters,
-                    "num_combos": num_combos,
-                    "num_buckets": self.abstraction.num_buckets(street),
-                }
-
-        with open(path / "metadata.json", "w") as f:
+        with open(path / METADATA_FILENAME, "w") as f:
             json.dump(metadata, f, indent=2)
 
         print(f"Saved abstraction to {path}")
 
     @classmethod
-    def load(cls, path: Path) -> PostflopBucketer:
-        """
-        Load precomputed abstraction from disk.
-
-        Args:
-            path: Directory containing saved abstraction
-
-        Returns:
-            Loaded PostflopBucketer object
-        """
-        path = Path(path)
-
-        with open(path / "combo_abstraction.pkl", "rb") as f:
-            try:
-                return pickle.load(f)
-            except (ModuleNotFoundError, AttributeError) as exc:
-                raise RuntimeError(
-                    f"Stale abstraction at {path}: it was pickled against an older "
-                    f"code layout ({exc}). Regenerate it via 'Precompute Combo "
-                    f"Abstraction' from the CLI."
-                ) from exc
+    def load(cls, path: Path) -> DenseBucketer:
+        """Load a precomputed abstraction artifact."""
+        return DenseBucketer.load(Path(path))

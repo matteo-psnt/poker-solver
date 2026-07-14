@@ -9,7 +9,7 @@ from src.interfaces.cli.flows.combo_precompute.common import (
 )
 from src.interfaces.cli.ui import prompts
 from src.interfaces.cli.ui.context import CliContext
-from src.pipeline.abstraction.postflop.hand_bucketing import PostflopBucketer
+from src.pipeline.abstraction.postflop.bucketer import DenseBucketer
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 
@@ -50,7 +50,7 @@ def handle_combo_validate(ctx: CliContext) -> None:
     _run_basic_validation(abstraction)
 
 
-def _run_basic_validation(abstraction: PostflopBucketer, num_samples: int = 100) -> None:
+def _run_basic_validation(abstraction: DenseBucketer, num_samples: int = 100) -> None:
     """Run quick sanity checks for an abstraction."""
     print("\nRunning basic validation...")
     print("  - Load abstraction")

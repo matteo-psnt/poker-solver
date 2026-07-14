@@ -1,303 +1,131 @@
-# Card + Board Abstraction (Suit Isomorphism)
+# Card + Board Abstraction (Suit Isomorphism, Full Coverage)
 
-This module implements **combo-level abstraction** for postflop poker using **suit isomorphism**. It's the foundation for tractable CFR training on Texas Hold'em.
+This module implements **combo-level abstraction** for postflop poker using
+**suit isomorphism** with **full per-board coverage**. It's the foundation for
+tractable CFR training on Texas Hold'em.
 
 ## Overview
 
 ### The Problem
 
-In Texas Hold'em, the number of possible game states is astronomically large:
-- **Flop**: 22,100 possible boards × 1,176 hole card combos = ~26 million states
-- **Turn**: 270,725 boards × 1,128 hole card combos = ~305 million states
-- **River**: 2,598,960 boards × 1,081 hole card combos = ~2.8 billion states
+The number of raw postflop states is astronomically large (billions of
+(hand, board) pairs). Storing strategies for every state is infeasible, so
+similar states are grouped into a small number of **buckets** per street;
+training learns one strategy per (bucket, betting line).
 
-Storing strategies for every state is infeasible. We need **abstraction** - grouping similar states together.
+### The Solution
 
-### The Solution: Suit Isomorphism
+Two reductions are applied, both computed exactly:
 
-The key insight is that **suits are strategically interchangeable**. For example:
-- A♠K♠ on T♠9♠8♣ (spade flush draw)
-- A♥K♥ on T♥9♥8♣ (heart flush draw)
+1. **Suit isomorphism** collapses strategically identical states:
+   A♠K♠ on T♠9♠8♣ ≡ A♥K♥ on T♥9♥8♣ (same flush draw, blockers, equity), but
+   ≠ A♥K♥ on T♠9♠8♣ (no flush draw). This shrinks boards ~12-19x
+   (1,755 canonical flops, 16,432 turns, 134,459 rivers) and hands on each
+   board into a few hundred classes.
+2. **Equity bucketing** groups hand classes with similar exact equity into
+   the configured number of buckets per street (weighted 1D k-means).
 
-These are **strategically identical** - both have the same flush draw potential, same blockers, same equity. We can treat them as the same state.
+Every canonical board on every street is covered — equity is computed on the
+board itself by the exact range-vs-range engine
+(`src/pipeline/abstraction/utils/equity.py`), never approximated from a
+"similar" board. There is **no fallback path**: every legal (hand, board)
+lookup resolves; an unresolvable lookup is a hard error.
 
-However, A♠K♠ on T♠9♠8♣ is **different** from A♥K♥ on T♠9♠8♣ - the first has a flush draw, the second doesn't.
-
-## Architecture
+## Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    PRECOMPUTATION PIPELINE                      │
-│                                                                 │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │  Canonical   │───▶│    Board     │───▶│   Equity     │       │
-│  │   Boards     │    │  Clustering  │    │ Calculation  │       │
-│  └──────────────┘    └──────────────┘    └──────────────┘       │
-│        │                   │                    │               │
-│        ▼                   ▼                    ▼               │
-│  1,755 flops         50-400 clusters     Exact range-vs-range   │
-│  16,432 turns        per street          equity engine          │
-│  ~135k rivers                                                   │
-│                                                                 │
-│                           ┌──────────────┐                      │
-│                           │   K-Means    │                      │
-│                           │  Bucketing   │                      │
-│                           └──────────────┘                      │
-│                                 │                               │
-│                                 ▼                               │
-│                      Bucket assignments saved                   │
-└─────────────────────────────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      RUNTIME LOOKUP                             │
-│                                                                 │
-│  Input: (A♠K♠, [T♠9♥8♣])                                        │
-│           │                                                     │
-│           ▼                                                     │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │ Canonicalize │───▶│   Predict    │───▶│   Lookup     │       │
-│  │  (hand,board)│    │   Cluster    │    │   Bucket     │       │
-│  └──────────────┘    └──────────────┘    └──────────────┘       │
-│           │                 │                   │               │
-│           ▼                 ▼                   ▼               │
-│     (A₀K₀, [T₀9₁8₂])   cluster_id=42      bucket_id=37          │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+Precompute (per street)                       Runtime lookup
+─────────────────────────                     ──────────────────────────
+1. Enumerate canonical boards                 1. Canonicalize (hand, board)
+2. Exact equity for every hand                2. Binary-search board row
+   class on every board                       3. Index hand column
+3. Weighted 1D k-means → buckets              4. Read bucket from matrix
+4. Dense matrices + metadata
 ```
 
 ## Modules
 
-### 1. `suit_canonicalization.py` - Core Canonicalization
+- `suit_isomorphism.py` — canonicalization of boards/hands, canonical IDs
+- `board_enumeration.py` — enumeration of all canonical boards per street
+- `canonical_hands.py` — canonical hand classes per board (with multiplicity)
+- `precompute.py` — `PostflopPrecomputer`: the offline pipeline
+- `bucketer.py` — `DenseBucketer`: runtime lookup over dense matrices
+- `quality.py` — abstraction quality metrics (variance explained, etc.)
 
-Converts concrete cards to canonical form by assigning suit labels in order of first appearance.
+## Storage Format
 
-```python
-# Example: Board establishes suit mapping
-Board: [T♠ 9♥ 8♠]  →  Canonical: [T₀ 9₁ 8₀]
-                       Mapping: {♠→0, ♥→1}
-
-# Hands use board's mapping, extending if needed
-Hand: [A♠ K♠]  →  [A₀ K₀]  (uses existing ♠→0)
-Hand: [A♥ K♥]  →  [A₁ K₁]  (uses existing ♥→1)
-Hand: [A♦ K♦]  →  [A₂ K₂]  (new suit, assigned 2)
+```
+data/combo_abstraction/buckets-F50T100R200-rexact-{hash}/
+├── metadata.json          # config, per-street stats + quality metrics
+├── hand_id_to_col.npy     # canonical hand ID → matrix column (static)
+├── flop_board_ids.npy     # sorted canonical board IDs (one row each)
+├── flop_buckets.npy       # [n_boards, 1326] uint8/uint16 bucket matrix
+├── turn_board_ids.npy / turn_buckets.npy
+└── river_board_ids.npy / river_buckets.npy
 ```
 
-**Key Types:**
-- `CanonicalCard`: A card with rank index and canonical suit label
-- `SuitMapping`: Tracks real suit → canonical label mapping
-- `canonicalize_board()`: Establishes mapping from board
-- `canonicalize_hand()`: Converts hand using board's mapping
+Bucket matrices are loaded with `mmap_mode="r"`, so artifacts cost RAM only
+for the pages actually touched. Cells for hand classes that can't exist on a
+board hold the dtype's max value as a sentinel.
 
-### 2. `canonical_boards.py` - Board Enumeration
+## Configuration (`config/abstraction/`)
 
-Enumerates all unique canonical boards per street.
-
-| Street | Raw Boards | Canonical Boards | Reduction |
-|--------|------------|------------------|-----------|
-| Flop   | 22,100     | ~1,755           | 12.6x     |
-| Turn   | 270,725    | ~16,432          | 16.5x     |
-| River  | 2,598,960  | ~134,459         | 19.3x     |
-
-**Key Class:**
-- `CanonicalBoardEnumerator`: Generates and caches all canonical boards
-
-### 3. `board_clustering.py` - Public State Abstraction
-
-Clusters canonical boards by strategic texture to further reduce computation.
-
-**Features extracted for each board:**
-- **Suit distribution**: Monotone, two-tone, rainbow indicators
-- **Rank pairing**: Paired, trips, two-pair, quads
-- **Connectivity**: Gaps between cards, straight potential
-- **High card strength**: Normalized rank values
-
-**Key Class:**
-- `BoardClusterer`: K-means clustering on board texture features
-
-```python
-# Example clusters (conceptual)
-Cluster 0: Monotone, connected boards (flush + straight draws)
-Cluster 1: Rainbow, paired boards (trips potential)
-Cluster 2: Two-tone, unconnected (moderate texture)
-...
-```
-
-### 4. `combo_abstraction.py` - Main Abstraction Class
-
-The `PostflopBucketer` class provides the runtime interface:
-
-```python
-# Get bucket for a hand+board combination
-bucket = abstraction.get_bucket(
-    hole_cards=(Card.new("As"), Card.new("Ks")),
-    board=(Card.new("Th"), Card.new("9h"), Card.new("8c")),
-    street=Street.FLOP
-)
-```
-
-**Pipeline:**
-1. Canonicalize (hand, board) pair
-2. Predict board cluster using trained K-means
-3. Lookup bucket from `{cluster_id, hand_id} → bucket_id` table
-
-**Storage Format (sparse):**
-```python
-{
-    Street.FLOP: {
-        cluster_0: {hand_id_1: bucket, hand_id_2: bucket, ...},
-        cluster_1: {...},
-        ...
-    },
-    Street.TURN: {...},
-    Street.RIVER: {...}
-}
-```
-
-### 5. `precompute.py` - Precomputation Pipeline
-
-Handles the one-time computation of bucket assignments.
-
-**Steps:**
-1. **Enumerate** all canonical boards for each street
-2. **Cluster** boards by texture (K-means on features)
-3. **Select representatives** from each cluster (closest or diverse spread)
-4. **Compute equity** for each (representative_board, hand) pair
-5. **Bucket hands** using K-means on equity values
-6. **Save** abstraction to disk
-
-**Configuration (`config/abstraction/`):**
 ```yaml
-# Example: default.yaml
-board_clusters:
+buckets:            # equity buckets per street
   flop: 50
   turn: 100
   river: 200
-
-buckets:
-  flop: 50
-  turn: 100
-  river: 200
-
 flop_runouts: null  # null = exact (all 1,176 runouts); turn/river always exact
-representatives_per_cluster: 1
-representative_selection: closest  # closest | diverse | random
+kmeans_max_iter: 300
+kmeans_n_init: 10
+num_workers: null
+seed: 42
 ```
 
 ## Usage
 
-### Precompute Abstraction
-
-```bash
-# Via CLI
-uv run poker-solver
-# Select "Combo Abstraction Tools" -> "Precompute Abstraction"
-
-# Or directly
+```python
+from pathlib import Path
+from src.core.game.state import Card, Street
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
+# Precompute (also available via CLI: "Combo Abstraction Tools")
 config = PrecomputeConfig.from_yaml("default")
 precomputer = PostflopPrecomputer(config)
 precomputer.precompute_all()
 precomputer.save(Path("data/combo_abstraction/my_abstraction"))
-```
 
-### Load and Use
-
-```python
-from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
-from src.core.game.state import Card, Street
-
-# Load precomputed abstraction
+# Load and look up
 abstraction = PostflopPrecomputer.load(Path("data/combo_abstraction/my_abstraction"))
-
-# Get bucket for a game state
 bucket = abstraction.get_bucket(
     hole_cards=(Card.new("As"), Card.new("Ks")),
     board=(Card.new("Th"), Card.new("9h"), Card.new("8c")),
-    street=Street.FLOP
+    street=Street.FLOP,
 )
-print(f"This hand is in bucket {bucket}")
 ```
 
-## Key Design Decisions
+## Quality Metrics
 
-### 1. Board Clustering BEFORE Equity Calculation
+Computed exactly at precompute time (combo-weighted) and stored in
+`metadata.json`; view via CLI → "View Abstraction Quality":
 
-We cluster boards by texture features (not equity), then only compute equity for representative boards.
+- **equity_std** — equity spread available on the street
+- **within_bucket_std** — equity spread forced to share a strategy
+- **variance_explained** — share of equity variance the buckets preserve
 
-Equity itself comes from the exact range-vs-range engine
-(`src/pipeline/abstraction/utils/equity.py`): one pass per representative
-board covers every hole-card combo at once (each combo evaluated once per
-runout, win/tie counts derived by sorted-strength counting with blocker
-corrections). A full exact flop table (all 1,176 runouts) takes ~1s per
-board; turn (~45ms) and river (~5ms) are always exact.
+Use these to choose bucket counts with evidence instead of guessing.
 
-### 2. Fallback Mechanism
+## Performance
 
-Not every (cluster, hand) combination is seen during precomputation. When a lookup misses, we fall back to the **median bucket** for that cluster. This provides reasonable behavior while logging warnings for coverage analysis.
+| Street | Canonical boards | Precompute (12 cores, exact) |
+|--------|------------------|------------------------------|
+| Flop   | 1,755            | ~3 min (seconds with `flop_runouts: 200`) |
+| Turn   | 16,432           | ~1.5 min |
+| River  | 134,459          | ~2 min (dominated by board enumeration) |
 
-### 3. Sparse Storage
-
-Only (cluster_id, hand_id) pairs actually seen during precomputation are stored. This saves memory compared to dense arrays.
-
-## File Structure
-
-```
-src/abstraction/isomorphism/
-├── __init__.py
-├── suit_canonicalization.py  # Core canonicalization logic
-├── canonical_boards.py       # Board enumeration
-├── board_clustering.py       # K-means on board textures
-├── combo_abstraction.py      # Main abstraction class
-├── precompute.py             # Precomputation pipeline
-└── README.md                 # This file
-
-config/abstraction/
-├── quick_test.yaml            # Quick testing (10/20/30 buckets)
-├── default.yaml              # Balanced (50/100/200 buckets)
-├── production.yaml           # High quality (100/300/600 buckets)
-└── README.md
-
-data/combo_abstraction/
-├── buckets-F50T100R200-C50C100C200-rexact-{hash}/
-│   ├── combo_abstraction.pkl  # Pickled PostflopBucketer
-│   └── metadata.json          # Config and statistics
-└── ...
-```
-
-## Performance Characteristics
-
-### Precomputation Time
-
-| Config | Board Clusters | Flop Runouts | Time Estimate |
-|--------|---------------|--------------|---------------|
-| quick_test | 10/20/30 | 200 | ~1 minute |
-| default | 50/100/200 | exact | ~5 minutes |
-| production | 100/200/400 | exact | ~10 minutes |
-
-### Runtime Lookup
-
-- **O(1)** dictionary lookups after canonicalization
-- Canonicalization: ~1μs per hand
-- Total lookup: ~5-10μs per hand
-
-### Training Results
-
-From a 100-iteration test run with `quick_test` abstraction:
-- **425,012 infosets** created
-- **16.9% fallback rate** (hands not in precomputed coverage)
-- **0.07 iterations/second** (limited by CFR traversal, not abstraction)
-
-## Comparison: 169-Class vs Combo-Level
-
-| Aspect | 169-Class | Combo-Level |
-|--------|-----------|-------------|
-| Preflop | Correct (169 classes) | Same |
-| Postflop | Wrong (ignores suit relation to board) | Correct (preserves flush draws) |
-| Storage | Smaller | Larger but sparse |
-| AKs on Ts9s8c | Same bucket as AKs on Tc9c8s | Different buckets (flush vs no flush) |
+Runtime lookup is two array indexes after canonicalization (~µs), memoized
+across CFR traversals.
 
 ## References
 

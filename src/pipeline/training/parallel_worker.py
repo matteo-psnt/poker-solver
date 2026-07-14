@@ -312,13 +312,6 @@ def _worker_loop(
                         )
                         storage.update_queue.clear()
 
-                    fallback_stats = None
-                    if hasattr(card_abstraction, "get_fallback_stats"):
-                        try:
-                            fallback_stats = card_abstraction.get_fallback_stats()
-                        except Exception:
-                            fallback_stats = None
-
                     result_queue.put(
                         {
                             "worker_id": worker_id,
@@ -328,7 +321,6 @@ def _worker_loop(
                             "num_owned_infosets": storage.num_owned_infosets(),
                             "capacity_usage": storage.get_capacity_usage(),
                             "iter_time": iter_time,
-                            "fallback_stats": fallback_stats,
                         }
                     )
 
