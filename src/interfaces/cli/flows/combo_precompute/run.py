@@ -52,13 +52,14 @@ def _get_config_choice(ctx: CliContext) -> PrecomputeConfig | None:
         return None
 
 
+# Measured single-core seconds per representative board with the exact
+# range-vs-range engine (flop scales linearly with enumerated runouts).
 TIME_PER_ITEM_BASELINE = {
-    Street.FLOP: 0.37,
-    Street.TURN: 0.39,
-    Street.RIVER: 0.41,
+    Street.FLOP: 1.1,
+    Street.TURN: 0.05,
+    Street.RIVER: 0.01,
 }
-TIME_BASELINE_WORKERS = 12
-TIME_BASELINE_SAMPLES = 1000
+FLOP_TOTAL_RUNOUTS = 1176
 
 
 def _estimate_time(config: PrecomputeConfig) -> None:
@@ -67,8 +68,7 @@ def _estimate_time(config: PrecomputeConfig) -> None:
 
     workers = config.num_workers or mp.cpu_count()
 
-    sample_factor = config.equity_samples / TIME_BASELINE_SAMPLES
-    worker_factor = TIME_BASELINE_WORKERS / workers
+    flop_runout_factor = (config.flop_runouts or FLOP_TOTAL_RUNOUTS) / FLOP_TOTAL_RUNOUTS
 
     estimates = {}
     total_seconds = 0.0
@@ -78,7 +78,9 @@ def _estimate_time(config: PrecomputeConfig) -> None:
         reps = config.representatives_per_cluster
         num_items = num_clusters * reps
 
-        seconds_per_item = TIME_PER_ITEM_BASELINE[street] * sample_factor * worker_factor
+        seconds_per_item = TIME_PER_ITEM_BASELINE[street] / workers
+        if street == Street.FLOP:
+            seconds_per_item *= flop_runout_factor
         street_seconds = num_items * seconds_per_item
 
         estimates[street] = {
@@ -168,7 +170,8 @@ def handle_combo_precompute(ctx: CliContext) -> None:
     )
     print(f"Representatives/cluster: {config.representatives_per_cluster}")
     print(f"Representative selection: {config.representative_selection}")
-    print(f"Equity samples: {config.equity_samples}")
+    flop_runouts = "exact (1176)" if config.flop_runouts is None else str(config.flop_runouts)
+    print(f"Flop runouts: {flop_runouts} (turn/river exact)")
     print(f"Workers: {config.num_workers or mp.cpu_count()}")
     print(f"Output: {output_path}")
     print("=" * 60)

@@ -45,7 +45,7 @@ class PrecomputeConfig(StrictFrozenModel):
     )
     representatives_per_cluster: PositiveInt = 3
     representative_selection: Literal["closest", "diverse", "random"] = "closest"
-    equity_samples: PositiveInt = 1000
+    flop_runouts: PositiveInt | None = None
     num_workers: PositiveInt | None = None
     seed: int = 42
     kmeans_max_iter: PositiveInt = 300
@@ -87,7 +87,7 @@ class PrecomputeConfig(StrictFrozenModel):
             "buckets": self.buckets.model_dump(),
             "representatives_per_cluster": self.representatives_per_cluster,
             "representative_selection": self.representative_selection,
-            "equity_samples": self.equity_samples,
+            "flop_runouts": self.flop_runouts,
         }
         stable_json = json.dumps(config_dict, sort_keys=True)
         return hashlib.sha256(stable_json.encode()).hexdigest()[:16]

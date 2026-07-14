@@ -54,7 +54,10 @@ def handle_combo_info(ctx: CliContext) -> None:
 
         if parsed_config is not None:
             print(f"   Seed: {parsed_config.seed}")
-            print(f"   Equity samples: {parsed_config.equity_samples}")
+            flop_runouts = (
+                "exact" if parsed_config.flop_runouts is None else str(parsed_config.flop_runouts)
+            )
+            print(f"   Flop runouts: {flop_runouts}")
             print(f"   Representatives per cluster: {parsed_config.representatives_per_cluster}")
             print(f"   Representative selection: {parsed_config.representative_selection}")
 

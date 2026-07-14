@@ -12,9 +12,8 @@ def test_output_path_matches_resolver_dirname():
     out = abstraction_output_path(Path("/repo"), config)
 
     assert out.parent == Path("/repo/data/combo_abstraction")
-    # Encodes buckets, board clusters, equity samples, and the short config hash — the
-    # exact scheme the on-disk quick_test abstraction (…-5879c364) uses.
-    assert out.name == "buckets-F10T20R30-C10C20C30-s100-5879c364"
+    # Encodes buckets, board clusters, flop runouts, and the short config hash.
+    assert out.name == "buckets-F10T20R30-C10C20C30-r200-973e271a"
 
 
 def test_output_config_hash_is_short_prefix():

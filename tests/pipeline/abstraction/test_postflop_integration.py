@@ -34,7 +34,7 @@ class TestClusteringIntegration:
         return PrecomputeConfig(
             board_clusters=StreetBucketConfig(flop=5, turn=10, river=15),
             representatives_per_cluster=1,  # Reduced from 2
-            equity_samples=25,  # Reduced from 50
+            flop_runouts=25,  # Small runout sample for speed (each is an exact river pass)
             buckets=StreetBucketConfig(flop=10, turn=15, river=20),
             seed=42,
         )
@@ -222,7 +222,7 @@ class TestClusterPrediction:
         config = PrecomputeConfig(
             board_clusters=StreetBucketConfig(flop=8, turn=15, river=20),  # Reduced
             representatives_per_cluster=1,  # Reduced from 2
-            equity_samples=50,  # Reduced from 100
+            flop_runouts=50,
             buckets=StreetBucketConfig(flop=15, turn=20, river=30),  # Reduced
             seed=42,
         )

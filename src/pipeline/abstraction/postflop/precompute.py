@@ -22,11 +22,12 @@ import numpy as np
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
-from src.core.game.state import Card, Street
+from src.core.game.state import Street
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.postflop.board_clustering import BoardClusterer
 from src.pipeline.abstraction.postflop.board_enumeration import (
     CanonicalBoardEnumerator,
+    CanonicalBoardInfo,
 )
 from src.pipeline.abstraction.postflop.hand_bucketing import (
     PostflopBucketer,
@@ -34,74 +35,29 @@ from src.pipeline.abstraction.postflop.hand_bucketing import (
     get_representative_hand,
 )
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
-    CanonicalCard,
     canonicalize_board,
     get_canonical_board_id,
-    get_canonical_hand_id,
 )
-from src.pipeline.abstraction.utils.equity import EquityCalculator
-
-
-def compute_equity_for_combo(
-    canonical_board: tuple[CanonicalCard, ...],
-    canonical_hand: tuple[CanonicalCard, CanonicalCard],
-    representative_board: tuple[Card, ...],
-    equity_samples: int,
-    seed: int,
-) -> tuple[int, int, float]:
-    """
-    Compute equity for a single combo. Designed for parallel execution.
-
-    Returns:
-        (board_id, hand_id, equity)
-    """
-    # Get representative hand from canonical form
-    _, suit_mapping = canonicalize_board(representative_board)
-    rep_hand = get_representative_hand(canonical_hand, suit_mapping)
-
-    # Check for card conflicts
-    board_set = set(representative_board)
-    if rep_hand[0] in board_set or rep_hand[1] in board_set:
-        # This shouldn't happen if generation is correct
-        return (
-            get_canonical_board_id(canonical_board),
-            get_canonical_hand_id(canonical_hand),
-            -1.0,  # Error marker
-        )
-
-    # Determine street from board length
-    if len(representative_board) == 3:
-        street = Street.FLOP
-    elif len(representative_board) == 4:
-        street = Street.TURN
-    else:
-        street = Street.RIVER
-
-    # Calculate equity
-    calculator = EquityCalculator(num_samples=equity_samples, seed=seed)
-    equity = calculator.calculate_equity(rep_hand, representative_board, street)
-
-    return (
-        get_canonical_board_id(canonical_board),
-        get_canonical_hand_id(canonical_hand),
-        equity,
-    )
+from src.pipeline.abstraction.utils.equity import RangeEquityEngine
 
 
 def _worker_compute_cluster_equities(args) -> list[tuple[int, int, int, float]]:
-    """Worker that computes equities for representative boards and tags them with cluster_id."""
-    board_info, cluster_id, equity_samples, seed = args
-    results = []
+    """
+    Worker that computes equities for one representative board, tagged with cluster_id.
 
-    for i, combo in enumerate(get_all_canonical_hands(board_info.representative)):
-        board_id, hand_id, equity = compute_equity_for_combo(
-            canonical_board=combo.board,
-            canonical_hand=combo.hand,
-            representative_board=board_info.representative,
-            equity_samples=equity_samples,
-            seed=seed + i,
-        )
-        results.append((cluster_id, board_id, hand_id, equity))
+    One exact range-vs-range pass covers every combo on the board; canonical
+    combos are then looked up from that shared table.
+    """
+    board_info, cluster_id, flop_runouts, seed = args
+
+    engine = RangeEquityEngine(max_runouts=flop_runouts, seed=seed)
+    table = engine.board_equities(board_info.representative)
+
+    _, suit_mapping = canonicalize_board(board_info.representative)
+    results = []
+    for combo in get_all_canonical_hands(board_info.representative):
+        rep_hand = get_representative_hand(combo.hand, suit_mapping)
+        results.append((cluster_id, board_info.board_id, combo.hand_id, table.equity(rep_hand)))
 
     return results
 
@@ -196,9 +152,6 @@ class PostflopPrecomputer:
         work_items = []
         for cluster in clusters:
             for rep_board in cluster.representative_boards:
-                # Create a minimal board info for the worker
-                from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardInfo
-
                 canonical_rep, _ = canonicalize_board(rep_board)
                 board_info = CanonicalBoardInfo(
                     canonical_board=canonical_rep,
@@ -207,7 +160,7 @@ class PostflopPrecomputer:
                     representative=rep_board,
                 )
                 work_items.append(
-                    (board_info, cluster.cluster_id, self.config.equity_samples, self.config.seed)
+                    (board_info, cluster.cluster_id, self.config.flop_runouts, self.config.seed)
                 )
 
         total_work = len(work_items)
@@ -244,9 +197,6 @@ class PostflopPrecomputer:
         cluster_hand_equities: dict[int, dict[int, list[float]]] = {}
 
         for cluster_id, board_id, hand_id, equity in all_equities:
-            if equity < 0:
-                continue
-
             if cluster_id not in cluster_hand_equities:
                 cluster_hand_equities[cluster_id] = {}
             if hand_id not in cluster_hand_equities[cluster_id]:

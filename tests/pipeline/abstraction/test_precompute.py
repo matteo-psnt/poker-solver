@@ -4,13 +4,19 @@ import pytest
 
 from src.core.game.state import Card, Street
 from src.pipeline.abstraction.config import PrecomputeConfig
-from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.pipeline.abstraction.postflop.board_enumeration import (
+    CanonicalBoardEnumerator,
+    CanonicalBoardInfo,
+)
 from src.pipeline.abstraction.postflop.hand_bucketing import get_all_canonical_hands
 from src.pipeline.abstraction.postflop.precompute import (
     PostflopPrecomputer,
-    compute_equity_for_combo,
+    _worker_compute_cluster_equities,
 )
-from src.pipeline.abstraction.postflop.suit_isomorphism import canonicalize_board
+from src.pipeline.abstraction.postflop.suit_isomorphism import (
+    canonicalize_board,
+    get_canonical_board_id,
+)
 
 
 class TestCanonicalBoardEnumerator:
@@ -80,50 +86,55 @@ class TestCanonicalComboGeneration:
             assert combo.board == canonicalize_board(board)[0]
 
 
-@pytest.mark.slow
-class TestEquityComputation:
-    """Tests for equity computation."""
+def _make_board_info(board: tuple[Card, ...]) -> CanonicalBoardInfo:
+    canonical, _ = canonicalize_board(board)
+    return CanonicalBoardInfo(
+        canonical_board=canonical,
+        board_id=get_canonical_board_id(canonical),
+        raw_count=1,
+        representative=board,
+    )
 
-    def test_compute_equity_returns_valid_range(self):
-        """Test that equity is between 0 and 1."""
+
+class TestEquityWorker:
+    """Tests for the per-representative-board equity worker."""
+
+    def test_worker_covers_all_canonical_combos(self):
+        """One worker call yields an equity for every canonical combo."""
         board = (Card.new("As"), Card.new("Kh"), Card.new("2c"))
-        combos = list(get_all_canonical_hands(board))
+        board_info = _make_board_info(board)
 
-        # Test first combo
-        combo = combos[0]
-        _board_id, _hand_id, equity = compute_equity_for_combo(
-            canonical_board=combo.board,
-            canonical_hand=combo.hand,
-            representative_board=board,
-            equity_samples=50,  # Minimal for speed
-            seed=42,
-        )
+        results = _worker_compute_cluster_equities((board_info, 3, 20, 42))
 
-        assert 0.0 <= equity <= 1.0
+        num_combos = sum(1 for _ in get_all_canonical_hands(board))
+        assert len(results) == num_combos
+
+        hand_ids = set()
+        for cluster_id, board_id, hand_id, equity in results:
+            assert cluster_id == 3
+            assert board_id == board_info.board_id
+            assert 0.0 <= equity <= 1.0
+            hand_ids.add(hand_id)
+        assert len(hand_ids) == num_combos
+
+    def test_worker_is_deterministic(self):
+        """Same args produce identical equities (seeded runout sampling)."""
+        board = (Card.new("2s"), Card.new("7h"), Card.new("Qc"))
+        board_info = _make_board_info(board)
+
+        results1 = _worker_compute_cluster_equities((board_info, 0, 25, 42))
+        results2 = _worker_compute_cluster_equities((board_info, 0, 25, 42))
+
+        assert results1 == results2
 
     def test_premium_hands_have_high_equity(self):
-        """Test that premium hands have high equity on dry boards."""
-        # Create a dry board
+        """Some hands on a dry board must be strong (sanity of equity scale)."""
         board = (Card.new("2s"), Card.new("7h"), Card.new("Qc"))
+        board_info = _make_board_info(board)
 
-        # Find combo for AA
-        combos = list(get_all_canonical_hands(board))
+        results = _worker_compute_cluster_equities((board_info, 0, 25, 42))
 
-        # Compute equity for several combos to find a high one
-        high_equity_found = False
-        for combo in combos[:20]:  # Check first 20
-            _, _, equity = compute_equity_for_combo(
-                canonical_board=combo.board,
-                canonical_hand=combo.hand,
-                representative_board=board,
-                equity_samples=100,
-                seed=42,
-            )
-            if equity > 0.7:
-                high_equity_found = True
-                break
-
-        assert high_equity_found, "Should find at least one high equity hand"
+        assert max(equity for _, _, _, equity in results) > 0.8
 
 
 class TestPrecomputeConfig:
@@ -134,7 +145,7 @@ class TestPrecomputeConfig:
         config = PrecomputeConfig.from_yaml("quick_test")
 
         assert config.num_buckets[Street.FLOP] == 10
-        assert config.equity_samples == 100
+        assert config.flop_runouts == 200
 
 
 class TestComboPrecomputer:
