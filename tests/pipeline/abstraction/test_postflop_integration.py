@@ -134,6 +134,40 @@ class TestFullCoveragePipeline:
         assert all(bucketer.get_bucket(hole, board, Street.FLOP) == first for _ in range(5))
 
 
+class TestPickleSupport:
+    """Training workers receive the abstraction by pickle."""
+
+    def test_disk_backed_bucketer_pickles_as_path(self, flop_artifact, bucketer):
+        import pickle
+
+        payload = pickle.dumps(bucketer)
+        # Path-only pickling: workers re-mmap instead of copying matrices.
+        assert len(payload) < 10_000
+
+        restored = pickle.loads(payload)
+        board = _covered_flop_boards()[0]
+        deck = [c for c in Card.get_full_deck() if c not in set(board)]
+        hole = (deck[0], deck[1])
+        assert restored.get_bucket(hole, board, Street.FLOP) == bucketer.get_bucket(
+            hole, board, Street.FLOP
+        )
+
+    def test_in_memory_bucketer_pickles_arrays(self):
+        import pickle
+
+        precomputer = PostflopPrecomputer(_test_config())
+        precomputer.precompute_street(Street.FLOP, board_limit=5)
+        in_memory = precomputer.build_bucketer()
+
+        restored = pickle.loads(pickle.dumps(in_memory))
+        board = _covered_flop_boards()[0]
+        deck = [c for c in Card.get_full_deck() if c not in set(board)]
+        hole = (deck[2], deck[9])
+        assert restored.get_bucket(hole, board, Street.FLOP) == in_memory.get_bucket(
+            hole, board, Street.FLOP
+        )
+
+
 class TestArtifactFormat:
     def test_artifact_files(self, flop_artifact):
         assert (flop_artifact / "metadata.json").exists()
