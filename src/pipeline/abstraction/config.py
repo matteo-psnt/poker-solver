@@ -41,6 +41,7 @@ class PrecomputeConfig(StrictFrozenModel):
         default_factory=lambda: StreetBucketConfig(flop=50, turn=100, river=200)
     )
     flop_runouts: PositiveInt | None = None
+    equity_histogram_bins: PositiveInt = 8
     num_workers: PositiveInt | None = None
     seed: int = 42
     kmeans_max_iter: PositiveInt = 300
@@ -75,6 +76,7 @@ class PrecomputeConfig(StrictFrozenModel):
         config_dict = {
             "buckets": self.buckets.model_dump(),
             "flop_runouts": self.flop_runouts,
+            "equity_histogram_bins": self.equity_histogram_bins,
         }
         stable_json = json.dumps(config_dict, sort_keys=True)
         return hashlib.sha256(stable_json.encode()).hexdigest()[:16]

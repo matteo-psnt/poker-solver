@@ -3,7 +3,7 @@
 import numpy as np
 
 from src.core.game.state import Card, Street
-from src.pipeline.abstraction.config import PrecomputeConfig
+from src.pipeline.abstraction.config import PrecomputeConfig, StreetBucketConfig
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.pipeline.abstraction.postflop.canonical_hands import (
     enumerate_hand_classes,
@@ -121,10 +121,12 @@ class TestEquityWorker:
             (0, (Card.new("As"), Card.new("Kh"), Card.new("2c"))),
             (1, (Card.new("2s"), Card.new("7h"), Card.new("Qc"))),
         ]
-        results = _worker_compute_board_chunk((boards, 20, 42))
+        results = _worker_compute_board_chunk((boards, 20, 42, 8))
 
         assert len(results) == 2
-        for (row, _board), (result_row, cols, equities, multiplicities) in zip(boards, results):
+        for (row, _board), (result_row, cols, equities, multiplicities, hists) in zip(
+            boards, results
+        ):
             assert result_row == row
             n_classes = len(enumerate_hand_classes(_board))
             assert len(cols) == len(equities) == len(multiplicities) == n_classes
@@ -133,13 +135,24 @@ class TestEquityWorker:
             assert np.all(multiplicities >= 1)
             # Columns are unique: one cell per class
             assert len(np.unique(cols)) == n_classes
+            # Realization histograms: one distribution per class, rows sum to 1
+            assert hists.shape == (n_classes, 8)
+            np.testing.assert_allclose(hists.sum(axis=1).astype(np.float64), 1.0, atol=2e-3)
+
+    def test_worker_without_histograms(self):
+        """River-style call (histogram_bins=None) returns no histograms."""
+        boards = [(0, (Card.new("2s"), Card.new("7h"), Card.new("Qc")))]
+        _, _, equities, _, hists = _worker_compute_board_chunk((boards, 25, 42, None))[0]
+
+        assert hists is None
+        assert np.all((equities >= 0.0) & (equities <= 1.0))
 
     def test_worker_is_deterministic(self):
         """Same args produce identical equities (seeded runout sampling)."""
         boards = [(0, (Card.new("2s"), Card.new("7h"), Card.new("Qc")))]
 
-        _, cols1, eq1, _ = _worker_compute_board_chunk((boards, 25, 42))[0]
-        _, cols2, eq2, _ = _worker_compute_board_chunk((boards, 25, 42))[0]
+        _, cols1, eq1, _, _ = _worker_compute_board_chunk((boards, 25, 42, None))[0]
+        _, cols2, eq2, _, _ = _worker_compute_board_chunk((boards, 25, 42, None))[0]
 
         assert np.array_equal(cols1, cols2)
         assert np.array_equal(eq1, eq2)
@@ -147,9 +160,83 @@ class TestEquityWorker:
     def test_premium_hands_have_high_equity(self):
         """Some hands on a dry board must be strong (sanity of equity scale)."""
         boards = [(0, (Card.new("2s"), Card.new("7h"), Card.new("Qc")))]
-        _, _, equities, _ = _worker_compute_board_chunk((boards, 25, 42))[0]
+        _, _, equities, _, _ = _worker_compute_board_chunk((boards, 25, 42, None))[0]
 
         assert float(equities.max()) > 0.8
+
+
+class TestHistogramBucketing:
+    """Potential-aware bucketing must separate draws from made hands."""
+
+    def test_equal_equity_different_shape_separate(self):
+        """Bimodal (draw) and unimodal (made) distributions with the same mean
+        must land in different buckets, which scalar-equity bucketing cannot do."""
+        config = PrecomputeConfig(
+            buckets=StreetBucketConfig(flop=2, turn=2, river=2),
+            kmeans_max_iter=50,
+            kmeans_n_init=2,
+            seed=42,
+        )
+        precomputer = PostflopPrecomputer(config)
+
+        bins = 8
+        made = np.zeros(bins)
+        made[3:5] = 0.5  # unimodal around 0.5 equity
+        draw = np.zeros(bins)
+        draw[0] = 0.5  # bimodal: miss...
+        draw[7] = 0.5  # ...or hit; same mean equity
+
+        n_each = 8
+        hist_matrix = np.zeros((1, 2 * n_each, bins), dtype=np.float16)
+        hist_matrix[0, :n_each] = made
+        hist_matrix[0, n_each:] = draw
+        equity_matrix = np.full((1, 2 * n_each), 0.5, dtype=np.float32)
+        weight_matrix = np.ones((1, 2 * n_each), dtype=np.uint8)
+        board_ids = np.array([0], dtype=np.int64)
+
+        precomputer.bucket_street(Street.FLOP, board_ids, equity_matrix, weight_matrix, hist_matrix)
+        buckets = precomputer._bucket_matrices[Street.FLOP][0]
+
+        made_buckets = set(buckets[:n_each].tolist())
+        draw_buckets = set(buckets[n_each:].tolist())
+        assert len(made_buckets) == 1
+        assert len(draw_buckets) == 1
+        assert made_buckets != draw_buckets
+
+    def test_bucket_order_follows_mean_equity(self):
+        """Bucket 0 must hold the lowest-equity distributions."""
+        config = PrecomputeConfig(
+            buckets=StreetBucketConfig(flop=2, turn=2, river=2),
+            kmeans_max_iter=50,
+            kmeans_n_init=2,
+            seed=42,
+        )
+        precomputer = PostflopPrecomputer(config)
+
+        bins = 8
+        weak = np.zeros(bins)
+        weak[0] = 1.0  # ~0.06 equity
+        strong = np.zeros(bins)
+        strong[7] = 1.0  # ~0.94 equity
+
+        n_each = 8
+        hist_matrix = np.zeros((1, 2 * n_each, bins), dtype=np.float16)
+        hist_matrix[0, :n_each] = weak
+        hist_matrix[0, n_each:] = strong
+        equity_matrix = np.zeros((1, 2 * n_each), dtype=np.float32)
+        equity_matrix[0, :n_each] = 0.06
+        equity_matrix[0, n_each:] = 0.94
+        weight_matrix = np.ones((1, 2 * n_each), dtype=np.uint8)
+        board_ids = np.array([0], dtype=np.int64)
+
+        quality = precomputer.bucket_street(
+            Street.FLOP, board_ids, equity_matrix, weight_matrix, hist_matrix
+        )
+        buckets = precomputer._bucket_matrices[Street.FLOP][0]
+
+        assert set(buckets[:n_each].tolist()) == {0}
+        assert set(buckets[n_each:].tolist()) == {1}
+        assert quality["bucketing"] == "equity_histogram_cdf"
 
 
 class TestPrecomputeConfig:
