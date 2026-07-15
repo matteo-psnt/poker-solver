@@ -25,6 +25,9 @@ def config_with_dummy_abstraction(tmp_path, monkeypatch):
         return DummyCardAbstraction()
 
     monkeypatch.setattr(components, "build_card_abstraction", mock_build_card_abstraction)
+    monkeypatch.setattr(
+        components, "resolve_card_abstraction_hash", lambda config: "dummy-abstraction-hash"
+    )
 
     return config
 

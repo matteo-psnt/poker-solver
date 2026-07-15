@@ -31,6 +31,11 @@ class RunMetadata:
     storage_capacity: int
     action_config_hash: str
     config: Config
+    # Exact config hash of the card abstraction this run trained against. The config
+    # *name* is a mutable pointer: recomputing an abstraction reuses the name but
+    # produces different buckets, so evaluating by name alone silently rebuckets the
+    # checkpoint. None on pre-provenance runs, which cannot be evaluated faithfully.
+    card_abstraction_hash: str | None = None
     # Representation/format version this run was produced under. Pre-versioning
     # (legacy) runs have no field and load as 0.
     representation_version: int = REPRESENTATION_VERSION
@@ -42,6 +47,7 @@ class RunMetadata:
         config_name: str,
         config: Config,
         action_config_hash: str,
+        card_abstraction_hash: str | None = None,
     ) -> RunMetadata:
         storage_capacity = config.storage.initial_capacity if config else 0
         return cls(
@@ -56,6 +62,7 @@ class RunMetadata:
             num_infosets=0,
             storage_capacity=storage_capacity,
             action_config_hash=action_config_hash,
+            card_abstraction_hash=card_abstraction_hash,
             config=config,
         )
 
@@ -80,6 +87,13 @@ class RunMetadata:
             num_infosets=int(data.get("num_infosets", 0)),
             storage_capacity=int(data.get("storage_capacity", 0)),
             action_config_hash=action_config_hash,
+            # Missing on pre-provenance runs → None; such runs cannot be pinned to the
+            # abstraction they trained against, so evaluation must refuse them.
+            card_abstraction_hash=(
+                data["card_abstraction_hash"]
+                if isinstance(data.get("card_abstraction_hash"), str)
+                else None
+            ),
             config=config,
             # Missing on pre-versioning runs → 0 (legacy), NOT the current default.
             representation_version=int(data.get("representation_version", 0)),
@@ -109,6 +123,7 @@ class RunMetadata:
             "num_infosets": self.num_infosets,
             "storage_capacity": self.storage_capacity,
             "action_config_hash": self.action_config_hash,
+            "card_abstraction_hash": self.card_abstraction_hash,
             "representation_version": self.representation_version,
             "config": config_dict,
         }
@@ -164,6 +179,7 @@ class RunTracker:
         config_name: str = "default",
         config: Config | None = None,
         action_config_hash: str | None = None,
+        card_abstraction_hash: str | None = None,
     ):
         """
         Initialize run tracker.
@@ -172,6 +188,9 @@ class RunTracker:
             run_dir: Directory for this run
             config_name: Name of config used
             config: Configuration object
+            action_config_hash: Hash of the action abstraction
+            card_abstraction_hash: Exact config hash of the card abstraction being
+                trained against, recorded so evaluation can pin it later
         """
         self.run_dir = Path(run_dir)
         self.run_id = self.run_dir.name
@@ -190,7 +209,11 @@ class RunTracker:
             if not action_config_hash:
                 raise ValueError("action_config_hash is required to create a new run tracker")
             self.metadata = RunMetadata.new(
-                self.run_id, config_name, config, action_config_hash=action_config_hash
+                self.run_id,
+                config_name,
+                config,
+                action_config_hash=action_config_hash,
+                card_abstraction_hash=card_abstraction_hash,
             )
 
     @property
@@ -269,6 +292,24 @@ class RunTracker:
                 f"{self.metadata_path}\n"
                 f"  expected: {self.metadata.action_config_hash}\n"
                 f"  actual:   {actual_hash}"
+            )
+
+    def verify_card_abstraction_hash(self, actual_hash: str | None) -> None:
+        """Ensure the card abstraction matches the one this run was trained against.
+
+        Resuming under a recomputed abstraction silently rebuckets every existing
+        infoset key, corrupting the run with no error.
+        """
+        if self.metadata.card_abstraction_hash is None:
+            return  # Pre-provenance run: nothing recorded to verify against.
+        if self.metadata.card_abstraction_hash != actual_hash:
+            raise ValueError(
+                "Card abstraction hash does not match run metadata: "
+                f"{self.metadata_path}\n"
+                f"  expected: {self.metadata.card_abstraction_hash}\n"
+                f"  actual:   {actual_hash}\n"
+                "The abstraction was recomputed since this run was trained; resuming "
+                "would rebucket its existing infosets and silently corrupt it."
             )
 
     def _save(self):

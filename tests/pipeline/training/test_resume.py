@@ -37,6 +37,9 @@ def mock_card_abstraction(monkeypatch):
         return DummyCardAbstraction()
 
     monkeypatch.setattr(components, "build_card_abstraction", _build_dummy_card_abstraction)
+    monkeypatch.setattr(
+        components, "resolve_card_abstraction_hash", lambda config: "dummy-abstraction-hash"
+    )
 
 
 @pytest.fixture

@@ -206,14 +206,18 @@ def precompute_abstraction(
     return out
 
 
-def _load_blueprint(config: Config, checkpoint_dir: Path) -> object:
+def _load_blueprint(
+    config: Config, checkpoint_dir: Path, abstraction_hash: str | None = None
+) -> object:
     """Build a fresh evaluation blueprint (solver) from a checkpoint.
 
     Used as a picklable factory (via ``functools.partial``) so parallel-LBR worker
     processes each construct their own solver — the solver holds a non-picklable
     Cython member and cannot be sent across a process boundary.
     """
-    solver, _ = build_evaluation_solver(config, checkpoint_dir=checkpoint_dir)
+    solver, _ = build_evaluation_solver(
+        config, checkpoint_dir=checkpoint_dir, abstraction_hash=abstraction_hash
+    )
     return solver
 
 
@@ -266,6 +270,7 @@ def evaluate_run_lbr(
     seed: int | None = None,
     num_workers: int = 1,
     allin_runouts: int = 50,
+    abstraction_hash: str | None = None,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
@@ -284,15 +289,28 @@ def evaluate_run_lbr(
         ValueError: Invalid configuration or checkpoint state.
     """
     metadata = load_run_metadata(run_dir)
+    effective_hash = abstraction_hash or metadata.card_abstraction_hash
+    if effective_hash is None:
+        raise ValueError(
+            f"Run '{run_dir.name}' does not record which card abstraction it was trained "
+            "against, so it cannot be evaluated faithfully: resolving by config name alone "
+            "would silently rebucket the checkpoint under whatever abstraction that name "
+            "now points at, yielding plausible but invalid numbers.\n"
+            "Pass abstraction_hash explicitly if you know it (see the abstraction's "
+            "metadata.json 'config_hash')."
+        )
     solver, storage = build_evaluation_solver(
         metadata.config,
         checkpoint_dir=run_dir,
+        abstraction_hash=effective_hash,
     )
     # For parallel LBR each worker rebuilds its own solver from the checkpoint (the
     # solver is not picklable across processes); the factory captures only picklable
     # args (config + checkpoint dir).
     factory = (
-        functools.partial(_load_blueprint, metadata.config, run_dir) if num_workers > 1 else None
+        functools.partial(_load_blueprint, metadata.config, run_dir, effective_hash)
+        if num_workers > 1
+        else None
     )
     result = compute_lbr_exploitability(
         solver,

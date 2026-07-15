@@ -135,8 +135,14 @@ def evaluate(
     use_average_strategy: bool = True,
     seed: int | None = None,
     allin_runouts: int = 50,
+    abstraction_hash: str | None = None,
 ) -> dict[str, Any]:
-    """Evaluate a run stored on the Volume (Local Best Response by default)."""
+    """Evaluate a run stored on the Volume (Local Best Response by default).
+
+    ``abstraction_hash`` pins the card abstraction to the exact one the checkpoint was
+    trained against. Without it the run's config name resolves against current code, so
+    a recomputed abstraction silently rebuckets hands and the numbers are meaningless.
+    """
     from src.pipeline.training import services
     from src.pipeline.training.services import LBR_ESTIMATOR_LABEL, ROLLOUT_ESTIMATOR_LABEL
 
@@ -160,6 +166,7 @@ def evaluate(
             seed=seed,
             num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
             allin_runouts=allin_runouts,
+            abstraction_hash=abstraction_hash,
         )
         estimator = LBR_ESTIMATOR_LABEL
     return {
@@ -376,11 +383,19 @@ def run_eval(
     cpu: int = 6,
     memory: int = 32768,
     seed: int = 1,
+    abstraction_hash: str = "",
 ) -> None:
     """LBR-evaluate an existing Volume run. Fewer workers + more memory for large
-    blueprints, since each parallel worker rebuilds the full blueprint."""
+    blueprints, since each parallel worker rebuilds the full blueprint.
+
+    Pass --abstraction-hash to pin the card abstraction to the one the run was trained
+    against (see the abstraction's metadata.json ``config_hash``)."""
     eval_result = evaluate.with_options(cpu=cpu, memory=memory).remote(
-        run_id=run_id, num_hands=hands, num_workers=cpu, seed=seed
+        run_id=run_id,
+        num_hands=hands,
+        num_workers=cpu,
+        seed=seed,
+        abstraction_hash=abstraction_hash or None,
     )
     results = eval_result["results"]
     print("\nEXPLOITABILITY (LBR — rigorous lower bound):")

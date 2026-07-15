@@ -56,6 +56,7 @@ class TrainingSession:
             self.action_model = ActionModel(config)
             self.card_abstraction = components.build_card_abstraction(config)
             action_config_hash = self.action_model.get_config_hash()
+            card_abstraction_hash = components.resolve_card_abstraction_hash(config)
 
             if self.run_tracker is None:
                 self.run_tracker = RunTracker(
@@ -63,9 +64,11 @@ class TrainingSession:
                     config_name=self.config.system.config_name,
                     config=config,
                     action_config_hash=action_config_hash,
+                    card_abstraction_hash=card_abstraction_hash,
                 )
             else:
                 self.run_tracker.verify_action_config_hash(action_config_hash)
+                self.run_tracker.verify_card_abstraction_hash(card_abstraction_hash)
 
             self.run_dir.mkdir(parents=True, exist_ok=True)
             self.storage = components.build_storage(
