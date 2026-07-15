@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument(
         "--resolver-iterations",
         type=int,
-        default=32,
+        default=64,
         help="[lbr] Pinned subgame-CFR iterations per deployed-opponent solve.",
     )
     # Rollout options (--method rollout).

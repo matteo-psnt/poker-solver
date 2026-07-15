@@ -272,7 +272,7 @@ def evaluate_run_lbr(
     allin_runouts: int = 50,
     abstraction_hash: str | None = None,
     opponent: str = "blueprint",
-    resolver_iterations: int = 32,
+    resolver_iterations: int = 64,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
