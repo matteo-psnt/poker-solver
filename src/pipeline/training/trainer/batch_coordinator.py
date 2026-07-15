@@ -79,10 +79,6 @@ class TrainingBatchCoordinator:
                 timeout=inter_batch_timeout,
                 verbose=self.verbose,
             )
-            self.worker_manager.apply_pending_updates(
-                timeout=inter_batch_timeout,
-                verbose=self.verbose,
-            )
 
         self._record_batch_metrics(
             batch_utilities,

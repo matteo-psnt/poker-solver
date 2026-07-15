@@ -41,7 +41,6 @@ def initialize_runtime(manager: SharedArrayWorkerManager) -> None:
 
     manager.job_queue = cast("MessageQueue", mp.Queue())
     manager.result_queue = cast("MessageQueue", mp.Queue())
-    manager.update_queues = [cast("MessageQueue", mp.Queue()) for _ in range(manager.num_workers)]
     manager.id_request_queues = [
         cast("MessageQueue", mp.Queue()) for _ in range(manager.num_workers)
     ]
@@ -67,7 +66,6 @@ def start_workers(manager: SharedArrayWorkerManager) -> None:
                 manager.base_seed,
                 manager.job_queue,
                 manager.result_queue,
-                manager.update_queues,
                 manager.id_request_queues,
                 manager.id_response_queues,
                 manager.capacity,

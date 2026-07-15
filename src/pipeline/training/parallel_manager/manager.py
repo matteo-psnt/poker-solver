@@ -34,7 +34,7 @@ class SharedArrayWorkerManager:
     - Ownership by stable hash (xxhash), not Python hash()
     - No global key synchronization
     - ID requests/responses flow directly between workers (batched)
-    - Cross-partition updates via per-worker queues
+    - Regret/strategy updates land directly in shared memory (lock-free)
     """
 
     # Runtime attributes initialized during lifecycle initialization.
@@ -42,7 +42,6 @@ class SharedArrayWorkerManager:
     storage: SharedArrayStorage
     job_queue: MessageQueue
     result_queue: MessageQueue
-    update_queues: list[MessageQueue]
     id_request_queues: list[MessageQueue]
     id_response_queues: list[MessageQueue]
 
@@ -94,12 +93,6 @@ class SharedArrayWorkerManager:
     def exchange_ids(self, timeout: float = 60.0, verbose: bool = True) -> dict[str, object]:
         """Trigger batched ID exchange between workers."""
         return sync_ops.exchange_ids(self, timeout=timeout, verbose=verbose)
-
-    def apply_pending_updates(
-        self, timeout: float = 60.0, verbose: bool = True
-    ) -> dict[str, object]:
-        """Trigger workers to apply any pending cross-partition updates."""
-        return sync_ops.apply_pending_updates(self, timeout=timeout, verbose=verbose)
 
     def check_and_resize_if_needed(
         self,
