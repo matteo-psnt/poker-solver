@@ -164,8 +164,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="lbr = Local Best Response (trustworthy, default); rollout = legacy diagnostic.",
     )
     # LBR options (--method lbr).
-    p_eval.add_argument("--hands", type=int, default=2000, help="[lbr] Number of hands.")
-    p_eval.add_argument("--runouts", type=int, default=24, help="[lbr] Equity runouts per node.")
+    p_eval.add_argument("--hands", type=int, default=1000, help="[lbr] Number of hands.")
+    p_eval.add_argument("--runouts", type=int, default=12, help="[lbr] Equity runouts per node.")
     p_eval.add_argument("--workers", type=int, default=1, help="[lbr] Parallel workers over hands.")
     p_eval.add_argument(
         "--opponent",
@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument(
         "--resolver-iterations",
         type=int,
-        default=64,
+        default=32,
         help="[lbr] Pinned subgame-CFR iterations per deployed-opponent solve.",
     )
     # Rollout options (--method rollout).

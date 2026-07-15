@@ -127,8 +127,8 @@ def train(
 def evaluate(
     run_id: str,
     method: str = "lbr",
-    num_hands: int = 2000,
-    equity_runouts: int = 24,
+    num_hands: int = 1000,
+    equity_runouts: int = 12,
     num_workers: int | None = None,
     num_samples: int = 500,
     num_rollouts: int = 50,
@@ -137,7 +137,7 @@ def evaluate(
     allin_runouts: int = 50,
     abstraction_hash: str | None = None,
     opponent: str = "blueprint",
-    resolver_iterations: int = 64,
+    resolver_iterations: int = 32,
 ) -> dict[str, Any]:
     """Evaluate a run stored on the Volume (Local Best Response by default).
 
@@ -329,7 +329,7 @@ def run_train(
     capacity: int = 0,
     memory: int = 24576,
     timeout: int = 10800,
-    eval_hands: int = 2000,
+    eval_hands: int = 1000,
     eval_cpu: int = 6,
     eval_memory: int = 32768,
 ) -> None:
@@ -386,13 +386,13 @@ def _print_variance_decomposition(results: dict[str, Any]) -> None:
 @app.local_entrypoint()
 def run_eval(
     run_id: str,
-    hands: int = 2000,
+    hands: int = 1000,
     cpu: int = 6,
     memory: int = 32768,
     seed: int = 1,
     abstraction_hash: str = "",
     opponent: str = "blueprint",
-    resolver_iterations: int = 64,
+    resolver_iterations: int = 32,
 ) -> None:
     """LBR-evaluate an existing Volume run. Fewer workers + more memory for large
     blueprints, since each parallel worker rebuilds the full blueprint.
@@ -424,7 +424,7 @@ def run_eval(
 def run_compare(
     run_a: str,
     run_b: str,
-    hands: int = 2000,
+    hands: int = 1000,
     cpu: int = 6,
     memory: int = 32768,
     seed: int = 1,
@@ -481,11 +481,11 @@ def run_compare(
 @app.local_entrypoint()
 def run_deployed_gate(
     run_id: str,
-    hands: int = 2000,
+    hands: int = 1000,
     cpu: int = 6,
     memory: int = 32768,
     seed: int = 1,
-    resolver_iterations: int = 64,
+    resolver_iterations: int = 32,
     timeout: int = 10800,
 ) -> None:
     """Paired LBR of ONE run under both opponent models: bare blueprint vs deployed
@@ -545,7 +545,7 @@ def resume_eval(
     run_id: str,
     additional: int = 9_000_000,
     cpu: int = 32,
-    eval_hands: int = 2000,
+    eval_hands: int = 1000,
     eval_cpu: int = 16,
 ) -> None:
     """Resume an existing Volume run for more iterations, then re-evaluate with LBR.

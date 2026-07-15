@@ -264,15 +264,15 @@ def _lbr_results_dict(result: LBRResult, big_blind: int) -> dict[str, Any]:
 def evaluate_run_lbr(
     run_dir: Path,
     *,
-    num_hands: int = 2000,
-    equity_runouts: int = 24,
+    num_hands: int = 1000,
+    equity_runouts: int = 12,
     include_off_tree: bool = False,
     seed: int | None = None,
     num_workers: int = 1,
     allin_runouts: int = 50,
     abstraction_hash: str | None = None,
     opponent: str = "blueprint",
-    resolver_iterations: int = 64,
+    resolver_iterations: int = 32,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 

@@ -64,7 +64,7 @@ def evaluate_solver(ctx: CliContext) -> None:
     num_hands = prompts.prompt_int(
         ctx,
         "LBR hands (more = tighter bound but slower, ~0.3s/hand):",
-        default=2000,
+        default=1000,
         min_value=1,
     )
     if num_hands is None:
