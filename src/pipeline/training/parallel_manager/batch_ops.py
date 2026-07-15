@@ -45,6 +45,7 @@ def run_batch(
             manager.job_queue.put(
                 {
                     "type": JobType.RUN_ITERATIONS.value,
+                    "target_worker": worker_id,
                     "num_iterations": num_iterations,
                     "batch_id": batch_id,
                     "iteration_offset": iteration_offset,

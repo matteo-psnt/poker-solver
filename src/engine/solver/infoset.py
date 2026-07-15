@@ -195,6 +195,11 @@ class InfoSet:
         self._stats_index: int | None = None
         self._stats_read_only = False
 
+        # False for placeholder views onto storage rows that must not be written
+        # (e.g. a remote infoset whose global ID this worker has not learned yet).
+        # Traversal skips regret/strategy updates on non-writable infosets.
+        self.writable = True
+
     def sync_stats_to_storage(
         self,
         reach_count: int,
