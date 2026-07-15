@@ -271,6 +271,8 @@ def evaluate_run_lbr(
     num_workers: int = 1,
     allin_runouts: int = 50,
     abstraction_hash: str | None = None,
+    opponent: str = "blueprint",
+    resolver_iterations: int = 64,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
@@ -278,6 +280,13 @@ def evaluate_run_lbr(
     on Kuhn/Leduc). ``include_off_tree`` stays False by default: off-tree bet sizes
     leak into a uniform-random opponent on later streets and bias the number.
     ``num_workers`` parallelizes over hands; the result is identical for any count.
+
+    ``opponent`` selects the strategy under measurement: ``"blueprint"`` (the raw
+    table) or ``"deployed"`` (blueprint + runtime subgame resolver — the system
+    that actually plays). Deployed solves are pinned to ``resolver_iterations``
+    CFR iterations instead of a wall-clock budget so the measured strategy is
+    machine-independent and CRN pairing stays valid; remaining resolver settings
+    (blend alpha, depth, leaf rollouts) come from the run's own config.
 
     The results dict carries per-hand records plus the base seed; evaluate two runs
     with the same explicit ``seed`` and feed the per-hand samples to
@@ -312,6 +321,11 @@ def evaluate_run_lbr(
         if num_workers > 1
         else None
     )
+    resolver_config = (
+        metadata.config.resolver.model_copy(update={"max_iterations": resolver_iterations})
+        if opponent == "deployed"
+        else None
+    )
     result = compute_lbr_exploitability(
         solver,
         LBRConfig(
@@ -321,10 +335,16 @@ def evaluate_run_lbr(
             seed=seed,
             num_workers=num_workers,
             allin_runouts=allin_runouts,
+            opponent=opponent,
+            resolver=resolver_config,
         ),
         blueprint_factory=factory,
     )
     results = _lbr_results_dict(result, big_blind=metadata.config.game.big_blind)
+    results["opponent_model"] = opponent
+    if resolver_config is not None:
+        results["resolver_iterations"] = resolver_iterations
+        results["resolver_blend_alpha"] = resolver_config.policy_blend_alpha
     return EvaluationOutput(infosets=storage.num_infosets(), results=results)
 
 

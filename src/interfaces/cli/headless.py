@@ -82,6 +82,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
             equity_runouts=args.runouts,
             seed=args.seed,
             num_workers=args.workers,
+            opponent=args.opponent,
+            resolver_iterations=args.resolver_iterations,
         )
         estimator = LBR_ESTIMATOR_LABEL
     payload: dict[str, Any] = {
@@ -165,6 +167,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--hands", type=int, default=2000, help="[lbr] Number of hands.")
     p_eval.add_argument("--runouts", type=int, default=24, help="[lbr] Equity runouts per node.")
     p_eval.add_argument("--workers", type=int, default=1, help="[lbr] Parallel workers over hands.")
+    p_eval.add_argument(
+        "--opponent",
+        choices=["blueprint", "deployed"],
+        default="blueprint",
+        help="[lbr] Strategy under measurement: raw table, or blueprint+resolver as deployed.",
+    )
+    p_eval.add_argument(
+        "--resolver-iterations",
+        type=int,
+        default=64,
+        help="[lbr] Pinned subgame-CFR iterations per deployed-opponent solve.",
+    )
     # Rollout options (--method rollout).
     p_eval.add_argument("--samples", type=int, default=500, help="[rollout] Number of samples.")
     p_eval.add_argument("--rollouts", type=int, default=50, help="[rollout] Rollouts per infoset.")

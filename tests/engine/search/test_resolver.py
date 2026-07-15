@@ -10,7 +10,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Card
 from src.engine.search import resolver as resolver_module
-from src.engine.search.range_inference import replace_actor_hole_cards
+from src.engine.search.range_inference import combo_index_for, replace_actor_hole_cards
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.in_memory import InMemoryStorage
@@ -162,6 +162,146 @@ def test_resolver_unknown_field_rejected(field):
     # Removed fields — ResolverConfig uses extra="forbid".
     with pytest.raises(ValidationError):
         make_test_config(seed=42, **{field: "any_value"})
+
+
+def _trained_solver(config, session_id: str):
+    """Small trained solver so blueprint lookups have real bite."""
+    action_model = ActionModel(config)
+    storage = SharedArrayStorage(
+        num_workers=1, worker_id=0, session_id=session_id, is_coordinator=True
+    )
+    solver = MCCFRSolver(
+        action_model=action_model,
+        card_abstraction=DummyCardAbstraction(),
+        storage=storage,
+        config=config,
+    )
+    for _ in range(10):
+        solver.train_iteration()
+    return solver, action_model
+
+
+def _fresh_matrix(solver, action_model, rules, config, state):
+    """Strategy matrix from a fresh resolver under fixed seeds/iterations."""
+    resolver = HUResolver(
+        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+    )
+    py_random.seed(123)
+    np.random.seed(123)
+    return resolver.solve_strategy_matrix(state)
+
+
+@pytest.mark.timeout(60)
+def test_strategy_matrix_rows_are_distributions_and_call_is_pure():
+    state, rules = _make_initial_state()
+    config = make_test_config(
+        seed=42, **{"resolver.max_iterations": 10, "resolver.leaf_rollouts": 2}
+    )
+    solver, action_model = _trained_solver(config, "resolver-matrix-pure")
+
+    resolver = HUResolver(
+        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+    )
+    py_random.seed(123)
+    np.random.seed(123)
+    actions, matrix = resolver.solve_strategy_matrix(state)
+
+    assert matrix.shape == (1326, len(actions))
+    assert np.all(matrix >= 0.0)
+    np.testing.assert_allclose(matrix.sum(axis=1), 1.0)
+    # Pure: no range state was created or mutated by the call.
+    assert resolver._ranges is None
+
+    # Reproducible: same seeds + pinned iterations => identical output.
+    py_random.seed(123)
+    np.random.seed(123)
+    actions_again, matrix_again = resolver.solve_strategy_matrix(state)
+    assert actions_again == actions
+    np.testing.assert_array_equal(matrix_again, matrix)
+
+
+@pytest.mark.timeout(60)
+def test_strategy_matrix_is_invariant_to_all_dealt_cards():
+    """The matrix answers "what would the system do holding each combo" — it must
+    not depend on what EITHER player was actually dealt (solve() only guards the
+    opponent's cards; the per-combo matrix must also be free of the hero's)."""
+    state, rules = _make_initial_state()
+    config = make_test_config(
+        seed=42, **{"resolver.max_iterations": 10, "resolver.leaf_rollouts": 2}
+    )
+    solver, action_model = _trained_solver(config, "resolver-matrix-honest")
+
+    state_alt = replace_actor_hole_cards(
+        state, actor=state.current_player, combo=(Card.new("9s"), Card.new("3h"))
+    )
+    state_alt = replace_actor_hole_cards(
+        state_alt, actor=1 - state.current_player, combo=(Card.new("2c"), Card.new("7d"))
+    )
+    assert state_alt.hole_cards != state.hole_cards
+
+    actions, matrix = _fresh_matrix(solver, action_model, rules, config, state)
+    actions_alt, matrix_alt = _fresh_matrix(solver, action_model, rules, config, state_alt)
+
+    assert actions == actions_alt
+    np.testing.assert_allclose(matrix, matrix_alt)
+
+
+@pytest.mark.timeout(60)
+def test_strategy_matrix_row_matches_solve_strategy():
+    """The deployed system's played strategy is exactly the matrix row of the
+    actually-dealt combo — the consistency contract between measurement (matrix)
+    and deployment (solve)."""
+    state, rules = _make_initial_state()
+    config = make_test_config(
+        seed=42, **{"resolver.max_iterations": 10, "resolver.leaf_rollouts": 2}
+    )
+    solver, action_model = _trained_solver(config, "resolver-matrix-row")
+
+    actions, matrix = _fresh_matrix(solver, action_model, rules, config, state)
+
+    resolver = HUResolver(
+        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+    )
+    py_random.seed(123)
+    np.random.seed(123)
+    result = resolver.solve(state)
+
+    assert result.root_actions == actions
+    hero_combo_row = matrix[combo_index_for(state.hole_cards[state.current_player])]
+    np.testing.assert_allclose(hero_combo_row, result.strategy)
+
+
+@pytest.mark.timeout(60)
+def test_strategy_matrix_alpha_zero_equals_blueprint_rows():
+    """alpha=0 (and no probability floor) collapses the matrix to the pure
+    per-combo blueprint strategy — the plumbing-only regression anchor."""
+    state, rules = _make_initial_state()
+    config = make_test_config(
+        seed=42,
+        **{
+            "resolver.max_iterations": 2,
+            "resolver.leaf_rollouts": 2,
+            "resolver.policy_blend_alpha": 0.0,
+            "resolver.min_strategy_prob": 0.0,
+        },
+    )
+    solver, action_model = _trained_solver(config, "resolver-matrix-alpha0")
+
+    resolver = HUResolver(
+        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+    )
+    py_random.seed(123)
+    np.random.seed(123)
+    actions, matrix = resolver.solve_strategy_matrix(state)
+
+    for combo in [
+        (Card.new("As"), Card.new("Ah")),
+        (Card.new("7c"), Card.new("2d")),
+        (Card.new("Ts"), Card.new("9s")),
+    ]:
+        hypo = replace_actor_hole_cards(state, actor=state.current_player, combo=combo)
+        expected = resolver._blueprint_strategy(hypo, actions, use_average=True)
+        np.testing.assert_allclose(matrix[combo_index_for(combo)], expected)
 
 
 def test_resolver_blend_alpha_zero_returns_blueprint_mix():

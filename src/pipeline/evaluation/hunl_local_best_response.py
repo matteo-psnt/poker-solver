@@ -72,14 +72,14 @@ from src.core.game.actions import Action, ActionType
 from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
-from src.engine.search.action_translation import translate_action_distribution
-from src.engine.search.range_inference import (
-    ALL_COMBOS,
-    COMBO_MASKS,
-    NUM_COMBOS,
-    replace_actor_hole_cards,
+from src.engine.search.range_inference import ALL_COMBOS, COMBO_MASKS, NUM_COMBOS
+from src.pipeline.evaluation.opponent_model import (
+    BlueprintOpponent,
+    OpponentModel,
+    ResolvedOpponent,
+    known_mask,
 )
-from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.shared.config import ResolverConfig
 
 _EPS = 1e-12
 
@@ -115,6 +115,16 @@ class LBRConfig:
     # Rao-Blackwellization (same expectation, lower variance). When exactly one card
     # is missing the runout is enumerated instead.
     allin_runouts: int = 50
+    # WHICH strategy the LBR player exploits on the realized path. "blueprint" is
+    # the raw table (historical numbers); "deployed" routes the opponent's actual
+    # decisions through the runtime subgame resolver — the system that really
+    # plays. The exploiter's myopic scorer stays blueprint-backed either way
+    # (selection-only: approximations there loosen the bound, never invalidate it).
+    opponent: str = "blueprint"
+    # Resolver settings for opponent="deployed". Must set max_iterations (wall-
+    # clock budgets make the measured strategy machine-dependent). None with
+    # opponent="deployed" raises at engine construction.
+    resolver: ResolverConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +195,21 @@ class _HUNLLocalBestResponse:
         self.card_abstraction = blueprint.card_abstraction
         self.storage = blueprint.storage
         self.evaluator = get_evaluator()
+        # The scorer ALWAYS uses the blueprint model (selection-only, see module
+        # docs); the realized path uses whichever strategy is under measurement.
+        self._blueprint_model = BlueprintOpponent(blueprint)
+        self.opponent: OpponentModel
+        if config.opponent == "blueprint":
+            self.opponent = self._blueprint_model
+        elif config.opponent == "deployed":
+            if config.resolver is None:
+                raise ValueError(
+                    'LBRConfig.opponent="deployed" requires LBRConfig.resolver '
+                    "(with max_iterations set)."
+                )
+            self.opponent = ResolvedOpponent(blueprint, config.resolver)
+        else:
+            raise ValueError(f"Unknown LBRConfig.opponent: {config.opponent!r}")
 
     # -- Realized play -----------------------------------------------------
 
@@ -204,6 +229,7 @@ class _HUNLLocalBestResponse:
         opp = 1 - lbr_player
         state = initial_state
         belief = self._initial_belief(initial_state, opp)
+        self.opponent.reset(initial_state, opp)
 
         prev_state: GameState | None = None
         prev_lbr_action: Action | None = None
@@ -218,7 +244,7 @@ class _HUNLLocalBestResponse:
                 action = self._choose_lbr_action(state, lbr_player, belief)
                 prev_state, prev_lbr_action = state, action
             else:
-                legal, vecs = self._opp_action_matrix(state, opp, prev_state, prev_lbr_action)
+                legal, vecs = self.opponent.action_matrix(state, opp, prev_state, prev_lbr_action)
                 branched = self._branch_terminal_decision(
                     state, lbr_player, opp, legal, vecs, belief
                 )
@@ -226,6 +252,7 @@ class _HUNLLocalBestResponse:
                     return branched
                 action, belief = self._sample_opponent(legal, vecs, belief)
 
+            self.opponent.observe(state, action)
             state = state.apply_action(action, self.rules)
 
         value = self._terminal_value(state, lbr_player, opp, belief)
@@ -291,22 +318,12 @@ class _HUNLLocalBestResponse:
 
     def _initial_belief(self, state: GameState, opp: int) -> np.ndarray:
         """Uniform opponent range vector masked by the LBR player's known cards."""
-        known = self._known_mask(state, opp)
+        known = known_mask(state, opp)
         weights = np.where((COMBO_MASKS & known) == 0, 1.0, 0.0)
         total = weights.sum()
         if total <= _EPS:
             return np.full(NUM_COMBOS, 1.0 / NUM_COMBOS)
         return weights / total
-
-    def _known_mask(self, state: GameState, opp: int) -> int:
-        """Bitmask of cards the LBR player can see (its holes + board)."""
-        lbr = 1 - opp
-        mask = 0
-        for card in state.hole_cards[lbr]:
-            mask |= card.mask
-        for card in state.board:
-            mask |= card.mask
-        return mask
 
     def _terminal_value(
         self, state: GameState, lbr_player: int, opp: int, belief: np.ndarray
@@ -334,7 +351,7 @@ class _HUNLLocalBestResponse:
         tie: pot/2 - invested, lose: -invested — exactly ``get_payoff``'s showdown
         cases), so no per-combo GameState construction is needed.
         """
-        known = self._known_mask(state, opp)
+        known = known_mask(state, opp)
         weights = np.where((COMBO_MASKS & known) == 0, belief, 0.0)
         total = weights.sum()
         if total <= _EPS:
@@ -371,7 +388,7 @@ class _HUNLLocalBestResponse:
         exactly as on a real river). One missing card is enumerated exactly; more
         are sampled ``allin_runouts`` times from the per-hand deterministic RNG.
         """
-        known = self._known_mask(state, opp)
+        known = known_mask(state, opp)
         missing = 5 - len(state.board)
         unseen = [card for card in _DECK if not (card.mask & known)]
         runouts: list[tuple[Card, ...]]
@@ -480,142 +497,6 @@ class _HUNLLocalBestResponse:
             return float(action.amount)
         return 0.0
 
-    # -- Opponent model (translation completion) ---------------------------
-
-    def _opponent_distribution(
-        self,
-        state: GameState,
-        opp: int,
-        prev_state: GameState | None,
-        prev_lbr_action: Action | None,
-    ) -> dict[Action, float]:
-        """Blueprint response distribution over legal actions at ``state``.
-
-        On-tree nodes read the blueprint infoset directly. Off-tree nodes (the
-        LBR player made an off-tree bet) map the bet to the nearest on-tree size
-        and read the blueprint there, projecting the response back onto the real
-        legal actions — the translation completion described in the module docs.
-        """
-        legal = list(self.rules.get_legal_actions(state, action_model=self.action_model))
-        if not legal:
-            return {}
-
-        direct = self._infoset_distribution(state, opp, legal)
-        if direct is not None:
-            return direct
-
-        if prev_state is not None and prev_lbr_action is not None:
-            translated = self._translated_distribution(
-                state, opp, legal, prev_state, prev_lbr_action
-            )
-            if translated:
-                return translated
-
-        uniform = 1.0 / len(legal)
-        return {action: uniform for action in legal}
-
-    def _infoset_distribution(
-        self, state: GameState, player: int, legal: list[Action]
-    ) -> dict[Action, float] | None:
-        """Blueprint strategy over ``legal`` at ``state``, or ``None`` if off-tree."""
-        infoset_key = encode_infoset_key(state, player, self.card_abstraction)
-        infoset = self.storage.get_infoset(infoset_key)
-        if infoset is None:
-            return None
-
-        legal_set = set(legal)
-        valid_indices: list[int] = []
-        valid_actions: list[Action] = []
-        for idx, action in enumerate(infoset.legal_actions):
-            if action in legal_set and self.rules.is_action_valid(state, action):
-                valid_indices.append(idx)
-                valid_actions.append(action)
-        if not valid_indices:
-            return None
-
-        strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=True)
-        dist: dict[Action, float] = {}
-        for action, prob in zip(valid_actions, strategy):
-            dist[action] = dist.get(action, 0.0) + float(prob)
-        return dist
-
-    def _translated_distribution(
-        self,
-        state: GameState,
-        opp: int,
-        legal: list[Action],
-        prev_state: GameState,
-        prev_lbr_action: Action,
-    ) -> dict[Action, float]:
-        """Project the blueprint's on-tree response onto real legal actions."""
-        on_tree = translate_action_distribution(
-            prev_state, prev_lbr_action, self.action_model, self.rules
-        )
-        dist: dict[Action, float] = {}
-        for proxy_action, weight in on_tree:
-            proxy_state = prev_state.apply_action(proxy_action, self.rules)
-            proxy_legal = list(
-                self.rules.get_legal_actions(proxy_state, action_model=self.action_model)
-            )
-            proxy_dist = self._infoset_distribution(proxy_state, opp, proxy_legal)
-            if proxy_dist is None:
-                continue
-            for action, prob in proxy_dist.items():
-                for real_action, share in self._map_to_real(state, action, legal):
-                    dist[real_action] = dist.get(real_action, 0.0) + weight * prob * share
-
-        total = sum(dist.values())
-        if total <= _EPS:
-            return {}
-        return {action: prob / total for action, prob in dist.items()}
-
-    def _map_to_real(
-        self, state: GameState, action: Action, legal: list[Action]
-    ) -> list[tuple[Action, float]]:
-        """Map a proxy-node response to the real legal actions at ``state``."""
-        if action in legal:
-            return [(action, 1.0)]
-        # Fold/check/call carry across states unchanged; only bet/raise sizes
-        # need re-discretizing to the real legal menu.
-        return translate_action_distribution(state, action, self.action_model, self.rules)
-
-    def _opp_action_matrix(
-        self,
-        state: GameState,
-        opp: int,
-        prev_state: GameState | None,
-        prev_lbr_action: Action | None,
-    ) -> tuple[list[Action], dict[Action, np.ndarray]]:
-        """Per-combo blueprint action probabilities at an opponent node.
-
-        Returns the legal actions and, for each, a length-``NUM_COMBOS`` vector
-        giving the probability the opponent takes it holding each combo. The
-        opponent's bucket (hence its whole distribution) is action-independent
-        per combo, so it is computed once and cached by infoset key across all
-        combos that share a bucket.
-        """
-        legal = list(self.rules.get_legal_actions(state, action_model=self.action_model))
-        vecs: dict[Action, np.ndarray] = {action: np.zeros(NUM_COMBOS) for action in legal}
-        if not legal:
-            return legal, vecs
-
-        known = self._known_mask(state, opp)
-        cache: dict[object, dict[Action, float]] = {}
-        for idx in range(NUM_COMBOS):
-            if COMBO_MASKS[idx] & known:
-                continue
-            opp_state = replace_actor_hole_cards(state, actor=opp, combo=ALL_COMBOS[idx])
-            key = encode_infoset_key(opp_state, opp, self.card_abstraction)
-            dist = cache.get(key)
-            if dist is None:
-                dist = self._opponent_distribution(opp_state, opp, prev_state, prev_lbr_action)
-                cache[key] = dist
-            for action, prob in dist.items():
-                vec = vecs.get(action)
-                if vec is not None:
-                    vec[idx] += prob
-        return legal, vecs
-
     def _sample_opponent(
         self, legal: list[Action], vecs: dict[Action, np.ndarray], belief: np.ndarray
     ) -> tuple[Action, np.ndarray]:
@@ -632,9 +513,15 @@ class _HUNLLocalBestResponse:
         return action, (posterior / mass if mass > _EPS else belief)
 
     def _opp_fold_probs(self, state: GameState, opp: int, action: Action) -> np.ndarray:
-        """Per-combo probability the opponent folds to ``action`` (scorer input)."""
+        """Per-combo probability the opponent folds to ``action`` (scorer input).
+
+        Deliberately blueprint-backed even under opponent="deployed": this feeds
+        the exploiter's selection scorer only, where approximation loosens the
+        lower bound but never invalidates it — and resolver-backing it would
+        multiply eval cost ~10x (one solve per candidate action per decision).
+        """
         resp_state = state.apply_action(action, self.rules)
-        legal, vecs = self._opp_action_matrix(resp_state, opp, state, action)
+        legal, vecs = self._blueprint_model.action_matrix(resp_state, opp, state, action)
         fold_probs = np.zeros(NUM_COMBOS)
         for candidate in legal:
             if candidate.type == ActionType.FOLD:
