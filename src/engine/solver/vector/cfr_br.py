@@ -38,6 +38,8 @@ the mechanism.
 Three tree passes per iteration against plain PCS's one: one that computes both
 seats' hybrid strategies from the current iterates, then one CFR update per
 seat, each needing its own forward pass because the opponent's reach differs.
+Not 3x in wall clock -- the first pass is shared between the seats, and a
+production node measured 0.026 boards/s against plain PCS's 0.062, so **2.38x**.
 """
 
 from __future__ import annotations
