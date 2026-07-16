@@ -60,21 +60,34 @@ NODE_HEADROOM_BYTES = 3_000_000_000
 
 
 def sample_boards(rng: np.random.Generator, runouts: int) -> list[np.ndarray]:
-    """``runouts`` full boards for one iteration, all beneath one flop.
+    """``runouts`` DISTINCT full boards for one iteration, all beneath one flop.
 
     One runout is a uniform five-card draw -- the real deal distribution, with
     no canonical-class table to get wrong. Several share the first draw's flop
     and re-draw turn and river, which is what makes their increments one
     iteration's joint sample rather than K independent ones.
+
+    Distinct because a turn and river are a SET: drawing them independently
+    repeats a runout about once per 200 iterations at K=4, and two copies of one
+    board are one observation counted twice. Harmless double-weighting for plain
+    PCS, fatal for CFR-BR, whose best response must choose one action across
+    boards it cannot tell apart and so cannot be run per board.
     """
     first = rng.choice(NUM_CARDS, BOARD_CARDS, replace=False)
     if runouts == 1:
         return [first]
     flop = first[:3]
     rest = np.setdiff1d(np.arange(NUM_CARDS), flop)
-    return [first] + [
-        np.concatenate([flop, rng.choice(rest, 2, replace=False)]) for _ in range(runouts - 1)
-    ]
+    boards = [first]
+    seen = {frozenset(int(card) for card in first[3:])}
+    while len(boards) < runouts:
+        pair = rng.choice(rest, 2, replace=False)
+        key = frozenset(int(card) for card in pair)
+        if key in seen:
+            continue
+        seen.add(key)
+        boards.append(np.concatenate([flop, pair]))
+    return boards
 
 
 def iteration_contexts(
