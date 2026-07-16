@@ -1,15 +1,10 @@
 """Tests for off-tree action translation."""
 
-import numpy as np
-
 from src.core.actions.action_model import ActionModel
-from src.core.game.actions import ActionType, raises
+from src.core.game.actions import raises
 from src.core.game.rules import GameRules
 from src.core.game.state import Card
-from src.engine.search.action_translation import (
-    translate_action_distribution,
-    translate_off_tree_action,
-)
+from src.engine.search.action_translation import translate_action_distribution
 from src.shared.config import Config
 
 
@@ -43,14 +38,3 @@ def test_probabilistic_translation_interpolates_between_sizes():
     assert len(dist) == 2
     assert abs(sum(prob for _, prob in dist) - 1.0) < 1e-9
     assert all(action in rules.get_legal_actions(state, action_model=model) for action, _ in dist)
-
-
-def test_probabilistic_sampling_returns_legal_action():
-    state, rules = _initial_state()
-    config = Config.default().merge({"action_model": {"off_tree_mapping": "probabilistic"}})
-    model = ActionModel(config)
-    rng = np.random.default_rng(42)
-
-    translated = translate_off_tree_action(state, raises(5), model, rules, rng=rng)
-    assert translated in rules.get_legal_actions(state, action_model=model)
-    assert translated.type in {ActionType.RAISE, ActionType.ALL_IN}

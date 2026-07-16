@@ -482,3 +482,59 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     assert seen["cfg"].seed == 7
     assert seen["cfg"].include_off_tree is False
     assert seen["cfg"].allin_runouts == 50
+    # Scorer settings default to the myopic exploiter and are recorded.
+    assert seen["cfg"].scorer == "myopic"
+    assert output.results["scorer"] == "myopic"
+    assert "lookahead_depth" not in output.results
+
+
+def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
+    """scorer/lookahead knobs must reach LBRConfig and the results dict."""
+    metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash="rec1")
+    metadata.config.game.big_blind = 100
+    storage = MagicMock(name="storage")
+    storage.num_infosets.return_value = 1
+    lbr_result = SimpleNamespace(
+        exploitability_mbb=1.0,
+        exploitability_bb=0.001,
+        std_error_mbb=0.5,
+        confidence_95_mbb=(0.0, 2.0),
+        lbr_utility_p0=0.0,
+        lbr_utility_p1=0.0,
+        num_hands=1,
+        base_seed=7,
+        hand_outcomes=[
+            (
+                HandOutcome(value=1.0, terminal="fold", pot=200),
+                HandOutcome(value=-1.0, terminal="fold", pot=200),
+            )
+        ],
+    )
+    seen = {}
+    monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(
+        services,
+        "build_evaluation_solver",
+        lambda cfg, checkpoint_dir, abstraction_hash=None: (object(), storage),
+    )
+    monkeypatch.setattr(
+        services,
+        "compute_lbr_exploitability",
+        lambda solver, cfg, **kw: seen.update(cfg=cfg) or lbr_result,
+    )
+
+    output = services.evaluate_run_lbr(
+        run_dir=tmp_path / "run-1",
+        num_hands=1,
+        seed=7,
+        scorer="lookahead",
+        lookahead_depth=3,
+        lookahead_top_k=5,
+    )
+
+    assert seen["cfg"].scorer == "lookahead"
+    assert seen["cfg"].lookahead_depth == 3
+    assert seen["cfg"].lookahead_top_k == 5
+    assert output.results["scorer"] == "lookahead"
+    assert output.results["lookahead_depth"] == 3
+    assert output.results["lookahead_top_k"] == 5
