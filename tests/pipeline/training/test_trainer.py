@@ -172,7 +172,7 @@ class TestTrainer:
 
         # Verify metrics are valid for parallel
         assert trainer_par.metrics.iteration == 4
-        assert len(trainer_par.metrics.infoset_counts) == 4
+        assert len(trainer_par.metrics.infoset_window) == 4
 
     @pytest.mark.slow
     @pytest.mark.timeout(20)  # Reduced from 60

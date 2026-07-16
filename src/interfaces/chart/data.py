@@ -8,7 +8,7 @@ from typing import Any
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
-from src.core.game.state import Card, Street
+from src.core.game.state import Card, GameState, Street
 from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.in_memory import InMemoryStorage
 
@@ -62,20 +62,16 @@ def build_preflop_chart_data(
 ) -> dict:
     ranks = "AKQJT98765432"
     situation_label = "First to act"
-    betting_sequence = ""
-    if situation_id == "first_to_act":
-        situation_label = "First to act"
-        betting_sequence = ""
-    elif situation_id.startswith("facing_raise_"):
-        size_text = situation_id.replace("facing_raise_", "")
-        raise_bb = float(size_text)
+    state = _initial_state(source)
+    if situation_id.startswith("facing_raise_"):
+        raise_bb = float(situation_id.removeprefix("facing_raise_"))
         situation_label = f"Facing raise to {_format_bb_size(raise_bb)}"
-        betting_sequence = _generate_betting_sequence_for_raise(
-            action_model=source.action_model,
-            rules=source.rules,
-            starting_stack=source.starting_stack,
-            raise_bb=raise_bb,
-        )
+        raised_state = _apply_open_raise(state, source, raise_bb)
+        if raised_state is not None:
+            state = raised_state
+
+    betting_sequence = state.normalized_betting_sequence()
+    to_call = state.to_call
 
     grid = []
     action_meta: dict[str, dict] = {}
@@ -86,17 +82,17 @@ def build_preflop_chart_data(
             if i == j:
                 hand = f"{r1}{r2}"
                 strategy = _get_hand_strategy(
-                    source, r1, r2, False, True, position, betting_sequence
+                    source, r1, r2, False, True, position, betting_sequence, to_call
                 )
             elif i < j:
                 hand = f"{r1}{r2}s"
                 strategy = _get_hand_strategy(
-                    source, r1, r2, True, False, position, betting_sequence
+                    source, r1, r2, True, False, position, betting_sequence, to_call
                 )
             else:
                 hand = f"{r2}{r1}o"
                 strategy = _get_hand_strategy(
-                    source, r2, r1, False, False, position, betting_sequence
+                    source, r2, r1, False, False, position, betting_sequence, to_call
                 )
 
             if strategy is None:
@@ -139,44 +135,12 @@ def _format_bb_size(size_bb: float) -> str:
     return f"{size_bb:.1f}bb"
 
 
-def _infer_to_call(
-    legal_actions: list[Action],
-    action_model: ActionModel,
-    rules: GameRules,
-) -> int:
-    if any(action.type == ActionType.BET for action in legal_actions):
-        return 0
-
-    raise_actions = [a for a in legal_actions if a.type == ActionType.RAISE]
-    if not raise_actions:
-        return 0
-
-    total_bets = [int(bb * rules.big_blind) for bb in action_model.get_preflop_open_sizes_bb()]
-    common_to_calls: set[int] | None = None
-
-    for action in raise_actions:
-        candidates = {total - action.amount for total in total_bets if total > action.amount}
-        common_to_calls = candidates if common_to_calls is None else common_to_calls & candidates
-
-    if common_to_calls:
-        return min(common_to_calls)
-
-    for action in raise_actions:
-        for total in total_bets:
-            to_call = total - action.amount
-            if to_call > 0:
-                return to_call
-
-    return 0
-
-
 def _build_action_breakdown(
     legal_actions: list[Action],
     strategy: list[float],
-    action_model: ActionModel,
     rules: GameRules,
+    to_call: int,
 ) -> list[dict]:
-    to_call = _infer_to_call(legal_actions, action_model, rules)
     breakdown: list[dict] = []
 
     for action, prob in zip(legal_actions, strategy):
@@ -216,24 +180,27 @@ def _build_action_breakdown(
     return breakdown
 
 
-def _generate_betting_sequence_for_raise(
-    action_model: ActionModel,
-    rules: GameRules,
-    starting_stack: int,
-    raise_bb: float,
-) -> str:
-    dummy_hole_cards = (
-        (Card.new("As"), Card.new("Kd")),
-        (Card.new("Qc"), Card.new("Jh")),
-    )
-    state = rules.create_initial_state(
-        starting_stack=starting_stack,
-        hole_cards=dummy_hole_cards,
+# Hole cards do not affect the betting structure; any two disjoint hands work.
+_DUMMY_HOLE_CARDS = (
+    (Card.new("As"), Card.new("Kd")),
+    (Card.new("Qc"), Card.new("Jh")),
+)
+
+
+def _initial_state(source: ChartDataRuntime) -> GameState:
+    return source.rules.create_initial_state(
+        starting_stack=source.starting_stack,
+        hole_cards=_DUMMY_HOLE_CARDS,
         button=0,
     )
 
-    total_bet = int(raise_bb * rules.big_blind)
-    legal_actions = rules.get_legal_actions(state, action_model=action_model)
+
+def _apply_open_raise(
+    state: GameState, source: ChartDataRuntime, raise_bb: float
+) -> GameState | None:
+    """Apply the open raise to ``raise_bb`` big blinds, or None if not in the tree."""
+    total_bet = int(raise_bb * source.rules.big_blind)
+    legal_actions = source.rules.get_legal_actions(state, action_model=source.action_model)
     raise_action = next(
         (
             action
@@ -244,10 +211,9 @@ def _generate_betting_sequence_for_raise(
     )
 
     if raise_action is None:
-        return ""
+        return None
 
-    new_state = state.apply_action(raise_action, rules)
-    return new_state.normalized_betting_sequence()
+    return state.apply_action(raise_action, source.rules)
 
 
 def _get_hand_strategy(
@@ -258,6 +224,7 @@ def _get_hand_strategy(
     is_pair: bool,
     position: int,
     betting_sequence: str,
+    to_call: int,
 ) -> dict | None:
     hand_string = _ranks_to_hand_string(rank1, rank2, suited, is_pair)
 
@@ -285,8 +252,8 @@ def _get_hand_strategy(
         "actions": _build_action_breakdown(
             infoset.legal_actions,
             strategy,
-            source.action_model,
             source.rules,
+            to_call,
         )
     }
 

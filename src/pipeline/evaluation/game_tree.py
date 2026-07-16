@@ -18,6 +18,7 @@ Conventions:
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Callable, Hashable, Sequence
 from typing import Protocol, TypeVar
 
@@ -93,6 +94,44 @@ class ExtensiveGame(Protocol[StateT, ActionT]):
         Two states that ``player`` cannot distinguish must map to equal keys.
         """
         ...
+
+
+def collect_infoset_states[StateT: Hashable, ActionT: Hashable](
+    game: ExtensiveGame[StateT, ActionT], player: int, policy: Policy
+) -> dict[InfoKey, list[tuple[StateT, float]]]:
+    """Group ``player``'s decision states by information set with counterfactual reach.
+
+    The counterfactual reach of a state is the product of chance and opponent
+    action probabilities along the path; ``player``'s own action probabilities
+    are excluded, so every subtree below their decisions is explored at full
+    weight. Zero-reach subtrees are pruned. This grouping is the shared first
+    phase of both exact best response and LBR: a responder must aggregate value
+    across all histories in an information set before choosing an action.
+    """
+    infoset_states: dict[InfoKey, list[tuple[StateT, float]]] = defaultdict(list)
+
+    def collect(state: StateT, cf_reach: float) -> None:
+        if cf_reach == 0.0 or game.is_terminal(state):
+            return
+        actor = game.current_player(state)
+        if actor == CHANCE:
+            for action, prob in game.chance_outcomes(state):
+                collect(game.next_state(state, action), cf_reach * prob)
+            return
+        if actor == player:
+            key = game.information_state_key(state, player)
+            infoset_states[key].append((state, cf_reach))
+            for action in game.legal_actions(state):
+                # Counterfactual: do not weight by the player's own action prob.
+                collect(game.next_state(state, action), cf_reach)
+            return
+        legal = game.legal_actions(state)
+        probs = policy(game.information_state_key(state, actor), legal)
+        for action, prob in zip(legal, probs):
+            collect(game.next_state(state, action), cf_reach * prob)
+
+    collect(game.initial_state(), 1.0)
+    return infoset_states
 
 
 class TabularStrategy:

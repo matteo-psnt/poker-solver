@@ -5,7 +5,7 @@ import pytest
 
 from src.core.game.actions import bet, call, fold
 from src.core.game.state import Street
-from src.engine.solver.infoset import InfoSet, InfoSetKey, create_infoset_key
+from src.engine.solver.infoset import InfoSet, InfoSetKey
 
 
 class TestInfoSetKey:
@@ -37,7 +37,7 @@ class TestInfoSetKey:
         assert key == fresh
         assert hash(key) == hash(fresh)
 
-    def test_create_infoset_key_preflop(self):
+    def test_infoset_key_preflop(self):
         """Test creating preflop InfoSetKey with hand string."""
         key = InfoSetKey(
             player_position=0,
@@ -54,7 +54,7 @@ class TestInfoSetKey:
         assert key.postflop_bucket is None
         assert key.spr_bucket == 2
 
-    def test_create_infoset_key_postflop(self):
+    def test_infoset_key_postflop(self):
         """Test creating postflop InfoSetKey with bucket."""
         key = InfoSetKey(
             player_position=0,
@@ -126,34 +126,6 @@ class TestInfoSetKey:
         key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
         with pytest.raises(AttributeError):
             setattr(key, "postflop_bucket", 30)
-
-    def test_create_infoset_key_helper_preflop(self):
-        """Test helper function for preflop."""
-        key = create_infoset_key(
-            player=0,
-            street=Street.PREFLOP,
-            betting_sequence="r2.5",
-            spr_bucket=2,
-            preflop_hand="AKs",
-        )
-        assert isinstance(key, InfoSetKey)
-        assert key.player_position == 0
-        assert key.street == Street.PREFLOP
-        assert key.preflop_hand == "AKs"
-
-    def test_create_infoset_key_helper_postflop(self):
-        """Test helper function for postflop."""
-        key = create_infoset_key(
-            player=0,
-            street=Street.TURN,
-            betting_sequence="x-b0.50",
-            spr_bucket=2,
-            postflop_bucket=40,
-        )
-        assert isinstance(key, InfoSetKey)
-        assert key.player_position == 0
-        assert key.street == Street.TURN
-        assert key.postflop_bucket == 40
 
     def test_get_hand_repr(self):
         """Test get_hand_repr method."""
@@ -249,22 +221,6 @@ class TestInfoSet:
 
         assert infoset.regrets[0] == 12.0  # 10 + 5 - 3
 
-    def test_update_strategy(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
-        actions = [fold(), call(), bet(50)]
-        infoset = InfoSet(key, actions)
-
-        # Set regrets to create non-uniform strategy
-        infoset.regrets = np.array([0.0, 100.0, 200.0], dtype=np.float32)
-
-        # Update strategy with reach prob 1.0
-        infoset.update_strategy(1.0)
-
-        assert infoset.reach_count == 1
-        # strategy_sum should equal current strategy
-        strategy = infoset.get_strategy()
-        assert np.allclose(infoset.strategy_sum, strategy)
-
     def test_average_strategy(self):
         """Average strategy should track cumulative play."""
         key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
@@ -272,11 +228,11 @@ class TestInfoSet:
         infoset = InfoSet(key, actions)
 
         # Iteration 1: all regrets zero (uniform)
-        infoset.update_strategy(1.0)
+        infoset.strategy_sum += infoset.get_strategy()
 
         # Iteration 2: favor action 2
         infoset.regrets = np.array([0.0, 0.0, 100.0], dtype=np.float32)
-        infoset.update_strategy(1.0)
+        infoset.strategy_sum += infoset.get_strategy()
 
         avg = infoset.get_average_strategy()
 
@@ -284,43 +240,6 @@ class TestInfoSet:
         assert 0 < avg[2] < 1.0
         assert avg[2] > avg[0]
         assert np.isclose(avg.sum(), 1.0)
-
-    def test_reset_regrets(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
-        actions = [fold(), call()]
-        infoset = InfoSet(key, actions)
-
-        infoset.regrets = np.array([10.0, 20.0], dtype=np.float32)
-        infoset.reset_regrets()
-
-        assert np.allclose(infoset.regrets, [0.0, 0.0])
-
-    def test_reset_strategy_sum(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
-        actions = [fold(), call()]
-        infoset = InfoSet(key, actions)
-
-        infoset.strategy_sum = np.array([10.0, 20.0], dtype=np.float32)
-        infoset.reset_strategy_sum()
-
-        assert np.allclose(infoset.strategy_sum, [0.0, 0.0])
-
-    def test_prune_small_values(self):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
-        actions = [fold(), call(), bet(50)]
-        infoset = InfoSet(key, actions)
-
-        infoset.regrets = np.array([1e-10, 10.0, 1e-11], dtype=np.float32)
-        infoset.strategy_sum = np.array([1e-12, 5.0, 1e-10], dtype=np.float32)
-
-        infoset.prune(threshold=1e-9)
-
-        # Small values should be pruned to 0
-        assert infoset.regrets[0] == 0.0
-        assert infoset.regrets[1] == 10.0
-        assert infoset.regrets[2] == 0.0
-        assert infoset.strategy_sum[0] == 0.0
-        assert infoset.strategy_sum[2] == 0.0
 
     def test_update_regret_invalid_index(self):
         key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
