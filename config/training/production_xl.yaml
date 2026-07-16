@@ -1,0 +1,35 @@
+# Production training on the XL (2x-bucket) card abstraction.
+# Identical to production.yaml except for the abstraction pointer: the paired
+# experiment isolates the bucket-count change (gate with the lookahead LBR
+# evaluator against a production run at matched iterations/seed).
+
+solver:
+  iteration_weighting: dcfr
+
+action_model:
+  preflop_templates:
+    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
+    bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
+    sb_vs_3bet: ["fold", "call", "2.3x_last", "jam"]
+  postflop_templates:
+    first_aggressive: [0.33, 0.66, 1.25]
+    facing_bet: ["min_raise", "pot_raise", "jam"]
+    after_one_raise: ["pot_raise", "jam"]
+    after_two_raises: ["jam"]
+
+resolver:
+  max_raises_per_street: 5
+
+card_abstraction:
+  config: production_xl
+
+training:
+  num_iterations: 1000000
+  checkpoint_frequency: 500000
+  iterations_per_worker: 5000
+
+storage:
+  initial_capacity: 4000000
+
+system:
+  config_name: "production_xl"

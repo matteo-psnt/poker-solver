@@ -340,6 +340,7 @@ def run_train(
     eval_hands: int = 1000,
     eval_cpu: int = 6,
     eval_memory: int = 32768,
+    eval_scorer: str = "lookahead",
 ) -> None:
     """Train a named config and evaluate the result with LBR.
 
@@ -366,7 +367,7 @@ def run_train(
     run_id = train_result["run_id"]
     print(f"\nEvaluating {run_id} with LBR ({eval_hands} hands, {eval_cpu} workers)...")
     eval_result = evaluate.with_options(cpu=eval_cpu, memory=eval_memory, timeout=timeout).remote(
-        run_id=run_id, num_hands=eval_hands, num_workers=eval_cpu, seed=1
+        run_id=run_id, num_hands=eval_hands, num_workers=eval_cpu, seed=1, scorer=eval_scorer
     )
     results = eval_result["results"]
     print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
