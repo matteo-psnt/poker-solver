@@ -5,6 +5,7 @@ import numpy as np
 from src.core.game.actions import bet, call, fold
 from src.core.game.state import Street
 from src.engine.solver.infoset import InfoSetKey
+from tests.test_helpers import build_test_storage
 
 # SharedArrayStorage checkpoint tests are covered by parallel training integration tests
 
@@ -16,13 +17,11 @@ class TestSharedArrayStorage:
         """Test that UNKNOWN_ID placeholder infosets are read-only to prevent corruption."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
         num_workers = 4
 
         # Create coordinator (worker 0)
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=num_workers,
             worker_id=0,
             session_id=session_id,
@@ -81,11 +80,9 @@ class TestSharedArrayStorage:
         """Test that UNKNOWN_ID views prevent dangerous in-place operations like +=."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=4,
             worker_id=0,
             session_id=session_id,
@@ -135,11 +132,9 @@ class TestSharedArrayStorage:
         """Test that owned infosets can be written to."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=4,
             worker_id=0,
             session_id=session_id,
@@ -184,11 +179,9 @@ class TestSharedArrayStorage:
         """Test that xxhash provides stable ownership across calls."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=4,
             worker_id=0,
             session_id=session_id,
@@ -222,14 +215,12 @@ class TestSharedArrayStorage:
         """Test that each worker has non-overlapping ID ranges."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
         num_workers = 4
         max_infosets = 10000
 
         # Create coordinator
-        coordinator = SharedArrayStorage(
+        coordinator = build_test_storage(
             num_workers=num_workers,
             worker_id=0,
             session_id=session_id,
@@ -266,11 +257,9 @@ class TestSharedArrayStorage:
         """Test that ownership is deterministic for the same key."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=8,
             worker_id=0,
             session_id=session_id,
@@ -319,13 +308,11 @@ class TestSharedArrayStorage:
         """Test that ID allocation uses the correct worker range."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
         num_workers = 4
         max_infosets = 10000
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=num_workers,
             worker_id=0,
             session_id=session_id,
@@ -366,11 +353,9 @@ class TestSharedArrayStorage:
         """Test that requests for non-owned keys are tracked."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=4,
             worker_id=0,
             session_id=session_id,
@@ -421,11 +406,9 @@ class TestSharedArrayStorage:
         """Test that remote key cache is updated when receiving ID responses."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=4,
             worker_id=0,
             session_id=session_id,
@@ -462,12 +445,10 @@ class TestSharedArrayStorage:
         """Test that exhausting a worker's ID range raises RuntimeError."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
         # Create storage with very small ID range to trigger exhaustion
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=4,
             worker_id=0,
             session_id=session_id,
@@ -517,11 +498,9 @@ class TestSharedArrayStorage:
         """Test behavior at max_actions boundary."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=2,
             worker_id=0,
             session_id=session_id,
@@ -572,11 +551,9 @@ class TestSharedArrayStorage:
         """Test capacity usage monitoring."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=2,
             worker_id=0,
             session_id=session_id,
@@ -624,11 +601,9 @@ class TestSharedArrayStorage:
         """Test that resize extends ID range correctly."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=2,
             worker_id=0,
             session_id=session_id,
@@ -698,11 +673,9 @@ class TestSharedArrayStorage:
         """Test that resize preserves all existing infoset data."""
         import uuid
 
-        from src.engine.solver.storage.shared_array import SharedArrayStorage
-
         session_id = f"test_{uuid.uuid4().hex[:8]}"
 
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=2,
             worker_id=0,
             session_id=session_id,

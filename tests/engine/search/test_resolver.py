@@ -14,8 +14,7 @@ from src.engine.search.range_inference import combo_index_for, replace_actor_hol
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.in_memory import InMemoryStorage
-from src.engine.solver.storage.shared_array import SharedArrayStorage
-from tests.test_helpers import DummyCardAbstraction, make_test_config
+from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
 
 
 def _make_initial_state():
@@ -117,7 +116,7 @@ def test_resolver_is_not_clairvoyant():
     # would break bitwise comparison.
     config = make_test_config(seed=42, **{"resolver.max_iterations": 20})
     action_model = ActionModel(config)
-    storage = SharedArrayStorage(
+    storage = build_test_storage(
         num_workers=1, worker_id=0, session_id="resolver-clair", is_coordinator=True
     )
     solver = MCCFRSolver(
@@ -167,7 +166,7 @@ def test_resolver_unknown_field_rejected(field):
 def _trained_solver(config, session_id: str):
     """Small trained solver so blueprint lookups have real bite."""
     action_model = ActionModel(config)
-    storage = SharedArrayStorage(
+    storage = build_test_storage(
         num_workers=1, worker_id=0, session_id=session_id, is_coordinator=True
     )
     solver = MCCFRSolver(

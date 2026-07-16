@@ -5,8 +5,7 @@ import pytest
 from src.core.actions.action_model import ActionModel
 from src.core.game.state import Card, GameState, Street
 from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.shared_array import SharedArrayStorage
-from tests.test_helpers import DummyCardAbstraction, make_test_config
+from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
 
 
 class TestMCCFRSolver:
@@ -15,7 +14,7 @@ class TestMCCFRSolver:
     def test_create_solver(self):
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -27,7 +26,7 @@ class TestMCCFRSolver:
     def test_deal_initial_state(self):
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
@@ -46,7 +45,7 @@ class TestMCCFRSolver:
         """Test that one iteration completes without error."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
@@ -62,7 +61,7 @@ class TestMCCFRSolver:
         """Test multiple training iterations."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
@@ -77,7 +76,7 @@ class TestMCCFRSolver:
         """Test that infosets accumulate over iterations."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
@@ -98,7 +97,7 @@ class TestMCCFRSolver:
         """Test that strategies are updated during training."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         # Use external sampling which updates strategy_sum for all actions
@@ -125,7 +124,7 @@ class TestMCCFRSolver:
         """Test chance node detection."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
@@ -141,7 +140,7 @@ class TestMCCFRSolver:
         """Test that chance node sampling deals cards."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
@@ -188,7 +187,7 @@ class TestMCCFRSolver:
         card_abs = DummyCardAbstraction()
 
         # Run with seed 42
-        storage1 = SharedArrayStorage(
+        storage1 = build_test_storage(
             num_workers=1, worker_id=0, session_id="test1", is_coordinator=True
         )
         solver1 = MCCFRSolver(action_abs, card_abs, storage1, config=make_test_config(seed=42))
@@ -197,7 +196,7 @@ class TestMCCFRSolver:
         infosets1 = solver1.num_infosets()
 
         # Run again with same seed
-        storage2 = SharedArrayStorage(
+        storage2 = build_test_storage(
             num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
         )
         solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=42))
@@ -217,7 +216,7 @@ class TestMCCFRSolver:
         """Test that checkpoint doesn't crash."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
@@ -229,7 +228,7 @@ class TestMCCFRSolver:
     def test_str_representation(self):
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
@@ -242,7 +241,7 @@ class TestMCCFRSolver:
         """Test solver with custom stack size."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
         solver = MCCFRSolver(
@@ -267,7 +266,7 @@ class TestMCCFRSolver:
 
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=2,
             worker_id=0,
             session_id=f"test_{uuid.uuid4().hex[:8]}",

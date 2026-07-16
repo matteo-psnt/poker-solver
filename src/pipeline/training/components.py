@@ -123,6 +123,8 @@ def build_storage(
         max_actions=config.storage.max_actions,
         is_coordinator=True,
         checkpoint_dir=run_dir if checkpoint_enabled else None,
+        zarr_compression_level=config.storage.zarr_compression_level,
+        zarr_chunk_size=config.storage.zarr_chunk_size,
     )
 
 

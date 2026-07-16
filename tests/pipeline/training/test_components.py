@@ -10,7 +10,7 @@ from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.training import components
 from src.shared.config import Config
-from tests.test_helpers import DummyCardAbstraction
+from tests.test_helpers import DummyCardAbstraction, build_test_storage
 
 
 class TestBuildCardAbstraction:
@@ -97,6 +97,22 @@ class TestBuildStorage:
         assert storage.num_infosets() == 0
         assert storage.checkpoint_dir == tmp_path
 
+    def test_build_storage_forwards_zarr_settings(self, tmp_path):
+        """Configured checkpoint knobs must reach the storage, not just the parallel path.
+
+        These are pure config passthrough, so a storage that disagrees with the
+        config it was built from means the YAML silently did nothing.
+        """
+        config = Config.default().merge(
+            {"storage": {"zarr_compression_level": 5, "zarr_chunk_size": 12345}}
+        )
+
+        storage = components.build_storage(config, run_dir=tmp_path)
+
+        assert isinstance(storage, SharedArrayStorage)
+        assert storage.zarr_compression_level == 5
+        assert storage.zarr_chunk_size == 12345
+
     def test_build_storage_without_checkpointing(self):
         """Test building storage without checkpointing."""
         config = Config.default().merge({"storage": {"checkpoint_enabled": False}})
@@ -124,7 +140,7 @@ class TestBuildSolver:
 
         action_model = ActionModel(config)
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -142,7 +158,7 @@ class TestBuildSolver:
 
         action_model = ActionModel(config)
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -159,7 +175,7 @@ class TestBuildSolver:
 
         action_model = ActionModel(config)
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 

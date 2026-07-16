@@ -10,8 +10,7 @@ from pydantic import ValidationError
 
 from src.core.actions.action_model import ActionModel
 from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.shared_array import SharedArrayStorage
-from tests.test_helpers import DummyCardAbstraction, make_test_config
+from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
 
 
 @pytest.mark.slow
@@ -22,7 +21,7 @@ class TestOutcomeSampling:
         """Test creating solver with outcome sampling enabled."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -40,7 +39,7 @@ class TestOutcomeSampling:
         """Test that outcome sampling iteration completes."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -61,7 +60,7 @@ class TestOutcomeSampling:
         """Test multiple iterations with outcome sampling."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -82,7 +81,7 @@ class TestOutcomeSampling:
         """Test that outcome sampling creates and updates infosets."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -113,7 +112,7 @@ class TestOutcomeSampling:
         """Test outcome sampling works with CFR+."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -135,7 +134,7 @@ class TestOutcomeSampling:
         """Test that outcome sampling produces valid strategies."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
@@ -166,7 +165,7 @@ class TestOutcomeSampling:
         card_abs = DummyCardAbstraction()
 
         # External sampling
-        storage_external = SharedArrayStorage(
+        storage_external = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_ext", is_coordinator=True
         )
         solver_external = MCCFRSolver(
@@ -179,7 +178,7 @@ class TestOutcomeSampling:
             solver_external.train_iteration()
 
         # Outcome sampling
-        storage_outcome = SharedArrayStorage(
+        storage_outcome = build_test_storage(
             num_workers=1, worker_id=0, session_id="test_out", is_coordinator=True
         )
         solver_outcome = MCCFRSolver(
@@ -213,7 +212,7 @@ class TestOutcomeSampling:
         """Test that outcome sampling shows convergence behavior."""
         action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = SharedArrayStorage(
+        storage = build_test_storage(
             num_workers=1, worker_id=0, session_id="test", is_coordinator=True
         )
 
