@@ -95,8 +95,15 @@ def trunk_arrays(config: Config, tree: BettingTree) -> dict[str, int]:
     return {TRUNK_ARRAY: TrunkLayout(tree, BR_REGIONS[config.pcs.cfr_br]).num_slots}
 
 
-def worker_bytes(tree: BettingTree, num_terminals: int, *, br_streets: str = "off") -> int:
-    """Private bytes one worker's kernel allocates, from the tree's shape."""
+def worker_bytes(
+    tree: BettingTree, num_terminals: int, *, br_streets: str = "off", runouts: int = 1
+) -> int:
+    """Private bytes one worker's kernel allocates, from the tree's shape.
+
+    ONE kernel whatever ``runouts`` is: CFR-BR rebinds a single kernel per
+    runout rather than holding one each, which is the only reason
+    ``runouts_per_flop`` above 1 fits a 32 GiB node at all.
+    """
     per_hand = 4 * LIVE_HANDS * np.dtype(DTYPE).itemsize
     scratch = (len(tree) + num_terminals) * per_hand  # reach, value, both players
     cache = tree.num_slots * np.dtype(DTYPE).itemsize  # bucket-space strategy cache
@@ -107,7 +114,7 @@ def worker_bytes(tree: BettingTree, num_terminals: int, *, br_streets: str = "of
         # backward pass that chose it to the forward pass that plays it.
         streets = frozenset(BR_REGIONS[br_streets])
         nodes = sum(1 for node in tree.nodes if node.street in streets)
-        picks = nodes * LIVE_HANDS
+        picks = nodes * LIVE_HANDS * runouts
     return scratch + cache + temporaries + picks + WORKER_OVERHEAD_BYTES
 
 
@@ -122,11 +129,13 @@ def ram_safe_workers(
     shared_bytes: int,
     memory: int | None = None,
     br_streets: str = "off",
+    runouts: int = 1,
 ) -> int:
     """How many workers this node can hold, from the arithmetic above."""
     total = node_memory_bytes() if memory is None else memory
     available = total - shared_bytes - NODE_HEADROOM_BYTES
-    return max(1, int(available // worker_bytes(tree, num_terminals, br_streets=br_streets)))
+    per_worker = worker_bytes(tree, num_terminals, br_streets=br_streets, runouts=runouts)
+    return max(1, int(available // per_worker))
 
 
 def mark_visited_from_strategy(storage: StaticArrayStorage) -> None:
@@ -195,6 +204,7 @@ def pcs_worker(
                 cfr_plus=solver.cfr_plus,
                 showdown=pcs.showdown,
                 num_boards=pcs.runouts_per_flop,
+                sequential=True,
             )
             logger.info(
                 "[cfr-br worker %d] hybrid opponent best-responds on %s; "

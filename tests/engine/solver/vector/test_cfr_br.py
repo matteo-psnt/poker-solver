@@ -117,6 +117,7 @@ class TestTheOpponentIsReallyBestResponding:
         assert hybrid[0] > matched[0]
         assert hybrid[1] > matched[1]
 
+    @pytest.mark.timeout(60)  # four regions x four boards of real tree passes
     def test_a_wider_best_response_region_is_worth_at_least_as_much(self, parts):
         """Streets nest, so from one starting point the responder's value must too."""
         compiled, contexts, _ = parts
@@ -201,6 +202,42 @@ class TestClairvoyanceIsNotPricedIn:
                         assert reference[hand] == action
             checked += 1
         assert checked > 0
+
+
+class TestSequentialBinding:
+    # Two iterations over four boards, twice: real tree passes, not a fixture.
+    @pytest.mark.timeout(120)
+    def test_one_rebound_kernel_writes_exactly_what_four_kernels_do(self, parts):
+        """Rebinding is what makes ``runouts_per_flop`` affordable; it must be free.
+
+        A kernel's hand-space scratch is ~3 GB at production size, so holding one
+        per runout is what a 32 GiB node cannot do. The two modes differ only in
+        how many are alive at once, and any drift between them would be a
+        different trainer wearing the same knob.
+        """
+        compiled, contexts, _ = parts
+        # Runouts of ONE flop, which is what the sampler draws: they share the
+        # flop's prefix, so only a river region is legal here.
+        river = [Street.RIVER]
+        tables = []
+        for sequential in (False, True):
+            driver, regrets, strategy_sum, trunk = _driver(compiled, "river", len(contexts))
+            driver.sequential = sequential and len(contexts) > 1
+            driver.br_streets = frozenset(river)
+            for iteration in range(2):
+                driver.iterate(contexts, iteration, boards=BOARDS)
+            tables.append((regrets.copy(), strategy_sum.copy(), trunk.copy()))
+
+        for parallel, rebound in zip(*tables, strict=True):
+            assert np.array_equal(parallel, rebound)
+
+    def test_sequential_refuses_a_region_it_cannot_maximise_across(self, parts):
+        """Four runouts share a flop, so a flop best response needs them at once."""
+        compiled, contexts, _ = parts
+        driver, _, _, _ = _driver(compiled, "postflop", len(contexts))
+        driver.sequential = True
+        with pytest.raises(ValueError, match="Sequential binding cannot best-respond"):
+            driver.iterate(contexts, 0, boards=BOARDS)
 
 
 @pytest.mark.slow
