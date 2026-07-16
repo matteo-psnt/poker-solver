@@ -5,6 +5,8 @@ This module wraps the eval7 evaluator to provide fast hand strength
 calculations for Texas Hold'em.
 """
 
+from functools import lru_cache
+
 import eval7
 
 from src.core.game.state import Card
@@ -154,18 +156,7 @@ class HandEvaluator:
         return self.compare_hands(hole_cards1, hole_cards2, board) == -1
 
 
-# Global evaluator instance for efficiency
-_evaluator_instance = None
-
-
+@lru_cache(maxsize=1)
 def get_evaluator() -> HandEvaluator:
-    """
-    Get the global evaluator instance (singleton pattern).
-
-    Returns:
-        Shared HandEvaluator instance
-    """
-    global _evaluator_instance
-    if _evaluator_instance is None:
-        _evaluator_instance = HandEvaluator()
-    return _evaluator_instance
+    """Shared HandEvaluator instance (lazily constructed singleton)."""
+    return HandEvaluator()

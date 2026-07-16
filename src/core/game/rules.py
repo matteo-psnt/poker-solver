@@ -7,9 +7,14 @@ that govern how the game progresses.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.core.game.actions import Action, ActionType, all_in, bet, call, check, fold, raises
 from src.core.game.evaluator import get_evaluator
 from src.core.game.state import Card, GameState, Street
+
+if TYPE_CHECKING:
+    from src.core.actions.action_model import ActionModel
 
 
 class GameRules:
@@ -140,7 +145,9 @@ class GameRules:
 
         return False
 
-    def get_legal_actions(self, state: GameState, action_model=None) -> list[Action]:
+    def get_legal_actions(
+        self, state: GameState, action_model: ActionModel | None = None
+    ) -> list[Action]:
         """
         Get all legal actions for the current player.
 
@@ -203,10 +210,6 @@ class GameRules:
             if not any(a.type == ActionType.ALL_IN for a in actions):
                 actions.append(all_in(current_stack))
 
-        # If facing bet equal to stack, can only fold or call (all-in)
-        if state.to_call > 0 and state.to_call >= current_stack:
-            actions = [fold(), all_in(current_stack)]
-
         return actions
 
     def apply_action(self, state: GameState, action: Action) -> GameState:
@@ -243,8 +246,6 @@ class GameRules:
         betting_history: list[Action] = list(state.betting_history)
         betting_history.append(action)
 
-        street = state.street
-
         # Handle different action types
         if action.type == ActionType.FOLD:
             # Opponent wins (winner determined by last action being FOLD)
@@ -256,7 +257,7 @@ class GameRules:
                 raise ValueError("Cannot check when facing a bet")
 
             # Get actions on current street to check for check-check
-            # Note: betting_history already includes current action (appended on line 179)
+            # Note: betting_history already includes the current action
             actions_this_street = self._get_actions_on_current_street(betting_history)
 
             # Check-check: both players have checked on this street
@@ -270,19 +271,11 @@ class GameRules:
                     return self._advance_street(state, tuple(betting_history))
 
             # First check or not check-check: pass action to opponent
-            return state.__class__(
-                street=street,
-                pot=pot,
-                stacks=self._stacks_to_tuple(stacks),
-                board=state.board,
-                hole_cards=state.hole_cards,
+            return state.replace(
                 betting_history=tuple(betting_history),
-                button_position=state.button_position,
                 current_player=opponent,
-                is_terminal=False,
                 to_call=0,
                 last_aggressor=None,  # No aggression on this street
-                blind_to_call=state.blind_to_call,
             )
 
         elif action.type == ActionType.CALL:
@@ -324,19 +317,13 @@ class GameRules:
             # Opponent now needs to call this amount
             new_to_call = bet_amount if action.type == ActionType.BET else action.amount
 
-            return state.__class__(
-                street=street,
+            return state.replace(
                 pot=pot,
                 stacks=self._stacks_to_tuple(stacks),
-                board=state.board,
-                hole_cards=state.hole_cards,
                 betting_history=tuple(betting_history),
-                button_position=state.button_position,
                 current_player=opponent,
-                is_terminal=False,
                 to_call=new_to_call,
                 last_aggressor=current_player,
-                blind_to_call=state.blind_to_call,
             )
 
         elif action.type == ActionType.ALL_IN:
@@ -357,19 +344,13 @@ class GameRules:
                         )
                     else:
                         # All-in raise
-                        return state.__class__(
-                            street=street,
+                        return state.replace(
                             pot=pot,
                             stacks=self._stacks_to_tuple(stacks),
-                            board=state.board,
-                            hole_cards=state.hole_cards,
                             betting_history=tuple(betting_history),
-                            button_position=state.button_position,
                             current_player=opponent,
-                            is_terminal=False,
                             to_call=new_to_call,
                             last_aggressor=current_player,
-                            blind_to_call=state.blind_to_call,
                         )
                 else:
                     # All-in for less than call, treat as call
@@ -378,19 +359,13 @@ class GameRules:
                     )
             else:
                 # All-in bet
-                return state.__class__(
-                    street=street,
+                return state.replace(
                     pot=pot,
                     stacks=self._stacks_to_tuple(stacks),
-                    board=state.board,
-                    hole_cards=state.hole_cards,
                     betting_history=tuple(betting_history),
-                    button_position=state.button_position,
                     current_player=opponent,
-                    is_terminal=False,
                     to_call=all_in_amount,
                     last_aggressor=current_player,
-                    blind_to_call=state.blind_to_call,
                 )
 
         else:
@@ -457,20 +432,15 @@ class GameRules:
         # Out of position player acts first postflop (non-button)
         first_to_act = 1 - state.button_position
 
-        return state.__class__(
+        return state.replace(
             street=next_street,
-            pot=pot or state.pot,
-            stacks=stacks or state.stacks,
-            board=state.board,  # Board will be updated by caller (CFR will deal cards)
-            hole_cards=state.hole_cards,
+            pot=state.pot if pot is None else pot,
+            stacks=state.stacks if stacks is None else stacks,
             betting_history=betting_history,
-            button_position=state.button_position,
             current_player=first_to_act,
-            is_terminal=False,
             to_call=0,
             last_aggressor=None,
-            blind_to_call=state.blind_to_call,
-            _skip_validation=True,  # Skip validation - board will be dealt by CFR
+            validate=False,  # Board is dealt by the caller (CFR) after the street advances
         )
 
     def _advance_to_showdown(
@@ -498,20 +468,13 @@ class GameRules:
         if len(state.board) < 5:
             # Return state signaling showdown needed but board incomplete
             # CFR will deal remaining cards
-            return state.__class__(
-                street=Street.RIVER if state.street == Street.RIVER else state.street,
+            return state.replace(
                 pot=pot,
                 stacks=stacks,
-                board=state.board,
-                hole_cards=state.hole_cards,
                 betting_history=betting_history,
-                button_position=state.button_position,
-                current_player=state.current_player,
-                is_terminal=True,  # Mark as terminal
+                is_terminal=True,
                 to_call=0,
-                last_aggressor=state.last_aggressor,
-                blind_to_call=state.blind_to_call,
-                _skip_validation=True,  # Board may be incomplete
+                validate=False,  # Board may be incomplete
             )
 
         # Winner computed on-demand via get_payoff() using hand evaluation
@@ -545,20 +508,19 @@ class GameRules:
         via get_payoff() using either the last action (for folds) or
         hand evaluation (for showdowns).
         """
-        return state.__class__(
-            street=state.street,
-            pot=pot or state.pot,
-            stacks=stacks or state.stacks,
-            board=state.board,
-            hole_cards=state.hole_cards,
+        return state.replace(
+            pot=state.pot if pot is None else pot,
+            stacks=state.stacks if stacks is None else stacks,
             betting_history=betting_history,
-            button_position=state.button_position,
-            current_player=state.current_player,
             is_terminal=True,
             to_call=0,
-            last_aggressor=state.last_aggressor,
-            blind_to_call=state.blind_to_call,
         )
+
+    @staticmethod
+    def starting_stack(state: GameState) -> float:
+        """Per-player starting stack, reconstructed from pot conservation
+        (both players start the hand with the same stack)."""
+        return (state.pot + state.stacks[0] + state.stacks[1]) / 2
 
     @staticmethod
     def invested_chips(state: GameState) -> tuple[float, float]:
@@ -567,7 +529,7 @@ class GameRules:
         Reconstructed from pot conservation: both players start with the same
         stack, so ``starting = (pot + s0 + s1) / 2`` and invested = starting - s_i.
         """
-        starting = (state.pot + state.stacks[0] + state.stacks[1]) / 2
+        starting = GameRules.starting_stack(state)
         return starting - state.stacks[0], starting - state.stacks[1]
 
     def get_payoff(self, state: GameState, player: int) -> float:
@@ -584,7 +546,7 @@ class GameRules:
         if not state.is_terminal:
             raise ValueError("Can only get payoff for terminal states")
 
-        starting_stack = (state.pot + state.stacks[0] + state.stacks[1]) / 2
+        starting_stack = self.starting_stack(state)
 
         # Determine winner if fold or showdown
         if state.ended_by_fold:

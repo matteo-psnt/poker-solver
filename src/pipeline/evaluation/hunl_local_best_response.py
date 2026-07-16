@@ -597,15 +597,6 @@ class _HUNLLocalBestResponse:
 
     # -- Helpers -----------------------------------------------------------
 
-    def _sample(self, dist: dict[Action, float]) -> Action:
-        actions = list(dist.keys())
-        probs = np.array([dist[a] for a in actions], dtype=np.float64)
-        total = probs.sum()
-        if total <= _EPS:
-            return actions[int(self.rng.integers(0, len(actions)))]
-        probs /= total
-        return actions[int(self.rng.choice(len(actions), p=probs))]
-
     @staticmethod
     def _is_showdown(state: GameState) -> bool:
         return bool(state.betting_history) and not state.ended_by_fold

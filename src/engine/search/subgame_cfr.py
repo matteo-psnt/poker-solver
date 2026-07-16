@@ -28,7 +28,7 @@ import numpy as np
 
 from src.core.game.evaluator import get_evaluator
 from src.core.game.state import Card, GameState
-from src.engine.search.range_inference import ALL_COMBOS, COMBO_CARDS, COMBO_MASKS, NUM_COMBOS
+from src.engine.search.range_inference import ALL_COMBOS, COMBO_CARDS, NUM_COMBOS, blocked_combos
 from src.engine.search.tree_builder import LocalTree, LocalTreeNode
 
 _EPS = 1e-12
@@ -52,11 +52,7 @@ class RunoutEvaluator:
         if len(board) != 5:
             raise ValueError(f"RunoutEvaluator needs a complete board, got {len(board)} cards")
         evaluator = get_evaluator()
-        board_mask = 0
-        for card in board:
-            board_mask |= card.mask
-
-        alive = np.nonzero((COMBO_MASKS & board_mask) == 0)[0]
+        alive = np.nonzero(~blocked_combos(board))[0]
         ranks = np.array([evaluator.evaluate(ALL_COMBOS[i], board) for i in alive], dtype=np.int64)
         # Sort best -> worst (smaller rank wins).
         order = np.argsort(ranks, kind="stable")

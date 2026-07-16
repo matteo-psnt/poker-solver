@@ -11,11 +11,12 @@ def handle_combo_quality(ctx: CliContext) -> None:
     print("  ABSTRACTION QUALITY")
     print("=" * 60)
 
-    abstraction_path, metadata = _select_abstraction(ctx)
-    if abstraction_path is None:
+    entry = _select_abstraction(ctx)
+    if entry is None:
         return
+    abstraction_path = entry.path
 
-    streets = (metadata or {}).get("streets")
+    streets = entry.metadata.get("streets")
     if not streets:
         print("\nNo quality statistics in metadata (regenerate the abstraction).")
         return

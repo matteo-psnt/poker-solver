@@ -1,7 +1,10 @@
 """Shared helpers for combo abstraction CLI flows."""
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
+
+from questionary import Choice
 
 from src.core.game.state import Card, Street
 from src.interfaces.cli.ui import prompts
@@ -14,6 +17,21 @@ BOARD_CARDS_BY_STREET: dict[Street, int] = {
     Street.RIVER: 5,
 }
 
+# Full deck as rank+suit strings, for random-sampling flows.
+ALL_CARDS: list[str] = [r + s for r in "23456789TJQKA" for s in "hdcs"]
+
+
+@dataclass(frozen=True)
+class AbstractionEntry:
+    """An on-disk combo abstraction directory with its parsed metadata."""
+
+    path: Path
+    metadata: dict
+
+    @property
+    def label(self) -> str:
+        return f"{self.path.name} ({_get_config_name_from_metadata(self.metadata)})"
+
 
 def _get_config_name_from_metadata(metadata: dict) -> str:
     """Extract config name from metadata JSON."""
@@ -25,58 +43,39 @@ def _get_config_name_from_metadata(metadata: dict) -> str:
     return "unknown"
 
 
-def _list_existing_abstractions(base_path: Path) -> list[tuple[Path, dict]]:
-    """Return all abstraction directories and parsed metadata."""
-    abstractions: list[tuple[Path, dict]] = []
+def _list_existing_abstractions(base_path: Path) -> list[AbstractionEntry]:
+    """Return all abstraction directories with their parsed metadata."""
+    abstractions: list[AbstractionEntry] = []
     for path in base_path.iterdir():
         if path.is_dir() and (path / "metadata.json").exists():
             with open(path / "metadata.json") as f:
                 metadata = json.load(f)
-            abstractions.append((path, metadata))
+            abstractions.append(AbstractionEntry(path=path, metadata=metadata))
     return abstractions
 
 
-def _select_abstraction(ctx: CliContext) -> tuple:
-    """
-    Prompt user to select an existing abstraction.
-
-    Returns:
-        (path, metadata) or (None, None) if cancelled or none found
-    """
+def _select_abstraction(ctx: CliContext) -> AbstractionEntry | None:
+    """Prompt the user to select an existing abstraction; None if cancelled or none found."""
     base_path = ctx.base_dir / "data" / "combo_abstraction"
 
     if not base_path.exists():
         print("\nNo combo abstractions found.")
         print("Run 'Precompute Combo Abstraction' to create one.")
-        return None, None
+        return None
 
     abstractions = _list_existing_abstractions(base_path)
     if not abstractions:
         print("\nNo combo abstractions found.")
-        return None, None
+        return None
 
-    choices = []
-    for path, metadata in abstractions:
-        config_name = _get_config_name_from_metadata(metadata)
-        choices.append(f"{path.name} ({config_name})")
+    choices: list[Choice] = [Choice(title=entry.label, value=entry) for entry in abstractions]
+    choices.append(Choice(title="Cancel", value=None))
 
-    choices.append("Cancel")
-
-    choice = prompts.select(
+    return prompts.select(
         ctx,
         "Select abstraction to examine:",
         choices=choices,
     )
-
-    if choice is None or choice == "Cancel":
-        return None, None
-
-    for path, metadata in abstractions:
-        config_name = _get_config_name_from_metadata(metadata)
-        if f"{path.name} ({config_name})" == choice:
-            return path, metadata
-
-    return None, None
 
 
 def _parse_cards(card_str: str, expected: int) -> list:

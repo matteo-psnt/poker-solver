@@ -41,15 +41,10 @@ class MetricsTracker:
         self.window_start_iteration = 0
 
         # Utility tracking
-        self.utilities: list[float] = []
         self.utility_window: deque[float] = deque(maxlen=window_size)
 
         # Infoset tracking
-        self.infoset_counts: list[int] = []
         self.infoset_window: deque[int] = deque(maxlen=window_size)
-
-        # Timing tracking (kept for compatibility)
-        self.iteration_times: deque[float] = deque(maxlen=window_size)
 
         # Solver-quality metrics (CFR health indicators)
         self.mean_pos_regret_window: deque[float] = deque(maxlen=window_size)
@@ -75,15 +70,11 @@ class MetricsTracker:
             infoset_sampler: Optional callable that returns sampled infosets for quality metrics
         """
         current_time = time.time()
-        iter_time = current_time - self.last_log_time
 
         # Update basic tracking
         self.iteration = iteration
-        self.utilities.append(utility)
         self.utility_window.append(utility)
-        self.infoset_counts.append(num_infosets)
         self.infoset_window.append(num_infosets)
-        self.iteration_times.append(iter_time)
 
         # Compute solver-quality metrics if sampler provided
         if infoset_sampler is not None:

@@ -4,6 +4,7 @@ from src.interfaces.cli.flows.combo_precompute import handle_combo_precompute
 from src.interfaces.cli.flows.config_helpers import list_abstraction_configs, try_merge
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
+from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.pipeline.training.components import build_card_abstraction
 from src.shared.config import Config
 
@@ -42,12 +43,11 @@ def edit_card_abstraction(ctx: CliContext, config: Config) -> Config:
         ui.warn(f"No precomputed abstraction found for '{config_name}'.")
         if prompts.confirm(ctx, "Run precomputation now?", default=True):
             handle_combo_precompute(ctx)
+    except AbstractionHashMismatchError:
+        ui.warn(f"Abstraction for '{config_name}' was built with different parameters.")
+        if prompts.confirm(ctx, "Recompute now?", default=True):
+            handle_combo_precompute(ctx)
     except ValueError as exc:
-        if "hash mismatch" in str(exc).lower():
-            ui.warn(f"Abstraction for '{config_name}' was built with different parameters.")
-            if prompts.confirm(ctx, "Recompute now?", default=True):
-                handle_combo_precompute(ctx)
-        else:
-            ui.error(str(exc))
+        ui.error(str(exc))
 
     return config

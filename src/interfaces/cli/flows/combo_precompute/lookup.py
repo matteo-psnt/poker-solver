@@ -19,9 +19,10 @@ def handle_combo_test_lookup(ctx: CliContext) -> None:
     print("  TEST COMBO ABSTRACTION LOOKUP")
     print("=" * 60)
 
-    abstraction_path, _metadata = _select_abstraction(ctx)
-    if abstraction_path is None:
+    entry = _select_abstraction(ctx)
+    if entry is None:
         return
+    abstraction_path = entry.path
 
     print(f"\nLoading abstraction from {abstraction_path.name}...")
     try:

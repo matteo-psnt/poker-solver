@@ -15,6 +15,7 @@ from src.engine.search.range_inference import (
     ALL_COMBOS,
     NUM_COMBOS,
     PlayerRanges,
+    blocked_combos,
     combo_index_for,
     infer_ranges,
     replace_actor_hole_cards,
@@ -178,11 +179,11 @@ class HUResolver:
         Board-blocked combos keep a uniform placeholder row.
         """
         actor = state.current_player
-        board_masks = {card.mask for card in state.board}
+        blocked = blocked_combos(state.board)
         matrix = np.full((NUM_COMBOS, len(actions)), 1.0 / len(actions), dtype=np.float64)
         cache: dict[object, np.ndarray] = {}
         for idx, combo in enumerate(ALL_COMBOS):
-            if combo[0].mask in board_masks or combo[1].mask in board_masks:
+            if blocked[idx]:
                 continue
             hypo_state = replace_actor_hole_cards(state, actor=actor, combo=combo)
             key = encode_infoset_key(hypo_state, actor, self.blueprint.card_abstraction)
@@ -264,16 +265,5 @@ class HUResolver:
         resolver_strategy: np.ndarray,
         blueprint_strategy: np.ndarray,
     ) -> np.ndarray:
-        if len(resolver_strategy) != len(blueprint_strategy):
-            raise ValueError("Resolver and blueprint strategy vectors must have the same length.")
-
-        alpha = float(np.clip(self.config.policy_blend_alpha, 0.0, 1.0))
-        mixed = ((1.0 - alpha) * blueprint_strategy) + (alpha * resolver_strategy)
-        floor = max(0.0, float(self.config.min_strategy_prob))
-        if floor > 0:
-            mixed = np.maximum(mixed, floor)
-
-        total = mixed.sum()
-        if total <= 1e-12:
-            return np.full(len(mixed), 1.0 / len(mixed), dtype=np.float64)
-        return mixed / total
+        """Single-row :meth:`_blend_matrix`."""
+        return self._blend_matrix(resolver_strategy[None, :], blueprint_strategy[None, :])[0]

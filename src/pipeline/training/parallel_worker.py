@@ -10,6 +10,7 @@ import signal
 import sys
 import time
 import traceback
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -189,8 +190,6 @@ def _worker_loop(
                 # Defensive: ensure this worker hasn't assigned duplicate IDs
                 ids = list(owned_keys.values())
                 if len(set(ids)) != len(ids):
-                    from collections import Counter
-
                     dup_ids = [i for i, c in Counter(ids).items() if c > 1]
                     raise RuntimeError(
                         f"Worker {worker_id} has duplicate infoset IDs in owned_keys; "

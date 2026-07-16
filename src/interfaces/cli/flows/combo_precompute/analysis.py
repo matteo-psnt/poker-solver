@@ -5,11 +5,13 @@ from collections import Counter, defaultdict
 
 from src.core.game.state import Card, Street
 from src.interfaces.cli.flows.combo_precompute.common import (
+    ALL_CARDS,
     BOARD_CARDS_BY_STREET,
     _select_abstraction,
 )
 from src.interfaces.cli.ui import prompts
 from src.interfaces.cli.ui.context import CliContext
+from src.pipeline.abstraction.postflop.bucketer import DenseBucketer
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
 
@@ -20,9 +22,10 @@ def handle_combo_analyze_bucketing(ctx: CliContext) -> None:
     print("  ANALYZE BUCKETING PATTERNS")
     print("=" * 60)
 
-    abstraction_path, _metadata = _select_abstraction(ctx)
-    if abstraction_path is None:
+    entry = _select_abstraction(ctx)
+    if entry is None:
         return
+    abstraction_path = entry.path
 
     print(f"\nLoading abstraction from {abstraction_path.name}...")
     try:
@@ -66,7 +69,7 @@ def handle_combo_analyze_bucketing(ctx: CliContext) -> None:
         _analyze_hand_strength_correlation(abstraction, street)
 
 
-def _analyze_premium_vs_weak(abstraction, street: Street) -> None:
+def _analyze_premium_vs_weak(abstraction: DenseBucketer, street: Street) -> None:
     """Analyze bucketing for premium vs weak hands."""
     print("\nTesting predefined hand scenarios...")
     print("-" * 60)
@@ -109,8 +112,8 @@ def _analyze_premium_vs_weak(abstraction, street: Street) -> None:
     results = defaultdict(list)
     for hole_str, board_str, description, category in scenarios:
         try:
-            hole_cards = tuple([Card.new(c) for c in hole_str])
-            board_cards = tuple([Card.new(c) for c in board_str])
+            hole_cards = (Card.new(hole_str[0]), Card.new(hole_str[1]))
+            board_cards = tuple(Card.new(c) for c in board_str)
 
             bucket = abstraction.get_bucket(hole_cards, board_cards, street)
             results[category].append((description, bucket))
@@ -131,27 +134,23 @@ def _analyze_premium_vs_weak(abstraction, street: Street) -> None:
         )
 
 
-def _analyze_random_sample(abstraction, street: Street) -> None:
+def _analyze_random_sample(abstraction: DenseBucketer, street: Street) -> None:
     """Analyze bucketing for random hand/board combinations."""
     print("\nGenerating 50 random hand/board combinations...")
     print("-" * 60)
-
-    ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
-    suits = ["h", "d", "c", "s"]
-    all_cards = [r + s for r in ranks for s in suits]
 
     num_board_cards = BOARD_CARDS_BY_STREET[street]
     bucket_counts: Counter[int] = Counter()
     results = []
 
     for i in range(50):
-        sampled = random.sample(all_cards, 2 + num_board_cards)
+        sampled = random.sample(ALL_CARDS, 2 + num_board_cards)
         hole_str = sampled[:2]
         board_str = sampled[2:]
 
         try:
-            hole_cards = tuple([Card.new(c) for c in hole_str])
-            board_cards = tuple([Card.new(c) for c in board_str])
+            hole_cards = (Card.new(hole_str[0]), Card.new(hole_str[1]))
+            board_cards = tuple(Card.new(c) for c in board_str)
 
             bucket = abstraction.get_bucket(hole_cards, board_cards, street)
             bucket_counts[bucket] += 1
@@ -176,7 +175,7 @@ def _analyze_random_sample(abstraction, street: Street) -> None:
         print(f"    Bucket {bucket:3d}: {bar} {count}")
 
 
-def _analyze_hand_strength_correlation(abstraction, street: Street) -> None:
+def _analyze_hand_strength_correlation(abstraction: DenseBucketer, street: Street) -> None:
     """Analyze whether hand strength correlates with bucket assignment."""
     print("\nAnalyzing hand strength vs bucket assignment...")
     print("Testing various hand strengths on the same board texture...")
@@ -225,11 +224,11 @@ def _analyze_hand_strength_correlation(abstraction, street: Street) -> None:
         ]
 
     results = []
-    board_cards = tuple([Card.new(c) for c in board_str])
+    board_cards = tuple(Card.new(c) for c in board_str)
 
     for hole_str, description in test_hands:
         try:
-            hole_cards = tuple([Card.new(c) for c in hole_str])
+            hole_cards = (Card.new(hole_str[0]), Card.new(hole_str[1]))
             bucket = abstraction.get_bucket(hole_cards, board_cards, street)
             results.append((description, bucket))
         except Exception as exc:

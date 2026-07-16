@@ -1,7 +1,7 @@
 """
 Statistical analysis for poker evaluation results.
 
-Provides confidence intervals, significance tests, and variance calculations
+Provides sample summaries, paired comparisons, and variance decomposition
 for match results.
 """
 
@@ -9,70 +9,6 @@ from collections.abc import Sequence
 
 import numpy as np
 from scipy import stats
-
-
-def compute_confidence_interval(
-    values: list[float],
-    confidence_level: float = 0.95,
-) -> tuple[float, float, float]:
-    """
-    Compute confidence interval for sample mean.
-
-    Args:
-        values: List of sample values
-        confidence_level: Confidence level (default: 0.95 for 95% CI)
-
-    Returns:
-        Tuple of (mean, lower_bound, upper_bound)
-    """
-    if not values:
-        return 0.0, 0.0, 0.0
-
-    n = len(values)
-    mean = np.mean(values)
-    std_err = stats.sem(values)  # Standard error of mean
-
-    # t-distribution for small samples
-    t_value = stats.t.ppf((1 + confidence_level) / 2, n - 1)
-
-    margin_of_error = t_value * std_err
-    lower = mean - margin_of_error
-    upper = mean + margin_of_error
-
-    return float(mean), float(lower), float(upper)
-
-
-def compute_win_rate_confidence_interval(
-    wins: int,
-    total: int,
-    confidence_level: float = 0.95,
-) -> tuple[float, float, float]:
-    """
-    Compute confidence interval for win rate using Wilson score interval.
-
-    Args:
-        wins: Number of wins
-        total: Total number of games
-        confidence_level: Confidence level
-
-    Returns:
-        Tuple of (win_rate, lower_bound, upper_bound)
-    """
-    if total == 0:
-        return 0.0, 0.0, 0.0
-
-    p = wins / total
-    z = stats.norm.ppf((1 + confidence_level) / 2)
-
-    # Wilson score interval
-    denominator = 1 + z**2 / total
-    center = (p + z**2 / (2 * total)) / denominator
-    margin = z * np.sqrt(p * (1 - p) / total + z**2 / (4 * total**2)) / denominator
-
-    lower = max(0.0, center - margin)
-    upper = min(1.0, center + margin)
-
-    return p, lower, upper
 
 
 def summarize_samples(
@@ -224,99 +160,3 @@ def variance_decomposition(
         "between_group_share": between / total_variance if total_variance > 0 else 0.0,
         "groups": group_stats,
     }
-
-
-def t_test_difference(
-    values1: Sequence[float],
-    values2: Sequence[float],
-    confidence_level: float = 0.95,
-) -> tuple[float, float, bool]:
-    """
-    Perform t-test to determine if two samples are significantly different.
-
-    Args:
-        values1: First sample
-        values2: Second sample
-        confidence_level: Confidence level
-
-    Returns:
-        Tuple of (t_statistic, p_value, is_significant)
-    """
-    if len(values1) < 2 or len(values2) < 2:
-        return 0.0, 1.0, False
-
-    # Two-sample t-test
-    t_stat, p_value = stats.ttest_ind(values1, values2)
-
-    # Check if significant at given confidence level
-    alpha = 1 - confidence_level
-    is_significant = bool(p_value < alpha)
-
-    return float(t_stat), float(p_value), is_significant
-
-
-def compute_variance(values: list[float]) -> tuple[float, float]:
-    """
-    Compute variance and standard deviation.
-
-    Args:
-        values: List of values
-
-    Returns:
-        Tuple of (variance, std_dev)
-    """
-    if not values:
-        return 0.0, 0.0
-
-    variance = float(np.var(values, ddof=1))  # Sample variance
-    std_dev = float(np.std(values, ddof=1))  # Sample std dev
-
-    return variance, std_dev
-
-
-def compute_percentiles(
-    values: Sequence[float],
-    percentiles: Sequence[int] = (25, 50, 75),
-) -> list[float]:
-    """
-    Compute percentiles of sample.
-
-    Args:
-        values: List of values
-        percentiles: Percentile ranks (0-100)
-
-    Returns:
-        List of percentile values
-    """
-    if not values:
-        return [0.0] * len(percentiles)
-
-    return [float(np.percentile(values, p)) for p in percentiles]
-
-
-def estimate_required_sample_size(
-    values: list[float],
-    target_margin_of_error: float,
-    confidence_level: float = 0.95,
-) -> int:
-    """
-    Estimate required sample size for given margin of error.
-
-    Args:
-        values: Pilot sample values
-        target_margin_of_error: Desired margin of error
-        confidence_level: Confidence level
-
-    Returns:
-        Estimated required sample size
-    """
-    if not values:
-        return 100  # Default
-
-    std_dev = np.std(values, ddof=1)
-    z = stats.norm.ppf((1 + confidence_level) / 2)
-
-    # Formula: n = (z * sigma / margin)^2
-    required_n = (z * std_dev / target_margin_of_error) ** 2
-
-    return max(30, int(np.ceil(required_n)))  # Minimum 30 samples

@@ -27,6 +27,7 @@ POSITION_OPTIONS = [
     {"id": 0, "label": "Button (BTN)"},
     {"id": 1, "label": "Big Blind (BB)"},
 ]
+_POSITION_LABELS = {option["id"]: option["label"] for option in POSITION_OPTIONS}
 
 
 def build_chart_metadata(
@@ -123,7 +124,7 @@ def build_preflop_chart_data(
         "runId": run_id,
         "position": position,
         "situation": situation_id,
-        "positionLabel": "Button (BTN)" if position == 0 else "Big Blind (BB)",
+        "positionLabel": _POSITION_LABELS[position],
         "situationLabel": situation_label,
         "bettingSequence": betting_sequence,
         "ranks": ranks,
