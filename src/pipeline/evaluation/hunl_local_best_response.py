@@ -80,8 +80,8 @@ from src.pipeline.evaluation.opponent_model import (
     known_mask,
 )
 from src.shared.config import ResolverConfig
-
-_EPS = 1e-12
+from src.shared.numeric import NORMALIZE_EPS
+from src.shared.units import chips_to_bb, chips_to_mbb
 
 # Canonical 52-card deck; runouts and deals draw from it by index/mask.
 _DECK: list[Card] = Card.get_full_deck()
@@ -291,7 +291,7 @@ class _HUNLLocalBestResponse:
 
         probs = np.array([float(np.dot(belief, vecs[action])) for action in legal])
         total = probs.sum()
-        if total <= _EPS:
+        if total <= NORMALIZE_EPS:
             return None  # degenerate belief: let the caller's uniform fallback handle it
 
         value = 0.0
@@ -301,7 +301,7 @@ class _HUNLLocalBestResponse:
                 continue
             posterior = belief * vecs[action]
             mass = posterior.sum()
-            branch_belief = posterior / mass if mass > _EPS else belief
+            branch_belief = posterior / mass if mass > NORMALIZE_EPS else belief
             value += weight * self._terminal_value(next_state, lbr_player, opp, branch_belief)
             kind = self._terminal_kind(next_state)
             if TERMINAL_SEVERITY[kind] >= TERMINAL_SEVERITY[terminal]:
@@ -321,7 +321,7 @@ class _HUNLLocalBestResponse:
         known = known_mask(state, opp)
         weights = np.where((COMBO_MASKS & known) == 0, 1.0, 0.0)
         total = weights.sum()
-        if total <= _EPS:
+        if total <= NORMALIZE_EPS:
             return np.full(NUM_COMBOS, 1.0 / NUM_COMBOS)
         return weights / total
 
@@ -354,7 +354,7 @@ class _HUNLLocalBestResponse:
         known = known_mask(state, opp)
         weights = np.where((COMBO_MASKS & known) == 0, belief, 0.0)
         total = weights.sum()
-        if total <= _EPS:
+        if total <= NORMALIZE_EPS:
             return float(state.get_payoff(lbr_player, self.rules))
 
         pot = float(state.pot)
@@ -480,7 +480,7 @@ class _HUNLLocalBestResponse:
         fold_probs = self._opp_fold_probs(state, opp, action)
         fold_equity = float(np.dot(opp_weights, fold_probs))
         weight_sum = float(opp_weights.sum())
-        fp = fold_equity / weight_sum if weight_sum > _EPS else 0.0
+        fp = fold_equity / weight_sum if weight_sum > NORMALIZE_EPS else 0.0
 
         continue_weights = opp_weights * (1.0 - fold_probs)
         wp = self._equity(lbr_hand, state.board, continue_weights)
@@ -503,14 +503,14 @@ class _HUNLLocalBestResponse:
         """Sample an opponent action from the range aggregate and Bayes-update."""
         aggregate = np.array([float(np.dot(belief, vecs[action])) for action in legal])
         total = aggregate.sum()
-        if total <= _EPS:
+        if total <= NORMALIZE_EPS:
             return legal[int(self.rng.integers(0, len(legal)))], belief
         aggregate /= total
         choice = int(self.rng.choice(len(legal), p=aggregate))
         action = legal[choice]
         posterior = belief * vecs[action]
         mass = posterior.sum()
-        return action, (posterior / mass if mass > _EPS else belief)
+        return action, (posterior / mass if mass > NORMALIZE_EPS else belief)
 
     def _opp_fold_probs(self, state: GameState, opp: int, action: Action) -> np.ndarray:
         """Per-combo probability the opponent folds to ``action`` (scorer input).
@@ -543,7 +543,7 @@ class _HUNLLocalBestResponse:
             known |= card.mask
         for card in board:
             known |= card.mask
-        active = np.where((opp_weights > _EPS) & ((COMBO_MASKS & known) == 0))[0]
+        active = np.where((opp_weights > NORMALIZE_EPS) & ((COMBO_MASKS & known) == 0))[0]
         if active.size == 0:
             return 0.5
 
@@ -580,7 +580,7 @@ class _HUNLLocalBestResponse:
             elif lbr_rank == opp_rank:
                 acc += 0.5 * w
             weight += w
-        return acc / weight if weight > _EPS else 0.5
+        return acc / weight if weight > NORMALIZE_EPS else 0.5
 
     def _complete_board(self, board: tuple[Card, ...], known: int) -> tuple[Card, ...]:
         needed = 5 - len(board)
@@ -664,11 +664,11 @@ def compute_lbr_exploitability(
     else:
         se = 0.0
 
-    exploitability_mbb = (exploitability / big_blind) * 1000.0
-    se_mbb = (se / big_blind) * 1000.0
+    exploitability_mbb = chips_to_mbb(exploitability, big_blind)
+    se_mbb = chips_to_mbb(se, big_blind)
     return LBRResult(
         exploitability_mbb=exploitability_mbb,
-        exploitability_bb=exploitability / big_blind,
+        exploitability_bb=chips_to_bb(exploitability, big_blind),
         lbr_utility_p0=float(np.mean(utilities_p0)) if utilities_p0 else float("nan"),
         lbr_utility_p1=float(np.mean(utilities_p1)) if utilities_p1 else float("nan"),
         std_error_mbb=se_mbb,

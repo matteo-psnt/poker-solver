@@ -11,6 +11,7 @@ from src.core.game.actions import Action
 from src.core.game.state import Card, GameState
 from src.engine.search.action_translation import translate_action_distribution
 from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.shared.numeric import NORMALIZE_EPS
 
 
 @dataclass
@@ -27,7 +28,13 @@ for i in range(len(_deck.cards)):
     for j in range(i + 1, len(_deck.cards)):
         _ALL_COMBOS.append((Card(_deck.cards[i]), Card(_deck.cards[j])))
 _NUM_COMBOS = len(_ALL_COMBOS)
-_EPS = 1e-12
+
+# Floor for a combo's action likelihood. Distinct from `NORMALIZE_EPS` despite the
+# shared value: this one keeps a likelihood strictly positive so a Bayes update can
+# never drive a combo to exactly zero, which would evict it from the range forever
+# with no way back. It is a modeling choice about range support and may be retuned
+# independently of the divide-by-zero guard.
+_LIKELIHOOD_FLOOR = 1e-12
 
 # Public, canonical hole-card combo enumeration. Range vectors produced by
 # `infer_ranges`/`update_ranges` are indexed by this ordering; consumers that
@@ -119,7 +126,7 @@ def _action_likelihood_vector(
     blueprint,
     blocked: np.ndarray,
 ) -> np.ndarray:
-    likelihood = np.full(_NUM_COMBOS, _EPS, dtype=np.float64)
+    likelihood = np.full(_NUM_COMBOS, _LIKELIHOOD_FLOOR, dtype=np.float64)
     cache: dict = {}
 
     for idx, combo in enumerate(_ALL_COMBOS):
@@ -137,8 +144,8 @@ def _action_likelihood_vector(
             hypo_state, action_model=blueprint.action_model
         )
         if not legal_actions:
-            cache[infoset_key] = _EPS
-            likelihood[idx] = _EPS
+            cache[infoset_key] = _LIKELIHOOD_FLOOR
+            likelihood[idx] = _LIKELIHOOD_FLOOR
             continue
 
         translated = translate_action_distribution(
@@ -151,7 +158,7 @@ def _action_likelihood_vector(
         if infoset is None:
             uniform = 1.0 / len(legal_actions)
             prob = sum(weight * uniform for _, weight in translated)
-            prob = max(prob, _EPS)
+            prob = max(prob, _LIKELIHOOD_FLOOR)
             cache[infoset_key] = prob
             likelihood[idx] = prob
             continue
@@ -167,7 +174,7 @@ def _action_likelihood_vector(
         if not valid_indices:
             uniform = 1.0 / len(legal_actions)
             prob = sum(weight * uniform for _, weight in translated)
-            prob = max(prob, _EPS)
+            prob = max(prob, _LIKELIHOOD_FLOOR)
             cache[infoset_key] = prob
             likelihood[idx] = prob
             continue
@@ -181,7 +188,7 @@ def _action_likelihood_vector(
         for mapped_action, weight in translated:
             total_prob += float(weight) * action_prob.get(mapped_action, 0.0)
 
-        total_prob = max(total_prob, _EPS)
+        total_prob = max(total_prob, _LIKELIHOOD_FLOOR)
         cache[infoset_key] = total_prob
         likelihood[idx] = total_prob
 
@@ -208,7 +215,7 @@ def replace_actor_hole_cards(
 def _masked_uniform(blocked: np.ndarray) -> np.ndarray:
     weights = np.where(blocked, 0.0, 1.0)
     total = weights.sum()
-    if total <= _EPS:
+    if total <= NORMALIZE_EPS:
         return np.full(_NUM_COMBOS, 1.0 / _NUM_COMBOS, dtype=np.float64)
     return weights / total
 
@@ -223,6 +230,6 @@ def _mask_invalid_combos(weights: np.ndarray, blocked: np.ndarray) -> np.ndarray
 
 def _normalize_or_uniform(weights: np.ndarray, blocked: np.ndarray) -> np.ndarray:
     total = float(weights.sum())
-    if total <= _EPS:
+    if total <= NORMALIZE_EPS:
         return _masked_uniform(blocked)
     return weights / total

@@ -39,8 +39,7 @@ from src.engine.search.range_inference import (
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.shared.config import ResolverConfig
-
-_EPS = 1e-12
+from src.shared.numeric import NORMALIZE_EPS
 
 
 def known_mask(state: GameState, actor: int) -> int:
@@ -217,7 +216,7 @@ class BlueprintOpponent:
                     dist[real_action] = dist.get(real_action, 0.0) + weight * prob * share
 
         total = sum(dist.values())
-        if total <= _EPS:
+        if total <= NORMALIZE_EPS:
             return {}
         return {action: prob / total for action, prob in dist.items()}
 

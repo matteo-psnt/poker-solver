@@ -26,6 +26,7 @@ from src.pipeline.training.run_tracker import RunMetadata, RunTracker
 from src.pipeline.training.trainer import TrainingSession
 from src.shared.config import Config
 from src.shared.config_loader import load_training_config
+from src.shared.units import pair_mean_mbb
 
 # Local Best Response: a rigorous lower bound on exploitability (LBR <= exact BR,
 # validated on Kuhn/Leduc). This is the trustworthy default metric.
@@ -228,9 +229,7 @@ def _lbr_results_dict(result: LBRResult, big_blind: int) -> dict[str, Any]:
     another run — or an offline variance decomposition — never requires
     re-running the eval or re-deriving the sample definition.
     """
-    samples_mbb = [
-        (o0.value + o1.value) / 2.0 / big_blind * 1000.0 for o0, o1 in result.hand_outcomes
-    ]
+    samples_mbb = [pair_mean_mbb(o0.value, o1.value, big_blind) for o0, o1 in result.hand_outcomes]
     groups = [dominant_terminal(o0.terminal, o1.terminal) for o0, o1 in result.hand_outcomes]
     return {
         "exploitability_mbb": result.exploitability_mbb,

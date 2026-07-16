@@ -25,6 +25,7 @@ from src.engine.search.subgame_cfr import solve_subgame
 from src.engine.search.tree_builder import build_local_tree
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.shared.config import ResolverConfig
+from src.shared.numeric import NORMALIZE_EPS
 
 
 @dataclass
@@ -209,7 +210,7 @@ class HUResolver:
 
         totals = mixed.sum(axis=1, keepdims=True)
         uniform = np.full(mixed.shape[1], 1.0 / mixed.shape[1])
-        return np.where(totals > 1e-12, mixed / np.maximum(totals, 1e-12), uniform)
+        return np.where(totals > NORMALIZE_EPS, mixed / np.maximum(totals, NORMALIZE_EPS), uniform)
 
     def _blueprint_strategy(
         self,
@@ -256,7 +257,7 @@ class HUResolver:
 
         probs = np.maximum(probs, 0.0)
         total = probs.sum()
-        if total <= 1e-12:
+        if total <= NORMALIZE_EPS:
             return np.full(len(actions), 1.0 / len(actions), dtype=np.float64)
         return probs / total
 

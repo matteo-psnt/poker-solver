@@ -25,15 +25,17 @@ from src.pipeline.training.parallel_sync import (
 from src.shared.config import Config
 
 
-def _compute_seed(base_seed: int | None, worker_id: int, batch_id: int = 0) -> int:
+def _compute_seed(base_seed: int, worker_id: int, batch_id: int = 0) -> int:
     """
-    Compute a deterministic seed for a worker/batch combination.
+    Derive the RNG stream for one worker's batch.
 
-    If base_seed is None, generates a random seed component.
+    Every ``(worker_id, batch_id)`` pair must map to a distinct, uncorrelated
+    stream: workers sample chance nodes and actions off the global RNG, so two
+    pairs sharing a seed would silently draw correlated MCCFR samples. Mixing the
+    coordinates by hand does not give that — ``SeedSequence`` is what hashes them
+    into independent streams.
     """
-    if base_seed is None:
-        return random.randint(0, 2**31 - 1) + worker_id * 10000 + batch_id * 1000
-    return base_seed + worker_id * 10000 + batch_id * 1000
+    return int(np.random.SeedSequence([base_seed, worker_id, batch_id]).generate_state(1)[0])
 
 
 def _worker_loop(
