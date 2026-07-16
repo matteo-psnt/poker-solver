@@ -1,5 +1,9 @@
 """Tests for suit isomorphism canonicalization."""
 
+import itertools
+
+import pytest
+
 from src.core.game.state import Card
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
     SuitMapping,
@@ -315,3 +319,77 @@ class TestEdgeCases:
 
         # These are different: As has flush draw, Ad/Ac don't
         assert get_canonical_hand_id(hand1) != get_canonical_hand_id(hand2)
+
+
+# (label, board, hand) for order-invariance checks. Each board has a non-trivial
+# symmetry — a repeated rank or repeated suit — which is what admits more than one
+# valid relabeling and so exposes an order-dependent tiebreak.
+_ORDER_INVARIANCE_CASES = [
+    ("paired flop", ["As", "Ah", "Kd"], ["Ks", "Qh"]),
+    ("paired flop, low", ["3h", "3d", "8s"], ["Jh", "7h"]),
+    ("trips flop", ["7s", "7h", "7d"], ["As", "Kh"]),
+    ("two pair board", ["9s", "9h", "4c"], ["9d", "Ac"]),
+    ("monotone flop", ["Ks", "9s", "4s"], ["Ah", "Qs"]),
+    ("rainbow flop", ["Ts", "9h", "8c"], ["Ad", "Kd"]),
+    ("paired turn", ["As", "Ah", "Kd", "2c"], ["Ks", "Qh"]),
+    ("paired river", ["As", "Ah", "Kd", "2c", "5h"], ["Ks", "Qh"]),
+    ("double-paired river", ["Js", "Jh", "4d", "4c", "9s"], ["Jd", "Ah"]),
+]
+
+
+class TestBoardOrderInvariance:
+    """Canonicalization must depend on the board as a SET, not its tuple order.
+
+    Boards reach the abstraction straight off a shuffled deck (``chance.py`` deals the
+    flop as ``deck.cards[:3]``) and are never sorted, so the same physical board arrives
+    in an arbitrary order. If the canonical suit mapping follows that order, the same
+    physical spot resolves to different infosets between iterations.
+
+    The tie lives on boards with repeated ranks or repeated suits: those admit several
+    relabelings that produce the same canonical board, and only the ordering of
+    ``present_suits`` decides which one wins.
+    """
+
+    @pytest.mark.parametrize(
+        "label,board_str,hand_str",
+        _ORDER_INVARIANCE_CASES,
+        ids=[c[0] for c in _ORDER_INVARIANCE_CASES],
+    )
+    def test_canonical_hand_id_is_invariant_across_board_orderings(
+        self, label, board_str, hand_str
+    ):
+        hand = (Card.new(hand_str[0]), Card.new(hand_str[1]))
+        board = [Card.new(c) for c in board_str]
+
+        ids = set()
+        board_ids = set()
+        for permuted in itertools.permutations(board):
+            canonical_board, mapping = canonicalize_board(permuted)
+            ids.add(get_canonical_hand_id(canonicalize_hand(hand, mapping)))
+            board_ids.add(get_canonical_board_id(canonical_board))
+
+        assert len(board_ids) == 1, f"{label}: board id varies with tuple order: {board_ids}"
+        assert len(ids) == 1, f"{label}: canonical hand id varies with tuple order: {ids}"
+
+    def test_suit_mapping_is_invariant_across_board_orderings(self):
+        """The mapping itself — not just the ids derived from it — must be stable."""
+        board = [Card.new(c) for c in ("As", "Ah", "Kd")]
+
+        mappings = {
+            tuple(sorted(canonicalize_board(p)[1].mapping.items()))
+            for p in itertools.permutations(board)
+        }
+        assert len(mappings) == 1, f"suit mapping varies with board order: {mappings}"
+
+    def test_every_paired_flop_ordering_agrees(self):
+        """Exhaustive over a paired board's orderings, for every legal hand on it."""
+        board = [Card.new(c) for c in ("As", "Ah", "Kd")]
+        dead = {c.mask for c in board}
+        live = [c for c in Card.get_full_deck() if c.mask not in dead]
+
+        for hand in itertools.combinations(live[:24], 2):
+            ids = {
+                get_canonical_hand_id(canonicalize_hand(hand, canonicalize_board(p)[1]))
+                for p in itertools.permutations(board)
+            }
+            assert len(ids) == 1, f"hand {hand} varies with board order: {ids}"

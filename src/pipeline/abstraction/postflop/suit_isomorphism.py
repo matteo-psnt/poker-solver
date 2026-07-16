@@ -165,8 +165,11 @@ def canonicalize_board(
         suit = get_card_suit(card)
         cards_info.append((rank_idx, suit))
 
-    # Sort by rank (lower rank_idx = higher rank, e.g., 0=Ace)
-    sorted_cards = sorted(cards_info, key=lambda x: x[0])
+    # Sort by rank, then suit (lower rank_idx = higher rank, e.g., 0=Ace). The suit
+    # tiebreak is load-bearing: `present_suits` takes its order from here, which decides
+    # which relabeling wins a tie below. Rank alone leaves same-rank cards in caller
+    # order, making a hand's bucket depend on how the board tuple was dealt.
+    sorted_cards = sorted(cards_info, key=lambda x: (x[0], x[1]))
 
     # Find all suits present in the board
     present_suits = list(dict.fromkeys(suit for _, suit in sorted_cards))
