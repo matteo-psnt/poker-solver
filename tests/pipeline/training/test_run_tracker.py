@@ -39,6 +39,44 @@ class TestRunTracker:
         tracker.initialize()
         assert metadata_file.exists()
 
+    def test_new_run_records_git_provenance(self, tmp_path):
+        """A fresh run stamps the current git commit + dirty flag, surviving a round-trip."""
+        run_dir = tmp_path / "run-git"
+        tracker = RunTracker(
+            run_dir=run_dir,
+            config_name="test",
+            config=Config.default(),
+            action_config_hash=self._action_config_hash(),
+        )
+        # In this repo checkout the commit is a 40-char sha and dirty is a bool.
+        commit = tracker.metadata.git_commit
+        assert commit is None or (len(commit) == 40)
+        assert tracker.metadata.git_dirty in (True, False, None)
+
+        tracker.initialize()
+        reloaded = RunTracker.load(run_dir)
+        assert reloaded.metadata.git_commit == tracker.metadata.git_commit
+        assert reloaded.metadata.git_dirty == tracker.metadata.git_dirty
+
+    def test_legacy_metadata_without_git_loads_as_none(self, tmp_path):
+        """Pre-provenance runs (no git fields) must load with None, not crash."""
+        run_dir = tmp_path / "run-legacy"
+        run_dir.mkdir()
+        metadata = {
+            "run_id": "run-legacy",
+            "config_name": "test",
+            "status": "completed",
+            "iterations": 100,
+            "runtime_seconds": 10.5,
+            "num_infosets": 1000,
+            "action_config_hash": self._action_config_hash(),
+            "config": Config.default().to_dict(),
+        }
+        (run_dir / ".run.json").write_text(json.dumps(metadata))
+        tracker = RunTracker.load(run_dir)
+        assert tracker.metadata.git_commit is None
+        assert tracker.metadata.git_dirty is None
+
     def test_load_existing_tracker(self, tmp_path):
         """Test loading an existing tracker."""
         run_dir = tmp_path / "run-existing"

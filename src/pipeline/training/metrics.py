@@ -89,6 +89,22 @@ class MetricsTracker:
 
         self.last_log_time = current_time
 
+    def record_quality(self, quality: dict[str, float]) -> None:
+        """Push an externally-computed quality-metrics dict into the rolling windows.
+
+        The parallel training loop cannot cheaply hand ``log_iteration`` a list of
+        ``InfoSet`` objects (the state lives in shared arrays owned by workers), so it
+        computes the same metrics directly from those arrays via
+        :func:`compute_quality_from_arrays` and feeds the result here. This keeps
+        ``get_summary``/``get_compact_summary`` as the single source of truth for the
+        health indicators regardless of how they were produced.
+        """
+        self.mean_pos_regret_window.append(quality["mean_pos_regret"])
+        self.max_pos_regret_window.append(quality["max_pos_regret"])
+        self.zero_regret_pct_window.append(quality["zero_regret_pct"])
+        self.avg_entropy_window.append(quality["avg_entropy"])
+        self.uniform_strategy_pct_window.append(quality["uniform_strategy_pct"])
+
     def _compute_quality_metrics(self, infosets) -> dict[str, float]:
         """
         Compute solver-quality metrics from sampled infosets.
@@ -148,39 +164,8 @@ class MetricsTracker:
 
     @staticmethod
     def _compute_normalized_entropy(probabilities: np.ndarray) -> float:
-        """
-        Compute normalized Shannon entropy of probability distribution.
-
-        Normalized entropy is in [0, 1] where:
-        - 0 = deterministic (all probability on one action)
-        - 1 = uniform (maximum entropy)
-
-        This makes entropy comparable across different action counts.
-
-        Args:
-            probabilities: Probability distribution (sums to 1)
-
-        Returns:
-            Normalized entropy in [0, 1]
-        """
-        # Filter out zero probabilities to avoid log(0)
-        probs = probabilities[probabilities > 0]
-        if len(probs) == 0:
-            return 0.0
-
-        # Compute raw entropy in nats
-        raw_entropy = float(-np.sum(probs * np.log(probs)))
-
-        # Normalize by max possible entropy (log of number of actions)
-        num_actions = len(probabilities)
-        if num_actions <= 1:
-            return 0.0  # No choice available
-
-        max_entropy = np.log(num_actions)
-        normalized = raw_entropy / max_entropy
-
-        # Clamp to [0, 1] to handle numerical errors
-        return float(np.clip(normalized, 0.0, 1.0))
+        """Deprecated thin wrapper; use :func:`normalized_entropy` directly."""
+        return normalized_entropy(probabilities)
 
     def get_avg_utility(self) -> float:
         """
@@ -395,6 +380,104 @@ class MetricsTracker:
     def __str__(self) -> str:
         """String representation."""
         return f"MetricsTracker(iter={self.iteration}, avg_util={self.get_avg_utility():+.2f})"
+
+
+def normalized_entropy(probabilities: np.ndarray) -> float:
+    """Normalized Shannon entropy of a probability distribution, in ``[0, 1]``.
+
+    ``0`` = deterministic (all mass on one action), ``1`` = uniform (maximum entropy).
+    Normalizing by ``log(num_actions)`` makes the value comparable across infosets
+    with different action counts.
+    """
+    # Filter out zero probabilities to avoid log(0)
+    probs = probabilities[probabilities > 0]
+    if len(probs) == 0:
+        return 0.0
+
+    # Compute raw entropy in nats
+    raw_entropy = float(-np.sum(probs * np.log(probs)))
+
+    # Normalize by max possible entropy (log of number of actions)
+    num_actions = len(probabilities)
+    if num_actions <= 1:
+        return 0.0  # No choice available
+
+    max_entropy = np.log(num_actions)
+    normalized = raw_entropy / max_entropy
+
+    # Clamp to [0, 1] to handle numerical errors
+    return float(np.clip(normalized, 0.0, 1.0))
+
+
+def compute_quality_from_arrays(
+    regrets: np.ndarray,
+    action_counts: np.ndarray,
+    sample_ids: np.ndarray,
+) -> dict[str, float]:
+    """Compute solver-quality metrics directly from the shared storage arrays.
+
+    Mirrors :meth:`MetricsTracker._compute_quality_metrics` (same output schema and
+    the same regret-matching strategy definition) but reads ragged rows straight out
+    of the flat ``shared_regrets`` / ``shared_action_counts`` arrays, so the parallel
+    coordinator can sample health metrics without reconstructing ``InfoSet`` objects.
+
+    Args:
+        regrets: ``(capacity, max_actions)`` regret array (may be read live).
+        action_counts: ``(capacity,)`` legal-action count per row; ``0`` marks an
+            unallocated slot.
+        sample_ids: Row indices to sample (already filtered to allocated rows).
+
+    Returns:
+        Dict with the same keys as ``_compute_quality_metrics``.
+    """
+    empty = {
+        "mean_pos_regret": 0.0,
+        "max_pos_regret": 0.0,
+        "zero_regret_pct": 0.0,
+        "avg_entropy": 0.0,
+        "uniform_strategy_pct": 0.0,
+    }
+    if len(sample_ids) == 0:
+        return empty
+
+    all_positive_regrets: list[float] = []
+    zero_regret_count = 0
+    entropies: list[float] = []
+    uniform_count = 0
+    sampled = 0
+
+    for row_id in sample_ids:
+        k = int(action_counts[row_id])
+        if k <= 0:
+            continue
+        sampled += 1
+        r = np.asarray(regrets[row_id, :k], dtype=np.float64)
+
+        pos = np.maximum(r, 0.0)
+        positive = pos[pos > 0]
+        if positive.size:
+            all_positive_regrets.extend(positive.tolist())
+
+        if np.all(r == 0):
+            zero_regret_count += 1
+
+        total = float(pos.sum())
+        strategy = pos / total if total > 0 else np.full(k, 1.0 / k)
+        entropy = normalized_entropy(strategy)
+        entropies.append(entropy)
+        if entropy > 0.99:
+            uniform_count += 1
+
+    if sampled == 0:
+        return empty
+
+    return {
+        "mean_pos_regret": float(np.mean(all_positive_regrets)) if all_positive_regrets else 0.0,
+        "max_pos_regret": float(np.max(all_positive_regrets)) if all_positive_regrets else 0.0,
+        "zero_regret_pct": 100.0 * zero_regret_count / sampled,
+        "avg_entropy": float(np.mean(entropies)) if entropies else 0.0,
+        "uniform_strategy_pct": 100.0 * uniform_count / sampled,
+    }
 
 
 def _format_time(seconds: float) -> str:

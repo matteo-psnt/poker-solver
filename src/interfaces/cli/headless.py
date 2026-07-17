@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from src.pipeline.evaluation import ledger as eval_ledger
+from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.training import services
 from src.pipeline.training.services import LBR_ESTIMATOR_LABEL, ROLLOUT_ESTIMATOR_LABEL
 
@@ -99,10 +101,145 @@ def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "results": out.results,
     }
     _write_result(run_dir, payload)
+    _record_to_ledger(run_dir, args, payload, estimator)
     return payload
 
 
+def _record_to_ledger(
+    run_dir: Path, args: argparse.Namespace, payload: dict[str, Any], estimator: str
+) -> None:
+    """Persist the full eval payload (no clobber) and append a compact ledger row.
+
+    Best-effort: the ledger is a research convenience, so a recording failure warns
+    but never fails the evaluation itself. The warning prints to stdout, which under
+    ``--json`` is redirected to stderr — keeping the machine-readable payload clean.
+    """
+    ledger_path = Path(args.ledger)
+    try:
+        results = payload["results"]
+        if args.method == "rollout":
+            knobs = eval_ledger.build_rollout_knobs(args, results)
+        else:
+            knobs = eval_ledger.build_lbr_knobs(args, results)
+        result_path, _ = eval_ledger.record_evaluation(
+            run_dir=run_dir,
+            payload=payload,
+            method=args.method,
+            estimator=estimator,
+            knobs=knobs,
+            ledger_path=ledger_path,
+        )
+        print(f"  Ledger:        appended to {ledger_path} (payload: {result_path})")
+    except Exception as exc:
+        print(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
+
+
+def _cmd_ledger(args: argparse.Namespace) -> dict[str, Any]:
+    """List recent eval-ledger rows as a compact table."""
+    records = eval_ledger.read_records(Path(args.ledger))
+    if args.run:
+        records = [r for r in records if r.get("run_id") == args.run]
+    records = records[-args.limit :]
+    return {"op": "ledger", "ledger": str(args.ledger), "rows": records}
+
+
+def _cmd_compare(args: argparse.Namespace) -> dict[str, Any]:
+    """Paired (common-random-numbers) comparison of two runs' latest evals."""
+    ledger_path = Path(args.ledger)
+    rec_a = eval_ledger.latest_record_for_run(args.a, ledger_path)
+    rec_b = eval_ledger.latest_record_for_run(args.b, ledger_path)
+    if rec_a is None or rec_b is None:
+        missing = args.a if rec_a is None else args.b
+        raise SystemExit(f"No ledger entry found for run '{missing}' in {ledger_path}")
+
+    reasons = eval_ledger.tier_mismatches(rec_a, rec_b)
+    if reasons and not args.force:
+        joined = "\n".join(f"  - {r}" for r in reasons)
+        raise SystemExit(
+            "Refusing to compare: the two evals are not a valid paired comparison:\n"
+            f"{joined}\n"
+            "Re-run both evals with matching knobs and the same --seed, or pass --force "
+            "to override (the resulting p-value will not be trustworthy)."
+        )
+
+    payload_a = eval_ledger.load_payload(rec_a)
+    payload_b = eval_ledger.load_payload(rec_b)
+    comparison = compare_paired_samples(
+        payload_a["results"]["pair_samples_mbb"],
+        payload_b["results"]["pair_samples_mbb"],
+    )
+    return {
+        "op": "compare",
+        "run_a": args.a,
+        "run_b": args.b,
+        "forced": bool(reasons and args.force),
+        "tier_warnings": reasons,
+        "comparison": comparison,
+    }
+
+
+def _fmt_commit(commit: str | None, dirty: bool | None) -> str:
+    if not commit:
+        return "—"
+    short = commit[:7]
+    if dirty:
+        short += "-dirty"
+    return short
+
+
+def _print_ledger(payload: dict[str, Any]) -> None:
+    rows = payload["rows"]
+    if not rows:
+        print(f"No eval-ledger entries in {payload['ledger']}.")
+        return
+    print(f"Eval ledger ({payload['ledger']}): {len(rows)} row(s)")
+    header = (
+        f"{'run_id':<26} {'commit':<14} {'scorer':<10} {'opp':<10} "
+        f"{'seed':>12} {'hands':>6} {'mbb/g':>12}"
+    )
+    print(header)
+    print("-" * len(header))
+    for r in rows:
+        knobs = r.get("knobs", {})
+        res = r.get("results", {})
+        mbb = res.get("exploitability_mbb")
+        se = res.get("std_error_mbb")
+        score = f"{mbb:.1f}±{se:.1f}" if isinstance(mbb, (int, float)) and se is not None else "—"
+        print(
+            f"{r.get('run_id', '')[:26]:<26} "
+            f"{_fmt_commit(r.get('eval_git_commit'), r.get('eval_git_dirty')):<14} "
+            f"{knobs.get('scorer', '')!s:<10} "
+            f"{knobs.get('opponent', '')!s:<10} "
+            f"{knobs.get('base_seed', '')!s:>12} "
+            f"{res.get('num_hands', '')!s:>6} "
+            f"{score:>12}"
+        )
+
+
+def _print_compare(payload: dict[str, Any]) -> None:
+    c = payload["comparison"]
+    print(f"Paired comparison: {payload['run_a']}  vs  {payload['run_b']}")
+    if payload["tier_warnings"]:
+        print("  ⚠️  FORCED over tier mismatches (p-value not trustworthy):")
+        for w in payload["tier_warnings"]:
+            print(f"     - {w}")
+    print(f"  mean(a):       {c['mean_a']:+.2f} mbb/g")
+    print(f"  mean(b):       {c['mean_b']:+.2f} mbb/g")
+    print(f"  mean_diff:     {c['mean_diff']:+.2f} mbb/g (± {c['se_diff']:.2f})")
+    print(f"  95% CI:        [{c['ci_lower']:+.2f}, {c['ci_upper']:+.2f}]")
+    print(
+        f"  p-value:       {c['p_value']:.4g}  ({'significant' if c['is_significant'] else 'n.s.'})"
+    )
+    print(f"  correlation:   {c['correlation']:.3f}  (se unpaired would be {c['se_unpaired']:.2f})")
+
+
 def _print_human(payload: dict[str, Any]) -> None:
+    if payload["op"] == "ledger":
+        _print_ledger(payload)
+        return
+    if payload["op"] == "compare":
+        _print_compare(payload)
+        return
     if payload["op"] == "train":
         print("Training complete.")
         print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
@@ -162,6 +299,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
     p_eval.add_argument("--runs-dir", default="data/runs", help="Base runs dir for id resolution.")
     p_eval.add_argument(
+        "--ledger",
+        default=str(eval_ledger.DEFAULT_LEDGER_PATH),
+        help="Append-only eval ledger path (records provenance + knobs + result).",
+    )
+    p_eval.add_argument(
         "--method",
         choices=["lbr", "rollout"],
         default="lbr",
@@ -218,6 +360,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_eval.add_argument("--seed", type=int, default=None, help="Random seed (default: random).")
     p_eval.set_defaults(func=_cmd_evaluate)
+
+    p_ledger = sub.add_parser(
+        "ledger", parents=[common], help="List recorded evaluations from the eval ledger."
+    )
+    p_ledger.add_argument(
+        "--ledger",
+        default=str(eval_ledger.DEFAULT_LEDGER_PATH),
+        help="Eval ledger path to read.",
+    )
+    p_ledger.add_argument("--run", default=None, help="Filter to a single run id.")
+    p_ledger.add_argument("--limit", type=int, default=25, help="Show only the last N rows.")
+    p_ledger.set_defaults(func=_cmd_ledger)
+
+    p_compare = sub.add_parser(
+        "compare",
+        parents=[common],
+        help="Paired (CRN) comparison of two runs' latest evals; refuses mismatched tiers.",
+    )
+    p_compare.add_argument("--a", required=True, help="First run id (baseline).")
+    p_compare.add_argument("--b", required=True, help="Second run id (candidate).")
+    p_compare.add_argument(
+        "--ledger",
+        default=str(eval_ledger.DEFAULT_LEDGER_PATH),
+        help="Eval ledger path to read.",
+    )
+    p_compare.add_argument(
+        "--force",
+        action="store_true",
+        help="Compare even if seeds/knob tiers differ (p-value will not be trustworthy).",
+    )
+    p_compare.set_defaults(func=_cmd_compare)
 
     return parser
 

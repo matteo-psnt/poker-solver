@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
 from tqdm import tqdm
+
+from src.pipeline.training.metrics import compute_quality_from_arrays
+from src.pipeline.training.metrics_history import MetricsHistoryWriter
 
 from . import checkpointing, reporting
 
@@ -50,6 +54,13 @@ class TrainingBatchCoordinator:
         self.training_start_time = training_start_time
         self.verbose = verbose
 
+        # Durable convergence curve: one row per batch under the run dir. Seed the
+        # sampler deterministically so metrics.jsonl is reproducible for a fixed
+        # config seed; sampling only reads shared arrays, so it never perturbs training.
+        self.history_writer = MetricsHistoryWriter(session.run_dir / "metrics.jsonl")
+        seed = session.config.system.seed
+        self._quality_rng = np.random.default_rng(seed if seed is not None else 0)
+
     def run_batch(self, batch_idx: int, batch_iterator: tqdm, state: BatchLoopState) -> None:
         """Run a single batch and update shared loop state."""
         checkpointing.wait_for_checkpoint(self.session)
@@ -85,6 +96,9 @@ class TrainingBatchCoordinator:
             state.total_infosets,
             completed_before_batch,
         )
+        self._record_history(
+            self.start_iteration + state.completed_iterations, state.total_infosets
+        )
         reporting.update_progress_bar(
             self.session,
             batch_iterator,
@@ -106,6 +120,52 @@ class TrainingBatchCoordinator:
                 storage_capacity=state.last_capacity or 0,
                 training_start_time=self.training_start_time,
             )
+
+    def _sample_quality(self) -> dict[str, float] | None:
+        """Sample solver-health metrics from the live shared arrays (coordinator view).
+
+        Reads a random sample of allocated infoset rows straight from shared memory.
+        The read races benign against Hogwild worker writes — torn values are fine for
+        aggregate statistics — and is bounded to ``sample_size`` rows. Returns None if
+        the arrays are not yet populated or on any error (metrics must never crash a run).
+        """
+        storage = getattr(self.worker_manager, "storage", None)
+        if storage is None:
+            return None
+        try:
+            action_counts = storage.shared_action_counts
+            regrets = storage.shared_regrets
+            allocated = np.flatnonzero(action_counts > 0)
+            if allocated.size == 0:
+                return None
+            sample_size = self.session.metrics.sample_size
+            if allocated.size > sample_size:
+                sample_ids = self._quality_rng.choice(allocated, sample_size, replace=False)
+            else:
+                sample_ids = allocated
+            return compute_quality_from_arrays(regrets, action_counts, sample_ids)
+        except Exception as exc:  # pragma: no cover - defensive; metrics must not kill a run
+            print(f"[metrics-history] quality sampling skipped: {exc}", flush=True)
+            return None
+
+    def _record_history(self, iteration: int, total_infosets: int) -> None:
+        """Append one convergence-curve row (utility, speed, and solver-health) to disk."""
+        metrics = self.session.metrics
+        quality = self._sample_quality()
+        if quality is not None:
+            metrics.record_quality(quality)
+
+        row = {
+            "iteration": iteration,
+            "elapsed_s": round(metrics.get_elapsed_time(), 3),
+            "iter_per_sec": round(metrics.get_iterations_per_second(), 2),
+            "num_infosets": int(total_infosets),
+            "avg_utility": metrics.get_avg_utility(),
+            "utility_std": metrics.get_utility_std(),
+        }
+        if quality is not None:
+            row.update(quality)
+        self.history_writer.append(row)
 
     def _get_iterations_per_worker(self, current_batch_size: int) -> list[int]:
         base = current_batch_size // self.num_workers

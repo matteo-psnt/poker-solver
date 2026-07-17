@@ -152,6 +152,7 @@ def evaluate(
     ``opponent="deployed"`` measures blueprint+resolver (the system that actually
     plays) with solves pinned to ``resolver_iterations`` CFR iterations.
     """
+    from src.pipeline.evaluation import ledger as eval_ledger
     from src.pipeline.training import services
     from src.pipeline.training.services import LBR_ESTIMATOR_LABEL, ROLLOUT_ESTIMATOR_LABEL
 
@@ -167,6 +168,12 @@ def evaluate(
             seed=seed,
         )
         estimator = ROLLOUT_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_rollout_knobs_from_params(
+            samples=num_samples,
+            rollouts=num_rollouts,
+            use_current=not use_average_strategy,
+            base_seed=out.results.get("base_seed", seed),
+        )
     else:  # "lbr" (default, trustworthy)
         out = services.evaluate_run_lbr(
             run_dir=run_dir,
@@ -184,13 +191,44 @@ def evaluate(
             lookahead_top_k=lookahead_top_k,
         )
         estimator = LBR_ESTIMATOR_LABEL
-    return {
+        knobs = eval_ledger.build_lbr_knobs_from_params(
+            scorer=scorer,
+            opponent=opponent,
+            hands=num_hands,
+            runouts=equity_runouts,
+            include_off_tree=include_off_tree,
+            base_seed=out.results.get("base_seed"),
+            resolver_iterations=resolver_iterations,
+            lookahead_depth=lookahead_depth,
+            lookahead_top_k=lookahead_top_k,
+        )
+    payload = {
+        "op": "evaluate",
         "run_id": run_id,
         "method": method,
         "estimator": estimator,
         "infosets": out.infosets,
         "results": out.results,
     }
+    # Persist the result to the Volume so cloud evals feed the same ledger the local
+    # `poker-solver-run ledger`/`compare` commands read — otherwise the numbers only ever
+    # exist in this container's stdout. Best-effort: the ledger is a research convenience,
+    # so a recording failure warns but never fails the eval. On success we commit the
+    # Volume so the appended row + payload survive the container.
+    try:
+        result_path, _ = eval_ledger.record_evaluation(
+            run_dir=run_dir,
+            payload=payload,
+            method=method,
+            estimator=estimator,
+            knobs=knobs,
+        )
+        data_volume.commit()
+        payload["ledger_result_path"] = str(result_path)
+        print(f"  Ledger: appended to {eval_ledger.DEFAULT_LEDGER_PATH} (payload: {result_path})")
+    except Exception as exc:  # recording must never break the eval
+        print(f"  Ledger: skipped ({type(exc).__name__}: {exc})")
+    return payload
 
 
 # Serial (single-process) match: one blueprint copy in memory, resolver decisions
@@ -376,6 +414,37 @@ def run_train(
         f"(± {results['std_error_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
     )
     print(f"  infosets: {eval_result['infosets']:,}")
+
+
+@app.local_entrypoint()
+def run_resume(
+    run_id: str,
+    additional: int,
+    cpu: int = 32,
+    memory: int = 24576,
+    timeout: int = 10800,
+) -> None:
+    """Resume a Volume run for ``additional`` more iterations on a big box.
+
+    Mirrors run_train's resourcing (the bare ``resume`` function is pinned to a small
+    box). The last batch is truncated to the target, so the run ends at exactly
+    ``<checkpoint iteration> + additional`` — pass ``additional`` accordingly.
+
+    Uses ``.spawn()`` (fire-and-forget), NOT ``.remote()``: a blocking ``.remote()`` ties the
+    remote function's lifetime to the local ``modal run`` client, and Modal cancels the call
+    ~10min after that client dies — fatal here because the client gets killed at unpredictable
+    times. ``.spawn()`` submits the call and returns immediately; combined with ``--detach`` the
+    function runs to completion server-side regardless of the client. There is therefore NO
+    result to print and NO eval tail — detect completion via the Volume metadata
+    (``status=completed``, iterations = target) and run the LBR eval separately with ``run_eval``.
+    """
+    call = resume.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
+        run_id=run_id,
+        additional_iterations=additional,
+        num_workers=cpu,
+    )
+    print(f"SPAWNED resume call {call.object_id}")
+    print(f"  run_id={run_id} additional={additional} cpu={cpu} — runs detached; does not wait.")
 
 
 def _print_variance_decomposition(results: dict[str, Any]) -> None:
