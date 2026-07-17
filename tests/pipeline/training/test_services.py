@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.pipeline.evaluation.hunl_local_best_response import HandOutcome
+from src.pipeline.evaluation.hunl_local_best_response import HandOutcome, LBRConfig
 from src.pipeline.training import services
 from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
-from src.pipeline.training.services import TrainingOutput
+from src.pipeline.training.services import RolloutParams, TrainingOutput
 from src.shared.config_loader import load_training_config
 
 
@@ -288,11 +288,8 @@ def test_evaluate_run_rollout_returns_output(monkeypatch, tmp_path):
     )
 
     output = services.evaluate_run_rollout(
-        run_dir=tmp_path / "run-1",
-        num_samples=50,
-        num_rollouts=7,
-        use_average_strategy=True,
-        seed=42,
+        tmp_path / "run-1",
+        RolloutParams(num_samples=50, num_rollouts=7, use_average_strategy=True, seed=42),
     )
 
     assert output.infosets == 1234
@@ -310,7 +307,7 @@ def test_evaluate_run_lbr_refuses_run_without_recorded_abstraction(monkeypatch, 
     monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
 
     with pytest.raises(ValueError, match="does not record which card abstraction"):
-        services.evaluate_run_lbr(run_dir=tmp_path / "run-legacy", num_hands=1)
+        services.evaluate_run_lbr(tmp_path / "run-legacy", LBRConfig(num_hands=1))
 
 
 def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
@@ -346,7 +343,7 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
         ),
     )
 
-    services.evaluate_run_lbr(run_dir=tmp_path / "run-1", num_hands=1)
+    services.evaluate_run_lbr(tmp_path / "run-1", LBRConfig(num_hands=1))
 
     assert seen["abstraction_hash"] == "recorded99"
 
@@ -388,7 +385,7 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
         ),
     )
 
-    services.evaluate_run_lbr(run_dir=tmp_path / "run-1", num_hands=1, abstraction_hash="abc123")
+    services.evaluate_run_lbr(tmp_path / "run-1", LBRConfig(num_hands=1), abstraction_hash="abc123")
 
     assert seen["abstraction_hash"] == "abc123"
 
@@ -438,7 +435,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     )
 
     output = services.evaluate_run_lbr(
-        run_dir=tmp_path / "run-1", num_hands=2000, equity_runouts=8, seed=7
+        tmp_path / "run-1", LBRConfig(num_hands=2000, equity_runouts=8, seed=7)
     )
 
     assert output.infosets == 4321
@@ -524,12 +521,8 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
     )
 
     output = services.evaluate_run_lbr(
-        run_dir=tmp_path / "run-1",
-        num_hands=1,
-        seed=7,
-        scorer="lookahead",
-        lookahead_depth=3,
-        lookahead_top_k=5,
+        tmp_path / "run-1",
+        LBRConfig(num_hands=1, seed=7, scorer="lookahead", lookahead_depth=3, lookahead_top_k=5),
     )
 
     assert seen["cfg"].scorer == "lookahead"

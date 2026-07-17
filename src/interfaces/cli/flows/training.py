@@ -8,6 +8,7 @@ from src.interfaces.cli.flows.combo_precompute import handle_combo_precompute
 from src.interfaces.cli.flows.config_menu import select_config
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
+from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.training import services
 from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.pipeline.training.components import (
@@ -92,9 +93,8 @@ def evaluate_solver(ctx: CliContext) -> None:
     print("\nRunning Local Best Response (rigorous lower bound; this can take minutes)...")
     try:
         output = services.evaluate_run_lbr(
-            run_dir=run_dir,
-            num_hands=num_hands,
-            seed=seed,
+            run_dir,
+            LBRConfig(num_hands=num_hands, seed=seed),
         )
     except FileNotFoundError as e:
         ui.error(str(e))

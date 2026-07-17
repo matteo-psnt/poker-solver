@@ -100,7 +100,7 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     fake_out = SimpleNamespace(
         infosets=42, results={"exploitability_mbb": 1.0, "std_error_mbb": 0.1}
     )
-    monkeypatch.setattr(headless.services, "evaluate_run_lbr", lambda **kw: fake_out)
+    monkeypatch.setattr(headless.services, "evaluate_run_lbr", lambda *a, **kw: fake_out)
 
     rc = headless.main(["evaluate", "--run", "run-xyz", "--runs-dir", str(tmp_path), "--json"])
 
@@ -119,7 +119,7 @@ def test_main_evaluate_rollout_opt_in(monkeypatch, tmp_path, capsys):
     fake_out = SimpleNamespace(
         infosets=7, results={"exploitability_mbb": 9.0, "std_error_mbb": 0.5}
     )
-    monkeypatch.setattr(headless.services, "evaluate_run_rollout", lambda **kw: fake_out)
+    monkeypatch.setattr(headless.services, "evaluate_run_rollout", lambda *a, **kw: fake_out)
 
     rc = headless.main(
         [

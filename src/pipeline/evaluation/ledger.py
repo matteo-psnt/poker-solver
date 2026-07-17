@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.gitinfo import get_git_commit, is_git_dirty
 
@@ -63,10 +64,6 @@ def build_lbr_knobs_from_params(
 ) -> dict[str, Any]:
     """Canonical LBR knob tier, built from explicit values.
 
-    Kept argument-source-agnostic so both the local CLI (argparse) and Modal (plain
-    function params) record byte-identical tiers — the guardrail in :func:`tier_mismatches`
-    only works if the two surfaces agree on exactly what "same tier" means.
-
     ``base_seed`` is the seed the deals were actually drawn from (LBR resolves a random
     seed when none is passed and reports it back), which is the value paired comparison
     must match on. Tier-specific knobs are included only when they apply, so a
@@ -88,18 +85,26 @@ def build_lbr_knobs_from_params(
     return knobs
 
 
-def build_lbr_knobs(args: Any, results: dict[str, Any]) -> dict[str, Any]:
-    """Extract the LBR comparison-tier knobs from CLI args + the effective results."""
+def build_lbr_knobs(config: LBRConfig, results: dict[str, Any]) -> dict[str, Any]:
+    """Canonical LBR knob tier for an eval that ran under ``config``.
+
+    Deriving the tier from the same :class:`LBRConfig` the eval consumed makes
+    "every transport records identical tiers" structural — the guardrail in
+    :func:`tier_mismatches` only works if all surfaces agree on exactly what
+    "same tier" means. ``base_seed`` and the deployed resolver's pinned
+    ``resolver_iterations`` come from the effective ``results`` because both are
+    resolved during the eval, not fixed by the config object.
+    """
     return build_lbr_knobs_from_params(
-        scorer=args.scorer,
-        opponent=args.opponent,
-        hands=args.hands,
-        runouts=args.runouts,
-        include_off_tree=bool(args.include_off_tree),
+        scorer=config.scorer,
+        opponent=config.opponent,
+        hands=config.num_hands,
+        runouts=config.equity_runouts,
+        include_off_tree=config.include_off_tree,
         base_seed=results.get("base_seed"),
-        resolver_iterations=getattr(args, "resolver_iterations", None),
-        lookahead_depth=getattr(args, "lookahead_depth", None),
-        lookahead_top_k=getattr(args, "lookahead_top_k", None),
+        resolver_iterations=results.get("resolver_iterations"),
+        lookahead_depth=config.lookahead_depth,
+        lookahead_top_k=config.lookahead_top_k,
     )
 
 
@@ -113,15 +118,6 @@ def build_rollout_knobs_from_params(
         "use_current": bool(use_current),
         "base_seed": base_seed,
     }
-
-
-def build_rollout_knobs(args: Any, results: dict[str, Any]) -> dict[str, Any]:
-    return build_rollout_knobs_from_params(
-        samples=args.samples,
-        rollouts=args.rollouts,
-        use_current=bool(args.current),
-        base_seed=results.get("base_seed", args.seed),
-    )
 
 
 def build_record(

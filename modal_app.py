@@ -152,82 +152,41 @@ def evaluate(
     ``opponent="deployed"`` measures blueprint+resolver (the system that actually
     plays) with solves pinned to ``resolver_iterations`` CFR iterations.
     """
-    from src.pipeline.evaluation import ledger as eval_ledger
+    from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
     from src.pipeline.training import services
-    from src.pipeline.training.services import LBR_ESTIMATOR_LABEL, ROLLOUT_ESTIMATOR_LABEL
 
     # Pick up runs committed by earlier train() calls in other containers.
     data_volume.reload()
     run_dir = Path("data/runs") / run_id
-    if method == "rollout":
-        out = services.evaluate_run_rollout(
-            run_dir=run_dir,
-            num_samples=num_samples,
-            num_rollouts=num_rollouts,
-            use_average_strategy=use_average_strategy,
-            seed=seed,
-        )
-        estimator = ROLLOUT_ESTIMATOR_LABEL
-        knobs = eval_ledger.build_rollout_knobs_from_params(
-            samples=num_samples,
-            rollouts=num_rollouts,
-            use_current=not use_average_strategy,
-            base_seed=out.results.get("base_seed", seed),
-        )
-    else:  # "lbr" (default, trustworthy)
-        out = services.evaluate_run_lbr(
-            run_dir=run_dir,
+    payload = services.evaluate_and_record(
+        run_dir,
+        method=method,
+        lbr=LBRConfig(
             num_hands=num_hands,
             equity_runouts=equity_runouts,
             include_off_tree=include_off_tree,
             seed=seed,
             num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
             allin_runouts=allin_runouts,
-            abstraction_hash=abstraction_hash,
             opponent=opponent,
-            resolver_iterations=resolver_iterations,
             scorer=scorer,
             lookahead_depth=lookahead_depth,
             lookahead_top_k=lookahead_top_k,
-        )
-        estimator = LBR_ESTIMATOR_LABEL
-        knobs = eval_ledger.build_lbr_knobs_from_params(
-            scorer=scorer,
-            opponent=opponent,
-            hands=num_hands,
-            runouts=equity_runouts,
-            include_off_tree=include_off_tree,
-            base_seed=out.results.get("base_seed"),
-            resolver_iterations=resolver_iterations,
-            lookahead_depth=lookahead_depth,
-            lookahead_top_k=lookahead_top_k,
-        )
-    payload = {
-        "op": "evaluate",
-        "run_id": run_id,
-        "method": method,
-        "estimator": estimator,
-        "infosets": out.infosets,
-        "results": out.results,
-    }
-    # Persist the result to the Volume so cloud evals feed the same ledger the local
-    # `poker-solver-run ledger`/`compare` commands read — otherwise the numbers only ever
-    # exist in this container's stdout. Best-effort: the ledger is a research convenience,
-    # so a recording failure warns but never fails the eval. On success we commit the
-    # Volume so the appended row + payload survive the container.
-    try:
-        result_path, _ = eval_ledger.record_evaluation(
-            run_dir=run_dir,
-            payload=payload,
-            method=method,
-            estimator=estimator,
-            knobs=knobs,
-        )
+        ),
+        rollout=services.RolloutParams(
+            num_samples=num_samples,
+            num_rollouts=num_rollouts,
+            use_average_strategy=use_average_strategy,
+            seed=seed,
+        ),
+        resolver_iterations=resolver_iterations,
+        abstraction_hash=abstraction_hash,
+    )
+    # The orchestrator wrote the ledger row + payload onto the Volume (best-effort);
+    # commit so they survive the container and cloud evals feed the same ledger the
+    # local `poker-solver-run ledger`/`compare` commands read.
+    if "ledger_result_path" in payload:
         data_volume.commit()
-        payload["ledger_result_path"] = str(result_path)
-        print(f"  Ledger: appended to {eval_ledger.DEFAULT_LEDGER_PATH} (payload: {result_path})")
-    except Exception as exc:  # recording must never break the eval
-        print(f"  Ledger: skipped ({type(exc).__name__}: {exc})")
     return payload
 
 
