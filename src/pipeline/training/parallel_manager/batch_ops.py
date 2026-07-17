@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import queue
 import time
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from src.pipeline.training.parallel_protocol import JobType
+
+from .gather import gather_worker_results
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -54,51 +55,33 @@ def run_batch(
             iteration_offset += num_iterations
             active_workers += 1
 
+    received, interrupted = gather_worker_results(
+        manager,
+        accept=lambda r: "error" in r or r.get("type") == "iterations_done",
+        expected=active_workers,
+        timeout=timeout,
+        description="worker batch results",
+        verbose=verbose,
+    )
+
     all_utilities = []
     results = []
     errors = []
     total_owned = 0
     max_worker_capacity = 0.0
-    interrupted = False
-
-    received = 0
-    while received < active_workers:
-        try:
-            raw_result = manager.result_queue.get(timeout=timeout)
-            if not isinstance(raw_result, dict):
-                if verbose:
-                    print(f"[Master] Ignoring unexpected non-dict result: {raw_result}", flush=True)
-                continue
-            result = cast(dict[str, object], raw_result)
-
-            if "error" in result:
-                errors.append(result)
-                print(
-                    f"[Master] Worker {result['worker_id']} error: {result['error']}",
-                    flush=True,
-                )
-                received += 1
-            elif result.get("type") == "iterations_done":
-                results.append(result)
-                all_utilities.extend(cast(list[float], result.get("utilities", [])))
-                total_owned += cast(int, result.get("num_owned_infosets", 0))
-                worker_capacity = float(cast(float | int, result.get("capacity_usage", 0.0)))
-                max_worker_capacity = max(max_worker_capacity, worker_capacity)
-                received += 1
-            else:
-                if verbose:
-                    print(f"[Master] Ignoring unexpected result: {result}", flush=True)
-        except queue.Empty:
-            raise RuntimeError(
-                f"Timeout waiting for workers ({len(results)}/{active_workers} received)"
+    for result in received:
+        if "error" in result:
+            errors.append(result)
+            print(
+                f"[Master] Worker {result['worker_id']} error: {result['error']}",
+                flush=True,
             )
-        except KeyboardInterrupt:
-            interrupted = True
-            if verbose:
-                print(
-                    "⚠️  Interrupt received; waiting for current batch to finish...",
-                    flush=True,
-                )
+        else:
+            results.append(result)
+            all_utilities.extend(cast(list[float], result.get("utilities", [])))
+            total_owned += cast(int, result.get("num_owned_infosets", 0))
+            worker_capacity = float(cast(float | int, result.get("capacity_usage", 0.0)))
+            max_worker_capacity = max(max_worker_capacity, worker_capacity)
 
     batch_time = time.time() - batch_start
     total_iters = sum(iterations_per_worker)

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import queue
 from typing import TYPE_CHECKING, cast
 
 from src.pipeline.training.parallel_protocol import JobType
+
+from .gather import gather_worker_results
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -24,19 +25,14 @@ def exchange_ids(
     for worker_id in range(manager.num_workers):
         manager.job_queue.put({"type": JobType.EXCHANGE_IDS.value, "target_worker": worker_id})
 
-    acks = []
-    total_owned = 0
-    for _ in range(manager.num_workers):
-        try:
-            raw_result = manager.result_queue.get(timeout=timeout)
-            if not isinstance(raw_result, dict):
-                continue
-            result = cast(dict[str, object], raw_result)
-            if result.get("type") == "exchange_ids_ack":
-                acks.append(result)
-                total_owned += cast(int, result.get("num_owned", 0))
-        except queue.Empty:
-            raise RuntimeError("Timeout waiting for ID exchange acks")
+    acks, _ = gather_worker_results(
+        manager,
+        accept=lambda r: r.get("type") == "exchange_ids_ack",
+        expected=manager.num_workers,
+        timeout=timeout,
+        description="ID exchange acks",
+    )
+    total_owned = sum(cast(int, result.get("num_owned", 0)) for result in acks)
 
     if verbose:
         print("[Master] ID exchange complete", flush=True)

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import itertools
-import queue
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from src.core.game.actions import Action
 from src.engine.solver.infoset import InfoSetKey
 from src.pipeline.training.parallel_protocol import JobType
+
+from .gather import gather_worker_results
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -38,48 +39,41 @@ def collect_keys(
             }
         )
 
+    responses, _ = gather_worker_results(
+        manager,
+        accept=lambda r: r.get("type") == "keys_collected",
+        expected=manager.num_workers,
+        timeout=timeout,
+        description="key collection",
+    )
+
     all_owned_keys: dict[InfoSetKey, int] = {}
     all_legal_actions: dict[int, list[Action]] = {}
     worker_ranges: dict[int, tuple[int, int]] = {}
     id_owners: dict[int, tuple[int, InfoSetKey]] = {}
 
-    responses_received = 0
-    while responses_received < manager.num_workers:
-        try:
-            raw_result = manager.result_queue.get(timeout=timeout)
-            if not isinstance(raw_result, dict):
-                continue
-            result = cast(dict[str, object], raw_result)
-            if result.get("type") != "keys_collected":
-                continue
+    for result in responses:
+        owned_keys = cast(dict[InfoSetKey, int], result["owned_keys"])
+        legal_actions = cast(dict[int, list[Action]], result["legal_actions_cache"])
+        worker_id = cast(int, result["worker_id"])
+        worker_ranges[worker_id] = (
+            cast(int, result["id_range_start"]),
+            cast(int, result["id_range_end"]),
+        )
 
-            owned_keys = cast(dict[InfoSetKey, int], result["owned_keys"])
-            legal_actions = cast(dict[int, list[Action]], result["legal_actions_cache"])
-            worker_id = cast(int, result["worker_id"])
-            worker_ranges[worker_id] = (
-                cast(int, result["id_range_start"]),
-                cast(int, result["id_range_end"]),
-            )
+        for key, infoset_id in owned_keys.items():
+            if infoset_id in id_owners:
+                prev_worker, prev_key = id_owners[infoset_id]
+                raise RuntimeError(
+                    f"Duplicate infoset_id {infoset_id} across workers "
+                    f"(prev worker {prev_worker}, key {prev_key} vs "
+                    f"worker {worker_id}, key {key}). "
+                    "ID ranges likely overlapping or num_workers changed."
+                )
+            id_owners[infoset_id] = (worker_id, key)
+            all_owned_keys[key] = infoset_id
 
-            for key, infoset_id in owned_keys.items():
-                if infoset_id in id_owners:
-                    prev_worker, prev_key = id_owners[infoset_id]
-                    raise RuntimeError(
-                        f"Duplicate infoset_id {infoset_id} across workers "
-                        f"(prev worker {prev_worker}, key {prev_key} vs "
-                        f"worker {worker_id}, key {key}). "
-                        "ID ranges likely overlapping or num_workers changed."
-                    )
-                id_owners[infoset_id] = (worker_id, key)
-                all_owned_keys[key] = infoset_id
-
-            all_legal_actions.update(legal_actions)
-            responses_received += 1
-        except queue.Empty:
-            raise RuntimeError(
-                "Timeout waiting for key collection "
-                f"({responses_received}/{manager.num_workers} received)"
-            )
+        all_legal_actions.update(legal_actions)
 
     ranges = sorted(worker_ranges.items(), key=lambda item: item[1][0])
     for (wid_a, (start_a, end_a)), (wid_b, (start_b, end_b)) in itertools.pairwise(ranges):
