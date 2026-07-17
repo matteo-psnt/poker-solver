@@ -39,6 +39,10 @@ PROGRESS_ARTIFACT = "train-progress.json"
 
 logger = logging.getLogger(__name__)
 
+# What the scalar trainer IS, for the resume guard. No `pcs` section: this
+# trainer never reads one, so a difference there is not a lineage break.
+TRAINER_BLOCKS = ("solver",)
+
 
 class StaticTrainingOutput(BaseModel):
     """Machine-readable summary of a static-storage training run.
@@ -145,6 +149,7 @@ def train_static(
     if resuming:
         tracker = RunTracker.load(run_dir)
         tracker.verify_action_config_hash(action_model.get_config_hash())
+        tracker.verify_trainer_knobs(config, TRAINER_BLOCKS)
         tracker.mark_resumed()
     else:
         tag = experiment or ExperimentTag()
