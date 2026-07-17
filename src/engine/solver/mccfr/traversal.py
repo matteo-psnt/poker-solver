@@ -10,6 +10,7 @@ from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.solver.infoset import InfoSet
 from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.policy_lookup import filter_stored_actions
 from src.shared.numba_ops import compute_dcfr_strategy_weight
 
 if TYPE_CHECKING:
@@ -38,12 +39,7 @@ def _infoset_context(
 
     infoset = self.storage.get_or_create_infoset(infoset_key, legal_actions)
 
-    valid_actions: list[Action] = []
-    valid_indices: list[int] = []
-    for index, action in enumerate(infoset.legal_actions):
-        if self.rules.is_action_valid(state, action):
-            valid_actions.append(action)
-            valid_indices.append(index)
+    valid_indices, valid_actions = filter_stored_actions(infoset, state, self.rules, legal_actions)
 
     if not valid_actions:
         valid_actions = legal_actions

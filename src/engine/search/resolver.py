@@ -24,6 +24,7 @@ from src.engine.search.range_inference import (
 from src.engine.search.subgame_cfr import solve_subgame
 from src.engine.search.tree_builder import build_local_tree
 from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.policy_lookup import blueprint_action_distribution
 from src.shared.config import ResolverConfig
 from src.shared.numeric import NORMALIZE_EPS
 
@@ -237,6 +238,11 @@ class HUResolver:
         *,
         use_average: bool,
     ) -> np.ndarray:
+        """Blueprint probabilities over ``actions``, which may repeat an action.
+
+        A repeated action's blueprint mass is split evenly across its slots so
+        the vector still sums to 1 over the caller's action list.
+        """
         if not actions:
             return np.array([], dtype=np.float64)
 
@@ -244,34 +250,19 @@ class HUResolver:
             state, state.current_player, self.blueprint.card_abstraction
         )
         infoset = self.blueprint.storage.get_infoset(infoset_key)
-        if infoset is None:
-            return np.full(len(actions), 1.0 / len(actions), dtype=np.float64)
-
-        action_to_indices: dict[Action, list[int]] = {}
-        for idx, action in enumerate(actions):
-            action_to_indices.setdefault(action, []).append(idx)
-
-        valid_indices: list[int] = []
-        valid_actions: list[Action] = []
-        for idx, action in enumerate(infoset.legal_actions):
-            if action in action_to_indices and self.rules.is_action_valid(state, action):
-                valid_indices.append(idx)
-                valid_actions.append(action)
-
-        if not valid_indices:
-            return np.full(len(actions), 1.0 / len(actions), dtype=np.float64)
-
-        filtered = infoset.get_filtered_strategy(
-            valid_indices=valid_indices, use_average=use_average
+        distribution = blueprint_action_distribution(
+            infoset, state, self.rules, actions, use_average=use_average
         )
-        probs = np.zeros(len(actions), dtype=np.float64)
-        for action, prob in zip(valid_actions, filtered):
-            target_indices = action_to_indices.get(action, [])
-            if not target_indices:
-                continue
-            share = float(prob) / len(target_indices)
-            for idx in target_indices:
-                probs[idx] += share
+        if distribution is None:
+            return np.full(len(actions), 1.0 / len(actions), dtype=np.float64)
+
+        slot_counts: dict[Action, int] = {}
+        for action in actions:
+            slot_counts[action] = slot_counts.get(action, 0) + 1
+        probs = np.array(
+            [distribution.get(action, 0.0) / slot_counts[action] for action in actions],
+            dtype=np.float64,
+        )
 
         probs = np.maximum(probs, 0.0)
         total = probs.sum()

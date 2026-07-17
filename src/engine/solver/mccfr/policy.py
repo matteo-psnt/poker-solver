@@ -9,6 +9,7 @@ import numpy as np
 from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.policy_lookup import blueprint_action_distribution
 
 if TYPE_CHECKING:
     from .solver import MCCFRSolver
@@ -27,18 +28,16 @@ def sample_action_from_strategy(
 
     infoset_key = encode_infoset_key(state, state.current_player, self.card_abstraction)
     infoset = self.storage.get_infoset(infoset_key)
-    if infoset is None:
+    distribution = blueprint_action_distribution(
+        infoset, state, self.rules, legal_actions, use_average=use_average
+    )
+    if distribution is None:
         return legal_actions[np.random.choice(len(legal_actions))]
 
-    legal_set = set(legal_actions)
-    valid_indices = [i for i, action in enumerate(infoset.legal_actions) if action in legal_set]
-    if not valid_indices:
-        return legal_actions[np.random.choice(len(legal_actions))]
-
-    filtered_actions = [infoset.legal_actions[i] for i in valid_indices]
-    strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=use_average)
-    action_idx = int(np.random.choice(len(filtered_actions), p=strategy))
-    return filtered_actions[action_idx]
+    actions = list(distribution)
+    probabilities = np.fromiter(distribution.values(), dtype=np.float64, count=len(actions))
+    action_idx = int(np.random.choice(len(actions), p=probabilities))
+    return actions[action_idx]
 
 
 def act(
