@@ -62,6 +62,28 @@ class PcsTrainingOutput(BaseModel):
     status: str
 
 
+# What a continuation must not silently change. `--set` overrides do NOT survive
+# into one -- the node rebuilds the config from `--config` plus whatever flags
+# THAT task carried -- so a resume that forgets one trains a different algorithm
+# into the same ladder, and the existing action/abstraction checks do not look
+# here. Near-miss that put this in: a 10-hour CFR-BR continuation was one
+# missing `--set pcs__cfr_br=river` away from appending plain-PCS rungs.
+TRAINER_BLOCKS = ("solver", "pcs")
+
+
+def verify_trainer_knobs(stored: Config, current: Config) -> None:
+    """Refuse a continuation whose trainer knobs differ from the run's own."""
+    for block in TRAINER_BLOCKS:
+        was, now = getattr(stored, block), getattr(current, block)
+        if was != now:
+            raise ValueError(
+                f"This run was trained with {block}={was!r}, and this task would continue "
+                f"it with {block}={now!r}. A `--set` does not carry into a continuation: "
+                "repeat every override the run was started with, or the ladder ends up "
+                "holding rungs from two different trainers."
+            )
+
+
 def train_pcs(
     config_name: str,
     *,
@@ -106,6 +128,7 @@ def train_pcs(
                 f"Run '{run_id}' was trained by the {tracker.metadata.kernel!r} kernel; "
                 "continuing it by public chance sampling would mix two lineages in one ladder."
             )
+        verify_trainer_knobs(tracker.metadata.config, config)
         tracker.mark_resumed()
     else:
         tag = experiment or ExperimentTag()
@@ -208,4 +231,4 @@ def train_pcs(
     )
 
 
-__all__ = ("KERNEL", "PcsTrainingOutput", "train_pcs")
+__all__ = ("KERNEL", "TRAINER_BLOCKS", "PcsTrainingOutput", "train_pcs", "verify_trainer_knobs")
