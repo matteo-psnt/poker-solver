@@ -164,6 +164,14 @@ def train_pcs(
         config.pcs.runouts_per_flop,
         config.pcs.cfr_br,
     )
+    # The RESOLVED knobs, not the flags someone meant to pass. A run's identity
+    # is what `--config` plus its `--set` list actually produced, and reading it
+    # back off a finished run used to mean unpacking the metadata by hand.
+    logger.info(
+        "[pcs] resolved trainer knobs: solver=%r pcs=%r",
+        config.solver.model_dump(),
+        config.pcs.model_dump(),
+    )
     # The kernel is numpy and numba on one core per worker; BLAS threads on
     # top of that only oversubscribe the node.
     for variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
