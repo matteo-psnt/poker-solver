@@ -15,8 +15,8 @@ Variance design (duplicate poker):
     the skill difference.
 
 Resolver lifecycle: a fresh :class:`HUResolver` per game (memoryless across
-hands, continual within a hand). ``MCCFRSolver.act`` caches one resolver for the
-process lifetime, which would leak ``_ranges`` across hands — deliberately not
+hands, continual within a hand). ``BlueprintAgent`` keeps one resolver for its
+own lifetime, which would leak ``_ranges`` across hands — deliberately not
 used here.
 """
 
@@ -26,8 +26,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 from src.engine.search.resolver import HUResolver
+from src.engine.solver.protocols import Blueprint
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.shared.units import pair_mean_mbb
 
@@ -50,7 +52,7 @@ class ResolverMatchResult:
 
 
 def play_resolver_match(
-    solver,
+    solver: Blueprint,
     *,
     num_deals: int = 1000,
     time_budget_ms: int = 100,
@@ -115,8 +117,8 @@ def play_resolver_match(
 
 
 def _play_game(
-    solver,
-    rules,
+    solver: Blueprint,
+    rules: GameRules,
     *,
     hole_cards,
     board_stack: list[Card],

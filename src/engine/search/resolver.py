@@ -25,6 +25,7 @@ from src.engine.search.subgame_cfr import solve_subgame
 from src.engine.search.tree_builder import build_local_tree
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.policy_lookup import blueprint_action_distribution
+from src.engine.solver.protocols import Blueprint
 from src.shared.config import ResolverConfig
 from src.shared.numeric import NORMALIZE_EPS
 
@@ -47,7 +48,7 @@ class HUResolver:
     def __init__(
         self,
         *,
-        blueprint,
+        blueprint: Blueprint,
         action_model: ActionModel,
         rules: GameRules,
         config: ResolverConfig,

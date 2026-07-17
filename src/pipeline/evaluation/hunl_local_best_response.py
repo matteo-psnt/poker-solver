@@ -81,6 +81,7 @@ from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 from src.engine.search.range_inference import ALL_COMBOS, COMBO_MASKS, NUM_COMBOS
+from src.engine.solver.protocols import Blueprint
 from src.pipeline.evaluation.lookahead_scorer import BlueprintDistMemo, LookaheadScorer
 from src.pipeline.evaluation.opponent_model import (
     BlueprintOpponent,
@@ -208,7 +209,7 @@ class _HUNLLocalBestResponse:
     thread-safe. Callers should use :func:`compute_lbr_exploitability`.
     """
 
-    def __init__(self, blueprint, config: LBRConfig, rng: np.random.Generator):
+    def __init__(self, blueprint: Blueprint, config: LBRConfig, rng: np.random.Generator):
         self.blueprint = blueprint
         self.config = config
         self.rng = rng
@@ -730,10 +731,10 @@ class _HUNLLocalBestResponse:
 
 
 def compute_lbr_exploitability(
-    blueprint,
+    blueprint: Blueprint,
     config: LBRConfig | None = None,
     *,
-    blueprint_factory: Callable[[], object] | None = None,
+    blueprint_factory: Callable[[], Blueprint] | None = None,
 ) -> LBRResult:
     """Estimate the blueprint's exploitability via Local Best Response.
 
@@ -863,7 +864,7 @@ _WORKER_CTX: tuple[int, int] | None = None  # (base_seed, starting_stack)
 
 
 def _init_worker(
-    blueprint_factory: Callable[[], object],
+    blueprint_factory: Callable[[], Blueprint],
     config: LBRConfig,
     base_seed: int,
     starting_stack: int,
@@ -885,7 +886,7 @@ def _worker_play_hand(hand: int) -> tuple[HandOutcome, HandOutcome]:
 
 
 def _run_hands_parallel(
-    blueprint_factory: Callable[[], object],
+    blueprint_factory: Callable[[], Blueprint],
     config: LBRConfig,
     base_seed: int,
     starting_stack: int,

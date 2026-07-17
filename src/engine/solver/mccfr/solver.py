@@ -58,7 +58,6 @@ class MCCFRSolver:
         # Reuse deck objects to avoid repeated Random() allocations.
         self._deck = eval7.Deck()
         self._deck_cards = list(self._deck.cards)
-        self._resolver: object | None = None
 
     def checkpoint(self) -> None:
         """Save a checkpoint of the current solver state."""
@@ -116,22 +115,6 @@ class MCCFRSolver:
 
     def sample_action_from_strategy(self, state: GameState, *, use_average: bool = True) -> Action:
         return policy.sample_action_from_strategy(self, state, use_average=use_average)
-
-    def act(
-        self,
-        state: GameState,
-        *,
-        use_resolver: bool | None = None,
-        time_budget_ms: int | None = None,
-        use_average: bool = True,
-    ) -> Action:
-        return policy.act(
-            self,
-            state,
-            use_resolver=use_resolver,
-            time_budget_ms=time_budget_ms,
-            use_average=use_average,
-        )
 
     def __str__(self) -> str:
         return (

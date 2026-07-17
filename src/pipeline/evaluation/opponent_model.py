@@ -38,6 +38,7 @@ from src.engine.search.range_inference import (
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.policy_lookup import blueprint_action_distribution
+from src.engine.solver.protocols import Blueprint
 from src.shared.config import ResolverConfig
 
 
@@ -93,7 +94,7 @@ class BlueprintOpponent:
 
     wants_translated_state = True
 
-    def __init__(self, blueprint, dist_memo=None):
+    def __init__(self, blueprint: Blueprint, dist_memo=None):
         self.blueprint = blueprint
         self.rules = blueprint.rules
         self.action_model = blueprint.action_model
@@ -229,7 +230,7 @@ class ResolvedOpponent:
 
     wants_translated_state = False
 
-    def __init__(self, blueprint, resolver_config: ResolverConfig):
+    def __init__(self, blueprint: Blueprint, resolver_config: ResolverConfig):
         if resolver_config.max_iterations is None:
             raise ValueError(
                 "Deployed-opponent LBR requires resolver max_iterations to be set: "
