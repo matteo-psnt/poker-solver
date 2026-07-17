@@ -3,6 +3,10 @@
 from typing import Any
 
 from src.core.actions.action_model import ActionModel
+from src.core.game.actions import Action
+from src.core.game.state import Card, GameState
+from src.engine.search.range_inference import replace_actor_hole_cards
+from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.storage.shared_array import SharedArrayStorage
 from src.pipeline.abstraction.base import BucketingStrategy
@@ -104,6 +108,31 @@ def make_test_config(**overrides) -> Config:
                 nested[key] = value
 
     return Config.default().merge(nested) if nested else Config.default()
+
+
+def skew_preflop_infoset(
+    blueprint: MCCFRSolver,
+    state: GameState,
+    *,
+    actor: int,
+    combo: tuple[Card, Card],
+    action: Action,
+) -> None:
+    """Force the blueprint to play ``action`` with certainty for one hand class.
+
+    Manufactures the preflop infoset ``actor`` would hold with ``combo`` and puts
+    all average-strategy mass on ``action`` (an in-place ``strategy_sum`` write —
+    the array is a view into shared-array storage, so later blueprint lookups see
+    it). Observing ``action`` then provably up-weights that hand class in range
+    inference, with no training. Tiny trained test blueprints are near-uniform,
+    which gives a Bayes update nothing to grip.
+    """
+    hypo = replace_actor_hole_cards(state, actor=actor, combo=combo)
+    key = encode_infoset_key(hypo, actor, blueprint.card_abstraction)
+    legal = blueprint.rules.get_legal_actions(hypo, action_model=blueprint.action_model)
+    infoset = blueprint.storage.get_or_create_infoset(key, legal)
+    infoset.strategy_sum[:] = 0.0
+    infoset.strategy_sum[infoset.legal_actions.index(action)] = 1.0
 
 
 class DummyCardAbstraction(BucketingStrategy):

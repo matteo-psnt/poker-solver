@@ -148,6 +148,10 @@ def _play_game(
             action = resolver.act(state, time_budget_ms=time_budget_ms)
         else:
             action = solver.sample_action_from_strategy(state, use_average=True)
+        # History-replay range inference: the resolver observes every realized
+        # action (both seats), so its next solve sees Bayes-updated ranges
+        # instead of uniform ones.
+        resolver.observe(state, action)
         state = state.apply_action(action, rules)
 
     if not state.ended_by_fold and len(state.board) < 5:

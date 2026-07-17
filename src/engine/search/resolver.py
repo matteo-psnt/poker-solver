@@ -55,10 +55,30 @@ class HUResolver:
         self.action_model = action_model
         self.rules = rules
         self.config = config
+        # History-replayed ranges: written ONLY by observe(). A driver that
+        # feeds every realized action through observe() gives the resolver
+        # Bayes-updated ranges for BOTH players; without a driver, solves fall
+        # back to fresh board-masked-uniform inference per decision (stateless,
+        # board-correct — no cross-hand leakage).
         self._ranges: PlayerRanges | None = None
         # Decisions where solve() raised and act() fell back to the blueprint.
         # Harnesses read this directly; the warning below is for humans only.
         self.fallback_count: int = 0
+
+    def observe(self, state: GameState, action: Action) -> None:
+        """Bayes-update the acting player's range for a realized ``action``.
+
+        History-replay range inference: the driver calls this for EVERY realized
+        action (both seats) as the hand plays out, so the opponent's observed
+        actions shape the opponent range the next solve uses — instead of the
+        uniform range that made deployed play measurably exploitable. Likelihoods
+        come from the blueprint (translation-completed for off-tree sizes), so
+        the update is a model-based inference: "the opponent plays roughly like
+        the blueprint." Deterministic; no RNG.
+        """
+        if self._ranges is None:
+            self._ranges = infer_ranges(state, self.blueprint)
+        self._ranges = update_ranges(state, self._ranges, action, self.blueprint)
 
     def act(self, state: GameState, *, time_budget_ms: int | None = None) -> Action:
         """Resolve local subgame and sample an action at the root."""
@@ -117,9 +137,13 @@ class HUResolver:
         blended with the blueprint.
         """
         budget = int(time_budget_ms or self.config.time_budget_ms)
-        self._ranges = infer_ranges(state, self.blueprint) if self._ranges is None else self._ranges
+        # Ranges come from observe()'s history replay when a driver provides it;
+        # otherwise infer fresh for this state WITHOUT persisting — solve() no
+        # longer writes _ranges (observe() is the single update path, so a
+        # driver observing the applied action would otherwise double-count it).
+        ranges = self._ranges if self._ranges is not None else infer_ranges(state, self.blueprint)
 
-        root_actions, solution = self._solve_root(state, self._ranges, budget)
+        root_actions, solution = self._solve_root(state, ranges, budget)
         hero = state.current_player
         hero_combo = combo_index_for(state.hole_cards[hero])
         # Rows of root_strategy are already normalized distributions.
@@ -132,12 +156,6 @@ class HUResolver:
         idx = int(np.random.choice(len(root_actions), p=strategy))
         chosen_action = root_actions[idx]
 
-        self._ranges = update_ranges(
-            state,
-            self._ranges,
-            chosen_action,
-            self.blueprint,
-        )
         return ResolveResult(
             action=chosen_action,
             root_actions=root_actions,
