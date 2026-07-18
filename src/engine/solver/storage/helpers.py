@@ -8,6 +8,7 @@ import numpy as np
 import zarr
 
 from src.core.game.actions import Action, ActionType
+from src.engine.solver.storage.array_specs import ARRAY_SPECS
 
 # Checkpoint file names
 CHECKPOINT_ZARR_DIR = "checkpoint.zarr"
@@ -70,13 +71,7 @@ def load_checkpoint_arrays(checkpoint_dir: Path) -> dict[str, np.ndarray]:
     root = zarr.open(store, mode="r")
 
     # Load arrays ([:] triggers decompression)
-    return {
-        "regrets": root["regrets"][:],
-        "strategies": root["strategies"][:],
-        "action_counts": root["action_counts"][:],
-        "reach_counts": root["reach_counts"][:],
-        "cumulative_utility": root["cumulative_utility"][:],
-    }
+    return {spec.checkpoint_key: root[spec.checkpoint_key][:] for spec in ARRAY_SPECS}
 
 
 def _validate_checkpoint_mapping(mapping_data: dict, context: str) -> tuple[int, int]:
@@ -99,40 +94,18 @@ def _validate_checkpoint_mapping(mapping_data: dict, context: str) -> tuple[int,
 
 
 def _validate_checkpoint_arrays(arrays: dict[str, np.ndarray], max_id: int, context: str) -> int:
-    regrets = arrays["regrets"]
-    strategies = arrays["strategies"]
-    action_counts = arrays["action_counts"]
-    reach_counts = arrays["reach_counts"]
-    cumulative_utility = arrays["cumulative_utility"]
-
-    if regrets.shape[0] != max_id:
-        raise ValueError(
-            f"{context}: max_id does not match regrets shape ({max_id} vs {regrets.shape[0]})"
-        )
-    if strategies.shape[0] != max_id:
-        raise ValueError(
-            f"{context}: max_id does not match strategies shape ({max_id} vs {strategies.shape[0]})"
-        )
-    if action_counts.shape[0] != max_id:
-        raise ValueError(
-            f"{context}: max_id does not match action_counts shape "
-            f"({max_id} vs {action_counts.shape[0]})"
-        )
-    if reach_counts.shape[0] != max_id:
-        raise ValueError(
-            f"{context}: max_id does not match reach_counts shape "
-            f"({max_id} vs {reach_counts.shape[0]})"
-        )
-    if cumulative_utility.shape[0] != max_id:
-        raise ValueError(
-            f"{context}: max_id does not match cumulative_utility shape "
-            f"({max_id} vs {cumulative_utility.shape[0]})"
-        )
-    max_actions = regrets.shape[1]
-    if strategies.shape[1] != max_actions:
+    for spec in ARRAY_SPECS:
+        array = arrays[spec.checkpoint_key]
+        if array.shape[0] != max_id:
+            raise ValueError(
+                f"{context}: max_id does not match {spec.checkpoint_key} shape "
+                f"({max_id} vs {array.shape[0]})"
+            )
+    max_actions = arrays["regrets"].shape[1]
+    if arrays["strategies"].shape[1] != max_actions:
         raise ValueError(
             f"{context}: max_actions does not match strategies shape "
-            f"({max_actions} vs {strategies.shape[1]})"
+            f"({max_actions} vs {arrays['strategies'].shape[1]})"
         )
     return max_actions
 

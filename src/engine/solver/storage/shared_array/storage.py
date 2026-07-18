@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from src.engine.solver.infoset import InfoSetKey
+from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.shared_array.checkpoint import (
     checkpoint_storage,
@@ -31,13 +32,18 @@ if TYPE_CHECKING:
 
 
 class SharedArrayStorage(Storage):
-    """Partitioned storage using flat NumPy arrays in shared memory."""
+    """Partitioned storage using flat NumPy arrays in shared memory.
 
-    SHM_REGRETS = "sas_reg"
-    SHM_STRATEGY = "sas_str"
-    SHM_ACTIONS = "sas_act"
-    SHM_REACH = "sas_reach"
-    SHM_UTILITY = "sas_util"
+    The backing arrays are declared once in
+    :data:`~src.engine.solver.storage.shared_array.specs.ARRAY_SPECS`; the
+    annotations below only give the spec-driven ``setattr`` loops static types.
+    """
+
+    shared_regrets: np.ndarray
+    shared_strategy_sum: np.ndarray
+    shared_action_counts: np.ndarray
+    shared_reach_counts: np.ndarray
+    shared_cumulative_utility: np.ndarray
 
     UNKNOWN_ID = 0
     CAPACITY_THRESHOLD = 0.85
@@ -116,11 +122,8 @@ class SharedArrayStorage(Storage):
             pending_id_requests={i: set() for i in range(num_workers)},
         )
 
-        self.shared_regrets = np.empty((0, self.max_actions), dtype=np.float64)
-        self.shared_strategy_sum = np.empty((0, self.max_actions), dtype=np.float64)
-        self.shared_action_counts = np.empty((0,), dtype=np.int32)
-        self.shared_reach_counts = np.empty((0,), dtype=np.int64)
-        self.shared_cumulative_utility = np.empty((0,), dtype=np.float64)
+        for spec in ARRAY_SPECS:
+            setattr(self, spec.attr, np.empty(spec.shape(0, self.max_actions), dtype=spec.dtype))
 
         if is_coordinator:
             self.create_shared_memory()

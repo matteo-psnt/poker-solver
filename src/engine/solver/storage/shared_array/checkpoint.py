@@ -10,6 +10,7 @@ import numcodecs
 import numpy as np
 import zarr
 
+from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.engine.solver.storage.helpers import (
     CheckpointPaths,
     _validate_action_signatures,
@@ -48,11 +49,12 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
 
     old_ids = np.array([old_id for (_, old_id) in items], dtype=np.int32)
 
-    regrets_dense = storage.shared_regrets[old_ids, :].copy()
-    strategies_dense = storage.shared_strategy_sum[old_ids, :].copy()
-    action_counts_dense = storage.shared_action_counts[old_ids].copy()
-    reach_counts_dense = storage.shared_reach_counts[old_ids].copy()
-    cumulative_utility_dense = storage.shared_cumulative_utility[old_ids].copy()
+    dense: dict[str, np.ndarray] = {}
+    for spec in ARRAY_SPECS:
+        array = getattr(storage, spec.attr)
+        dense[spec.checkpoint_key] = (
+            array[old_ids, :].copy() if spec.per_action else array[old_ids].copy()
+        )
 
     store = zarr.DirectoryStore(paths.checkpoint_zarr)
     root = zarr.open(store, mode="w")
@@ -65,41 +67,14 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
 
     chunk_size = storage.zarr_chunk_size
 
-    root.create_dataset(
-        "regrets",
-        data=regrets_dense,
-        chunks=(chunk_size, storage.max_actions),
-        compressor=compressor,
-        dtype=np.float64,
-    )
-    root.create_dataset(
-        "strategies",
-        data=strategies_dense,
-        chunks=(chunk_size, storage.max_actions),
-        compressor=compressor,
-        dtype=np.float64,
-    )
-    root.create_dataset(
-        "action_counts",
-        data=action_counts_dense,
-        chunks=(chunk_size,),
-        compressor=compressor,
-        dtype=np.int32,
-    )
-    root.create_dataset(
-        "reach_counts",
-        data=reach_counts_dense,
-        chunks=(chunk_size,),
-        compressor=compressor,
-        dtype=np.int64,
-    )
-    root.create_dataset(
-        "cumulative_utility",
-        data=cumulative_utility_dense,
-        chunks=(chunk_size,),
-        compressor=compressor,
-        dtype=np.float64,
-    )
+    for spec in ARRAY_SPECS:
+        root.create_dataset(
+            spec.checkpoint_key,
+            data=dense[spec.checkpoint_key],
+            chunks=(chunk_size, storage.max_actions) if spec.per_action else (chunk_size,),
+            compressor=compressor,
+            dtype=spec.dtype,
+        )
 
     root.attrs["iteration"] = iteration
     root.attrs["num_infosets"] = len(items)
@@ -118,7 +93,7 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
         pickle.dump(action_sigs, f)
 
     _validate_action_signatures(
-        action_counts_dense,
+        dense["action_counts"],
         action_sigs,
         f"SharedArrayStorage.checkpoint(iter={iteration})",
     )
@@ -171,12 +146,6 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     if storage.capacity < data.max_id + 1:
         raise ValueError(f"Storage capacity too small: {storage.capacity} vs {data.max_id + 1}")
 
-    my_regrets = data.arrays["regrets"][my_old_ids_array, :]
-    my_strategies = data.arrays["strategies"][my_old_ids_array, :]
-    my_action_counts = data.arrays["action_counts"][my_old_ids_array]
-    my_reach_counts = data.arrays["reach_counts"][my_old_ids_array]
-    my_utility = data.arrays["cumulative_utility"][my_old_ids_array]
-
     new_ids = []
     for key in my_keys:
         new_id = storage.allocate_id()
@@ -185,11 +154,13 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
 
     new_ids_array = np.array(new_ids, dtype=np.int32)
 
-    storage.shared_action_counts[new_ids_array] = my_action_counts
-    storage.shared_reach_counts[new_ids_array] = my_reach_counts
-    storage.shared_cumulative_utility[new_ids_array] = my_utility
-    storage.shared_regrets[new_ids_array, :] = my_regrets
-    storage.shared_strategy_sum[new_ids_array, :] = my_strategies
+    for spec in ARRAY_SPECS:
+        array = getattr(storage, spec.attr)
+        saved = data.arrays[spec.checkpoint_key]
+        if spec.per_action:
+            array[new_ids_array, :] = saved[my_old_ids_array, :]
+        else:
+            array[new_ids_array] = saved[my_old_ids_array]
 
     for new_id, old_id in zip(new_ids, my_old_ids):
         legal_actions = build_legal_actions(
