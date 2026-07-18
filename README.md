@@ -151,7 +151,7 @@ num_workers: null
 seed: 42
 ```
 
-`config/training/default.yaml` documents every available setting and its default; new configs only need the keys they override.
+`config/training/default.yaml` documents every available setting and its default; new configs only need the keys they override. See the [Configuration Guide](config/README.md) for the full schema reference and workflows.
 
 ## Evaluation
 
