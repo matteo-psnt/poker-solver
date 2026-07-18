@@ -27,6 +27,7 @@ from typing import Any
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.gitinfo import get_git_commit, is_git_dirty
+from src.shared.jsonio import json_default
 
 LEDGER_SCHEMA_VERSION = 1
 DEFAULT_LEDGER_PATH = Path("data/eval_ledger.jsonl")
@@ -36,13 +37,6 @@ DEFAULT_LEDGER_PATH = Path("data/eval_ledger.jsonl")
 # measured strategies and the number is meaningless. Kept as data so `compare` and
 # the record builder agree on exactly what "same tier" means.
 TIER_KNOBS = ("scorer", "opponent", "include_off_tree")
-
-
-def _json_default(obj: Any) -> Any:
-    try:
-        return float(obj)
-    except (TypeError, ValueError):
-        return str(obj)
 
 
 def _knob_hash(knobs: dict[str, Any]) -> str:
@@ -209,7 +203,7 @@ def write_payload(run_dir: Path, payload: dict[str, Any], knobs: dict[str, Any])
     evals_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     path = evals_dir / f"eval-{stamp}-{_knob_hash(knobs)}.json"
-    path.write_text(json.dumps(payload, indent=2, default=_json_default))
+    path.write_text(json.dumps(payload, indent=2, default=json_default))
     return path
 
 
@@ -217,7 +211,7 @@ def append_record(record: dict[str, Any], ledger_path: Path = DEFAULT_LEDGER_PAT
     """Append one row to the ledger JSONL, creating it if needed."""
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     with open(ledger_path, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, default=_json_default) + "\n")
+        handle.write(json.dumps(record, default=json_default) + "\n")
 
 
 def read_records(ledger_path: Path = DEFAULT_LEDGER_PATH) -> list[dict[str, Any]]:

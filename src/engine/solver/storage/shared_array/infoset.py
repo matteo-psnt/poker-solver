@@ -111,8 +111,15 @@ def get_infoset(storage: SharedArrayStorage, key: InfoSetKey) -> InfoSet | None:
 
     legal_actions = storage.state.legal_actions_cache.get(infoset_id)
     if legal_actions is None:
-        num_actions = storage.shared_action_counts[infoset_id]
-        legal_actions = [fold() for _ in range(num_actions)]
+        # Every get_infoset consumer matches stored strategy mass to actions BY
+        # IDENTITY (policy lookup, range inference, exploitability). Fabricating
+        # placeholder actions here would silently misattribute that mass, so a
+        # miss — impossible on checkpoint-loaded storage, whose cache is fully
+        # populated on load — must fail loudly instead.
+        raise RuntimeError(
+            f"No legal actions cached for infoset {infoset_id} ({key}); "
+            "strategy lookup on this storage would misattribute probability mass."
+        )
 
     return create_infoset_view(storage, infoset_id, key, legal_actions)
 
@@ -132,6 +139,9 @@ def iter_infosets(storage: SharedArrayStorage):
     for key, infoset_id in storage.state.owned_keys.items():
         legal_actions = storage.state.legal_actions_cache.get(infoset_id)
         if legal_actions is None:
+            # Unlike get_infoset, iteration consumers (quality metrics,
+            # exploitability sweeps) read only the numeric arrays, where just the
+            # action COUNT matters — placeholder identities are never consulted.
             num_actions = storage.shared_action_counts[infoset_id]
             legal_actions = [fold() for _ in range(num_actions)]
         yield create_infoset_view(storage, infoset_id, key, legal_actions)

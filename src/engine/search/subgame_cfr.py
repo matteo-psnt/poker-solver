@@ -27,13 +27,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from src.core.game.evaluator import get_evaluator
-from src.core.game.state import Card, GameState
+from src.core.game.state import FULL_DECK, Card, GameState
 from src.engine.search.range_inference import ALL_COMBOS, COMBO_CARDS, NUM_COMBOS, blocked_combos
 from src.engine.search.tree_builder import LocalTree, LocalTreeNode
 from src.shared.numeric import NORMALIZE_EPS
 
 _MIN_ITERATIONS = 8
-_DECK: list[Card] = Card.get_full_deck()
 _CARD_A = COMBO_CARDS[:, 0]
 _CARD_B = COMBO_CARDS[:, 1]
 
@@ -184,6 +183,7 @@ def solve_subgame(
     budget_ms: int,
     num_runouts: int = 4,
     max_iterations: int | None = None,
+    rng: np.random.Generator | None = None,
 ) -> SubgameSolution:
     """Run RM+ CFR over the local tree; both players adapt per combo.
 
@@ -197,7 +197,7 @@ def solve_subgame(
     if not root.actions:
         raise ValueError("Subgame tree has no root actions.")
 
-    evaluators = _sample_runout_evaluators(root.state, num_runouts)
+    evaluators = _sample_runout_evaluators(root.state, num_runouts, rng)
     # Per-combo count of runouts where the combo is alive (for averaging).
     alive_count = np.zeros(NUM_COMBOS, dtype=np.float64)
     for evaluator in evaluators:
@@ -309,21 +309,25 @@ def _prepare_nodes(
         _prepare_nodes(child, hero, rules, node_data, leaf_specs)
 
 
-def _sample_runout_evaluators(state: GameState, num_runouts: int) -> list[RunoutEvaluator]:
+def _sample_runout_evaluators(
+    state: GameState, num_runouts: int, rng: np.random.Generator | None = None
+) -> list[RunoutEvaluator]:
     """Evaluators on completed boards; exact when the board is already complete."""
     board = state.board
     if len(board) == 5:
         return [RunoutEvaluator(board)]
 
+    if rng is None:
+        rng = np.random.default_rng()
     board_mask = 0
     for card in board:
         board_mask |= card.mask
-    unseen = [card for card in _DECK if not (card.mask & board_mask)]
+    unseen = [card for card in FULL_DECK if not (card.mask & board_mask)]
     missing = 5 - len(board)
 
     evaluators = []
     for _ in range(max(1, num_runouts)):
-        picks = np.random.choice(len(unseen), size=missing, replace=False)
+        picks = rng.choice(len(unseen), size=missing, replace=False)
         runout = tuple(unseen[int(i)] for i in picks)
         evaluators.append(RunoutEvaluator(board + runout))
     return evaluators

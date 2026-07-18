@@ -12,6 +12,7 @@ from src.interfaces.cli.flows.config_editors import (
     edit_system_settings,
     edit_training_params,
 )
+from src.interfaces.cli.flows.config_helpers import list_config_names
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
 from src.shared.config import Config
@@ -37,13 +38,13 @@ def select_config(ctx: CliContext) -> Config | None:
         Loaded Config object or None if cancelled.
     """
     training_config_dir = ctx.config_dir / "training"
-    config_files = sorted(training_config_dir.glob("*.yaml"))
+    config_names = list_config_names(training_config_dir)
 
-    if not config_files:
+    if not config_names:
         ui.error(f"No config files found in {training_config_dir}/")
         return None
 
-    choices = [f.stem for f in config_files] + ["Cancel"]
+    choices = [*config_names, "Cancel"]
     selected = prompts.select(ctx, "Select configuration:", choices=choices)
 
     if selected is None or selected == "Cancel":

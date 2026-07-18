@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 from src.core.game.actions import Action
-from src.shared.numba_ops import (
+from src.engine.solver.numba_ops import (
     average_strategy,
     compute_dcfr_weight,
     regret_matching,

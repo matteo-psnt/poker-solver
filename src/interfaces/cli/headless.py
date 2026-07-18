@@ -26,21 +26,14 @@ from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.training import services
 from src.pipeline.training.services import RolloutParams
-
-
-def _json_default(obj: Any) -> Any:
-    """Coerce non-JSON-native values (e.g. numpy scalars) to plain types."""
-    try:
-        return float(obj)
-    except (TypeError, ValueError):
-        return str(obj)
+from src.shared.jsonio import json_default
 
 
 def _write_result(run_dir: Path, payload: dict[str, Any]) -> None:
     """Persist a per-operation result file (e.g. ``train_result.json``) in the run dir."""
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / f"{payload['op']}_result.json").write_text(
-        json.dumps(payload, indent=2, default=_json_default)
+        json.dumps(payload, indent=2, default=json_default)
     )
 
 
@@ -386,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
         # JSON blob is the ONLY thing on stdout and machine consumers can parse it directly.
         with contextlib.redirect_stdout(sys.stderr):
             payload = args.func(args)
-        print(json.dumps(payload, indent=2, default=_json_default))
+        print(json.dumps(payload, indent=2, default=json_default))
     else:
         payload = args.func(args)
         _print_human(payload)

@@ -180,6 +180,10 @@ class Card:
         return (self.__class__.new, (str(self._card),))
 
 
+# Canonical 52-card deck; evaluators draw runouts and deals from it by index/mask.
+FULL_DECK: tuple[Card, ...] = tuple(Card.get_full_deck())
+
+
 @dataclass(frozen=True)
 class GameState:
     """

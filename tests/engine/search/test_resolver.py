@@ -149,12 +149,15 @@ def test_resolver_is_not_clairvoyant():
 
     def _solve(target_state):
         resolver = HUResolver(
-            blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+            blueprint=solver,
+            action_model=action_model,
+            rules=rules,
+            config=config.resolver,
+            rng=np.random.default_rng(123),
         )
-        # Seed BOTH streams: leaf sampling uses np.random, the blueprint's board
-        # dealing inside rollouts uses the global `random` module.
+        # The blueprint's board dealing inside rollouts uses the global `random`
+        # module; the resolver's own sampling comes from the rng passed above.
         py_random.seed(123)
-        np.random.seed(123)
         return resolver.solve(target_state, time_budget_ms=25)
 
     result = _solve(state)
@@ -194,10 +197,13 @@ def _trained_solver(config, session_id: str):
 def _fresh_matrix(solver, action_model, rules, config, state):
     """Strategy matrix from a fresh resolver under fixed seeds/iterations."""
     resolver = HUResolver(
-        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+        blueprint=solver,
+        action_model=action_model,
+        rules=rules,
+        config=config.resolver,
+        rng=np.random.default_rng(123),
     )
     py_random.seed(123)
-    np.random.seed(123)
     return resolver.solve_strategy_matrix(state)
 
 
@@ -209,23 +215,26 @@ def test_strategy_matrix_rows_are_distributions_and_call_is_pure():
     )
     solver, action_model = _trained_solver(config, "resolver-matrix-pure")
 
-    resolver = HUResolver(
-        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
-    )
-    py_random.seed(123)
-    np.random.seed(123)
-    actions, matrix = resolver.solve_strategy_matrix(state)
+    actions, matrix = _fresh_matrix(solver, action_model, rules, config, state)
 
     assert matrix.shape == (1326, len(actions))
     assert np.all(matrix >= 0.0)
     np.testing.assert_allclose(matrix.sum(axis=1), 1.0)
+
     # Pure: no range state was created or mutated by the call.
+    resolver = HUResolver(
+        blueprint=solver,
+        action_model=action_model,
+        rules=rules,
+        config=config.resolver,
+        rng=np.random.default_rng(123),
+    )
+    py_random.seed(123)
+    resolver.solve_strategy_matrix(state)
     assert resolver._ranges is None
 
     # Reproducible: same seeds + pinned iterations => identical output.
-    py_random.seed(123)
-    np.random.seed(123)
-    actions_again, matrix_again = resolver.solve_strategy_matrix(state)
+    actions_again, matrix_again = _fresh_matrix(solver, action_model, rules, config, state)
     assert actions_again == actions
     np.testing.assert_array_equal(matrix_again, matrix)
 
@@ -333,10 +342,13 @@ def test_strategy_matrix_row_matches_solve_strategy():
     actions, matrix = _fresh_matrix(solver, action_model, rules, config, state)
 
     resolver = HUResolver(
-        blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
+        blueprint=solver,
+        action_model=action_model,
+        rules=rules,
+        config=config.resolver,
+        rng=np.random.default_rng(123),
     )
     py_random.seed(123)
-    np.random.seed(123)
     result = resolver.solve(state)
 
     assert result.root_actions == actions

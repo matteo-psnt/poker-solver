@@ -17,17 +17,18 @@ from src.pipeline.training.services import (
     TrainingOutput,
 )
 from src.shared.config import Config
+from src.shared.jsonio import json_default
 
 
 def test_json_default_coerces_numpy_scalar():
-    """_json_default should turn numpy scalars into plain floats for JSON."""
-    assert headless._json_default(np.float64(1.5)) == 1.5
-    assert isinstance(headless._json_default(np.float64(1.5)), float)
+    """json_default should turn numpy scalars into plain floats for JSON."""
+    assert json_default(np.float64(1.5)) == 1.5
+    assert isinstance(json_default(np.float64(1.5)), float)
 
 
 def test_json_default_falls_back_to_str():
     """Non-numeric objects should stringify rather than raise."""
-    assert headless._json_default(object()).startswith("<object")
+    assert json_default(object()).startswith("<object")
 
 
 def test_resolve_run_dir_prefers_direct_path(tmp_path):

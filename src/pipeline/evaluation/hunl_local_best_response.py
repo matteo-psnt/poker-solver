@@ -79,7 +79,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
 from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
-from src.core.game.state import Card, GameState, Street
+from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.range_inference import ALL_COMBOS, COMBO_MASKS, NUM_COMBOS
 from src.engine.solver.protocols import Blueprint
 from src.pipeline.evaluation.lookahead_scorer import BlueprintDistMemo, LookaheadScorer
@@ -94,9 +94,7 @@ from src.shared.config import ResolverConfig
 from src.shared.numeric import NORMALIZE_EPS
 from src.shared.units import chips_to_bb, chips_to_mbb
 
-# Canonical 52-card deck; runouts and deals draw from it by index/mask.
-_DECK: list[Card] = Card.get_full_deck()
-_DECK_MASKS: np.ndarray = np.array([card.mask for card in _DECK], dtype=np.int64)
+_DECK_MASKS: np.ndarray = np.array([card.mask for card in FULL_DECK], dtype=np.int64)
 
 # Off-tree bet sizes (as a fraction of the pot) the LBR player may bet when it is
 # first to put money in on a street. These are deliberately not the blueprint's
@@ -247,7 +245,13 @@ class _HUNLLocalBestResponse:
                     'LBRConfig.opponent="deployed" requires LBRConfig.resolver '
                     "(with max_iterations set)."
                 )
-            self.opponent = ResolvedOpponent(blueprint, config.resolver)
+            # Child generator: the resolver's runout sampling stays reproducible
+            # under the eval seed without entangling it with the deal stream.
+            self.opponent = ResolvedOpponent(
+                blueprint,
+                config.resolver,
+                rng=np.random.default_rng(int(self.rng.integers(2**63))),
+            )
         else:
             raise ValueError(f"Unknown LBRConfig.opponent: {config.opponent!r}")
 
@@ -452,7 +456,7 @@ class _HUNLLocalBestResponse:
         """
         known = known_mask(state, opp)
         missing = 5 - len(state.board)
-        unseen = [card for card in _DECK if not (card.mask & known)]
+        unseen = [card for card in FULL_DECK if not (card.mask & known)]
         runouts: list[tuple[Card, ...]]
         if missing == 1:
             runouts = [(card,) for card in unseen]
@@ -720,7 +724,7 @@ class _HUNLLocalBestResponse:
             if used & mask:
                 continue
             used |= mask
-            drawn.append(_DECK[idx])
+            drawn.append(FULL_DECK[idx])
         return tuple(board) + tuple(drawn)
 
     # -- Helpers -----------------------------------------------------------
@@ -815,7 +819,7 @@ def _deal_initial_state(
 ) -> GameState:
     """Deal a fresh hand (both hole cards) using ``rng`` for reproducibility."""
     order = rng.permutation(52)
-    cards = [_DECK[int(i)] for i in order[:4]]
+    cards = [FULL_DECK[int(i)] for i in order[:4]]
     hole_cards = ((cards[0], cards[1]), (cards[2], cards[3]))
     return engine.rules.create_initial_state(
         starting_stack=starting_stack,

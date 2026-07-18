@@ -4,7 +4,7 @@ Unit tests for numba-compiled operations.
 Tests the DCFR weight calculation functions.
 """
 
-from src.shared.numba_ops import (
+from src.engine.solver.numba_ops import (
     compute_dcfr_strategy_weight,
     compute_dcfr_weight,
 )
