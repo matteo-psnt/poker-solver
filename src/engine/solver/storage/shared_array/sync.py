@@ -10,14 +10,21 @@ if TYPE_CHECKING:
 
 
 def respond_to_id_requests(
-    storage: SharedArrayStorage, requested_keys: set[InfoSetKey]
+    storage: SharedArrayStorage, requested_keys: set[InfoSetKey], requester: int
 ) -> dict[InfoSetKey, int]:
-    """Respond to ID requests from other workers."""
+    """Respond to ID requests from another worker.
+
+    Keys this worker owns but has not allocated yet are remembered in
+    ``unanswered_id_requests`` and answered proactively when the allocation
+    happens — the requester never has to retry to learn the ID.
+    """
     responses = {}
     for key in requested_keys:
         infoset_id = storage.state.owned_keys.get(key)
         if infoset_id is not None:
             responses[key] = infoset_id
+        else:
+            storage.state.unanswered_id_requests.setdefault(key, set()).add(requester)
     return responses
 
 

@@ -462,6 +462,53 @@ class TestSharedArrayStorage:
         finally:
             storage.cleanup()
 
+    def test_pre_allocation_requests_answered_at_allocation(self):
+        """A request for a not-yet-allocated owned key is answered when the
+        owner allocates it, not left for the requester to retry."""
+        import uuid
+
+        session_id = f"test_{uuid.uuid4().hex[:8]}"
+
+        storage = build_test_storage(
+            num_workers=4,
+            worker_id=0,
+            session_id=session_id,
+            initial_capacity=10000,
+            max_actions=10,
+            is_coordinator=True,
+        )
+
+        try:
+            owned_key = None
+            for i in range(100):
+                key = InfoSetKey(
+                    player_position=0,
+                    street=Street.FLOP,
+                    betting_sequence=f"b{i}.25",
+                    preflop_hand=None,
+                    postflop_bucket=i,
+                    spr_bucket=1,
+                )
+                if storage.get_owner(key) == 0:
+                    owned_key = key
+                    break
+            assert owned_key is not None
+
+            # Request arrives before this worker has allocated the key.
+            responses = storage.respond_to_id_requests({owned_key}, requester=2)
+            assert responses == {}
+            assert storage.state.unanswered_id_requests[owned_key] == {2}
+
+            # Allocation queues the response for the waiting requester.
+            infoset = storage.get_or_create_infoset(owned_key, [fold(), call()])
+            assert infoset.writable
+            allocated_id = storage.state.owned_keys[owned_key]
+            assert storage.state.pending_late_responses[2] == {owned_key: allocated_id}
+            assert owned_key not in storage.state.unanswered_id_requests
+
+        finally:
+            storage.cleanup()
+
     def test_remote_key_cache_updated_on_response(self):
         """Test that remote key cache is updated when receiving ID responses."""
         import uuid

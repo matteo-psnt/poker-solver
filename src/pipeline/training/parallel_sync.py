@@ -60,7 +60,7 @@ def _process_id_requests(
             keys = request["keys"]
 
             # Respond with IDs for keys we own
-            responses = storage.respond_to_id_requests(keys)
+            responses = storage.respond_to_id_requests(keys, requester)
 
             if responses:
                 try:
@@ -77,6 +77,32 @@ def _process_id_requests(
         except queue.Empty:
             break
     return count
+
+
+def _send_late_responses(
+    worker_id: int,
+    id_response_queues: list[mp.Queue],
+    storage: SharedArrayStorage,
+) -> int:
+    """Flush allocation-time responses for requests that arrived pre-allocation.
+
+    Entries stay queued when a requester's queue is full, so they are retried
+    on the next flush instead of being dropped.
+    """
+    sent = 0
+    late = storage.state.pending_late_responses
+    for requester in list(late):
+        responses = late[requester]
+        if not responses or requester == worker_id:
+            late.pop(requester)
+            continue
+        try:
+            id_response_queues[requester].put_nowait(dict(responses))
+        except queue.Full:
+            continue
+        late.pop(requester)
+        sent += len(responses)
+    return sent
 
 
 def _process_id_responses(response_queue: mp.Queue, storage: SharedArrayStorage) -> int:
@@ -110,4 +136,5 @@ def _process_all_messages(
     return {
         "requests": _process_id_requests(worker_id, id_request_queue, id_response_queues, storage),
         "responses": _process_id_responses(id_response_queue, storage),
+        "late_responses": _send_late_responses(worker_id, id_response_queues, storage),
     }

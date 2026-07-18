@@ -39,6 +39,12 @@ def get_or_create_infoset(
         state.owned_keys[key] = infoset_id
         storage.shared_action_counts[infoset_id] = num_actions
         state.legal_actions_cache[infoset_id] = legal_actions
+
+        # Answer workers that requested this key before it existed.
+        waiting = state.unanswered_id_requests.pop(key, None)
+        if waiting is not None:
+            for requester in waiting:
+                state.pending_late_responses.setdefault(requester, {})[key] = infoset_id
         return create_infoset_view(storage, infoset_id, key, legal_actions)
 
     if key not in state.requested_id_keys:
