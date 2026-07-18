@@ -7,6 +7,7 @@ to a player given their information (hole cards, board, betting history).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -168,7 +169,7 @@ class InfoSet:
     """
 
     def __init__(
-        self, key: InfoSetKey, legal_actions: list[Action], *, allocate_arrays: bool = True
+        self, key: InfoSetKey, legal_actions: Sequence[Action], *, allocate_arrays: bool = True
     ):
         """
         Initialize information set.

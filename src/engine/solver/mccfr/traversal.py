@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -31,7 +32,7 @@ def _infoset_context(
     self: MCCFRSolver,
     state: GameState,
     current_player: int,
-) -> tuple[InfoSet, list[Action], list[int], np.ndarray]:
+) -> tuple[InfoSet, Sequence[Action], list[int], np.ndarray]:
     """Build infoset, filter valid actions, and compute strategy over valid actions."""
     infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
     legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)

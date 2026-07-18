@@ -417,7 +417,7 @@ class TestMenuGating:
         engine.shadow.start(state)
         menu = engine._action_menu(state, engine.shadow)
         legal = engine.rules.get_legal_actions(state, action_model=engine.action_model)
-        assert [candidate.real_action for candidate in menu] == legal
+        assert tuple(candidate.real_action for candidate in menu) == legal
         assert all(candidate.shadow_dist == ((candidate.real_action, 1.0),) for candidate in menu)
 
     def test_off_tree_bets_offered_when_leading(self, solver):

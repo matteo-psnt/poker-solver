@@ -442,3 +442,59 @@ class TestGameRules:
         # Both players have acted and checked - would advance to turn
         # (This is tested more thoroughly in state tests, but validates rules integration)
         assert state.street == Street.FLOP
+
+
+class TestIncrementalBettingSequence:
+    """The O(1) sequence cache set by apply_action must equal a full recompute.
+
+    apply_action derives each child's normalized betting sequence by extending
+    the parent's cached sequence with one token (state._adopt_sequence_cache).
+    These playouts drive every action type — including all-in for less — and
+    check the derived cache against renormalizing the whole history from
+    scratch at every step.
+    """
+
+    @staticmethod
+    def _from_scratch(state: GameState) -> str:
+        import dataclasses
+
+        # replace() resets the init=False cache field, forcing a full recompute.
+        return dataclasses.replace(state).normalized_betting_sequence()
+
+    def test_matches_full_recompute_over_random_playouts(self):
+        import random
+
+        rng = random.Random(7)
+        rules = GameRules(small_blind=1, big_blind=2)
+        deck = list(Card.get_full_deck())
+
+        for hand in range(200):
+            cards = rng.sample(deck, 9)
+            hole = ((cards[0], cards[1]), (cards[2], cards[3]))
+            runout = cards[4:]
+            # Small stacks make all-in-for-less spots common.
+            state = rules.create_initial_state(
+                starting_stack=rng.choice([6, 10, 20, 50]), hole_cards=hole, button=hand % 2
+            )
+
+            for _ in range(40):
+                if state.is_terminal:
+                    break
+                # Deal the board after a street advance, like the CFR loop does.
+                need = state.street.board_card_count - len(state.board)
+                if need > 0:
+                    board = (
+                        state.board + tuple(runout[: len(state.board) + need])[len(state.board) :]
+                    )
+                    state = state.replace(board=board, validate=False)
+
+                actions = list(rules.get_legal_actions(state, None))
+                stack = state.stacks[state.current_player]
+                if state.can_bet() and stack > 1:
+                    actions.append(bet(rng.randint(1, stack - 1)))
+                if state.can_raise() and stack > state.to_call + 1:
+                    actions.append(raises(rng.randint(1, stack - state.to_call - 1)))
+
+                state = rules.apply_action(state, rng.choice(actions))
+                assert state._cached_betting_sequence is not None
+                assert state._cached_betting_sequence == self._from_scratch(state)

@@ -30,13 +30,13 @@ class Street(Enum):
     TURN = auto()
     RIVER = auto()
 
+    # Number of board cards a fully-dealt board has on this street. Set as a
+    # plain member attribute below (not a property): this is read on every
+    # traversal node and the descriptor + dict-hash indirection is measurable.
+    board_card_count: int
+
     def __str__(self) -> str:
         return self.name.lower()
-
-    @property
-    def board_card_count(self) -> int:
-        """Number of board cards a fully-dealt board has on this street."""
-        return _BOARD_CARD_COUNT[self]
 
     def is_preflop(self) -> bool:
         return self == Street.PREFLOP
@@ -63,6 +63,8 @@ _BOARD_CARD_COUNT: dict[Street, int] = {
     Street.TURN: 4,
     Street.RIVER: 5,
 }
+for _street, _count in _BOARD_CARD_COUNT.items():
+    _street.board_card_count = _count
 
 
 class Card:
@@ -244,7 +246,10 @@ class GameState:
         # Skip validation if requested (for CFR internal states)
         if self._skip_validation:
             return
+        self.validate()
 
+    def validate(self) -> None:
+        """Check state invariants; raises ValueError on any violation."""
         # Validate player indices
         if self.button_position not in (0, 1):
             raise ValueError(f"Invalid button_position: {self.button_position}")
@@ -313,7 +318,7 @@ class GameState:
 
     def legal_actions(
         self, action_model: ActionModel | None = None, rules: GameRules | None = None
-    ) -> list[Action]:
+    ) -> tuple[Action, ...]:
         """Get legal actions for current player using the provided rules engine."""
         if rules is None:
             raise ValueError("rules is required for GameState.legal_actions()")
@@ -340,9 +345,31 @@ class GameState:
         board is dealt fails the board-size check). The flag is symmetric: the
         derived state's ``_skip_validation`` is set from ``validate``, never
         inherited from the source state.
+
+        Hand-rolled instead of ``dataclasses.replace``: this runs once per
+        traversal edge, and the generated ``__init__`` machinery is ~3x slower
+        than copying slots directly. The betting-sequence cache survives the
+        copy whenever none of its inputs (``betting_history``, ``pot``,
+        ``blind_to_call``) change, so derived states on the same betting line
+        skip renormalizing the full history.
         """
-        changes.setdefault("_skip_validation", not validate)
-        return dataclasses.replace(self, **changes)
+        if "_cached_betting_sequence" in changes:
+            raise TypeError("_cached_betting_sequence is derived; it cannot be set via replace()")
+        skip = changes.pop("_skip_validation", not validate)
+        new = object.__new__(GameState)
+        setattr_ = object.__setattr__
+        for name in _STATE_FIELDS:
+            setattr_(new, name, getattr(self, name))
+        for name, value in changes.items():
+            setattr_(new, name, value)
+        setattr_(new, "_skip_validation", skip)
+        cache = self._cached_betting_sequence
+        if cache is not None and not _SEQUENCE_FIELDS.isdisjoint(changes):
+            cache = None
+        setattr_(new, "_cached_betting_sequence", cache)
+        if not skip:
+            new.validate()
+        return new
 
     @property
     def ended_by_fold(self) -> bool:
@@ -352,6 +379,24 @@ class GameState:
     def normalized_betting_sequence(self) -> str:
         """Return canonical betting-sequence encoding used in infoset keys."""
         return self._normalize_betting_sequence()
+
+    def derive_sequence_cache(self, parent: GameState, action: Action) -> None:
+        """Derive this state's betting-sequence cache from ``parent``'s in O(1).
+
+        Precondition (guaranteed by ``GameRules.apply_action``, the only
+        caller): ``self.betting_history`` is ``parent.betting_history`` with
+        ``action`` appended, and the pot moved by exactly the contribution
+        ``_normalize_betting_sequence`` models for ``action``. Under that
+        invariant the anchor pot for the appended action is ``parent.pot``, so
+        extending the parent's sequence by one token equals a full recompute.
+        """
+        if self._cached_betting_sequence is not None:
+            return
+        parent_seq = parent._normalize_betting_sequence()
+        token = action.normalize(parent.pot)
+        object.__setattr__(
+            self, "_cached_betting_sequence", f"{parent_seq}-{token}" if parent_seq else token
+        )
 
     def _normalize_betting_sequence(self) -> str:
         """
@@ -429,3 +474,15 @@ class GameState:
             f"GameState({player_str} to act | {street_str} | {pot_str} | "
             f"{stacks_str} | {board_str} | {to_call_str})"
         )
+
+
+# Fields replace() copies verbatim; the two it manages itself are excluded.
+_STATE_FIELDS: tuple[str, ...] = tuple(
+    f.name
+    for f in dataclasses.fields(GameState)
+    if f.name not in ("_skip_validation", "_cached_betting_sequence")
+)
+
+# The inputs _normalize_betting_sequence() reads; changing any of them
+# invalidates the carried cache.
+_SEQUENCE_FIELDS: frozenset[str] = frozenset(("betting_history", "pot", "blind_to_call"))

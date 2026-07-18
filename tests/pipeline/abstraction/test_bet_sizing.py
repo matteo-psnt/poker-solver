@@ -277,7 +277,7 @@ class TestActionAbstraction:
             to_call=0,
             _skip_validation=True,
         )
-        assert _legal_actions(abstraction, state) == []
+        assert _legal_actions(abstraction, state) == ()
 
     def test_discretize_passthrough_for_non_aggressive_actions(self):
         abstraction = ActionModel(Config.default())

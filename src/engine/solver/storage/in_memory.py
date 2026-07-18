@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +31,7 @@ class InMemoryStorage(Storage):
         if self.checkpoint_dir and self.checkpoint_dir.exists():
             self._load_from_checkpoint()
 
-    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: list[Action]) -> InfoSet:
+    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: Sequence[Action]) -> InfoSet:
         infoset_id = self.key_to_id.get(key)
         if infoset_id is not None:
             return self._infosets_by_id[infoset_id]

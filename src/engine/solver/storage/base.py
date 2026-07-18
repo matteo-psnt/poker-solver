@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from src.core.game.actions import Action
@@ -12,7 +12,7 @@ class Storage(ABC):
     checkpoint_dir: Path | None = None
 
     @abstractmethod
-    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: list[Action]) -> InfoSet:
+    def get_or_create_infoset(self, key: InfoSetKey, legal_actions: Sequence[Action]) -> InfoSet:
         """Get existing infoset or create new one."""
         pass
 
