@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from src.core.game.state import Street
+from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.storage.array_specs import ARRAY_SPECS
 from src.pipeline.training import components
 from src.pipeline.training.trainer.session import TrainingSession
@@ -68,6 +70,17 @@ def test_config(temp_run_dir):
     )
 
 
+def _key(i: int) -> InfoSetKey:
+    return InfoSetKey(
+        player_position=i % 2,
+        street=Street.FLOP,
+        betting_sequence=f"b{i}",
+        preflop_hand=None,
+        postflop_bucket=i,
+        spr_bucket=0,
+    )
+
+
 def _live_segments(session: TrainingSession) -> list[str]:
     """Shared-memory handles the session's bootstrap storage still holds."""
     return [
@@ -88,6 +101,33 @@ def test_training_releases_the_bootstrap_storage(test_config, temp_run_dir):
     session = TrainingSession(test_config, run_id=temp_run_dir.name)
     session.train(num_iterations=1, num_workers=1)
     assert _live_segments(session) == [], "bootstrap segments leaked past training start"
+
+
+def test_release_drops_the_key_dicts_before_the_fork(test_config, temp_run_dir):
+    """The COW storm, not the shared memory, is what OOMs a resume.
+
+    With num_workers=1 this storage owns every key, so on resume owned_keys holds
+    one entry per infoset (~289 bytes each: ~3 GB at 10.6M infosets, ~5 GB at 18M).
+    Workers are forked and CPython refcounting touches inherited pages, so every
+    child copies it. Freeing only the shared memory leaves that heap in place.
+    """
+    session = TrainingSession(test_config, run_id=temp_run_dir.name)
+
+    # A fresh session's dicts are empty, so stand in for the resume case by
+    # populating them; otherwise this test passes with or without the fix.
+    state = session.storage.state
+    state.owned_keys = {_key(i): i for i in range(64)}
+    state.legal_actions_cache = {i: () for i in range(64)}
+    state.remote_keys = {_key(i): i for i in range(64, 96)}
+    state.requested_id_keys = {_key(i) for i in range(96, 100)}
+    assert state.owned_keys, "guard: the dicts must be populated for this to mean anything"
+
+    session.train(num_iterations=1, num_workers=1)
+
+    assert state.owned_keys == {}
+    assert state.remote_keys == {}
+    assert state.legal_actions_cache == {}
+    assert state.requested_id_keys == set()
 
 
 def test_release_is_idempotent(test_config, temp_run_dir):
