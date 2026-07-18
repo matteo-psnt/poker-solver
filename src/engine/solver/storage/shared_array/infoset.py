@@ -15,30 +15,34 @@ def get_or_create_infoset(
     storage: SharedArrayStorage, key: InfoSetKey, legal_actions: list[Action]
 ) -> InfoSet:
     """Get existing infoset or create new one."""
-    owner = storage.get_owner(key)
+    state = storage.state
 
-    if owner == storage.worker_id:
-        infoset_id = storage.state.owned_keys.get(key)
-        if infoset_id is None:
-            num_actions = len(legal_actions)
-            if num_actions > storage.max_actions:
-                raise ValueError(
-                    f"Infoset has {num_actions} actions, exceeding max_actions={storage.max_actions}. "
-                    "Increase max_actions in storage config or reduce action abstraction complexity."
-                )
-
-            infoset_id = allocate_id(storage)
-            storage.state.owned_keys[key] = infoset_id
-            storage.shared_action_counts[infoset_id] = num_actions
-            storage.state.legal_actions_cache[infoset_id] = legal_actions
-
-        return create_infoset_view(storage, infoset_id, key, legal_actions)
-
-    infoset_id = storage.state.remote_keys.get(key)
+    # Known keys resolve by dict lookup alone; the owner hash (xxhash over
+    # encoded key bytes) is only paid on the first-ever visit to a key.
+    infoset_id = state.owned_keys.get(key)
+    if infoset_id is None:
+        infoset_id = state.remote_keys.get(key)
     if infoset_id is not None:
         return create_infoset_view(storage, infoset_id, key, legal_actions)
 
-    storage.state.pending_id_requests[owner].add(key)
+    owner = storage.get_owner(key)
+
+    if owner == storage.worker_id:
+        num_actions = len(legal_actions)
+        if num_actions > storage.max_actions:
+            raise ValueError(
+                f"Infoset has {num_actions} actions, exceeding max_actions={storage.max_actions}. "
+                "Increase max_actions in storage config or reduce action abstraction complexity."
+            )
+
+        infoset_id = allocate_id(storage)
+        state.owned_keys[key] = infoset_id
+        storage.shared_action_counts[infoset_id] = num_actions
+        state.legal_actions_cache[infoset_id] = legal_actions
+        return create_infoset_view(storage, infoset_id, key, legal_actions)
+
+    if key not in state.requested_id_keys:
+        state.pending_id_requests[owner].add(key)
     return create_infoset_view(storage, storage.UNKNOWN_ID, key, legal_actions)
 
 
@@ -67,7 +71,7 @@ def create_infoset_view(
 ) -> InfoSet:
     """Create an infoset backed by shared-memory views."""
     num_actions = len(legal_actions)
-    infoset = InfoSet(key, legal_actions)
+    infoset = InfoSet(key, legal_actions, allocate_arrays=False)
 
     regrets_view = storage.shared_regrets[infoset_id, :num_actions]
     strategy_view = storage.shared_strategy_sum[infoset_id, :num_actions]

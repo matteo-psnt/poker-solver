@@ -402,6 +402,66 @@ class TestSharedArrayStorage:
         finally:
             storage.cleanup()
 
+    def test_in_flight_requests_not_repending_until_rearm(self):
+        """Visits to an in-flight key must not re-queue it; rearm retries it."""
+        import uuid
+
+        session_id = f"test_{uuid.uuid4().hex[:8]}"
+
+        storage = build_test_storage(
+            num_workers=4,
+            worker_id=0,
+            session_id=session_id,
+            initial_capacity=10000,
+            max_actions=10,
+            is_coordinator=True,
+        )
+
+        try:
+            remote_key = None
+            remote_owner = None
+            for i in range(100):
+                key = InfoSetKey(
+                    player_position=1,
+                    street=Street.TURN,
+                    betting_sequence=f"b{i}.5",
+                    preflop_hand=None,
+                    postflop_bucket=i,
+                    spr_bucket=2,
+                )
+                owner = storage.get_owner(key)
+                if owner != 0:
+                    remote_key = key
+                    remote_owner = owner
+                    break
+            assert remote_key is not None and remote_owner is not None
+
+            storage.get_or_create_infoset(remote_key, [fold(), call()])
+            assert remote_key in storage.state.pending_id_requests[remote_owner]
+
+            # Simulate a flush: pending moves to in-flight.
+            storage.state.pending_id_requests[remote_owner].clear()
+            storage.state.requested_id_keys.add(remote_key)
+
+            # Re-visiting while in flight must not re-queue the key.
+            storage.get_or_create_infoset(remote_key, [fold(), call()])
+            assert remote_key not in storage.state.pending_id_requests[remote_owner]
+
+            # Batch boundary: unanswered keys are re-armed exactly once.
+            assert storage.rearm_unresolved_id_requests() == 1
+            assert remote_key in storage.state.pending_id_requests[remote_owner]
+            assert not storage.state.requested_id_keys
+
+            # A resolved key is not re-armed.
+            storage.state.pending_id_requests[remote_owner].clear()
+            storage.state.requested_id_keys.add(remote_key)
+            storage.state.remote_keys[remote_key] = 123
+            assert storage.rearm_unresolved_id_requests() == 0
+            assert remote_key not in storage.state.pending_id_requests[remote_owner]
+
+        finally:
+            storage.cleanup()
+
     def test_remote_key_cache_updated_on_response(self):
         """Test that remote key cache is updated when receiving ID responses."""
         import uuid

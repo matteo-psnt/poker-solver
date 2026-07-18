@@ -165,6 +165,7 @@ def _worker_loop(
                 break
 
             elif job_type == JobType.EXCHANGE_IDS:
+                storage.rearm_unresolved_id_requests()
                 _send_pending_id_requests(worker_id, id_request_queues, storage)
 
                 # Process any incoming requests/responses
@@ -309,6 +310,14 @@ def _worker_loop(
                     )
 
                 batch_count += 1
+
+        # Discard undelivered cross-worker messages: peers are shutting down too,
+        # so nobody drains these queues, and a feeder thread with buffered data
+        # blocks process exit until the coordinator's join timeout force-kills us
+        # (worker_count x 10s of pure shutdown wall-clock). The result queue is
+        # left alone so genuine results/errors always flush.
+        for q in (job_queue, *id_request_queues, *id_response_queues):
+            q.cancel_join_thread()
 
         # Cleanup (just close handles, don't unlink - coordinator does that)
         storage.cleanup()
