@@ -110,11 +110,12 @@ def _cmd_ledger(args: argparse.Namespace) -> dict[str, Any]:
 def _cmd_compare(args: argparse.Namespace) -> dict[str, Any]:
     """Paired (common-random-numbers) comparison of two runs' latest evals."""
     ledger_path = Path(args.ledger)
-    rec_a = eval_ledger.latest_record_for_run(args.a, ledger_path)
-    rec_b = eval_ledger.latest_record_for_run(args.b, ledger_path)
+    rec_a = eval_ledger.latest_record_for_run(args.a, ledger_path, args.a_at)
+    rec_b = eval_ledger.latest_record_for_run(args.b, ledger_path, args.b_at)
     if rec_a is None or rec_b is None:
-        missing = args.a if rec_a is None else args.b
-        raise SystemExit(f"No ledger entry found for run '{missing}' in {ledger_path}")
+        missing, at = (args.a, args.a_at) if rec_a is None else (args.b, args.b_at)
+        at_note = f" at checkpoint iteration {at}" if at is not None else ""
+        raise SystemExit(f"No ledger entry found for run '{missing}'{at_note} in {ledger_path}")
 
     reasons = eval_ledger.tier_mismatches(rec_a, rec_b)
     if reasons and not args.force:
@@ -136,6 +137,9 @@ def _cmd_compare(args: argparse.Namespace) -> dict[str, Any]:
         "op": "compare",
         "run_a": args.a,
         "run_b": args.b,
+        # Which checkpoints were actually compared: a run id alone does not say.
+        "checkpoint_iteration_a": rec_a.get("checkpoint_iteration"),
+        "checkpoint_iteration_b": rec_b.get("checkpoint_iteration"),
         "forced": bool(reasons and args.force),
         "tier_warnings": reasons,
         "comparison": comparison,
@@ -357,6 +361,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compare.add_argument("--a", required=True, help="First run id (baseline).")
     p_compare.add_argument("--b", required=True, help="Second run id (candidate).")
+    p_compare.add_argument(
+        "--a-at",
+        type=int,
+        default=None,
+        help=(
+            "Checkpoint iteration to select for --a. Needed when a run has been "
+            "evaluated at more than one checkpoint; otherwise the newest row wins."
+        ),
+    )
+    p_compare.add_argument(
+        "--b-at",
+        type=int,
+        default=None,
+        help="Checkpoint iteration to select for --b (see --a-at).",
+    )
     p_compare.add_argument(
         "--ledger",
         default=str(eval_ledger.DEFAULT_LEDGER_PATH),
