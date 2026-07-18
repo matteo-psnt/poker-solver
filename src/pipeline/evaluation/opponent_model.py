@@ -69,6 +69,14 @@ class OpponentModel(Protocol):
         """Start of a hand; ``actor`` is the seat this model plays."""
         ...
 
+    def reseed(self, seed: int) -> None:
+        """Re-seed any randomness this model consumes, for per-hand determinism.
+
+        Called once per hand per seat by the LBR driver. Models whose decisions
+        are deterministic given the state implement this as a no-op.
+        """
+        ...
+
     def action_matrix(
         self, state: GameState, actor: int
     ) -> tuple[list[Action], dict[Action, np.ndarray]]:
@@ -109,6 +117,10 @@ class BlueprintOpponent:
 
     def reset(self, initial_state: GameState, actor: int) -> None:
         del initial_state, actor
+
+    def reseed(self, seed: int) -> None:
+        # Blueprint lookups are deterministic given the state; no RNG to seed.
+        del seed
 
     def observe(self, state: GameState, action: Action) -> None:
         del state, action
@@ -260,6 +272,13 @@ class ResolvedOpponent:
         # (which can precede the first action_matrix call).
         self._ranges = infer_ranges(initial_state, self.blueprint)
         self._seat = actor
+
+    def reseed(self, seed: int) -> None:
+        # The resolver's generator drives leaf-runout sampling inside
+        # solve_subgame, so it changes the returned strategy matrix -- it is
+        # part of the measured behavior and must be pinned per hand, not left
+        # to advance across hands in a worker-dependent order.
+        self._resolver.rng = np.random.default_rng(seed)
 
     def action_matrix(
         self, state: GameState, actor: int

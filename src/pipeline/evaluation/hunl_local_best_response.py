@@ -833,6 +833,20 @@ def _hand_seed(base_seed: int, hand: int) -> int:
     return int(np.random.SeedSequence([base_seed, hand]).generate_state(1)[0])
 
 
+# Distinguishes the opponent-model stream from the deal/LBR stream under the
+# same (base_seed, hand): the two must not be correlated.
+_OPPONENT_STREAM = 1
+
+
+def _opponent_hand_seed(base_seed: int, hand: int) -> int:
+    """Per-hand seed for the opponent model's own randomness.
+
+    Kept on a separate stream from ``_hand_seed`` so the opponent's sampling is
+    uncorrelated with the deal it is responding to.
+    """
+    return int(np.random.SeedSequence([base_seed, hand, _OPPONENT_STREAM]).generate_state(1)[0])
+
+
 def _play_hand_pair(
     engine: _HUNLLocalBestResponse,
     hand: int,
@@ -842,18 +856,27 @@ def _play_hand_pair(
     """Play one deal from both positions under a per-hand deterministic RNG.
 
     Reseeds every randomness source consumed during the hand — the engine's own
-    ``rng`` and the global ``random`` module (the blueprint deals the board via
-    ``random.shuffle``) — from ``(base_seed, hand)``, so the result is independent of
-    which worker runs the hand or in what order. ``np.random`` is reseeded defensively
-    (no global ``np.random`` is used in the current LBR path, but this guards new ones).
+    ``rng``, the global ``random`` module (the blueprint deals the board via
+    ``random.shuffle``), and the opponent model's own generator — from
+    ``(base_seed, hand)``, so the result is independent of which worker runs the hand
+    or in what order. ``np.random`` is reseeded defensively (no global ``np.random``
+    is used in the current LBR path, but this guards new ones).
+
+    The opponent is reseeded identically before each seat: the two games of a pair
+    are the same deal with the seats swapped, so giving them common random numbers
+    keeps the pair a true paired sample rather than adding opponent noise to the
+    difference.
     """
     s_h = _hand_seed(base_seed, hand)
     random.seed(s_h)
     np.random.seed(s_h)
     engine.rng = np.random.default_rng(s_h)
+    s_opp = _opponent_hand_seed(base_seed, hand)
     button = hand % 2
     state = _deal_initial_state(engine, starting_stack, button, engine.rng)
+    engine.opponent.reseed(s_opp)
     outcome_p0 = engine.play_hand(0, state)
+    engine.opponent.reseed(s_opp)
     outcome_p1 = engine.play_hand(1, state)
     return outcome_p0, outcome_p1
 
