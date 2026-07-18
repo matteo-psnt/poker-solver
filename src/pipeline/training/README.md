@@ -29,9 +29,12 @@ train(num_iterations=None, num_workers=None, batch_size=None)
     # num_workers defaults to CPU count; batch_size defaults to
     # iterations_per_worker * num_workers.
 
-TrainingSession.resume(run_dir: Path, checkpoint_id: str | None = None)
+TrainingSession.resume(run_dir: Path, capacity_override: int | None = None)
     # Classmethod: load solver state from a checkpoint and return a
-    # configured session; call .train() to continue.
+    # configured session; call .train() to continue. The iteration to
+    # continue from comes from the checkpoint manifest (committed atomically
+    # with the arrays), not from .run.json, which is written separately and
+    # can lag the data when a leg is hard-killed.
 
 evaluate(num_samples=10000, num_rollouts_per_infoset=100,
          use_average_strategy=True, seed=None)
