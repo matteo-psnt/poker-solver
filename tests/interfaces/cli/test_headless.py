@@ -7,16 +7,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from src.core.actions.action_model import ActionModel
 from src.interfaces.cli import headless
 from src.pipeline.evaluation import ledger as eval_ledger
-from src.pipeline.training.run_tracker import RunMetadata
-from src.pipeline.training.services import (
+from src.pipeline.services import (
     LBR_ESTIMATOR_LABEL,
     ROLLOUT_ESTIMATOR_LABEL,
     TrainingOutput,
 )
-from src.shared.config import Config
 from src.shared.jsonio import json_default
 
 
@@ -159,16 +156,17 @@ def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
         "pair_samples_mbb": samples,
     }
     payload_path = eval_ledger.write_payload(run_dir, {"results": results}, knobs)
-    config = Config.default()
-    run_metadata = RunMetadata.new(
+    provenance = eval_ledger.RunProvenance(
         run_id=run_id,
+        git_commit="cafebabe" * 5,
+        git_dirty=False,
         config_name="quick_test",
-        config=config,
-        action_config_hash=ActionModel(config).get_config_hash(),
         card_abstraction_hash="hash",
+        action_config_hash="beefcafe",
+        representation_version=1,
     )
     record = eval_ledger.build_record(
-        run_metadata=run_metadata,
+        provenance=provenance,
         method="lbr",
         estimator=LBR_ESTIMATOR_LABEL,
         infosets=10,

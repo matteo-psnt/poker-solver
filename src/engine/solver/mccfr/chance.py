@@ -11,14 +11,6 @@ if TYPE_CHECKING:
     from .solver import MCCFRSolver
 
 
-EXPECTED_BOARD_SIZE: dict[Street, int] = {
-    Street.PREFLOP: 0,
-    Street.FLOP: 3,
-    Street.TURN: 4,
-    Street.RIVER: 5,
-}
-
-
 def deal_initial_state(self: MCCFRSolver) -> GameState:
     """Deal random cards and create the initial game state."""
     self._deck.cards = list(self._deck_cards)
@@ -38,7 +30,7 @@ def deal_initial_state(self: MCCFRSolver) -> GameState:
 
 def is_chance_node(self: MCCFRSolver, state: GameState) -> bool:
     """Check if state still needs chance-card dealing."""
-    return len(state.board) < self._EXPECTED_BOARD_SIZE[state.street]
+    return len(state.board) < state.street.board_card_count
 
 
 def prepare_shuffled_deck(self: MCCFRSolver, state: GameState) -> None:

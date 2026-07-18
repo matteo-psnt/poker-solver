@@ -70,7 +70,7 @@ def precompute(
     Output lands under /root/data/combo_abstraction (the Volume). num_workers is pinned
     to the cpu reservation (the container reports host cores, not the reservation).
     """
-    from src.pipeline.training import services
+    from src.pipeline import services
 
     out = services.precompute_abstraction(
         abstraction_config,
@@ -97,7 +97,7 @@ def train(
     commit: bool = True,
 ) -> dict[str, Any]:
     """Run a headless training session in the container and (optionally) persist checkpoints."""
-    from src.pipeline.training import services
+    from src.pipeline import services
 
     out = services.train(
         config_name,
@@ -152,8 +152,8 @@ def evaluate(
     ``opponent="deployed"`` measures blueprint+resolver (the system that actually
     plays) with solves pinned to ``resolver_iterations`` CFR iterations.
     """
+    from src.pipeline import services
     from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
-    from src.pipeline.training import services
 
     # Pick up runs committed by earlier train() calls in other containers.
     data_volume.reload()
@@ -206,7 +206,7 @@ def resolver_gate(
     seed: int = 1,
 ) -> dict[str, Any]:
     """Duplicate-deal head-to-head: blueprint+resolver vs bare blueprint."""
-    from src.pipeline.training import services
+    from src.pipeline import services
 
     data_volume.reload()
     out = services.evaluate_run_resolver_gate(
@@ -235,7 +235,7 @@ def resume(
     Loads the latest checkpoint the trainer committed and continues training. Passing
     a ``num_workers`` different from the original run also exercises key re-partitioning.
     """
-    from src.pipeline.training import services
+    from src.pipeline import services
 
     data_volume.reload()
     run_dir = Path("data/runs") / run_id

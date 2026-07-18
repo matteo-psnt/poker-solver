@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action
 from src.core.game.rules import GameRules
-from src.core.game.state import GameState, Street
+from src.core.game.state import GameState
 
 
 @dataclass
@@ -92,10 +92,4 @@ def _expand(
 
 
 def _is_chance_node(state: GameState) -> bool:
-    expected_board_size = {
-        Street.PREFLOP: 0,
-        Street.FLOP: 3,
-        Street.TURN: 4,
-        Street.RIVER: 5,
-    }
-    return len(state.board) < expected_board_size[state.street]
+    return len(state.board) < state.street.board_card_count

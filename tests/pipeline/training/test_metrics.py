@@ -5,10 +5,11 @@ import time
 import numpy as np
 import pytest
 
-from src.core.game.actions import Action, ActionType
-from src.core.game.state import Street
-from src.engine.solver.infoset import InfoSet, InfoSetKey
-from src.pipeline.training.metrics import MetricsTracker
+from src.pipeline.training.metrics import (
+    MetricsTracker,
+    compute_quality_from_arrays,
+    normalized_entropy,
+)
 
 
 class TestMetricsTracker:
@@ -128,70 +129,21 @@ class TestMetricsTracker:
         assert "MetricsTracker" in s
         assert "iter=1" in s
 
-    def test_solver_quality_metrics_with_sampler(self):
-        """Test solver-quality metrics with infoset sampler."""
+    def test_solver_quality_metrics_from_arrays(self):
+        """Quality metrics computed from shared arrays feed the rolling windows."""
+        # Three allocated rows: positive regrets (2 actions), all-zero regrets
+        # (2 actions), all-zero regrets (3 actions -> uniform strategy).
+        regrets = np.zeros((4, 3), dtype=np.float64)
+        regrets[0, :2] = [10.0, 5.0]
+        action_counts = np.array([2, 2, 3, 0], dtype=np.int32)
+        sample_ids = np.array([0, 1, 2])
+
+        quality = compute_quality_from_arrays(regrets, action_counts, sample_ids)
+
         tracker = MetricsTracker(sample_size=10)
+        tracker.log_iteration(iteration=1, utility=10.0, num_infosets=100)
+        tracker.record_quality(quality)
 
-        # Create mock infosets with different characteristics
-        def create_mock_sampler():
-            # Create some sample infosets
-            infosets = []
-
-            # Infoset with positive regrets
-            key1 = InfoSetKey(
-                player_position=0,
-                street=Street.FLOP,
-                betting_sequence="c",
-                preflop_hand=None,
-                postflop_bucket=0,
-                spr_bucket=1,
-            )
-            actions = [Action(ActionType.FOLD), Action(ActionType.CALL)]
-            infoset1 = InfoSet(key1, actions)
-            infoset1.regrets = np.array([10.0, 5.0], dtype=np.float32)
-            infosets.append(infoset1)
-
-            # Infoset with all zero regrets
-            key2 = InfoSetKey(
-                player_position=1,
-                street=Street.FLOP,
-                betting_sequence="b0.5",
-                preflop_hand=None,
-                postflop_bucket=1,
-                spr_bucket=1,
-            )
-            infoset2 = InfoSet(key2, actions)
-            infoset2.regrets = np.array([0.0, 0.0], dtype=np.float32)
-            infosets.append(infoset2)
-
-            # Infoset with uniform strategy (3 actions)
-            key3 = InfoSetKey(
-                player_position=0,
-                street=Street.TURN,
-                betting_sequence="c-b0.5",
-                preflop_hand=None,
-                postflop_bucket=2,
-                spr_bucket=1,
-            )
-            actions3 = [
-                Action(ActionType.FOLD),
-                Action(ActionType.CALL),
-                Action(ActionType.RAISE, 10),
-            ]
-            infoset3 = InfoSet(key3, actions3)
-            infoset3.regrets = np.array(
-                [0.0, 0.0, 0.0], dtype=np.float32
-            )  # All zero -> uniform strategy
-            infosets.append(infoset3)
-
-            return lambda n: infosets
-
-        sampler = create_mock_sampler()
-
-        # Log iteration with sampler
-        tracker.log_iteration(iteration=1, utility=10.0, num_infosets=100, infoset_sampler=sampler)
-
-        # Verify quality metrics were computed
         assert tracker.get_mean_pos_regret() > 0
         assert tracker.get_max_pos_regret() > 0
         assert tracker.get_zero_regret_pct() > 0  # Should have some zero-regret infosets
@@ -209,48 +161,32 @@ class TestMetricsTracker:
         """Test normalized entropy computation for strategies."""
         # Uniform distribution should have entropy = 1.0 (maximum)
         uniform_probs = np.array([0.25, 0.25, 0.25, 0.25])
-        uniform_entropy = MetricsTracker._compute_normalized_entropy(uniform_probs)
-        assert uniform_entropy == pytest.approx(1.0, rel=0.01)
+        assert normalized_entropy(uniform_probs) == pytest.approx(1.0, rel=0.01)
 
         # Deterministic distribution should have entropy = 0.0 (minimum)
         deterministic_probs = np.array([1.0, 0.0, 0.0, 0.0])
-        deterministic_entropy = MetricsTracker._compute_normalized_entropy(deterministic_probs)
-        assert deterministic_entropy == pytest.approx(0.0, abs=1e-6)
+        assert normalized_entropy(deterministic_probs) == pytest.approx(0.0, abs=1e-6)
 
         # Mixed distribution should have intermediate entropy in (0, 1)
         mixed_probs = np.array([0.7, 0.2, 0.1, 0.0])
-        mixed_entropy = MetricsTracker._compute_normalized_entropy(mixed_probs)
-        assert 0 < mixed_entropy < 1.0
+        assert 0 < normalized_entropy(mixed_probs) < 1.0
 
         # Test that normalized entropy is comparable across action counts
         # 2-action uniform should also have entropy = 1.0
         uniform_2action = np.array([0.5, 0.5])
-        entropy_2action = MetricsTracker._compute_normalized_entropy(uniform_2action)
-        assert entropy_2action == pytest.approx(1.0, rel=0.01)
+        assert normalized_entropy(uniform_2action) == pytest.approx(1.0, rel=0.01)
 
     def test_compact_summary_format(self):
         """Test compact summary format for progress bars."""
         tracker = MetricsTracker()
 
-        # Create mock sampler
-        def mock_sampler(n):
-            key = InfoSetKey(
-                player_position=0,
-                street=Street.FLOP,
-                betting_sequence="c",
-                preflop_hand=None,
-                postflop_bucket=0,
-                spr_bucket=1,
-            )
-            actions = [Action(ActionType.FOLD), Action(ActionType.CALL)]
-            infoset = InfoSet(key, actions)
-            infoset.regrets = np.array([5.0, 3.0], dtype=np.float32)
-            return [infoset]
+        regrets = np.array([[5.0, 3.0]], dtype=np.float64)
+        action_counts = np.array([2], dtype=np.int32)
+        quality = compute_quality_from_arrays(regrets, action_counts, np.array([0]))
 
-        # Log with quality metrics
-        tracker.log_iteration(1, 10.0, 100, infoset_sampler=mock_sampler)
+        tracker.log_iteration(1, 10.0, 100)
+        tracker.record_quality(quality)
 
-        # Get compact summary
         compact = tracker.get_compact_summary()
 
         # Should include key metrics in compact format

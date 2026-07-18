@@ -11,8 +11,8 @@ from src.interfaces.chart.data import (
     parse_situation,
     render_preflop_chart,
 )
+from src.pipeline import services
 from src.pipeline.evaluation.preflop_chart import preflop_chart_data, preflop_open_sizes_bb
-from src.pipeline.training import services
 from src.pipeline.training.components import build_evaluation_solver
 
 

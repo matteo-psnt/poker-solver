@@ -7,7 +7,6 @@ timing, convergence indicators, solver-quality metrics, etc.
 
 import time
 from collections import deque
-from collections.abc import Callable
 
 import numpy as np
 
@@ -53,41 +52,22 @@ class MetricsTracker:
         self.avg_entropy_window: deque[float] = deque(maxlen=window_size)
         self.uniform_strategy_pct_window: deque[float] = deque(maxlen=window_size)
 
-    def log_iteration(
-        self,
-        iteration: int,
-        utility: float,
-        num_infosets: int,
-        infoset_sampler: Callable | None = None,
-    ):
+    def log_iteration(self, iteration: int, utility: float, num_infosets: int):
         """
         Log metrics for a training iteration.
+
+        Solver-quality metrics are fed separately via :meth:`record_quality`
+        (computed from the shared arrays by :func:`compute_quality_from_arrays`).
 
         Args:
             iteration: Iteration number
             utility: Player 0 utility for this iteration
             num_infosets: Total number of infosets discovered
-            infoset_sampler: Optional callable that returns sampled infosets for quality metrics
         """
-        current_time = time.time()
-
-        # Update basic tracking
         self.iteration = iteration
         self.utility_window.append(utility)
         self.infoset_window.append(num_infosets)
-
-        # Compute solver-quality metrics if sampler provided
-        if infoset_sampler is not None:
-            sampled_infosets = infoset_sampler(self.sample_size)
-            if sampled_infosets:
-                quality_metrics = self._compute_quality_metrics(sampled_infosets)
-                self.mean_pos_regret_window.append(quality_metrics["mean_pos_regret"])
-                self.max_pos_regret_window.append(quality_metrics["max_pos_regret"])
-                self.zero_regret_pct_window.append(quality_metrics["zero_regret_pct"])
-                self.avg_entropy_window.append(quality_metrics["avg_entropy"])
-                self.uniform_strategy_pct_window.append(quality_metrics["uniform_strategy_pct"])
-
-        self.last_log_time = current_time
+        self.last_log_time = time.time()
 
     def record_quality(self, quality: dict[str, float]) -> None:
         """Push an externally-computed quality-metrics dict into the rolling windows.
@@ -104,68 +84,6 @@ class MetricsTracker:
         self.zero_regret_pct_window.append(quality["zero_regret_pct"])
         self.avg_entropy_window.append(quality["avg_entropy"])
         self.uniform_strategy_pct_window.append(quality["uniform_strategy_pct"])
-
-    def _compute_quality_metrics(self, infosets) -> dict[str, float]:
-        """
-        Compute solver-quality metrics from sampled infosets.
-
-        Args:
-            infosets: List of sampled InfoSet objects
-
-        Returns:
-            Dictionary of quality metrics
-        """
-        if not infosets:
-            return {
-                "mean_pos_regret": 0.0,
-                "max_pos_regret": 0.0,
-                "zero_regret_pct": 0.0,
-                "avg_entropy": 0.0,
-                "uniform_strategy_pct": 0.0,
-            }
-
-        # Regret metrics
-        all_positive_regrets = []
-        zero_regret_count = 0
-
-        # Strategy metrics
-        entropies = []
-        uniform_count = 0
-
-        for infoset in infosets:
-            # Positive regrets (learning signal)
-            pos_regrets = np.maximum(infoset.regrets, 0)
-            if np.any(pos_regrets > 0):
-                all_positive_regrets.extend(pos_regrets[pos_regrets > 0])
-
-            # Check if all regrets are zero (no learning signal)
-            if np.all(infoset.regrets == 0):
-                zero_regret_count += 1
-
-            # Strategy entropy (diversity measure)
-            # Normalized entropy is in [0, 1] where 1 = uniform distribution
-            strategy = infoset.get_strategy()
-            normalized_entropy = self._compute_normalized_entropy(strategy)
-            entropies.append(normalized_entropy)
-
-            # Check if strategy is approximately uniform (entropy close to 1.0)
-            if normalized_entropy > 0.99:  # Within 1% of max entropy
-                uniform_count += 1
-
-        return {
-            "mean_pos_regret": float(np.mean(all_positive_regrets))
-            if all_positive_regrets
-            else 0.0,
-            "max_pos_regret": float(np.max(all_positive_regrets)) if all_positive_regrets else 0.0,
-            "zero_regret_pct": 100.0 * zero_regret_count / len(infosets),
-            "avg_entropy": float(np.mean(entropies)) if entropies else 0.0,
-            "uniform_strategy_pct": 100.0 * uniform_count / len(infosets),
-        }
-
-    @staticmethod
-    def _compute_normalized_entropy(probabilities: np.ndarray) -> float:
-        """Deprecated thin wrapper; use :func:`normalized_entropy` directly."""
-        return normalized_entropy(probabilities)
 
     def get_avg_utility(self) -> float:
         """
@@ -416,10 +334,10 @@ def compute_quality_from_arrays(
 ) -> dict[str, float]:
     """Compute solver-quality metrics directly from the shared storage arrays.
 
-    Mirrors :meth:`MetricsTracker._compute_quality_metrics` (same output schema and
-    the same regret-matching strategy definition) but reads ragged rows straight out
-    of the flat ``shared_regrets`` / ``shared_action_counts`` arrays, so the parallel
-    coordinator can sample health metrics without reconstructing ``InfoSet`` objects.
+    Reads ragged rows straight out of the flat ``shared_regrets`` /
+    ``shared_action_counts`` arrays (regret-matching strategy definition), so the
+    parallel coordinator can sample health metrics without reconstructing
+    ``InfoSet`` objects; feed the result to :meth:`MetricsTracker.record_quality`.
 
     Args:
         regrets: ``(capacity, max_actions)`` regret array (may be read live).
@@ -428,7 +346,7 @@ def compute_quality_from_arrays(
         sample_ids: Row indices to sample (already filtered to allocated rows).
 
     Returns:
-        Dict with the same keys as ``_compute_quality_metrics``.
+        Dict with the quality-metric keys ``record_quality`` expects.
     """
     empty = {
         "mean_pos_regret": 0.0,

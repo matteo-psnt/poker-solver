@@ -460,9 +460,19 @@ def evaluate_and_record(
         "results": out.results,
     }
     try:
+        metadata = load_run_metadata(run_dir)
         result_path, _ = eval_ledger.record_evaluation(
             run_dir=run_dir,
             payload=payload,
+            provenance=eval_ledger.RunProvenance(
+                run_id=metadata.run_id,
+                git_commit=metadata.git_commit,
+                git_dirty=metadata.git_dirty,
+                config_name=metadata.config_name,
+                card_abstraction_hash=metadata.card_abstraction_hash,
+                action_config_hash=metadata.action_config_hash,
+                representation_version=metadata.representation_version,
+            ),
             method=method,
             estimator=estimator,
             knobs=knobs,

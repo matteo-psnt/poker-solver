@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.pipeline import services
 from src.pipeline.evaluation.hunl_local_best_response import HandOutcome, LBRConfig
-from src.pipeline.training import services
+from src.pipeline.services import RolloutParams, TrainingOutput
 from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
-from src.pipeline.training.services import RolloutParams, TrainingOutput
 from src.shared.config_loader import load_training_config
 
 
