@@ -81,12 +81,17 @@ def precompute(
     return {"abstraction_config": abstraction_config, "output_dir": str(out)}
 
 
+# retries=0: a training container that dies has already written its progress to the
+# Volume, so the recovery path is an explicit resume with a target, not a silent
+# respawn. Modal retries infrastructure failures (an OOM kill is one) by default,
+# which produced 13 ghost attempts on one run before anyone noticed.
 @app.function(
     image=image,
     volumes={DATA_MOUNT: data_volume},
     cpu=DEFAULT_CPU,
     memory=DEFAULT_MEMORY_MB,
     timeout=3600,
+    retries=0,
 )
 def train(
     config_name: str,
@@ -246,35 +251,67 @@ def blueprint_match(
     return {"run_a": run_a, "run_b": run_b, "results": out.results}
 
 
+# retries=0: see train. A retried resume is now convergent rather than compounding
+# (the target is absolute), but a silent respawn still burns a container reloading a
+# checkpoint to die the same way, and reads as a live attempt while it does it.
 @app.function(
     image=image,
     volumes={DATA_MOUNT: data_volume},
     cpu=DEFAULT_CPU,
     memory=DEFAULT_MEMORY_MB,
     timeout=3600,
+    retries=0,
 )
 def resume(
     run_id: str,
-    additional_iterations: int,
+    to_iteration: int,
     num_workers: int | None = None,
     capacity: int | None = None,
 ) -> dict[str, Any]:
     """Resume an existing Volume run in a fresh container and persist the result.
 
-    Loads the latest checkpoint the trainer committed and continues training. Passing
-    a ``num_workers`` different from the original run also exercises key re-partitioning.
-    ``capacity`` pre-allocates shared storage above the checkpoint's capacity so the
-    leg never has to resize mid-run.
+    Loads the latest checkpoint the trainer committed and trains up to the ABSOLUTE
+    ``to_iteration``. Absolute, not "train N more": a retried call re-reads a *newer*
+    checkpoint, so a relative target compounds -- a leg aimed at 25.5M that gets
+    retried after committing 21.5M would re-add its increment and chase 30.6M. Modal
+    retries infrastructure failures (an OOM kill is one) on its own, silently, so a
+    resume must converge on the same endpoint no matter how many times it runs. With
+    an absolute target every attempt aims at the same number and a retry after the
+    target is reached is a no-op.
+
+    Passing a ``num_workers`` different from the original run also exercises key
+    re-partitioning. ``capacity`` pre-allocates shared storage above the checkpoint's
+    capacity so the leg never has to resize mid-run.
     """
     from src.pipeline import services
 
     data_volume.reload()
     run_dir = Path("data/runs") / run_id
     session, resumed_from = services.create_resumed_session(run_dir, capacity_override=capacity)
+
+    remaining = to_iteration - resumed_from
+    if remaining <= 0:
+        # Already at or past the target: a retry of an attempt that succeeded, or a
+        # target set below the committed checkpoint. Report, change nothing.
+        print(
+            f"[resume] Checkpoint is at {resumed_from:,}, target is {to_iteration:,}: "
+            "nothing to do.",
+            flush=True,
+        )
+        metadata = services.load_run_metadata(run_dir)
+        return {
+            "run_id": run_id,
+            "resumed_from_iteration": resumed_from,
+            "final_iterations": metadata.iterations,
+            "num_infosets": metadata.num_infosets,
+            "status": metadata.status,
+            "no_op": True,
+        }
+
     services.run_training(
         session,
         num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
-        num_iterations=additional_iterations,
+        num_iterations=remaining,
     )
     data_volume.commit()
 
@@ -285,6 +322,7 @@ def resume(
         "final_iterations": metadata.iterations,
         "num_infosets": metadata.num_infosets,
         "status": metadata.status,
+        "no_op": False,
     }
 
 
@@ -306,8 +344,9 @@ def resume_test(
         f"infosets={train_result['num_infosets']:,}"
     )
 
-    print(f"\nContainer B (fresh, 4 workers): resuming {run_id} for +1500 iterations...")
-    resume_result = resume.remote(run_id=run_id, additional_iterations=1500, num_workers=4)
+    target = train_result["iterations"] + 1500
+    print(f"\nContainer B (fresh, 4 workers): resuming {run_id} to iteration {target}...")
+    resume_result = resume.remote(run_id=run_id, to_iteration=target, num_workers=4)
     print(f"  resumed_from_iteration={resume_result['resumed_from_iteration']}")
     print(f"  final_iterations={resume_result['final_iterations']}")
     print(f"  num_infosets={resume_result['num_infosets']:,}")
@@ -455,17 +494,24 @@ def run_train(
 @app.local_entrypoint()
 def run_resume(
     run_id: str,
-    additional: int,
+    to_iteration: int,
     cpu: int = 32,
     memory: int = 24576,
     timeout: int = 10800,
     capacity: int = 0,
 ) -> None:
-    """Resume a Volume run for ``additional`` more iterations on a big box.
+    """Resume a Volume run and train it up to the ABSOLUTE ``to_iteration`` on a big box.
 
     Mirrors run_train's resourcing (the bare ``resume`` function is pinned to a small
     box). The last batch is truncated to the target, so the run ends at exactly
-    ``<checkpoint iteration> + additional`` — pass ``additional`` accordingly.
+    ``to_iteration``.
+
+    The target is absolute rather than "train N more" because Modal retries
+    infrastructure failures — an OOM kill is one — silently and on its own. A relative
+    increment is re-applied to whatever checkpoint the retry finds, so it compounds: a
+    leg aimed at 25.5M that died after committing 21.5M would come back chasing 30.6M.
+    An absolute target is convergent: every attempt aims at the same number, and one
+    that starts after the target is met exits immediately as a no-op.
 
     Uses ``.spawn()`` (fire-and-forget), NOT ``.remote()``: a blocking ``.remote()`` ties the
     remote function's lifetime to the local ``modal run`` client, and Modal cancels the call
@@ -479,7 +525,7 @@ def run_resume(
 
     call = resume.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
         run_id=run_id,
-        additional_iterations=additional,
+        to_iteration=to_iteration,
         num_workers=cpu,
         capacity=capacity or None,
     )
@@ -490,10 +536,12 @@ def run_resume(
         function="resume",
         object_id=call.object_id,
         resources={"cpu": cpu, "memory": memory, "timeout": timeout},
-        extra={"additional_iterations": additional, "capacity": capacity or None},
+        extra={"to_iteration": to_iteration, "capacity": capacity or None},
     )
     print(f"SPAWNED resume call {call.object_id}")
-    print(f"  run_id={run_id} additional={additional} cpu={cpu} — runs detached; does not wait.")
+    print(
+        f"  run_id={run_id} to_iteration={to_iteration} cpu={cpu} — runs detached; does not wait."
+    )
 
 
 def _print_variance_decomposition(results: dict[str, Any]) -> None:
@@ -755,18 +803,19 @@ def run_deployed_gate(
 @app.local_entrypoint()
 def resume_eval(
     run_id: str,
-    additional: int = 9_000_000,
+    to_iteration: int,
     cpu: int = 32,
     eval_hands: int = 1000,
     eval_cpu: int = 16,
 ) -> None:
-    """Resume an existing Volume run for more iterations, then re-evaluate with LBR.
+    """Resume an existing Volume run up to ``to_iteration``, then re-evaluate with LBR.
 
     Warm-start from a base checkpoint (no retrain from scratch); compare the LBR
-    number before and after to see whether more training helped.
+    number before and after to see whether more training helped. The target is
+    absolute so a retried resume converges instead of compounding (see ``resume``).
     """
     resume_result = resume.with_options(cpu=cpu, memory=16384).remote(
-        run_id=run_id, additional_iterations=additional, num_workers=cpu
+        run_id=run_id, to_iteration=to_iteration, num_workers=cpu
     )
     print("RESUME RESULT:")
     for key, value in resume_result.items():
