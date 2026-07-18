@@ -8,6 +8,7 @@ every weighting, so nothing observed DCFR at all.
 """
 
 import numpy as np
+import pytest
 
 from tests.test_helpers import DummyCardAbstraction, build_test_solver, make_test_config
 
@@ -29,10 +30,12 @@ def _train(weighting: str, iterations: int = 60) -> np.ndarray:
 
 
 class TestTheWeightingReachesTheMath:
+    @pytest.mark.timeout(60)
     def test_dcfr_and_linear_do_not_produce_the_same_table(self):
         """The knob is read at the update, not just stored on the config."""
         assert not np.allclose(_train("dcfr"), _train("linear"))
 
+    @pytest.mark.timeout(60)
     def test_dcfr_carries_less_negative_regret_than_linear(self):
         """beta=0 HALVES negative regret on every visit; linear discounts none
         of it. That sign convention is the load-bearing half of DCFR here --
