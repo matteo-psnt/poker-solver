@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pickle
 import random
+import signal
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +36,15 @@ def get_training_config(
         )
     initial_capacity = stored_capacity
 
+    if session.capacity_override is not None:
+        if session.capacity_override < initial_capacity:
+            raise ValueError(
+                f"capacity override {session.capacity_override:,} is smaller than the "
+                f"checkpoint's capacity {initial_capacity:,}"
+            )
+        print(f"[Resume] Pre-allocating capacity override: {session.capacity_override:,}")
+        initial_capacity = session.capacity_override
+
     return {
         "batch_size": batch_size,
         "verbose": session.config.training.verbose,
@@ -51,6 +61,33 @@ def train_partitioned(
     batch_size: int | None = None,
 ) -> dict[str, Any]:
     """Run parallel training using shared array storage."""
+    assert session.run_tracker is not None
+
+    # Route SIGTERM (Modal app stop / preemption grace, systemd, etc.) into the
+    # KeyboardInterrupt path so the run attempts a final checkpoint instead of
+    # dying with unsaved progress.
+    def _sigterm_to_interrupt(_signum: int, _frame: object) -> None:
+        print("[Master] SIGTERM received — attempting final checkpoint...", flush=True)
+        raise KeyboardInterrupt
+
+    try:
+        prev_sigterm = signal.signal(signal.SIGTERM, _sigterm_to_interrupt)
+    except ValueError:
+        prev_sigterm = None  # not the main thread (tests) — skip installation
+
+    try:
+        return _train_partitioned(session, num_iterations, num_workers, batch_size)
+    finally:
+        if prev_sigterm is not None:
+            signal.signal(signal.SIGTERM, prev_sigterm)
+
+
+def _train_partitioned(
+    session: TrainingSession,
+    num_iterations: int,
+    num_workers: int,
+    batch_size: int | None = None,
+) -> dict[str, Any]:
     assert session.run_tracker is not None
     config = get_training_config(session, num_workers, batch_size)
     batch_size_val = config["batch_size"]
@@ -74,6 +111,16 @@ def train_partitioned(
     if verbose:
         abstraction_size = len(serialized_action_model) + len(serialized_card_abstraction)
         print(f"   Serialized abstractions: {abstraction_size:,} bytes")
+
+    # Hand shared memory over to the worker manager before it creates its own
+    # coordinator storage. Both use session_id=run_dir.name, and creating the
+    # second one calls cleanup_stale_shm(), which unlinks the segments this
+    # bootstrap storage is still mapping. Left implicit, that orphans a full
+    # capacity-sized allocation (GBs at production capacity) for the whole run --
+    # nothing ever frees it -- on top of the checkpoint it loaded on resume.
+    # Releasing here makes the ownership handoff explicit: from this point the
+    # worker manager's storage is the only live view of the arrays.
+    session.release_bootstrap_storage()
 
     pool_start_time = time.time()
 

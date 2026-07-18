@@ -15,6 +15,7 @@ from src.engine.solver.storage.helpers import (
     CheckpointPaths,
     _validate_action_signatures,
     build_legal_actions,
+    commit_checkpoint_manifest,
     get_missing_checkpoint_files,
     load_action_signatures,
     load_checkpoint_data,
@@ -43,7 +44,9 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
     items = sorted(storage.state.owned_keys.items(), key=lambda item: item[1])
     dense_ids = {key: idx for idx, (key, _) in enumerate(items)}
 
-    paths = CheckpointPaths.from_dir(storage.checkpoint_dir)
+    # Write a fresh versioned snapshot; the previous one stays intact until the
+    # manifest commit below flips to this one atomically.
+    paths = CheckpointPaths.for_iteration(storage.checkpoint_dir, iteration)
     with open(paths.key_mapping, "wb") as f:
         pickle.dump({"owned_keys": dense_ids}, f)
 
@@ -97,6 +100,9 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
         action_sigs,
         f"SharedArrayStorage.checkpoint(iter={iteration})",
     )
+
+    # All artifacts written and validated — make this snapshot current.
+    commit_checkpoint_manifest(storage.checkpoint_dir, iteration, paths)
 
 
 def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:

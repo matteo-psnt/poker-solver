@@ -257,17 +257,20 @@ def resume(
     run_id: str,
     additional_iterations: int,
     num_workers: int | None = None,
+    capacity: int | None = None,
 ) -> dict[str, Any]:
     """Resume an existing Volume run in a fresh container and persist the result.
 
     Loads the latest checkpoint the trainer committed and continues training. Passing
     a ``num_workers`` different from the original run also exercises key re-partitioning.
+    ``capacity`` pre-allocates shared storage above the checkpoint's capacity so the
+    leg never has to resize mid-run.
     """
     from src.pipeline import services
 
     data_volume.reload()
     run_dir = Path("data/runs") / run_id
-    session, resumed_from = services.create_resumed_session(run_dir)
+    session, resumed_from = services.create_resumed_session(run_dir, capacity_override=capacity)
     services.run_training(
         session,
         num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
@@ -456,6 +459,7 @@ def run_resume(
     cpu: int = 32,
     memory: int = 24576,
     timeout: int = 10800,
+    capacity: int = 0,
 ) -> None:
     """Resume a Volume run for ``additional`` more iterations on a big box.
 
@@ -477,6 +481,7 @@ def run_resume(
         run_id=run_id,
         additional_iterations=additional,
         num_workers=cpu,
+        capacity=capacity or None,
     )
     # Persist the object_id → run_id link now, before the detached call can be
     # guillotined: its Modal exit status is then recoverable via snapshot_call later.
@@ -485,7 +490,7 @@ def run_resume(
         function="resume",
         object_id=call.object_id,
         resources={"cpu": cpu, "memory": memory, "timeout": timeout},
-        extra={"additional_iterations": additional},
+        extra={"additional_iterations": additional, "capacity": capacity or None},
     )
     print(f"SPAWNED resume call {call.object_id}")
     print(f"  run_id={run_id} additional={additional} cpu={cpu} — runs detached; does not wait.")

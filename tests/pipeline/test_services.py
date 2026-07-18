@@ -218,7 +218,9 @@ def test_create_resumed_session_uses_metadata_iteration(monkeypatch, tmp_path):
     session = MagicMock(name="session")
 
     monkeypatch.setattr(services, "load_run_metadata", lambda run_dir: metadata)
-    monkeypatch.setattr(services.TrainingSession, "resume", lambda run_dir: session)
+    monkeypatch.setattr(
+        services.TrainingSession, "resume", lambda run_dir, capacity_override=None: session
+    )
 
     actual_session, latest = services.create_resumed_session(tmp_path / "run-1")
 

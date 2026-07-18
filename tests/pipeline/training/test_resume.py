@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from src.core.actions.action_model import ActionModel
+from src.engine.solver.storage.helpers import CheckpointPaths, read_checkpoint_manifest
 from src.pipeline.training import components
 from src.pipeline.training.trainer import TrainingSession
 from src.shared.config import Config
@@ -165,14 +166,53 @@ def test_resume_incomplete_checkpoint(test_config, temp_run_dir):
     session = TrainingSession(test_config, run_id=temp_run_dir.name)
     session.train(num_iterations=1, num_workers=1)
 
-    # Delete checkpoint.zarr to make it incomplete
-    checkpoint_dir = temp_run_dir / "checkpoint.zarr"
+    # Delete the snapshot's zarr directory to make it incomplete
+    checkpoint_dir = CheckpointPaths.from_dir(temp_run_dir).checkpoint_zarr
 
     shutil.rmtree(checkpoint_dir)
 
     # Should fail with clear error message
     with pytest.raises(ValueError, match="Checkpoint is incomplete"):
         TrainingSession.resume(temp_run_dir)
+
+
+def test_checkpoint_manifest_supersedes_and_prunes(test_config, temp_run_dir):
+    """A newer snapshot becomes current atomically and older artifacts are pruned."""
+    session = TrainingSession(test_config, run_id=temp_run_dir.name)
+    session.train(num_iterations=1, num_workers=1)
+
+    manifest1 = read_checkpoint_manifest(temp_run_dir)
+    assert manifest1 is not None
+    assert (temp_run_dir / manifest1["zarr"]).exists()
+    # Legacy fixed names are never written by the manifest scheme
+    assert not (temp_run_dir / "checkpoint.zarr").exists()
+
+    session2 = TrainingSession.resume(temp_run_dir)
+    session2.train(num_iterations=1, num_workers=1)
+
+    manifest2 = read_checkpoint_manifest(temp_run_dir)
+    assert manifest2 is not None
+    assert manifest2["iteration"] > manifest1["iteration"]
+    # Superseded snapshot was pruned; exactly one snapshot remains
+    assert not (temp_run_dir / manifest1["zarr"]).exists()
+    assert len(list(temp_run_dir.glob("checkpoint-*.zarr"))) == 1
+    assert len(list(temp_run_dir.glob("key_mapping-*.pkl"))) == 1
+
+
+def test_resume_reads_legacy_fixed_name_checkpoint(test_config, temp_run_dir):
+    """Runs checkpointed before the manifest scheme (fixed file names) still resume."""
+    session = TrainingSession(test_config, run_id=temp_run_dir.name)
+    results = session.train(num_iterations=1, num_workers=1)
+
+    # Rewrite the snapshot into the legacy layout: fixed names, no manifest.
+    paths = CheckpointPaths.from_dir(temp_run_dir)
+    paths.checkpoint_zarr.rename(temp_run_dir / "checkpoint.zarr")
+    paths.key_mapping.rename(temp_run_dir / "key_mapping.pkl")
+    paths.action_signatures.rename(temp_run_dir / "action_signatures.pkl")
+    (temp_run_dir / "CHECKPOINT.json").unlink()
+
+    session2 = TrainingSession.resume(temp_run_dir)
+    assert session2.storage.num_infosets() == results["final_infosets"]
 
 
 def test_resume_metadata_tracking(test_config, temp_run_dir):

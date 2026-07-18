@@ -8,8 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from src.core.actions.action_model import ActionModel
-from src.engine.solver.storage.helpers import get_missing_checkpoint_files
+from src.engine.solver.storage.array_specs import ARRAY_SPECS
+from src.engine.solver.storage.helpers import (
+    get_missing_checkpoint_files,
+    resolve_resume_iteration,
+)
 from src.pipeline.training import components
 from src.pipeline.training.metrics import MetricsTracker
 from src.pipeline.training.run_tracker import RunTracker
@@ -29,6 +35,9 @@ class TrainingSession:
         run_tracker: RunTracker | None = None,
     ):
         self.config = config
+        # Set by resume(): pre-allocate shared storage above the checkpoint's
+        # capacity so the run never has to resize mid-flight.
+        self.capacity_override: int | None = None
 
         self.run_tracker = run_tracker
         if self.run_tracker:
@@ -80,7 +89,11 @@ class TrainingSession:
             raise
 
     @classmethod
-    def resume(cls, run_dir: str | Path, checkpoint_id: int | None = None) -> TrainingSession:
+    def resume(
+        cls,
+        run_dir: str | Path,
+        capacity_override: int | None = None,
+    ) -> TrainingSession:
         """Resume training from a checkpoint in an existing run directory."""
         run_path = Path(run_dir)
         if not run_path.exists():
@@ -89,11 +102,7 @@ class TrainingSession:
         run_tracker = RunTracker.load(run_path)
         metadata = run_tracker.metadata
 
-        if checkpoint_id is not None:
-            checkpoint_iter = checkpoint_id
-        else:
-            checkpoint_iter = metadata.iterations if metadata.iterations > 0 else None
-
+        checkpoint_iter = resolve_resume_iteration(run_path, metadata.iterations)
         if checkpoint_iter is None:
             raise FileNotFoundError(f"No checkpoint found in {run_path}")
 
@@ -106,6 +115,7 @@ class TrainingSession:
         config = metadata.config
 
         session = cls(config, run_id=run_path.name, run_tracker=run_tracker)
+        session.capacity_override = capacity_override
 
         if session.storage.num_infosets() == 0:
             raise ValueError(
@@ -121,6 +131,25 @@ class TrainingSession:
         print(f"✅ Resumed from checkpoint at iteration {checkpoint_iter}")
 
         return session
+
+    def release_bootstrap_storage(self) -> None:
+        """Free the session-level coordinator storage before training claims the name.
+
+        ``__init__`` builds a single-worker ``SharedArrayStorage`` so ``resume``
+        can verify the checkpoint actually loads. Training then builds its own
+        coordinator storage under the *same* ``session_id``, whose
+        ``cleanup_stale_shm`` unlinks these segments regardless -- so this only
+        makes the handoff explicit and reclaims the memory instead of leaking it.
+        Idempotent: safe if training is entered more than once.
+        """
+        storage = getattr(self, "storage", None)
+        if storage is None:
+            return
+        # Drop the numpy views first: they export pointers into the buffers, and
+        # SharedMemory.close() raises BufferError while any are still alive.
+        for spec in ARRAY_SPECS:
+            setattr(storage, spec.attr, np.empty(spec.shape(0, storage.max_actions), spec.dtype))
+        storage.cleanup()
 
     def __del__(self):
         """Cleanup on deletion (guarded: __init__ may have failed before the manager)."""
