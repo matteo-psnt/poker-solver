@@ -18,8 +18,7 @@ def _make_ctx(tmp_path):
 
 
 def _fake_chart_service(num_infosets: int = 10):
-    runtime = SimpleNamespace(storage=SimpleNamespace(num_infosets=lambda: num_infosets))
-    return SimpleNamespace(runtime=runtime)
+    return SimpleNamespace(num_infosets=lambda: num_infosets)
 
 
 def test_viewer_uses_fastapi_server_by_default(tmp_path, monkeypatch):
@@ -30,7 +29,7 @@ def test_viewer_uses_fastapi_server_by_default(tmp_path, monkeypatch):
         base_url = "http://127.0.0.1:5173"
 
         def __init__(self, service, base_dir):
-            assert service.runtime.storage.num_infosets() == 10
+            assert service.num_infosets() == 10
             calls["fastapi"] += 1
 
         def start(self):
