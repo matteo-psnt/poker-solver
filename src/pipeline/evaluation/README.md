@@ -1,276 +1,134 @@
 # Evaluation Module
 
-This module provides tools for evaluating poker solver performance, with emphasis on empirical exploitability estimation.
+This module measures blueprint quality. The primary, trustworthy metric is
+**Local Best Response (LBR)** exploitability; a legacy rollout estimator is
+retained only as a fast smoke-test diagnostic.
 
 ## What is Exploitability?
 
-Exploitability measures how much an optimal opponent (best response) can gain against your strategy. It's the gold standard metric for evaluating CFR convergence in poker.
+Exploitability measures how much an optimal opponent (best response) can gain
+against your strategy — the gold-standard metric for evaluating CFR
+convergence in poker. Exact best response is computationally infeasible for
+HUNL (it exists in `best_response.py` and is validated on toy games like
+Kuhn), so we approximate it from below with LBR.
 
-**Definition**: `Exploitability = (BR₀ + BR₁) / 2`
+**Units:** milli-big-blinds per game (mbb/g). Lower is better. LBR is a
+*lower bound* on true exploitability: it reports how much a specific,
+tractable exploiter wins, so real exploitability is at least the reported
+value.
 
-Where BR_i is the expected utility when player i plays best response against the strategy.
+## Local Best Response (`hunl_local_best_response.py`)
 
-**Target Values (in milli-big-blinds per game):**
-- `< 0.1 mbb/g`: Near-optimal (professional GTO play)
-- `0.1-1 mbb/g`: Strong player
-- `1-5 mbb/g`: Good player
-- `5-20 mbb/g`: Decent player
-- `20-100 mbb/g`: Weak player
-- `100+ mbb/g`: Very exploitable
+`compute_lbr_exploitability()` plays the frozen blueprint against an LBR
+exploiter over `num_hands` dealt hands and reports the exploiter's mean
+winnings with standard error and a 95% confidence interval (`LBRResult`).
 
-## Implementation: Rollout-Based Approximation
+Key knobs (`LBRConfig`), all of which define the *comparison tier* of a
+result:
 
-### Why Not Exact Best Response?
+- **`scorer`** — how the exploiter values its actions:
+  - `"myopic"` (default): one-step equity-based action scoring.
+  - `"lookahead"`: depth-limited best-response lookahead
+    (`lookahead_scorer.py`), with `lookahead_depth` (default 2) and
+    `lookahead_top_k` (default 3). This is the standard scorer for
+    on-tree evaluation — the myopic scorer substantially understates
+    exploitability.
+- **`opponent`** — what the exploiter plays against:
+  - `"blueprint"` (default): raw average-strategy table lookups.
+  - `"deployed"`: blueprint + the runtime subgame resolver, i.e. the agent
+    as actually deployed (`resolver_iterations` pins the resolver budget).
+- **`include_off_tree`** (default `False`): allow the exploiter to take bet
+  sizes outside the trained action tree. Implemented rigorously via
+  `shadow_state.py` (`ShadowTracker`): a shadow on-tree `GameState` is
+  carried alongside the real one, and off-tree bets are translated to
+  on-tree proxies (pseudo-harmonic mapping) so opponent strategy lookups
+  stay on the trained tree. When off, the shadow path never diverges and
+  draws no RNG.
+- `num_hands` (default 1000), `equity_runouts` (default 12), `allin_runouts`,
+  `num_workers`, `base_seed`.
 
-Exact BR computation requires:
-- Full game tree traversal (millions+ nodes in No-Limit Hold'em)
-- Expectation over ALL chance outcomes (no sampling allowed)
-- Tracking belief distributions over opponent hands
-- Dynamic programming over abstract game states
+Results include per-hand samples (`pair_samples_mbb`), which enable *paired*
+statistical comparison between runs evaluated with the same seed and tier.
 
-This is **computationally infeasible** for production poker games.
+## Orchestration & the Eval Ledger
 
-### Our Approach: Monte Carlo Rollout Sampling
+All evaluation transports (headless CLI, Modal) route through one
+orchestrator: `evaluate_and_record()` in `src/pipeline/services.py`. It:
 
-Following modern poker research (Johanson et al. 2013, Brown & Sandholm 2019), we use rollout-based approximation:
+1. Runs the requested method (`lbr` by default, or legacy `rollout`).
+2. Pins the run's recorded `card_abstraction_hash` (refusing unhashed runs)
+   so evals always use the abstraction the run was trained with.
+3. Records git provenance (commit/dirty for both the run and the eval).
+4. Appends a row to the append-only ledger at `data/eval_ledger.jsonl`, and
+   writes the full payload (including per-hand samples) under
+   `<run_dir>/evals/`.
 
-1. **Freeze** the solver's average strategy σ
-2. **For each player** as potential exploiter:
-   - Simulate N complete games from random starting states
-   - At exploiter's decision points:
-     * Estimate action values via K Monte Carlo rollouts
-     * Choose greedily (best estimated action)
-   - At opponent's decision points:
-     * Sample actions from frozen strategy σ
-   - Record terminal utilities
-3. **Compute** empirical mean and confidence intervals
+### CLI (`poker-solver-run`)
 
-**Key Properties:**
-- ✅ Does NOT sample chance outcomes within BR (samples complete games)
-- ✅ Scales to large games (linear in samples, not tree size)
-- ✅ Provides confidence intervals (it's an empirical estimate)
-- ✅ Correct in expectation with sufficient rollout budget
-- ❌ NOT exact exploitability (it's an approximation)
+```bash
+# Evaluate a run (LBR, on-tree lookahead scorer, deployed opponent)
+poker-solver-run evaluate --run <id> --hands 1000 --runouts 12 \
+    --scorer lookahead --opponent deployed --seed 42
 
-## Functions
+# Browse recorded evaluations
+poker-solver-run ledger [--run <id>] [--limit N]
 
-### `compute_exploitability(solver, num_samples, use_average_strategy, num_rollouts_per_infoset, seed)`
-
-Computes empirical exploitability estimate via Monte Carlo rollout sampling.
-
-**Parameters:**
-- `solver`: Trained MCCFR solver
-- `num_samples`: Number of game simulations per player (default: 10000)
-- `use_average_strategy`: Use average strategy (True) or current (False)
-- `num_rollouts_per_infoset`: Rollouts for action value estimation (default: 100)
-- `seed`: Random seed for reproducibility
-
-**Returns:**
-```python
-{
-    'exploitability_mbb': float,      # Primary metric (milli-BB per game)
-    'exploitability_bb': float,       # In big blinds per game
-    'player_0_br_utility': float,     # P0's BR utility (chips)
-    'player_1_br_utility': float,     # P1's BR utility (chips)
-    'std_error_mbb': float,           # Standard error of estimate
-    'confidence_95_mbb': (float, float),  # 95% confidence interval
-    'num_samples': int,               # Samples used
-}
+# Paired comparison between two runs (mean diff ± se, 95% CI, p-value)
+poker-solver-run compare --a <run> --b <run>
 ```
 
-**Example:**
-```python
-from src.pipeline.evaluation.exploitability import compute_exploitability
+`compare` computes a paired-sample test (`statistics.py`) and **refuses**
+mismatched pairings: differing `base_seed`, `num_hands`, or any tier knob
+(`scorer`, `opponent`, `include_off_tree`). `--force` overrides, but the
+p-value is then untrustworthy. Use the ledger instead of hand-transcribing
+scores.
 
-results = compute_exploitability(
-    solver,
-    num_samples=10000,
-    num_rollouts_per_infoset=100,
-    seed=42
-)
+## Legacy Rollout Estimator (`exploitability.py`)
 
-print(f"Exploitability: {results['exploitability_mbb']:.2f} ± {results['std_error_mbb']:.2f} mbb/g")
-print(f"95% CI: [{results['confidence_95_mbb'][0]:.2f}, {results['confidence_95_mbb'][1]:.2f}]")
-```
+`compute_exploitability(solver, num_samples, use_average_strategy,
+num_rollouts_per_infoset, seed)` estimates a **one-ply deviation gain** via
+Monte Carlo rollouts. It is **not** a trustworthy exploitability figure — it
+severely understates true exploitability and is not a valid bound. It is
+retained only as a fast smoke test (`--method rollout` in the CLI).
 
-### `compute_total_positive_regret(solver)`
+`compute_total_positive_regret(solver)` is a training-convergence
+diagnostic: it should decrease during training, is not comparable across
+abstractions, and is not interpretable in big-blind terms.
 
-Computes total positive regret across all information sets.
+## Reporting Guidelines
 
-**IMPORTANT:** This is a training diagnostic, NOT a quality metric:
-- ❌ NOT comparable across different abstractions
-- ❌ NOT interpretable in big-blind terms
-- ✅ Useful for monitoring convergence (same abstraction)
-- ✅ Should decrease during training
+1. Report confidence intervals, never bare point estimates.
+2. State the full tier: scorer, opponent, off-tree flag, `num_hands`,
+   `equity_runouts`, seed. Numbers from different tiers are not comparable.
+3. Compare runs only via `poker-solver-run compare` (paired, same seed/tier).
+4. State that LBR is a lower bound on exploitability, not the exact value.
 
-**Returns:**
-```python
-{
-    'total_positive_regret': float,
-    'num_infosets': int,
-    'avg_regret_per_infoset': float,
-}
-```
+## Module Map
 
-## Usage Guidelines
-
-### For Research / Publication
-
-**ALWAYS report:**
-1. Confidence intervals, not just point estimates
-2. Number of samples used
-3. Number of rollouts per infoset
-4. That this is an *empirical estimate*, not exact exploitability
-
-**Example statement:**
-> "We estimate exploitability at 12.3 ± 1.8 mbb/g (95% CI: [8.7, 15.9], N=10000 samples, 100 rollouts/infoset)."
-
-### For Development
-
-**Quick checks** (low accuracy, fast):
-```python
-results = compute_exploitability(solver, num_samples=100, num_rollouts_per_infoset=20)
-```
-
-**Production evaluation** (high accuracy, slow):
-```python
-results = compute_exploitability(solver, num_samples=10000, num_rollouts_per_infoset=200)
-```
-
-### Reducing Variance
-
-Standard error decreases with √N:
-- 100 samples: ±X mbb/g
-- 400 samples: ±X/2 mbb/g
-- 10000 samples: ±X/10 mbb/g
-
-### Improving BR Quality
-
-More rollouts → better action value estimates → better BR approximation:
-- 10 rollouts: Very rough BR
-- 50 rollouts: Reasonable BR
-- 100 rollouts: Good BR (recommended)
-- 200+ rollouts: Diminishing returns
-
-## Performance Notes
-
-Rollout-based approach is **much faster** than exact tree traversal:
-- Scales linearly with num_samples
-- Each sample is a single game simulation
-- Typical: 10-100ms per sample (vs. minutes for exact)
-
-For 10000 samples at 50ms each: ~8 minutes total
-
-## Best Practices
-
-1. **For Quick Testing:**
-   - `num_samples=100`, `num_rollouts_per_infoset=20`
-   - Iterate quickly during development
-
-2. **For Final Evaluation:**
-   - `num_samples=10000+`, `num_rollouts_per_infoset=100+`
-   - Report confidence intervals
-   - Use multiple random seeds
-
-3. **For Training Monitoring:**
-   - Use `compute_total_positive_regret()` for fast convergence checks
-   - Run full exploitability evaluation at checkpoints only
-
-4. **For Publications:**
-   - Always state this is "empirical exploitability estimate"
-   - Report all parameters (N, K, seed)
-   - Include confidence intervals
-   - Compare only strategies with same abstraction
-
-## Example Usage
-
-```python
-from src.pipeline.evaluation.exploitability import (
-    compute_exploitability,
-    compute_total_positive_regret
-)
-
-# After training
-solver = trainer.solver
-
-# Quick training diagnostic (fast, < 1 second)
-regret_stats = compute_total_positive_regret(solver)
-print(f"Total positive regret: {regret_stats['total_positive_regret']:.2e}")
-print(f"Avg per infoset: {regret_stats['avg_regret_per_infoset']:.2e}")
-
-# Full exploitability evaluation (slower, ~5-10 minutes)
-results = compute_exploitability(
-    solver,
-    num_samples=10000,
-    num_rollouts_per_infoset=100,
-    use_average_strategy=True,
-    seed=42
-)
-
-print(f"\nExploitability: {results['exploitability_mbb']:.2f} ± {results['std_error_mbb']:.2f} mbb/g")
-print(f"95% CI: [{results['confidence_95_mbb'][0]:.2f}, {results['confidence_95_mbb'][1]:.2f}]")
-
-# Interpret
-exp = results['exploitability_mbb']
-if exp < 1.0:
-    print("✅ Strong solution (< 1 mbb/g)")
-elif exp < 5.0:
-    print("✅ Good solution (< 5 mbb/g)")
-elif exp < 20.0:
-    print("⚠️  Decent solution (< 20 mbb/g)")
-else:
-    print("❌ Needs more training")
-```
-
-## Implementation Details
-
-### Rollout-Based Best Response
-
-The implementation uses **rollout simulation** instead of exact tree traversal:
-
-**At BR player's decision points:**
-```python
-for action in legal_actions:
-    # Estimate action value via K rollouts
-    value = average([simulate_game(action) for _ in range(K)])
-
-return max(values)  # Choose best
-```
-
-**At opponent's decision points:**
-```python
-strategy = solver.get_strategy(infoset)
-action = sample(strategy)  # Sample from frozen strategy
-return simulate_game(action)
-```
-
-This is **fundamentally different** from exact BR but is tractable for large games.
-
-### Why This Works
-
-- Each rollout provides an unbiased estimate of action value
-- Averaging K rollouts reduces variance
-- Greedy selection based on estimates approximates max EV
-- In expectation over many samples, converges to true exploitability
+- `hunl_local_best_response.py` — LBR evaluator (`compute_lbr_exploitability`)
+- `lookahead_scorer.py` — depth-limited lookahead action scorer
+- `shadow_state.py` — off-tree shadow-state translation
+- `ledger.py` — eval ledger (rows, tiers, mismatch detection)
+- `statistics.py` — paired-sample comparison
+- `resolver_match.py` — resolver-in-eval machinery
+- `exploitability.py` — legacy rollout diagnostic
+- `best_response.py` / `tabular_cfr.py` — exact BR for toy-game validation
+- `preflop_chart.py` — preflop strategy extraction for the chart viewer
 
 ## Testing
 
-Tests in [test_exploitability_rollout.py](../../../tests/pipeline/evaluation/test_exploitability_rollout.py).
-
 ```bash
-uv run pytest tests/pipeline/evaluation/test_exploitability_rollout.py -v
+uv run pytest tests/pipeline/evaluation/
 ```
+
+Key files: `test_hunl_local_best_response.py`, `test_lookahead_scorer.py`,
+`test_shadow_state.py`, `test_ledger.py`, `test_statistics.py`,
+`test_exploitability_rollout.py` (legacy path).
 
 ## References
 
-1. Johanson et al. "Evaluating State-Space Abstractions in Extensive-Form Games" (AAMAS 2013)
-2. Brown & Sandholm "Solving Imperfect-Information Games via Discounted Regret Minimization" (AAAI 2019)
-3. Bowling et al. "Heads-up Limit Hold'em Poker is Solved" (Science 2015)
-
-## Future Enhancements
-
-Potential improvements:
-- Parallel sampling across multiple cores
-- Adaptive rollout budgets based on game phase
-- Importance sampling for rare situations
-- Caching for repeated public states
+1. Lisý & Bowling, "Equilibrium Approximation Quality of Current No-Limit
+   Poker Bots" (2017) — Local Best Response
+2. Johanson et al., "Evaluating State-Space Abstractions in Extensive-Form
+   Games" (AAMAS 2013)
+3. Bowling et al., "Heads-up Limit Hold'em Poker is Solved" (Science 2015)

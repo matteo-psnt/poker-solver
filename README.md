@@ -7,18 +7,19 @@ A research-grade Monte Carlo CFR implementation for computing near-optimal (GTO)
 
 ## Overview
 
-This solver uses **Monte Carlo Counterfactual Regret Minimization (MCCFR)** with advanced optimizations (CFR+, Linear CFR) to compute equilibrium strategies for heads-up no-limit hold'em. It features sophisticated card and action abstractions, parallel training, and empirical exploitability evaluation.
+This solver uses **Monte Carlo Counterfactual Regret Minimization (MCCFR)** with modern regret-weighting schemes (CFR+, Linear CFR, Discounted CFR) to compute equilibrium strategies for heads-up no-limit hold'em. It features exact suit-isomorphism card abstraction, hogwild parallel training over shared memory, and rigorous exploitability evaluation via Local Best Response.
 
 ### Key Features
 
-- **Advanced CFR Variants**: CFR+ provides ~100x faster convergence than vanilla CFR, with Linear CFR adding an additional 2-3x speedup
-- **Suit Isomorphism Card Abstraction**: Reduces state space by 12-19x while preserving strategic relevance (flush draws, suit coordination)
+- **Advanced CFR Variants**: CFR+ regret flooring with configurable iteration weighting (`none` | `linear` | `dcfr`); production training uses Discounted CFR
+- **Suit Isomorphism Card Abstraction**: Exact, full-coverage combo-level abstraction that preserves suit relationships (flush draws, blockers) with no fallback path
 - **Node-Template Action Model**: Context-aware preflop/postflop sizing with SPR-gated jam logic
 - **Realtime Subgame Resolver**: Runtime local re-solving with configurable depth, rollout leaves, and conservative blueprint blending
-- **Parallel Training**: Multi-core support with lock-free shared memory for efficient scaling
-- **Comprehensive Evaluation**: Rollout-based exploitability estimation with confidence intervals
-- **Production-Ready Checkpointing**: Efficient Zarr-based storage with resume capability
-- **Interactive CLI & Web UI**: Train, evaluate, and visualize strategies through intuitive interfaces
+- **Parallel Training**: Hash-partitioned shared memory with owner-only writes — lock-free, no merge step
+- **Rigorous Evaluation**: Local Best Response (LBR) exploitability lower bounds with confidence intervals, recorded to an append-only eval ledger with paired run comparison
+- **Production-Ready Checkpointing**: Async Zarr-based snapshots with resume capability
+- **Reproducibility**: Runs record git provenance, config hashes, and the exact card-abstraction hash; evaluation auto-pins to it
+- **Interactive CLI, Headless CLI & Web UI**: Train, evaluate, and visualize strategies
 
 ## Quick Start
 
@@ -40,25 +41,27 @@ uv sync --group dev
 uv run poker-solver
 ```
 
-From the CLI, you can:
-- **Train** a new solver with predefined configurations
-- **Resume** training from checkpoints
-- **Evaluate** trained strategies (exploitability estimation)
-- **View** preflop GTO charts
-- **Precompute** custom card abstractions
+The interactive CLI offers: **Train Solver**, **Resume Training**, **View Past Runs**, **Evaluate Solver**, **View Preflop Chart**, and **Combo Abstraction Tools** (precompute abstractions, inspect quality metrics).
+
+For scripted/remote use there is a headless CLI:
+
+```bash
+uv run poker-solver-run train --config production
+uv run poker-solver-run evaluate --run <id> --scorer lookahead
+uv run poker-solver-run ledger                 # browse recorded evaluations
+uv run poker-solver-run compare --a <run> --b <run>   # paired comparison with p-value
+```
 
 ### Training Your First Solver
 
 1. Launch the CLI: `uv run poker-solver`
 2. Select "Train Solver"
-3. Choose a configuration:
-   - `quick_test`: Fast convergence test (~2 minutes, ~500 mbb/g)
-   - `production`: Balanced quality (~2-3 hours, ~10-20 mbb/g)
+3. Choose a configuration (`quick_test` for a fast smoke run, `production` for a real run)
 4. Training runs with live progress updates and automatic checkpointing
 
 ## Architecture
 
-The codebase follows a layered package layout with a single allowed dependency direction:
+The codebase follows a layered package layout with a single allowed dependency direction, enforced by import-linter:
 
 - `src/interfaces` -> `src/pipeline` -> `src/engine` -> `src/core`
 - `src/shared` is layer-neutral and can be imported by all layers
@@ -73,24 +76,33 @@ The solver uses **combo-level abstraction** that preserves suit relationships to
 
 This is a significant improvement over naive 169-class abstractions that ignore suit coordination.
 
-**Process:**
-1. **Canonicalize** boards by suit order (22,100 → 1,755 unique flops)
-2. **Cluster** boards by texture (connectivity, pairing, suits)
-3. **Bucket** hands within clusters by equity distributions
-4. **Result**: 12-19x state space reduction with minimal strategic loss
+**Process (per street, computed exactly):**
+1. **Canonicalize** boards and hands by suit isomorphism (22,100 → 1,755 unique flops)
+2. **Compute exact equity** for every canonical hand class on every canonical board
+3. **Bucket** hand classes by equity (weighted 1D k-means) into the configured count per street
+4. **Result**: 12-19x state space reduction, full per-board coverage, no fallback path
 
 See [Card Abstraction README](src/pipeline/abstraction/postflop/README.md) for details.
 
+### Realtime Resolver (Runtime Search)
+
+Decision-time play is handled by `BlueprintAgent` (`src/engine/search/agent.py`), which wraps any `Blueprint` (a protocol the MCCFR solver satisfies). When the resolver is enabled, `act()`:
+
+- Builds a depth-limited local lookahead tree from the current state
+- Estimates leaf values via blueprint rollouts
+- Computes a local strategy and blends it with the blueprint policy (`policy_blend_alpha`)
+- Applies a minimum strategy floor (`min_strategy_prob`) before normalization
+
+Training still learns the blueprint policy; resolving happens only at decision time. Off-tree opponent actions are handled by the action model's `off_tree_mapping`.
+
 ## Configuration
 
-Training behavior is controlled by YAML configs in `config/training/`:
+Training configs in `config/training/` are sparse overrides on the schema defaults in `src/shared/config.py` (`config/training/default.yaml` documents every default). The actual production config:
 
 ```yaml
 # config/training/production.yaml
-game:
-  starting_stack: 200  # BB units
-  small_blind: 1
-  big_blind: 2
+solver:
+  iteration_weighting: dcfr
 
 action_model:
   preflop_templates:
@@ -102,86 +114,56 @@ action_model:
     facing_bet: ["min_raise", "pot_raise", "jam"]
     after_one_raise: ["pot_raise", "jam"]
     after_two_raises: ["jam"]
-  jam_spr_threshold: 2.0
-  off_tree_mapping: "probabilistic"
 
 resolver:
-  enabled: true
-  time_budget_ms: 300
-  max_depth: 2
   max_raises_per_street: 5
-  leaf_rollouts: 8
-  leaf_use_average_strategy: true
-  policy_blend_alpha: 0.35
-  min_strategy_prob: 1.0e-6
 
-solver:
-  cfr_plus: true         # 100x faster convergence
-  iteration_weighting: "linear"  # "none" | "linear" | "dcfr"
-  sampling_method: "external"  # or "outcome"
+card_abstraction:
+  config: production
 
 training:
-  num_iterations: 1000000  # 1M iterations
-  checkpoint_frequency: 100000
+  num_iterations: 1000000
+  checkpoint_frequency: 500000
+  iterations_per_worker: 5000
+
+storage:
+  initial_capacity: 4000000
+
+system:
+  config_name: "production"
 ```
 
-### Runtime Resolver (Realtime Search)
-
-`MCCFRSolver.act()` can use a realtime HU resolver instead of sampling directly from the blueprint.
-
-- Builds a depth-limited local lookahead tree from the current state
-- Estimates leaf values via blueprint rollouts
-- Computes a local strategy and blends it with blueprint policy (`policy_blend_alpha`)
-- Applies a minimum strategy floor (`min_strategy_prob`) before normalization
-- Uses off-tree translation (`off_tree_mapping`) to improve robustness
-
-Training still learns the blueprint policy; realtime resolving is used at decision time.
+Resolver defaults (`ResolverConfig`): `enabled: true`, `time_budget_ms: 300`, `max_depth: 2`, `leaf_rollouts: 8`, `policy_blend_alpha: 0.35`, `min_strategy_prob: 1.0e-6`.
 
 Card abstraction configs live in `config/abstraction/`:
 
 ```yaml
 # config/abstraction/default.yaml
-board_clusters:
+buckets:            # equity buckets per street
   flop: 50
   turn: 100
   river: 200
-
-buckets:
-  flop: 50
-  turn: 100
-  river: 200
-
-equity_samples: 1000
+flop_runouts: null  # null = exact (all 1,176 runouts)
+equity_histogram_bins: 8
+kmeans_max_iter: 300
+kmeans_n_init: 10
+num_workers: null
+seed: 42
 ```
 
-See [Configuration Guide](docs/CONFIGURATION.md) for details on adding custom configs.
+`config/training/default.yaml` documents every available setting and its default; new configs only need the keys they override.
 
-## Evaluation Metrics
+## Evaluation
 
-### Exploitability
+The primary quality metric is **exploitability**, measured with **Local Best Response (LBR)**: an exploiter plays against the frozen blueprint and its winnings (in mbb/g) form a *lower bound* on true exploitability. Key knobs define the comparison tier:
 
-The primary quality metric is **exploitability**: the expected value a best-response opponent can achieve.
+- `--scorer lookahead` — depth-limited best-response scoring (the standard for on-tree evaluation; the default `myopic` scorer understates exploitability)
+- `--opponent blueprint|deployed` — raw strategy table vs. blueprint + runtime resolver
+- `--include-off-tree` — allow the exploiter off the trained action tree (shadow-state translation)
 
-**Target Values** (in milli-big-blinds per game):
-- `< 1 mbb/g`: Strong player
-- `1-5 mbb/g`: Good player
-- `5-20 mbb/g`: Decent player
-- `20+ mbb/g`: Needs more training
+Every evaluation is recorded to `data/eval_ledger.jsonl` with git provenance and the pinned abstraction hash; `poker-solver-run compare` runs a paired statistical comparison and refuses mismatched seeds or tiers.
 
-**Implementation**: Monte Carlo rollout-based best response approximation (following Brown & Sandholm 2019). This is tractable for large games but provides empirical estimates rather than exact exploitability.
-
-```python
-results = compute_exploitability(
-    solver,
-    num_samples=10000,          # Game simulations per player
-    num_rollouts_per_infoset=100,  # Rollouts for action value estimation
-    use_average_strategy=True
-)
-
-# Output includes confidence intervals
-print(f"{results['exploitability_mbb']:.2f} ± {results['std_error_mbb']:.2f} mbb/g")
-print(f"95% CI: [{results['confidence_95_mbb'][0]:.2f}, {results['confidence_95_mbb'][1]:.2f}]")
-```
+An older rollout-based estimator (`compute_exploitability`) is retained as a fast smoke test only — it measures a one-ply deviation gain and is not a trustworthy exploitability figure.
 
 See [Evaluation README](src/pipeline/evaluation/README.md) for methodology and best practices.
 
@@ -213,16 +195,14 @@ uv run lint-imports
 
 ### Chart Viewer Backend
 
-The preflop chart viewer now serves data through FastAPI.
-
-- FastAPI server (`/health`, `/api/meta`, `/api/chart`) + static UI from `ui/dist`
+The preflop chart viewer serves data through FastAPI (`src/interfaces/api/`): `/health`, `/api/meta`, `/api/chart`, plus the static UI from `ui/dist`.
 
 ### Project Structure
 
 ```
 poker-solver/
 ├── src/
-│   ├── interfaces/      # User-facing entrypoints (CLI, API, charts)
+│   ├── interfaces/      # User-facing entrypoints (CLI, headless CLI, API, charts)
 │   ├── pipeline/        # Training, evaluation, abstraction workflows
 │   ├── engine/          # Solver/search internals
 │   ├── core/            # Poker domain foundations (game/actions)
@@ -233,7 +213,9 @@ poker-solver/
 │   └── abstraction/     # Card abstraction presets
 ├── data/
 │   ├── runs/            # Training runs and checkpoints
-│   └── combo_abstraction/  # Precomputed card abstractions
+│   ├── combo_abstraction/  # Precomputed card abstractions
+│   └── eval_ledger.jsonl   # Append-only evaluation ledger
+├── modal_app.py         # Modal remote training/eval orchestration
 └── ui/                  # React web interface for charts
 ```
 
