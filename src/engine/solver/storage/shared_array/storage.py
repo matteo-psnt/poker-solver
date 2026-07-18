@@ -102,7 +102,8 @@ class SharedArrayStorage(Storage):
         """
         self.num_workers = num_workers
         self.worker_id = worker_id
-        self.session_id = session_id[:8]
+        # Full id kept for logs; get_shm_name hashes it into the segment names.
+        self.session_id = session_id
         self.capacity = initial_capacity
         self.max_actions = max_actions
         self.is_coordinator = is_coordinator
