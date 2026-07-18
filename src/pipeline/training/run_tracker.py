@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,14 +19,74 @@ from src.shared.gitinfo import get_git_commit, is_git_dirty
 
 
 @dataclass
+class AttemptRecord:
+    """One contiguous compute session (container lifetime) for a run.
+
+    A run is trained across N attempts: the initial ``fresh`` attempt plus one
+    ``resume`` per checkpoint-restart. Recording each attempt separately — rather
+    than overwriting a single ``resumed_at``/``runtime_seconds`` slot — is what
+    lets the wall-clock timeline (and per-chunk timing of the mandatory <40min
+    resume chunks) be reconstructed instead of lost on every restart.
+
+    ``end_iter``/``runtime_seconds`` are refreshed on each checkpoint, so an
+    attempt that is killed mid-flight (guillotine, OOM) retains its last
+    checkpointed iteration and compute time even though ``mark_*`` never ran and
+    its ``status`` stays ``running`` with ``ended_at`` null — that dangling shape
+    is itself the signal that the attempt died, to be cross-referenced with the
+    client-side orchestration log's Modal exit status.
+    """
+
+    index: int
+    kind: str  # "fresh" | "resume"
+    started_at: str
+    start_iter: int
+    ended_at: str | None = None
+    end_iter: int | None = None
+    runtime_seconds: float = 0.0
+    status: str = "running"
+    git_commit: str | None = None
+    git_dirty: bool | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "kind": self.kind,
+            "started_at": self.started_at,
+            "start_iter": self.start_iter,
+            "ended_at": self.ended_at,
+            "end_iter": self.end_iter,
+            "runtime_seconds": self.runtime_seconds,
+            "status": self.status,
+            "git_commit": self.git_commit,
+            "git_dirty": self.git_dirty,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AttemptRecord:
+        return cls(
+            index=int(data.get("index", 0)),
+            kind=data.get("kind", "fresh"),
+            started_at=data.get("started_at", ""),
+            start_iter=int(data.get("start_iter", 0)),
+            ended_at=data.get("ended_at"),
+            end_iter=(int(data["end_iter"]) if data.get("end_iter") is not None else None),
+            runtime_seconds=float(data.get("runtime_seconds", 0.0)),
+            status=data.get("status", "unknown"),
+            git_commit=data.get("git_commit") if isinstance(data.get("git_commit"), str) else None,
+            git_dirty=data.get("git_dirty") if isinstance(data.get("git_dirty"), bool) else None,
+        )
+
+
+@dataclass
 class RunMetadata:
     run_id: str
     config_name: str
     started_at: str
-    resumed_at: str | None
     completed_at: str | None
     status: str
     iterations: int
+    # Cumulative compute time across every attempt (sum of AttemptRecord.runtime_seconds),
+    # NOT just the most recent session. Recomputed on each progress update.
     runtime_seconds: float
     num_infosets: int
     storage_capacity: int
@@ -46,6 +106,15 @@ class RunMetadata:
     # or before this field existed.
     git_commit: str | None = None
     git_dirty: bool | None = None
+    # Append-only per-session compute records. attempts[0] is the fresh run; each
+    # resume appends one. Empty only on malformed/pre-attempts metadata (synthesized
+    # on load, see from_dict).
+    attempts: list[AttemptRecord] = field(default_factory=list)
+
+    @property
+    def current_attempt(self) -> AttemptRecord:
+        """The live (most recent) attempt. Callers mutate this on progress/close."""
+        return self.attempts[-1]
 
     @classmethod
     def new(
@@ -57,11 +126,13 @@ class RunMetadata:
         card_abstraction_hash: str | None = None,
     ) -> RunMetadata:
         storage_capacity = config.storage.initial_capacity if config else 0
+        now = datetime.now().isoformat()
+        git_commit = get_git_commit()
+        git_dirty = is_git_dirty()
         return cls(
             run_id=run_id,
             config_name=config_name,
-            started_at=datetime.now().isoformat(),
-            resumed_at=None,
+            started_at=now,
             completed_at=None,
             status="running",
             iterations=0,
@@ -71,8 +142,18 @@ class RunMetadata:
             action_config_hash=action_config_hash,
             card_abstraction_hash=card_abstraction_hash,
             config=config,
-            git_commit=get_git_commit(),
-            git_dirty=is_git_dirty(),
+            git_commit=git_commit,
+            git_dirty=git_dirty,
+            attempts=[
+                AttemptRecord(
+                    index=0,
+                    kind="fresh",
+                    started_at=now,
+                    start_iter=0,
+                    git_commit=git_commit,
+                    git_dirty=git_dirty,
+                )
+            ],
         )
 
     @classmethod
@@ -84,15 +165,46 @@ class RunMetadata:
         if not isinstance(action_config_hash, str) or not action_config_hash:
             raise ValueError("Run metadata missing required action_config_hash")
         config = Config.from_persisted_dict(config_dict)
+        started_at = data.get("started_at", "")
+        completed_at = data.get("completed_at")
+        status = data.get("status", "unknown")
+        iterations = int(data.get("iterations", 0))
+        runtime_seconds = float(data.get("runtime_seconds", 0.0))
+        git_commit = data.get("git_commit") if isinstance(data.get("git_commit"), str) else None
+        git_dirty = data.get("git_dirty") if isinstance(data.get("git_dirty"), bool) else None
+
+        raw_attempts = data.get("attempts")
+        if isinstance(raw_attempts, list) and raw_attempts:
+            attempts = [AttemptRecord.from_dict(a) for a in raw_attempts]
+        else:
+            # Pre-attempts metadata: synthesize a single attempt spanning the whole
+            # run so old runs still load and read as a one-session timeline. The
+            # original single resumed_at slot can't be split back into distinct
+            # sessions, so a resumed legacy run collapses to one attempt (lossy by
+            # necessity, not by design).
+            attempts = [
+                AttemptRecord(
+                    index=0,
+                    kind="fresh",
+                    started_at=started_at,
+                    start_iter=0,
+                    ended_at=completed_at,
+                    end_iter=iterations,
+                    runtime_seconds=runtime_seconds,
+                    status=status,
+                    git_commit=git_commit,
+                    git_dirty=git_dirty,
+                )
+            ]
+
         return cls(
             run_id=data.get("run_id", ""),
             config_name=data.get("config_name", "default"),
-            started_at=data.get("started_at", ""),
-            resumed_at=data.get("resumed_at"),
-            completed_at=data.get("completed_at"),
-            status=data.get("status", "unknown"),
-            iterations=int(data.get("iterations", 0)),
-            runtime_seconds=float(data.get("runtime_seconds", 0.0)),
+            started_at=started_at,
+            completed_at=completed_at,
+            status=status,
+            iterations=iterations,
+            runtime_seconds=runtime_seconds,
             num_infosets=int(data.get("num_infosets", 0)),
             storage_capacity=int(data.get("storage_capacity", 0)),
             action_config_hash=action_config_hash,
@@ -106,8 +218,9 @@ class RunMetadata:
             config=config,
             # Missing on pre-versioning runs → 0 (legacy), NOT the current default.
             representation_version=int(data.get("representation_version", 0)),
-            git_commit=data.get("git_commit") if isinstance(data.get("git_commit"), str) else None,
-            git_dirty=data.get("git_dirty") if isinstance(data.get("git_dirty"), bool) else None,
+            git_commit=git_commit,
+            git_dirty=git_dirty,
+            attempts=attempts,
         )
 
     @classmethod
@@ -126,7 +239,6 @@ class RunMetadata:
             "run_id": self.run_id,
             "config_name": self.config_name,
             "started_at": self.started_at,
-            "resumed_at": self.resumed_at,
             "completed_at": self.completed_at,
             "status": self.status,
             "iterations": self.iterations,
@@ -138,8 +250,13 @@ class RunMetadata:
             "representation_version": self.representation_version,
             "git_commit": self.git_commit,
             "git_dirty": self.git_dirty,
+            "attempts": [a.to_dict() for a in self.attempts],
             "config": config_dict,
         }
+
+    def _sync_cumulative_runtime(self) -> None:
+        """Top-level runtime_seconds is the sum over all attempts, not the last one."""
+        self.runtime_seconds = sum(a.runtime_seconds for a in self.attempts)
 
     def update_progress(
         self,
@@ -148,30 +265,58 @@ class RunMetadata:
         num_infosets: int,
         storage_capacity: int,
     ) -> None:
+        # ``runtime_seconds`` is this session's elapsed wall time (per-process). Store
+        # it on the live attempt and refresh the run-level total; ``iterations`` is the
+        # cumulative count, so it also marks how far the current attempt has reached.
         self.iterations = iterations
-        self.runtime_seconds = runtime_seconds
         self.num_infosets = num_infosets
         self.storage_capacity = storage_capacity
+        attempt = self.current_attempt
+        attempt.runtime_seconds = runtime_seconds
+        attempt.end_iter = iterations
+        self._sync_cumulative_runtime()
 
     def resolve_initial_capacity(self, default_capacity: int) -> int:
         """Return stored capacity if present, otherwise a default."""
         return self.storage_capacity or default_capacity
 
     def mark_resumed(self) -> None:
-        self.resumed_at = datetime.now().isoformat()
+        # Open a new attempt starting at the checkpoint we're resuming from. Called
+        # while self.iterations still holds the checkpoint count, so start_iter is
+        # exactly the resume point.
         self.status = "running"
+        self.attempts.append(
+            AttemptRecord(
+                index=len(self.attempts),
+                kind="resume",
+                started_at=datetime.now().isoformat(),
+                start_iter=self.iterations,
+                git_commit=get_git_commit(),
+                git_dirty=is_git_dirty(),
+            )
+        )
+
+    def _close_current_attempt(self, status: str) -> None:
+        attempt = self.current_attempt
+        attempt.status = status
+        attempt.ended_at = datetime.now().isoformat()
+        if attempt.end_iter is None:
+            attempt.end_iter = self.iterations
 
     def mark_completed(self) -> None:
         self.status = "completed"
         self.completed_at = datetime.now().isoformat()
+        self._close_current_attempt("completed")
 
     def mark_interrupted(self) -> None:
         self.status = "interrupted"
         self.completed_at = datetime.now().isoformat()
+        self._close_current_attempt("interrupted")
 
     def mark_failed(self) -> None:
         self.status = "failed"
         self.completed_at = datetime.now().isoformat()
+        self._close_current_attempt("failed")
 
 
 class RunTracker:

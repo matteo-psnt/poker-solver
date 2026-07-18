@@ -349,13 +349,33 @@ def run_train(
       low --eval-cpu with high --eval-memory (each LBR worker rebuilds the full
         blueprint, so eval RAM ~= workers * blueprint size).
     """
+    from src.shared.orchestration_log import record_spawn, snapshot_call
+
     overrides = {"storage__initial_capacity": capacity} if capacity > 0 else None
-    train_result = train.with_options(cpu=cpu, memory=memory, timeout=timeout).remote(
+    # Spawn (not .remote) so the object_id is captured for the orchestration log; the
+    # immediate .get() below keeps the blocking, waits-for-result behaviour.
+    train_call = train.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
         config_name=config,
         num_workers=cpu,
         num_iterations=iterations or None,
         seed=seed,
         config_overrides=overrides,
+    )
+    # Fresh trains mint their run_id in-container, so it is unknown until the result
+    # returns: breadcrumb now with an empty run_id, snapshot with the real one after.
+    record_spawn(
+        run_id="",
+        function="train",
+        object_id=train_call.object_id,
+        resources={"cpu": cpu, "memory": memory, "timeout": timeout},
+        extra={"config": config, "seed": seed},
+    )
+    train_result = train_call.get()
+    snapshot_call(
+        run_id=train_result["run_id"],
+        function="train",
+        object_id=train_call.object_id,
+        call=train_call,
     )
     print("TRAINING RESULT:")
     for key, value in train_result.items():
@@ -363,9 +383,16 @@ def run_train(
 
     run_id = train_result["run_id"]
     print(f"\nEvaluating {run_id} with LBR ({eval_hands} hands, {eval_cpu} workers)...")
-    eval_result = evaluate.with_options(cpu=eval_cpu, memory=eval_memory, timeout=timeout).remote(
+    eval_call = evaluate.with_options(cpu=eval_cpu, memory=eval_memory, timeout=timeout).spawn(
         run_id=run_id, num_hands=eval_hands, num_workers=eval_cpu, seed=1, scorer=eval_scorer
     )
+    record_spawn(
+        run_id=run_id,
+        function="evaluate",
+        object_id=eval_call.object_id,
+        resources={"cpu": eval_cpu, "memory": eval_memory, "timeout": timeout},
+    )
+    eval_result = _await_call(eval_call, run_id, "evaluate")
     results = eval_result["results"]
     print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
     print(
@@ -397,10 +424,21 @@ def run_resume(
     result to print and NO eval tail — detect completion via the Volume metadata
     (``status=completed``, iterations = target) and run the LBR eval separately with ``run_eval``.
     """
+    from src.shared.orchestration_log import record_spawn
+
     call = resume.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
         run_id=run_id,
         additional_iterations=additional,
         num_workers=cpu,
+    )
+    # Persist the object_id → run_id link now, before the detached call can be
+    # guillotined: its Modal exit status is then recoverable via snapshot_call later.
+    record_spawn(
+        run_id=run_id,
+        function="resume",
+        object_id=call.object_id,
+        resources={"cpu": cpu, "memory": memory, "timeout": timeout},
+        extra={"additional_iterations": additional},
     )
     print(f"SPAWNED resume call {call.object_id}")
     print(f"  run_id={run_id} additional={additional} cpu={cpu} — runs detached; does not wait.")
@@ -418,6 +456,23 @@ def _print_variance_decomposition(results: dict[str, Any]) -> None:
             f"({group['n']} deals, {group['share_of_samples']:.1%})"
         )
     print(f"    (between-group: {decomposition['between_group_share']:.1%})")
+
+
+def _await_call(call: Any, run_id: str, function: str) -> dict[str, Any]:
+    """Block on a spawned call and snapshot its Modal exit status either way.
+
+    The snapshot runs in a ``finally`` so a server-side death — OOM, timeout, or an
+    in-container exception, all of which surface as a ``.get()`` exception — is still
+    recorded. A *client* guillotine kills this process before the finally runs, so
+    that exit-cause is recoverable only by a later poll on the object_id persisted by
+    ``record_spawn`` (within Modal's result-retention window).
+    """
+    from src.shared.orchestration_log import snapshot_call
+
+    try:
+        return call.get()
+    finally:
+        snapshot_call(run_id=run_id, function=function, object_id=call.object_id, call=call)
 
 
 @app.local_entrypoint()
@@ -445,7 +500,9 @@ def run_eval(
     Pass --include-off-tree to arm the exploiter with off-tree bet/raise sizes and
     --scorer lookahead for the depth-limited best-response scorer (both produce a
     stronger, still-rigorous exploiter; never mix settings within one comparison)."""
-    eval_result = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout).remote(
+    from src.shared.orchestration_log import record_spawn
+
+    eval_call = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
         run_id=run_id,
         num_hands=hands,
         num_workers=cpu,
@@ -458,6 +515,14 @@ def run_eval(
         lookahead_depth=lookahead_depth,
         lookahead_top_k=lookahead_top_k,
     )
+    record_spawn(
+        run_id=run_id,
+        function="evaluate",
+        object_id=eval_call.object_id,
+        resources={"cpu": cpu, "memory": memory, "timeout": timeout},
+        extra={"opponent": opponent, "scorer": scorer},
+    )
+    eval_result = _await_call(eval_call, run_id, "evaluate")
     results = eval_result["results"]
     print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
     print(
@@ -491,6 +556,7 @@ def run_compare(
     independent CIs. Positive ``diff`` means ``run_b`` is less exploitable (better).
     """
     from src.pipeline.evaluation.statistics import compare_paired_samples
+    from src.shared.orchestration_log import record_spawn
 
     fn = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout)
     shared = dict(
@@ -502,9 +568,13 @@ def run_compare(
         lookahead_depth=lookahead_depth,
         lookahead_top_k=lookahead_top_k,
     )
+    resources = {"cpu": cpu, "memory": memory, "timeout": timeout}
     call_a = fn.spawn(run_id=run_a, **shared)
     call_b = fn.spawn(run_id=run_b, **shared)
-    result_a, result_b = call_a.get(), call_b.get()
+    record_spawn(run_id=run_a, function="evaluate", object_id=call_a.object_id, resources=resources)
+    record_spawn(run_id=run_b, function="evaluate", object_id=call_b.object_id, resources=resources)
+    result_a = _await_call(call_a, run_a, "evaluate")
+    result_b = _await_call(call_b, run_b, "evaluate")
 
     results_a, results_b = result_a["results"], result_b["results"]
     if results_a["base_seed"] != results_b["base_seed"]:
@@ -563,6 +633,7 @@ def run_deployed_gate(
     exploitability, the Plan C headline number.
     """
     from src.pipeline.evaluation.statistics import compare_paired_samples
+    from src.shared.orchestration_log import record_spawn
 
     fn = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout)
     shared = dict(
@@ -575,13 +646,29 @@ def run_deployed_gate(
         lookahead_depth=lookahead_depth,
         lookahead_top_k=lookahead_top_k,
     )
+    resources = {"cpu": cpu, "memory": memory, "timeout": timeout}
     call_bare = fn.spawn(**shared)
     call_deployed = fn.spawn(
         opponent="deployed",
         resolver_iterations=resolver_iterations,
         **shared,
     )
-    result_bare, result_deployed = call_bare.get(), call_deployed.get()
+    record_spawn(
+        run_id=run_id,
+        function="evaluate",
+        object_id=call_bare.object_id,
+        resources=resources,
+        extra={"opponent": "blueprint"},
+    )
+    record_spawn(
+        run_id=run_id,
+        function="evaluate",
+        object_id=call_deployed.object_id,
+        resources=resources,
+        extra={"opponent": "deployed", "resolver_iterations": resolver_iterations},
+    )
+    result_bare = _await_call(call_bare, run_id, "evaluate")
+    result_deployed = _await_call(call_deployed, run_id, "evaluate")
 
     results_bare = result_bare["results"]
     results_deployed = result_deployed["results"]
@@ -660,7 +747,10 @@ def run_pruning_calibration(
     is then compared with a paired eval (run_compare) on those ids. Only flip
     enable_pruning in the production config if throughput wins AND quality holds.
     """
+    from src.shared.orchestration_log import record_spawn, snapshot_call
+
     fn = train.with_options(cpu=cpu, memory=memory, timeout=timeout)
+    resources = {"cpu": cpu, "memory": memory, "timeout": timeout}
     call_off = fn.spawn(
         config_name="production", num_workers=cpu, num_iterations=iterations, seed=seed
     )
@@ -671,7 +761,35 @@ def run_pruning_calibration(
         seed=seed,
         config_overrides={"solver__enable_pruning": True},
     )
+    # Fresh trains mint their run_id in-container, so it is unknown at spawn; the
+    # object_id anchors the call and the real run_id is backfilled into the snapshot.
+    record_spawn(
+        run_id="",
+        function="train",
+        object_id=call_off.object_id,
+        resources=resources,
+        extra={"pruning": False, "seed": seed},
+    )
+    record_spawn(
+        run_id="",
+        function="train",
+        object_id=call_on.object_id,
+        resources=resources,
+        extra={"pruning": True, "seed": seed},
+    )
     result_off, result_on = call_off.get(), call_on.get()
+    snapshot_call(
+        run_id=result_off["run_id"],
+        function="train",
+        object_id=call_off.object_id,
+        call=call_off,
+    )
+    snapshot_call(
+        run_id=result_on["run_id"],
+        function="train",
+        object_id=call_on.object_id,
+        call=call_on,
+    )
 
     for label, result in (("pruning OFF", result_off), ("pruning ON ", result_on)):
         print(

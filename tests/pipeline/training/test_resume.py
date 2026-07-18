@@ -187,7 +187,13 @@ def test_resume_metadata_tracking(test_config, temp_run_dir):
     # Check metadata was updated
     assert session2.run_tracker is not None
     metadata = session2.run_tracker.metadata
-    assert metadata.resumed_at is not None, "resumed_at should be set"
+    assert len(metadata.attempts) == 2, "resume should append a second attempt"
+    resume_attempt = metadata.attempts[-1]
+    assert resume_attempt.kind == "resume"
+    assert resume_attempt.started_at, "resume attempt should be timestamped"
+    assert resume_attempt.start_iter == metadata.attempts[0].end_iter, (
+        "resume should start at the iteration the prior attempt reached"
+    )
     assert metadata.started_at is not None, "started_at should still be set"
     assert metadata.status == "running", "Status should be 'running' after resume"
 

@@ -47,6 +47,12 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 "*.py" = ["E501"]
 "tests/**/*.py" = ["SLF001"]
 
+[tool.deptry.per_rule_ignores]
+# `modal` is an infra/dev dependency, not a runtime one. The orchestration log
+# imports it lazily on the remote-orchestration path and degrades gracefully when
+# it is absent, so a `src` reference to it is intentional, not a missing dependency.
+DEP004 = ["modal"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

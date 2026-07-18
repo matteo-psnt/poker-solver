@@ -3,7 +3,7 @@
 import json
 
 from src.core.actions.action_model import ActionModel
-from src.pipeline.training.run_tracker import RunTracker
+from src.pipeline.training.run_tracker import RunMetadata, RunTracker
 from src.shared.config import Config
 
 
@@ -201,3 +201,45 @@ class TestRunTracker:
         """Test listing runs in non-existent directory."""
         runs = RunTracker.list_runs(tmp_path / "does-not-exist")
         assert runs == []
+
+    def test_load_legacy_metadata_without_attempts(self, tmp_path):
+        """Pre-attempts .run.json (every frozen baseline on the Volume predates the
+        attempts list) must still load — synthesizing one attempt — and resume on top.
+
+        This is the load-bearing back-compat path: the next load/eval/resume of any
+        existing run hits from_dict's synthesis branch, and a resume must append a
+        correctly-indexed second attempt.
+        """
+        config = Config.default()
+        fresh = RunMetadata.new(
+            "run-legacy", "test", config, action_config_hash=self._action_config_hash()
+        )
+        fresh.update_progress(
+            iterations=5_000_000, runtime_seconds=1800.0, num_infosets=1234, storage_capacity=10**6
+        )
+        fresh.mark_completed()
+
+        legacy = fresh.to_dict()
+        del legacy["attempts"]  # simulate pre-attempts metadata on disk
+        legacy["resumed_at"] = None  # old single-slot field, now dropped/ignored
+
+        # Round-trip through disk to exercise RunTracker.load, not just from_dict.
+        run_dir = tmp_path / "run-legacy"
+        run_dir.mkdir()
+        (run_dir / ".run.json").write_text(json.dumps(legacy))
+        loaded = RunTracker.load(run_dir).metadata
+
+        assert len(loaded.attempts) == 1
+        (attempt,) = loaded.attempts
+        assert attempt.kind == "fresh"
+        assert attempt.start_iter == 0
+        assert attempt.end_iter == 5_000_000
+        assert attempt.runtime_seconds == 1800.0
+        assert attempt.status == "completed"
+
+        # A resume of the legacy run appends a second attempt at its final iteration.
+        loaded.mark_resumed()
+        assert len(loaded.attempts) == 2
+        assert loaded.attempts[1].index == 1
+        assert loaded.attempts[1].kind == "resume"
+        assert loaded.attempts[1].start_iter == 5_000_000
