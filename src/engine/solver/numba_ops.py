@@ -22,8 +22,8 @@ def regret_matching(regrets):
     Returns:
         Probability distribution over actions (sums to 1, always float64)
     """
-    # Get positive regrets only (ensure float64)
-    positive_regrets = np.maximum(regrets, 0.0)
+    # Upcast so float32 storage rows still yield a float64 distribution
+    positive_regrets = np.maximum(regrets.astype(np.float64), 0.0)
     sum_positive = np.sum(positive_regrets)
     num_actions = len(regrets)
 
@@ -46,11 +46,13 @@ def average_strategy(strategy_sum):
     Returns:
         Normalized average strategy (always float64)
     """
-    sum_total = np.sum(strategy_sum)
+    # Upcast so float32 storage rows still yield a float64 distribution
+    sums = strategy_sum.astype(np.float64)
+    sum_total = np.sum(sums)
     num_actions = len(strategy_sum)
 
     if sum_total > 0:
-        return strategy_sum / sum_total
+        return sums / sum_total
     else:
         # Return uniform strategy (float64)
         return np.ones(num_actions, dtype=np.float64) / np.float64(num_actions)
@@ -83,11 +85,12 @@ def compute_dcfr_weight(iteration, alpha, beta, is_positive):
     exponent = alpha if is_positive else beta
 
     if exponent == 0.0:
-        return 1.0
+        # t^0 / (t^0 + 1) = 1/2: beta=0 halves accumulated negative regret on
+        # every update (Brown & Sandholm 2019) — not a no-op.
+        return 0.5
 
     # Standard DCFR discount: t^exponent / (t^exponent + 1)
     # As t increases, this approaches 1.0, meaning less discount
-    # Higher exponent → stronger discounting early on
     t_exp = t**exponent
     return t_exp / (t_exp + 1.0)
 
@@ -124,7 +127,10 @@ def apply_regret_updates(
     for i in range(regrets.shape[0]):
         if weighting == 2 and iteration > 1:
             exponent = dcfr_alpha if regrets[i] > 0 else dcfr_beta
-            if exponent != 0.0:
+            if exponent == 0.0:
+                # t^0 / (t^0 + 1) = 1/2 (see compute_dcfr_weight)
+                regrets[i] *= 0.5
+            else:
                 t_exp = np.float64(iteration) ** exponent
                 regrets[i] *= t_exp / (t_exp + 1.0)
 

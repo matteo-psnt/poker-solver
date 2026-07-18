@@ -29,7 +29,8 @@ GOLDEN_RUN = Path(__file__).parents[2] / "fixtures" / "golden_run"
 # Content hash of the golden checkpoint's arrays, recorded at fixture creation. A
 # change to how the arrays are stored/read that alters the strategic content breaks
 # this even if the checkpoint still "loads" — the strong form of the tripwire.
-GOLDEN_FINGERPRINT = "099643f36bc4e26b6470611afe155cbf0033891e128bfe8051722f727f55fa07"
+# Refreshed 2026-07-18 for v2 (float32 hot arrays, migration m0002).
+GOLDEN_FINGERPRINT = "e91c70f7d29e53db7cec3d274634cfc9947de80f7db25e006f8aa14416e70392"
 
 
 def test_golden_run_metadata_loads_under_current_schema():

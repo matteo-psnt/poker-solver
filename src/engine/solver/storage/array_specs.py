@@ -47,8 +47,13 @@ class ArraySpec:
 
 
 ARRAY_SPECS: tuple[ArraySpec, ...] = (
-    ArraySpec("shared_regrets", "shm_regrets", "sas_reg", "regrets", np.float64, True),
-    ArraySpec("shared_strategy_sum", "shm_strategy", "sas_str", "strategies", np.float64, True),
+    # float32 for the two hot per-action arrays: training is DRAM-bandwidth-bound
+    # past ~10M infosets, and halving the bytes per touch is the cheapest lever.
+    # CFR tolerates the precision (sampling noise dwarfs float32 rounding; Pluribus
+    # stored regrets as integers). Representation v2; migration m0002 downcasts
+    # older checkpoints.
+    ArraySpec("shared_regrets", "shm_regrets", "sas_reg", "regrets", np.float32, True),
+    ArraySpec("shared_strategy_sum", "shm_strategy", "sas_str", "strategies", np.float32, True),
     ArraySpec("shared_action_counts", "shm_actions", "sas_act", "action_counts", np.int32, False),
     ArraySpec("shared_reach_counts", "shm_reach", "sas_reach", "reach_counts", np.int64, False),
     ArraySpec(

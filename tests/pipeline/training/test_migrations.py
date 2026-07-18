@@ -96,14 +96,15 @@ def test_migrate_legacy_run_to_current(tmp_path):
     dst = migrate_run(src, tmp_path / "migrated")
 
     assert run_representation_version(dst) == REPRESENTATION_VERSION
-    # EXACT migration: strategic content is byte-identical.
+    # The v0 copy already stores float32 arrays (fixture refreshed at v2), so the
+    # chain (version stamp + dtype downcast) leaves strategic content byte-identical.
     assert checkpoint_fingerprint(dst) == before
     # Original is untouched (functional).
     assert run_representation_version(src) == 0
-    # History recorded.
+    # History recorded, one entry per chain step.
     history = json.loads((dst / ".run.json").read_text())["migration_history"]
-    assert [h["version"] for h in history] == [REPRESENTATION_VERSION]
-    assert history[-1]["kind"] == "exact"
+    assert [h["version"] for h in history] == list(range(1, REPRESENTATION_VERSION + 1))
+    assert history[-1]["kind"] == "approximate"
 
 
 def test_migrate_current_run_is_noop_copy(tmp_path):
@@ -123,7 +124,10 @@ def test_migrate_rolls_back_on_failure(tmp_path):
     def _boom(_run_dir):
         raise RuntimeError("verify failed")
 
-    failing = [Migration(version=1, description="bad", kind=MigrationKind.EXACT, verify=_boom)]
+    failing = [
+        Migration(version=1, description="ok", kind=MigrationKind.EXACT),
+        Migration(version=2, description="bad", kind=MigrationKind.EXACT, verify=_boom),
+    ]
     src = _v0_copy(tmp_path / "legacy")
     dst = tmp_path / "migrated"
 
