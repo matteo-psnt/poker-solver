@@ -6,10 +6,11 @@ scheduler fired every batch).
 """
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
-from src.pipeline.training.trainer import checkpointing
+from src.pipeline.training.trainer.checkpointing import CheckpointManager
 
 if TYPE_CHECKING:
     from src.pipeline.training.parallel_manager import SharedArrayWorkerManager
@@ -36,93 +37,89 @@ class _RecordingExecutor:
         return _DoneFuture()
 
 
-def _session(
+def _manager(
     *,
     freq=100_000,
     last=0,
     enabled=True,
     ckpt_seconds=0.0,
     ckpt_end=0.0,
-    executor=None,
+    recording=True,
     overhead=0.1,
-) -> "TrainingSession":
-    return cast(
+) -> CheckpointManager:
+    session = cast(
         "TrainingSession",
         SimpleNamespace(
             config=SimpleNamespace(
-                storage=SimpleNamespace(
-                    checkpoint_enabled=enabled, max_checkpoint_overhead=overhead
-                ),
+                # Disabled during construction so no real ThreadPoolExecutor is
+                # created; the flag is flipped afterwards for the `enabled` path.
+                storage=SimpleNamespace(checkpoint_enabled=False, max_checkpoint_overhead=overhead),
                 training=SimpleNamespace(checkpoint_frequency=freq),
             ),
-            last_checkpoint_iteration=last,
-            last_checkpoint_seconds=ckpt_seconds,
-            last_checkpoint_end_time=ckpt_end,
-            checkpoint_executor=executor,
-            pending_checkpoint=None,
+            run_tracker=None,
             verbose=False,
         ),
     )
+    manager = CheckpointManager(session)
+    session.config.storage.checkpoint_enabled = enabled
+    if recording:
+        manager.executor = cast(ThreadPoolExecutor, _RecordingExecutor())
+    manager.last_iteration = last
+    manager.last_seconds = ckpt_seconds
+    manager.last_end_time = ckpt_end
+    return manager
+
+
+def _submits(manager: CheckpointManager) -> int:
+    return cast(_RecordingExecutor, manager.executor).submits
 
 
 def test_should_checkpoint_is_interval_based():
-    session = _session(freq=100_000, last=0)
-    assert not checkpointing.should_checkpoint(session, 50_000, batch_size=10_000)
-    assert checkpointing.should_checkpoint(session, 100_000, batch_size=10_000)
+    manager = _manager(freq=100_000, last=0)
+    assert not manager.should_checkpoint(50_000)
+    assert manager.should_checkpoint(100_000)
 
 
 def test_should_checkpoint_disabled_or_iteration_zero():
-    assert not checkpointing.should_checkpoint(_session(enabled=False), 100_000, 10_000)
-    assert not checkpointing.should_checkpoint(_session(), 0, 10_000)
+    assert not _manager(enabled=False, recording=False).should_checkpoint(100_000)
+    assert not _manager().should_checkpoint(0)
 
 
 def test_back_pressure_defers_within_the_overhead_window():
     # 10% overhead → must wait 9x the last checkpoint's cost (900s) before the next.
-    executor = _RecordingExecutor()
-    session = _session(
-        ckpt_seconds=100.0, ckpt_end=time.time() - 200.0, executor=executor, overhead=0.1
-    )
-    checkpointing.async_checkpoint(session, _NO_WM, 200_000, 0, 0, 0.0)
-    assert executor.submits == 0  # only 200s elapsed, need 900s
+    manager = _manager(ckpt_seconds=100.0, ckpt_end=time.time() - 200.0, overhead=0.1)
+    manager.async_checkpoint(_NO_WM, 200_000, 0, 0, 0.0)
+    assert _submits(manager) == 0  # only 200s elapsed, need 900s
 
 
 def test_back_pressure_allows_after_the_overhead_window():
-    executor = _RecordingExecutor()
-    session = _session(
-        ckpt_seconds=100.0, ckpt_end=time.time() - 1000.0, executor=executor, overhead=0.1
-    )
-    checkpointing.async_checkpoint(session, _NO_WM, 200_000, 0, 0, 0.0)
-    assert executor.submits == 1  # 1000s > 900s
-    assert session.last_checkpoint_iteration == 200_000
+    manager = _manager(ckpt_seconds=100.0, ckpt_end=time.time() - 1000.0, overhead=0.1)
+    manager.async_checkpoint(_NO_WM, 200_000, 0, 0, 0.0)
+    assert _submits(manager) == 1  # 1000s > 900s
+    assert manager.last_iteration == 200_000
 
 
 def test_higher_overhead_allowance_checkpoints_sooner():
     # At 50% overhead the wait is only 1x cost, so the same 200s gap is enough.
-    executor = _RecordingExecutor()
-    session = _session(
-        ckpt_seconds=100.0, ckpt_end=time.time() - 200.0, executor=executor, overhead=0.5
-    )
-    checkpointing.async_checkpoint(session, _NO_WM, 200_000, 0, 0, 0.0)
-    assert executor.submits == 1
+    manager = _manager(ckpt_seconds=100.0, ckpt_end=time.time() - 200.0, overhead=0.5)
+    manager.async_checkpoint(_NO_WM, 200_000, 0, 0, 0.0)
+    assert _submits(manager) == 1
 
 
 def test_first_checkpoint_is_not_back_pressured():
-    executor = _RecordingExecutor()
-    session = _session(ckpt_seconds=0.0, executor=executor)
-    checkpointing.async_checkpoint(session, _NO_WM, 100_000, 0, 0, 0.0)
-    assert executor.submits == 1
+    manager = _manager(ckpt_seconds=0.0)
+    manager.async_checkpoint(_NO_WM, 100_000, 0, 0, 0.0)
+    assert _submits(manager) == 1
 
 
 def test_final_checkpoint_dedups_when_already_saved():
-    executor = _RecordingExecutor()
-    session = _session(last=500_000, executor=executor)
-    checkpointing.ensure_final_checkpoint(session, _NO_WM, 500_000, 0, 0, 0.0)
-    assert executor.submits == 0
+    manager = _manager(last=500_000)
+    manager.ensure_final_checkpoint(_NO_WM, 500_000, 0, 0, 0.0)
+    assert _submits(manager) == 0
 
 
 def test_final_checkpoint_saves_unsaved_final_state():
-    executor = _RecordingExecutor()
-    session = _session(last=400_000, executor=executor)
-    checkpointing.ensure_final_checkpoint(session, _NO_WM, 500_000, 0, 0, 0.0)
-    assert executor.submits == 1
-    assert session.last_checkpoint_iteration == 500_000
+    manager = _manager(last=400_000)
+    manager.ensure_final_checkpoint(_NO_WM, 500_000, 0, 0, 0.0)
+    assert _submits(manager) == 1
+    assert manager.last_iteration == 500_000

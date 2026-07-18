@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 import multiprocessing as mp
 import uuid
 from datetime import datetime
@@ -16,7 +15,8 @@ from src.pipeline.training.metrics import MetricsTracker
 from src.pipeline.training.run_tracker import RunTracker
 from src.shared.config import Config
 
-from . import checkpointing, partitioned
+from . import partitioned
+from .checkpointing import CheckpointManager
 
 
 class TrainingSession:
@@ -43,14 +43,7 @@ class TrainingSession:
                 run_id = f"run-{timestamp}-{uuid.uuid4().hex[:6]}"
             self.run_dir = runs_base_dir / run_id
 
-        self.checkpoint_executor: concurrent.futures.ThreadPoolExecutor | None = None
-        self.pending_checkpoint: concurrent.futures.Future[float] | None = None
-        # Checkpoint back-pressure: iteration of the last submitted checkpoint, and the
-        # wall-clock cost / finish time of the last completed one. Used to keep
-        # checkpointing from dominating compute on large (slow-to-serialize) runs.
-        self.last_checkpoint_iteration: int = 0
-        self.last_checkpoint_seconds: float = 0.0
-        self.last_checkpoint_end_time: float = 0.0
+        self.checkpoints = CheckpointManager(self)
 
         try:
             self.action_model = ActionModel(config)
@@ -81,11 +74,6 @@ class TrainingSession:
             )
 
             self.metrics = MetricsTracker()
-
-            if self.config.storage.checkpoint_enabled:
-                self.checkpoint_executor = concurrent.futures.ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="checkpoint"
-                )
         except Exception:
             if self.run_tracker is not None:
                 self.run_tracker.mark_failed(cleanup_if_empty=True)
@@ -135,8 +123,10 @@ class TrainingSession:
         return session
 
     def __del__(self):
-        """Cleanup on deletion."""
-        checkpointing.shutdown_checkpoint_executor(self)
+        """Cleanup on deletion (guarded: __init__ may have failed before the manager)."""
+        checkpoints = getattr(self, "checkpoints", None)
+        if checkpoints is not None:
+            checkpoints.shutdown()
 
     @property
     def verbose(self) -> bool:

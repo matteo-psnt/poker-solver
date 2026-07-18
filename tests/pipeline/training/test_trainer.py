@@ -256,10 +256,8 @@ class TestAsyncCheckpointing:
         trainer = TrainingSession(config)
 
         # Verify checkpoint executor is initialized
-        assert hasattr(trainer, "checkpoint_executor")
-        assert trainer.checkpoint_executor is not None
-        assert hasattr(trainer, "pending_checkpoint")
-        assert trainer.pending_checkpoint is None
+        assert trainer.checkpoints.executor is not None
+        assert trainer.checkpoints.pending is None
 
     @pytest.mark.timeout(60)
     def test_async_checkpoint_nonblocking(self, config_with_dummy_abstraction):
@@ -298,7 +296,7 @@ class TestAsyncCheckpointing:
         trainer.train(num_iterations=4, num_workers=1)
 
         # After training, pending checkpoint should be None (completed)
-        assert trainer.pending_checkpoint is None
+        assert trainer.checkpoints.pending is None
 
         # Verify checkpoint files exist
         assert (trainer.run_dir / "key_mapping.pkl").exists()
