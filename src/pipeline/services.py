@@ -11,6 +11,7 @@ from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 from src.pipeline.evaluation import ledger as eval_ledger
+from src.pipeline.evaluation.blueprint_match import play_blueprint_match
 from src.pipeline.evaluation.hunl_local_best_response import (
     LBRConfig,
     LBRResult,
@@ -374,6 +375,58 @@ def evaluate_run_resolver_gate(
         "pair_samples_mbb": result.pair_samples_mbb,
     }
     return EvaluationOutput(infosets=storage.num_infosets(), results=results)
+
+
+def evaluate_blueprint_match(
+    run_dir_a: Path,
+    run_dir_b: Path,
+    *,
+    num_deals: int = 2000,
+    seed: int = 1,
+) -> EvaluationOutput:
+    """Head-to-head match between two runs' blueprints on duplicate deals.
+
+    Positive ``a_mbb_per_hand`` means run A's blueprint wins chips off run B's.
+    Each blueprint is pinned to the card abstraction its run trained against.
+
+    Raises:
+        FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
+        ValueError: Invalid checkpoint state, or mismatched game configurations.
+    """
+    metadata_a = load_run_metadata(run_dir_a)
+    metadata_b = load_run_metadata(run_dir_b)
+    if metadata_a.config.game != metadata_b.config.game:
+        raise ValueError(
+            f"Game configs differ between runs ({metadata_a.config.game} vs "
+            f"{metadata_b.config.game}); a chip match would be meaningless."
+        )
+
+    solver_a, storage_a = build_evaluation_solver(
+        metadata_a.config,
+        checkpoint_dir=run_dir_a,
+        abstraction_hash=metadata_a.card_abstraction_hash,
+    )
+    solver_b, storage_b = build_evaluation_solver(
+        metadata_b.config,
+        checkpoint_dir=run_dir_b,
+        abstraction_hash=metadata_b.card_abstraction_hash,
+    )
+    result = play_blueprint_match(solver_a, solver_b, num_deals=num_deals, seed=seed)
+    results = {
+        "run_a": metadata_a.run_id,
+        "run_b": metadata_b.run_id,
+        "a_mbb_per_hand": result.a_mbb_per_hand,
+        "se_mbb": result.se_mbb,
+        "confidence_95_mbb": result.confidence_95_mbb,
+        "p_value": result.p_value,
+        "num_deals": result.num_deals,
+        "num_hands": result.num_hands,
+        "infosets_a": storage_a.num_infosets(),
+        "infosets_b": storage_b.num_infosets(),
+        "seed": seed,
+        "pair_samples_mbb": result.pair_samples_mbb,
+    }
+    return EvaluationOutput(infosets=storage_a.num_infosets(), results=results)
 
 
 def evaluate_run_rollout(

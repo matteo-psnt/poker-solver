@@ -218,6 +218,34 @@ def resolver_gate(
     return {"run_id": run_id, "infosets": out.infosets, "results": out.results}
 
 
+# Two full blueprints resident at once (each ~GBs at 10M infosets); play itself
+# is serial dict lookups, so the memory reservation is the binding resource.
+@app.function(
+    image=image,
+    volumes={DATA_MOUNT: data_volume},
+    cpu=4,
+    memory=49152,
+    timeout=10800,
+)
+def blueprint_match(
+    run_a: str,
+    run_b: str,
+    num_deals: int = 2000,
+    seed: int = 1,
+) -> dict[str, Any]:
+    """Duplicate-deal head-to-head between two runs' blueprints (A's edge in mbb/hand)."""
+    from src.pipeline import services
+
+    data_volume.reload()
+    out = services.evaluate_blueprint_match(
+        Path("data/runs") / run_a,
+        Path("data/runs") / run_b,
+        num_deals=num_deals,
+        seed=seed,
+    )
+    return {"run_a": run_a, "run_b": run_b, "results": out.results}
+
+
 @app.function(
     image=image,
     volumes={DATA_MOUNT: data_volume},
@@ -290,6 +318,25 @@ def resume_test(
         f"(expected final={train_result['iterations'] + 1500}, "
         f"got {resume_result['final_iterations']})"
     )
+
+
+@app.local_entrypoint()
+def run_match(
+    run_a: str,
+    run_b: str,
+    deals: int = 2000,
+    seed: int = 1,
+) -> None:
+    """Duplicate-deal head-to-head between two runs' blueprints."""
+    result = blueprint_match.remote(run_a=run_a, run_b=run_b, num_deals=deals, seed=seed)
+    r = result["results"]
+    print(f"BLUEPRINT MATCH: {run_a} (A) vs {run_b} (B)")
+    print(f"  infosets: A={r['infosets_a']:,}  B={r['infosets_b']:,}")
+    print(
+        f"  A edge: {r['a_mbb_per_hand']:+.1f} mbb/hand (± {r['se_mbb']:.1f}; "
+        f"95% CI {r['confidence_95_mbb']})"
+    )
+    print(f"  p-value: {r['p_value']:.5f}  over {r['num_deals']} duplicate deals")
 
 
 @app.local_entrypoint()
