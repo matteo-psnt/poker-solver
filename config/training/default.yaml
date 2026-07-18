@@ -50,8 +50,9 @@
 #   # - "outcome": Higher variance, faster (good for testing)
 #   # sampling_method: "external"  # default: "external"
 #
-#   # CFR+ provides ~100x faster convergence than vanilla CFR
-#   # cfr_plus: true  # default: true
+#   # CFR+ regret floor. Off by default: the floor locks in sampling noise under
+#   # MCCFR (Burch 2017); DCFR's beta discount decays negative regrets instead.
+#   # cfr_plus: false  # default: false
 #
 #   # Iteration weighting: "linear" (default), "dcfr", or "none"
 #   # iteration_weighting: "linear"

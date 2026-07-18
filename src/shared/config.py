@@ -258,7 +258,7 @@ class SolverConfig(StrictFrozenModel):
     """Solver algorithm configuration."""
 
     sampling_method: Literal["external", "outcome"] = Field(default="external")
-    cfr_plus: bool = Field(default=True)
+    cfr_plus: bool = Field(default=False)
     iteration_weighting: Literal["none", "linear", "dcfr"] = Field(default="linear")
 
     # DCFR parameters — only used when iteration_weighting == "dcfr"

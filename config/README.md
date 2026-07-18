@@ -76,9 +76,9 @@ Sections and fields, with defaults:
 | | `min_strategy_prob` | 1e-6 | |
 | | `max_iterations` | null | fixed CFR count; determinism knob (null = wall-clock budget) |
 | `solver` | `sampling_method` | `external` | or `outcome` |
-| | `cfr_plus` | true | |
+| | `cfr_plus` | false | |
 | | `iteration_weighting` | `linear` | `none` \| `linear` \| `dcfr`; production uses `dcfr` |
-| | `dcfr_alpha/beta/gamma` | 1.5 / 0.0 / 2.0 | used only with `dcfr` |
+| | `dcfr_alpha/beta/gamma` | 1.5 / 0.0 / 2.0 | used only with `dcfr`; `beta=0` halves negative regrets per update |
 | | `enable_pruning` | false | requires external sampling |
 | | `pruning_threshold` | 300.0 | |
 | | `prune_start_iteration` | 100 | |
