@@ -93,6 +93,52 @@ def compute_dcfr_weight(iteration, alpha, beta, is_positive):
 
 
 @jit(nopython=True, cache=True)
+def apply_regret_updates(
+    regrets,
+    action_utilities,
+    node_utility,
+    opponent_reach,
+    cfr_plus,
+    iteration,
+    weighting,
+    dcfr_alpha,
+    dcfr_beta,
+):
+    """
+    Apply one node's regret updates to a full regret row in a single call.
+
+    Equivalent to calling ``InfoSet.update_regret`` for every action index, but
+    without the per-action Python loop and kernel-call overhead.
+
+    Args:
+        regrets: Regret row for the infoset (mutated in place)
+        action_utilities: Counterfactual utility per action
+        node_utility: Node utility under the current strategy
+        opponent_reach: Opponent reach probability
+        cfr_plus: Floor cumulative regrets at 0 (CFR+)
+        iteration: Current iteration (1-indexed)
+        weighting: 0 = none, 1 = linear, 2 = DCFR
+        dcfr_alpha: Positive-regret discount exponent (DCFR)
+        dcfr_beta: Negative-regret discount exponent (DCFR)
+    """
+    for i in range(regrets.shape[0]):
+        if weighting == 2 and iteration > 1:
+            exponent = dcfr_alpha if regrets[i] > 0 else dcfr_beta
+            if exponent != 0.0:
+                t_exp = np.float64(iteration) ** exponent
+                regrets[i] *= t_exp / (t_exp + 1.0)
+
+        weighted_regret = (action_utilities[i] - node_utility) * opponent_reach
+        if weighting == 1:
+            weighted_regret = weighted_regret * iteration
+
+        updated = regrets[i] + weighted_regret
+        if cfr_plus and updated < 0:
+            updated = 0.0
+        regrets[i] = updated
+
+
+@jit(nopython=True, cache=True)
 def compute_dcfr_strategy_weight(iteration, gamma):
     """
     Compute DCFR weight for strategy_sum updates.

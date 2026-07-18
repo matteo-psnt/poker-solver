@@ -28,6 +28,7 @@ import numpy as np
 from src.core.game.state import Card, Street
 from src.pipeline.abstraction.base import BucketingStrategy
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
+    SuitMapping,
     canonicalize_board,
     canonicalize_hand,
     get_canonical_board_id,
@@ -101,7 +102,14 @@ class DenseBucketer(BucketingStrategy):
         self._sentinels = {
             street: np.iinfo(matrix.dtype).max for street, matrix in self._buckets.items()
         }
+        self._install_caches()
+
+    def _install_caches(self) -> None:
+        # Two-level memoization: the (hand, board) cache serves exact repeats;
+        # the board-level cache below it makes new hands on a seen board cheap,
+        # since board canonicalization dominates the miss cost.
         self._cached_postflop_bucket = lru_cache(maxsize=_LOOKUP_CACHE_SIZE)(self._postflop_bucket)
+        self._cached_board_row = lru_cache(maxsize=_LOOKUP_CACHE_SIZE)(self._board_row)
 
     def __getstate__(self) -> dict:
         """
@@ -115,7 +123,8 @@ class DenseBucketer(BucketingStrategy):
         if self._source_path is not None:
             return {"_source_path": self._source_path}
         state = dict(self.__dict__)
-        state.pop("_cached_postflop_bucket")  # lru_cache wrapper is not picklable
+        state.pop("_cached_postflop_bucket")  # lru_cache wrappers are not picklable
+        state.pop("_cached_board_row")
         state["_buckets"] = {street: np.asarray(matrix) for street, matrix in self._buckets.items()}
         return state
 
@@ -125,7 +134,7 @@ class DenseBucketer(BucketingStrategy):
             self.__dict__.update(loaded.__dict__)
             return
         self.__dict__.update(state)
-        self._cached_postflop_bucket = lru_cache(maxsize=_LOOKUP_CACHE_SIZE)(self._postflop_bucket)
+        self._install_caches()
 
     @classmethod
     def load(cls, path: Path) -> DenseBucketer:
@@ -186,13 +195,7 @@ class DenseBucketer(BucketingStrategy):
             return _PREFLOP_CLASSES.get_hand_index(hole_cards)
         return self._cached_postflop_bucket(hole_cards, tuple(board), street)
 
-    def _postflop_bucket(
-        self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
-    ) -> int:
-        matrix = self._buckets.get(street)
-        if matrix is None:
-            raise KeyError(f"No buckets loaded for street {street.name}")
-
+    def _board_row(self, board: tuple[Card, ...], street: Street) -> tuple[int, SuitMapping]:
         canonical_board, suit_mapping = canonicalize_board(board)
         board_id = get_canonical_board_id(canonical_board)
 
@@ -203,6 +206,16 @@ class DenseBucketer(BucketingStrategy):
                 f"Board {board} (canonical id {board_id}) not found for {street.name}; "
                 "the abstraction is incomplete or the board is malformed."
             )
+        return row, suit_mapping
+
+    def _postflop_bucket(
+        self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
+    ) -> int:
+        matrix = self._buckets.get(street)
+        if matrix is None:
+            raise KeyError(f"No buckets loaded for street {street.name}")
+
+        row, suit_mapping = self._cached_board_row(board, street)
 
         canonical_hand = canonicalize_hand(hole_cards, suit_mapping)
         col = int(self._hand_id_to_col[get_canonical_hand_id(canonical_hand)])

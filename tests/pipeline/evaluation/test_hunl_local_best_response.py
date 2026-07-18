@@ -535,14 +535,17 @@ class TestExploitability:
     def test_include_off_tree_false_pinned_baseline(self):
         """Bitwise anchor: the on-tree eval must not move under the shadow-state
         refactor. Pinned on this platform against the pre-shadow implementation;
-        a change here means the include_off_tree=False path is no longer inert."""
+        a change here means the include_off_tree=False path is no longer inert.
+        (Re-pinned after the 2026-07-17 training-speed work changed the solver's
+        sampling RNG stream, which shifts the tiny trained blueprint this test
+        evaluates — the eval path itself is unchanged.)"""
         solver = _build_solver(3, starting_stack=400)
         result = compute_lbr_exploitability(
             solver, LBRConfig(num_hands=8, equity_runouts=2, seed=99)
         )
-        assert result.exploitability_mbb == 319.5319499341222
-        assert result.lbr_utility_p0 == 4.7565656565654315
-        assert result.lbr_utility_p1 == 59.149824330259015
+        assert result.exploitability_mbb == 435.1439393939373
+        assert result.lbr_utility_p0 == 4.054545454545224
+        assert result.lbr_utility_p1 == 82.97424242424223
 
     @pytest.mark.timeout(30)
     def test_off_tree_deterministic_under_fixed_seed(self):

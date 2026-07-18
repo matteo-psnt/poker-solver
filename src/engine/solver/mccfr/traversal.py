@@ -10,11 +10,13 @@ from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.solver.infoset import InfoSet
 from src.engine.solver.infoset_encoder import encode_infoset_key
-from src.engine.solver.numba_ops import compute_dcfr_strategy_weight
+from src.engine.solver.numba_ops import apply_regret_updates, compute_dcfr_strategy_weight
 from src.engine.solver.policy_lookup import filter_stored_actions
 
 if TYPE_CHECKING:
     from .solver import MCCFRSolver
+
+_WEIGHTING_CODES = {"none": 0, "linear": 1, "dcfr": 2}
 
 
 def _terminal_utility(self: MCCFRSolver, state: GameState, traversing_player: int) -> float:
@@ -39,14 +41,36 @@ def _infoset_context(
 
     infoset = self.storage.get_or_create_infoset(infoset_key, legal_actions)
 
-    valid_indices, valid_actions = filter_stored_actions(infoset, state, self.rules, legal_actions)
-
-    if not valid_actions:
+    if infoset.legal_actions is legal_actions:
+        # Same list object => the stored-action filter is an identity; skip it.
         valid_actions = legal_actions
         valid_indices = list(range(len(legal_actions)))
+    else:
+        valid_indices, valid_actions = filter_stored_actions(
+            infoset, state, self.rules, legal_actions
+        )
+        if not valid_actions:
+            valid_actions = legal_actions
+            valid_indices = list(range(len(legal_actions)))
 
     strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=False)
     return infoset, valid_actions, valid_indices, strategy
+
+
+def _sample_action_index(strategy: np.ndarray) -> int:
+    """Sample an index from a probability vector.
+
+    Equivalent in distribution to ``np.random.choice(len(strategy), p=strategy)``
+    but ~30x cheaper for the short action vectors CFR deals in.
+    """
+    r = np.random.random()
+    acc = 0.0
+    probs = strategy.tolist()
+    for i, p in enumerate(probs):
+        acc += p
+        if r < acc:
+            return i
+    return len(probs) - 1
 
 
 def _update_average_strategy(
@@ -58,20 +82,15 @@ def _update_average_strategy(
     node_utility: float,
 ) -> None:
     """Update cumulative strategy and infoset statistics."""
-    for local_idx, strategy_prob in enumerate(strategy):
-        original_idx = valid_indices[local_idx]
-        weight = strategy_prob * player_reach_prob
+    weight = player_reach_prob
+    if self.config.solver.iteration_weighting == "dcfr":
+        weight *= compute_dcfr_strategy_weight(self.iteration, self.config.solver.dcfr_gamma)
+    elif self.config.solver.iteration_weighting == "linear":
+        weight *= self.iteration
 
-        if self.config.solver.iteration_weighting == "dcfr":
-            gamma_weight = compute_dcfr_strategy_weight(
-                self.iteration,
-                self.config.solver.dcfr_gamma,
-            )
-            weight *= gamma_weight
-        elif self.config.solver.iteration_weighting == "linear":
-            weight *= self.iteration
-
-        infoset.strategy_sum[original_idx] += weight
+    strategy_sum = infoset.strategy_sum
+    for local_idx, strategy_prob in enumerate(strategy.tolist()):
+        strategy_sum[valid_indices[local_idx]] += strategy_prob * weight
 
     infoset.increment_reach_count()
     infoset.add_cumulative_utility(node_utility)
@@ -140,22 +159,36 @@ def cfr_external_sampling(
         # Skipped only for placeholder views whose global ID is still unknown.
         if infoset.writable:
             opponent = 1 - current_player
-            for local_idx in range(len(legal_actions)):
-                original_idx = valid_indices[local_idx]
-
-                if self.config.solver.enable_pruning and infoset.is_pruned(original_idx):
-                    continue
-
-                regret = action_utilities[local_idx] - node_utility
-                infoset.update_regret(
-                    original_idx,
-                    regret * reach_probs[opponent],
-                    cfr_plus=self.config.solver.cfr_plus,
-                    iteration=self.iteration,
-                    iteration_weighting=self.config.solver.iteration_weighting,
-                    dcfr_alpha=self.config.solver.dcfr_alpha,
-                    dcfr_beta=self.config.solver.dcfr_beta,
+            solver_config = self.config.solver
+            if not solver_config.enable_pruning and len(valid_indices) == infoset.num_actions:
+                apply_regret_updates(
+                    infoset.regrets,
+                    action_utilities,
+                    node_utility,
+                    reach_probs[opponent],
+                    solver_config.cfr_plus,
+                    self.iteration,
+                    _WEIGHTING_CODES[solver_config.iteration_weighting],
+                    solver_config.dcfr_alpha,
+                    solver_config.dcfr_beta,
                 )
+            else:
+                for local_idx in range(len(legal_actions)):
+                    original_idx = valid_indices[local_idx]
+
+                    if solver_config.enable_pruning and infoset.is_pruned(original_idx):
+                        continue
+
+                    regret = action_utilities[local_idx] - node_utility
+                    infoset.update_regret(
+                        original_idx,
+                        regret * reach_probs[opponent],
+                        cfr_plus=solver_config.cfr_plus,
+                        iteration=self.iteration,
+                        iteration_weighting=solver_config.iteration_weighting,
+                        dcfr_alpha=solver_config.dcfr_alpha,
+                        dcfr_beta=solver_config.dcfr_beta,
+                    )
 
             if self.config.solver.enable_pruning:
                 infoset.update_pruning(
@@ -176,7 +209,7 @@ def cfr_external_sampling(
 
         return node_utility
 
-    action_idx = int(np.random.choice(len(legal_actions), p=strategy))
+    action_idx = _sample_action_index(strategy)
     action = legal_actions[action_idx]
 
     new_reach_probs = reach_probs.copy()
@@ -210,7 +243,7 @@ def cfr_outcome_sampling(
         current_player,
     )
 
-    action_idx = int(np.random.choice(len(legal_actions), p=strategy))
+    action_idx = _sample_action_index(strategy)
     action = legal_actions[action_idx]
 
     next_state = state.apply_action(action, self.rules)

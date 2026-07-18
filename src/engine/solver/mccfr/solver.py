@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import random
 
-import eval7
 import numpy as np
 
 from src.core.actions.action_model import ActionModel
@@ -52,10 +51,6 @@ class MCCFRSolver:
             random.seed(self.config.system.seed)
             np.random.seed(self.config.system.seed)
 
-        # Reuse deck objects to avoid repeated Random() allocations.
-        self._deck = eval7.Deck()
-        self._deck_cards = list(self._deck.cards)
-
     def checkpoint(self) -> None:
         """Save a checkpoint of the current solver state."""
         self.storage.checkpoint(self.iteration)
@@ -84,9 +79,6 @@ class MCCFRSolver:
 
     def is_chance_node(self, state: GameState) -> bool:
         return chance.is_chance_node(self, state)
-
-    def _prepare_shuffled_deck(self, state: GameState) -> None:
-        chance.prepare_shuffled_deck(self, state)
 
     def sample_chance_outcome(self, state: GameState) -> GameState:
         return chance.sample_chance_outcome(self, state)

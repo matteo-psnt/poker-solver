@@ -174,29 +174,25 @@ def canonicalize_board(
     # Find all suits present in the board
     present_suits = list(dict.fromkeys(suit for _, suit in sorted_cards))
 
-    # Try all possible suit relabelings and find the lexicographically smallest
-    best_canonical: tuple[CanonicalCard, ...] | None = None
-    best_mapping: dict[str, int] | None = None
+    # Try all possible suit relabelings and keep the lexicographically smallest.
+    # Cards are compared as rank_idx*4+label integers, which orders exactly like
+    # CanonicalCard (rank first, then suit label); the CanonicalCard objects are
+    # only materialized once, for the winner.
+    suit_positions = {suit: pos for pos, suit in enumerate(present_suits)}
+    card_codes = [(rank_idx * 4, suit_positions[suit]) for rank_idx, suit in sorted_cards]
 
-    # Only need to try permutations of length equal to number of distinct suits
+    best_key: tuple[int, ...] | None = None
+    best_perm: tuple[int, ...] | None = None
+
     for perm in permutations(range(len(present_suits))):
-        # Create mapping: present_suits[i] -> perm[i]
-        suit_to_label = {present_suits[i]: perm[i] for i in range(len(present_suits))}
+        key = tuple(sorted(rank_base + perm[pos] for rank_base, pos in card_codes))
+        if best_key is None or key < best_key:
+            best_key = key
+            best_perm = perm
 
-        # Apply mapping to get canonical cards
-        canonical = tuple(
-            sorted(
-                (CanonicalCard(rank_idx, suit_to_label[suit]) for rank_idx, suit in sorted_cards)
-            )
-        )
-
-        # Compare lexicographically
-        if best_canonical is None or canonical < best_canonical:
-            best_canonical = canonical
-            best_mapping = suit_to_label
-
-    # Build SuitMapping from best mapping (guaranteed to be set after loop)
-    assert best_mapping is not None and best_canonical is not None
+    assert best_key is not None and best_perm is not None
+    best_canonical = tuple(CanonicalCard(code >> 2, code & 3) for code in best_key)
+    best_mapping = {suit: best_perm[pos] for suit, pos in suit_positions.items()}
     final_mapping = SuitMapping(best_mapping, len(best_mapping))
 
     return best_canonical, final_mapping
