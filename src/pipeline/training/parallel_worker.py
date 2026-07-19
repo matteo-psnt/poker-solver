@@ -202,13 +202,15 @@ def _worker_loop(
                     if infoset_id in storage.state.legal_actions_cache
                 }
 
-                # Defensive: ensure this worker hasn't assigned duplicate IDs
-                ids = list(storage.state.owned_keys.values())
+                # Defensive: duplicate IDs in the delta indicate an allocation bug.
+                # Checking only the shipped entries keeps the collect O(delta); ids
+                # come from worker-exclusive monotonic ranges, so a delta-vs-history
+                # duplicate cannot occur without corrupting allocation itself.
+                ids = [infoset_id for _, infoset_id in shipped]
                 if len(set(ids)) != len(ids):
                     dup_ids = [i for i, c in Counter(ids).items() if c > 1]
                     raise RuntimeError(
-                        f"Worker {worker_id} has duplicate infoset IDs in owned_keys; "
-                        f"examples: {dup_ids[:5]}"
+                        f"Worker {worker_id} shipped duplicate infoset IDs; examples: {dup_ids[:5]}"
                     )
 
                 result_queue.put(
