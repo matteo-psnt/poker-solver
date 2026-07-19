@@ -105,33 +105,50 @@ def write_key_table(
     hand_vocab: dict[str, int] = {}
     type_vocab: dict[str, int] = {}
 
-    cols = {name: np.empty(n, dtype=dtype) for name, dtype in _COLUMNS.items()}
-    offsets = np.zeros(n + 1, dtype=np.int64)
+    # Accumulate into plain lists and convert once per column. Assigning into a
+    # numpy array element-by-element boxes a scalar per store, which at production
+    # scale (~19M rows x 8 stores) dominated the whole checkpoint write.
+    positions: list[int] = []
+    streets: list[int] = []
+    sprs: list[int] = []
+    buckets: list[int] = []
+    hand_codes: list[int] = []
+    seq_codes: list[int] = []
+    offset_list: list[int] = [0] * (n + 1)
     type_codes: list[int] = []
     amounts: list[int] = []
 
     for i, key in enumerate(keys):
-        cols["key_hash"][i] = np.uint64(key_hashes[i])
-        cols["player_position"][i] = key.player_position
-        cols["street"][i] = int(key.street.value)
-        cols["spr_bucket"][i] = key.spr_bucket
-        cols["postflop_bucket"][i] = -1 if key.postflop_bucket is None else int(key.postflop_bucket)
-        if key.preflop_hand is None:
-            cols["preflop_code"][i] = -1
-        else:
-            cols["preflop_code"][i] = hand_vocab.setdefault(key.preflop_hand, len(hand_vocab))
-        cols["seq_code"][i] = seq_vocab.setdefault(key.betting_sequence, len(seq_vocab))
+        positions.append(key.player_position)
+        streets.append(key.street.value)
+        sprs.append(key.spr_bucket)
+        bucket = key.postflop_bucket
+        buckets.append(-1 if bucket is None else bucket)
+        hand = key.preflop_hand
+        hand_codes.append(-1 if hand is None else hand_vocab.setdefault(hand, len(hand_vocab)))
+        sequence = key.betting_sequence
+        seq_codes.append(seq_vocab.setdefault(sequence, len(seq_vocab)))
 
         actions = action_lists[i]
         if actions:
             for action in actions:
                 type_codes.append(type_vocab.setdefault(action.type.name, len(type_vocab)))
                 amounts.append(int(action.amount))
-        offsets[i + 1] = len(type_codes)
+        offset_list[i + 1] = len(type_codes)
+
+    cols = {
+        "key_hash": np.fromiter(key_hashes, dtype=_COLUMNS["key_hash"], count=n),
+        "player_position": np.array(positions, dtype=_COLUMNS["player_position"]),
+        "street": np.array(streets, dtype=_COLUMNS["street"]),
+        "spr_bucket": np.array(sprs, dtype=_COLUMNS["spr_bucket"]),
+        "postflop_bucket": np.array(buckets, dtype=_COLUMNS["postflop_bucket"]),
+        "preflop_code": np.array(hand_codes, dtype=_COLUMNS["preflop_code"]),
+        "seq_code": np.array(seq_codes, dtype=_COLUMNS["seq_code"]),
+    }
 
     for name, array in cols.items():
         np.save(table_dir / f"{name}.npy", array)
-    np.save(table_dir / "sig_offsets.npy", offsets)
+    np.save(table_dir / "sig_offsets.npy", np.array(offset_list, dtype=np.int64))
     np.save(table_dir / "sig_type_code.npy", np.asarray(type_codes, dtype=np.int8))
     np.save(table_dir / "sig_amount.npy", np.asarray(amounts, dtype=np.int32))
 

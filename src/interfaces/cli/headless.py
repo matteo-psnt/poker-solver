@@ -26,6 +26,7 @@ from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.services import RolloutParams
+from src.shared import checkpoint_profile
 from src.shared.jsonio import json_default
 
 
@@ -105,6 +106,54 @@ def _cmd_ledger(args: argparse.Namespace) -> dict[str, Any]:
         records = [r for r in records if r.get("run_id") == args.run]
     records = records[-args.limit :]
     return {"op": "ledger", "ledger": str(args.ledger), "rows": records}
+
+
+def _cmd_checkpoint_profile(args: argparse.Namespace) -> dict[str, Any]:
+    """Summarize a run's per-checkpoint phase timings and the Volume commit."""
+    run_dir = Path(args.runs_dir) / args.run
+    path = run_dir / checkpoint_profile.PROFILE_FILENAME
+    if not path.exists():
+        raise SystemExit(
+            f"No checkpoint profile at {path}. It is written per checkpoint, so the "
+            "run must have checkpointed at least once with profiling in place."
+        )
+
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    checkpoints = [r for r in rows if r.get("event") != "volume_commit"]
+    commits = [r for r in rows if r.get("event") == "volume_commit"]
+
+    phase_totals: dict[str, float] = {}
+    for row in checkpoints:
+        for name, secs in row.get("phases", {}).items():
+            phase_totals[name] = phase_totals.get(name, 0.0) + secs
+
+    checkpoint_seconds = sum(r["total_seconds"] for r in checkpoints)
+    commit_seconds = sum(r["total_seconds"] for r in commits)
+    # storage_write wraps the engine-level phases, so counting it alongside them
+    # would double-count; collect_keys and storage_write are the top-level split.
+    top_level = {k: v for k, v in phase_totals.items() if k in ("collect_keys", "storage_write")}
+
+    return {
+        "op": "checkpoint-profile",
+        "run": args.run,
+        "num_checkpoints": len(checkpoints),
+        "checkpoint_seconds": round(checkpoint_seconds, 2),
+        "volume_commit_seconds": round(commit_seconds, 2),
+        "total_seconds": round(checkpoint_seconds + commit_seconds, 2),
+        "commit_share": (
+            round(commit_seconds / (checkpoint_seconds + commit_seconds), 3)
+            if checkpoint_seconds + commit_seconds > 0
+            else None
+        ),
+        "top_level_phases": {k: round(v, 2) for k, v in sorted(top_level.items())},
+        "write_phases": {
+            k: round(v, 2)
+            for k, v in sorted(phase_totals.items(), key=lambda kv: -kv[1])
+            if k not in ("collect_keys", "storage_write")
+        },
+        "checkpoints": checkpoints,
+        "volume_commits": commits,
+    }
 
 
 def _cmd_compare(args: argparse.Namespace) -> dict[str, Any]:
@@ -353,6 +402,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_ledger.add_argument("--run", default=None, help="Filter to a single run id.")
     p_ledger.add_argument("--limit", type=int, default=25, help="Show only the last N rows.")
     p_ledger.set_defaults(func=_cmd_ledger)
+
+    p_profile = sub.add_parser(
+        "checkpoint-profile",
+        parents=[common],
+        help="Per-checkpoint phase timings and Volume-commit cost for a run.",
+    )
+    p_profile.add_argument("--run", required=True, help="Run id to summarize.")
+    p_profile.add_argument(
+        "--runs-dir", default="data/runs", help="Directory containing run directories."
+    )
+    p_profile.set_defaults(func=_cmd_checkpoint_profile)
 
     p_compare = sub.add_parser(
         "compare",

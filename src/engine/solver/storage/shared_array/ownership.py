@@ -6,6 +6,14 @@ import xxhash
 
 from src.engine.solver.infoset import InfoSetKey
 
+# Every component of a key is drawn from a small domain -- 2 positions, 4 streets,
+# a few thousand betting sequences, 169 preflop hands, a few hundred buckets, 3 SPRs
+# -- while the number of keys is in the millions. Memoizing the encodings turns the
+# per-key str()/encode() work into a dict lookup. The joined bytes, and therefore the
+# digest, are unchanged; ownership of existing checkpoints is unaffected.
+_TEXT_BYTES: dict[str, bytes] = {}
+_INT_BYTES: dict[int, bytes] = {}
+
 
 def stable_hash(key: InfoSetKey) -> int:
     """
@@ -14,15 +22,44 @@ def stable_hash(key: InfoSetKey) -> int:
     Python's built-in hash() is randomized per process, which breaks
     ownership consistency across workers.
     """
-    parts = [
-        str(key.player_position).encode(),
-        key.street.name.encode(),
-        key.betting_sequence.encode(),
-        (key.preflop_hand or "").encode(),
-        str(key.postflop_bucket if key.postflop_bucket is not None else -1).encode(),
-        str(key.spr_bucket).encode(),
-    ]
-    key_bytes = b"|".join(parts)
+    text = _TEXT_BYTES
+    ints = _INT_BYTES
+
+    position = key.player_position
+    position_bytes = ints.get(position)
+    if position_bytes is None:
+        position_bytes = ints[position] = str(position).encode()
+
+    street_name = key.street.name
+    street_bytes = text.get(street_name)
+    if street_bytes is None:
+        street_bytes = text[street_name] = street_name.encode()
+
+    sequence = key.betting_sequence
+    sequence_bytes = text.get(sequence)
+    if sequence_bytes is None:
+        sequence_bytes = text[sequence] = sequence.encode()
+
+    hand = key.preflop_hand or ""
+    hand_bytes = text.get(hand)
+    if hand_bytes is None:
+        hand_bytes = text[hand] = hand.encode()
+
+    bucket = key.postflop_bucket
+    if bucket is None:
+        bucket = -1
+    bucket_bytes = ints.get(bucket)
+    if bucket_bytes is None:
+        bucket_bytes = ints[bucket] = str(bucket).encode()
+
+    spr = key.spr_bucket
+    spr_bytes = ints.get(spr)
+    if spr_bytes is None:
+        spr_bytes = ints[spr] = str(spr).encode()
+
+    key_bytes = b"|".join(
+        (position_bytes, street_bytes, sequence_bytes, hand_bytes, bucket_bytes, spr_bytes)
+    )
     return xxhash.xxh64(key_bytes).intdigest()
 
 

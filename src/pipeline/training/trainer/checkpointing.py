@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from src.pipeline.training.parallel_manager import SharedArrayWorkerManager
+from src.shared import checkpoint_profile
 
 if TYPE_CHECKING:
     from src.pipeline.training.trainer.session import TrainingSession
@@ -152,7 +153,15 @@ class CheckpointManager:
         training_start_time: float,
     ) -> float:
         start = time.time()
-        worker_manager.checkpoint(iteration)
+        with checkpoint_profile.recording(iteration) as rec:
+            worker_manager.checkpoint(iteration)
+            checkpoint_profile.emit(
+                getattr(self.session, "run_dir", None),
+                rec,
+                num_workers=worker_manager.num_workers,
+                total_infosets=total_infosets,
+                storage_capacity=storage_capacity,
+            )
 
         elapsed_time = time.time() - training_start_time
         if self.session.run_tracker is not None:
