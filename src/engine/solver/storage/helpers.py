@@ -167,6 +167,34 @@ def load_checkpoint_arrays(checkpoint_dir: Path) -> dict[str, np.ndarray]:
     return {spec.checkpoint_key: root[spec.checkpoint_key][:] for spec in ARRAY_SPECS}
 
 
+def load_checkpoint_rows(checkpoint_dir: Path, row_ids: np.ndarray) -> tuple[dict, int]:
+    """Load ONLY ``row_ids`` from each checkpoint array, plus max_actions.
+
+    Workers own ~1/N of the rows, so reading the full arrays into every worker
+    costs N x the whole checkpoint in private memory (~1.9 GB each at 18.9M keys,
+    ~30 GB across 16) for data they immediately discard. Zarr's orthogonal
+    selection materializes only the selected rows. ``row_ids`` must be sorted
+    ascending, which is what ``flatnonzero`` on the ownership mask yields.
+
+    Returned rows are positional: result row ``k`` is ``row_ids[k]``.
+    """
+    zarr_path = CheckpointPaths.from_dir(checkpoint_dir).checkpoint_zarr
+    if not zarr_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {zarr_path}")
+
+    root = zarr.open(zarr.DirectoryStore(zarr_path), mode="r")
+    selected: dict[str, np.ndarray] = {}
+    max_actions = 0
+    for spec in ARRAY_SPECS:
+        array = root[spec.checkpoint_key]
+        if spec.per_action:
+            max_actions = array.shape[1]
+            selected[spec.checkpoint_key] = array.oindex[row_ids, :]
+        else:
+            selected[spec.checkpoint_key] = array.oindex[row_ids]
+    return selected, max_actions
+
+
 def _validate_key_table(table_dir: Path, context: str) -> tuple[int, int]:
     """Row count and exclusive max id. Ids are row indices, so they cannot be invalid."""
     rows = key_table.num_rows(table_dir)
