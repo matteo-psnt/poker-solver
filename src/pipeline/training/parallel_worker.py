@@ -191,12 +191,19 @@ def _worker_loop(
                 )
 
             elif job_type == JobType.COLLECT_KEYS:
-                # Collect owned keys for coordinator checkpointing
-                owned_keys = dict(storage.state.owned_keys)
-                legal_actions_cache = dict(storage.state.legal_actions_cache)
+                # Ship only entries added since the last collect; the coordinator
+                # accumulates across collects, so re-pickling all keys every
+                # checkpoint (minutes at production sizes) is avoided.
+                shipped = list(storage.state.unshipped_keys)
+                owned_keys = dict(shipped)
+                legal_actions_cache = {
+                    infoset_id: storage.state.legal_actions_cache[infoset_id]
+                    for _, infoset_id in shipped
+                    if infoset_id in storage.state.legal_actions_cache
+                }
 
                 # Defensive: ensure this worker hasn't assigned duplicate IDs
-                ids = list(owned_keys.values())
+                ids = list(storage.state.owned_keys.values())
                 if len(set(ids)) != len(ids):
                     dup_ids = [i for i, c in Counter(ids).items() if c > 1]
                     raise RuntimeError(
@@ -215,6 +222,9 @@ def _worker_loop(
                         "next_local_id": storage.state.next_local_id,
                     }
                 )
+                # The coordinator merges before any failure-prone checkpoint I/O,
+                # so once sent these entries are durably accumulated master-side.
+                del storage.state.unshipped_keys[: len(shipped)]
 
             elif job_type == JobType.RESIZE_STORAGE:
                 # Stop-the-world storage resize
@@ -295,6 +305,15 @@ def _worker_loop(
                             "num_owned_infosets": storage.num_owned_infosets(),
                             "capacity_usage": storage.get_capacity_usage(),
                             "iter_time": iter_time,
+                            # True when this worker has no ID-sync work in any
+                            # direction; the coordinator skips the exchange
+                            # barrier when every worker reports idle.
+                            "sync_idle": (
+                                not any(storage.state.pending_id_requests.values())
+                                and not storage.state.requested_id_keys
+                                and not any(storage.state.pending_late_responses.values())
+                                and not storage.state.unanswered_id_requests
+                            ),
                         }
                     )
 

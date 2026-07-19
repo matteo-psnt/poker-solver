@@ -45,25 +45,34 @@ class ExtraRegion:
 
 @dataclass(slots=True)
 class SharedArrayMutableState:
-    """Mutable runtime state for SharedArrayStorage internals."""
+    """Mutable runtime state for SharedArrayStorage internals.
+
+    ID-sync fields, whose invariants are not obvious from their types:
+
+    ``unshipped_keys``
+        Keys allocated since the last COLLECT_KEYS. Shares InfoSetKey objects
+        with ``owned_keys``, so a teardown that clears one must clear both.
+    ``requested_id_keys``
+        Sent and awaiting a response. Gates re-queuing (without it, hot
+        unresolved keys re-pickle every flush and multi-worker scaling
+        collapses). Re-armed into ``pending_id_requests`` at batch boundaries
+        as a lost-message backstop.
+    ``unanswered_id_requests``
+        Owner side: requesters waiting on keys this worker owns but hasn't
+        allocated. Answered at allocation time via ``pending_late_responses``.
+    ``pending_late_responses``
+        Owner side: allocation-time responses per requester, flushed on the
+        regular sync cadence.
+    """
 
     next_local_id: int
     owned_keys: dict[InfoSetKey, int] = field(default_factory=dict)
+    unshipped_keys: list[tuple[InfoSetKey, int]] = field(default_factory=list)
     remote_keys: dict[InfoSetKey, int] = field(default_factory=dict)
     legal_actions_cache: dict[int, Sequence[Action]] = field(default_factory=dict)
     pending_id_requests: dict[int, set[InfoSetKey]] = field(default_factory=dict)
-    # Keys already sent to their owner and awaiting a response. Gates re-adding
-    # to pending_id_requests: without it, every visit to a hot unresolved key
-    # re-queues it and each flush re-pickles the same keys to the same owner —
-    # enough traffic to collapse multi-worker scaling. Re-armed (moved back to
-    # pending) at batch boundaries as a lost-message backstop.
     requested_id_keys: set[InfoSetKey] = field(default_factory=set)
-    # Owner side: requesters of keys this worker owns but has not allocated yet.
-    # Answered proactively at allocation time (via pending_late_responses), so a
-    # request never waits on the requester retrying.
     unanswered_id_requests: dict[InfoSetKey, set[int]] = field(default_factory=dict)
-    # Owner side: allocation-time responses queued per requester, flushed with
-    # the regular sync cadence.
     pending_late_responses: dict[int, dict[InfoSetKey, int]] = field(default_factory=dict)
     extra_regions: list[ExtraRegion] = field(default_factory=list)
     extra_allocations: list[ExtraAllocation] = field(default_factory=list)

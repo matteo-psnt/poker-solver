@@ -165,6 +165,9 @@ class TrainingSession:
         # these are the pages children would copy.
         state = storage.state
         state.owned_keys = {}
+        # Shares InfoSetKey objects with owned_keys, so leaving it would make
+        # clearing owned_keys free nothing.
+        state.unshipped_keys = []
         state.remote_keys = {}
         state.legal_actions_cache = {}
         state.pending_id_requests = {}

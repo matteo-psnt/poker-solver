@@ -13,6 +13,7 @@ assertions are about storage lifetime, and should not break when the resume test
 config changes.
 """
 
+import dataclasses
 import shutil
 import tempfile
 from pathlib import Path
@@ -70,6 +71,25 @@ def test_config(temp_run_dir):
     )
 
 
+# Fields release_bootstrap_storage deliberately leaves alone: the id counter, the
+# resize bookkeeping (needed to stay consistent with the arrays), and the shared
+# memory handles, which are closed separately rather than emptied. Everything else
+# is key-bearing heap the fork must not copy. Adding a name here is a decision, not
+# a formality -- see the assertion below.
+_NOT_CLEARED_BY_RELEASE = frozenset(
+    {
+        "next_local_id",
+        "extra_regions",
+        "extra_allocations",
+        "shm_regrets",
+        "shm_strategy",
+        "shm_actions",
+        "shm_reach",
+        "shm_utility",
+    }
+)
+
+
 def _key(i: int) -> InfoSetKey:
     return InfoSetKey(
         player_position=i % 2,
@@ -117,17 +137,25 @@ def test_release_drops_the_key_dicts_before_the_fork(test_config, temp_run_dir):
     # populating them; otherwise this test passes with or without the fix.
     state = session.storage.state
     state.owned_keys = {_key(i): i for i in range(64)}
+    state.unshipped_keys = [(_key(i), i) for i in range(64)]
     state.legal_actions_cache = {i: () for i in range(64)}
     state.remote_keys = {_key(i): i for i in range(64, 96)}
     state.requested_id_keys = {_key(i) for i in range(96, 100)}
+    state.pending_id_requests = {0: {_key(i) for i in range(96, 100)}}
+    state.unanswered_id_requests = {_key(100): {0}}
+    state.pending_late_responses = {0: {_key(101): 101}}
     assert state.owned_keys, "guard: the dicts must be populated for this to mean anything"
 
     session.train(num_iterations=1, num_workers=1)
 
-    assert state.owned_keys == {}
-    assert state.remote_keys == {}
-    assert state.legal_actions_cache == {}
-    assert state.requested_id_keys == set()
+    # Enumerated structurally rather than by hand: a new key-bearing field on
+    # SharedArrayMutableState that escapes the teardown keeps the whole key heap
+    # reachable (the containers share InfoSetKey objects, so missing one makes
+    # clearing the others free nothing) and silently reintroduces the resume OOM.
+    for name in dataclasses.fields(state):
+        if name.name in _NOT_CLEARED_BY_RELEASE:
+            continue
+        assert not getattr(state, name.name), f"{name.name} survived the pre-fork release"
 
 
 def test_release_is_idempotent(test_config, temp_run_dir):

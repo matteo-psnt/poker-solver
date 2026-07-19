@@ -111,7 +111,13 @@ class TrainingBatchCoordinator:
             )
             state.last_capacity = self.worker_manager.capacity
 
-        if batch_idx < self.num_batches - 1:
+        # Skip the exchange barrier only when EVERY worker explicitly reported
+        # no ID-sync state in any direction (missing data => exchange).
+        worker_results = batch_result.get("worker_results") or []
+        all_sync_idle = bool(worker_results) and all(
+            r.get("sync_idle") is True for r in worker_results
+        )
+        if batch_idx < self.num_batches - 1 and not all_sync_idle:
             inter_batch_timeout = max(60.0, batch_result["batch_time"] * 2.0)
             self.worker_manager.exchange_ids(
                 timeout=inter_batch_timeout,
@@ -159,14 +165,29 @@ class TrainingBatchCoordinator:
         try:
             action_counts = storage.shared_action_counts
             regrets = storage.shared_regrets
-            allocated = np.flatnonzero(action_counts > 0)
-            if allocated.size == 0:
-                return None
             sample_size = self.session.metrics.sample_size
-            if allocated.size > sample_size:
-                sample_ids = self._quality_rng.choice(allocated, sample_size, replace=False)
-            else:
-                sample_ids = allocated
+            capacity = action_counts.shape[0]
+
+            # Rejection-sample allocated rows instead of materializing every
+            # allocated index: np.flatnonzero over a 24-48M array plus a
+            # multi-million index allocation per batch is pure telemetry
+            # overhead. Uniform over allocated rows either way.
+            sample_ids = None
+            for oversample in (8, 64):
+                probes = self._quality_rng.integers(0, capacity, size=sample_size * oversample)
+                hits = np.unique(probes[action_counts[probes] > 0])
+                if hits.size >= sample_size:
+                    sample_ids = self._quality_rng.choice(hits, sample_size, replace=False)
+                    break
+            if sample_ids is None:
+                # Sparse storage (early training): the full scan is cheap here.
+                allocated = np.flatnonzero(action_counts > 0)
+                if allocated.size == 0:
+                    return None
+                if allocated.size > sample_size:
+                    sample_ids = self._quality_rng.choice(allocated, sample_size, replace=False)
+                else:
+                    sample_ids = allocated
             return compute_quality_from_arrays(regrets, action_counts, sample_ids)
         except Exception as exc:  # pragma: no cover - defensive; metrics must not kill a run
             print(f"[metrics-history] quality sampling skipped: {exc}", flush=True)

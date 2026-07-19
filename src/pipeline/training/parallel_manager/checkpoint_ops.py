@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from src.core.game.actions import Action
@@ -19,7 +20,7 @@ class CollectedKeys(TypedDict):
     """Collected key and legal-action mappings from all workers."""
 
     owned_keys: dict[InfoSetKey, int]
-    legal_actions_cache: dict[int, list[Action]]
+    legal_actions_cache: dict[int, Sequence[Action]]
 
 
 def collect_keys(
@@ -29,7 +30,10 @@ def collect_keys(
     """
     Collect owned keys from all workers for checkpointing.
 
-    Workers send key→ID mappings to the coordinator so complete checkpoints can be written.
+    Workers ship only entries added since the previous collect; this merges them
+    into the coordinator storage's accumulated view (``state.owned_keys`` /
+    ``state.legal_actions_cache``), which is what checkpoints are written from.
+    Returns the accumulated view.
     """
     for worker_id in range(manager.num_workers):
         manager.job_queue.put(
@@ -47,14 +51,16 @@ def collect_keys(
         description="key collection",
     )
 
-    all_owned_keys: dict[InfoSetKey, int] = {}
-    all_legal_actions: dict[int, list[Action]] = {}
+    accumulated_keys = cast("dict[InfoSetKey, int]", manager.storage.state.owned_keys)
+    accumulated_actions = cast(
+        "dict[int, Sequence[Action]]", manager.storage.state.legal_actions_cache
+    )
+    id_owners = manager.checkpoint_id_owners
     worker_ranges: dict[int, tuple[int, int]] = {}
-    id_owners: dict[int, tuple[int, InfoSetKey]] = {}
 
     for result in responses:
         owned_keys = cast(dict[InfoSetKey, int], result["owned_keys"])
-        legal_actions = cast(dict[int, list[Action]], result["legal_actions_cache"])
+        legal_actions = cast("dict[int, Sequence[Action]]", result["legal_actions_cache"])
         worker_id = cast(int, result["worker_id"])
         worker_ranges[worker_id] = (
             cast(int, result["id_range_start"]),
@@ -62,8 +68,9 @@ def collect_keys(
         )
 
         for key, infoset_id in owned_keys.items():
-            if infoset_id in id_owners:
-                prev_worker, prev_key = id_owners[infoset_id]
+            prev = id_owners.get(infoset_id)
+            if prev is not None and prev[1] != key:
+                prev_worker, prev_key = prev
                 raise RuntimeError(
                     f"Duplicate infoset_id {infoset_id} across workers "
                     f"(prev worker {prev_worker}, key {prev_key} vs "
@@ -71,9 +78,9 @@ def collect_keys(
                     "ID ranges likely overlapping or num_workers changed."
                 )
             id_owners[infoset_id] = (worker_id, key)
-            all_owned_keys[key] = infoset_id
+            accumulated_keys[key] = infoset_id
 
-        all_legal_actions.update(legal_actions)
+        accumulated_actions.update(legal_actions)
 
     ranges = sorted(worker_ranges.items(), key=lambda item: item[1][0])
     for (wid_a, (start_a, end_a)), (wid_b, (start_b, end_b)) in itertools.pairwise(ranges):
@@ -85,8 +92,8 @@ def collect_keys(
             )
 
     return {
-        "owned_keys": all_owned_keys,
-        "legal_actions_cache": all_legal_actions,
+        "owned_keys": accumulated_keys,
+        "legal_actions_cache": accumulated_actions,
     }
 
 
@@ -94,8 +101,10 @@ def checkpoint(manager: SharedArrayWorkerManager, iteration: int) -> None:
     """Save checkpoint to disk after collecting key mappings from workers."""
     collected = collect_keys(manager)
 
+    # collect_keys merges into the coordinator storage's own dicts and returns
+    # them; these assignments are identity-preserving (no copies of 10M+ entries).
     manager.storage.state.owned_keys = collected["owned_keys"]
-    manager.storage.state.legal_actions_cache = dict(collected["legal_actions_cache"])
+    manager.storage.state.legal_actions_cache = collected["legal_actions_cache"]
 
     if manager.storage.state.owned_keys:
         max_id = max(manager.storage.state.owned_keys.values())
