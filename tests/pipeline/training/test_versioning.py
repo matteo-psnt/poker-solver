@@ -17,6 +17,7 @@ import pytest
 
 from src.engine.solver.storage.in_memory import InMemoryStorage
 from src.pipeline.training.run_tracker import RunMetadata
+from src.pipeline.training.trainer import TrainingSession
 from src.pipeline.training.versioning import (
     REPRESENTATION_VERSION,
     checkpoint_fingerprint,
@@ -83,3 +84,13 @@ def test_ensure_current_rejects_newer(tmp_path):
     )
     with pytest.raises(ValueError, match="newer than this"):
         ensure_current(tmp_path)
+
+
+def test_resume_refuses_stale_representation_version(tmp_path):
+    """The resume path itself enforces the version stamp — not just by accident of
+    missing files, but with an explicit migrate-first error."""
+    (tmp_path / ".run.json").write_text(
+        json.dumps({"run_id": "stale", "representation_version": REPRESENTATION_VERSION - 1})
+    )
+    with pytest.raises(ValueError, match="Migrate it first"):
+        TrainingSession.resume(tmp_path)

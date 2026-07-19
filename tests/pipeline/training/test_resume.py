@@ -16,6 +16,7 @@ from src.core.actions.action_model import ActionModel
 from src.engine.solver.storage.helpers import CheckpointPaths, read_checkpoint_manifest
 from src.pipeline.training import components
 from src.pipeline.training.trainer import TrainingSession
+from src.pipeline.training.versioning import REPRESENTATION_VERSION
 from src.shared.config import Config
 from tests.test_helpers import DummyCardAbstraction
 
@@ -152,6 +153,9 @@ def test_resume_no_checkpoint(temp_run_dir):
                 "iterations": 0,
                 "action_config_hash": action_config_hash,
                 "config": config_obj.to_dict(),
+                # Stamp current: an unstamped run reads as v0 and the resume
+                # version guard fires before the checkpoint check under test.
+                "representation_version": REPRESENTATION_VERSION,
             }
         )
     )
