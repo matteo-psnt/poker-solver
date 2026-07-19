@@ -96,8 +96,7 @@ def test_iteration_is_sourced_from_the_manifest(tmp_path):
             {
                 "iteration": 16_160_000,
                 "zarr": "checkpoint-16160000.zarr",
-                "key_mapping": "key_mapping-16160000.pkl",
-                "action_signatures": "action_signatures-16160000.pkl",
+                "key_table": "keys-16160000",
             }
         )
     )

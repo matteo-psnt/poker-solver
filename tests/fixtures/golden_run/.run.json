@@ -10,7 +10,7 @@
   "num_infosets": 6000,
   "storage_capacity": 1000000,
   "action_config_hash": "5417962a73efaf71",
-  "representation_version": 2,
+  "representation_version": 3,
   "config": {
     "training": {
       "num_iterations": 3600,
@@ -119,5 +119,13 @@
     "card_abstraction": {
       "config": "quick_test"
     }
-  }
+  },
+  "migration_history": [
+    {
+      "version": 3,
+      "description": "columnar key table (keys + action signatures) so workers load only their shard.",
+      "kind": "exact",
+      "applied_at": "2026-07-18T19:41:58.861762"
+    }
+  ]
 }

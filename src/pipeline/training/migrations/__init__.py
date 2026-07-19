@@ -24,6 +24,7 @@ from src.pipeline.training.migrations.base import (
 )
 from src.pipeline.training.migrations.m0001_introduce_versioning import MIGRATION as _M0001
 from src.pipeline.training.migrations.m0002_float32_hot_arrays import MIGRATION as _M0002
+from src.pipeline.training.migrations.m0003_columnar_key_table import MIGRATION as _M0003
 from src.pipeline.training.versioning import (
     REPRESENTATION_VERSION,
     RUN_METADATA_FILE,
@@ -41,7 +42,7 @@ __all__ = [
 ]
 
 # Ordered chain of representation migrations.
-MIGRATIONS: list[Migration] = [_M0001, _M0002]
+MIGRATIONS: list[Migration] = [_M0001, _M0002, _M0003]
 
 
 def validate_registry(migrations: list[Migration] | None = None) -> None:

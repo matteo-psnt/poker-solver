@@ -24,11 +24,17 @@ GOLDEN_RUN = Path(__file__).parents[2] / "fixtures" / "golden_run"
 
 
 def _v0_copy(dst: Path) -> Path:
-    """A copy of the golden run with the version stamp stripped (a legacy v0 run)."""
+    """A copy of the golden run with the version stamp stripped (a legacy v0 run).
+
+    Also drops any recorded migration history: the fixture is itself produced by
+    migrating, so leaving its history in place would make the chain assertions
+    below compare against entries this test never applied.
+    """
     shutil.copytree(GOLDEN_RUN, dst)
     meta_path = dst / ".run.json"
     data = json.loads(meta_path.read_text())
     data.pop("representation_version", None)
+    data.pop("migration_history", None)
     meta_path.write_text(json.dumps(data))
     return dst
 
@@ -104,7 +110,7 @@ def test_migrate_legacy_run_to_current(tmp_path):
     # History recorded, one entry per chain step.
     history = json.loads((dst / ".run.json").read_text())["migration_history"]
     assert [h["version"] for h in history] == list(range(1, REPRESENTATION_VERSION + 1))
-    assert history[-1]["kind"] == "approximate"
+    assert history[-1]["kind"] == "exact"
 
 
 def test_migrate_current_run_is_noop_copy(tmp_path):
@@ -127,6 +133,7 @@ def test_migrate_rolls_back_on_failure(tmp_path):
     failing = [
         Migration(version=1, description="ok", kind=MigrationKind.EXACT),
         Migration(version=2, description="bad", kind=MigrationKind.EXACT, verify=_boom),
+        Migration(version=3, description="unreached", kind=MigrationKind.EXACT),
     ]
     src = _v0_copy(tmp_path / "legacy")
     dst = tmp_path / "migrated"

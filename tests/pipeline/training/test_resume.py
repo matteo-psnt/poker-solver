@@ -196,7 +196,7 @@ def test_checkpoint_manifest_supersedes_and_prunes(test_config, temp_run_dir):
     # Superseded snapshot was pruned; exactly one snapshot remains
     assert not (temp_run_dir / manifest1["zarr"]).exists()
     assert len(list(temp_run_dir.glob("checkpoint-*.zarr"))) == 1
-    assert len(list(temp_run_dir.glob("key_mapping-*.pkl"))) == 1
+    assert len(list(temp_run_dir.glob("keys-*"))) == 1
 
 
 def test_resume_reads_legacy_fixed_name_checkpoint(test_config, temp_run_dir):
@@ -207,8 +207,7 @@ def test_resume_reads_legacy_fixed_name_checkpoint(test_config, temp_run_dir):
     # Rewrite the snapshot into the legacy layout: fixed names, no manifest.
     paths = CheckpointPaths.from_dir(temp_run_dir)
     paths.checkpoint_zarr.rename(temp_run_dir / "checkpoint.zarr")
-    paths.key_mapping.rename(temp_run_dir / "key_mapping.pkl")
-    paths.action_signatures.rename(temp_run_dir / "action_signatures.pkl")
+    paths.key_table.rename(temp_run_dir / "keys")
     (temp_run_dir / "CHECKPOINT.json").unlink()
 
     session2 = TrainingSession.resume(temp_run_dir)
