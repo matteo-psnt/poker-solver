@@ -190,6 +190,52 @@ def _v2_with_manifest(dst: Path) -> Path:
     return dst
 
 
+def _v1_with_manifest(dst: Path) -> Path:
+    """A manifested run still at v1: float64 hot arrays + pickled keys.
+
+    Upcasts the hot arrays back to the float64 that v1 stored; float64→float32
+    of float32-derived values is lossless, so the full chain must reproduce the
+    golden fingerprint.
+    """
+    import zarr
+
+    from src.engine.solver.storage.array_specs import ARRAY_SPECS
+
+    _v2_with_manifest(dst)
+
+    store = zarr.DirectoryStore(dst / "checkpoint-4242.zarr")
+    root = zarr.open(store, mode="r")
+    attrs = dict(root.attrs)
+    arrays = {spec.checkpoint_key: root[spec.checkpoint_key][:] for spec in ARRAY_SPECS}
+    new_root = zarr.open(store, mode="w")
+    for spec in ARRAY_SPECS:
+        data = arrays[spec.checkpoint_key]
+        if spec.per_action:
+            data = data.astype("float64")
+        new_root.create_dataset(spec.checkpoint_key, data=data)
+    new_root.attrs.update(attrs)
+
+    meta_path = dst / ".run.json"
+    data = json.loads(meta_path.read_text())
+    data["representation_version"] = 1
+    meta_path.write_text(json.dumps(data))
+    return dst
+
+
+def test_migrate_manifested_v1_run(tmp_path):
+    """m0002 must read a pre-v3 manifest (which lacks 'key_table'); without that,
+    a manifested v1 run is neither current, nor migratable, nor barriered —
+    breaking the trichotomy the registry promises."""
+    src = _v1_with_manifest(tmp_path / "v1")
+
+    dst = migrate_run(src, tmp_path / "migrated")
+
+    assert run_representation_version(dst) == REPRESENTATION_VERSION
+    assert checkpoint_fingerprint(dst) == checkpoint_fingerprint(GOLDEN_RUN)
+    manifest = json.loads((dst / "CHECKPOINT.json").read_text())
+    assert manifest["key_table"] == "keys-4242"
+
+
 def test_migrate_v2_run_with_manifest(tmp_path):
     """A manifested v2 run converts, and the manifest is rewritten to point at the table."""
     from src.engine.solver.storage import key_table
