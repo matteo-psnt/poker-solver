@@ -45,6 +45,11 @@ class MCCFRSolver:
         self.config = config
 
         self.iteration = 0
+        # Updates skipped because the infoset's global ID was not yet known
+        # (non-owner placeholder views). Cumulative over the solver's lifetime;
+        # workers report per-batch deltas so the drop rate is observable
+        # instead of an assumed "brief propagation delay".
+        self.dropped_unknown_id_updates = 0
         self.rules = GameRules(self.config.game.small_blind, self.config.game.big_blind)
 
         if self.config.system.seed is not None:

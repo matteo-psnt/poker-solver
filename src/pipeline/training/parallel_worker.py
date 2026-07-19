@@ -276,6 +276,7 @@ def _worker_loop(
                 np.random.seed(batch_seed)
 
                 utilities = []
+                dropped_before = solver.dropped_unknown_id_updates
                 iter_start = time.time()
 
                 try:
@@ -307,6 +308,9 @@ def _worker_loop(
                             "num_owned_infosets": storage.num_owned_infosets(),
                             "capacity_usage": storage.get_capacity_usage(),
                             "iter_time": iter_time,
+                            "dropped_unknown_id_updates": (
+                                solver.dropped_unknown_id_updates - dropped_before
+                            ),
                             # True when this worker has no ID-sync work in any
                             # direction; the coordinator skips the exchange
                             # barrier when every worker reports idle.

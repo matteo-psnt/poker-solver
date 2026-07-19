@@ -130,7 +130,9 @@ class TrainingBatchCoordinator:
             completed_before_batch,
         )
         self._record_history(
-            self.start_iteration + state.completed_iterations, state.total_infosets
+            self.start_iteration + state.completed_iterations,
+            state.total_infosets,
+            batch_result.get("dropped_unknown_id_updates", 0),
         )
         reporting.update_progress_bar(
             self.session,
@@ -193,7 +195,9 @@ class TrainingBatchCoordinator:
             print(f"[metrics-history] quality sampling skipped: {exc}", flush=True)
             return None
 
-    def _record_history(self, iteration: int, total_infosets: int) -> None:
+    def _record_history(
+        self, iteration: int, total_infosets: int, dropped_unknown_id_updates: int = 0
+    ) -> None:
         """Append one convergence-curve row (utility, speed, and solver-health) to disk."""
         metrics = self.session.metrics
         quality = self._sample_quality()
@@ -205,6 +209,10 @@ class TrainingBatchCoordinator:
             "elapsed_s": round(metrics.get_elapsed_time(), 3),
             "iter_per_sec": round(metrics.get_iterations_per_second(), 2),
             "num_infosets": int(total_infosets),
+            # Cross-worker updates skipped for not-yet-propagated infoset IDs
+            # this batch; the observable for the "cold-owner keys drop updates
+            # permanently" question — see the concurrency audit.
+            "dropped_unknown_id_updates": int(dropped_unknown_id_updates),
             "avg_utility": metrics.get_avg_utility(),
             "utility_std": metrics.get_utility_std(),
         }

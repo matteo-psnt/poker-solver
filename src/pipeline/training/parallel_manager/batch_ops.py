@@ -21,6 +21,7 @@ class BatchResult(TypedDict):
     total_iterations: int
     worker_results: list[dict[str, object]]
     num_infosets: int
+    dropped_unknown_id_updates: int
     max_worker_capacity: float
     resized: bool
     capacity: int
@@ -68,6 +69,7 @@ def run_batch(
     results = []
     errors = []
     total_owned = 0
+    total_dropped = 0
     max_worker_capacity = 0.0
     for result in received:
         if "error" in result:
@@ -80,6 +82,7 @@ def run_batch(
             results.append(result)
             all_utilities.extend(cast(list[float], result.get("utilities", [])))
             total_owned += cast(int, result.get("num_owned_infosets", 0))
+            total_dropped += cast(int, result.get("dropped_unknown_id_updates", 0))
             worker_capacity = float(cast(float | int, result.get("capacity_usage", 0.0)))
             max_worker_capacity = max(max_worker_capacity, worker_capacity)
 
@@ -120,6 +123,7 @@ def run_batch(
         "total_iterations": total_iters,
         "worker_results": results,
         "num_infosets": total_owned,
+        "dropped_unknown_id_updates": total_dropped,
         "max_worker_capacity": max_worker_capacity,
         "resized": resized,
         "capacity": manager.capacity,
