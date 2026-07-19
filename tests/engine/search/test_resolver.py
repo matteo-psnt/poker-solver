@@ -74,6 +74,23 @@ def test_agent_act_with_resolver_enabled():
     assert action in rules.get_legal_actions(state, action_model=action_model)
 
 
+def test_agent_forwards_rng_to_resolver():
+    """The injected generator must reach the resolver: it drives leaf-runout
+    sampling, so eval harnesses pin it per hand for reproducibility."""
+    config = make_test_config(seed=42)
+    solver = MCCFRSolver(
+        action_model=ActionModel(config),
+        card_abstraction=DummyCardAbstraction(),
+        storage=InMemoryStorage(),
+        config=config,
+    )
+
+    rng = np.random.default_rng(7)
+    agent = BlueprintAgent(solver, use_resolver=True, rng=rng)
+    assert agent.resolver is not None
+    assert agent.resolver.rng is rng
+
+
 def test_resolver_solves_subgame_with_per_combo_strategy(monkeypatch):
     """solve() routes through the range-vs-range subgame CFR and picks the
     hero-combo row of the average root strategy."""

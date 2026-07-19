@@ -14,10 +14,9 @@ Variance design (duplicate poker):
     deal's card luck — the dominant noise in head-to-head play — leaving mostly
     the skill difference.
 
-Resolver lifecycle: a fresh :class:`HUResolver` per game (memoryless across
-hands, continual within a hand). ``BlueprintAgent`` keeps one resolver for its
-own lifetime, which would leak ``_ranges`` across hands — deliberately not
-used here.
+Resolver lifecycle: a fresh :class:`BlueprintAgent` per game, matching its
+documented contract (one resolver per agent lifetime, a new agent per hand),
+with the per-game rng pinned so runout sampling is reproducible.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ import numpy as np
 
 from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card, GameState, Street
-from src.engine.search.resolver import HUResolver
+from src.engine.search.agent import BlueprintAgent
 from src.engine.solver.protocols import Blueprint
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.shared.units import pair_mean_mbb
@@ -130,13 +129,7 @@ def _play_game(
     resolver_rng: np.random.Generator | None = None,
 ) -> tuple[float, int, int]:
     """One game off a fixed deck; returns (resolver-seat payoff, decisions, fallbacks)."""
-    resolver = HUResolver(
-        blueprint=solver,
-        action_model=solver.action_model,
-        rules=rules,
-        config=solver.config.resolver,
-        rng=resolver_rng,
-    )
+    agent = BlueprintAgent(solver, use_resolver=True, rng=resolver_rng)
     state = rules.create_initial_state(
         starting_stack=starting_stack,
         hole_cards=hole_cards,
@@ -150,19 +143,20 @@ def _play_game(
             continue
         if state.current_player == resolver_seat:
             decisions += 1
-            action = resolver.act(state, time_budget_ms=time_budget_ms)
+            action = agent.act(state, time_budget_ms=time_budget_ms)
         else:
             action = solver.sample_action_from_strategy(state, use_average=True)
         # History-replay range inference: the resolver observes every realized
         # action (both seats), so its next solve sees Bayes-updated ranges
         # instead of uniform ones.
-        resolver.observe(state, action)
+        agent.observe(state, action)
         state = state.apply_action(action, rules)
 
     if not state.ended_by_fold and len(state.board) < 5:
         state = _complete_board(state, board_stack)
 
-    return float(state.get_payoff(resolver_seat, rules)), decisions, resolver.fallback_count
+    assert agent.resolver is not None  # use_resolver=True above
+    return float(state.get_payoff(resolver_seat, rules)), decisions, agent.resolver.fallback_count
 
 
 def _deal_from_stack(state: GameState, board_stack: list[Card]) -> GameState:
