@@ -1,10 +1,14 @@
 """Tests for storage systems."""
 
+from types import SimpleNamespace
+
 import numpy as np
+import pytest
 
 from src.core.game.actions import bet, call, fold
 from src.core.game.state import Street
 from src.engine.solver.infoset import InfoSetKey
+from src.engine.solver.storage.shared_array import memory
 from tests.test_helpers import build_test_storage
 
 # SharedArrayStorage checkpoint tests are covered by parallel training integration tests
@@ -823,3 +827,27 @@ class TestSharedArrayStorage:
 
         finally:
             storage.cleanup()
+
+
+class TestShmCapacityGuard:
+    """The shared-memory allocation guard turns a capacity/tmpfs overcommit into a
+    clear MemoryError at allocation time instead of a SIGBUS on first write."""
+
+    @staticmethod
+    def _stub(capacity, max_actions=10):
+        return SimpleNamespace(capacity=capacity, max_actions=max_actions)
+
+    def test_refuses_when_arrays_exceed_free_shm(self, monkeypatch):
+        monkeypatch.setattr(memory, "_shm_free_bytes", lambda: 1024)  # 1 KiB free
+        with pytest.raises(MemoryError, match="Refusing to allocate"):
+            memory._guard_shm_capacity(self._stub(capacity=10_000_000))
+
+    def test_allows_when_arrays_fit(self, monkeypatch):
+        monkeypatch.setattr(memory, "_shm_free_bytes", lambda: 8 * 1024**3)  # 8 GiB free
+        memory._guard_shm_capacity(self._stub(capacity=1_000))  # ~100 KiB, no raise
+
+    def test_skips_guard_when_free_space_unknown(self, monkeypatch):
+        # Off Linux / unreadable /dev/shm: skip rather than guess (SharedMemory is
+        # not tmpfs-backed there, so the SIGBUS mode does not apply).
+        monkeypatch.setattr(memory, "_shm_free_bytes", lambda: None)
+        memory._guard_shm_capacity(self._stub(capacity=10**12))  # would be huge, still no raise

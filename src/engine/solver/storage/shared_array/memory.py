@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import shutil
 import sys
 import time
 from multiprocessing import shared_memory
@@ -61,9 +62,53 @@ def get_shm_name_for_storage(storage: SharedArrayStorage, base: str) -> str:
     return get_shm_name(base, storage.session_id)
 
 
+def _shm_free_bytes() -> int | None:
+    """Free bytes on the tmpfs backing ``multiprocessing.shared_memory`` (Linux).
+
+    ``SharedMemory`` maps ``/dev/shm``; a segment larger than its free space is
+    created lazily and only faults on first write, so overcommit surfaces as a
+    SIGBUS deep in ``.fill(0)`` rather than an allocation error. Returns ``None``
+    off Linux (macOS/local dev is not tmpfs-backed) and when the path is
+    unreadable, so the caller skips the guard instead of guessing.
+    """
+    if sys.platform != "linux":
+        return None
+    try:
+        return shutil.disk_usage("/dev/shm").free
+    except OSError:
+        return None
+
+
+def _guard_shm_capacity(storage: SharedArrayStorage) -> None:
+    """Refuse to allocate shared arrays that would not fit in ``/dev/shm``.
+
+    Converts the capacity-vs-tmpfs SIGBUS into a clear error at the point of
+    allocation. Fires both at launch (the initial ``initial_capacity`` segment)
+    and before every resize (a resize creates a new, larger segment while the old
+    one still holds space, which ``.free`` already accounts for). Uses only
+    measured quantities — the exact array footprint and the real tmpfs free
+    space — never a projected infoset count, so it does not depend on a growth
+    model that the fork-OOM fix has not yet re-characterised.
+    """
+    free = _shm_free_bytes()
+    if free is None:
+        return
+    total = sum(spec.nbytes(storage.capacity, storage.max_actions) for spec in ARRAY_SPECS)
+    if total > free:
+        gib = 1024**3
+        raise MemoryError(
+            f"Shared arrays need {total / gib:.2f} GiB at capacity "
+            f"{storage.capacity:,} (max_actions={storage.max_actions}), but only "
+            f"{free / gib:.2f} GiB is free on /dev/shm. Lower storage.initial_capacity "
+            f"or the iteration target, or allocate more container memory. Refusing "
+            f"to allocate rather than SIGBUS on first write."
+        )
+
+
 def create_shared_memory(storage: SharedArrayStorage) -> None:
     """Create all shared memory segments (coordinator only)."""
     cleanup_stale_shm(storage)
+    _guard_shm_capacity(storage)
 
     sizes: dict[str, int] = {}
     for spec in ARRAY_SPECS:
