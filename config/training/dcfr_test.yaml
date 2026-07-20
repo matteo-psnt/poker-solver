@@ -1,5 +1,5 @@
-# DCFR + Pruning Test Configuration
-# Tests Discounted CFR with regret-based pruning (Brown & Sandholm 2019).
+# DCFR Test Configuration
+# Tests Discounted CFR (Brown & Sandholm 2019).
 
 resolver:
   max_raises_per_street: 3
@@ -9,12 +9,6 @@ solver:
   dcfr_alpha: 1.5
   dcfr_beta: 0.0
   dcfr_gamma: 2.0
-
-  # Pruning
-  enable_pruning: true
-  pruning_threshold: 300.0
-  prune_start_iteration: 100
-  prune_reactivate_frequency: 100
 
 training:
   num_iterations: 10000
