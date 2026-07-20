@@ -266,27 +266,29 @@ class SolverConfig(StrictFrozenModel):
     dcfr_beta: NonNegFloat = Field(default=0.0)
     dcfr_gamma: PositiveFloat = Field(default=2.0)
 
-    # Regret-based pruning.
+    # Regret-based pruning (Brown & Sandholm 2019). The pruned set is derived
+    # live from the persistent regrets each visit (see InfoSet.pruned_mask), so
+    # the knob needs no stored state.
     #
-    # Not implemented on the shared-array storage backend: the per-action pruned
-    # mask lives only on the per-visit ``InfoSet`` view (``InfoSet._pruned``),
-    # which is rebuilt from scratch on every traversal and has no home in the
-    # shared arrays. Marks therefore never persist across visits, so the knob is
-    # a silent no-op. Rejected at load until a persistent mask exists rather than
-    # letting a config quietly do nothing.
+    # Default off, and measured before trusting: a single-worker 60k-iter
+    # production smoke found it throughput-NEUTRAL (~1.0x it/s; it skipped ~4.5%
+    # of subtrees but external-sampling's per-node cost is already low, so the
+    # saving ~ the masking overhead). Its effect on the average-strategy /
+    # exploitability is NOT validated — enabling it changes the algorithm and
+    # needs a paired-LBR gate, not just the it/s wash. Do not expect the
+    # literature speedup here.
     enable_pruning: bool = Field(default=False)
     pruning_threshold: NonNegFloat = Field(default=300.0)
     prune_start_iteration: PositiveInt = Field(default=100)
     prune_reactivate_frequency: PositiveInt = Field(default=100)
 
     @model_validator(mode="after")
-    def pruning_not_implemented(self) -> SolverConfig:
-        if self.enable_pruning:
+    def pruning_requires_external_sampling(self) -> SolverConfig:
+        if self.enable_pruning and self.sampling_method != "external":
             raise ValueError(
-                "enable_pruning=True is not supported: regret-based pruning is a "
-                "no-op on the shared-array storage backend (the pruned mask lives "
-                "on the per-visit InfoSet view and never persists). Leave it "
-                "disabled until a shared-storage-backed pruned mask is implemented."
+                "enable_pruning=True requires sampling_method='external'. Pruning "
+                "skips the traverser's dominated actions, which only external "
+                "sampling enumerates; outcome sampling samples a single action."
             )
         return self
 
