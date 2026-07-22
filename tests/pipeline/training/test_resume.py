@@ -124,7 +124,10 @@ def test_resume_basic(test_config, temp_run_dir):
     assert session2.solver.iteration == initial_iterations, (
         f"Solver iteration not restored: expected {initial_iterations}, got {session2.solver.iteration}"
     )
-    restored_infosets = session2.storage.num_infosets()
+    # Resume no longer eager-loads the checkpoint into the session's bootstrap
+    # storage (the workers load their shards at train time), so the restored
+    # infoset count is read from the run metadata, not that storage.
+    restored_infosets = session2.run_tracker.metadata.num_infosets
     assert restored_infosets == initial_infosets, (
         f"Infosets not restored: expected {initial_infosets}, got {restored_infosets}"
     )
@@ -215,7 +218,11 @@ def test_resume_reads_legacy_fixed_name_checkpoint(test_config, temp_run_dir):
     (temp_run_dir / "CHECKPOINT.json").unlink()
 
     session2 = TrainingSession.resume(temp_run_dir)
-    assert session2.storage.num_infosets() == results["final_infosets"]
+    # Resume no longer eager-loads, so prove the legacy-named checkpoint is truly
+    # readable by training a step: the workers resolve and load the legacy shard,
+    # and the carried-forward infoset count lands in metadata.
+    session2.train(num_iterations=1, num_workers=1)
+    assert session2.run_tracker.metadata.num_infosets >= results["final_infosets"]
 
 
 def test_resume_metadata_tracking(test_config, temp_run_dir):

@@ -123,6 +123,13 @@ def build_storage(
         max_actions=config.storage.max_actions,
         is_coordinator=True,
         checkpoint_dir=run_dir if checkpoint_enabled else None,
+        # Never eager-load the checkpoint into this bootstrap storage. At
+        # num_workers=1 that load is single-threaded over the entire key table
+        # (>15 min at ~11M infosets) and is then discarded by
+        # release_bootstrap_storage before training -- the actual workers each
+        # load their own 1/N shard in parallel. Resume verifies the checkpoint
+        # is non-empty via the cheap key-table row count instead.
+        load_checkpoint_on_init=False,
         zarr_compression_level=config.storage.zarr_compression_level,
         zarr_chunk_size=config.storage.zarr_chunk_size,
     )

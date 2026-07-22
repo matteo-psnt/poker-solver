@@ -586,5 +586,6 @@ class TestCheckpointEnabledConfig:
         # Resume training
         trainer2 = TrainingSession.resume(trainer1.run_dir)
 
-        # Verify loaded correctly
-        assert trainer2.solver.num_infosets() == initial_infosets
+        # Resume no longer eager-loads into the session storage (workers load
+        # their shards at train time), so verify the restored count via metadata.
+        assert trainer2.run_tracker.metadata.num_infosets == initial_infosets
