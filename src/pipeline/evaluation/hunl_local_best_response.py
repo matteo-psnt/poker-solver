@@ -74,6 +74,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import stats
 from tqdm import tqdm
 
 from src.core.actions.action_model import ActionModel
@@ -527,7 +528,11 @@ class _HUNLLocalBestResponse:
         if len(dist) == 1:
             return best.real_action, dist[0][0]
         weights = np.array([weight for _, weight in dist])
-        choice = int(self.rng.choice(len(dist), p=weights / weights.sum()))
+        total = weights.sum()
+        # A degenerate off-tree translation distribution (all-zero weights) would
+        # make ``weights / total`` NaN and crash ``rng.choice``; fall back to uniform.
+        probs = weights / total if total > 0 else np.full(len(dist), 1.0 / len(dist))
+        choice = int(self.rng.choice(len(dist), p=probs))
         return best.real_action, dist[choice][0]
 
     def _action_menu(self, state: GameState, shadow: ShadowTracker) -> list[MenuCandidate]:
@@ -799,13 +804,19 @@ def compute_lbr_exploitability(
 
     exploitability_mbb = chips_to_mbb(exploitability, big_blind)
     se_mbb = chips_to_mbb(se, big_blind)
+    # t-multiplier with n-1 df, matching the sibling evaluators' summarize_samples;
+    # a fixed z=1.96 understates the interval at the small hand counts LBR often runs.
+    t_mult = float(stats.t.ppf(0.975, len(samples) - 1)) if len(samples) >= 2 else 0.0
     return LBRResult(
         exploitability_mbb=exploitability_mbb,
         exploitability_bb=chips_to_bb(exploitability, big_blind),
         lbr_utility_p0=float(np.mean(utilities_p0)) if utilities_p0 else float("nan"),
         lbr_utility_p1=float(np.mean(utilities_p1)) if utilities_p1 else float("nan"),
         std_error_mbb=se_mbb,
-        confidence_95_mbb=(exploitability_mbb - 1.96 * se_mbb, exploitability_mbb + 1.96 * se_mbb),
+        confidence_95_mbb=(
+            exploitability_mbb - t_mult * se_mbb,
+            exploitability_mbb + t_mult * se_mbb,
+        ),
         num_hands=len(samples),
         base_seed=base_seed,
         hand_outcomes=pairs,

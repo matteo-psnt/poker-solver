@@ -64,7 +64,10 @@ def sample_chance_outcome(self: MCCFRSolver, state: GameState) -> GameState:
     elif state.street == Street.RIVER and board_size == 4:
         count = 1
     else:
-        return state
+        # is_chance_node reported this state needs dealing, but (street, board_size)
+        # is not a legal deal point. Returning ``state`` unchanged would spin the
+        # caller's "while chance node" loop forever; fail loudly on the malformed state.
+        raise ValueError(f"Unexpected chance state: street={state.street}, board_size={board_size}")
 
     first_to_act = 1 - state.button_position
 
