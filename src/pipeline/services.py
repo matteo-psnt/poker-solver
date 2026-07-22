@@ -7,7 +7,7 @@ from typing import Any
 
 from src.core.game.state import Street
 from src.engine.solver.protocols import Blueprint
-from src.engine.solver.storage.helpers import read_checkpoint_manifest
+from src.engine.solver.storage.helpers import CHECKPOINT_MANIFEST_FILE, read_checkpoint_manifest
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
@@ -28,8 +28,10 @@ from src.pipeline.training.components import (
 )
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
 from src.pipeline.training.trainer import TrainingSession
+from src.pipeline.training.versioning import REPRESENTATION_VERSION
 from src.shared.config import Config
 from src.shared.config_loader import load_training_config
+from src.shared.gitinfo import commits_ahead_of
 from src.shared.units import pair_mean_mbb
 
 # Local Best Response: a rigorous lower bound on exploitability (LBR <= exact BR,
@@ -101,6 +103,92 @@ class TrainingOutput:
 def list_runs(runs_dir: Path) -> list[str]:
     """List available training runs in the provided base directory."""
     return RunTracker.list_runs(runs_dir)
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    """A run annotated with how old it is and whether it can still be loaded.
+
+    ``commits_ago`` is the number of commits HEAD is ahead of the run's train
+    commit (0 == trained on the current HEAD, None == commit unknown to this
+    checkout). ``loadable`` is False when the run cannot be opened at HEAD --
+    either it never checkpointed or its on-disk format predates the current
+    ``REPRESENTATION_VERSION`` -- with ``blocker`` naming the reason for the UI.
+    """
+
+    name: str
+    commits_ago: int | None
+    git_dirty: bool | None
+    representation_version: int | None
+    current_version: int
+    has_checkpoint: bool
+    loadable: bool
+    blocker: str | None
+    # Descriptive metadata for the picker (None when metadata is unreadable).
+    iterations: int | None
+    num_infosets: int | None
+    config_name: str | None
+    status: str | None
+
+
+def _has_checkpoint(run_dir: Path) -> bool:
+    """Whether ``run_dir`` holds a checkpoint the loader can open.
+
+    Covers both the versioned manifest and the legacy fixed-name/iteration-suffixed
+    zarr layouts (``checkpoint.zarr`` / ``checkpoint-N.zarr``).
+    """
+    return (run_dir / CHECKPOINT_MANIFEST_FILE).exists() or any(run_dir.glob("checkpoint*.zarr"))
+
+
+def _summarize_run(runs_dir: Path, name: str) -> RunSummary:
+    run_dir = runs_dir / name
+    try:
+        metadata = load_run_metadata(run_dir)
+    except (OSError, ValueError, KeyError):
+        return RunSummary(
+            name=name,
+            commits_ago=None,
+            git_dirty=None,
+            representation_version=None,
+            current_version=REPRESENTATION_VERSION,
+            has_checkpoint=_has_checkpoint(run_dir),
+            loadable=False,
+            blocker="unreadable metadata",
+            iterations=None,
+            num_infosets=None,
+            config_name=None,
+            status=None,
+        )
+
+    has_checkpoint = _has_checkpoint(run_dir)
+    version = metadata.representation_version
+    if not has_checkpoint:
+        blocker: str | None = "no checkpoint"
+    elif version != REPRESENTATION_VERSION:
+        blocker = f"format v{version} ≠ v{REPRESENTATION_VERSION}"
+    else:
+        blocker = None
+
+    return RunSummary(
+        name=name,
+        commits_ago=commits_ahead_of(metadata.git_commit),
+        git_dirty=metadata.git_dirty,
+        representation_version=version,
+        current_version=REPRESENTATION_VERSION,
+        has_checkpoint=has_checkpoint,
+        loadable=blocker is None,
+        blocker=blocker,
+        iterations=metadata.iterations,
+        num_infosets=metadata.num_infosets,
+        config_name=metadata.config_name,
+        status=metadata.status,
+    )
+
+
+def describe_runs(runs_dir: Path) -> list[RunSummary]:
+    """Summarize every run, newest first, with age and loadability annotations."""
+    names = list_runs(runs_dir)
+    return [_summarize_run(runs_dir, name) for name in reversed(names)]
 
 
 def load_run_metadata(run_dir: Path) -> RunMetadata:

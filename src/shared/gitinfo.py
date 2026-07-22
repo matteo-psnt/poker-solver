@@ -51,3 +51,26 @@ def is_git_dirty() -> bool | None:
     if status is None:
         return None
     return bool(status)
+
+
+@lru_cache(maxsize=256)
+def commits_ahead_of(commit: str | None) -> int | None:
+    """How many commits HEAD is ahead of ``commit`` (0 when they are the same).
+
+    Returns None when the age is unknowable: no commit recorded, the commit is
+    absent from this checkout (trained on a branch/history that was never
+    fetched, or rewritten), or git is unavailable. A run whose commit is *not* an
+    ancestor of HEAD still yields the count of commits reachable from HEAD but not
+    from it -- a sensible "distance" for the divergent case.
+    """
+    if not commit:
+        return None
+    # rev-list itself errors (-> None) on a sha absent from this checkout, so that
+    # already separates "unknown" from a real zero distance -- no pre-check needed.
+    count = _run_git("rev-list", "--count", f"{commit}..HEAD")
+    if count is None:
+        return None
+    try:
+        return int(count)
+    except ValueError:
+        return None

@@ -38,8 +38,7 @@ def test_viewer_uses_fastapi_server_by_default(tmp_path, monkeypatch):
         def stop(self):
             return None
 
-    monkeypatch.setattr(viewer.services, "list_runs", lambda _runs_dir: ["run-a"])
-    monkeypatch.setattr(viewer.prompts, "select", lambda *_args, **_kwargs: "run-a")
+    monkeypatch.setattr(viewer, "select_run", lambda *_args, **_kwargs: "run-a")
     monkeypatch.setattr(viewer, "_ensure_ui_build", lambda _ctx: True)
     monkeypatch.setattr(
         viewer.ChartService, "from_run_dir", lambda *_args, **_kwargs: _fake_chart_service()
