@@ -41,7 +41,7 @@ def _build_static_dir(tmp_path: Path) -> Path:
 
 
 def test_chart_api_routes_and_static_mount(tmp_path: Path):
-    app = create_app(_DummyChartService(), _build_static_dir(tmp_path))
+    app = create_app(_build_static_dir(tmp_path), chart_service=_DummyChartService())
     client = TestClient(app)
 
     health = client.get("/health")
@@ -67,7 +67,7 @@ def test_chart_api_routes_and_static_mount(tmp_path: Path):
 
 
 def test_chart_api_validates_position_query(tmp_path: Path):
-    app = create_app(_DummyChartService(), _build_static_dir(tmp_path))
+    app = create_app(_build_static_dir(tmp_path), chart_service=_DummyChartService())
     client = TestClient(app)
 
     response = client.get("/api/chart", params={"position": 2, "situation": "first_to_act"})
