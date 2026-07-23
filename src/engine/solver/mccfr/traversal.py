@@ -11,13 +11,27 @@ from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.solver.infoset import InfoSet
 from src.engine.solver.infoset_encoder import encode_infoset_key
-from src.engine.solver.numba_ops import apply_regret_updates, compute_dcfr_strategy_weight
+from src.engine.solver.numba_ops import (
+    WEIGHTING_CODES,
+    apply_regret_updates,
+    compute_dcfr_strategy_weight,
+)
 from src.engine.solver.policy_lookup import filter_stored_actions
 
 if TYPE_CHECKING:
     from .solver import MCCFRSolver
 
-_WEIGHTING_CODES = {"none": 0, "linear": 1, "dcfr": 2}
+# Identity index rows for the full-row kernel call, cached per action count so
+# the hot path stays allocation-free. Read-only by convention (numba kernels
+# never write target_indices).
+_IDENTITY_INDICES: dict[int, np.ndarray] = {}
+
+
+def _identity_indices(num_actions: int) -> np.ndarray:
+    indices = _IDENTITY_INDICES.get(num_actions)
+    if indices is None:
+        indices = _IDENTITY_INDICES.setdefault(num_actions, np.arange(num_actions, dtype=np.int64))
+    return indices
 
 
 def _terminal_utility(self: MCCFRSolver, state: GameState, traversing_player: int) -> float:
@@ -184,35 +198,30 @@ def cfr_external_sampling(
         # Skipped only for placeholder views whose global ID is still unknown.
         if infoset.writable:
             opponent = 1 - current_player
-            if prune is None and len(valid_indices) == infoset.num_actions:
-                apply_regret_updates(
-                    infoset.regrets,
-                    action_utilities,
-                    node_utility,
-                    reach_probs[opponent],
-                    solver_config.cfr_plus,
-                    self.iteration,
-                    _WEIGHTING_CODES[solver_config.iteration_weighting],
-                    solver_config.dcfr_alpha,
-                    solver_config.dcfr_beta,
-                )
+            # One kernel call for every shape: full row (identity indices,
+            # allocation-free), partial-legal subset, or unpruned subset.
+            if prune is None:
+                if len(valid_indices) == infoset.num_actions:
+                    target_indices = _identity_indices(infoset.num_actions)
+                else:
+                    target_indices = np.asarray(valid_indices, dtype=np.int64)
+                utilities = action_utilities
             else:
-                for local_idx in range(len(legal_actions)):
-                    original_idx = valid_indices[local_idx]
-
-                    if prune is not None and prune[original_idx]:
-                        continue
-
-                    regret = action_utilities[local_idx] - node_utility
-                    infoset.update_regret(
-                        original_idx,
-                        regret * reach_probs[opponent],
-                        cfr_plus=solver_config.cfr_plus,
-                        iteration=self.iteration,
-                        iteration_weighting=solver_config.iteration_weighting,
-                        dcfr_alpha=solver_config.dcfr_alpha,
-                        dcfr_beta=solver_config.dcfr_beta,
-                    )
+                unpruned = [j for j in range(len(legal_actions)) if not prune[valid_indices[j]]]
+                target_indices = np.array([valid_indices[j] for j in unpruned], dtype=np.int64)
+                utilities = action_utilities[unpruned]
+            apply_regret_updates(
+                infoset.regrets,
+                target_indices,
+                utilities,
+                node_utility,
+                reach_probs[opponent],
+                solver_config.cfr_plus,
+                self.iteration,
+                WEIGHTING_CODES[solver_config.iteration_weighting],
+                solver_config.dcfr_alpha,
+                solver_config.dcfr_beta,
+            )
 
             # Diagnostics only (no strategy consumer reads these): visit count
             # and running utility of the traverser's own nodes. The average

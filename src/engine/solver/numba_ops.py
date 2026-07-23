@@ -8,6 +8,10 @@ identified through profiling.
 import numpy as np
 from numba import jit
 
+# Weighting-scheme codes shared by every caller of ``apply_regret_updates``
+# (numba kernels take ints, not strings).
+WEIGHTING_CODES = {"none": 0, "linear": 1, "dcfr": 2}
+
 
 @jit(nopython=True, cache=True)
 def regret_matching(regrets):
@@ -15,6 +19,12 @@ def regret_matching(regrets):
     Compute strategy from regrets using regret matching.
 
     This is the core operation in CFR, called millions of times.
+
+    Intentionally distinct from the resolver's batched row normalization
+    (``subgame_cfr._normalize_or_uniform``): this is the 1-D training-path
+    kernel with exact ``sum > 0`` semantics, the resolver normalizes
+    (combos x actions) matrices under ``NORMALIZE_EPS``. Do not merge them —
+    either direction changes numerics or slows its hot path.
 
     Args:
         regrets: NumPy array of regrets for each action (float64)
@@ -59,46 +69,10 @@ def average_strategy(strategy_sum):
 
 
 @jit(nopython=True, cache=True)
-def compute_dcfr_weight(iteration, alpha, beta, is_positive):
-    """
-    Compute DCFR discount factor for cumulative regrets.
-
-    Uses standard DCFR formula: t^exponent / (t^exponent + 1)
-    where exponent = alpha for positive regrets, beta for negative regrets.
-
-    This discount is applied to cumulative regrets each iteration, giving
-    exponentially less weight to older iterations (Brown & Sandholm 2019).
-
-    Args:
-        iteration: Current iteration number (1-indexed)
-        alpha: Exponent for positive regrets (typically 1.5)
-        beta: Exponent for negative regrets (typically 0.0)
-        is_positive: True if cumulative regret is positive, False if negative
-
-    Returns:
-        Discount factor to multiply cumulative regret by (float64, range [0, 1])
-    """
-    if iteration <= 1:
-        return 1.0
-
-    t = np.float64(iteration)
-    exponent = alpha if is_positive else beta
-
-    if exponent == 0.0:
-        # t^0 / (t^0 + 1) = 1/2: beta=0 halves accumulated negative regret on
-        # every update (Brown & Sandholm 2019) — not a no-op.
-        return 0.5
-
-    # Standard DCFR discount: t^exponent / (t^exponent + 1)
-    # As t increases, this approaches 1.0, meaning less discount
-    t_exp = t**exponent
-    return t_exp / (t_exp + 1.0)
-
-
-@jit(nopython=True, cache=True)
 def apply_regret_updates(
     regrets,
-    action_utilities,
+    target_indices,
+    utilities,
     node_utility,
     opponent_reach,
     cfr_plus,
@@ -108,33 +82,40 @@ def apply_regret_updates(
     dcfr_beta,
 ):
     """
-    Apply one node's regret updates to a full regret row in a single call.
+    THE regret-update kernel: every CFR-variant regret write goes through here.
 
-    Equivalent to calling ``InfoSet.update_regret`` for every action index, but
-    without the per-action Python loop and kernel-call overhead.
+    Applies, per target slot, the DCFR discount (Brown & Sandholm 2019: the
+    cumulative regret is multiplied by t^e/(t^e+1), e = alpha for positive /
+    beta for negative regrets, where e = 0 means x0.5 — not a no-op) followed
+    by the weighted counterfactual-regret add and the optional CFR+ floor.
+    Callers select which slots to touch via ``target_indices`` (full row,
+    partial-legal subset, unpruned subset, or a single action); there is no
+    other implementation of this math — keep it that way.
 
     Args:
         regrets: Regret row for the infoset (mutated in place)
-        action_utilities: Counterfactual utility per action
+        target_indices: Row slots to update, ascending (int64)
+        utilities: Counterfactual utility per entry of ``target_indices``
         node_utility: Node utility under the current strategy
         opponent_reach: Opponent reach probability
         cfr_plus: Floor cumulative regrets at 0 (CFR+)
         iteration: Current iteration (1-indexed)
-        weighting: 0 = none, 1 = linear, 2 = DCFR
+        weighting: ``WEIGHTING_CODES``: 0 = none, 1 = linear, 2 = DCFR
         dcfr_alpha: Positive-regret discount exponent (DCFR)
         dcfr_beta: Negative-regret discount exponent (DCFR)
     """
-    for i in range(regrets.shape[0]):
+    for j in range(target_indices.shape[0]):
+        i = target_indices[j]
         if weighting == 2 and iteration > 1:
             exponent = dcfr_alpha if regrets[i] > 0 else dcfr_beta
             if exponent == 0.0:
-                # t^0 / (t^0 + 1) = 1/2 (see compute_dcfr_weight)
+                # t^0 / (t^0 + 1) = 1/2
                 regrets[i] *= 0.5
             else:
                 t_exp = np.float64(iteration) ** exponent
                 regrets[i] *= t_exp / (t_exp + 1.0)
 
-        weighted_regret = (action_utilities[i] - node_utility) * opponent_reach
+        weighted_regret = (utilities[j] - node_utility) * opponent_reach
         if weighting == 1:
             weighted_regret = weighted_regret * iteration
 
