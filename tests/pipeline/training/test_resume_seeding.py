@@ -50,8 +50,9 @@ class _RecordingWorkerManager:
             "interrupted": False,
         }
 
-    def exchange_ids(self, **_kwargs) -> None:
-        return None
+    def exchange_ids(self, **_kwargs) -> dict:
+        # Match the real return shape: sync-health telemetry reads acks off it.
+        return {"acks": []}
 
 
 def _emitted_batch_ids(start_iteration: int, tmp_path, monkeypatch) -> list[int]:
