@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
@@ -17,6 +18,8 @@ from src.pipeline.training.metrics import (
 from src.pipeline.training.metrics_history import MetricsHistoryWriter
 
 from . import reporting
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.pipeline.training.parallel_manager import SharedArrayWorkerManager
@@ -233,7 +236,7 @@ class TrainingBatchCoordinator:
                     sample_ids = allocated
             return compute_quality_from_arrays(regrets, action_counts, sample_ids)
         except Exception as exc:  # pragma: no cover - defensive; metrics must not kill a run
-            print(f"[metrics-history] quality sampling skipped: {exc}", flush=True)
+            logger.warning(f"[metrics-history] quality sampling skipped: {exc}")
             return None
 
     def _policy_delta(self, total_infosets: int) -> float | None:
@@ -265,7 +268,7 @@ class TrainingBatchCoordinator:
             self._prev_probe_policies = current
             return delta
         except Exception as exc:  # pragma: no cover - defensive; metrics must not kill a run
-            print(f"[metrics-history] policy delta skipped: {exc}", flush=True)
+            logger.warning(f"[metrics-history] policy delta skipped: {exc}")
             return None
 
     def _record_history(

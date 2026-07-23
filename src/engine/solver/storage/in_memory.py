@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from src.engine.solver.storage.helpers import (
     get_missing_checkpoint_files,
     load_checkpoint_data,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class InMemoryStorage(Storage):
@@ -120,7 +123,9 @@ class InMemoryStorage(Storage):
         self._arrays = data.arrays
         self._action_lists = data.action_lists
 
-        print(f"Loaded {len(self.id_to_key)} infosets from checkpoint (materialized on demand)")
+        logger.info(
+            f"Loaded {len(self.id_to_key)} infosets from checkpoint (materialized on demand)"
+        )
 
     def __str__(self) -> str:
         checkpoint_info = f", checkpoint_dir={self.checkpoint_dir}" if self.checkpoint_dir else ""

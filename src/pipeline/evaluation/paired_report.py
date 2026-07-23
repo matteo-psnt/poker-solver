@@ -8,9 +8,12 @@ entrypoints that drive it (``run_compare``, ``run_deployed_gate``) stay thin.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from src.pipeline.evaluation.statistics import compare_paired_samples
+
+logger = logging.getLogger(__name__)
 
 
 def print_variance_decomposition(results: dict[str, Any]) -> None:
@@ -18,13 +21,13 @@ def print_variance_decomposition(results: dict[str, Any]) -> None:
     decomposition = results.get("variance_decomposition")
     if not decomposition:
         return
-    print("  variance by terminal type (within-group share of total):")
+    logger.info("  variance by terminal type (within-group share of total):")
     for label, group in decomposition["groups"].items():
-        print(
+        logger.info(
             f"    {label:>9}: {group['variance_share']:>5.1%} of variance "
             f"({group['n']} deals, {group['share_of_samples']:.1%})"
         )
-    print(f"    (between-group: {decomposition['between_group_share']:.1%})")
+    logger.info(f"    (between-group: {decomposition['between_group_share']:.1%})")
 
 
 def report_paired_lbr(
@@ -56,24 +59,28 @@ def report_paired_lbr(
     )
 
     for title, results in ((title_a, results_a), (title_b, results_b)):
-        print(f"\n{title}:")
-        print(f"  {results['exploitability_mbb']:.1f} mbb/g (± {results['std_error_mbb']:.1f})")
+        logger.info(f"\n{title}:")
+        logger.info(
+            f"  {results['exploitability_mbb']:.1f} mbb/g (± {results['std_error_mbb']:.1f})"
+        )
         print_variance_decomposition(results)
 
-    print(f"\nPAIRED DIFFERENCE ({diff_label}, {comparison['n']} common deals):")
-    print(
+    logger.info(f"\nPAIRED DIFFERENCE ({diff_label}, {comparison['n']} common deals):")
+    logger.info(
         f"  {comparison['mean_diff']:.1f} mbb/g (± {comparison['se_diff']:.1f}; "
         f"95% CI [{comparison['ci_lower']:.1f}, {comparison['ci_upper']:.1f}])"
     )
-    print(f"  p-value: {comparison['p_value']:.4f} | correlation: {comparison['correlation']:.3f}")
+    logger.info(
+        f"  p-value: {comparison['p_value']:.4f} | correlation: {comparison['correlation']:.3f}"
+    )
     if show_pairing_gain:
-        print(
+        logger.info(
             f"  pairing gain: SE {comparison['se_diff']:.1f} vs {comparison['se_unpaired']:.1f} "
             f"unpaired ({comparison['se_unpaired'] / max(comparison['se_diff'], 1e-12):.1f}x tighter)"
         )
     if comparison["is_significant"]:
         better = better_labels[0] if comparison["mean_diff"] > 0 else better_labels[1]
-        print(f"  VERDICT: {better} is significantly less exploitable (95% level).")
+        logger.info(f"  VERDICT: {better} is significantly less exploitable (95% level).")
     else:
-        print("  VERDICT: no significant difference at the 95% level.")
+        logger.info("  VERDICT: no significant difference at the 95% level.")
     return comparison

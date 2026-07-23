@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import pickle
 import random
 import signal
@@ -14,6 +15,8 @@ from src.pipeline.training.parallel_manager import SharedArrayWorkerManager
 
 from . import reporting
 from .batch_coordinator import BatchLoopState, TrainingBatchCoordinator
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.pipeline.training.trainer.session import TrainingSession
@@ -30,7 +33,7 @@ def get_training_config(
     initial_capacity = session.config.storage.initial_capacity
     stored_capacity = session.run_tracker.metadata.resolve_initial_capacity(initial_capacity)
     if stored_capacity != initial_capacity:
-        print(
+        logger.info(
             f"[Resume] Using stored capacity {stored_capacity:,} "
             f"(config initial_capacity={initial_capacity:,})"
         )
@@ -42,7 +45,7 @@ def get_training_config(
                 f"capacity override {session.capacity_override:,} is smaller than the "
                 f"checkpoint's capacity {initial_capacity:,}"
             )
-        print(f"[Resume] Pre-allocating capacity override: {session.capacity_override:,}")
+        logger.info(f"[Resume] Pre-allocating capacity override: {session.capacity_override:,}")
         initial_capacity = session.capacity_override
 
     return {
@@ -67,7 +70,7 @@ def train_partitioned(
     # KeyboardInterrupt path so the run attempts a final checkpoint instead of
     # dying with unsaved progress.
     def _sigterm_to_interrupt(_signum: int, _frame: object) -> None:
-        print("[Master] SIGTERM received — attempting final checkpoint...", flush=True)
+        logger.info("[Master] SIGTERM received — attempting final checkpoint...")
         raise KeyboardInterrupt
 
     try:
@@ -110,7 +113,7 @@ def _train_partitioned(
 
     if verbose:
         abstraction_size = len(serialized_action_model) + len(serialized_card_abstraction)
-        print(f"   Serialized abstractions: {abstraction_size:,} bytes")
+        logger.info(f"   Serialized abstractions: {abstraction_size:,} bytes")
 
     # Hand shared memory over to the worker manager before it creates its own
     # coordinator storage. Both use session_id=run_dir.name, and creating the
@@ -140,7 +143,7 @@ def _train_partitioned(
         pool_init_time = time.time() - pool_start_time
 
         if verbose:
-            print(f"   Worker pool ready ({pool_init_time:.2f}s)\n")
+            logger.info(f"   Worker pool ready ({pool_init_time:.2f}s)\n")
 
         num_batches = (num_iterations + batch_size_val - 1) // batch_size_val
         batch_iterator = tqdm(
@@ -189,7 +192,7 @@ def _train_partitioned(
         session.checkpoints.wait()
         if completed_iterations > 0:
             if verbose:
-                print("[Master] Saving final checkpoint...", flush=True)
+                logger.info("[Master] Saving final checkpoint...")
             session.checkpoints.ensure_final_checkpoint(
                 worker_manager=worker_manager,
                 iteration=start_iteration + completed_iterations,

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.pipeline.training.trainer.session import TrainingSession
@@ -20,13 +23,13 @@ def print_training_header(
 ) -> None:
     if not session.verbose:
         return
-    print("\n🚀 Shared Array Parallel Training")
-    print(f"   Workers: {num_workers}")
-    print(f"   Iterations: {num_iterations}")
-    print(f"   Batch size: {batch_size}")
-    print(f"   Initial capacity: {initial_capacity:,}")
-    print(f"   Max actions: {max_actions}")
-    print("   Mode: Live shared memory arrays")
+    logger.info("\n🚀 Shared Array Parallel Training")
+    logger.info(f"   Workers: {num_workers}")
+    logger.info(f"   Iterations: {num_iterations}")
+    logger.info(f"   Batch size: {batch_size}")
+    logger.info(f"   Initial capacity: {initial_capacity:,}")
+    logger.info(f"   Max actions: {max_actions}")
+    logger.info("   Mode: Live shared memory arrays")
 
 
 def update_progress_bar(
@@ -54,13 +57,13 @@ def print_final_summary(
     if not session.verbose:
         return
     if interrupted:
-        print("🟡 Training interrupted")
+        logger.info("🟡 Training interrupted")
     else:
-        print("✅ Shared Array Training complete!")
+        logger.info("✅ Shared Array Training complete!")
 
-    print(f"   Iterations: {total_iterations}")
-    print(f"   Infosets: {total_infosets:,}")
-    print(f"   Time: {elapsed_time:.1f}s")
+    logger.info(f"   Iterations: {total_iterations}")
+    logger.info(f"   Infosets: {total_infosets:,}")
+    logger.info(f"   Time: {elapsed_time:.1f}s")
 
     if total_iterations > 0:
-        print(f"   Speed: {total_iterations / elapsed_time:.2f} iter/s")
+        logger.info(f"   Speed: {total_iterations / elapsed_time:.2f} iter/s")

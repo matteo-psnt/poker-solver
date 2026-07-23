@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from src.pipeline.training.parallel_protocol import JobType
 
 from .gather import gather_worker_results
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -74,9 +77,8 @@ def run_batch(
     for result in received:
         if "error" in result:
             errors.append(result)
-            print(
+            logger.error(
                 f"[Master] Worker {result['worker_id']} error: {result['error']}",
-                flush=True,
             )
         else:
             results.append(result)
@@ -90,10 +92,9 @@ def run_batch(
     total_iters = sum(iterations_per_worker)
 
     if verbose:
-        print(
+        logger.info(
             f"[Master] Batch {batch_id} complete in {batch_time:.1f}s "
             f"({total_iters / batch_time:.1f} iter/s)",
-            flush=True,
         )
 
     if errors:

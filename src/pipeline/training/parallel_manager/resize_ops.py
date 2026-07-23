@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING, cast
 
 from src.pipeline.training.parallel_protocol import JobType
 
 from .gather import gather_worker_results
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -25,11 +28,10 @@ def check_and_resize_if_needed(
 
     new_max = int(manager.capacity * manager.storage.GROWTH_FACTOR)
     if verbose:
-        print(
+        logger.info(
             "[Master] Storage resize triggered: "
             f"worker at {max_worker_capacity:.1%} capacity, "
             f"growing {manager.capacity:,} -> {new_max:,}",
-            flush=True,
         )
 
     return resize_storage(manager, new_capacity=new_max, timeout=timeout, verbose=verbose)
@@ -52,9 +54,8 @@ def resize_storage(
     resize_start = time.time()
 
     if verbose:
-        print(
+        logger.info(
             f"[Master] Resizing storage: {manager.storage.capacity:,} -> {new_capacity:,}",
-            flush=True,
         )
 
     manager.storage.resize(new_capacity)
@@ -62,9 +63,8 @@ def resize_storage(
     manager.capacity = new_capacity
 
     if verbose:
-        print(
+        logger.info(
             f"[Master] New shared memory created (session={new_session_id}), notifying workers...",
-            flush=True,
         )
 
     for worker_id in range(manager.num_workers):
@@ -88,17 +88,15 @@ def resize_storage(
         for result in acks:
             worker_id = cast(int, result["worker_id"])
             new_range = cast(tuple[int, int], result["new_id_range"])
-            print(
+            logger.info(
                 f"[Master] Worker {worker_id} reattached (range={new_range})",
-                flush=True,
             )
 
     resize_time = time.time() - resize_start
     if verbose:
-        print(
+        logger.info(
             f"[Master] Resize complete in {resize_time:.1f}s, "
             f"new capacity: {new_capacity:,} infosets",
-            flush=True,
         )
 
     return True

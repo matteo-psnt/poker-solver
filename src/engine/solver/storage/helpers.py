@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from collections.abc import Sequence
@@ -16,6 +17,8 @@ from src.engine.solver.storage import key_table
 from src.engine.solver.storage.array_specs import ARRAY_SPECS
 
 # Legacy fixed checkpoint file names (pre-manifest runs; still readable).
+
+logger = logging.getLogger(__name__)
 CHECKPOINT_ZARR_DIR = "checkpoint.zarr"
 KEY_MAPPING_FILE = "key_mapping.pkl"
 ACTION_SIGNATURES_FILE = "action_signatures.pkl"
@@ -101,11 +104,10 @@ def resolve_resume_iteration(checkpoint_dir: Path, metadata_iterations: int) -> 
 
     manifest_iteration = int(manifest["iteration"])
     if manifest_iteration != metadata_iterations:
-        print(
+        logger.info(
             f"[resume] Run metadata reports iteration {metadata_iterations} but the "
             f"checkpoint manifest reports {manifest_iteration}; trusting the manifest "
             "(metadata was likely not flushed before the previous leg died).",
-            flush=True,
         )
     return manifest_iteration if manifest_iteration > 0 else None
 
@@ -142,7 +144,7 @@ def _prune_superseded_snapshots(checkpoint_dir: Path, keep: dict) -> None:
             elif path.exists():
                 path.unlink()
         except OSError as exc:
-            print(f"Warning: could not prune superseded checkpoint {path.name}: {exc}")
+            logger.warning(f"Warning: could not prune superseded checkpoint {path.name}: {exc}")
 
 
 def get_missing_checkpoint_files(checkpoint_dir: Path) -> list[str]:

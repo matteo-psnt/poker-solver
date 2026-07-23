@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, cast
 
 from src.pipeline.training.parallel_protocol import JobType
 
 from .gather import gather_worker_results
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -35,6 +38,6 @@ def exchange_ids(
     total_owned = sum(cast(int, result.get("num_owned", 0)) for result in acks)
 
     if verbose:
-        print("[Master] ID exchange complete", flush=True)
+        logger.info("[Master] ID exchange complete")
 
     return {"total_owned": total_owned, "acks": acks}

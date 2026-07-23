@@ -8,9 +8,11 @@ from src.interfaces.cli.flows.play import play_against_model
 from src.interfaces.cli.ui import ui
 from src.interfaces.cli.ui.context import CliContext
 from src.interfaces.cli.ui.menu import MenuItem, run_menu
+from src.shared.log import configure_logging
 
 
 def main() -> None:
+    configure_logging()
     ctx = CliContext.from_project_root()
 
     ui.header("POKER SOLVER CLI")

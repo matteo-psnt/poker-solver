@@ -15,8 +15,11 @@ write is best-effort: a metrics failure must never take down training.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsHistoryWriter:
@@ -40,5 +43,5 @@ class MetricsHistoryWriter:
             with open(self.path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, separators=(",", ":")) + "\n")
         except Exception as exc:  # pragma: no cover - defensive; metrics must not kill a run
-            print(f"[metrics-history] disabled after write error: {exc}", flush=True)
+            logger.warning(f"[metrics-history] disabled after write error: {exc}")
             self._disabled = True

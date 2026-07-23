@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import logging
 import multiprocessing as mp
 import uuid
 from datetime import datetime
@@ -27,6 +28,8 @@ from src.shared.config import Config
 
 from . import partitioned
 from .checkpointing import CheckpointManager
+
+logger = logging.getLogger(__name__)
 
 
 class TrainingSession:
@@ -139,7 +142,7 @@ class TrainingSession:
         assert session.run_tracker is not None
         session.run_tracker.mark_resumed()
 
-        print(
+        logger.info(
             f"✅ Resumed from checkpoint at iteration {checkpoint_iter} ({total_rows:,} infosets)"
         )
 

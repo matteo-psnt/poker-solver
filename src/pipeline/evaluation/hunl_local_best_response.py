@@ -93,6 +93,7 @@ from src.pipeline.evaluation.opponent_model import (
 )
 from src.pipeline.evaluation.shadow_state import MenuCandidate, ShadowTracker
 from src.shared.config import ResolverConfig
+from src.shared.log import configure_logging
 from src.shared.numeric import NORMALIZE_EPS
 from src.shared.units import chips_to_bb, chips_to_mbb
 
@@ -909,9 +910,11 @@ def _init_worker(
     starting_stack: int,
 ) -> None:
     global _WORKER_ENGINE, _WORKER_CTX
-    # Worker subprocess stdout (e.g. checkpoint-load logs from building the blueprint)
-    # cannot be captured by the parent's stdout redirect; route it to stderr so the
-    # parent's --json output on stdout stays clean.
+    # Spawned process: logging config does not inherit from the parent.
+    configure_logging()
+    # Third-party stdout (e.g. numba/zarr noise while building the blueprint) cannot be
+    # captured by the parent's stdout redirect; route it to stderr so the parent's
+    # --json output on stdout stays clean.
     sys.stdout = sys.stderr
     blueprint = blueprint_factory()
     _WORKER_ENGINE = _HUNLLocalBestResponse(blueprint, config, np.random.default_rng(base_seed))

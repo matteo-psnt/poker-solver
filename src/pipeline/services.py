@@ -1,6 +1,7 @@
 """Service-layer APIs for training and evaluation orchestration."""
 
 import functools
+import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,8 @@ from src.shared.units import pair_mean_mbb
 
 # Local Best Response: a rigorous lower bound on exploitability (LBR <= exact BR,
 # validated on Kuhn/Leduc). This is the trustworthy default metric.
+
+logger = logging.getLogger(__name__)
 LBR_ESTIMATOR_LABEL = "local_best_response (rigorous lower bound on exploitability)"
 
 # The legacy `evaluate_run` metric is a one-ply rollout that both understates the
@@ -655,7 +658,7 @@ def evaluate_and_record(
             ledger_path=ledger_path,
         )
         payload["ledger_result_path"] = str(result_path)
-        print(f"  Ledger:        appended to {ledger_path} (payload: {result_path})")
+        logger.info(f"  Ledger:        appended to {ledger_path} (payload: {result_path})")
     except Exception as exc:  # recording must never break the eval
-        print(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
+        logger.warning(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
     return payload

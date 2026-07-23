@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, TypedDict, cast
 
@@ -12,6 +13,8 @@ from src.pipeline.training.parallel_protocol import JobType
 from src.shared import checkpoint_profile
 
 from .gather import gather_worker_results
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .manager import SharedArrayWorkerManager
@@ -111,11 +114,10 @@ def checkpoint(manager: SharedArrayWorkerManager, iteration: int) -> None:
         manager.storage.state.next_local_id = max_id + 1
 
     if manager.config.training.verbose:
-        print(
+        logger.info(
             f"[Master] Checkpointing iter={iteration}: "
             f"{len(manager.storage.state.owned_keys):,} infosets "
             f"(max_id={manager.storage.state.next_local_id})...",
-            flush=True,
         )
 
     # Per-street convergence snapshot: the coordinator only holds the full key→id
@@ -165,4 +167,4 @@ def _record_street_metrics(manager: SharedArrayWorkerManager, iteration: int) ->
         with open(run_dir / "street_metrics.jsonl", "a") as fh:
             fh.write(json.dumps(row) + "\n")
     except Exception as exc:  # pragma: no cover - telemetry must never fail a checkpoint
-        print(f"[street-metrics] skipped at iter={iteration}: {exc}", flush=True)
+        logger.warning(f"[street-metrics] skipped at iter={iteration}: {exc}")

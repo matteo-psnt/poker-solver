@@ -28,6 +28,7 @@ from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.services import RolloutParams
 from src.shared import checkpoint_profile
 from src.shared.jsonio import json_default
+from src.shared.log import configure_logging
 
 
 def _write_result(run_dir: Path, payload: dict[str, Any]) -> None:
@@ -452,10 +453,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging()
     args = build_parser().parse_args(argv)
     if args.json:
-        # Training/evaluation log to stdout via print(); redirect those to stderr so the
-        # JSON blob is the ONLY thing on stdout and machine consumers can parse it directly.
+        # Library layers log to stderr, but third-party writers (numba, zarr) can still
+        # print to stdout; redirect so the JSON blob is the ONLY thing on stdout and
+        # machine consumers can parse it directly.
         with contextlib.redirect_stdout(sys.stderr):
             payload = args.func(args)
         print(json.dumps(payload, indent=2, default=json_default))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,8 @@ from src.engine.solver.storage.helpers import (
 )
 from src.engine.solver.storage.shared_array.ownership import stable_hash
 from src.shared import checkpoint_profile
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.engine.solver.storage.shared_array.storage import SharedArrayStorage
@@ -151,10 +154,9 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     # timing, resume emits only the trailing summary and looks hung the whole time.
     wid = storage.worker_id
     load_start = time.perf_counter()
-    print(
+    logger.info(
         f"[checkpoint-load] worker {wid}: loading up to {total_rows:,} rows "
         f"(num_workers={storage.num_workers}) from {storage.checkpoint_dir}...",
-        flush=True,
     )
 
     # Read ONLY this worker's shard. Reading the whole table here (which is what the
@@ -164,12 +166,11 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     owned = key_table.read_owned_rows(paths.key_table, storage.num_workers, storage.worker_id)
     my_keys = owned.keys
     if not my_keys:
-        print(f"Worker {wid} owns 0/{total_rows} keys from checkpoint", flush=True)
+        logger.info(f"Worker {wid} owns 0/{total_rows} keys from checkpoint")
         return True
-    print(
+    logger.info(
         f"[checkpoint-load] worker {wid}: read {len(my_keys):,}/{total_rows:,} owned keys "
         f"in {time.perf_counter() - phase_start:.1f}s",
-        flush=True,
     )
 
     my_old_ids_array = owned.row_ids.astype(np.int32, copy=False)
@@ -178,10 +179,9 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     # 18.9M keys (~30 GB across 16) of data it discards immediately.
     phase_start = time.perf_counter()
     arrays, max_actions = load_checkpoint_rows(storage.checkpoint_dir, my_old_ids_array)
-    print(
+    logger.info(
         f"[checkpoint-load] worker {wid}: read {len(my_keys):,} array rows "
         f"in {time.perf_counter() - phase_start:.1f}s",
-        flush=True,
     )
 
     if max_actions != storage.max_actions:
@@ -211,15 +211,13 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
 
     for new_id, legal_actions in zip(new_ids, owned.action_lists):
         storage.state.legal_actions_cache[new_id] = legal_actions
-    print(
+    logger.info(
         f"[checkpoint-load] worker {wid}: populated {len(my_keys):,} infosets "
         f"in {time.perf_counter() - phase_start:.1f}s",
-        flush=True,
     )
 
-    print(
+    logger.info(
         f"Worker {wid} loaded {len(my_keys)}/{total_rows} infosets from checkpoint "
         f"in {time.perf_counter() - load_start:.1f}s total",
-        flush=True,
     )
     return True

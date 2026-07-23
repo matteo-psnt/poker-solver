@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import multiprocessing as mp
 import pickle
 import queue
 import random
 import signal
-import sys
 import time
 import traceback
 from collections import Counter
@@ -23,6 +23,7 @@ from src.pipeline.training.parallel_sync import (
     _send_pending_id_requests,
 )
 from src.shared.config import Config
+from src.shared.log import configure_logging
 
 # Re-arm the unresolved cross-worker ID frontier only every N exchanges, not
 # every one. The frontier (keys referenced but not yet allocated by their owner)
@@ -31,6 +32,8 @@ from src.shared.config import Config
 # Re-arming is only a safety retry: a request the owner received is remembered
 # (``unanswered_id_requests``) and answered proactively on allocation, and the
 # only response-loss path (a full response queue) was never observed to fire.
+
+logger = logging.getLogger(__name__)
 # New keys are unaffected -- their first request is sent every batch regardless.
 REARM_EVERY_N_EXCHANGES = 8
 
@@ -99,13 +102,13 @@ def _worker_loop(
         checkpoint_dir: Optional checkpoint directory
     """
     try:
+        # Spawned process: logging config does not inherit from the coordinator.
+        configure_logging()
         # Let the coordinator handle Ctrl+C; workers should exit via shutdown.
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-        print(
+        logger.info(
             f"[Worker {worker_id}] Initializing (attaching to shared memory)...",
-            file=sys.stderr,
-            flush=True,
         )
 
         # Deserialize abstractions
@@ -140,10 +143,8 @@ def _worker_loop(
             config=worker_config,
         )
 
-        print(
+        logger.info(
             f"[Worker {worker_id}] Ready (id_range=[{storage.id_range_start}, {storage.id_range_end}))",
-            file=sys.stderr,
-            flush=True,
         )
 
         # Worker loop
@@ -257,11 +258,9 @@ def _worker_loop(
                 new_session_id = job["new_session_id"]
                 new_capacity = job["new_capacity"]
 
-                print(
+                logger.info(
                     f"[Worker {worker_id}] Reattaching after resize "
                     f"(new_max={new_capacity:,}, session={new_session_id})",
-                    file=sys.stderr,
-                    flush=True,
                 )
 
                 # Preserve owned keys and next_local_id before reattach
@@ -349,10 +348,8 @@ def _worker_loop(
                     )
 
                 except Exception as e:
-                    print(
+                    logger.error(
                         f"[Worker {worker_id}] Error: {e}",
-                        file=sys.stderr,
-                        flush=True,
                     )
                     traceback.print_exc()
                     result_queue.put(
@@ -378,7 +375,7 @@ def _worker_loop(
         storage.cleanup()
 
     except Exception as e:
-        print(f"[Worker {worker_id}] Fatal error: {e}", file=sys.stderr, flush=True)
+        logger.error(f"[Worker {worker_id}] Fatal error: {e}")
         traceback.print_exc()
         try:
             result_queue.put({"worker_id": worker_id, "error": str(e)}, timeout=5)

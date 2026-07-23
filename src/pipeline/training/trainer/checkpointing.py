@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from src.pipeline.training.parallel_manager import SharedArrayWorkerManager
 from src.shared import checkpoint_profile
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.pipeline.training.trainer.session import TrainingSession
@@ -67,7 +70,7 @@ class CheckpointManager:
             return
         if self.pending is not None and not self.pending.done():
             if self.session.verbose:
-                print("[Master] Previous checkpoint still running; skipping", flush=True)
+                logger.warning("[Master] Previous checkpoint still running; skipping")
             return
         # Back-pressure: cap checkpointing at ~`max_checkpoint_overhead` of wall-clock. If
         # the last checkpoint cost T seconds, require (1-f)/f * T seconds of training since
@@ -78,7 +81,7 @@ class CheckpointManager:
             min_gap = self.last_seconds * (1.0 - frac) / frac
             if time.time() - self.last_end_time < min_gap:
                 if self.session.verbose:
-                    print("[Master] Deferring checkpoint (back-pressure)", flush=True)
+                    logger.info("[Master] Deferring checkpoint (back-pressure)")
                 return
 
         self._submit(
@@ -110,11 +113,11 @@ class CheckpointManager:
         if self.pending is None:
             return
         if self.session.verbose:
-            print("[Master] Waiting for background checkpoint to complete...", flush=True)
+            logger.info("[Master] Waiting for background checkpoint to complete...")
         try:
             self.pending.result()
         except Exception as exc:
-            print(f"[Master] ERROR: Background checkpoint failed: {exc}", flush=True)
+            logger.error(f"[Master] ERROR: Background checkpoint failed: {exc}")
             raise
         finally:
             self.pending = None
@@ -176,8 +179,7 @@ class CheckpointManager:
         self.last_seconds = checkpoint_time
         self.last_end_time = time.time()
         if self.session.verbose:
-            print(
+            logger.info(
                 f"[Master] Checkpoint saved at iter={iteration} in {checkpoint_time:.2f}s",
-                flush=True,
             )
         return checkpoint_time
