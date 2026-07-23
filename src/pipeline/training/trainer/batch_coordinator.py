@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from tqdm import tqdm
@@ -119,10 +121,24 @@ class TrainingBatchCoordinator:
         )
         if batch_idx < self.num_batches - 1 and not all_sync_idle:
             inter_batch_timeout = max(60.0, batch_result["batch_time"] * 2.0)
-            self.worker_manager.exchange_ids(
+            _sync_t0 = time.perf_counter()
+            _exchange = self.worker_manager.exchange_ids(
                 timeout=inter_batch_timeout,
                 verbose=self.verbose,
             )
+            if os.environ.get("SYNC_PROFILE"):
+                _acks = cast("list[dict[str, int]]", _exchange.get("acks", []))
+                _req = sum(a.get("requested_unresolved", 0) for a in _acks)
+                _pend = sum(a.get("pending_requests", 0) for a in _acks)
+                _rem = sum(a.get("remote_resolved", 0) for a in _acks)
+                print(
+                    f"[SYNC] iter={self.start_iteration + state.completed_iterations} "
+                    f"infosets={state.total_infosets} "
+                    f"exchange_s={time.perf_counter() - _sync_t0:.3f} "
+                    f"unresolved_frontier={_req} pending={_pend} remote_resolved={_rem} "
+                    f"dropped={batch_result.get('dropped_unknown_id_updates', 0)}",
+                    flush=True,
+                )
 
         self._record_batch_metrics(
             batch_utilities,

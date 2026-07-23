@@ -24,6 +24,16 @@ from src.pipeline.training.parallel_sync import (
 )
 from src.shared.config import Config
 
+# Re-arm the unresolved cross-worker ID frontier only every N exchanges, not
+# every one. The frontier (keys referenced but not yet allocated by their owner)
+# grows to multiples of the infoset count on large hash-sharded runs, and
+# re-sending all of it every batch made ID exchange 30-50% of batch wall-clock.
+# Re-arming is only a safety retry: a request the owner received is remembered
+# (``unanswered_id_requests``) and answered proactively on allocation, and the
+# only response-loss path (a full response queue) was never observed to fire.
+# New keys are unaffected -- their first request is sent every batch regardless.
+REARM_EVERY_N_EXCHANGES = 8
+
 
 def _compute_seed(base_seed: int, worker_id: int, batch_id: int = 0) -> int:
     """
@@ -138,6 +148,7 @@ def _worker_loop(
 
         # Worker loop
         batch_count = 0
+        exchange_count = 0
         while True:
             # Process all pending messages and flush outbound ID requests
             _process_all_messages(
@@ -170,7 +181,12 @@ def _worker_loop(
                 break
 
             elif job_type == JobType.EXCHANGE_IDS:
-                storage.rearm_unresolved_id_requests()
+                # Throttle the frontier re-send (see REARM_EVERY_N_EXCHANGES); the
+                # first-time send below is never throttled, so new keys still get
+                # requested every batch.
+                exchange_count += 1
+                if exchange_count % REARM_EVERY_N_EXCHANGES == 0:
+                    storage.rearm_unresolved_id_requests()
                 _send_pending_id_requests(worker_id, id_request_queues, storage)
 
                 # Process any incoming requests/responses
@@ -187,6 +203,13 @@ def _worker_loop(
                         "worker_id": worker_id,
                         "type": "exchange_ids_ack",
                         "num_owned": storage.num_owned_infosets(),
+                        # Diagnostic: size of the still-unresolved cross-worker
+                        # frontier this worker re-processes every exchange.
+                        "requested_unresolved": len(storage.state.requested_id_keys),
+                        "pending_requests": sum(
+                            len(v) for v in storage.state.pending_id_requests.values()
+                        ),
+                        "remote_resolved": len(storage.state.remote_keys),
                     }
                 )
 
