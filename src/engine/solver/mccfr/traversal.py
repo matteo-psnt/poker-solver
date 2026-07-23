@@ -222,6 +222,7 @@ def cfr_external_sampling(
             # carries no pi_i (see docs/AVERAGE_STRATEGY_WEIGHTING.md).
             infoset.increment_reach_count()
             infoset.add_cumulative_utility(node_utility)
+            self.applied_updates += 1
         else:
             self.dropped_unknown_id_updates += 1
 
@@ -231,6 +232,7 @@ def cfr_external_sampling(
     # frequency supplies the pi_i weighting (see _accumulate_average_strategy).
     if infoset.writable:
         _accumulate_average_strategy(self, infoset, valid_indices, strategy, reach_weight=1.0)
+        self.applied_updates += 1
     else:
         self.dropped_unknown_id_updates += 1
 

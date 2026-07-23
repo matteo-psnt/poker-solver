@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
@@ -28,6 +27,10 @@ class BatchLoopState:
     total_infosets: int = 0
     interrupted: bool = False
     last_capacity: int | None = None
+    # Infoset count after the previous batch, for the new_infosets growth delta.
+    # -1 sentinel => not yet set (first batch, incl. the first post-resume batch,
+    # reports a null delta rather than a spurious jump off the loaded count).
+    prev_infosets: int = -1
 
 
 class TrainingBatchCoordinator:
@@ -119,26 +122,30 @@ class TrainingBatchCoordinator:
         all_sync_idle = bool(worker_results) and all(
             r.get("sync_idle") is True for r in worker_results
         )
+        # Sync-health telemetry: meaningful only on batches where the exchange
+        # actually ran. Left None on skipped/idle batches so a stale value is never
+        # carried forward (which would read as sync cost that did not happen).
+        exchange_s: float | None = None
+        unresolved_frontier: int | None = None
         if batch_idx < self.num_batches - 1 and not all_sync_idle:
             inter_batch_timeout = max(60.0, batch_result["batch_time"] * 2.0)
-            _sync_t0 = time.perf_counter()
-            _exchange = self.worker_manager.exchange_ids(
+            sync_t0 = time.perf_counter()
+            exchange = self.worker_manager.exchange_ids(
                 timeout=inter_batch_timeout,
                 verbose=self.verbose,
             )
-            if os.environ.get("SYNC_PROFILE"):
-                _acks = cast("list[dict[str, int]]", _exchange.get("acks", []))
-                _req = sum(a.get("requested_unresolved", 0) for a in _acks)
-                _pend = sum(a.get("pending_requests", 0) for a in _acks)
-                _rem = sum(a.get("remote_resolved", 0) for a in _acks)
-                print(
-                    f"[SYNC] iter={self.start_iteration + state.completed_iterations} "
-                    f"infosets={state.total_infosets} "
-                    f"exchange_s={time.perf_counter() - _sync_t0:.3f} "
-                    f"unresolved_frontier={_req} pending={_pend} remote_resolved={_rem} "
-                    f"dropped={batch_result.get('dropped_unknown_id_updates', 0)}",
-                    flush=True,
-                )
+            exchange_s = round(time.perf_counter() - sync_t0, 3)
+            acks = cast("list[dict[str, int]]", exchange.get("acks", []))
+            unresolved_frontier = sum(a.get("requested_unresolved", 0) for a in acks)
+
+        applied_updates = sum(
+            cast("dict[str, int]", w).get("applied_updates", 0) for w in worker_results
+        )
+        # First batch (incl. first post-resume) has no prior count => null delta.
+        new_infosets = (
+            None if state.prev_infosets < 0 else max(0, state.total_infosets - state.prev_infosets)
+        )
+        state.prev_infosets = state.total_infosets
 
         self._record_batch_metrics(
             batch_utilities,
@@ -148,7 +155,12 @@ class TrainingBatchCoordinator:
         self._record_history(
             self.start_iteration + state.completed_iterations,
             state.total_infosets,
-            batch_result.get("dropped_unknown_id_updates", 0),
+            dropped_unknown_id_updates=int(batch_result.get("dropped_unknown_id_updates", 0)),
+            applied_updates=applied_updates,
+            exchange_s=exchange_s,
+            unresolved_frontier=unresolved_frontier,
+            new_infosets=new_infosets,
+            capacity_pct=round(100.0 * float(max_worker_capacity), 1),
         )
         reporting.update_progress_bar(
             self.session,
@@ -212,7 +224,16 @@ class TrainingBatchCoordinator:
             return None
 
     def _record_history(
-        self, iteration: int, total_infosets: int, dropped_unknown_id_updates: int = 0
+        self,
+        iteration: int,
+        total_infosets: int,
+        *,
+        dropped_unknown_id_updates: int = 0,
+        applied_updates: int = 0,
+        exchange_s: float | None = None,
+        unresolved_frontier: int | None = None,
+        new_infosets: int | None = None,
+        capacity_pct: float | None = None,
     ) -> None:
         """Append one convergence-curve row (utility, speed, and solver-health) to disk."""
         metrics = self.session.metrics
@@ -220,15 +241,29 @@ class TrainingBatchCoordinator:
         if quality is not None:
             metrics.record_quality(quality)
 
+        total_updates = dropped_unknown_id_updates + applied_updates
         row = {
             "iteration": iteration,
             "elapsed_s": round(metrics.get_elapsed_time(), 3),
             "iter_per_sec": round(metrics.get_iterations_per_second(), 2),
             "num_infosets": int(total_infosets),
-            # Cross-worker updates skipped for not-yet-propagated infoset IDs
-            # this batch; the observable for the "cold-owner keys drop updates
-            # permanently" question — see the concurrency audit.
+            # Tree-growth signal: new infosets allocated this batch. A tree that
+            # keeps allocating rather than plateauing is spending iterations on
+            # discovery, not refinement (see the 25M long-run postmortem).
+            "new_infosets": new_infosets,
+            "capacity_pct": capacity_pct,
+            # Cross-worker updates skipped for not-yet-propagated infoset IDs this
+            # batch, plus the applied count and the resulting per-visit drop RATE
+            # — the sample-efficiency signal for hash-sharded multi-worker runs.
             "dropped_unknown_id_updates": int(dropped_unknown_id_updates),
+            "applied_updates": int(applied_updates),
+            "drop_rate": (
+                round(dropped_unknown_id_updates / total_updates, 4) if total_updates else None
+            ),
+            # ID-exchange wall time and the still-unresolved cross-worker frontier
+            # size; None on batches where the exchange barrier was skipped.
+            "exchange_s": exchange_s,
+            "unresolved_frontier": unresolved_frontier,
             "avg_utility": metrics.get_avg_utility(),
             "utility_std": metrics.get_utility_std(),
         }

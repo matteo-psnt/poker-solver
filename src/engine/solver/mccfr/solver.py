@@ -50,6 +50,9 @@ class MCCFRSolver:
         # workers report per-batch deltas so the drop rate is observable
         # instead of an assumed "brief propagation delay".
         self.dropped_unknown_id_updates = 0
+        # Diagnostic counterpart: writable (applied) update sites, so the drop
+        # RATE (dropped / (dropped + applied)) is observable, not just the count.
+        self.applied_updates = 0
         self.rules = GameRules(self.config.game.small_blind, self.config.game.big_blind)
 
         if self.config.system.seed is not None:
