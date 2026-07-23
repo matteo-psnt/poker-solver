@@ -118,5 +118,51 @@ def checkpoint(manager: SharedArrayWorkerManager, iteration: int) -> None:
             flush=True,
         )
 
+    # Per-street convergence snapshot: the coordinator only holds the full key→id
+    # map here (post-collect), so per-street quality is recorded at checkpoint
+    # cadence rather than per batch. Sampled + defensive — must never fail a write.
+    _record_street_metrics(manager, iteration)
+
     with checkpoint_profile.phase("storage_write"):
         manager.storage.checkpoint(iteration)
+
+
+def _record_street_metrics(manager: SharedArrayWorkerManager, iteration: int) -> None:
+    """Append one per-street quality row to ``run_dir/street_metrics.jsonl``."""
+    import json
+    import random
+
+    from src.pipeline.training.metrics import compute_per_street_quality
+
+    sample_size = 20_000
+    try:
+        storage = manager.storage
+        run_dir = storage.checkpoint_dir
+        if run_dir is None:
+            return
+        owned = storage.state.owned_keys
+        if not owned:
+            return
+        # Reservoir sample so streets are represented in proportion (dict order is
+        # allocation order — early streets first — so a prefix would be biased).
+        # O(N) iteration, O(sample_size) memory; cheap beside the O(N) checkpoint
+        # write it rides alongside, and never materializes the whole key map.
+        rng = random.Random(iteration)
+        sample: list[tuple[object, int]] = []
+        for i, item in enumerate(owned.items()):
+            if i < sample_size:
+                sample.append(item)
+            else:
+                j = rng.randint(0, i)
+                if j < sample_size:
+                    sample[j] = item
+        per_street = compute_per_street_quality(
+            sample,
+            storage.shared_regrets,
+            storage.shared_action_counts,
+        )
+        row = {"iteration": iteration, "num_infosets": len(owned), "per_street": per_street}
+        with open(run_dir / "street_metrics.jsonl", "a") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except Exception as exc:  # pragma: no cover - telemetry must never fail a checkpoint
+        print(f"[street-metrics] skipped at iter={iteration}: {exc}", flush=True)
