@@ -24,6 +24,7 @@ from typing import Any
 from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
+from src.pipeline.evaluation.public_tree_br import PublicBRConfig
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.services import RolloutParams
 from src.shared import checkpoint_profile
@@ -91,6 +92,12 @@ def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
             num_rollouts=args.rollouts,
             use_average_strategy=not args.current,
             seed=args.seed,
+        ),
+        exact_br=PublicBRConfig(
+            num_flops=args.br_flops,
+            num_turns=args.br_turns,
+            num_rivers=args.br_rivers,
+            board_seed=args.br_board_seed,
         ),
         resolver_iterations=args.resolver_iterations,
         abstraction_hash=args.abstraction_hash,
@@ -323,9 +330,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_eval.add_argument(
         "--method",
-        choices=["lbr", "rollout"],
+        choices=["lbr", "rollout", "exact_br"],
         default="lbr",
-        help="lbr = Local Best Response (trustworthy, default); rollout = legacy diagnostic.",
+        help="lbr = Local Best Response (trustworthy, default); rollout = legacy diagnostic; "
+        "exact_br = deterministic exact BR on a sampled public tree (zero eval variance; "
+        "compare within a matched board tier).",
     )
     # LBR options (--method lbr).
     p_eval.add_argument("--hands", type=int, default=1000, help="[lbr] Number of hands.")
@@ -380,6 +389,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3,
         help="[lbr] Lookahead-rescore only the top-k myopic candidates (<=0: all).",
+    )
+    # Exact-BR options (--method exact_br). The board plan defines the comparison
+    # tier: evals pair iff flops/turns/rivers and the board seed all match.
+    p_eval.add_argument(
+        "--br-flops", type=int, default=8, help="[exact_br] Sampled canonical flops (>=1755: all)."
+    )
+    p_eval.add_argument(
+        "--br-turns", type=int, default=2, help="[exact_br] Turn cards per board node."
+    )
+    p_eval.add_argument(
+        "--br-rivers", type=int, default=2, help="[exact_br] River cards per board node."
+    )
+    p_eval.add_argument(
+        "--br-board-seed", type=int, default=7, help="[exact_br] Seed pinning the board sample."
     )
     # Rollout options (--method rollout).
     p_eval.add_argument("--samples", type=int, default=500, help="[rollout] Number of samples.")

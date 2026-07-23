@@ -174,6 +174,10 @@ def evaluate(
     scorer: str = "myopic",
     lookahead_depth: int = 2,
     lookahead_top_k: int = 3,
+    br_flops: int = 8,
+    br_turns: int = 2,
+    br_rivers: int = 2,
+    br_board_seed: int = 7,
 ) -> dict[str, Any]:
     """Evaluate a run stored on the Volume (Local Best Response by default).
 
@@ -187,6 +191,7 @@ def evaluate(
     _configure_logging()
     from src.pipeline import services
     from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
+    from src.pipeline.evaluation.public_tree_br import PublicBRConfig
 
     # Pick up runs committed by earlier train() calls in other containers.
     data_volume.reload()
@@ -211,6 +216,12 @@ def evaluate(
             num_rollouts=num_rollouts,
             use_average_strategy=use_average_strategy,
             seed=seed,
+        ),
+        exact_br=PublicBRConfig(
+            num_flops=br_flops,
+            num_turns=br_turns,
+            num_rivers=br_rivers,
+            board_seed=br_board_seed,
         ),
         resolver_iterations=resolver_iterations,
         abstraction_hash=abstraction_hash,
@@ -791,6 +802,7 @@ def _await_call(call: Any, run_id: str, function: str) -> dict[str, Any]:
 @app.local_entrypoint()
 def run_eval(
     run_id: str,
+    method: str = "lbr",
     hands: int = 1000,
     cpu: int = 6,
     memory: int = 32768,
@@ -802,23 +814,32 @@ def run_eval(
     scorer: str = "myopic",
     lookahead_depth: int = 2,
     lookahead_top_k: int = 3,
+    br_flops: int = 8,
+    br_turns: int = 2,
+    br_rivers: int = 2,
+    br_board_seed: int = 7,
     timeout: int = 10800,
 ) -> None:
-    """LBR-evaluate an existing Volume run. Fewer workers + more memory for large
-    blueprints, since each parallel worker rebuilds the full blueprint.
+    """Evaluate an existing Volume run (LBR by default; ``--method exact-br`` for the
+    deterministic public-tree exact BR). Fewer workers + more memory for large
+    blueprints, since each parallel LBR worker rebuilds the full blueprint.
 
     Pass --abstraction-hash to pin the card abstraction to the one the run was trained
     against (see the abstraction's metadata.json ``config_hash``). Pass
     --opponent deployed to measure blueprint+resolver (the system that actually plays).
     Pass --include-off-tree to arm the exploiter with off-tree bet/raise sizes and
     --scorer lookahead for the depth-limited best-response scorer (both produce a
-    stronger, still-rigorous exploiter; never mix settings within one comparison)."""
+    stronger, still-rigorous exploiter; never mix settings within one comparison).
+    For exact BR the board plan (--br-flops/--br-turns/--br-rivers/--br-board-seed)
+    is the comparison tier; matched tiers compare exactly, no p-value involved."""
     _configure_logging()
     from src.pipeline.evaluation.paired_report import print_variance_decomposition
     from src.shared.orchestration_log import record_spawn
 
+    method = method.replace("-", "_")
     eval_call = evaluate.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
         run_id=run_id,
+        method=method,
         num_hands=hands,
         num_workers=cpu,
         seed=seed,
@@ -829,16 +850,33 @@ def run_eval(
         scorer=scorer,
         lookahead_depth=lookahead_depth,
         lookahead_top_k=lookahead_top_k,
+        br_flops=br_flops,
+        br_turns=br_turns,
+        br_rivers=br_rivers,
+        br_board_seed=br_board_seed,
     )
     record_spawn(
         run_id=run_id,
         function="evaluate",
         object_id=eval_call.object_id,
         resources={"cpu": cpu, "memory": memory, "timeout": timeout},
-        extra={"opponent": opponent, "scorer": scorer},
+        extra={"method": method, "opponent": opponent, "scorer": scorer},
     )
     eval_result = _await_call(eval_call, run_id, "evaluate")
     results = eval_result["results"]
+    if method == "exact_br":
+        print("\nEXPLOITABILITY (public-tree exact BR — deterministic, restricted game):")
+        print(f"  {results['exploitability_mbb']:.1f} mbb/g (exact; zero eval variance)")
+        print(
+            f"  board tier: flops={results['num_flops']} turns={results['num_turns']} "
+            f"rivers={results['num_rivers']} seed={results['board_seed']}"
+        )
+        print(
+            f"  uniform-fallback mass: {100.0 * results['missing_policy_mass']:.2f}% | "
+            f"nodes: {results['nodes_visited']:,} | {results['elapsed_s']:.0f}s"
+        )
+        print(f"  infosets: {eval_result['infosets']:,}")
+        return
     print("\nEXPLOITABILITY (LBR — rigorous lower bound):")
     print(
         f"  {results['exploitability_mbb']:.1f} mbb/g "

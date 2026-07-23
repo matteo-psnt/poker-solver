@@ -396,8 +396,8 @@ def _leaf_values(
     # against any sampled runout.
     if spec.is_fold:
         return (
-            spec.hero_payoff * _nonblocking_mass(reach_opp),
-            spec.opp_payoff * _nonblocking_mass(reach_hero),
+            spec.hero_payoff * nonblocking_mass(reach_opp),
+            spec.opp_payoff * nonblocking_mass(reach_hero),
         )
 
     hero, opp = ctx.hero, 1 - ctx.hero
@@ -417,7 +417,7 @@ def _leaf_values(
     return v_hero, v_opp
 
 
-def _nonblocking_mass(reach: np.ndarray) -> np.ndarray:
+def nonblocking_mass(reach: np.ndarray) -> np.ndarray:
     """Per-combo total reach mass of combos not sharing a card (inclusion-exclusion)."""
     per_card = np.bincount(_CARD_A, weights=reach, minlength=52) + np.bincount(
         _CARD_B, weights=reach, minlength=52

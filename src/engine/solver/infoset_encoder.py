@@ -28,7 +28,7 @@ def _same_suit(card1: Card, card2: Card) -> bool:
     return repr(card1)[-1] == repr(card2)[-1]
 
 
-def _preflop_hand_string(hole_cards: tuple[Card, Card]) -> str:
+def preflop_hand_string(hole_cards: tuple[Card, Card]) -> str:
     c1, c2 = hole_cards
     r1 = _rank_char(c1)
     r2 = _rank_char(c2)
@@ -44,7 +44,7 @@ def _preflop_hand_string(hole_cards: tuple[Card, Card]) -> str:
     return f"{high}{low}{suffix}"
 
 
-def _get_spr_bucket(spr: float) -> int:
+def get_spr_bucket(spr: float) -> int:
     """Get SPR bucket (0=shallow, 1=medium, 2=deep)."""
     if spr < SPR_SHALLOW_THRESHOLD:
         return 0
@@ -65,11 +65,11 @@ def encode_infoset_key(
     """
     effective_stack = min(state.stacks)
     spr = effective_stack / state.pot if state.pot > 0 else 0
-    spr_bucket = _get_spr_bucket(spr)
+    spr_bucket = get_spr_bucket(spr)
     betting_sequence = state.normalized_betting_sequence()
 
     if state.street == Street.PREFLOP:
-        preflop_hand = _preflop_hand_string(state.hole_cards[player])
+        preflop_hand = preflop_hand_string(state.hole_cards[player])
         return InfoSetKey(
             player_position=player,
             street=state.street,
