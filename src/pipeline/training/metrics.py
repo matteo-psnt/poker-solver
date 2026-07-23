@@ -411,6 +411,40 @@ def compute_quality_from_arrays(
     }
 
 
+def regret_matched_policies(
+    regrets: np.ndarray, action_counts: np.ndarray, ids: np.ndarray
+) -> dict[int, np.ndarray]:
+    """Current-iteration regret-matched strategy for each allocated ``id``.
+
+    The *current* policy (regret-matching on live ``regrets``), NOT the averaged
+    ``strategy_sum`` — the average damps late changes by construction, so its
+    per-batch delta shrinks even while the policy is still moving, which would
+    defeat a plateau signal. Uniform when all regrets are non-positive.
+    """
+    out: dict[int, np.ndarray] = {}
+    for row_id in ids:
+        k = int(action_counts[row_id])
+        if k <= 0:
+            continue
+        pos = np.maximum(np.asarray(regrets[row_id, :k], dtype=np.float64), 0.0)
+        total = float(pos.sum())
+        out[int(row_id)] = pos / total if total > 0 else np.full(k, 1.0 / k)
+    return out
+
+
+def mean_policy_l1_delta(prev: dict[int, np.ndarray], curr: dict[int, np.ndarray]) -> float | None:
+    """Mean L1 change of the per-infoset policy over ids in both snapshots.
+
+    In [0, 2] per infoset; ~0 means the policy has stopped moving (converged),
+    larger means it is still shifting. None if the snapshots share no ids.
+    """
+    common = [i for i in curr if i in prev and prev[i].shape == curr[i].shape]
+    if not common:
+        return None
+    total = sum(float(np.abs(curr[i] - prev[i]).sum()) for i in common)
+    return round(total / len(common), 5)
+
+
 def _format_time(seconds: float) -> str:
     """
     Format seconds into human-readable string.
