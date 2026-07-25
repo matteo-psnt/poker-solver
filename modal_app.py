@@ -278,18 +278,25 @@ def blueprint_match(
     num_deals: int = 2000,
     seed: int = 1,
 ) -> dict[str, Any]:
-    """Duplicate-deal head-to-head between two runs' blueprints (A's edge in mbb/hand)."""
+    """Duplicate-deal head-to-head between two runs' blueprints (A's edge in mbb/hand).
+
+    Persists a self-describing payload (both runs' provenance + card-abstraction hashes)
+    under run A's dir and commits it, so a client guillotine after the match never loses
+    the result — the payload, not the returned dict, is the durable record.
+    """
     _configure_logging()
     from src.pipeline import services
 
     data_volume.reload()
-    out = services.evaluate_blueprint_match(
+    payload = services.record_blueprint_match(
         Path("data/runs") / run_a,
         Path("data/runs") / run_b,
         num_deals=num_deals,
         seed=seed,
     )
-    return {"run_a": run_a, "run_b": run_b, "results": out.results}
+    if "result_path" in payload:
+        data_volume.commit()
+    return payload
 
 
 # Sized from the largest checkpoint on the Volume: migrating loads every array at its
@@ -572,6 +579,74 @@ def run_match(
 
 
 @app.local_entrypoint()
+def run_match_calibrate(
+    run_ids: str,
+    deals: int = 2000,
+    seed: int = 1,
+    cpu: int = 4,
+    memory: int = 49152,
+    timeout: int = 10800,
+) -> None:
+    """Calibrate the head-to-head TRAINING-IDENTITY FLOOR over matched replicates.
+
+    Plays every pair of the comma-separated ``run_ids`` head-to-head. When the runs are
+    matched replicates (same spec, differing only by Hogwild scheduling), their true edge
+    is 0 by symmetry, so the SPREAD of the pairwise edges is how many chips run-to-run
+    training identity alone moves a head-to-head — the analog of the exact-BR noise floor.
+
+    NB this floor is NOT a universal gate threshold: matched replicates barely disagree so
+    duplicate-deal CRN cancels almost everything and CIs are tight; a REAL cross-abstraction
+    match has blueprints that diverge far more, so read THAT match's own (wider) CI as its
+    resolution. Each match persists its payload to the Volume, so a client kill loses
+    nothing — reconstruct from ``<run_a>/evals`` blueprint_match payloads. Run detached::
+
+        uv run modal run --detach modal_app.py::run_match_calibrate --run-ids a,b,c
+    """
+    from src.shared.orchestration_log import record_spawn
+
+    ids = [r.strip() for r in run_ids.split(",") if r.strip()]
+    pairs = [(ids[i], ids[j]) for i in range(len(ids)) for j in range(i + 1, len(ids))]
+    print(f"=== head-to-head calibration: {len(pairs)} pair(s) x {deals} duplicate deals ===")
+    calls = []
+    for run_a, run_b in pairs:
+        call = blueprint_match.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
+            run_a=run_a, run_b=run_b, num_deals=deals, seed=seed
+        )
+        record_spawn(
+            run_id=run_a,
+            function="blueprint_match",
+            object_id=call.object_id,
+            resources={"cpu": cpu, "memory": memory, "timeout": timeout},
+            extra={"run_b": run_b, "num_deals": deals, "match_calibrate": True},
+        )
+        print(f"  {run_a[-6:]} vs {run_b[-6:]}: spawned {call.object_id}")
+        calls.append((run_a, run_b, call))
+
+    edges = []
+    print("\n=== PAIRWISE EDGES (A minus B, mbb/hand) ===")
+    for run_a, run_b, call in calls:
+        r = _await_call(call, run_a, "blueprint_match")["results"]
+        edges.append(r["a_mbb_per_hand"])
+        print(
+            f"  {run_a[-6:]} vs {run_b[-6:]}: {r['a_mbb_per_hand']:+7.1f} "
+            f"(se {r['se_mbb']:.1f}, 95% CI [{r['confidence_95_mbb'][0]:.1f}, "
+            f"{r['confidence_95_mbb'][1]:.1f}], p={r['p_value']:.3f})"
+        )
+
+    if edges:
+        lo, hi = min(edges), max(edges)
+        print("\n=== TRAINING-IDENTITY FLOOR (spread of matched-replicate edges) ===")
+        print(
+            f"  edges span {hi - lo:.1f} mbb/hand | range [{lo:+.1f}, {hi:+.1f}] "
+            f"| max |edge| {max(abs(e) for e in edges):.1f}"
+        )
+        print(
+            "  (matched replicates → true edge 0; this is Hogwild-identity chip noise, "
+            "NOT a universal gate threshold — read each real match's own CI.)"
+        )
+
+
+@app.local_entrypoint()
 def main(
     config: str = "quick_test",
     workers: int | None = None,
@@ -679,6 +754,279 @@ def run_train(
         f"(± {results['std_error_mbb']:.1f}; 95% CI {results['confidence_95_mbb']})"
     )
     print(f"  infosets: {eval_result['infosets']:,}")
+
+
+def _noise_floor_report(
+    run_ids: list[str],
+    *,
+    board_seeds: str,
+    eval_cpu: int,
+    eval_memory: int,
+    timeout: int,
+    abstraction_hash: str,
+    br_flops: int,
+    br_turns: int,
+    br_rivers: int,
+) -> None:
+    """Exact-BR every run across every board seed, then print the two floors.
+
+    Deterministic per (checkpoint, board_seed), so every digit is signal:
+      * TRAINING NOISE FLOOR — spread of exact BR ACROSS runs at a fixed board seed.
+        A future single-run exact-BR delta smaller than this is noise, not signal.
+      * GATE BOARD-RESOLUTION — spread of the PAIRED difference
+        ``BR_s(rep_i) - BR_s(rep_j)`` ACROSS board seeds ``s``. Because A and B share the
+        board seed in a real gate, board luck cancels in the difference (same CRN logic as
+        statistics.py); this is the correct, much tighter, resolution of the tier.
+    """
+    from src.shared.orchestration_log import record_spawn
+
+    seeds = [int(s) for s in board_seeds.split(",") if s.strip()]
+    print(
+        f"\n=== exact BR — {len(run_ids)} runs x {len(seeds)} board seeds "
+        f"@ {br_flops}/{br_turns}/{br_rivers} ==="
+    )
+    eval_calls: dict[tuple[str, int], Any] = {}
+    for run_id in run_ids:
+        for bs in seeds:
+            call = evaluate.with_options(cpu=eval_cpu, memory=eval_memory, timeout=timeout).spawn(
+                run_id=run_id,
+                method="exact_br",
+                num_workers=eval_cpu,
+                abstraction_hash=abstraction_hash or None,
+                br_flops=br_flops,
+                br_turns=br_turns,
+                br_rivers=br_rivers,
+                br_board_seed=bs,
+            )
+            record_spawn(
+                run_id=run_id,
+                function="evaluate",
+                object_id=call.object_id,
+                resources={"cpu": eval_cpu, "memory": eval_memory, "timeout": timeout},
+                extra={"method": "exact_br", "board_seed": bs},
+            )
+            eval_calls[(run_id, bs)] = call
+
+    scores: dict[tuple[str, int], float] = {}
+    for (run_id, bs), call in eval_calls.items():
+        result = _await_call(call, run_id, "evaluate")
+        scores[(run_id, bs)] = result["results"]["exploitability_mbb"]
+
+    print("\n=== RESULT MATRIX (exact BR mbb/g) ===")
+    print("run".ljust(40) + "".join(f"seed{bs}".rjust(12) for bs in seeds))
+    for run_id in run_ids:
+        print(run_id.ljust(40) + "".join(f"{scores[(run_id, bs)]:12.1f}" for bs in seeds))
+
+    print("\n=== TRAINING NOISE FLOOR (spread across runs, per board seed) ===")
+    for bs in seeds:
+        vals = [scores[(run_id, bs)] for run_id in run_ids]
+        lo, hi = min(vals), max(vals)
+        print(
+            f"  seed {bs}: mean {sum(vals) / len(vals):8.1f} | range {hi - lo:7.1f} "
+            f"| [{lo:.1f}, {hi:.1f}]"
+        )
+
+    print("\n=== GATE BOARD-RESOLUTION (paired diff across board seeds, per run pair) ===")
+    for a in range(len(run_ids)):
+        for b in range(a + 1, len(run_ids)):
+            diffs = [scores[(run_ids[a], bs)] - scores[(run_ids[b], bs)] for bs in seeds]
+            print(
+                f"  {run_ids[a][-6:]} - {run_ids[b][-6:]}: "
+                f"diffs {[f'{d:.1f}' for d in diffs]} | swing {max(diffs) - min(diffs):.1f}"
+            )
+
+
+@app.local_entrypoint()
+def run_noise_floor(
+    config: str = "production",
+    replicates: int = 3,
+    iterations: int = 10_000_000,
+    seed: int = 42,
+    cpu: int = 16,
+    memory: int = 32768,
+    timeout: int = 5400,
+    board_seeds: str = "7,8,9",
+    abstraction_hash: str = "",
+    eval_cpu: int = 4,
+    eval_memory: int = 32768,
+    br_flops: int = 8,
+    br_turns: int = 2,
+    br_rivers: int = 2,
+) -> None:
+    """Measure the training noise floor (and the gate's board-resolution) of the
+    zero-eval-variance public-tree exact BR.
+
+    Trains ``replicates`` blueprints from an IDENTICAL spec (same config, same
+    ``seed``): the only run-to-run variation is multi-worker Hogwild scheduling
+    non-determinism — the real source of the historical spread (LBR 1213/1758/2094 were
+    all seed 42). Then scores every replicate with exact BR at each board seed via
+    ``_noise_floor_report``.
+
+    Uses ``.spawn()`` + orchestration-log breadcrumbs throughout, so the spawned
+    containers and their ledger rows survive a client guillotine; recover run_ids from the
+    Volume and finish with ``run_noise_floor_eval`` if the client dies mid-experiment. NB:
+    size ``timeout`` off the SLOW-box tail (10M ÷ ~500 it/s ≈ 5.5h), never a lucky box.
+    Run detached::
+
+        uv run modal run --detach modal_app.py::run_noise_floor
+    """
+    from src.shared.orchestration_log import record_spawn
+
+    print(
+        f"=== Phase 1: spawning {replicates} matched trains "
+        f"(config={config}, seed={seed}, iters={iterations:,}, cpu={cpu}) ==="
+    )
+    train_calls = []
+    for i in range(replicates):
+        call = train.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
+            config_name=config,
+            num_workers=cpu,
+            num_iterations=iterations,
+            seed=seed,
+        )
+        record_spawn(
+            run_id="",
+            function="train",
+            object_id=call.object_id,
+            resources={"cpu": cpu, "memory": memory, "timeout": timeout},
+            extra={"config": config, "seed": seed, "noise_floor_replicate": i},
+        )
+        print(f"  replicate {i}: spawned {call.object_id}")
+        train_calls.append(call)
+
+    run_ids: list[str] = []
+    for i, call in enumerate(train_calls):
+        result = _await_call(call, "", "train")
+        run_ids.append(result["run_id"])
+        print(
+            f"  replicate {i} DONE: {result['run_id']} "
+            f"({result.get('num_infosets', '?'):,} infosets, "
+            f"{result.get('runtime_seconds', 0):.0f}s)"
+        )
+
+    _noise_floor_report(
+        run_ids,
+        board_seeds=board_seeds,
+        eval_cpu=eval_cpu,
+        eval_memory=eval_memory,
+        timeout=timeout,
+        abstraction_hash=abstraction_hash,
+        br_flops=br_flops,
+        br_turns=br_turns,
+        br_rivers=br_rivers,
+    )
+
+
+@app.local_entrypoint()
+def run_noise_floor_resume(
+    run_ids: str,
+    to_iteration: int = 8_000_000,
+    cpu: int = 16,
+    memory: int = 32768,
+    capacity: int = 33_000_000,
+    timeout: int = 18000,
+    board_seeds: str = "7,8,9",
+    abstraction_hash: str = "",
+    eval_cpu: int = 4,
+    eval_memory: int = 32768,
+    br_flops: int = 8,
+    br_turns: int = 2,
+    br_rivers: int = 2,
+) -> None:
+    """Resume existing replicates to a COMMON ``to_iteration`` then run the noise-floor
+    report — the recovery path when a fresh ``run_noise_floor`` timed out at uneven
+    progress (Modal box-variance leaves replicates at different iters, and only the
+    latest checkpoint per run is retained, so aligning UP to the fastest run's iter count
+    is the only way to a matched set).
+
+    ``run_ids`` is a comma-separated list. ``to_iteration`` is ABSOLUTE (resume is
+    convergent/idempotent — a run already past it is a no-op), so pick it at or above the
+    furthest-along replicate. ``capacity`` pre-allocates above the expected final infoset
+    count to avoid a late mid-run resize. ``timeout`` must cover the LAGGARD's remaining
+    iters on a slow box. Run detached::
+
+        uv run modal run --detach modal_app.py::run_noise_floor_resume \\
+            --run-ids run-a,run-b,run-c --to-iteration 8000000
+    """
+    from src.shared.orchestration_log import record_spawn
+
+    ids = [r.strip() for r in run_ids.split(",") if r.strip()]
+    print(
+        f"=== Phase 1: resuming {len(ids)} replicates to {to_iteration:,} "
+        f"(cpu={cpu}, capacity={capacity:,}) ==="
+    )
+    resume_calls = []
+    for run_id in ids:
+        call = resume.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
+            run_id=run_id,
+            to_iteration=to_iteration,
+            num_workers=cpu,
+            capacity=capacity,
+        )
+        record_spawn(
+            run_id=run_id,
+            function="resume",
+            object_id=call.object_id,
+            resources={"cpu": cpu, "memory": memory, "timeout": timeout},
+            extra={"to_iteration": to_iteration, "noise_floor_resume": True},
+        )
+        print(f"  {run_id}: spawned {call.object_id}")
+        resume_calls.append((run_id, call))
+
+    for run_id, call in resume_calls:
+        result = _await_call(call, run_id, "resume")
+        print(
+            f"  {run_id} DONE: final_iterations={result.get('final_iterations'):,} "
+            f"({result.get('num_infosets', '?'):,} infosets"
+            f"{', no-op' if result.get('no_op') else ''})"
+        )
+
+    _noise_floor_report(
+        ids,
+        board_seeds=board_seeds,
+        eval_cpu=eval_cpu,
+        eval_memory=eval_memory,
+        timeout=timeout,
+        abstraction_hash=abstraction_hash,
+        br_flops=br_flops,
+        br_turns=br_turns,
+        br_rivers=br_rivers,
+    )
+
+
+@app.local_entrypoint()
+def run_noise_floor_eval(
+    run_ids: str,
+    board_seeds: str = "7,8,9",
+    abstraction_hash: str = "",
+    eval_cpu: int = 4,
+    eval_memory: int = 32768,
+    timeout: int = 10800,
+    br_flops: int = 8,
+    br_turns: int = 2,
+    br_rivers: int = 2,
+) -> None:
+    """Run ONLY the exact-BR noise-floor report over already-trained replicates.
+
+    The recovery tail for when the train/resume client died after checkpoints
+    committed but before the eval phase ran (a client guillotine kills the client-side
+    ``_noise_floor_report``, not the spawned trains). ``run_ids`` is comma-separated;
+    each must already hold a committed checkpoint at the matched iteration. Run detached::
+
+        uv run modal run --detach modal_app.py::run_noise_floor_eval --run-ids a,b,c
+    """
+    ids = [r.strip() for r in run_ids.split(",") if r.strip()]
+    _noise_floor_report(
+        ids,
+        board_seeds=board_seeds,
+        eval_cpu=eval_cpu,
+        eval_memory=eval_memory,
+        timeout=timeout,
+        abstraction_hash=abstraction_hash,
+        br_flops=br_flops,
+        br_turns=br_turns,
+        br_rivers=br_rivers,
+    )
 
 
 @app.local_entrypoint()
