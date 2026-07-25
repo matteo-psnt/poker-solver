@@ -132,6 +132,7 @@ def build_storage(
         load_checkpoint_on_init=False,
         zarr_compression_level=config.storage.zarr_compression_level,
         zarr_chunk_size=config.storage.zarr_chunk_size,
+        checkpoint_retain_every=config.storage.checkpoint_retain_every,
     )
 
 

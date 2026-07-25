@@ -48,6 +48,15 @@ def edit_storage_settings(ctx: CliContext, config: Config) -> Config:
     if zarr_chunk is None:
         return config
 
+    retain_every = prompts.prompt_int(
+        ctx,
+        "Retain a checkpoint every N iterations (0 = keep only the last):",
+        default=config.storage.checkpoint_retain_every,
+        min_value=0,
+    )
+    if retain_every is None:
+        return config
+
     return try_merge(
         config,
         {
@@ -56,6 +65,7 @@ def edit_storage_settings(ctx: CliContext, config: Config) -> Config:
                 "max_actions": max_actions,
                 "zarr_compression_level": zarr_compression,
                 "zarr_chunk_size": zarr_chunk,
+                "checkpoint_retain_every": retain_every,
             }
         },
     )

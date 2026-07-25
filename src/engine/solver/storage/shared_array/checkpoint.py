@@ -114,7 +114,12 @@ def checkpoint_storage(storage: SharedArrayStorage, iteration: int) -> None:
 
     # All artifacts written and validated — make this snapshot current.
     with checkpoint_profile.phase("commit_manifest"):
-        commit_checkpoint_manifest(storage.checkpoint_dir, iteration, paths)
+        commit_checkpoint_manifest(
+            storage.checkpoint_dir,
+            iteration,
+            paths,
+            retain_every=storage.checkpoint_retain_every,
+        )
 
     # File count, not byte size, is what a Modal Volume commit scales with.
     with checkpoint_profile.phase("measure_artifacts"):

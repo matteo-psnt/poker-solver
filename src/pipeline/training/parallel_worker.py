@@ -128,6 +128,7 @@ def _worker_loop(
             ready_event=ready_event,
             zarr_compression_level=config.storage.zarr_compression_level,
             zarr_chunk_size=config.storage.zarr_chunk_size,
+            checkpoint_retain_every=config.storage.checkpoint_retain_every,
         )
 
         # Create solver config with worker-specific seed

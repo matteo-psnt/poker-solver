@@ -70,6 +70,23 @@ class CheckpointPaths:
             key_table=checkpoint_dir / f"keys-{iteration}",
         )
 
+    @classmethod
+    def for_retained(cls, checkpoint_dir: Path, iteration: int) -> CheckpointPaths:
+        """Paths of a retained ladder snapshot, by iteration.
+
+        Resolved through the manifest rather than by name convention: a
+        ``checkpoint-N.zarr`` sitting on disk is not evidence that N was ever
+        committed, and reading a half-written snapshot would report a wrong
+        strategy rather than fail.
+        """
+        available = retained_checkpoint_iterations(checkpoint_dir)
+        if iteration not in available:
+            raise ValueError(
+                f"No retained checkpoint at iteration {iteration} in {checkpoint_dir}; "
+                f"available: {available or 'none (run predates checkpoint retention)'}"
+            )
+        return cls.for_iteration(checkpoint_dir, iteration)
+
 
 def read_checkpoint_manifest(checkpoint_dir: Path) -> dict | None:
     """Read the checkpoint manifest, or None if this run predates manifests."""
@@ -113,13 +130,31 @@ def resolve_resume_iteration(checkpoint_dir: Path, metadata_iterations: int) -> 
 
 
 def commit_checkpoint_manifest(
-    checkpoint_dir: Path, iteration: int, paths: CheckpointPaths
+    checkpoint_dir: Path, iteration: int, paths: CheckpointPaths, *, retain_every: int
 ) -> None:
-    """Atomically make a fully-written snapshot current, then prune superseded artifacts."""
+    """Atomically make a fully-written snapshot current, then prune superseded artifacts.
+
+    Retention: with ``retain_every > 0`` the manifest also carries a ladder of
+    older snapshots spared from pruning -- at most one per
+    ``iteration // retain_every`` band, the first snapshot committed into that
+    band. Without it a run ends holding exactly one checkpoint, which makes any
+    within-run measurement (exploitability against training iterations) impossible
+    to compute after the fact.
+
+    Only committed snapshots enter the ladder, so a snapshot left half-written by
+    a crash -- never manifested, and indistinguishable on disk from a good one by
+    filename alone -- can never be retained as a measurement point.
+
+    The ladder is append-only and survives a leg that passes ``retain_every=0``:
+    a resume whose caller forgot to forward the knob must not silently delete
+    points an earlier leg was told to keep.
+    """
+    previous = read_checkpoint_manifest(checkpoint_dir)
     manifest = {
         "iteration": iteration,
         "zarr": paths.checkpoint_zarr.name,
         "key_table": paths.key_table.name,
+        "retained": _extend_retained_ladder(previous, iteration, paths, retain_every),
     }
     tmp = checkpoint_dir / (CHECKPOINT_MANIFEST_FILE + ".tmp")
     tmp.write_text(json.dumps(manifest))
@@ -127,9 +162,40 @@ def commit_checkpoint_manifest(
     _prune_superseded_snapshots(checkpoint_dir, keep=manifest)
 
 
+def _extend_retained_ladder(
+    previous: dict | None, iteration: int, paths: CheckpointPaths, retain_every: int
+) -> list[dict]:
+    """The retained ladder after committing ``iteration``, one entry per band."""
+    ladder: list[dict] = list(previous.get("retained", [])) if previous else []
+    if retain_every <= 0:
+        return ladder
+    occupied = {int(entry["iteration"]) // retain_every for entry in ladder}
+    if iteration // retain_every not in occupied:
+        ladder.append(
+            {
+                "iteration": iteration,
+                "zarr": paths.checkpoint_zarr.name,
+                "key_table": paths.key_table.name,
+            }
+        )
+    return ladder
+
+
+def retained_checkpoint_iterations(checkpoint_dir: Path) -> list[int]:
+    """Iterations of every snapshot still on disk, oldest first (the ladder + current)."""
+    manifest = read_checkpoint_manifest(checkpoint_dir)
+    if manifest is None:
+        return []
+    iterations = {int(entry["iteration"]) for entry in manifest.get("retained", ())}
+    iterations.add(int(manifest["iteration"]))
+    return sorted(iterations)
+
+
 def _prune_superseded_snapshots(checkpoint_dir: Path, keep: dict) -> None:
     """Delete snapshots the manifest no longer references. Never fails a checkpoint."""
     keep_names = {keep["zarr"], keep["key_table"]}
+    for entry in keep.get("retained", ()):
+        keep_names.update((entry["zarr"], entry["key_table"]))
     doomed: list[Path] = [
         checkpoint_dir / CHECKPOINT_ZARR_DIR,
         checkpoint_dir / KEY_MAPPING_FILE,

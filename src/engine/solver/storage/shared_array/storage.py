@@ -91,14 +91,15 @@ class SharedArrayStorage(Storage):
         *,
         zarr_compression_level: int,
         zarr_chunk_size: int,
+        checkpoint_retain_every: int,
     ):
         """Storage over shared memory.
 
-        ``zarr_*`` are required rather than defaulted: they are owned by
-        ``StorageConfig`` and only ever passed through. A default here would be a
+        The keyword-only knobs are required rather than defaulted: they are owned
+        by ``StorageConfig`` and only ever passed through. A default here would be a
         second source of truth that silently wins whenever a caller forgets to
         forward the loaded config — which is exactly how single-worker training
-        came to ignore both knobs.
+        came to ignore both zarr knobs.
         """
         self.num_workers = num_workers
         self.worker_id = worker_id
@@ -114,6 +115,7 @@ class SharedArrayStorage(Storage):
 
         self.zarr_compression_level = zarr_compression_level
         self.zarr_chunk_size = zarr_chunk_size
+        self.checkpoint_retain_every = checkpoint_retain_every
 
         usable_slots = initial_capacity - 1
         slots_per_worker = usable_slots // num_workers

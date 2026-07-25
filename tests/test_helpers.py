@@ -16,14 +16,15 @@ from src.shared.config import Config, StorageConfig
 def build_test_storage(session_id: str = "test", **overrides: Any) -> SharedArrayStorage:
     """A SharedArrayStorage carrying the declared ``StorageConfig`` defaults.
 
-    The zarr knobs are required at the constructor, but tests that never tune
-    checkpointing shouldn't restate their values — that would just re-scatter the
-    literals ``StorageConfig`` exists to own. Take them from it instead.
+    The checkpoint knobs are required at the constructor, but tests that never
+    tune checkpointing shouldn't restate their values — that would just re-scatter
+    the literals ``StorageConfig`` exists to own. Take them from it instead.
     """
     defaults = StorageConfig()
     overrides.setdefault("num_workers", 1)
     overrides.setdefault("worker_id", 0)
     overrides.setdefault("is_coordinator", True)
+    overrides.setdefault("checkpoint_retain_every", defaults.checkpoint_retain_every)
     return SharedArrayStorage(
         session_id=session_id,
         zarr_compression_level=defaults.zarr_compression_level,
