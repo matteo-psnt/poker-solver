@@ -1,89 +1,54 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-`src/` follows a layered package structure:
-- `src/core/` (`game/`, `actions/`) for foundational poker domain logic.
-- `src/engine/` (`solver/`, `search/`) for solving/search internals.
-- `src/pipeline/` (`training/`, `evaluation/`, `abstraction/`) for offline
-  workflows, experiments, and abstraction/bucketing.
-- `src/interfaces/` (`cli/`, `api/`, `chart/`) for user-facing entrypoints.
-- `src/shared/` for reusable cross-layer helpers (config loading, utility
-  primitives).
+## Layout & Architecture
+`src/` is layered — `interfaces/` (cli, api, chart) → `pipeline/` (training,
+evaluation, abstraction) → `engine/` (solver, search) → `core/` (game,
+actions), with `shared/` importable by all layers. The layering is
+hard-enforced by import-linter (`.importlinter`, run via pre-commit).
 
-Soft dependency convention (enforced by review and contributor discipline):
-- `interfaces -> pipeline -> engine -> core`
-- `shared` is importable by all layers.
-- Avoid reverse imports across these layer boundaries.
+Tests in `tests/` mirror this layout. Config YAML lives under `config/`
+(source of truth for training setups; name new files for their purpose).
+Runtime artifacts go in `data/` (`runs/`, `profiles/`, `combo_abstraction/`,
+`eval_ledger.jsonl`); avoid committing large training outputs. The React
+frontend lives in `ui/` (`npm run dev` / `npm run build` from `ui/`).
 
-Tests live in `tests/` and mirror this layout (`tests/core/`, `tests/engine/`,
-`tests/pipeline/`, `tests/interfaces/`, `tests/shared/`) with integration
-coverage in `tests/integration/`. Configuration is stored in YAML under
-`config/` (e.g., `config/training/quick_test.yaml`). Generated artifacts and
-runtime outputs go in `data/` (`runs/`, `profiles/`, `combo_abstraction/`). The
-frontend lives in `ui/` with React sources in `ui/src` and builds in `ui/dist`.
+## Commands
+- `uv sync --group dev` — install dependencies.
+- `uv run poker-solver` — interactive CLI.
+- `uv run poker-solver-run` — headless entrypoint: `train`, `evaluate`,
+  `ledger`, `compare`, `checkpoint-profile`. Use `ledger`/`compare` for eval
+  bookkeeping instead of hand-transcribing scores.
+- `modal_app.py` — cloud training/eval on Modal (`uv run modal run
+  modal_app.py`); mirrors the local layout with `data/` on a Volume.
+- `uv run pytest -m "not slow"` — fast gate; `uv run pytest` — full suite.
+- `uv run pre-commit run --all-files` — full quality gate (ruff lint+format,
+  ty, import-linter, deptry, vulture). Run before handing off changes.
 
-## Build, Test, and Development Commands
-- `uv sync --group dev` installs Python dependencies from `uv.lock`.
-- `uv run poker-solver` launches the CLI (or `poker-solver` if installed into
-  your environment).
-- `uv run pytest` runs the test suite.
-- `uv run pytest -m "not slow"` runs the fast gate (default during iteration).
-- `uv run pytest --durations=40 --durations-min=0.1 -q` prints the slowest
-  tests to guide optimization and marker cleanup.
-- `uv run ruff check .` runs linting and import sorting checks; `uv run ruff format .`
-  applies formatting.
-- `uv run ty check` runs static type checks.
-- `cd ui && npm install` installs UI dependencies.
-- `cd ui && npm run dev` starts the Vite dev server.
-- `cd ui && npm run build` creates a production UI build.
+## Code Style
+Python 3.12+. Ruff enforces formatting and import sorting — don't hand-police
+style. What is *not* enforced by tooling:
+- Prefer explicit, typed interfaces between solver, training, and evaluation
+  layers.
+- Do not assume backward compatibility is required. Unless explicitly
+  requested, prefer clean breaks over compatibility shims, aliases, or legacy
+  import paths.
+- Imports at the top of the file; avoid importing inside functions unless
+  absolutely necessary.
+- This is a research-grade project: call out anything that does not meet that
+  bar — bugs, correctness risks, or inelegant code that can be optimized.
 
-## Coding Style & Naming Conventions
-Python code targets 3.10+ with 4-space indentation and a 100-character line
-limit enforced by Ruff. Use `snake_case` for functions/variables, `PascalCase`
-for classes, and `UPPER_SNAKE_CASE` for constants. Keep modules focused and
-prefer explicit, typed interfaces between solver, training, and evaluation
-layers.
-Do not assume backward compatibility is required. Unless explicitly requested,
-prefer clean breaks over compatibility shims, aliases, or legacy import paths.
-Imports must be placed at the top of the file unless absolutely necessary;
-avoid importing inside functions.
-This is a research-grade project; call out anything that does not meet that
-bar, including bugs, correctness risks, or unelegant code that can be
-optimized.
+## Testing
+- While developing, run focused tests: `uv run pytest tests/<path>::<test>`.
+- Before handoff, run the fast gate (`-m "not slow"`). Run the full suite when
+  a change touches training, abstraction/bucketing, evaluator logic, config
+  loading, or shared infrastructure.
+- Default timeout is 5s (pytest-timeout). Mark expensive tests
+  `@pytest.mark.slow`; intentionally longer ones get an explicit tight
+  `@pytest.mark.timeout(<seconds>)`.
+- Keep tests deterministic (fixed seeds, no nondeterministic assertions) and
+  fast; when one turns slow, check `--durations` (setup vs call time are
+  separate) and optimize or reclassify.
 
-## Testing Guidelines
-Tests are written with pytest and should follow the configured patterns:
-`test_*.py`, `Test*` classes, and `test_*` functions.
-Use this workflow:
-- While developing, run focused tests first: `uv run pytest tests/<path>::<test_name>`.
-- Before handing off changes, run the fast gate: `uv run pytest -m "not slow"`.
-- Run full suite (`uv run pytest`) when your change impacts training,
-  abstraction/bucketing, evaluator logic, config loading, or shared
-  infrastructure.
-- At the end of changes, run `uv run pre-commit run --all-files` to catch any
-  unexpected formatting, lint, typing, or import-layer issues before handoff.
-
-Marker and timeout policy:
-- Mark expensive tests with `@pytest.mark.slow`.
-- The default timeout is 5 seconds (configured in `pyproject.toml` via
-  `pytest-timeout`).
-- If a test is intentionally longer, add an explicit per-test timeout with
-  `@pytest.mark.timeout(<seconds>)` and keep it as tight as possible.
-
-Performance and determinism expectations:
-- Keep tests deterministic (fixed seeds, no nondeterministic assertions).
-- Avoid long loops and oversized fixtures in non-slow tests.
-- When a test becomes unexpectedly slow, capture timings with
-  `--durations` and either optimize or reclassify it with `@pytest.mark.slow`.
-- Read duration output carefully: setup time and call time are reported
-  separately.
-
-## Commit Guidelines
-Commit messages are short and imperative (sentence case is common); a
-Conventional prefix like `feat:` is acceptable if used consistently. Call out
-any new config files or data artifacts added under `config/` or `data/`.
-
-## Configuration & Data Notes
-Treat `config/` as the source of truth for training setups; keep new YAML files
-named for their purpose (e.g., `full_training.yaml`). Avoid committing large
-training outputs under `data/` unless explicitly required for reproducibility.
+## Commits
+Short, imperative messages; a Conventional prefix like `feat:` is fine if used
+consistently. Call out new files added under `config/` or `data/`.
