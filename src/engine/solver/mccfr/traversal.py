@@ -10,7 +10,6 @@ import numpy as np
 from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.solver.infoset import InfoSet
-from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.numba_ops import (
     WEIGHTING_CODES,
     apply_regret_updates,
@@ -35,11 +34,13 @@ def _identity_indices(num_actions: int) -> np.ndarray:
 
 
 def _terminal_utility(self: MCCFRSolver, state: GameState, traversing_player: int) -> float:
-    """Evaluate payoff at terminal states, completing board when necessary."""
-    if len(state.board) < 5:
-        complete_state = self.deal_remaining_cards(state)
-        return complete_state.get_payoff(traversing_player, self.rules)
-    return state.get_payoff(traversing_player, self.rules)
+    """Evaluate payoff at terminal states, completing the board when necessary.
+
+    ``deal_remaining_cards`` owns the is-the-board-complete test and returns
+    ``state`` untouched when there is nothing to deal, so the traversal never has
+    to know that a board exists at all.
+    """
+    return self.deal_remaining_cards(state).get_payoff(traversing_player, self.rules)
 
 
 def _infoset_context(
@@ -48,7 +49,7 @@ def _infoset_context(
     current_player: int,
 ) -> tuple[InfoSet, Sequence[Action], list[int], np.ndarray]:
     """Build infoset, filter valid actions, and compute strategy over valid actions."""
-    infoset_key = encode_infoset_key(state, current_player, self.card_abstraction)
+    infoset_key = self.encode_infoset_key(state, current_player)
     legal_actions = self.rules.get_legal_actions(state, action_model=self.action_model)
 
     if not legal_actions:

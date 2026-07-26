@@ -81,8 +81,15 @@ def sample_chance_outcome(self: MCCFRSolver, state: GameState) -> GameState:
 
 
 def deal_remaining_cards(self: MCCFRSolver, state: GameState) -> GameState:
-    """Deal all remaining board cards for terminal all-in showdowns."""
+    """Deal all remaining board cards for terminal all-in showdowns.
+
+    A complete board returns ``state`` unchanged, so callers can run every
+    terminal through here instead of repeating the board-length test. No caller
+    ever passed a complete board before this became the contract.
+    """
     cards_needed = 5 - len(state.board)
+    if cards_needed <= 0:
+        return state
 
     return state.replace(
         street=Street.RIVER,

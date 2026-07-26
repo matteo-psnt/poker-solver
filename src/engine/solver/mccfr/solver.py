@@ -10,6 +10,8 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState
+from src.engine.solver import infoset_encoder
+from src.engine.solver.infoset import InfoSetKey
 from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.base import Storage
 from src.shared.config import Config
@@ -93,6 +95,17 @@ class MCCFRSolver:
 
     def deal_remaining_cards(self, state: GameState) -> GameState:
         return chance.deal_remaining_cards(self, state)
+
+    def encode_infoset_key(self, state: GameState, player: int) -> InfoSetKey:
+        """The key under which ``player``'s decision at ``state`` is stored.
+
+        Dispatched through the solver rather than called directly by the traversal
+        so the CFR kernel can be exercised on games other than HUNL: this encoding
+        is HUNL-specific (169 preflop classes, equity buckets, SPR) while the
+        regret math below it is not. See
+        ``tests/engine/solver/mccfr/extensive_game_solver.py``.
+        """
+        return infoset_encoder.encode_infoset_key(state, player, self.card_abstraction)
 
     def _cfr_external_sampling(
         self,
