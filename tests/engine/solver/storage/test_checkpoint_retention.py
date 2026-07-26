@@ -124,6 +124,50 @@ class TestLadderSurvivesResume:
         assert retained_checkpoint_iterations(tmp_path) == [8_000_000]
 
 
+class TestProductionLadderShape:
+    """The rung list production actually gets, at the shipped knob values.
+
+    ``checkpoint_frequency: 500000`` with ``checkpoint_retain_every: 1000000``. The
+    x-axis of every convergence curve is this list, so it is worth pinning rather
+    than deriving: a half-band offset would misplace every point on the plot, and
+    the cost of finding out is a whole 8M-iteration training run.
+    """
+
+    def test_an_8m_run_lands_rungs_on_round_million_boundaries(self, tmp_path):
+        for iteration in range(500_000, 8_000_001, 500_000):
+            _commit(tmp_path, iteration, retain_every=1_000_000)
+
+        assert retained_checkpoint_iterations(tmp_path) == [
+            500_000,
+            1_000_000,
+            2_000_000,
+            3_000_000,
+            4_000_000,
+            5_000_000,
+            6_000_000,
+            7_000_000,
+            8_000_000,
+        ]
+
+    def test_a_resume_leg_that_forgets_the_knob_keeps_the_earlier_rungs(self, tmp_path):
+        """Production 8M runs are stitched from resume legs (the guillotine workaround).
+
+        A later leg spawned without the knob must not silently delete the points an
+        earlier leg was told to keep -- that would yield a curve with no early half.
+        """
+        for iteration in (500_000, 1_000_000, 1_500_000, 2_000_000):
+            _commit(tmp_path, iteration, retain_every=1_000_000)
+        for iteration in (2_500_000, 3_000_000):
+            _commit(tmp_path, iteration, retain_every=0)
+
+        assert retained_checkpoint_iterations(tmp_path) == [
+            500_000,
+            1_000_000,
+            2_000_000,
+            3_000_000,
+        ]
+
+
 class TestRetainedLookup:
     def test_resolves_a_ladder_snapshot_by_iteration(self, tmp_path):
         _commit(tmp_path, 1000, retain_every=1000)
