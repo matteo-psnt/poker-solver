@@ -72,13 +72,20 @@ class EvaluationOutput:
     checkpoint_iteration: int | None = None
 
 
-def checkpoint_iteration_of(run_dir: Path) -> int | None:
-    """Iteration of the checkpoint currently published for ``run_dir``.
+def checkpoint_iteration_of(run_dir: Path, at_iteration: int | None = None) -> int | None:
+    """Iteration of the checkpoint an evaluator will actually score.
 
     Read from the manifest rather than run metadata: the manifest is committed in
     the same atomic replace as the arrays it names, so it describes exactly what an
     evaluator loading this directory will see. None for pre-manifest runs.
+
+    With ``at_iteration`` the evaluator loads that ladder rung instead, so the
+    reported iteration must be the rung -- reporting the published one would
+    relabel every point of a convergence curve with the run's final iteration,
+    which is the exact mislabelling this field exists to prevent.
     """
+    if at_iteration is not None:
+        return at_iteration
     manifest = read_checkpoint_manifest(run_dir)
     return int(manifest["iteration"]) if manifest is not None else None
 
@@ -345,7 +352,10 @@ def _effective_abstraction_hash(
 
 
 def _load_blueprint(
-    config: Config, checkpoint_dir: Path, abstraction_hash: str | None = None
+    config: Config,
+    checkpoint_dir: Path,
+    abstraction_hash: str | None = None,
+    at_iteration: int | None = None,
 ) -> Blueprint:
     """Build a fresh evaluation blueprint (solver) from a checkpoint.
 
@@ -354,7 +364,10 @@ def _load_blueprint(
     Cython member and cannot be sent across a process boundary.
     """
     solver, _ = build_evaluation_solver(
-        config, checkpoint_dir=checkpoint_dir, abstraction_hash=abstraction_hash
+        config,
+        checkpoint_dir=checkpoint_dir,
+        abstraction_hash=abstraction_hash,
+        at_iteration=at_iteration,
     )
     return solver
 
@@ -403,6 +416,7 @@ def evaluate_run_lbr(
     *,
     resolver_iterations: int = 64,
     abstraction_hash: str | None = None,
+    at_iteration: int | None = None,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
@@ -436,12 +450,13 @@ def evaluate_run_lbr(
         metadata.config,
         checkpoint_dir=run_dir,
         abstraction_hash=effective_hash,
+        at_iteration=at_iteration,
     )
     # For parallel LBR each worker rebuilds its own solver from the checkpoint (the
     # solver is not picklable across processes); the factory captures only picklable
     # args (config + checkpoint dir).
     factory = (
-        functools.partial(_load_blueprint, metadata.config, run_dir, effective_hash)
+        functools.partial(_load_blueprint, metadata.config, run_dir, effective_hash, at_iteration)
         if config.num_workers > 1
         else None
     )
@@ -465,7 +480,7 @@ def evaluate_run_lbr(
     return EvaluationOutput(
         infosets=storage.num_infosets(),
         results=results,
-        checkpoint_iteration=checkpoint_iteration_of(run_dir),
+        checkpoint_iteration=checkpoint_iteration_of(run_dir, at_iteration),
     )
 
 
@@ -474,6 +489,7 @@ def evaluate_run_exact_br(
     config: PublicBRConfig | None = None,
     *,
     abstraction_hash: str | None = None,
+    at_iteration: int | None = None,
 ) -> EvaluationOutput:
     """Exact best response on the sampled public tree (deterministic point value).
 
@@ -484,9 +500,16 @@ def evaluate_run_exact_br(
     restricted game (see :mod:`~src.pipeline.evaluation.public_tree_br`), not of
     full HUNL: compare within a tier, don't quote it as a bound.
 
+    ``at_iteration`` scores a retained ladder rung instead of the published
+    snapshot. Because the value is deterministic, scoring several rungs of one run
+    under an identical config gives an exactly-paired within-run convergence curve
+    — the intended use. Hold the board plan fixed across rungs; shrinking the
+    sample for cheap early points destroys the pairing.
+
     Raises:
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
-        ValueError: Invalid configuration or checkpoint state.
+        ValueError: Invalid configuration or checkpoint state, or ``at_iteration``
+            is not a retained rung (the error lists the available ones).
     """
     config = config or PublicBRConfig()
     metadata = load_run_metadata(run_dir)
@@ -495,6 +518,7 @@ def evaluate_run_exact_br(
         metadata.config,
         checkpoint_dir=run_dir,
         abstraction_hash=effective_hash,
+        at_iteration=at_iteration,
     )
     result = compute_public_tree_br(
         solver, config, starting_stack=metadata.config.game.starting_stack
@@ -524,7 +548,7 @@ def evaluate_run_exact_br(
     return EvaluationOutput(
         infosets=storage.num_infosets(),
         results=results,
-        checkpoint_iteration=checkpoint_iteration_of(run_dir),
+        checkpoint_iteration=checkpoint_iteration_of(run_dir, at_iteration),
     )
 
 
@@ -729,6 +753,7 @@ def evaluate_and_record(
     exact_br: PublicBRConfig | None = None,
     resolver_iterations: int = 64,
     abstraction_hash: str | None = None,
+    at_iteration: int | None = None,
     ledger_path: Path = eval_ledger.DEFAULT_LEDGER_PATH,
 ) -> dict[str, Any]:
     """Evaluate a run and persist the result to the eval ledger (best-effort).
@@ -741,8 +766,19 @@ def evaluate_and_record(
     Returns the portable evaluate payload; when recording succeeded it carries
     ``ledger_result_path``. Recording failures print a warning but never fail
     the evaluation itself — the ledger is a research convenience.
+
+    ``at_iteration`` scores a retained ladder rung rather than the published
+    snapshot; each rung records its own ``checkpoint_iteration``, so a run's
+    convergence curve arrives as ordinary ledger rows.
     """
     if method == "rollout":
+        if at_iteration is not None:
+            # Refuse rather than silently score the published snapshot and label the
+            # row with a rung that was never loaded.
+            raise ValueError(
+                "--at is not supported for method 'rollout' (a diagnostic estimator, "
+                "not a curve tool); use exact_br for within-run convergence curves."
+            )
         params = rollout or RolloutParams()
         out = evaluate_run_rollout(run_dir, params)
         estimator = ROLLOUT_ESTIMATOR_LABEL
@@ -754,7 +790,9 @@ def evaluate_and_record(
         )
     elif method == "exact_br":
         br_config = exact_br or PublicBRConfig()
-        out = evaluate_run_exact_br(run_dir, br_config, abstraction_hash=abstraction_hash)
+        out = evaluate_run_exact_br(
+            run_dir, br_config, abstraction_hash=abstraction_hash, at_iteration=at_iteration
+        )
         estimator = EXACT_BR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_exact_br_knobs_from_params(
             num_flops=br_config.num_flops,
@@ -769,6 +807,7 @@ def evaluate_and_record(
             config,
             resolver_iterations=resolver_iterations,
             abstraction_hash=abstraction_hash,
+            at_iteration=at_iteration,
         )
         estimator = LBR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_lbr_knobs(config, out.results)

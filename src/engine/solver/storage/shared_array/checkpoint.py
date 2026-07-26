@@ -144,11 +144,11 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     if not storage.checkpoint_dir:
         return False
 
-    missing_files = get_missing_checkpoint_files(storage.checkpoint_dir)
-    if missing_files:
+    # Training always loads the published snapshot, never a ladder rung.
+    paths = CheckpointPaths.from_dir(storage.checkpoint_dir)
+    if get_missing_checkpoint_files(paths):
         return False
 
-    paths = CheckpointPaths.from_dir(storage.checkpoint_dir)
     total_rows = key_table.num_rows(paths.key_table)
     if total_rows == 0:
         return True
@@ -183,7 +183,7 @@ def load_storage_checkpoint(storage: SharedArrayStorage) -> bool:
     # Read only this worker's rows; the full arrays would be ~1.9 GB per worker at
     # 18.9M keys (~30 GB across 16) of data it discards immediately.
     phase_start = time.perf_counter()
-    arrays, max_actions = load_checkpoint_rows(storage.checkpoint_dir, my_old_ids_array)
+    arrays, max_actions = load_checkpoint_rows(paths, my_old_ids_array)
     logger.info(
         f"[checkpoint-load] worker {wid}: read {len(my_keys):,} array rows "
         f"in {time.perf_counter() - phase_start:.1f}s",

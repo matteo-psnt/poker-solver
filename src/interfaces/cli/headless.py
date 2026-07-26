@@ -101,6 +101,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
         ),
         resolver_iterations=args.resolver_iterations,
         abstraction_hash=args.abstraction_hash,
+        at_iteration=args.at,
         ledger_path=Path(args.ledger),
     )
     _write_result(run_dir, payload)
@@ -327,6 +328,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--ledger",
         default=str(eval_ledger.DEFAULT_LEDGER_PATH),
         help="Append-only eval ledger path (records provenance + knobs + result).",
+    )
+    p_eval.add_argument(
+        "--at",
+        type=int,
+        default=None,
+        help="Score a RETAINED checkpoint at this iteration instead of the run's latest "
+        "(requires storage.checkpoint_retain_every at train time). Repeat over the ladder "
+        "under one fixed config to build a within-run convergence curve.",
     )
     p_eval.add_argument(
         "--method",

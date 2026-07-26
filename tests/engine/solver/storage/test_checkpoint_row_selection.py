@@ -17,14 +17,18 @@ import numpy as np
 import pytest
 
 from src.engine.solver.storage.array_specs import ARRAY_SPECS
-from src.engine.solver.storage.helpers import load_checkpoint_arrays, load_checkpoint_rows
+from src.engine.solver.storage.helpers import (
+    CheckpointPaths,
+    load_checkpoint_arrays,
+    load_checkpoint_rows,
+)
 
 GOLDEN_RUN = Path(__file__).parents[3] / "fixtures" / "golden_run"
 
 
 @pytest.fixture(scope="module")
 def full_arrays():
-    return load_checkpoint_arrays(GOLDEN_RUN)
+    return load_checkpoint_arrays(CheckpointPaths.from_dir(GOLDEN_RUN))
 
 
 @pytest.mark.parametrize("num_workers", [2, 4, 16])
@@ -33,7 +37,7 @@ def test_selected_rows_match_the_full_arrays(full_arrays, num_workers):
     total = full_arrays["action_counts"].shape[0]
     for worker_id in range(num_workers):
         row_ids = np.arange(worker_id, total, num_workers, dtype=np.int32)
-        selected, max_actions = load_checkpoint_rows(GOLDEN_RUN, row_ids)
+        selected, max_actions = load_checkpoint_rows(CheckpointPaths.from_dir(GOLDEN_RUN), row_ids)
 
         assert max_actions == full_arrays["regrets"].shape[1]
         for spec in ARRAY_SPECS:
@@ -48,7 +52,7 @@ def test_selected_rows_match_the_full_arrays(full_arrays, num_workers):
 def test_scattered_selection_preserves_order(full_arrays):
     """Ownership is hash-scattered, so rows are sparse and non-contiguous."""
     row_ids = np.array([0, 7, 8, 91, 512, 1000], dtype=np.int32)
-    selected, _ = load_checkpoint_rows(GOLDEN_RUN, row_ids)
+    selected, _ = load_checkpoint_rows(CheckpointPaths.from_dir(GOLDEN_RUN), row_ids)
 
     for spec in ARRAY_SPECS:
         for k, row in enumerate(row_ids.tolist()):
@@ -60,5 +64,7 @@ def test_scattered_selection_preserves_order(full_arrays):
 
 
 def test_single_row_selection(full_arrays):
-    selected, _ = load_checkpoint_rows(GOLDEN_RUN, np.array([3], dtype=np.int32))
+    selected, _ = load_checkpoint_rows(
+        CheckpointPaths.from_dir(GOLDEN_RUN), np.array([3], dtype=np.int32)
+    )
     np.testing.assert_array_equal(selected["regrets"][0], full_arrays["regrets"][3])

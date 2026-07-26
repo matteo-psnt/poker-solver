@@ -62,6 +62,18 @@ class CheckpointPaths:
         )
 
     @classmethod
+    def resolve(cls, checkpoint_dir: Path, at_iteration: int | None = None) -> CheckpointPaths:
+        """The snapshot a reader should load: the published one, or a ladder rung.
+
+        The single entry point for every read path, so ``at_iteration=None``
+        (score whatever the run currently publishes) and ``at_iteration=N``
+        (score rung N of the retained ladder) cannot diverge in how they resolve.
+        """
+        if at_iteration is None:
+            return cls.from_dir(checkpoint_dir)
+        return cls.for_retained(checkpoint_dir, at_iteration)
+
+    @classmethod
     def for_iteration(cls, checkpoint_dir: Path, iteration: int) -> CheckpointPaths:
         """Versioned artifact paths for writing a new snapshot."""
         return cls(
@@ -213,18 +225,17 @@ def _prune_superseded_snapshots(checkpoint_dir: Path, keep: dict) -> None:
             logger.warning(f"Warning: could not prune superseded checkpoint {path.name}: {exc}")
 
 
-def get_missing_checkpoint_files(checkpoint_dir: Path) -> list[str]:
+def get_missing_checkpoint_files(paths: CheckpointPaths) -> list[str]:
     """Check for missing checkpoint files."""
-    paths = CheckpointPaths.from_dir(checkpoint_dir)
     missing = [paths.checkpoint_zarr.name] if not paths.checkpoint_zarr.exists() else []
     if not paths.key_table.exists():
         return [*missing, paths.key_table.name]
     return missing + [f.name for f in key_table.table_files(paths.key_table) if not f.exists()]
 
 
-def load_checkpoint_arrays(checkpoint_dir: Path) -> dict[str, np.ndarray]:
+def load_checkpoint_arrays(paths: CheckpointPaths) -> dict[str, np.ndarray]:
     """Load checkpoint arrays from Zarr format (directory store for performance)."""
-    zarr_path = CheckpointPaths.from_dir(checkpoint_dir).checkpoint_zarr
+    zarr_path = paths.checkpoint_zarr
     if not zarr_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {zarr_path}")
 
@@ -235,7 +246,7 @@ def load_checkpoint_arrays(checkpoint_dir: Path) -> dict[str, np.ndarray]:
     return {spec.checkpoint_key: root[spec.checkpoint_key][:] for spec in ARRAY_SPECS}
 
 
-def load_checkpoint_rows(checkpoint_dir: Path, row_ids: np.ndarray) -> tuple[dict, int]:
+def load_checkpoint_rows(paths: CheckpointPaths, row_ids: np.ndarray) -> tuple[dict, int]:
     """Load ONLY ``row_ids`` from each checkpoint array, plus max_actions.
 
     Workers own ~1/N of the rows, so reading the full arrays into every worker
@@ -246,7 +257,7 @@ def load_checkpoint_rows(checkpoint_dir: Path, row_ids: np.ndarray) -> tuple[dic
 
     Returned rows are positional: result row ``k`` is ``row_ids[k]``.
     """
-    zarr_path = CheckpointPaths.from_dir(checkpoint_dir).checkpoint_zarr
+    zarr_path = paths.checkpoint_zarr
     if not zarr_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {zarr_path}")
 
@@ -335,10 +346,9 @@ class CheckpointData:
         return {key: i for i, key in enumerate(self.keys)}
 
 
-def load_checkpoint_data(checkpoint_dir: Path, *, context: str) -> CheckpointData:
-    paths = CheckpointPaths.from_dir(checkpoint_dir)
+def load_checkpoint_data(paths: CheckpointPaths, *, context: str) -> CheckpointData:
     _, max_id = _validate_key_table(paths.key_table, context)
-    arrays = load_checkpoint_arrays(checkpoint_dir)
+    arrays = load_checkpoint_arrays(paths)
     max_actions = _validate_checkpoint_arrays(arrays, max_id, context)
     rows = key_table.read_all_rows(paths.key_table)
     validate_action_counts(arrays["action_counts"], rows.action_lists, context)

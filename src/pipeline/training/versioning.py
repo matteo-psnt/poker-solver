@@ -14,7 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from src.engine.solver.storage.helpers import load_checkpoint_arrays
+from src.engine.solver.storage.helpers import CheckpointPaths, load_checkpoint_arrays
 
 # Bump when a change alters the on-disk run/checkpoint format or the infoset
 # encoding such that an existing run can no longer be loaded/continued as-is.
@@ -43,7 +43,7 @@ def checkpoint_fingerprint(run_dir: Path) -> str:
     leave the fingerprint unchanged) and the strong form of the golden tripwire (the
     fixture must load to the *same* strategies, not merely load).
     """
-    arrays = load_checkpoint_arrays(Path(run_dir))
+    arrays = load_checkpoint_arrays(CheckpointPaths.from_dir(Path(run_dir)))
     hasher = hashlib.sha256()
     for name in sorted(arrays):
         arr = arrays[name]

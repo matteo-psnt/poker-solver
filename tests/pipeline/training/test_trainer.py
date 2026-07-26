@@ -324,7 +324,7 @@ class TestAsyncCheckpointing:
         paths = CheckpointPaths.from_dir(trainer.run_dir)
         assert paths.key_table.exists()
         assert paths.checkpoint_zarr.exists()
-        assert not get_missing_checkpoint_files(trainer.run_dir)
+        assert not get_missing_checkpoint_files(paths)
 
     @pytest.mark.timeout(30)
     def test_checkpoint_executor_cleanup(self, config_with_dummy_abstraction):
@@ -420,7 +420,7 @@ class TestAsyncCheckpointing:
 
         assert paths.key_table.exists()
         assert checkpoint_dir.exists()
-        assert not get_missing_checkpoint_files(trainer.run_dir)
+        assert not get_missing_checkpoint_files(paths)
 
         # Row index IS the infoset id, so the table's row count must match the
         # array height exactly -- an off-by-one here would misindex every row.

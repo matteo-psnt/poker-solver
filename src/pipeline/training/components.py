@@ -172,13 +172,16 @@ def build_evaluation_solver(
     checkpoint_dir: Path,
     abstractions_dir: Path | None = None,
     abstraction_hash: str | None = None,
+    at_iteration: int | None = None,
 ) -> tuple[MCCFRSolver, InMemoryStorage]:
     """Build solver and storage for read-only checkpoint evaluation.
 
     ``abstraction_hash`` pins the card abstraction to the one the checkpoint was
     trained against; without it the config name resolves against current code.
+    ``at_iteration`` scores a retained ladder rung instead of the published
+    snapshot (the within-run convergence curve).
     """
-    storage = InMemoryStorage(checkpoint_dir=checkpoint_dir)
+    storage = InMemoryStorage(checkpoint_dir=checkpoint_dir, at_iteration=at_iteration)
     action_model = ActionModel(config)
     card_abstraction = build_card_abstraction(
         config,

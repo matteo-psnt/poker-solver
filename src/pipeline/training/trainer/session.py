@@ -117,7 +117,9 @@ class TrainingSession:
         if checkpoint_iter is None:
             raise FileNotFoundError(f"No checkpoint found in {run_path}")
 
-        missing_files = get_missing_checkpoint_files(run_path)
+        # Resume always continues the published snapshot, never a ladder rung.
+        checkpoint_paths = CheckpointPaths.from_dir(run_path)
+        missing_files = get_missing_checkpoint_files(checkpoint_paths)
         if missing_files:
             raise ValueError(f"Checkpoint is incomplete. Missing files: {missing_files}")
 
@@ -126,7 +128,7 @@ class TrainingSession:
         # with load_checkpoint_on_init=False, so the O(N) array/dtype validation the
         # eager load used to do up front now happens when each worker loads its shard
         # at train time -- gross corruption surfaces there, loudly, per worker.
-        total_rows = key_table.num_rows(CheckpointPaths.from_dir(run_path).key_table)
+        total_rows = key_table.num_rows(checkpoint_paths.key_table)
         if total_rows == 0:
             raise ValueError(f"Checkpoint in {run_path} has no infosets to resume from.")
 
