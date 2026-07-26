@@ -21,6 +21,8 @@ is live-mounted for fast iteration).
 from __future__ import annotations
 
 import dataclasses
+import gc
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -178,6 +180,7 @@ def evaluate(
     br_turns: int = 2,
     br_rivers: int = 2,
     br_board_seed: int = 7,
+    at_iteration: int | None = None,
 ) -> dict[str, Any]:
     """Evaluate a run stored on the Volume (Local Best Response by default).
 
@@ -187,6 +190,9 @@ def evaluate(
 
     ``opponent="deployed"`` measures blueprint+resolver (the system that actually
     plays) with solves pinned to ``resolver_iterations`` CFR iterations.
+
+    ``at_iteration`` scores a retained ladder rung instead of the run's latest
+    checkpoint; sweep it over the ladder to build a within-run convergence curve.
     """
     _configure_logging()
     from src.pipeline import services
@@ -225,6 +231,7 @@ def evaluate(
         ),
         resolver_iterations=resolver_iterations,
         abstraction_hash=abstraction_hash,
+        at_iteration=at_iteration,
     )
     # The orchestrator wrote the ledger row + payload onto the Volume (best-effort);
     # commit so they survive the container and cloud evals feed the same ledger the
@@ -294,8 +301,18 @@ def blueprint_match(
         num_deals=num_deals,
         seed=seed,
     )
+    # The two blueprints and their card abstractions are mmap'd (mmap_mode="r"); once
+    # record_blueprint_match returns nothing references them, but the OS file handles
+    # stay open until collected — and Modal refuses a Volume commit while ANY file is
+    # open ("... buckets.npy is open"). Force the collection, then commit; keep the
+    # commit non-fatal so a match still returns its result even if persistence is
+    # blocked (the payload was already written to the run dir).
     if "result_path" in payload:
-        data_volume.commit()
+        gc.collect()
+        try:
+            data_volume.commit()
+        except Exception as exc:  # commit is best-effort; never fail the match on it
+            logging.getLogger(__name__).warning("blueprint-match commit skipped: %s", exc)
     return payload
 
 
@@ -1085,6 +1102,7 @@ def run_resume(
     memory: int = 24576,
     timeout: int = 10800,
     capacity: int = 0,
+    retries: int = 0,
 ) -> None:
     """Resume a Volume run and train it up to the ABSOLUTE ``to_iteration`` on a big box.
 
@@ -1109,7 +1127,11 @@ def run_resume(
     """
     from src.shared.orchestration_log import record_spawn
 
-    call = resume.with_options(cpu=cpu, memory=memory, timeout=timeout).spawn(
+    # retries>0 is safe ONLY because resume is convergent on the absolute target: a
+    # preemption/OOM respawn re-reads the newest committed checkpoint and aims at the same
+    # number, so it continues rather than compounding. Use it when preemption is the
+    # observed failure (a fresh train stays retries=0 to avoid ghost attempts).
+    call = resume.with_options(cpu=cpu, memory=memory, timeout=timeout, retries=retries).spawn(
         run_id=run_id,
         to_iteration=to_iteration,
         num_workers=cpu,
@@ -1166,6 +1188,7 @@ def run_eval(
     br_turns: int = 2,
     br_rivers: int = 2,
     br_board_seed: int = 7,
+    at_iteration: int = 0,
     timeout: int = 10800,
 ) -> None:
     """Evaluate an existing Volume run (LBR by default; ``--method exact-br`` for the
@@ -1179,7 +1202,9 @@ def run_eval(
     --scorer lookahead for the depth-limited best-response scorer (both produce a
     stronger, still-rigorous exploiter; never mix settings within one comparison).
     For exact BR the board plan (--br-flops/--br-turns/--br-rivers/--br-board-seed)
-    is the comparison tier; matched tiers compare exactly, no p-value involved."""
+    is the comparison tier; matched tiers compare exactly, no p-value involved.
+    --at-iteration N scores retained ladder rung N instead of the latest checkpoint
+    (0 = latest); sweep it under one fixed board plan for a within-run curve."""
     _configure_logging()
     from src.pipeline.evaluation.paired_report import print_variance_decomposition
     from src.shared.orchestration_log import record_spawn
@@ -1202,13 +1227,19 @@ def run_eval(
         br_turns=br_turns,
         br_rivers=br_rivers,
         br_board_seed=br_board_seed,
+        at_iteration=at_iteration or None,
     )
     record_spawn(
         run_id=run_id,
         function="evaluate",
         object_id=eval_call.object_id,
         resources={"cpu": cpu, "memory": memory, "timeout": timeout},
-        extra={"method": method, "opponent": opponent, "scorer": scorer},
+        extra={
+            "method": method,
+            "opponent": opponent,
+            "scorer": scorer,
+            "at_iteration": at_iteration or None,
+        },
     )
     eval_result = _await_call(eval_call, run_id, "evaluate")
     results = eval_result["results"]
