@@ -1,0 +1,245 @@
+"""Preallocated flat-array infoset storage over a static betting tree.
+
+Every infoset the solver can ever touch is known once :class:`BettingTree` is
+built, so storage is a pair of flat arrays sized exactly to the tree and indexed
+by arithmetic. There is no key table, no id allocation, no owner map, no
+capacity estimate and no resize path.
+
+Why that matters beyond line count: the dynamic design could not answer "which
+row is this infoset?" without cross-worker agreement, and a worker that had not
+yet learned an id wrote nothing at all — a measured 39-74% of update samples were
+dropped that way. Here the row is a pure function of the tree, identical in every
+process, so a worker never encounters an infoset it cannot write.
+``dropped_unknown_id_updates`` is not merely small; it has no code path.
+
+Layout (ragged, zero padding):
+
+    regrets/strategy_sum   flat, length tree.num_slots
+    reach/utility          flat, length tree.num_rows
+
+    infoset (node n, bucket b) owns slots
+        [slot_offset[n] + b*num_actions[n],  ... + num_actions[n])
+
+A dense ``(num_infosets, max_actions)`` rectangle would waste
+``max_actions - num_actions`` floats on every row; at the production tree's mean
+of ~2.6 actions against ``max_actions=10`` that is roughly 4x the memory.
+
+Concurrency:
+    Workers Hogwild-write shared memory exactly as before — lock-free, racy by
+    design, and unchanged in its convergence argument. The difference is that
+    the shared arrays are mapped once at a fixed size and every process computes
+    identical indices, so there is nothing to exchange at runtime.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterator
+from multiprocessing import shared_memory
+
+import numpy as np
+
+from src.engine.solver.betting_tree import BettingTree
+from src.engine.solver.infoset import InfoSet
+
+logger = logging.getLogger(__name__)
+
+# float32 halves the footprint of the two hot arrays at a measured relative error
+# of 5.95e-8, comfortably inside f32 epsilon (see the m0002 downcast measurement).
+REGRET_DTYPE = np.float32
+STRATEGY_DTYPE = np.float32
+UTILITY_DTYPE = np.float64
+REACH_DTYPE = np.int64
+VISITED_DTYPE = np.uint8
+
+_ARRAYS = ("regrets", "strategy_sum", "reach_counts", "cumulative_utility", "visited")
+
+
+class StaticArrayStorage:
+    """Infoset storage backed by arrays sized to a static betting tree.
+
+    Deliberately not a subclass of the legacy ``Storage`` ABC: that interface is
+    keyed by ``InfoSetKey``, and reintroducing a string key here would restore
+    the hashing this design exists to remove. Consumers address infosets by
+    ``(node_id, bucket)``, which the tree already owns.
+    """
+
+    def __init__(
+        self,
+        tree: BettingTree,
+        *,
+        session_id: str | None = None,
+        attach: bool = False,
+    ):
+        """Allocate (or attach to) arrays sized to ``tree``.
+
+        session_id:
+            ``None`` allocates process-local arrays. A name allocates them in
+            shared memory so worker processes can Hogwild-write the same table.
+        attach:
+            Map an existing session's arrays instead of creating them — the
+            worker-process path. The worker rebuilds the tree locally from config
+            rather than receiving it, so no index information crosses a process
+            boundary at any point. Requires ``session_id``.
+        """
+        if attach and session_id is None:
+            raise ValueError("attach=True requires a session_id to attach to")
+
+        self.tree = tree
+        self.session_id = session_id
+        self._shm: list[shared_memory.SharedMemory] = []
+        self._owns_shm = False
+
+        if session_id is None:
+            self.regrets = np.zeros(tree.num_slots, dtype=REGRET_DTYPE)
+            self.strategy_sum = np.zeros(tree.num_slots, dtype=STRATEGY_DTYPE)
+            self.reach_counts = np.zeros(tree.num_rows, dtype=REACH_DTYPE)
+            self.cumulative_utility = np.zeros(tree.num_rows, dtype=UTILITY_DTYPE)
+            self.visited = np.zeros(tree.num_rows, dtype=VISITED_DTYPE)
+        elif attach:
+            self._map_shared(create=False)
+        else:
+            self._map_shared(create=True)
+
+    # ---- shared memory ---------------------------------------------------
+
+    def _spec(self) -> dict[str, tuple[int, np.dtype]]:
+        return {
+            "regrets": (self.tree.num_slots, np.dtype(REGRET_DTYPE)),
+            "strategy_sum": (self.tree.num_slots, np.dtype(STRATEGY_DTYPE)),
+            "reach_counts": (self.tree.num_rows, np.dtype(REACH_DTYPE)),
+            "cumulative_utility": (self.tree.num_rows, np.dtype(UTILITY_DTYPE)),
+            "visited": (self.tree.num_rows, np.dtype(VISITED_DTYPE)),
+        }
+
+    def _shm_name(self, array: str) -> str:
+        return f"sts_{array[:4]}_{self.session_id}"
+
+    def _map_shared(self, *, create: bool) -> None:
+        """Create or attach the shared segments and bind them as array views."""
+        self._owns_shm = create
+        for name, (length, dtype) in self._spec().items():
+            if create:
+                shm = shared_memory.SharedMemory(
+                    name=self._shm_name(name),
+                    create=True,
+                    size=max(1, length * dtype.itemsize),
+                )
+            else:
+                shm = shared_memory.SharedMemory(name=self._shm_name(name), create=False)
+            self._shm.append(shm)
+            array = np.ndarray((length,), dtype=dtype, buffer=shm.buf)
+            if create:
+                array.fill(0)
+            setattr(self, name, array)
+
+    def close(self) -> None:
+        """Release this process's mappings; the creator also unlinks them."""
+        for shm in self._shm:
+            try:
+                shm.close()
+                if self._owns_shm:
+                    shm.unlink()
+            except (FileNotFoundError, BufferError):
+                pass
+        self._shm = []
+
+    # ---- infoset access --------------------------------------------------
+
+    def infoset_at(self, node_id: int, bucket: int) -> InfoSet:
+        """Resolve an infoset for the traversal, marking it as covered.
+
+        The returned views alias shared memory — writes through
+        ``infoset.regrets`` land in storage with no write-back step. Always
+        writable: a static row cannot be unknown to a worker.
+
+        Coverage is marked here rather than from ``reach_counts`` because that
+        counter increments only where the traverser enumerates its own actions,
+        so it silently omits opponent nodes, where the average strategy
+        accumulates. Counting those as untouched understates coverage by more
+        than half — and coverage is the diagnostic that makes under-training
+        visible. Read-only consumers must use :meth:`view` instead, or a metrics
+        sweep would mark the entire tree as covered.
+        """
+        infoset = self.view(node_id, bucket)
+        self.visited[infoset.row] = 1
+        return infoset
+
+    def view(self, node_id: int, bucket: int) -> InfoSet:
+        """Same view as :meth:`infoset_at` but without marking coverage."""
+        node = self.tree.nodes[node_id]
+        start, end = self.tree.slots(node_id, bucket)
+        row = self.tree.row(node_id, bucket)
+
+        infoset = InfoSet(None, node.legal_actions, allocate_arrays=False)
+        infoset.regrets = self.regrets[start:end]
+        infoset.strategy_sum = self.strategy_sum[start:end]
+        infoset.node_id = node_id
+        infoset.bucket = bucket
+        infoset.row = row
+        infoset.attach_stats_views(self.reach_counts, self.cumulative_utility, row, read_only=False)
+        infoset.sync_stats_to_storage(self.reach_counts[row], self.cumulative_utility[row])
+        return infoset
+
+    def view_at_row(self, row: int) -> InfoSet:
+        """Read-only-safe view for a flat row index."""
+        node_id = int(np.searchsorted(self.tree.row_offset, row, side="right") - 1)
+        return self.view(node_id, row - int(self.tree.row_offset[node_id]))
+
+    def num_infosets(self) -> int:
+        """Total rows in the tree.
+
+        Unlike the dynamic backend this is a property of the config, not of how
+        much of the tree training has happened to reach — which is precisely why
+        it can no longer be mistaken for training progress. Use
+        :meth:`num_touched_infosets` for that.
+        """
+        return self.tree.num_rows
+
+    def num_touched_infosets(self) -> int:
+        """Rows the traversal has resolved at least once — the real progress signal.
+
+        ``num_touched / num_infosets`` is tree coverage, and
+        ``reach_counts.sum() / num_touched`` is the mean visits per touched
+        infoset. The second number is the one that matters: CFR needs it in the
+        thousands, and a static denominator makes that checkable during a run
+        rather than inferable afterwards.
+        """
+        return int(np.count_nonzero(self.visited))
+
+    def coverage(self) -> float:
+        """Fraction of the enumerated tree the traversal has reached."""
+        return self.num_touched_infosets() / self.tree.num_rows if self.tree.num_rows else 0.0
+
+    def mean_visits_per_touched_infoset(self) -> float:
+        """Mean traverser visits across rows that have been reached at all.
+
+        The headline convergence diagnostic. Compare against the 1e3-1e4 that
+        CFR needs before a regret average carries signal.
+        """
+        touched = self.num_touched_infosets()
+        return float(self.reach_counts.sum()) / touched if touched else 0.0
+
+    def iter_infosets(self) -> Iterator[InfoSet]:
+        for node in self.tree.nodes:
+            for bucket in range(self.tree.num_buckets(node.street)):
+                yield self.view(node.node_id, bucket)
+
+    def iter_touched_infosets(self) -> Iterator[InfoSet]:
+        """Only rows the traversal has reached — the useful subset for metrics."""
+        for node in self.tree.nodes:
+            base = int(self.tree.row_offset[node.node_id])
+            for bucket in range(self.tree.num_buckets(node.street)):
+                if self.visited[base + bucket]:
+                    yield self.view(node.node_id, bucket)
+
+    # ---- diagnostics -----------------------------------------------------
+
+    def nbytes(self) -> int:
+        return sum(int(getattr(self, name).nbytes) for name in _ARRAYS)
+
+    def __str__(self) -> str:
+        return (
+            f"StaticArrayStorage(nodes={len(self.tree)}, rows={self.tree.num_rows:,}, "
+            f"slots={self.tree.num_slots:,}, {self.nbytes() / 1e6:.1f} MB)"
+        )

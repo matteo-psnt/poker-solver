@@ -107,6 +107,15 @@ class MCCFRSolver:
         """
         return infoset_encoder.encode_infoset_key(state, player, self.card_abstraction)
 
+    def lookup_infoset(self, state: GameState, current_player: int):
+        """Resolve ``current_player``'s infoset at ``state`` for the traversal.
+
+        The identity seam (see ``traversal._infoset_context``). This
+        implementation hashes an ``InfoSetKey``; ``StaticTreeSolver`` overrides it
+        to index the betting tree instead.
+        """
+        return traversal.dynamic_infoset_context(self, state, current_player)
+
     def _cfr_external_sampling(self, state: GameState, traversing_player: int) -> float:
         return traversal.cfr_external_sampling(self, state, traversing_player)
 
