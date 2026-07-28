@@ -96,6 +96,49 @@ def precompute(
     return {"abstraction_config": abstraction_config, "output_dir": str(out)}
 
 
+# memory: the river matrices are the sizing constraint, not the bucketing. Equity
+# and weight matrices are (134,459 boards x ~1,326 hand columns) float64 -- ~1.4 GB
+# each -- and flattening the valid entries for the k-means fit allocates another
+# ~2.3 GB. 64 GB leaves room for that plus the per-count refits without swapping.
+@app.function(
+    image=image,
+    volumes={DATA_MOUNT: data_volume},
+    cpu=32,
+    memory=65536,
+    timeout=10800,
+)
+def bucket_sweep(
+    abstraction_config: str,
+    street: str,
+    bucket_counts: list[int],
+    board_limit: int | None = None,
+) -> dict[str, Any]:
+    """Measure what each bucket count actually buys on one street.
+
+    One equity pass, then a k-means per bucket count over the same matrices --
+    so a seven-point sweep costs about one precompute rather than seven. Writes
+    nothing to the Volume: this measures an abstraction rather than producing
+    one (see ``services.sweep_bucket_counts``).
+    """
+    _configure_logging()
+    from src.core.game.state import Street
+    from src.pipeline import services
+
+    results = services.sweep_bucket_counts(
+        abstraction_config,
+        Street[street.upper()],
+        bucket_counts,
+        num_workers=32,
+        board_limit=board_limit,
+    )
+    return {
+        "abstraction_config": abstraction_config,
+        "street": street.upper(),
+        "board_limit": board_limit,
+        "results": results,
+    }
+
+
 # retries=0: a training container that dies has already written its progress to the
 # Volume, so the recovery path is an explicit resume with a target, not a silent
 # respawn. Modal retries infrastructure failures (an OOM kill is one) by default,
@@ -484,6 +527,70 @@ def resume(
         "status": metadata.status,
         "no_op": False,
     }
+
+
+@app.local_entrypoint()
+def sweep_buckets(
+    config: str = "production",
+    street: str = "river",
+    counts: str = "20,30,60,100,200,300,600",
+    board_limit: int = 0,
+) -> None:
+    """How much resolution does each bucket count actually buy?
+
+    Motivation: at production settings the river resolves equity to a
+    within-bucket std of 0.000352 (variance explained 0.999999) while the flop
+    sits at 0.9934 — so the river's 600 buckets look saturated, and the river is
+    ~94% of the infoset space. That claim currently rests on a 1/k
+    extrapolation; this measures the curve instead.
+
+    board_limit>0 runs a cheap subset first — use it to validate the path before
+    paying for the full river pass.
+
+        uv run modal run modal_app.py::sweep_buckets --street flop --board-limit 40
+        uv run modal run modal_app.py::sweep_buckets --street river
+    """
+    bucket_counts = [int(part) for part in counts.split(",") if part.strip()]
+    limit = board_limit if board_limit > 0 else None
+
+    out = bucket_sweep.remote(
+        abstraction_config=config,
+        street=street,
+        bucket_counts=bucket_counts,
+        board_limit=limit,
+    )
+
+    rows = out["results"]
+    scope = f"{limit} boards" if limit else "all boards"
+    print(f"\n{out['street']} bucket sweep — config={out['abstraction_config']} ({scope})\n")
+    header = f"{'buckets':>8} {'occupied':>12} {'var explained':>14} {'within std':>12} {'max/median':>11}"
+    print(header)
+    print("-" * len(header))
+    for row in rows:
+        occupied = f"{row['occupied_buckets']}/{row['num_buckets']}"
+        median = row["bucket_combos_median"] or 1.0
+        print(
+            f"{row['requested_buckets']:>8} {occupied:>12} {row['variance_explained']:>14.6f} "
+            f"{row['within_bucket_std']:>12.6f} {row['bucket_combos_max'] / median:>10.1f}x"
+        )
+
+    baseline = max(rows, key=lambda r: r["requested_buckets"])
+    print(
+        "\nreference: the FLOP at its production 100 buckets sits at variance explained 0.993421."
+    )
+    print(
+        "read the smallest count whose variance explained still clears that bar — "
+        "buckets past it are resolving equity nobody can act on."
+    )
+    print(
+        f"(largest measured here: {baseline['requested_buckets']} buckets, "
+        f"variance explained {baseline['variance_explained']:.6f})"
+    )
+    print(
+        "\nCAVEAT: variance explained measures EQUITY resolution only. Two river hands "
+        "with equal equity can still want different strategies (blockers), which this "
+        "cannot see — gate any bucket-count change on exploitability, not on this table."
+    )
 
 
 @app.local_entrypoint()
