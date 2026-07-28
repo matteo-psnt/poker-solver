@@ -39,6 +39,7 @@ from src.pipeline.abstraction.postflop.bucketer import (
 )
 from src.pipeline.abstraction.postflop.canonical_hands import enumerate_hand_classes
 from src.pipeline.abstraction.postflop.quality import compute_street_quality
+from src.pipeline.abstraction.preflop.opponent_clusters import opponent_cluster_assignment
 from src.pipeline.abstraction.utils.equity import RangeEquityEngine
 
 logger = logging.getLogger(__name__)
@@ -58,27 +59,47 @@ _MAX_CHUNK_BOARDS = 512
 
 
 def _worker_compute_board_chunk(
-    args: tuple[list[tuple[int, tuple[Card, ...]]], int | None, int, int | None],
+    args: tuple[
+        list[tuple[int, tuple[Card, ...]]],
+        int | None,
+        int,
+        int | None,
+        tuple[np.ndarray, int] | None,
+    ],
 ) -> list[tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]]:
     """
-    Compute per-class equities (and optional realization histograms) for a
+    Compute per-class equities (and optional per-class feature vectors) for a
     chunk of boards.
 
-    Returns one (row, columns, equities, multiplicities, histograms) tuple per
-    board; histograms is None when histogram_bins is None.
+    ``args`` is (boards, flop_runouts, seed, histogram_bins, ochs). ``ochs`` is
+    None for the equity-realization histogram, or (cluster_of_class,
+    num_clusters) to fill the feature slot with OCHS instead.
+
+    Returns one (row, columns, equities, multiplicities, features) tuple per
+    board; features is None when histogram_bins is None.
     """
-    boards, flop_runouts, seed, histogram_bins = args
+    boards, flop_runouts, seed, histogram_bins, ochs_clusters = args
     engine = RangeEquityEngine(max_runouts=flop_runouts, seed=seed)
 
+    # OCHS fills the same per-class feature slot the realization histogram
+    # normally occupies, so everything downstream — the matrices, the L2 k-means,
+    # the storage layout — is reused unchanged. Only the meaning of the vector
+    # differs: win rate per opponent cluster, rather than probability per equity
+    # bin.
     results = []
     for row, board in boards:
         table = engine.board_equities(board, histogram_bins=histogram_bins)
         classes = enumerate_hand_classes(board)
 
+        ochs_lookup = None
+        if ochs_clusters is not None:
+            combos, ochs = engine.board_ochs(board, ochs_clusters[0], ochs_clusters[1])
+            ochs_lookup = {frozenset((a.mask, b.mask)): ochs[i] for i, (a, b) in enumerate(combos)}
+
         cols = np.empty(len(classes), dtype=np.int32)
         equities = np.empty(len(classes), dtype=np.float32)
         multiplicities = np.empty(len(classes), dtype=np.uint8)
-        histograms = (
+        features = (
             np.empty((len(classes), histogram_bins), dtype=np.float16)
             if histogram_bins is not None
             else None
@@ -87,10 +108,15 @@ def _worker_compute_board_chunk(
             cols[k] = _HAND_ID_TO_COL[hand_class.canonical.hand_id]
             equities[k] = table.equity(hand_class.representative)
             multiplicities[k] = hand_class.multiplicity
-            if histograms is not None:
-                histograms[k] = table.histogram(hand_class.representative)
+            if features is None:
+                continue
+            if ochs_lookup is None:
+                features[k] = table.histogram(hand_class.representative)
+            else:
+                card_a, card_b = hand_class.representative
+                features[k] = ochs_lookup[frozenset((card_a.mask, card_b.mask))]
 
-        results.append((row, cols, equities, multiplicities, histograms))
+        results.append((row, cols, equities, multiplicities, features))
 
     return results
 
@@ -154,7 +180,24 @@ class PostflopPrecomputer:
         board_ids = np.array([info.board_id for info in board_infos], dtype=np.int64)
         logger.info(f"Computing exact equities for {n_boards} canonical {street.name} boards...")
 
-        histogram_bins = self.config.equity_histogram_bins if street != Street.RIVER else None
+        # The river has no future cards, so a realization histogram is degenerate
+        # there. Under OCHS the same slot carries win rates per opponent cluster
+        # instead, which is the whole point: it restores a multi-dimensional
+        # river feature where scalar equity had collapsed to one saturated number.
+        use_ochs = street == Street.RIVER and self.config.river_feature == "ochs"
+        if street == Street.RIVER:
+            histogram_bins = self.config.ochs_clusters if use_ochs else None
+        else:
+            histogram_bins = self.config.equity_histogram_bins
+
+        ochs_args = None
+        if use_ochs:
+            ochs_args = (
+                opponent_cluster_assignment(
+                    num_clusters=self.config.ochs_clusters, seed=self.config.seed
+                ),
+                self.config.ochs_clusters,
+            )
 
         equity_matrix = np.full((n_boards, N_HAND_COLUMNS), np.nan, dtype=np.float32)
         weight_matrix = np.zeros((n_boards, N_HAND_COLUMNS), dtype=np.uint8)
@@ -175,7 +218,7 @@ class PostflopPrecomputer:
             futures = [
                 executor.submit(
                     _worker_compute_board_chunk,
-                    (chunk, flop_runouts, self.config.seed, histogram_bins),
+                    (chunk, flop_runouts, self.config.seed, histogram_bins, ochs_args),
                 )
                 for chunk in chunks
             ]
@@ -214,13 +257,28 @@ class PostflopPrecomputer:
         if values.size == 0:
             raise ValueError(f"No equity data computed for {street.name}")
 
+        is_ochs = street == Street.RIVER and self.config.river_feature == "ochs"
+
         if hist_matrix is None:
             bucket_flat, actual_buckets = self._bucket_scalar(values, weights, target_buckets)
             quality_extra: dict = {"bucketing": "scalar_equity"}
+        elif is_ochs:
+            # OCHS vectors are already the feature. Taking a CDF of them would be
+            # meaningless — the components are win rates against distinct
+            # opponent clusters, not a distribution over ordered bins.
+            features = hist_matrix[valid].astype(np.float64)
+            bucket_flat, actual_buckets, dispersion = self._bucket_histograms(
+                features, weights, target_buckets, order_by="mean"
+            )
+            quality_extra = {
+                "bucketing": "ochs",
+                "ochs_clusters": int(hist_matrix.shape[-1]),
+                "within_bucket_ochs_rmse": dispersion,
+            }
         else:
             features = self._cdf_features(hist_matrix, valid)
             bucket_flat, actual_buckets, hist_dispersion = self._bucket_histograms(
-                features, weights, target_buckets
+                features, weights, target_buckets, order_by="cdf"
             )
             quality_extra = {
                 "bucketing": "equity_histogram_cdf",
@@ -289,9 +347,14 @@ class PostflopPrecomputer:
         features: np.ndarray,
         weights: np.ndarray,
         num_buckets: int,
+        order_by: str = "cdf",
     ) -> tuple[np.ndarray, int, float]:
         """
-        K-means over realization-CDF features (flop/turn).
+        K-means over multi-dimensional per-hand features.
+
+        ``order_by`` selects how centroids are ranked into bucket ids: ``"cdf"``
+        reads them as realization CDFs (flop/turn), ``"mean"`` as OCHS win-rate
+        vectors (river).
 
         Fits on a weighted subsample, assigns every row in chunks, and orders
         buckets by ascending centroid-implied mean equity so bucket IDs stay
@@ -317,14 +380,21 @@ class PostflopPrecomputer:
             chunk = slice(start, min(start + _KMEANS_ASSIGN_CHUNK, n))
             labels[chunk] = kmeans.predict(features[chunk])
 
-        # Mean equity implied by a centroid CDF c: sum of bin probabilities
-        # times bin centers, with p = diff([0, c, 1]).
         centers = kmeans.cluster_centers_
-        n_bins = centers.shape[1] + 1
-        bin_centers = (np.arange(n_bins) + 0.5) / n_bins
-        full_cdf = np.hstack([centers, np.ones((centers.shape[0], 1))])
-        probabilities = np.diff(full_cdf, axis=1, prepend=0.0)
-        center_means = probabilities @ bin_centers
+        if order_by == "mean":
+            # OCHS centroids: components are win rates against opponent clusters,
+            # so their plain mean is the natural strength summary. The CDF formula
+            # below would read them as bin probabilities and order buckets by a
+            # quantity that does not exist.
+            center_means = centers.mean(axis=1)
+        else:
+            # Mean equity implied by a centroid CDF c: sum of bin probabilities
+            # times bin centers, with p = diff([0, c, 1]).
+            n_bins = centers.shape[1] + 1
+            bin_centers = (np.arange(n_bins) + 0.5) / n_bins
+            full_cdf = np.hstack([centers, np.ones((centers.shape[0], 1))])
+            probabilities = np.diff(full_cdf, axis=1, prepend=0.0)
+            center_means = probabilities @ bin_centers
 
         order = np.argsort(center_means, kind="stable")
         relabel = np.empty_like(order)

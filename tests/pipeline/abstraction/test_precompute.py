@@ -121,7 +121,7 @@ class TestEquityWorker:
             (0, (Card.new("As"), Card.new("Kh"), Card.new("2c"))),
             (1, (Card.new("2s"), Card.new("7h"), Card.new("Qc"))),
         ]
-        results = _worker_compute_board_chunk((boards, 20, 42, 8))
+        results = _worker_compute_board_chunk((boards, 20, 42, 8, None))
 
         assert len(results) == 2
         for (row, _board), (result_row, cols, equities, multiplicities, hists) in zip(
@@ -142,7 +142,7 @@ class TestEquityWorker:
     def test_worker_without_histograms(self):
         """River-style call (histogram_bins=None) returns no histograms."""
         boards = [(0, (Card.new("2s"), Card.new("7h"), Card.new("Qc")))]
-        _, _, equities, _, hists = _worker_compute_board_chunk((boards, 25, 42, None))[0]
+        _, _, equities, _, hists = _worker_compute_board_chunk((boards, 25, 42, None, None))[0]
 
         assert hists is None
         assert np.all((equities >= 0.0) & (equities <= 1.0))
@@ -151,8 +151,8 @@ class TestEquityWorker:
         """Same args produce identical equities (seeded runout sampling)."""
         boards = [(0, (Card.new("2s"), Card.new("7h"), Card.new("Qc")))]
 
-        _, cols1, eq1, _, _ = _worker_compute_board_chunk((boards, 25, 42, None))[0]
-        _, cols2, eq2, _, _ = _worker_compute_board_chunk((boards, 25, 42, None))[0]
+        _, cols1, eq1, _, _ = _worker_compute_board_chunk((boards, 25, 42, None, None))[0]
+        _, cols2, eq2, _, _ = _worker_compute_board_chunk((boards, 25, 42, None, None))[0]
 
         assert np.array_equal(cols1, cols2)
         assert np.array_equal(eq1, eq2)
@@ -160,7 +160,7 @@ class TestEquityWorker:
     def test_premium_hands_have_high_equity(self):
         """Some hands on a dry board must be strong (sanity of equity scale)."""
         boards = [(0, (Card.new("2s"), Card.new("7h"), Card.new("Qc")))]
-        _, _, equities, _, _ = _worker_compute_board_chunk((boards, 25, 42, None))[0]
+        _, _, equities, _, _ = _worker_compute_board_chunk((boards, 25, 42, None, None))[0]
 
         assert float(equities.max()) > 0.8
 

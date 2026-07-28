@@ -35,6 +35,40 @@ OPPONENTS_PER_FULL_BOARD = 990
 _TABLE_CACHE_SIZE = 32
 
 
+def _build_class_index_table() -> np.ndarray:
+    """``(52, 52)`` lookup from a pair of eval7 card indices to preflop class id.
+
+    Built once so the OCHS inner loop can classify 1,081 combos per board with an
+    array index instead of 1,081 Python calls -- at 134,459 river boards that
+    difference is the whole cost of the feature.
+    """
+    from src.pipeline.abstraction.preflop.hand_classes import PreflopHandClasses
+
+    classes = PreflopHandClasses()
+    deck = eval7.Deck().cards
+    by_index: dict[int, Card] = {}
+    for raw in deck:
+        by_index[raw.rank * 4 + raw.suit] = Card(raw)
+
+    table = np.full((52, 52), -1, dtype=np.int64)
+    for i, card_i in by_index.items():
+        for j, card_j in by_index.items():
+            if i == j:
+                continue
+            table[i, j] = classes.get_hand_index((card_i, card_j))
+    return table
+
+
+_CLASS_INDEX_TABLE: np.ndarray | None = None
+
+
+def class_index_table() -> np.ndarray:
+    global _CLASS_INDEX_TABLE
+    if _CLASS_INDEX_TABLE is None:
+        _CLASS_INDEX_TABLE = _build_class_index_table()
+    return _CLASS_INDEX_TABLE
+
+
 def _combo_key(hole_cards: tuple[Card, Card]) -> tuple[int, int]:
     a, b = hole_cards[0].mask, hole_cards[1].mask
     return (a, b) if a <= b else (b, a)
@@ -229,6 +263,101 @@ class RangeEquityEngine:
 
         combos = [(remaining[a], remaining[b]) for a, b in combo_pairs]
         return BoardEquityTable(board, combos, equities, histograms)
+
+    def board_ochs(
+        self,
+        board: tuple[Card, ...],
+        cluster_of_class: np.ndarray,
+        num_clusters: int,
+    ) -> tuple[list[tuple[Card, Card]], np.ndarray]:
+        """Opponent Cluster Hand Strength for every combo on a complete board.
+
+        Returns ``(combos, ochs)`` where ``ochs[i, c]`` is combo ``i``'s equity
+        against a uniformly random opponent holding *drawn from cluster c* --
+        win + half tie, with exact card removal.
+
+        Why this exists: scalar equity against a uniform range cannot say *which*
+        part of the opponent's range a hand beats, so a bluff-catcher and a weak
+        made hand with the same equity number become the same infoset despite
+        wanting opposite strategies. The vector separates them. See
+        :mod:`src.pipeline.abstraction.preflop.opponent_clusters`.
+
+        River only: with no cards to come each combo has one strength, which is
+        what makes the counting argument below exact.
+
+        Counting: per cluster, wins/ties come from binary search into that
+        cluster's sorted strengths, then card removal subtracts, for each of the
+        hero's two cards, the cluster members sharing it. A conflicting opponent
+        shares exactly one card with the hero, so per-card subtraction is exact
+        inclusion-exclusion -- except for the hero itself, which shares both and
+        is therefore subtracted twice; the ``+ in_cluster`` terms add it back
+        once. This mirrors the ``n_valid + 1`` trick in ``board_equities``.
+        """
+        board = tuple(board)
+        if len(board) != 5:
+            raise ValueError(f"OCHS is defined on a complete board; got {len(board)} cards")
+
+        board_masks = {c.mask for c in board}
+        remaining = [c for c in self._full_deck if c.mask not in board_masks]
+        n_rem = len(remaining)
+        combo_pairs = list(itertools.combinations(range(n_rem), 2))
+        n_combos = len(combo_pairs)
+
+        rem_e7 = [c.to_eval7() for c in remaining]
+        board_e7 = [c.to_eval7() for c in board]
+
+        cards7 = [*board_e7, None, None]
+        evaluate = eval7.evaluate
+        strengths = np.empty(n_combos, dtype=np.int64)
+        for i, (a, b) in enumerate(combo_pairs):
+            cards7[5] = rem_e7[a]
+            cards7[6] = rem_e7[b]
+            strengths[i] = evaluate(cards7)
+
+        # Combo -> preflop class -> opponent cluster, vectorised through the table.
+        table = class_index_table()
+        deck_idx = np.array([c.rank * 4 + c.suit for c in rem_e7], dtype=np.int64)
+        pair_a = np.array([a for a, _ in combo_pairs], dtype=np.int64)
+        pair_b = np.array([b for _, b in combo_pairs], dtype=np.int64)
+        class_ids = table[deck_idx[pair_a], deck_idx[pair_b]]
+        clusters = cluster_of_class[class_ids]
+
+        containing: list[list[int]] = [[] for _ in range(n_rem)]
+        for i, (a, b) in enumerate(combo_pairs):
+            containing[a].append(i)
+            containing[b].append(i)
+        combos_containing = [np.asarray(lst, dtype=np.int64) for lst in containing]
+
+        ochs = np.zeros((n_combos, num_clusters), dtype=np.float64)
+        for cluster in range(num_clusters):
+            members = np.nonzero(clusters == cluster)[0]
+            if members.size == 0:
+                continue
+            in_cluster = (clusters == cluster).astype(np.int64)
+
+            sorted_members = np.sort(strengths[members])
+            wins = np.searchsorted(sorted_members, strengths, side="left")
+            upper = np.searchsorted(sorted_members, strengths, side="right")
+            ties = upper - wins + in_cluster
+            opp = np.full(n_combos, members.size, dtype=np.int64) + in_cluster
+
+            for hero_combos in combos_containing:
+                blockers = hero_combos[clusters[hero_combos] == cluster]
+                if blockers.size == 0:
+                    continue
+                sorted_blockers = np.sort(strengths[blockers])
+                hero_strengths = strengths[hero_combos]
+                lo = np.searchsorted(sorted_blockers, hero_strengths, side="left")
+                hi = np.searchsorted(sorted_blockers, hero_strengths, side="right")
+                wins[hero_combos] -= lo
+                ties[hero_combos] -= hi - lo
+                opp[hero_combos] -= blockers.size
+
+            playable = opp > 0
+            ochs[playable, cluster] = (wins[playable] + 0.5 * ties[playable]) / opp[playable]
+
+        combos = [(remaining[a], remaining[b]) for a, b in combo_pairs]
+        return combos, ochs
 
     def hand_equity(self, hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -> float:
         """

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,6 +42,19 @@ class PrecomputeConfig(StrictFrozenModel):
     )
     flop_runouts: PositiveInt | None = None
     equity_histogram_bins: PositiveInt = 8
+
+    # River bucketing feature.
+    #   scalar_equity  equity vs a UNIFORM opponent range (the original)
+    #   ochs           Opponent Cluster Hand Strength: a vector of win rates
+    #                  against clustered opponent holdings (Johanson et al.,
+    #                  AAMAS 2013)
+    # Scalar equity cannot express *which* part of the opponent's range a hand
+    # beats, so a bluff-catcher and a weak made hand with equal equity share a
+    # bucket while wanting opposite strategies. Measured on the production
+    # abstraction, scalar equity is saturated at 600 buckets (variance explained
+    # 0.999999) -- the feature, not the bucket count, is the binding limit.
+    river_feature: Literal["scalar_equity", "ochs"] = "scalar_equity"
+    ochs_clusters: PositiveInt = 8
     num_workers: PositiveInt | None = None
     seed: int = 42
     kmeans_max_iter: PositiveInt = 300
@@ -78,5 +91,11 @@ class PrecomputeConfig(StrictFrozenModel):
             "flop_runouts": self.flop_runouts,
             "equity_histogram_bins": self.equity_histogram_bins,
         }
+        # Only perturb the hash when a non-default river feature is in play, so
+        # every abstraction built before OCHS existed keeps its identity and the
+        # provenance checks guarding evaluation still recognise it.
+        if self.river_feature != "scalar_equity":
+            config_dict["river_feature"] = self.river_feature
+            config_dict["ochs_clusters"] = self.ochs_clusters
         stable_json = json.dumps(config_dict, sort_keys=True)
         return hashlib.sha256(stable_json.encode()).hexdigest()[:16]
