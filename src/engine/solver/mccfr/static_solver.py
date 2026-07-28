@@ -30,6 +30,7 @@ import numpy as np
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action
+from src.core.game.rules import GameRules
 from src.core.game.state import GameState
 from src.engine.solver.betting_tree import BettingTree, build_betting_tree
 from src.engine.solver.infoset import InfoSet
@@ -83,18 +84,15 @@ class StaticTreeSolver(MCCFRSolver):
         session_id: str | None = None,
     ) -> StaticTreeSolver:
         """Enumerate the tree, allocate storage to fit it, and wire up a solver."""
-        solver = cls.__new__(cls)
-        MCCFRSolver.__init__(solver, action_model, card_abstraction, None, config)  # type: ignore[arg-type]
+        rules = GameRules(config.game.small_blind, config.game.big_blind)
         tree = build_betting_tree(
-            solver.rules,
+            rules,
             action_model,
             card_abstraction,
             starting_stack=config.game.starting_stack,
         )
         storage = StaticArrayStorage(tree, session_id=session_id)
-        solver.storage = storage
-        solver.tree = tree
-        return solver
+        return cls(action_model, card_abstraction, storage, config, tree=tree)
 
     def lookup_infoset(
         self, state: GameState, current_player: int
