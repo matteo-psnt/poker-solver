@@ -1006,6 +1006,113 @@ def ochs_gate(
     )
 
 
+@app.local_entrypoint()
+def ochs_gate_eval(
+    scalar_runs: str,
+    ochs_runs: str,
+    at_iteration: int = 1_000_000,
+    board_seeds: str = "7,11,13",
+    br_flops: int = 16,
+    br_turns: int = 3,
+    br_rivers: int = 3,
+    eval_cpu: int = 8,
+    eval_memory: int = 16384,
+    timeout: int = 10800,
+) -> None:
+    """Score already-trained OCHS-gate runs by exact BR at a shared iteration rung.
+
+    Split out from ``ochs_gate`` because training and scoring have very different
+    failure modes: a lost client kills training (Modal cancels the remote
+    functions with it), and re-running the scoring should never mean re-running
+    the training. Every run is scored at the same ``at_iteration`` rung, so arms
+    are compared at an identical budget even when their runs stopped at
+    different points.
+
+    Board seeds are shared across every run, so board luck cancels in the
+    arm-to-arm difference (CRN). The replicate spread WITHIN an arm is training
+    noise, and it is what any claimed effect has to clear — it is reported
+    alongside the difference rather than left implicit.
+    """
+    scalar = [r.strip() for r in scalar_runs.split(",") if r.strip()]
+    ochs = [r.strip() for r in ochs_runs.split(",") if r.strip()]
+    boards = [int(b) for b in board_seeds.split(",") if b.strip()]
+
+    print(
+        f"\n=== OCHS gate scoring @ iteration {at_iteration:,} "
+        f"(exact BR {br_flops}/{br_turns}/{br_rivers}, {len(boards)} board seeds) ==="
+    )
+    calls: dict[tuple[str, str, int], Any] = {}
+    for arm, runs in (("scalar", scalar), ("ochs", ochs)):
+        for run_id in runs:
+            for board_seed in boards:
+                calls[(arm, run_id, board_seed)] = evaluate.with_options(
+                    cpu=eval_cpu, memory=eval_memory, timeout=timeout
+                ).spawn(
+                    run_id=run_id,
+                    method="exact_br",
+                    num_workers=eval_cpu,
+                    br_flops=br_flops,
+                    br_turns=br_turns,
+                    br_rivers=br_rivers,
+                    br_board_seed=board_seed,
+                    at_iteration=at_iteration,
+                )
+
+    scores: dict[tuple[str, str, int], float] = {}
+    for key, call in calls.items():
+        result = _await_call(call, key[1], "evaluate")
+        scores[key] = result["results"]["exploitability_mbb"]
+        print(f"  {key[0]:>6} {key[1]} board={key[2]}: {scores[key]:.1f} mbb/g")
+
+    def mean(values: list[float]) -> float:
+        return sum(values) / len(values)
+
+    def sd(values: list[float]) -> float:
+        if len(values) < 2:
+            return 0.0
+        m = mean(values)
+        return (sum((v - m) ** 2 for v in values) / (len(values) - 1)) ** 0.5
+
+    print("\n=== exact BR by arm and board seed (mbb/g; lower is better) ===")
+    header = "board".ljust(8) + "scalar mean".rjust(14) + "ochs mean".rjust(12) + "diff".rjust(10)
+    print(header)
+    print("-" * len(header))
+    per_board_diff = []
+    for board_seed in boards:
+        s = [scores[("scalar", r, board_seed)] for r in scalar]
+        o = [scores[("ochs", r, board_seed)] for r in ochs]
+        diff = mean(o) - mean(s)
+        per_board_diff.append(diff)
+        print(f"{board_seed:<8}{mean(s):>14.1f}{mean(o):>12.1f}{diff:>+10.1f}")
+
+    overall = mean(per_board_diff)
+    print(f"\n  mean difference (ochs - scalar): {overall:+.1f} mbb/g")
+    print(f"  spread across board seeds (CRN-cancelled): {sd(per_board_diff):.1f}")
+
+    replicate_sd = mean(
+        [
+            sd([scores[(arm, r, b)] for r in runs])
+            for arm, runs in (("scalar", scalar), ("ochs", ochs))
+            for b in boards
+        ]
+    )
+    print(f"  replicate sd WITHIN an arm (training noise): {replicate_sd:.1f}")
+    n_per_arm = len(scalar)
+    resolution = 2 * replicate_sd * (2 / max(1, n_per_arm)) ** 0.5
+    print(f"  ~2-sigma resolution at {n_per_arm} replicates/arm: {resolution:.1f} mbb/g")
+
+    if abs(overall) > resolution:
+        verdict = "OCHS BETTER" if overall < 0 else "OCHS WORSE"
+    else:
+        verdict = "INCONCLUSIVE — the difference is inside training noise"
+    print(f"\n  verdict: {verdict}")
+    print(
+        f"\n  CAVEAT: iteration {at_iteration:,} is ~{at_iteration * 22.8 / 87984:.0f} regret "
+        "updates per infoset, below the 1e3 CFR needs. An inconclusive result here is\n"
+        "  uninformative rather than evidence of no effect."
+    )
+
+
 def _noise_floor_report(
     run_ids: list[str],
     *,
