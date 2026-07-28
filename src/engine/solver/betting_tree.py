@@ -173,6 +173,11 @@ class BettingTree:
             self.num_actions[node.node_id] = node.num_actions
             rows_per_node[node.node_id] = self.num_buckets(node.street)
 
+        # Kept as an array, not recomputed from street: the storage bounds check
+        # runs once per node visit, and an array index beats a Street comparison
+        # plus dict lookup on that path.
+        self.buckets_per_node = rows_per_node
+
         # Exclusive prefix sums: node n's rows/slots begin at offset[n].
         self.row_offset = np.zeros(n + 1, dtype=np.int64)
         np.cumsum(rows_per_node, out=self.row_offset[1:])
