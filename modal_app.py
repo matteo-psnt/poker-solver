@@ -880,6 +880,125 @@ def run_train(
     print(f"  infosets: {eval_result['infosets']:,}")
 
 
+@app.local_entrypoint()
+def ochs_gate(
+    seeds: str = "42,43,44",
+    board_seeds: str = "7,11,13",
+    train_cpu: int = 16,
+    eval_cpu: int = 16,
+    eval_memory: int = 32768,
+    timeout: int = 10800,
+) -> None:
+    """Does OCHS on the river actually lower exploitability?
+
+    The gate for the river-feature change. Two arms differing in exactly one
+    config field (``river_feature``), trained on an identical betting tree with
+    identical budgets and paired training seeds, scored by EXACT best response.
+
+    Design notes, each of which exists because of a way this project has been
+    misled before:
+
+    * **Scored by exact BR, never by ``variance_explained``.** That metric scores
+      how well buckets separate *equity*, and OCHS is deliberately not optimising
+      equity — it scores LOWER on it while (hypothetically) playing better.
+    * **Sized to converge.** 20bb stack, 2-raise cap, 20 buckets/street gives
+      ~44k infosets; 2M iterations is ~971 regret updates per infoset. Comparing
+      two under-trained blueprints measures which was less starved, not which
+      abstraction is better — and a null from an underpowered experiment is
+      indistinguishable from a real null.
+    * **Paired on both axes.** Training seeds pair arm-to-arm, and both arms see
+      the same board seeds, so board luck cancels in the difference (CRN). The
+      spread of the paired difference across board seeds is the resolution of
+      the gate; the spread across training seeds is the noise the effect must
+      clear.
+    """
+    from src.shared.orchestration_log import record_spawn
+
+    train_seeds = [int(s) for s in seeds.split(",") if s.strip()]
+    boards = [int(s) for s in board_seeds.split(",") if s.strip()]
+    arms = {"scalar": "ochs_gate_scalar", "ochs": "ochs_gate_ochs"}
+
+    print(f"\n=== OCHS gate: {len(arms)} arms x {len(train_seeds)} training seeds ===")
+    train_calls: dict[tuple[str, int], Any] = {}
+    for arm, config_name in arms.items():
+        for seed in train_seeds:
+            call = train.with_options(cpu=train_cpu, timeout=timeout).spawn(
+                config_name=config_name, num_workers=train_cpu, seed=seed
+            )
+            record_spawn(
+                run_id=f"{arm}-seed{seed}",
+                function="train",
+                object_id=call.object_id,
+                resources={"cpu": train_cpu, "timeout": timeout},
+                extra={"gate": "ochs", "arm": arm, "seed": seed},
+            )
+            train_calls[(arm, seed)] = call
+
+    runs: dict[tuple[str, int], str] = {}
+    for (arm, seed), call in train_calls.items():
+        result = _await_call(call, f"{arm}-seed{seed}", "train")
+        runs[(arm, seed)] = result["run_id"]
+        print(
+            f"  trained {arm} seed={seed}: run_id={result['run_id']} "
+            f"infosets={result['num_infosets']:,}"
+        )
+
+    print(f"\n=== exact BR over {len(boards)} board seeds ===")
+    eval_calls: dict[tuple[str, int, int], Any] = {}
+    for (arm, seed), run_id in runs.items():
+        for board_seed in boards:
+            call = evaluate.with_options(cpu=eval_cpu, memory=eval_memory, timeout=timeout).spawn(
+                run_id=run_id,
+                method="exact_br",
+                num_workers=eval_cpu,
+                br_flops=64,
+                br_turns=4,
+                br_rivers=4,
+                br_board_seed=board_seed,
+            )
+            eval_calls[(arm, seed, board_seed)] = call
+
+    scores: dict[tuple[str, int, int], float] = {}
+    for key, call in eval_calls.items():
+        result = _await_call(call, runs[(key[0], key[1])], "evaluate")
+        scores[key] = result["results"]["exploitability_mbb"]
+
+    print("\n=== exact BR (mbb/g; lower is better) ===")
+    header = "arm/seed".ljust(16) + "".join(f"board{b}".rjust(12) for b in boards)
+    print(header)
+    print("-" * len(header))
+    for arm in arms:
+        for seed in train_seeds:
+            row = "".join(f"{scores[(arm, seed, b)]:>12.1f}" for b in boards)
+            print(f"{arm}/{seed}".ljust(16) + row)
+
+    print("\n=== PAIRED DIFFERENCE (ochs - scalar; negative = OCHS better) ===")
+    diffs = []
+    for seed in train_seeds:
+        for board_seed in boards:
+            delta = scores[("ochs", seed, board_seed)] - scores[("scalar", seed, board_seed)]
+            diffs.append(delta)
+            print(f"  seed={seed} board={board_seed}: {delta:+.1f} mbb/g")
+
+    mean = sum(diffs) / len(diffs)
+    spread = (sum((d - mean) ** 2 for d in diffs) / max(1, len(diffs) - 1)) ** 0.5
+    stderr = spread / (len(diffs) ** 0.5)
+    print(f"\n  mean paired difference: {mean:+.1f} mbb/g")
+    print(f"  sd {spread:.1f}   se {stderr:.1f}   n={len(diffs)}")
+    verdict = (
+        "OCHS BETTER"
+        if mean + 2 * stderr < 0
+        else "OCHS WORSE"
+        if mean - 2 * stderr > 0
+        else "INCONCLUSIVE — the interval spans zero"
+    )
+    print(f"  verdict (2 se): {verdict}")
+    print(
+        "\n  The paired differences share board seeds, so board luck cancels; the "
+        "spread above is training noise, which is what the effect has to clear."
+    )
+
+
 def _noise_floor_report(
     run_ids: list[str],
     *,

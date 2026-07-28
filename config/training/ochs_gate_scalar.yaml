@@ -1,0 +1,51 @@
+# OCHS gate — CONTROL training arm (scalar-equity river abstraction).
+#
+# Paired with ochs_gate_ochs.yaml, which differs ONLY in
+# card_abstraction.config. Same betting tree, same solver settings, same
+# iteration budget, same seed.
+#
+# Why this shape: the point of the gate is to compare two abstractions at
+# CONVERGENCE, because a comparison between two under-trained blueprints
+# measures which arm was less starved rather than which abstraction is better.
+# A 20bb stack with a 2-raise cap gives a 2,140-node betting tree; at 20 buckets
+# per street that is ~44k infosets, and 2M iterations delivers ~971 regret
+# updates per infoset — the low end of what CFR needs, and roughly 300x what the
+# production configuration achieves.
+#
+# Scored by EXACT best response (zero eval variance), never by
+# variance_explained: that metric scores equity separation, and OCHS is not
+# trying to separate equity.
+
+game:
+  starting_stack: 20
+  small_blind: 1
+  big_blind: 2
+
+resolver:
+  max_raises_per_street: 2
+
+solver:
+  sampling_method: external
+  iteration_weighting: dcfr
+  dcfr_alpha: 1.5
+  dcfr_beta: 0.0
+  dcfr_gamma: 2.0
+
+training:
+  num_iterations: 2000000
+  checkpoint_frequency: 500000
+  iterations_per_worker: 5000
+
+card_abstraction:
+  config: ochs_gate_scalar
+
+storage:
+  initial_capacity: 500000
+  # Retain the ladder so the arms can also be compared partway through, not just
+  # at the endpoint — a crossing curve would mean the budget, not the feature,
+  # decided the result.
+  checkpoint_retain_every: 500000
+
+system:
+  seed: 42
+  config_name: "ochs_gate_scalar"
