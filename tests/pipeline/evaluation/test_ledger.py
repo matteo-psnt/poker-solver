@@ -78,8 +78,8 @@ class TestKnobs:
 class TestWriteAndAppend:
     def test_write_payload_never_clobbers(self, tmp_path):
         knobs = {"scorer": "myopic", "base_seed": 7}
-        p1 = ledger.write_payload(tmp_path, {"op": "evaluate", "n": 1}, knobs)
-        p2 = ledger.write_payload(tmp_path, {"op": "evaluate", "n": 2}, knobs)
+        p1 = ledger.write_payload(tmp_path, {"op": "evaluate", "n": 1}, ledger.eval_slug(knobs))
+        p2 = ledger.write_payload(tmp_path, {"op": "evaluate", "n": 2}, ledger.eval_slug(knobs))
         assert p1 != p2
         assert p1.exists() and p2.exists()
 
@@ -106,7 +106,7 @@ class TestWriteAndAppend:
     def test_build_record_shape_and_provenance(self, tmp_path):
         results = _results()
         knobs = ledger.build_lbr_knobs(_lbr_config(), results)
-        payload_path = ledger.write_payload(tmp_path, {"results": results}, knobs)
+        payload_path = ledger.write_payload(tmp_path, {"results": results}, ledger.eval_slug(knobs))
         record = ledger.build_record(
             provenance=_fake_provenance("run-x"),
             method="lbr",
@@ -149,9 +149,11 @@ class TestRecordEvaluation:
         rows = ledger.read_records(led)
         assert len(rows) == 1
         assert rows[0]["run_id"] == "run-x"
-        assert rows[0]["result_path"] == str(result_path)
+        # Stored run-relative, not CWD-relative: the pointer must mean the same
+        # thing on a machine that mounts its runs directory somewhere else.
+        assert rows[0]["result_path"] == f"run-x/evals/{result_path.name}"
         # The appended row round-trips to its full payload, including per-hand samples.
-        assert ledger.load_payload(record)["results"]["base_seed"] == 7
+        assert ledger.load_payload(record, tmp_path)["results"]["base_seed"] == 7
 
 
 class TestTierMismatches:
