@@ -47,10 +47,10 @@ from src.core.game.actions import Action
 from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS, blocked_combos
 from src.engine.search.subgame_cfr import RunoutEvaluator, nonblocking_mass
-from src.engine.solver.infoset import InfoSetKey
-from src.engine.solver.infoset_encoder import get_spr_bucket, preflop_hand_string
+from src.engine.solver.infoset_encoder import get_spr_bucket
+from src.engine.solver.infoset_index import preflop_hand_index
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.protocols import Blueprint
+from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
 
 logger = logging.getLogger(__name__)
@@ -61,23 +61,20 @@ _TURN_STREAM = 1
 _RIVER_STREAM = 2
 
 
-def _build_preflop_tables() -> tuple[np.ndarray, list[str]]:
-    """Static combo -> 169-class id map plus id -> hand-string list."""
-    class_of = np.empty(NUM_COMBOS, dtype=np.int64)
-    index: dict[str, int] = {}
-    strings: list[str] = []
-    for i, combo in enumerate(ALL_COMBOS):
-        hand = preflop_hand_string(combo)
-        j = index.get(hand)
-        if j is None:
-            j = len(strings)
-            index[hand] = j
-            strings.append(hand)
-        class_of[i] = j
-    return class_of, strings
+def _build_preflop_class_of_combo() -> np.ndarray:
+    """Combo -> 169-class id, in the SOLVER's canonical preflop ordering.
+
+    Previously this assigned ids in discovery order over ``ALL_COMBOS``, which
+    was self-consistent but was a SECOND ordering of the 169 classes. The policy
+    rows below are built per id and then gathered through this map, so the two
+    must agree exactly; two independently-derived orderings agreeing was an
+    accident waiting to stop happening. Deferring to ``infoset_index`` makes the
+    solver's ordering the only one.
+    """
+    return np.array([preflop_hand_index(combo) for combo in ALL_COMBOS], dtype=np.int64)
 
 
-_PREFLOP_CLASS_OF_COMBO, _PREFLOP_STRINGS = _build_preflop_tables()
+_PREFLOP_CLASS_OF_COMBO = _build_preflop_class_of_combo()
 
 
 @dataclass(frozen=True)
@@ -186,8 +183,10 @@ class _BoardPlan:
 class PublicTreeBestResponse:
     """Exact best response of one seat against the blueprint on the sampled tree."""
 
-    def __init__(self, blueprint: Blueprint, config: PublicBRConfig, *, starting_stack: int):
-        self._storage = blueprint.storage
+    def __init__(
+        self, blueprint: ScorableBlueprint, config: PublicBRConfig, *, starting_stack: int
+    ):
+        self._policy_source = policy_source_for(blueprint)
         self._rules = blueprint.rules
         self._action_model = blueprint.action_model
         self._abstraction = blueprint.card_abstraction
@@ -360,16 +359,11 @@ class PublicTreeBestResponse:
         )
         cached = self._policy_cache.get(context_key)
         if cached is None:
-            if state.street == Street.PREFLOP:
-                num_buckets = len(_PREFLOP_STRINGS)
-            else:
-                num_buckets = self._abstraction.num_buckets(state.street)
+            num_buckets = self._policy_source.num_buckets(state.street)
             rows = np.empty((num_buckets, len(legal)), dtype=np.float64)
             row_missing = np.empty(num_buckets, dtype=bool)
             for bucket in range(num_buckets):
-                rows[bucket], row_missing[bucket] = self._policy_row(
-                    state, legal, sequence, spr_bucket, bucket
-                )
+                rows[bucket], row_missing[bucket] = self._policy_row(state, legal, bucket)
             cached = (rows, row_missing)
             self._policy_cache[context_key] = cached
         rows, row_missing = cached
@@ -385,30 +379,14 @@ class PublicTreeBestResponse:
         self,
         state: GameState,
         legal: tuple[Action, ...],
-        sequence: str,
-        spr_bucket: int,
         bucket: int,
     ) -> tuple[np.ndarray, bool]:
-        if state.street == Street.PREFLOP:
-            key = InfoSetKey(
-                player_position=state.current_player,
-                street=state.street,
-                betting_sequence=sequence,
-                preflop_hand=_PREFLOP_STRINGS[bucket],
-                postflop_bucket=None,
-                spr_bucket=spr_bucket,
-            )
-        else:
-            key = InfoSetKey(
-                player_position=state.current_player,
-                street=state.street,
-                betting_sequence=sequence,
-                preflop_hand=None,
-                postflop_bucket=bucket,
-                spr_bucket=spr_bucket,
-            )
         distribution = blueprint_action_distribution(
-            self._storage.get_infoset(key), state, self._rules, legal, use_average=True
+            self._policy_source.infoset_at(state, bucket),
+            state,
+            self._rules,
+            legal,
+            use_average=True,
         )
         if distribution is None:
             return np.full(len(legal), 1.0 / len(legal)), True
@@ -439,7 +417,7 @@ class PublicTreeBestResponse:
 
 
 def compute_public_tree_br(
-    blueprint: Blueprint, config: PublicBRConfig, *, starting_stack: int
+    blueprint: ScorableBlueprint, config: PublicBRConfig, *, starting_stack: int
 ) -> PublicBRResult:
     """Exact best response against ``blueprint`` on the sampled public tree."""
     engine = PublicTreeBestResponse(blueprint, config, starting_stack=starting_stack)
