@@ -71,10 +71,30 @@ publish_all() {
     # `cp -u` still behaves correctly without it: the destination takes the copy
     # time, which is newer than the source, so an already-published file is
     # skipped and a genuinely updated one is not.
-    local failed=0
-    cp -ru \
-        $(find "$run_dir" -maxdepth 1 -mindepth 1 ! -name CHECKPOINT.json) \
-        "$ARCHIVE/$name/" 2>/tmp/publish_err || failed=1
+    # Per-snapshot COMPLETION MARKERS. Manifest-last protects the manifest, but a
+    # kill during the copy of one snapshot still leaves that directory partial --
+    # and since the manifest may already name it, a later fetch pulls down
+    # truncated arrays ("mmap length is greater than file size"). Writing a marker
+    # only after a snapshot copies cleanly moves the same guarantee down to
+    # per-directory granularity, and needs no atomic rename (SMB has none).
+    local failed=0 d base
+    for d in "$run_dir"*/ ; do
+      [ -d "$d" ] || continue
+      base=$(basename "$d")
+      case "$base" in
+        checkpoint-*|keys-*)
+          rm -f "$ARCHIVE/$name/.complete-$base" 2>/dev/null || true
+          if cp -ru "$d" "$ARCHIVE/$name/" 2>>/tmp/publish_err; then
+            : > "$ARCHIVE/$name/.complete-$base" 2>/dev/null || true
+          else
+            failed=1
+          fi ;;
+        *) cp -ru "$d" "$ARCHIVE/$name/" 2>>/tmp/publish_err || failed=1 ;;
+      esac
+    done
+    # Loose files (.run.json, metrics.jsonl, result json), manifest excluded.
+    find "$run_dir" -maxdepth 1 -type f ! -name CHECKPOINT.json \
+        -exec cp -u {} "$ARCHIVE/$name/" \; 2>>/tmp/publish_err || failed=1
     if [ "$failed" -eq 0 ] && [ -f "$run_dir/CHECKPOINT.json" ]; then
       cp -u "$run_dir/CHECKPOINT.json" "$ARCHIVE/$name/" 2>>/tmp/publish_err || failed=1
     fi
@@ -141,10 +161,51 @@ ln -sfn "$DATA" "$CODE/data"
 log "syncing dependencies"
 uv sync --quiet
 
+# Fetch ONLY what the manifest names, never the whole archive directory.
+#
+# A task killed mid-publish leaves PARTIALLY-COPIED snapshot directories behind.
+# Publishing the manifest last keeps the manifest itself honest, but the orphan
+# files still sit there -- and copying them down produced a truncated checkpoint
+# that failed with "mmap length is greater than file size". Worse, a later
+# `cp -u` would skip them as already present, so the corruption would persist.
+#
+# The manifest IS the definition of what is complete. Anything it does not name
+# is by construction unfinished, and is ignored.
 if [ -n "${RUN_ID:-}" ] && [ -d "$ARCHIVE/$RUN_ID" ]; then
   log "fetching published checkpoint for $RUN_ID"
   mkdir -p "$RUNS/$RUN_ID"
-  cp -ru "$ARCHIVE/$RUN_ID/." "$RUNS/$RUN_ID/"
+  src="$ARCHIVE/$RUN_ID"
+  if [ -f "$src/CHECKPOINT.json" ]; then
+    wanted=$(python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+names = {d['zarr'], d['key_table']}
+for e in d.get('retained', []):
+    names.update((e['zarr'], e['key_table']))
+print(chr(10).join(sorted(n for n in names if n)))
+" "$src/CHECKPOINT.json" || true)
+    # Everything that is not a snapshot dir: metadata, metrics, eval records.
+    find "$src" -maxdepth 1 -mindepth 1 \
+         ! -name 'checkpoint-*' ! -name 'keys-*' ! -name CHECKPOINT.json \
+         -exec cp -ru {} "$RUNS/$RUN_ID/" \; 2>/dev/null || true
+    # Only snapshots that BOTH the manifest names and a completion marker
+    # vouches for. A dir without its marker was interrupted mid-copy.
+    kept=0
+    while IFS= read -r n; do
+      [ -n "$n" ] || continue
+      if [ -e "$src/$n" ] && [ -f "$src/.complete-$n" ]; then
+        cp -ru "$src/$n" "$RUNS/$RUN_ID/" 2>/dev/null || true
+        kept=$((kept + 1))
+      elif [ -e "$src/$n" ]; then
+        log "  skipping $n: no completion marker (published copy was interrupted)"
+      fi
+    done <<<"$wanted"
+    # Manifest last here too, so a torn fetch never claims more than it copied.
+    cp -u "$src/CHECKPOINT.json" "$RUNS/$RUN_ID/" 2>/dev/null || true
+    log "fetched $kept complete snapshot dir(s)"
+  else
+    cp -ru "$src/." "$RUNS/$RUN_ID/"
+  fi
 fi
 
 watch_rungs &

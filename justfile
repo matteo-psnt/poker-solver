@@ -225,7 +225,7 @@ cancel job task:
     #!/usr/bin/env bash
     set -euo pipefail
     just _login
-    az batch task terminate --job-id "{{job}}" --task-id "{{task}}" --yes
+    az batch task stop --job-id "{{job}}" --task-id "{{task}}"
     echo "  terminated {{task}} — partial progress is on the share"
 
 # --------------------------------------------------------------------------- #
@@ -279,21 +279,30 @@ panic:
         --node-deallocation-option terminate
     echo "  pool $POOL resizing to 0. Re-arm autoscale with: just create"
 
-# Confirm the stall backstop would actually fire, against the LIVE pool.
+# Evaluate the deployed autoscale formula server-side and print BOTH its
+# variables and any error.
 #
-# The CPU-floor clause rests on $CPUPercent being a 0-1 fraction. If it is not,
-# the clause silently never fires and you have no backstop while believing you
-# do. `autoscale evaluate` runs the formula server-side and prints each variable,
-# so `stalled` and `cpuAvg` can be read directly.
-[doc("Evaluate the autoscale formula on the live pool and print its variables.")]
+# The error half is the point. An invalid or throwing formula still returns
+# partial `results`, so printing results alone makes a broken formula look
+# healthy -- which is exactly how a `#` comment (Batch wants `//`) and a
+# one-argument GetSample both went unnoticed while the pool quietly stopped
+# scaling. Run this after every formula change.
+[doc("Evaluate the deployed autoscale formula on the live pool, errors included.")]
 autoscale-check:
     #!/usr/bin/env bash
     set -euo pipefail
     just _login
     POOL=$({{tf}} output -raw pool_id)
+    OUT=$(mktemp); trap 'rm -f "$OUT"' EXIT
     az batch pool autoscale evaluate --pool-id "$POOL" \
-        --auto-scale-formula "$({{tf}} output -raw autoscale_formula)" \
-        --query "results" -o tsv | tr ';' '\n' | sed 's/^/  /'
+        --auto-scale-formula "$({{tf}} output -raw autoscale_formula)" -o json > "$OUT"
+    if jq -e '.error' "$OUT" >/dev/null; then
+        jq -r '"  ERROR: \(.error.code)", (.error.values[]? | "    \(.value)")' "$OUT"
+        echo "  (results below are PARTIAL — the formula did not fully evaluate)"
+    else
+        echo "  no error"
+    fi
+    jq -r '(.results // "") | split(";")[] | select(length > 0) | "    " + .' "$OUT"
 
 # Bring published runs and eval records back, then rebuild the ledger.
 #
