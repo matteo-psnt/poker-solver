@@ -55,12 +55,22 @@ class FingerprintMismatchError(RuntimeError):
     """The checkpoint was written against a different betting tree."""
 
 
+class AbstractionMismatchError(RuntimeError):
+    """The checkpoint was written under a different bucket ASSIGNMENT.
+
+    Distinct from a fingerprint mismatch: the tree, layout and bucket counts can
+    match exactly while the abstraction maps hands to different buckets. Nothing
+    about the arrays reveals it, so it has to be recorded and checked.
+    """
+
+
 @dataclass(frozen=True)
 class StaticCheckpointManifest:
     iteration: int
     zarr_name: str
     fingerprint: str
     retained: list[dict]
+    abstraction_id: str | None = None
 
     @classmethod
     def read(cls, checkpoint_dir: Path) -> StaticCheckpointManifest | None:
@@ -76,6 +86,7 @@ class StaticCheckpointManifest:
             zarr_name=raw["zarr"],
             fingerprint=raw["fingerprint"],
             retained=list(raw.get("retained", [])),
+            abstraction_id=raw.get("abstraction_id"),
         )
 
     def entry_for(self, iteration: int | None) -> dict:
@@ -95,10 +106,19 @@ def save_checkpoint(
     iteration: int,
     *,
     retain_every: int = 0,
+    abstraction_id: str | None = None,
     compression_level: int = DEFAULT_COMPRESSION_LEVEL,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> Path:
-    """Write a snapshot and atomically publish it. Returns the zarr path."""
+    """Write a snapshot and atomically publish it. Returns the zarr path.
+
+    ``abstraction_id`` identifies the bucket ASSIGNMENT, which the tree
+    fingerprint deliberately does not cover: the fingerprint pins node identity,
+    layout and bucket COUNTS, so an abstraction that buckets the same hands
+    differently under the same counts produces an identical fingerprint. Resuming
+    or scoring across such a change silently trains on rebucketed hands. Pass the
+    resolved abstraction hash to make that detectable.
+    """
     checkpoint_dir = Path(checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     zarr_path = checkpoint_dir / f"static-{iteration}.zarr"
@@ -123,10 +143,23 @@ def save_checkpoint(
     root.attrs["num_slots"] = storage.tree.num_slots
 
     previous = StaticCheckpointManifest.read(checkpoint_dir)
+    if (
+        previous is not None
+        and previous.abstraction_id is not None
+        and abstraction_id is not None
+        and previous.abstraction_id != abstraction_id
+    ):
+        raise AbstractionMismatchError(
+            f"{checkpoint_dir} holds snapshots bucketed by {previous.abstraction_id}, "
+            f"but this run buckets by {abstraction_id}. Appending would leave a ladder "
+            "whose rungs are not comparable."
+        )
+
     manifest = {
         "iteration": iteration,
         "zarr": zarr_path.name,
         "fingerprint": storage.tree.fingerprint(),
+        "abstraction_id": abstraction_id,
         "format_version": FORMAT_VERSION,
         "retained": _extend_ladder(previous, iteration, zarr_path.name, retain_every),
     }
@@ -172,6 +205,7 @@ def load_checkpoint(
     checkpoint_dir: Path,
     *,
     at_iteration: int | None = None,
+    abstraction_id: str | None = None,
 ) -> int:
     """Load a snapshot into ``storage`` in place. Returns the iteration loaded.
 
@@ -190,6 +224,18 @@ def load_checkpoint(
             f"{manifest.fingerprint}, but this storage indexes tree {expected}. "
             "Loading it would reinterpret every row as a different infoset. "
             "Rebuild the tree from the config the checkpoint was trained under."
+        )
+
+    if (
+        abstraction_id is not None
+        and manifest.abstraction_id is not None
+        and manifest.abstraction_id != abstraction_id
+    ):
+        raise AbstractionMismatchError(
+            f"Checkpoint in {checkpoint_dir} was trained under abstraction "
+            f"{manifest.abstraction_id}, but this storage buckets by {abstraction_id}. "
+            "The tree matches, so every row is the right SHAPE while holding a "
+            "different hand's strategy."
         )
 
     entry = manifest.entry_for(at_iteration)

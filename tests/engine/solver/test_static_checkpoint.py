@@ -19,6 +19,7 @@ from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import (
+    AbstractionMismatchError,
     FingerprintMismatchError,
     StaticCheckpointManifest,
     load_checkpoint,
@@ -313,3 +314,55 @@ class TestSolverIntegration:
                 solver.checkpoint()
         finally:
             solver.storage.close()
+
+
+class TestAbstractionIdentity:
+    """The tree fingerprint pins layout; it cannot pin bucket ASSIGNMENT.
+
+    Two abstractions with identical per-street counts produce an identical
+    fingerprint while mapping hands to different buckets. Nothing about the
+    arrays reveals that, so resuming or scoring across such a change would
+    silently train on rebucketed hands — the exact hazard the justfile warns
+    about for recomputed abstractions.
+    """
+
+    def test_load_under_a_different_abstraction_is_refused(self, tree, tmp_path):
+        storage = StaticArrayStorage(tree)
+        try:
+            save_checkpoint(storage, tmp_path, 100, abstraction_id="abstraction-A")
+        finally:
+            storage.close()
+
+        target = StaticArrayStorage(tree)
+        try:
+            with pytest.raises(AbstractionMismatchError, match="different hand"):
+                load_checkpoint(target, tmp_path, abstraction_id="abstraction-B")
+        finally:
+            target.close()
+
+    def test_matching_abstraction_loads(self, tree, tmp_path):
+        storage = StaticArrayStorage(tree)
+        try:
+            save_checkpoint(storage, tmp_path, 100, abstraction_id="abstraction-A")
+            assert load_checkpoint(storage, tmp_path, abstraction_id="abstraction-A") == 100
+        finally:
+            storage.close()
+
+    def test_appending_a_differently_bucketed_rung_is_refused(self, tree, tmp_path):
+        """A ladder whose rungs are bucketed differently is not comparable."""
+        storage = StaticArrayStorage(tree)
+        try:
+            save_checkpoint(storage, tmp_path, 100, retain_every=100, abstraction_id="A")
+            with pytest.raises(AbstractionMismatchError, match="not comparable"):
+                save_checkpoint(storage, tmp_path, 200, retain_every=100, abstraction_id="B")
+        finally:
+            storage.close()
+
+    def test_absent_ids_stay_permissive(self, tree, tmp_path):
+        """Checkpoints written before this existed must remain loadable."""
+        storage = StaticArrayStorage(tree)
+        try:
+            save_checkpoint(storage, tmp_path, 100)
+            assert load_checkpoint(storage, tmp_path, abstraction_id="anything") == 100
+        finally:
+            storage.close()
