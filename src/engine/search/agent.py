@@ -15,7 +15,7 @@ import numpy as np
 from src.core.game.actions import Action
 from src.core.game.state import GameState
 from src.engine.search.resolver import HUResolver
-from src.engine.solver.protocols import Blueprint
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.shared.config import ResolverConfig
 
 
@@ -35,7 +35,7 @@ class BlueprintAgent:
 
     def __init__(
         self,
-        blueprint: Blueprint,
+        blueprint: ScorableBlueprint,
         *,
         use_resolver: bool | None = None,
         resolver_config: ResolverConfig | None = None,

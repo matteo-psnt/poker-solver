@@ -96,7 +96,7 @@ class TestTreePolicySource:
     def test_resolves_a_trained_infoset(self):
         solver = _solver()
         try:
-            source = TreePolicySource(solver.tree, solver.storage)
+            source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
             state = solver.deal_initial_state()
             infoset = source.infoset_at(state, preflop_hand_index(state.hole_cards[0]))
             assert infoset is not None
@@ -107,7 +107,7 @@ class TestTreePolicySource:
     def test_reports_the_trees_bucket_counts(self):
         solver = _solver(iterations=1)
         try:
-            source = TreePolicySource(solver.tree, solver.storage)
+            source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
             assert source.num_buckets(Street.PREFLOP) == NUM_PREFLOP_HANDS
             assert source.num_buckets(Street.RIVER) == BUCKETS[Street.RIVER]
         finally:
@@ -117,7 +117,7 @@ class TestTreePolicySource:
         """An oversized bucket must not silently alias another node's infoset."""
         solver = _solver(iterations=1)
         try:
-            source = TreePolicySource(solver.tree, solver.storage)
+            source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
             state = solver.deal_initial_state()
             assert source.infoset_at(state, NUM_PREFLOP_HANDS) is None
             assert source.infoset_at(state, -1) is None
@@ -128,7 +128,7 @@ class TestTreePolicySource:
         """Scoring must not make an untrained tree look explored."""
         solver = _solver(iterations=1)
         try:
-            source = TreePolicySource(solver.tree, solver.storage)
+            source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
             before = solver.storage.num_touched_infosets()
             state = solver.deal_initial_state()
             for bucket in range(NUM_PREFLOP_HANDS):
@@ -140,7 +140,7 @@ class TestTreePolicySource:
     def test_off_tree_state_raises_rather_than_scoring_a_different_game(self):
         solver = _solver(iterations=1)
         try:
-            source = TreePolicySource(solver.tree, solver.storage)
+            source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
             deep = solver.rules.create_initial_state(
                 200, ((Card.new("As"), Card.new("Kd")), (Card.new("Qh"), Card.new("Jc"))), button=0
             )
@@ -197,5 +197,98 @@ class TestExactBROverStaticStorage:
             # broken bridge would silently fall back to uniform and still
             # produce a plausible-looking score.
             assert result.missing_policy_mass == pytest.approx(0.0, abs=1e-9)
+        finally:
+            solver.storage.close()
+
+
+class TestStaticBlueprintCanPlay:
+    """The runtime paths, not just the evaluators.
+
+    resolver, heads_up_session and range_inference all used to build an
+    InfoSetKey and call storage.get_infoset directly, which hard-wired them to
+    the key-addressed backend: a tree-addressed blueprint could be trained and
+    scored but not PLAYED. These are the tests that say it can.
+    """
+
+    def test_bucket_for_matches_what_the_solver_stores(self):
+        """The bridge must resolve the same bucket the traversal wrote to."""
+        solver = _solver(iterations=200)
+        try:
+            source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
+            state = solver.deal_initial_state()
+            player = state.current_player
+            assert source.bucket_for(state, player) == preflop_hand_index(state.hole_cards[player])
+        finally:
+            solver.storage.close()
+
+    def test_session_bot_picks_a_real_action(self):
+        """The per-decision play path, which used to build an InfoSetKey inline."""
+        from src.engine.search.heads_up_session import HeadsUpHand
+
+        solver = _solver(iterations=400)
+        try:
+            session = HeadsUpHand(
+                blueprint=solver, human_seat=0, button=0, rng=np.random.default_rng(3)
+            )
+            state = solver.deal_initial_state()
+            action, fell_back = session._bot_action(state)
+            legal = solver.rules.get_legal_actions(state, action_model=solver.action_model)
+            assert action in legal
+            # A trained blueprint should have an entry here; falling back to a
+            # uniform draw would mean the bridge silently resolved nothing.
+            assert not fell_back
+        finally:
+            solver.storage.close()
+
+    def test_range_inference_runs_against_a_static_blueprint(self):
+        from src.engine.search.range_inference import infer_ranges, update_ranges
+
+        solver = _solver(iterations=400)
+        try:
+            state = solver.deal_initial_state()
+            ranges = infer_ranges(state, solver)
+            actions = solver.rules.get_legal_actions(state, action_model=solver.action_model)
+            updated = update_ranges(
+                state=state,
+                ranges=ranges,
+                observed_action=actions[0],
+                blueprint=solver,
+            )
+            assert updated is not None
+        finally:
+            solver.storage.close()
+
+    def test_keyed_and_tree_sources_agree_on_bucket(self):
+        """Both backends must partition hands identically, or a bridged consumer
+        would silently look up a different hand on one of them."""
+        solver = _solver(iterations=1)
+        try:
+            tree_source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
+            # A real key-addressed storage: bucket_for never touches it, but
+            # constructing the source with the wrong backend would be a lie.
+            keyed = KeyedPolicySource(
+                build_test_storage("policy-source-agree"), solver.card_abstraction
+            )
+            for trial in range(20):
+                state = solver.deal_initial_state()
+                player = state.current_player
+                assert tree_source.bucket_for(state, player) == keyed.bucket_for(state, player)
+                assert trial >= 0
+        finally:
+            solver.storage.close()
+
+    def test_sample_action_from_strategy_works_on_a_static_blueprint(self):
+        """The Blueprint protocol's own sampling method.
+
+        StaticTreeSolver inherits it from MCCFRSolver, so a key-based lookup in
+        there would leave a tree-addressed blueprint unplayable while every other
+        runtime path worked — the gap that this test exists to keep closed.
+        """
+        solver = _solver(iterations=400)
+        try:
+            state = solver.deal_initial_state()
+            legal = solver.rules.get_legal_actions(state, action_model=solver.action_model)
+            for _ in range(10):
+                assert solver.sample_action_from_strategy(state) in legal
         finally:
             solver.storage.close()

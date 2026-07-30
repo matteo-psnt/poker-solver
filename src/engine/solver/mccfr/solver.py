@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import random
 
 import numpy as np
@@ -106,6 +107,17 @@ class MCCFRSolver:
         ``tests/engine/solver/mccfr/extensive_game_solver.py``.
         """
         return infoset_encoder.encode_infoset_key(state, player, self.card_abstraction)
+
+    @functools.cached_property
+    def policy_source(self):
+        """Backend-agnostic policy access for the runtime paths.
+
+        Cached: the storage backend cannot change over a solver's life, and this
+        is reached once per decision during play.
+        """
+        from src.engine.solver.policy_source import policy_source_for
+
+        return policy_source_for(self)
 
     def lookup_infoset(self, state: GameState, current_player: int):
         """Resolve ``current_player``'s infoset at ``state`` for the traversal.

@@ -10,9 +10,8 @@ import numpy as np
 from src.core.game.actions import Action
 from src.core.game.state import Card, GameState
 from src.engine.search.action_translation import translate_action_distribution
-from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.protocols import Blueprint
+from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
 from src.shared.numeric import NORMALIZE_EPS
 
 
@@ -70,7 +69,7 @@ def blocked_combos(board: tuple[Card, ...]) -> np.ndarray:
     return (COMBO_MASKS & board_mask) != 0
 
 
-def infer_ranges(state: GameState, blueprint: Blueprint) -> PlayerRanges:
+def infer_ranges(state: GameState, blueprint: ScorableBlueprint) -> PlayerRanges:
     """
     Infer ranges from blueprint and action history.
 
@@ -88,7 +87,7 @@ def update_ranges(
     state: GameState,
     ranges: PlayerRanges,
     observed_action: Action,
-    blueprint: Blueprint,
+    blueprint: ScorableBlueprint,
 ) -> PlayerRanges:
     """
     Update ranges after an observed action using Bayesian likelihood weighting.
@@ -125,10 +124,11 @@ def _action_likelihood_vector(
     state: GameState,
     actor: int,
     observed_action: Action,
-    blueprint: Blueprint,
+    blueprint: ScorableBlueprint,
     blocked: np.ndarray,
 ) -> np.ndarray:
     likelihood = np.full(_NUM_COMBOS, _LIKELIHOOD_FLOOR, dtype=np.float64)
+    source = policy_source_for(blueprint)
     cache: dict = {}
 
     for idx, combo in enumerate(_ALL_COMBOS):
@@ -136,7 +136,11 @@ def _action_likelihood_vector(
             continue
 
         hypo_state = replace_actor_hole_cards(state, actor=actor, combo=combo)
-        infoset_key = encode_infoset_key(hypo_state, actor, blueprint.card_abstraction)
+        # Cache on the bucket rather than a rebuilt key: across this loop only
+        # the actor's hole cards change, so the bucket is the only part of
+        # infoset identity that varies — the same partition the key gave, and
+        # the one thing both storage backends agree on.
+        infoset_key = source.bucket_for(hypo_state, actor)
         cached = cache.get(infoset_key)
         if cached is not None:
             likelihood[idx] = cached
@@ -156,7 +160,7 @@ def _action_likelihood_vector(
             action_model=blueprint.action_model,
             rules=blueprint.rules,
         )
-        infoset = blueprint.storage.get_infoset(infoset_key)
+        infoset = source.infoset_at(hypo_state, infoset_key)
         action_prob = blueprint_action_distribution(
             infoset, hypo_state, blueprint.rules, legal_actions, use_average=True
         )

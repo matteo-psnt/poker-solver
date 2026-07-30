@@ -8,7 +8,6 @@ import numpy as np
 
 from src.core.game.actions import Action
 from src.core.game.state import GameState
-from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.policy_lookup import blueprint_action_distribution
 
 if TYPE_CHECKING:
@@ -26,8 +25,12 @@ def sample_action_from_strategy(
     if not legal_actions:
         raise ValueError(f"No legal actions at state: {state}")
 
-    infoset_key = encode_infoset_key(state, state.current_player, self.card_abstraction)
-    infoset = self.storage.get_infoset(infoset_key)
+    # Through the policy source, not storage directly: this is the sampling path
+    # the Blueprint protocol exposes, and StaticTreeSolver inherits it. Reaching
+    # for a key here would make a tree-addressed blueprint unplayable while every
+    # other runtime path worked.
+    source = self.policy_source
+    infoset = source.infoset_at(state, source.bucket_for(state, state.current_player))
     distribution = blueprint_action_distribution(
         infoset, state, self.rules, legal_actions, use_average=use_average
     )

@@ -34,10 +34,9 @@ import numpy as np
 from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, GameState, Street
-from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.mccfr.chance import draw_cards
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.protocols import Blueprint
+from src.engine.solver.policy_source import ScorableBlueprint, policy_source_for
 
 
 @dataclass(frozen=True)
@@ -79,7 +78,7 @@ class HeadsUpHand:
 
     def __init__(
         self,
-        blueprint: Blueprint,
+        blueprint: ScorableBlueprint,
         *,
         human_seat: int,
         button: int,
@@ -90,6 +89,11 @@ class HeadsUpHand:
         if button not in (0, 1):
             raise ValueError(f"button must be 0 or 1, got {button}")
         self.blueprint = blueprint
+        # Backend-agnostic policy access: key-addressed storage and the
+        # tree-addressed one answer 'which infoset is this?' incompatibly.
+        # Resolved once: the blueprint's storage backend does not change mid-session,
+        # and this is on the per-decision path.
+        self._policy_source = policy_source_for(blueprint)
         self.rules: GameRules = blueprint.rules
         self.action_model = blueprint.action_model
         self.human_seat = human_seat
@@ -166,8 +170,9 @@ class HeadsUpHand:
         legal = self.rules.get_legal_actions(state, action_model=self.action_model)
         if not legal:
             raise ValueError(f"No legal actions at state: {state}")
-        key = encode_infoset_key(state, state.current_player, self.blueprint.card_abstraction)
-        infoset = self.blueprint.storage.get_infoset(key)
+        source = self._policy_source
+        bucket = source.bucket_for(state, state.current_player)
+        infoset = source.infoset_at(state, bucket)
         distribution = blueprint_action_distribution(
             infoset, state, self.rules, legal, use_average=True
         )
