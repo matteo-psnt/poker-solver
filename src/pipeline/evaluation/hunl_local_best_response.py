@@ -217,7 +217,6 @@ class _HUNLLocalBestResponse:
         self.rules: GameRules = blueprint.rules
         self.action_model: ActionModel = blueprint.action_model
         self.card_abstraction = blueprint.card_abstraction
-        self.storage = blueprint.storage
         self.evaluator = get_evaluator()
         # On-tree shadow state for rigorous off-tree play (see module docs).
         self.shadow = ShadowTracker(self.rules, self.action_model)

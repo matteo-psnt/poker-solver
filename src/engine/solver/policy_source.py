@@ -19,6 +19,7 @@ problem that module was written to end would come back.
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from typing import Protocol
 
 from src.core.actions.action_model import ActionModel
@@ -27,7 +28,7 @@ from src.core.game.rules import GameRules
 from src.core.game.state import GameState, Street
 from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.infoset import InfoSet, InfoSetKey
-from src.engine.solver.infoset_encoder import get_spr_bucket
+from src.engine.solver.infoset_encoder import encode_infoset_key, get_spr_bucket
 from src.engine.solver.infoset_index import (
     NUM_PREFLOP_HANDS,
     bucket_of,
@@ -87,6 +88,24 @@ class PolicySource(Protocol):
         """
         ...
 
+    def infoset_for(self, state: GameState, player: int) -> InfoSet | None:
+        """``player``'s stored infoset at ``state``, bucketing their real hand.
+
+        The common runtime case: consumers that hold a concrete hand rather than
+        a bucket to enumerate.
+        """
+        ...
+
+    def identity(self, state: GameState, player: int) -> Hashable:
+        """An opaque, hashable identifier for that infoset — for caching only.
+
+        Deliberately not the bucket. Several consumers memoize ACROSS states, and
+        a bucket alone omits the street and betting sequence, so two unrelated
+        nodes sharing a bucket would collide in a cross-call memo. Comparable
+        only within one policy source; never persist it.
+        """
+        ...
+
     def bucket_for(self, state: GameState, player: int) -> int:
         """The card bucket ``player``'s actual hole cards fall in at ``state``.
 
@@ -114,6 +133,15 @@ class KeyedPolicySource:
 
     def bucket_for(self, state: GameState, player: int) -> int:
         return bucket_of(state, player, self._abstraction)
+
+    def infoset_for(self, state: GameState, player: int) -> InfoSet | None:
+        return self._storage.get_infoset(self._key(state, player))
+
+    def identity(self, state: GameState, player: int) -> Hashable:
+        return self._key(state, player)
+
+    def _key(self, state: GameState, player: int) -> InfoSetKey:
+        return encode_infoset_key(state, player, self._abstraction)
 
     def infoset_at(self, state: GameState, bucket: int) -> InfoSet | None:
         spr = min(state.stacks) / state.pot if state.pot > 0 else 0
@@ -153,6 +181,12 @@ class TreePolicySource:
 
     def bucket_for(self, state: GameState, player: int) -> int:
         return bucket_of(state, player, self._abstraction)
+
+    def infoset_for(self, state: GameState, player: int) -> InfoSet | None:
+        return self.infoset_at(state, self.bucket_for(state, player))
+
+    def identity(self, state: GameState, player: int) -> Hashable:
+        return (self._tree.node_id(state), self.bucket_for(state, player))
 
     def infoset_at(self, state: GameState, bucket: int) -> InfoSet | None:
         node_id = self._tree.node_id(state)
