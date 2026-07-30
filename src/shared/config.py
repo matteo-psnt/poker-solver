@@ -7,9 +7,11 @@ Validation constraints live here, next to each field — nowhere else.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Annotated, Any, Literal
 
+import xxhash
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, parse_multiplier_token
@@ -328,6 +330,18 @@ class Config(StrictFrozenModel):
     def to_dict(self) -> dict[str, Any]:
         """Serialize config to a plain dict (for JSON, logging, etc.)."""
         return self.model_dump()
+
+    def content_hash(self) -> str:
+        """Stable hash of the fully-resolved config.
+
+        Experiment identity: ``config_name`` comes from ``system.config_name``
+        inside the YAML, so two runs differing only by overrides record the same
+        name and are otherwise indistinguishable. This is the field that tells
+        them apart. Same canonicalization as ``ActionModel.get_config_hash`` so
+        there is one hashing convention in the repo, not two.
+        """
+        payload = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), default=str)
+        return xxhash.xxh64(payload.encode()).hexdigest()
 
     @classmethod
     def default(cls) -> Config:

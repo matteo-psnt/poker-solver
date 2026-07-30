@@ -472,14 +472,10 @@ def resume(
 ) -> dict[str, Any]:
     """Resume an existing Volume run in a fresh container and persist the result.
 
-    Loads the latest checkpoint the trainer committed and trains up to the ABSOLUTE
-    ``to_iteration``. Absolute, not "train N more": a retried call re-reads a *newer*
-    checkpoint, so a relative target compounds -- a leg aimed at 25.5M that gets
-    retried after committing 21.5M would re-add its increment and chase 30.6M. Modal
-    retries infrastructure failures (an OOM kill is one) on its own, silently, so a
-    resume must converge on the same endpoint no matter how many times it runs. With
-    an absolute target every attempt aims at the same number and a retry after the
-    target is reached is a no-op.
+    Volume transport around :func:`services.resume`, which owns the absolute-target
+    semantics: a retried call re-reads a *newer* checkpoint, so only an absolute
+    ``to_iteration`` converges on the same endpoint no matter how many times Modal
+    silently retries an infrastructure failure.
 
     Passing a ``num_workers`` different from the original run also exercises key
     re-partitioning. ``capacity`` pre-allocates shared storage above the checkpoint's
@@ -489,43 +485,36 @@ def resume(
     from src.pipeline import services
 
     data_volume.reload()
-    run_dir = Path("data/runs") / run_id
-    session, resumed_from = services.create_resumed_session(run_dir, capacity_override=capacity)
+    out = services.resume(
+        Path("data/runs") / run_id,
+        to_iteration,
+        num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
+        capacity_override=capacity,
+    )
 
-    remaining = to_iteration - resumed_from
-    if remaining <= 0:
+    if out.no_op:
         # Already at or past the target: a retry of an attempt that succeeded, or a
-        # target set below the committed checkpoint. Report, change nothing.
+        # target set below the committed checkpoint.
         print(
-            f"[resume] Checkpoint is at {resumed_from:,}, target is {to_iteration:,}: "
-            "nothing to do.",
+            f"[resume] Checkpoint is at {out.resumed_from_iteration:,}, target is "
+            f"{to_iteration:,}: nothing to do.",
             flush=True,
         )
-        metadata = services.load_run_metadata(run_dir)
-        return {
-            "run_id": run_id,
-            "resumed_from_iteration": resumed_from,
-            "final_iterations": metadata.iterations,
-            "num_infosets": metadata.num_infosets,
-            "status": metadata.status,
-            "no_op": True,
-        }
-
-    services.run_training(
-        session,
-        num_workers=num_workers if num_workers is not None else DEFAULT_CPU,
-        num_iterations=remaining,
-    )
+    # Commit on BOTH branches. The no-op path is not read-only: `services.resume`
+    # goes through `mark_resumed` (status "running", attempt appended) and then
+    # `mark_completed`, and both write `.run.json`. Skipping the commit here would
+    # discard those writes and leave the Volume holding a run marked "running" with
+    # a dangling attempt -- precisely the state `mark_completed` was added to
+    # prevent -- while the returned payload reports "completed".
     data_volume.commit()
 
-    metadata = services.load_run_metadata(run_dir)
     return {
-        "run_id": run_id,
-        "resumed_from_iteration": resumed_from,
-        "final_iterations": metadata.iterations,
-        "num_infosets": metadata.num_infosets,
-        "status": metadata.status,
-        "no_op": False,
+        "run_id": out.run_id,
+        "resumed_from_iteration": out.resumed_from_iteration,
+        "final_iterations": out.iterations,
+        "num_infosets": out.num_infosets,
+        "status": out.status,
+        "no_op": out.no_op,
     }
 
 

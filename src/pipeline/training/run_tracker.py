@@ -9,13 +9,37 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from src.pipeline.training.versioning import REPRESENTATION_VERSION
 from src.shared.config import Config
 from src.shared.gitinfo import get_git_commit, is_git_dirty
+
+
+def _opt_str(value: Any) -> str | None:
+    """A non-empty string, or None — guards against a persisted null or empty string."""
+    return value if isinstance(value, str) and value else None
+
+
+@dataclass(frozen=True)
+class ExperimentTag:
+    """Which experiment, and which arm of it, a run belongs to.
+
+    Travels together from the CLI down to the run metadata because the three are
+    only meaningful as a set: an arm without its experiment cannot be grouped, and
+    a variant without a paired control cannot be attributed — the extra training a
+    fork receives moves the score on its own.
+    """
+
+    experiment_id: str | None = None
+    arm: str | None = None
+    parent_run_id: str | None = None
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.experiment_id or self.arm or self.parent_run_id)
 
 
 @dataclass
@@ -110,6 +134,17 @@ class RunMetadata:
     # resume appends one. Empty only on malformed/pre-attempts metadata (synthesized
     # on load, see from_dict).
     attempts: list[AttemptRecord] = field(default_factory=list)
+    # Experiment lineage. A base-fork experiment is a base run plus several arms,
+    # and an arm's score is uninterpretable without knowing which experiment it
+    # belongs to and whether it is the variant or the control. None on runs that
+    # were not launched as part of an experiment, which includes every legacy run.
+    experiment_id: str | None = None
+    arm: str | None = None
+    parent_run_id: str | None = None
+    # Exact hash of the resolved config. `config_name` is not identity: it comes
+    # from system.config_name inside the YAML, so a run and its override-variant
+    # record the same name. None on pre-hash runs.
+    config_hash: str | None = None
 
     @property
     def current_attempt(self) -> AttemptRecord:
@@ -124,9 +159,12 @@ class RunMetadata:
         config: Config,
         action_config_hash: str,
         card_abstraction_hash: str | None = None,
+        experiment_id: str | None = None,
+        arm: str | None = None,
+        parent_run_id: str | None = None,
     ) -> RunMetadata:
         storage_capacity = config.storage.initial_capacity if config else 0
-        now = datetime.now().isoformat()
+        now = datetime.now(UTC).isoformat()
         git_commit = get_git_commit()
         git_dirty = is_git_dirty()
         return cls(
@@ -154,6 +192,10 @@ class RunMetadata:
                     git_dirty=git_dirty,
                 )
             ],
+            experiment_id=experiment_id,
+            arm=arm,
+            parent_run_id=parent_run_id,
+            config_hash=config.content_hash() if config else None,
         )
 
     @classmethod
@@ -221,6 +263,13 @@ class RunMetadata:
             git_commit=git_commit,
             git_dirty=git_dirty,
             attempts=attempts,
+            # All four are absent on every pre-experiment run, so they default to
+            # None rather than being required — a legacy run is simply an
+            # unaffiliated one, not an unloadable one.
+            experiment_id=_opt_str(data.get("experiment_id")),
+            arm=_opt_str(data.get("arm")),
+            parent_run_id=_opt_str(data.get("parent_run_id")),
+            config_hash=_opt_str(data.get("config_hash")),
         )
 
     @classmethod
@@ -251,6 +300,10 @@ class RunMetadata:
             "git_commit": self.git_commit,
             "git_dirty": self.git_dirty,
             "attempts": [a.to_dict() for a in self.attempts],
+            "experiment_id": self.experiment_id,
+            "arm": self.arm,
+            "parent_run_id": self.parent_run_id,
+            "config_hash": self.config_hash,
             "config": config_dict,
         }
 
@@ -300,7 +353,7 @@ class RunMetadata:
             AttemptRecord(
                 index=len(self.attempts),
                 kind="resume",
-                started_at=datetime.now().isoformat(),
+                started_at=datetime.now(UTC).isoformat(),
                 start_iter=self.iterations,
                 git_commit=get_git_commit(),
                 git_dirty=is_git_dirty(),
@@ -310,23 +363,23 @@ class RunMetadata:
     def _close_current_attempt(self, status: str) -> None:
         attempt = self.current_attempt
         attempt.status = status
-        attempt.ended_at = datetime.now().isoformat()
+        attempt.ended_at = datetime.now(UTC).isoformat()
         if attempt.end_iter is None:
             attempt.end_iter = self.iterations
 
     def mark_completed(self) -> None:
         self.status = "completed"
-        self.completed_at = datetime.now().isoformat()
+        self.completed_at = datetime.now(UTC).isoformat()
         self._close_current_attempt("completed")
 
     def mark_interrupted(self) -> None:
         self.status = "interrupted"
-        self.completed_at = datetime.now().isoformat()
+        self.completed_at = datetime.now(UTC).isoformat()
         self._close_current_attempt("interrupted")
 
     def mark_failed(self) -> None:
         self.status = "failed"
-        self.completed_at = datetime.now().isoformat()
+        self.completed_at = datetime.now(UTC).isoformat()
         self._close_current_attempt("failed")
 
 
@@ -349,6 +402,9 @@ class RunTracker:
         config: Config | None = None,
         action_config_hash: str | None = None,
         card_abstraction_hash: str | None = None,
+        experiment_id: str | None = None,
+        arm: str | None = None,
+        parent_run_id: str | None = None,
     ):
         """
         Initialize run tracker.
@@ -360,6 +416,10 @@ class RunTracker:
             action_config_hash: Hash of the action abstraction
             card_abstraction_hash: Exact config hash of the card abstraction being
                 trained against, recorded so evaluation can pin it later
+            experiment_id: Experiment this run is an arm of, if any
+            arm: Which arm — e.g. ``"control"`` or ``"variant:<idea>"``. A variant's
+                score is uninterpretable without its paired control
+            parent_run_id: Base run this was forked from, for base-fork lineage
         """
         self.run_dir = Path(run_dir)
         self.run_id = self.run_dir.name
@@ -383,6 +443,9 @@ class RunTracker:
                 config,
                 action_config_hash=action_config_hash,
                 card_abstraction_hash=card_abstraction_hash,
+                experiment_id=experiment_id,
+                arm=arm,
+                parent_run_id=parent_run_id,
             )
 
     @property
