@@ -14,6 +14,7 @@ import pytest
 
 from src.core.game.state import Street
 from src.pipeline import services
+from src.pipeline.services import abstraction as services_abstraction
 
 
 @pytest.fixture
@@ -42,7 +43,10 @@ def one_pass_service(monkeypatch, synthetic_matrices):
         return synthetic_matrices
 
     monkeypatch.setattr(
-        services.PostflopPrecomputer, "compute_street_matrices", fake_matrices, raising=True
+        services_abstraction.PostflopPrecomputer,
+        "compute_street_matrices",
+        fake_matrices,
+        raising=True,
     )
     return calls
 
