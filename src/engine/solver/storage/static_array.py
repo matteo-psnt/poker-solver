@@ -33,6 +33,7 @@ Concurrency:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Iterator
 from multiprocessing import shared_memory
@@ -113,7 +114,23 @@ class StaticArrayStorage:
         }
 
     def _shm_name(self, array: str) -> str:
-        return f"sts_{array[:4]}_{self.session_id}"
+        """Segment name, keyed by BOTH the session and the tree fingerprint.
+
+        Workers rebuild the tree locally and then index shared arrays with it, so
+        two processes disagreeing about the tree would each write to different
+        rows of the same memory — silent, total corruption with no error
+        anywhere. Folding the fingerprint into the name makes that unattachable
+        rather than merely unlikely: a mismatched tree computes a different name
+        and simply cannot find the segments.
+
+        Hashed to a fixed width because shared-memory names are length-capped
+        (31 characters on macOS), so concatenating a session id and a fingerprint
+        would overflow for ordinary session names.
+        """
+        digest = hashlib.sha256(
+            f"{self.session_id}|{self.tree.fingerprint()}".encode()
+        ).hexdigest()[:12]
+        return f"sts_{array[:4]}_{digest}"
 
     def _map_shared(self, *, create: bool) -> None:
         """Create or attach the shared segments and bind them as array views."""
@@ -126,7 +143,17 @@ class StaticArrayStorage:
                     size=max(1, length * dtype.itemsize),
                 )
             else:
-                shm = shared_memory.SharedMemory(name=self._shm_name(name), create=False)
+                try:
+                    shm = shared_memory.SharedMemory(name=self._shm_name(name), create=False)
+                except FileNotFoundError as exc:
+                    raise FileNotFoundError(
+                        f"No shared segment for array {name!r} in session "
+                        f"{self.session_id!r} under betting tree "
+                        f"{self.tree.fingerprint()}. Either the session is not "
+                        "running, or this process built a DIFFERENT tree than the "
+                        "coordinator — segment names are keyed by the fingerprint "
+                        "precisely so a mismatch cannot silently attach."
+                    ) from exc
             self._shm.append(shm)
             array = np.ndarray((length,), dtype=dtype, buffer=shm.buf)
             if create:
