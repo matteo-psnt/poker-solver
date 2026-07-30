@@ -68,6 +68,23 @@ def worker_seed(base_seed: int, worker_id: int, batch_id: int = 0) -> int:
     return int(np.random.SeedSequence([base_seed, worker_id, batch_id]).generate_state(1)[0])
 
 
+def worker_iteration_indices(worker_id: int, num_workers: int, num_iterations: int) -> range:
+    """Global iteration indices for one worker: ``worker_id, +N, +2N, ...``
+
+    INTERLEAVED, not contiguous blocks, and the difference is not cosmetic.
+    ``solver.iteration`` is not a progress counter — it is read as *t* by the
+    DCFR discount ``t^a/(t^a+1)``, by the strategy weight ``t^gamma``, and by the
+    traversing-player and button alternation. Contiguous blocks would give the
+    first worker only small *t* and the last only large *t*, so each would apply
+    a different slice of the discount schedule to the shared arrays.
+
+    Interleaving gives every worker the full range of *t*, and the union across
+    workers is exactly ``range(num_iterations)`` — the same absolute numbering a
+    single-worker run would see.
+    """
+    return range(worker_id, num_iterations, num_workers)
+
+
 def _build_local(config: Config, abstraction: BucketingStrategy | None = None):
     """Rebuild the tree (and abstraction) inside a worker, from config alone.
 
@@ -91,7 +108,7 @@ def _worker_entry(
     config: Config,
     worker_id: int,
     session_id: str,
-    iterations: int,
+    indices: range,
     base_seed: int,
     result_queue: mp.Queue,
     abstraction: BucketingStrategy | None = None,
@@ -112,12 +129,18 @@ def _worker_entry(
         np.random.seed(seed)
 
         started = time.time()
-        for _ in range(iterations):
+        # Assign the ABSOLUTE iteration before each step: train_iteration reads
+        # self.iteration as t and then increments, so leaving it to count locally
+        # would give this worker t = 0..share instead of its true global indices.
+        count = 0
+        for global_iteration in indices:
+            solver.iteration = global_iteration
             solver.train_iteration()
+            count += 1
         result_queue.put(
             {
                 "worker_id": worker_id,
-                "iterations": iterations,
+                "iterations": count,
                 "elapsed_s": time.time() - started,
                 "dropped": solver.dropped_unknown_id_updates,
                 "error": None,
@@ -157,9 +180,9 @@ def train_static_parallel(
     )
 
     try:
-        per_worker = [num_iterations // num_workers] * num_workers
-        for i in range(num_iterations % num_workers):
-            per_worker[i] += 1
+        assignments = [
+            worker_iteration_indices(w, num_workers, num_iterations) for w in range(num_workers)
+        ]
 
         started = time.time()
         ctx = mp.get_context("spawn")
@@ -171,7 +194,7 @@ def train_static_parallel(
                     config,
                     worker_id,
                     session_id,
-                    per_worker[worker_id],
+                    assignments[worker_id],
                     base_seed,
                     result_queue,
                     abstraction,
@@ -179,7 +202,7 @@ def train_static_parallel(
                 daemon=False,
             )
             for worker_id in range(num_workers)
-            if per_worker[worker_id] > 0
+            if len(assignments[worker_id]) > 0
         ]
         for process in processes:
             process.start()
@@ -193,6 +216,12 @@ def train_static_parallel(
             raise RuntimeError(f"{len(failures)} static worker(s) failed: {failures[0]['error']}")
 
         elapsed = time.time() - started
+        completed = sum(r["iterations"] for r in results)
+        if completed != num_iterations:
+            raise AssertionError(
+                f"workers ran {completed} iterations against a target of {num_iterations}; "
+                "the interleaved index assignment does not tile the range."
+            )
         dropped = sum(r["dropped"] for r in results)
         if dropped:
             # Structurally impossible here; a nonzero value means something
@@ -224,4 +253,9 @@ def train_static_parallel(
         storage.close()
 
 
-__all__ = ("StaticTrainingResult", "train_static_parallel", "worker_seed")
+__all__ = (
+    "StaticTrainingResult",
+    "train_static_parallel",
+    "worker_iteration_indices",
+    "worker_seed",
+)
