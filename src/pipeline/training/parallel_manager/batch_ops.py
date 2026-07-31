@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from src.pipeline.training.parallel_protocol import JobType
+from src.shared.procinfo import rss_mb
 
 from .gather import gather_worker_results
 
@@ -29,6 +30,13 @@ class BatchResult(TypedDict):
     resized: bool
     capacity: int
     interrupted: bool
+    # Memory telemetry. `max_worker_rss_mb` is the LARGEST single worker, not a
+    # node total: RSS counts shared pages in every process that maps them, so
+    # summing across workers multiplies the mmapped bucket matrices and the
+    # shared training arrays by the worker count. None where RSS is unreadable
+    # (macOS has no /proc), which is distinct from "measured zero".
+    max_worker_rss_mb: int | None
+    master_rss_mb: int | None
 
 
 def run_batch(
@@ -74,6 +82,11 @@ def run_batch(
     total_owned = 0
     total_dropped = 0
     max_worker_capacity = 0.0
+    # Max, not sum: RSS counts shared pages (the mmapped bucket matrices, the
+    # shared training arrays) in every process that maps them, so a sum
+    # double-counts them several times over. The largest single worker is the
+    # honest number for "how close is one worker to the ceiling".
+    worker_rss: list[int] = []
     for result in received:
         if "error" in result:
             errors.append(result)
@@ -87,6 +100,9 @@ def run_batch(
             total_dropped += cast(int, result.get("dropped_unknown_id_updates", 0))
             worker_capacity = float(cast(float | int, result.get("capacity_usage", 0.0)))
             max_worker_capacity = max(max_worker_capacity, worker_capacity)
+            rss = result.get("rss_mb")
+            if isinstance(rss, int):
+                worker_rss.append(rss)
 
     batch_time = time.time() - batch_start
     total_iters = sum(iterations_per_worker)
@@ -126,6 +142,8 @@ def run_batch(
         "num_infosets": total_owned,
         "dropped_unknown_id_updates": total_dropped,
         "max_worker_capacity": max_worker_capacity,
+        "max_worker_rss_mb": max(worker_rss) if worker_rss else None,
+        "master_rss_mb": rss_mb(),
         "resized": resized,
         "capacity": manager.capacity,
         "interrupted": interrupted,
