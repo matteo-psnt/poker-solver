@@ -131,6 +131,15 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     # One job per day, holding that day's tasks. Created on demand; the `|| true`
     # is the second and later submissions finding it already there.
     JOB="poker-$(date -u +%Y%m%d)"
+    # A job that has been STOPPED cannot take new tasks: `az batch task create`
+    # answers JobCompleted. Since the id is per-day, one `just panic` -- or one
+    # stranded task that had to be cleared at job level -- would otherwise block
+    # every further submission until midnight UTC. Fall back to a suffixed id.
+    STATE=$(az batch job show --job-id "$JOB" --query state -o tsv 2>/dev/null || echo absent)
+    if [ "$STATE" != "absent" ] && [ "$STATE" != "active" ]; then
+        JOB="$JOB-$(date -u +%H%M%S)"
+        echo "  previous job is $STATE; using $JOB"
+    fi
     # Explicit, not defaulted: these are billing controls, and a billing control
     # that depends on a service default is one upgrade away from not existing.
     #   retry 0  -- a task that fails deterministically must not re-burn a node
