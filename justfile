@@ -172,6 +172,9 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     # RUN_TIMEOUT must stay comfortably below it or the cheap stop never fires.
     RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
     MAX_WALL="${MAX_WALL:-P1D}"
+    # RUN_WORKERS empty = all CPUs. Worth setting BELOW the core count on a big
+    # abstraction: every worker pickle.loads its own copy (385 MB for production),
+    # so 16 workers cost 6.2 GB in duplicates alone before any training state.
     az batch task create --job-id "$JOB" --task-id "$TASK" \
         --max-wall-clock-time "$MAX_WALL" \
         --command-line "/bin/bash -c '$LEG'" \
@@ -179,7 +182,7 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
             CODE_SNAPSHOT="{{snap}}" RUN_CONFIG="{{config}}" RUN_TO="{{to}}" \
             RUN_ID="{{run}}" RUN_EXPERIMENT="{{experiment}}" RUN_ARM="{{arm}}" \
             RUN_PARENT="{{parent}}" RUN_SETS_HEX="$SETS_HEX" \
-            RUN_TIMEOUT="$RUN_TIMEOUT" \
+            RUN_TIMEOUT="$RUN_TIMEOUT" RUN_WORKERS="${RUN_WORKERS:-}" \
         -o none
     echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
     echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
