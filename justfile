@@ -156,14 +156,23 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     # rejects it. Base64 would reintroduce the problem via its `=` padding; hex
     # has no special characters at all.
     SETS_HEX=$(printf '%s' "{{sets}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
+    # Two nested ceilings, deliberately different:
+    #   RUN_TIMEOUT  kills the TRAINING process and still runs the publish trap,
+    #                so a wedged leg loses at most one rung interval.
+    #   maxWallClock kills the TASK, losing whatever the trap did not reach.
+    # RUN_TIMEOUT must stay comfortably below it or the cheap stop never fires.
+    RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
+    MAX_WALL="${MAX_WALL:-P1D}"
     az batch task create --job-id "$JOB" --task-id "$TASK" \
-        --max-wall-clock-time "P1D" \
+        --max-wall-clock-time "$MAX_WALL" \
         --command-line "/bin/bash -c '$LEG'" \
         --environment-settings \
             CODE_SNAPSHOT="{{snap}}" RUN_CONFIG="{{config}}" RUN_TO="{{to}}" \
             RUN_ID="{{run}}" RUN_EXPERIMENT="{{experiment}}" RUN_ARM="{{arm}}" \
             RUN_PARENT="{{parent}}" RUN_SETS_HEX="$SETS_HEX" \
+            RUN_TIMEOUT="$RUN_TIMEOUT" \
         -o none
+    echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
     echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
 
 # Start a NEW run and train it to an absolute iteration count.

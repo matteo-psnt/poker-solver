@@ -230,13 +230,36 @@ if [ -n "$RUN_SETS" ]; then
   for kv in $RUN_SETS; do [ -n "$kv" ] && ARGS+=(--set "$kv"); done
 fi
 
+# Wall-clock ceiling for the training process itself. The task-level
+# maxWallClockTime (P1D) is not a backstop for a hang: it is longer than any leg
+# is meant to run, so a wedged process bills a full node-day before Batch acts.
+# One leg proved this -- training died, the process could not exit, and the task
+# stayed `running` indefinitely.
+#
+# --signal=TERM first so the trap below still publishes; --kill-after guarantees
+# the process dies even if it ignores TERM, which is the case that hung.
+RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
+GUARD=(timeout --signal=TERM --kill-after=120s "$RUN_TIMEOUT")
+
+# `|| rc=$?` because `set -e` would abort before the exit code could be read,
+# and a timed-out leg must still reach the reporting below.
+rc=0
 if [ -z "${RUN_ID:-}" ]; then
-  log "fresh train: config=$RUN_CONFIG iterations=$RUN_TO"
-  uv run poker-solver-run train --config "$RUN_CONFIG" --iterations "$RUN_TO" "${ARGS[@]}"
+  log "fresh train: config=$RUN_CONFIG iterations=$RUN_TO (timeout $RUN_TIMEOUT)"
+  "${GUARD[@]}" uv run poker-solver-run train \
+    --config "$RUN_CONFIG" --iterations "$RUN_TO" "${ARGS[@]}" || rc=$?
 else
-  log "resume: run=$RUN_ID to=$RUN_TO (absolute)"
-  uv run poker-solver-run resume --run "$RUN_ID" --to-iteration "$RUN_TO" \
-    ${RUN_WORKERS:+--workers "$RUN_WORKERS"}
+  log "resume: run=$RUN_ID to=$RUN_TO (absolute) (timeout $RUN_TIMEOUT)"
+  "${GUARD[@]}" uv run poker-solver-run resume \
+    --run "$RUN_ID" --to-iteration "$RUN_TO" \
+    ${RUN_WORKERS:+--workers "$RUN_WORKERS"} || rc=$?
 fi
+# 124 is timeout's own "deadline expired"; surface it as itself rather than as a
+# training failure, so `just jobs` distinguishes a hang from a crash.
+if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+  log "TIMEOUT after $RUN_TIMEOUT -- leg killed; published rungs are on the share"
+  exit 124
+fi
+[ "$rc" = 0 ] || exit "$rc"
 
 log "leg complete"
