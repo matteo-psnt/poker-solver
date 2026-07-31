@@ -20,6 +20,7 @@ from src.engine.solver.storage.shared_array.ownership import (
 from src.engine.solver.storage.shared_array.ownership import (
     stable_hash as _stable_hash,
 )
+from src.engine.solver.storage.shared_array.remote_cache import RemoteKeyCache
 from src.engine.solver.storage.shared_array.types import SharedArrayMutableState
 
 from . import infoset as infoset_ops
@@ -92,6 +93,7 @@ class SharedArrayStorage(Storage):
         zarr_compression_level: int,
         zarr_chunk_size: int,
         checkpoint_retain_every: int,
+        remote_key_cache_size: int = 0,
     ):
         """Storage over shared memory.
 
@@ -116,6 +118,7 @@ class SharedArrayStorage(Storage):
         self.zarr_compression_level = zarr_compression_level
         self.zarr_chunk_size = zarr_chunk_size
         self.checkpoint_retain_every = checkpoint_retain_every
+        self.remote_key_cache_size = remote_key_cache_size
 
         usable_slots = initial_capacity - 1
         slots_per_worker = usable_slots // num_workers
@@ -124,6 +127,7 @@ class SharedArrayStorage(Storage):
         self.state = SharedArrayMutableState(
             next_local_id=self.id_range_start,
             pending_id_requests={i: set() for i in range(num_workers)},
+            remote_keys=RemoteKeyCache(remote_key_cache_size),
         )
 
         for spec in ARRAY_SPECS:

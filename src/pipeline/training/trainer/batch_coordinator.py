@@ -179,6 +179,7 @@ class TrainingBatchCoordinator:
             capacity_pct=round(100.0 * float(max_worker_capacity), 1),
             max_worker_rss_mb=batch_result.get("max_worker_rss_mb"),
             master_rss_mb=batch_result.get("master_rss_mb"),
+            remote_cache_evictions=batch_result.get("remote_cache_evictions"),
         )
         reporting.update_progress_bar(
             self.session,
@@ -286,6 +287,7 @@ class TrainingBatchCoordinator:
         capacity_pct: float | None = None,
         max_worker_rss_mb: int | None = None,
         master_rss_mb: int | None = None,
+        remote_cache_evictions: int | None = None,
     ) -> None:
         """Append one convergence-curve row (utility, speed, and solver-health) to disk."""
         metrics = self.session.metrics
@@ -311,6 +313,8 @@ class TrainingBatchCoordinator:
             # a node total; compare workers to each other and watch it grow.
             "max_worker_rss_mb": max_worker_rss_mb,
             "master_rss_mb": master_rss_mb,
+            # Remote-key cache pressure: 0 = the cap is not binding.
+            "remote_cache_evictions": remote_cache_evictions,
             # Cross-worker updates skipped for not-yet-propagated infoset IDs this
             # batch, plus the applied count and the resulting per-visit drop RATE
             # — the sample-efficiency signal for hash-sharded multi-worker runs.
