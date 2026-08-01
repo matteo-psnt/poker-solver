@@ -87,7 +87,15 @@ publish_all() {
       [ -d "$d" ] || continue
       base=$(basename "$d")
       case "$base" in
-        checkpoint-*|keys-*)
+        # static-* MUST be here too. The static ladder's snapshots are named
+        # static-<iter>.zarr, so they fell to the unguarded branch below and were
+        # published with NO completion marker -- an interrupted publish then left
+        # a partial rung on the share that nothing could tell from a whole one.
+        # That is how static-10000000.zarr of the 30M run became a corrupt
+        # artifact: a scoring leg fetched it cleanly, then died with "error
+        # during blosc decompression: 0". Publishing every ~250k iterations
+        # meant many chances to be interrupted mid-copy.
+        checkpoint-*|keys-*|static-*)
           rm -f "$ARCHIVE/$name/.complete-$base" 2>/dev/null || true
           if cp -ru "$d" "$ARCHIVE/$name/" 2>>/tmp/publish_err; then
             : > "$ARCHIVE/$name/.complete-$base" 2>/dev/null || true
@@ -240,6 +248,13 @@ print(chr(10).join(sorted(n for n in names if n)))
         # next task inherits a TRUNCATED checkpoint and dies inside zarr. That
         # is what happened to rung 10000000: "fetched" in one second, then a
         # read error. Node-local state is never evidence of a complete copy.
+        if [ ! -f "$src/.complete-static-$it.zarr" ]; then
+          # Refuse rather than load: an unmarked rung is either pre-marker or was
+          # interrupted mid-publish, and the two are indistinguishable from here.
+          # Loading it yields a corrupt-chunk error deep in zarr minutes later.
+          log "  WARN rung $it has no completion marker -- refusing (may be partial)"
+          continue
+        fi
         rm -rf "$RUNS/$RUN_ID/static-$it.zarr"
         if cp -r "$src/static-$it.zarr" "$RUNS/$RUN_ID/" 2>/tmp/fetch_err; then
           log "  fetched rung $it"
