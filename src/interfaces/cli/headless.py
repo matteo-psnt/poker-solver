@@ -91,6 +91,25 @@ def _cmd_train(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def _cmd_train_static(args: argparse.Namespace) -> dict[str, Any]:
+    """Argparse transport around :func:`services.train_static`."""
+    out = services.train_static(
+        args.config,
+        num_workers=args.workers,
+        num_iterations=args.iterations,
+        seed=args.seed,
+        config_overrides=_parse_overrides(args.overrides),
+        experiment=services.ExperimentTag(
+            experiment_id=args.experiment,
+            arm=args.arm,
+            parent_run_id=args.parent,
+        ),
+    )
+    payload: dict[str, Any] = {"op": "train-static", **dataclasses.asdict(out)}
+    _write_result(Path(out.runs_dir) / out.run_id, payload)
+    return payload
+
+
 def _cmd_resume(args: argparse.Namespace) -> dict[str, Any]:
     """Argparse transport around :func:`services.resume`."""
     run_dir = _resolve_run_dir(args.run, args.runs_dir)
@@ -379,6 +398,39 @@ def _add_train_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None
         "--parent", default=None, help="Run id this was forked from (base-fork lineage)."
     )
     p_train.set_defaults(func=_cmd_train)
+
+
+def _add_train_static_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
+    """Arguments for `poker-solver-run train-static`."""
+    p_ts = sub.add_parser(
+        "train-static",
+        parents=[common],
+        help="Train over the statically-enumerated tree (fixed memory, no key maps).",
+    )
+    p_ts.add_argument("--config", required=True, help="Config stem under config/training/.")
+    p_ts.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Worker processes. Unlike `train`, this does NOT raise memory: the table "
+        "is shared and there are no per-worker key maps, so it is a pure throughput knob.",
+    )
+    p_ts.add_argument(
+        "--iterations", type=int, default=None, help="Override the config iteration count."
+    )
+    p_ts.add_argument("--seed", type=int, default=None, help="Override system.seed.")
+    p_ts.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="overrides",
+        metavar="KEY=VALUE",
+        help="Nested config override, `__` as the separator. Repeatable.",
+    )
+    p_ts.add_argument("--experiment", default=None, help="Experiment id this run is an arm of.")
+    p_ts.add_argument("--arm", default=None, help="Arm within the experiment.")
+    p_ts.add_argument("--parent", default=None, help="Run id this was forked from.")
+    p_ts.set_defaults(func=_cmd_train_static)
 
 
 def _add_resume_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
@@ -706,6 +758,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     _add_train_parser(sub, common)
+    _add_train_static_parser(sub, common)
     _add_resume_parser(sub, common)
     _add_precompute_parser(sub, common)
     _add_eval_parser(sub, common)
