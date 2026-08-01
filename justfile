@@ -201,7 +201,13 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
             RUN_STATIC="${RUN_STATIC:-}" RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-}" \
         -o none
     echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
-    echo "  retries:  $RETRIES $([ -n "{{run}}" ] && echo "(resume is idempotent)" || echo "(fresh submit is not idempotent)")"
+    if [ "$RETRIES" = "0" ]; then
+        echo "  retries:  0 (a fresh dynamic submit is not idempotent -- a retry would start a second run)"
+    elif [ "${RUN_STATIC:-}" = "1" ]; then
+        echo "  retries:  $RETRIES (static leg: stable run id, so a retry resumes)"
+    else
+        echo "  retries:  $RETRIES (resume is idempotent: --to-iteration is absolute)"
+    fi
     echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
 
 # Start a NEW run and train it to an absolute iteration count.
