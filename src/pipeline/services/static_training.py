@@ -116,10 +116,15 @@ def train_static(
     # Same id shape as the dynamic path, including the random suffix: second
     # resolution collides when runs start simultaneously, and two runs sharing a
     # directory interleave their checkpoints silently.
-    resuming = run_id is not None
     if run_id is None:
         run_id = f"run-{datetime.now().strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
     run_dir = base_dir / run_id
+    # A NAMED run that does not exist yet is a fresh start, not an error. This is
+    # what makes a scheduler retry safe on the static path: the first attempt
+    # creates the directory, and a retry under the same name resumes it instead
+    # of starting a second run from zero -- the hazard that keeps retries off the
+    # dynamic fresh-train path.
+    resuming = (run_dir / ".run.json").exists()
 
     action_model = ActionModel(config)
     if resuming:

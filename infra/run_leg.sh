@@ -274,8 +274,12 @@ LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
 # dynamic path needs does not exist.
 rc=0
 if [ "${RUN_STATIC:-}" = "1" ]; then
-  STATIC_ARGS=()
-  [ -n "${RUN_ID:-}" ] && STATIC_ARGS+=(--run "$RUN_ID")
+  # Derive a STABLE run id from the task when none was given. A Batch retry keeps
+  # the same task id, so the retry resumes this run rather than starting a second
+  # one from zero -- which is what makes retries safe here and not on the dynamic
+  # fresh-train path.
+  STATIC_RUN="${RUN_ID:-run-${AZ_BATCH_TASK_ID:-local}}"
+  STATIC_ARGS=(--run "$STATIC_RUN")
   [ -n "${RUN_CHECKPOINT_EVERY:-}" ] && STATIC_ARGS+=(--checkpoint-every "$RUN_CHECKPOINT_EVERY")
   log "static: config=${RUN_CONFIG:-} run=${RUN_ID:-<new>} to=$RUN_TO (timeout $RUN_TIMEOUT)"
   set +o pipefail

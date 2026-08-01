@@ -11,6 +11,8 @@ iteration accounting and resume semantics, which are assignment-independent.
 
 from __future__ import annotations
 
+import pytest
+
 from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.training.static_parallel import (
     train_static_parallel,
@@ -66,6 +68,8 @@ class TestChunkSeeding:
         assert len(seeds) == 8
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(180)
 class TestCheckpointAndResume:
     def test_chunking_reaches_the_same_total(self, tmp_path):
         result = train_static_parallel(
