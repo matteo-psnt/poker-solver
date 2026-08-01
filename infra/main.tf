@@ -81,22 +81,32 @@ locals {
       return 1
     }
 
-    DEV=""
-    for _ in $(seq 30); do
-      DEV=$(find_data_disk || true)
-      [ -n "$DEV" ] && break
-      sleep 2
-    done
-    if [ -z "$DEV" ]; then
-      echo "FATAL: no unpartitioned ${var.data_disk_gb}G data disk found. Block devices:" >&2
-      lsblk -o NAME,SIZE,TYPE,MOUNTPOINT >&2
-      exit 1
+    # IDEMPOTENCE FIRST. Batch RETRIES a failed start task on the same node, and
+    # `find_data_disk` deliberately skips disks that are already mounted -- so
+    # once attempt 1 has mounted the disk, attempt 2 finds nothing and the FATAL
+    # below bricks the node with `starttaskfailed`. Two nodes were lost to
+    # exactly this, with the disk sitting healthy at /mnt/work in the very lsblk
+    # output printed by the error. Anything already mounted there is the answer,
+    # not a problem.
+    if mountpoint -q /mnt/work; then
+      echo "data disk: already mounted at /mnt/work (start task retry)"
+    else
+      DEV=""
+      for _ in $(seq 30); do
+        DEV=$(find_data_disk || true)
+        [ -n "$DEV" ] && break
+        sleep 2
+      done
+      if [ -z "$DEV" ]; then
+        echo "FATAL: no unpartitioned ${var.data_disk_gb}G data disk found. Block devices:" >&2
+        lsblk -o NAME,SIZE,TYPE,MOUNTPOINT >&2
+        exit 1
+      fi
+      echo "data disk: $DEV"
+      blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -F "$DEV"
+      mkdir -p /mnt/work
+      mount "$DEV" /mnt/work
     fi
-    echo "data disk: $DEV"
-
-    blkid "$DEV" >/dev/null 2>&1 || mkfs.ext4 -F "$DEV"
-    mkdir -p /mnt/work
-    mountpoint -q /mnt/work || mount "$DEV" /mnt/work
     chmod 1777 /mnt/work
     apt-get update -qq
     apt-get install -y -qq build-essential python3-dev libgomp1 git rsync
