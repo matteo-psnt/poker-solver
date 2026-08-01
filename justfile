@@ -438,3 +438,20 @@ score run method="exact_br" rungs="" *flags:
           just _task "$SNAP" "" "0" "{{run}}" "" "" "" ""
     done
     echo "  ${#RUNGS[@]} rung(s) queued — Batch runs them across the pool"
+
+# Verify a published static ladder and mark the rungs that actually load.
+#
+#   just repair-ladder run-production-025433-1095 production
+#
+# Rungs published before completion markers covered `static-*` are refused by
+# the fetch, since an unmarked rung and an interrupted one are indistinguishable.
+# This PROVES each one by loading it on a node and marks only those that read
+# cleanly, so a corrupt rung is found once, here, instead of inside a scoring leg.
+[doc("Verify a published static ladder, marking rungs that load. Args: run config")]
+repair-ladder run config:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SNAP=$(just push-code)
+    echo "  code snapshot: $SNAP"
+    RUN_OP=repair-ladder RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
+      just _task "$SNAP" "{{config}}" "0" "{{run}}" "" "" "" ""

@@ -313,6 +313,57 @@ LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
 # `|| rc=$?` because `set -e` would abort before the exit code could be read,
 # and a timed-out leg must still reach the reporting below. PIPESTATUS, not $?,
 # because the tee makes this a pipeline and $? would report tee's success.
+# REPAIR mode. Rungs published before completion markers covered `static-*` are
+# indistinguishable from interrupted ones, so the fetch now (correctly) refuses
+# them all -- including the 30M run's entire ladder. Deleting and retraining is
+# absurd for a 2.6h run whose data is mostly fine, and blanket-marking them would
+# reinstate exactly the bug the markers exist to prevent.
+#
+# So PROVE each rung instead: copy it, load it, and mark it only if zarr can
+# actually decompress every chunk. A rung that fails is left unmarked and named,
+# which is a permanently honest record -- corrupt data is discovered here, once,
+# rather than in a scoring leg minutes deep.
+if [ "${RUN_OP:-train}" = "repair-ladder" ]; then
+  src="$ARCHIVE/$RUN_ID"
+  [ -d "$src" ] || { log "FATAL no such run on the share: $RUN_ID"; exit 1; }
+  mkdir -p "$RUNS/$RUN_ID"
+  find "$src" -maxdepth 1 -mindepth 1 ! -name 'static-*' ! -name '.complete-*' \
+       -exec cp -ru {} "$RUNS/$RUN_ID/" \; 2>/dev/null || true
+  good=0; bad=0
+  for d in "$src"/static-*.zarr; do
+    [ -d "$d" ] || continue
+    base=$(basename "$d")
+    it="${base#static-}"; it="${it%.zarr}"
+    rm -rf "${RUNS:?}/$RUN_ID/$base"
+    if ! cp -r "$d" "$RUNS/$RUN_ID/" 2>/dev/null; then
+      log "  $base: COPY FAILED"; bad=$((bad+1)); continue
+    fi
+    if uv run python -c "
+import sys
+from pathlib import Path
+from src.shared.config_loader import load_training_config
+from src.pipeline.training.components import build_static_evaluation_solver
+try:
+    build_static_evaluation_solver(
+        load_training_config('$RUN_CONFIG'),
+        checkpoint_dir=Path('$RUNS/$RUN_ID'),
+        at_iteration=int('$it'),
+    )
+except Exception as exc:
+    print(f'{type(exc).__name__}: {exc}'[:160], file=sys.stderr); sys.exit(1)
+" 2>/tmp/verify_err; then
+      : > "$src/.complete-$base" 2>/dev/null || true
+      log "  $base: OK, marked"; good=$((good+1))
+    else
+      log "  $base: CORRUPT -- $(tail -1 /tmp/verify_err)"; bad=$((bad+1))
+    fi
+    rm -rf "${RUNS:?}/$RUN_ID/$base"
+  done
+  log "repair complete: $good verified and marked, $bad unusable"
+  publish_log
+  exit 0
+fi
+
 # EVALUATE mode. Scoring belongs on the node, not on a laptop: the share is a
 # local mount here and a WAN download away from anywhere else -- one checkpoint
 # is ~540 MB of small zarr chunks, which took ~20 minutes to pull over SMB and
