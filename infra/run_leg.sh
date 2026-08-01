@@ -25,6 +25,8 @@
 #   RUN_PARENT      parent run id
 #   RUN_SETS_HEX    hex-encoded, space-separated k=v config overrides
 #   RUN_WORKERS     worker count (empty = all CPUs)
+#   RUN_STATIC      1 = statically-enumerated tree (fixed memory, resumable)
+#   RUN_CHECKPOINT_EVERY  static only: checkpoint every N iterations
 set -euo pipefail
 
 WORK=/mnt/work
@@ -266,8 +268,23 @@ LEG_LOG="$WORK/leg-${AZ_BATCH_TASK_ID:-local}.log"
 # `|| rc=$?` because `set -e` would abort before the exit code could be read,
 # and a timed-out leg must still reach the reporting below. PIPESTATUS, not $?,
 # because the tee makes this a pipeline and $? would report tee's success.
+# RUN_STATIC=1 selects the statically-enumerated tree. One command covers both
+# fresh and resume there, because `train-static --run <id>` continues an existing
+# run and `--iterations` is an absolute target -- so the fresh/resume split the
+# dynamic path needs does not exist.
 rc=0
-if [ -z "${RUN_ID:-}" ]; then
+if [ "${RUN_STATIC:-}" = "1" ]; then
+  STATIC_ARGS=()
+  [ -n "${RUN_ID:-}" ] && STATIC_ARGS+=(--run "$RUN_ID")
+  [ -n "${RUN_CHECKPOINT_EVERY:-}" ] && STATIC_ARGS+=(--checkpoint-every "$RUN_CHECKPOINT_EVERY")
+  log "static: config=${RUN_CONFIG:-} run=${RUN_ID:-<new>} to=$RUN_TO (timeout $RUN_TIMEOUT)"
+  set +o pipefail
+  "${GUARD[@]}" uv run poker-solver-run train-static \
+    --config "$RUN_CONFIG" --iterations "$RUN_TO" \
+    "${STATIC_ARGS[@]}" "${ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
+  rc=${PIPESTATUS[0]}
+  set -o pipefail
+elif [ -z "${RUN_ID:-}" ]; then
   log "fresh train: config=$RUN_CONFIG iterations=$RUN_TO (timeout $RUN_TIMEOUT)"
   set +o pipefail
   "${GUARD[@]}" uv run poker-solver-run train \
