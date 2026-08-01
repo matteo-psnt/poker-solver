@@ -22,8 +22,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from src.core.game.state import Card
-from src.engine.solver.infoset_encoder import encode_infoset_key
 from src.engine.solver.policy_lookup import blueprint_action_distribution
+from src.engine.solver.policy_source import policy_source_for
 from src.pipeline.evaluation.game_tree import CHANCE, Policy
 
 DEAL = "DEAL"
@@ -134,13 +134,18 @@ class RestrictedHUNL:
 
 
 def blueprint_policy(blueprint) -> Policy:
-    """Policy callable replaying the deployed blueprint from full-state info keys."""
+    """Policy callable replaying the deployed blueprint from full-state info keys.
+
+    Resolves through the policy source rather than addressing storage directly:
+    the source is what the real scorers use, so a test that reached past it
+    would be validating a lookup path nothing in production takes.
+    """
+    source = policy_source_for(blueprint)
 
     def policy(info_key, legal_actions):
         player, state = info_key
-        key = encode_infoset_key(state, player, blueprint.card_abstraction)
         distribution = blueprint_action_distribution(
-            blueprint.storage.get_infoset(key),
+            source.infoset_for(state, player),
             state,
             blueprint.rules,
             tuple(legal_actions),

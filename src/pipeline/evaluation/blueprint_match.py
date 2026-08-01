@@ -24,7 +24,7 @@ import numpy as np
 
 from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card
-from src.engine.solver.protocols import Blueprint
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.pipeline.evaluation.resolver_match import _complete_board, _deal_from_stack
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.shared.units import pair_mean_mbb
@@ -44,8 +44,8 @@ class BlueprintMatchResult:
 
 
 def play_blueprint_match(
-    solver_a: Blueprint,
-    solver_b: Blueprint,
+    solver_a: ScorableBlueprint,
+    solver_b: ScorableBlueprint,
     *,
     num_deals: int = 2000,
     seed: int = 1,
@@ -110,8 +110,8 @@ def play_blueprint_match(
 
 
 def _play_game(
-    solver_a: Blueprint,
-    solver_b: Blueprint,
+    solver_a: ScorableBlueprint,
+    solver_b: ScorableBlueprint,
     rules: GameRules,
     *,
     hole_cards: tuple[tuple[Card, Card], tuple[Card, Card]],

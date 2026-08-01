@@ -1,7 +1,7 @@
 """Service-layer APIs for training and evaluation orchestration.
 
-The one seam between transports (headless CLI, Modal, the Azure leg wrapper,
-the interactive menu) and the pipeline internals. A transport composes calls
+The one seam between transports (headless CLI, the Azure leg wrapper, the
+interactive menu) and the pipeline internals. A transport composes calls
 from here; it never reaches past them, which is what keeps a cloud run and a
 local run doing the same thing.
 
@@ -10,8 +10,8 @@ group by concern only:
 
 ``runs``
     Readers over the run directory — what exists, what state it is in.
-``training``
-    Start a run, or continue one to an absolute iteration target.
+``static_training``
+    Start a run over the static tree, or continue one to an absolute target.
 ``abstraction``
     Produce a card abstraction, or measure one at several bucket counts.
 ``evaluation``
@@ -57,15 +57,6 @@ from src.pipeline.services.runs import (
     load_run_metadata,
 )
 from src.pipeline.services.static_training import StaticTrainingOutput, train_static
-from src.pipeline.services.training import (
-    ResumeOutput,
-    TrainingOutput,
-    create_resumed_session,
-    create_training_session,
-    resume,
-    run_training,
-    train,
-)
 from src.pipeline.training.run_tracker import ExperimentTag
 
 __all__ = [
@@ -82,14 +73,10 @@ __all__ = [
     "EvaluationOutput",
     "ExperimentReport",
     "ExperimentTag",
-    "ResumeOutput",
     "RolloutParams",
     "RunSummary",
     "StaticTrainingOutput",
-    "TrainingOutput",
     "checkpoint_iteration_of",
-    "create_resumed_session",
-    "create_training_session",
     "describe_runs",
     "evaluate_and_record",
     "evaluate_blueprint_match",
@@ -105,9 +92,6 @@ __all__ = [
     "precompute_abstraction",
     "promote_baseline",
     "record_blueprint_match",
-    "resume",
-    "run_training",
     "sweep_bucket_counts",
-    "train",
     "train_static",
 ]

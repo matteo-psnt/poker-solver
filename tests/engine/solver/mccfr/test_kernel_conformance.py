@@ -46,6 +46,7 @@ import pytest
 
 from src.core.game.actions import bet, call, check, fold, raises
 from src.pipeline.evaluation.best_response import exploitability, on_policy_value
+from tests.engine.solver.mccfr.dict_storage import DictStorage
 from tests.engine.solver.mccfr.extensive_game_solver import (
     ExtensiveGameSolver,
     average_policy,
@@ -53,7 +54,7 @@ from tests.engine.solver.mccfr.extensive_game_solver import (
 )
 from tests.pipeline.evaluation.kuhn_poker import KuhnPoker
 from tests.pipeline.evaluation.leduc_poker import LeducPoker
-from tests.test_helpers import build_test_storage, make_test_config
+from tests.test_helpers import make_test_config
 
 KUHN_GAME_VALUE_P0 = -1.0 / 18.0
 
@@ -71,7 +72,7 @@ LEDUC_EXPLOITABILITY_BOUND = 0.15
 
 def _train(game, actions, iterations: int, session: str, **config_overrides):
     config = make_test_config(seed=42, **config_overrides)
-    storage = build_test_storage(session, initial_capacity=20_000)
+    storage = DictStorage()
     solver = ExtensiveGameSolver(game, actions, storage, config)
     for _ in range(iterations):
         solver.train_iteration()

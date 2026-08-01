@@ -11,8 +11,6 @@ def _summary(name, *, commits_ago, loadable, blocker=None, dirty=False) -> RunSu
         name=name,
         commits_ago=commits_ago,
         git_dirty=dirty,
-        representation_version=3,
-        current_version=3,
         has_checkpoint=loadable,
         loadable=loadable,
         blocker=blocker,

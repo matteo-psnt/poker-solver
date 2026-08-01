@@ -52,7 +52,6 @@ class RunProvenance:
     config_name: str
     card_abstraction_hash: str | None
     action_config_hash: str | None
-    representation_version: int
     # Experiment lineage, copied onto the row so a report can group and attribute
     # arms without opening every run's .run.json. None on unaffiliated runs.
     experiment_id: str | None = None
@@ -208,7 +207,6 @@ def build_record(
         "config_hash": provenance.config_hash,
         "card_abstraction_hash": provenance.card_abstraction_hash,
         "action_config_hash": provenance.action_config_hash,
-        "representation_version": provenance.representation_version,
         "experiment_id": provenance.experiment_id,
         "arm": provenance.arm,
         "parent_run_id": provenance.parent_run_id,

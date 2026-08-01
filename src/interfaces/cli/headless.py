@@ -73,24 +73,6 @@ def _parse_overrides(pairs: list[str]) -> dict[str, Any]:
     return overrides
 
 
-def _cmd_train(args: argparse.Namespace) -> dict[str, Any]:
-    out = services.train(
-        args.config,
-        num_workers=args.workers,
-        num_iterations=args.iterations,
-        seed=args.seed,
-        config_overrides=_parse_overrides(args.overrides),
-        experiment=services.ExperimentTag(
-            experiment_id=args.experiment,
-            arm=args.arm,
-            parent_run_id=args.parent,
-        ),
-    )
-    payload: dict[str, Any] = {"op": "train", **dataclasses.asdict(out)}
-    _write_result(Path(out.runs_dir) / out.run_id, payload)
-    return payload
-
-
 def _cmd_train_static(args: argparse.Namespace) -> dict[str, Any]:
     """Argparse transport around :func:`services.train_static`."""
     out = services.train_static(
@@ -109,24 +91,6 @@ def _cmd_train_static(args: argparse.Namespace) -> dict[str, Any]:
     )
     payload: dict[str, Any] = {"op": "train-static", **dataclasses.asdict(out)}
     _write_result(Path(out.runs_dir) / out.run_id, payload)
-    return payload
-
-
-def _cmd_resume(args: argparse.Namespace) -> dict[str, Any]:
-    """Argparse transport around :func:`services.resume`."""
-    run_dir = _resolve_run_dir(args.run, args.runs_dir)
-    out = services.resume(
-        run_dir,
-        args.to_iteration,
-        num_workers=args.workers,
-        capacity_override=args.capacity,
-    )
-    payload: dict[str, Any] = {
-        "op": "resume",
-        "runs_dir": args.runs_dir,
-        **dataclasses.asdict(out),
-    }
-    _write_result(run_dir, payload)
     return payload
 
 
@@ -369,42 +333,6 @@ def _cmd_compare(args: argparse.Namespace) -> dict[str, Any]:
 _SubParsers = argparse._SubParsersAction  # noqa: SLF001
 
 
-def _add_train_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
-    """Arguments for `poker-solver-run train`."""
-    p_train = sub.add_parser(
-        "train", parents=[common], help="Train a solver from a named training config."
-    )
-    p_train.add_argument("--config", required=True, help="Config stem under config/training/.")
-    p_train.add_argument(
-        "--workers", type=int, default=None, help="Parallel workers (default: all CPUs)."
-    )
-    p_train.add_argument(
-        "--iterations", type=int, default=None, help="Override the config iteration count."
-    )
-    p_train.add_argument("--seed", type=int, default=None, help="Override system.seed.")
-    p_train.add_argument(
-        "--set",
-        action="append",
-        default=[],
-        dest="overrides",
-        metavar="KEY=VALUE",
-        help="Nested config override, `__` as the separator — e.g. "
-        "--set storage__checkpoint_retain_every=1000. Repeatable.",
-    )
-    p_train.add_argument("--experiment", default=None, help="Experiment id this run is an arm of.")
-    p_train.add_argument(
-        "--arm",
-        default=None,
-        help="Arm within the experiment, e.g. 'control' or 'variant:pruning'. A variant's "
-        "score is uninterpretable without a paired control — the extra training a fork "
-        "gets moves the number on its own.",
-    )
-    p_train.add_argument(
-        "--parent", default=None, help="Run id this was forked from (base-fork lineage)."
-    )
-    p_train.set_defaults(func=_cmd_train)
-
-
 def _add_train_static_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
     """Arguments for `poker-solver-run train-static`."""
     p_ts = sub.add_parser(
@@ -452,35 +380,6 @@ def _add_train_static_parser(sub: _SubParsers, common: argparse.ArgumentParser) 
         "ABSOLUTE target, so re-running past it is a no-op and a retry converges.",
     )
     p_ts.set_defaults(func=_cmd_train_static)
-
-
-def _add_resume_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
-    """Arguments for `poker-solver-run resume`."""
-    p_resume = sub.add_parser(
-        "resume",
-        parents=[common],
-        help="Resume a run and train up to an absolute iteration target.",
-    )
-    p_resume.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
-    p_resume.add_argument(
-        "--runs-dir", default="data/runs", help="Base runs dir for id resolution."
-    )
-    p_resume.add_argument(
-        "--to-iteration",
-        type=int,
-        required=True,
-        help="ABSOLUTE target iteration (not an increment) — retry-safe under scheduler restarts.",
-    )
-    p_resume.add_argument(
-        "--workers", type=int, default=None, help="Parallel workers (default: all CPUs)."
-    )
-    p_resume.add_argument(
-        "--capacity",
-        type=int,
-        default=None,
-        help="Pre-allocate shared storage above the checkpoint's capacity (avoids mid-run resize).",
-    )
-    p_resume.set_defaults(func=_cmd_resume)
 
 
 def _add_precompute_parser(sub: _SubParsers, common: argparse.ArgumentParser) -> None:
@@ -778,9 +677,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Headless training/evaluation entrypoint for scripts and cloud runs.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    _add_train_parser(sub, common)
     _add_train_static_parser(sub, common)
-    _add_resume_parser(sub, common)
     _add_precompute_parser(sub, common)
     _add_eval_parser(sub, common)
     _add_ledger_parser(sub, common)

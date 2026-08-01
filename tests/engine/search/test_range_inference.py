@@ -2,17 +2,12 @@
 
 import numpy as np
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.actions import call
 from src.core.game.rules import GameRules
 from src.core.game.state import Card
 from src.engine.search.range_inference import combo_index_for, infer_ranges, update_ranges
-from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.in_memory import InMemoryStorage
 from tests.test_helpers import (
-    DummyCardAbstraction,
     build_trained_test_solver,
-    make_test_config,
     skew_preflop_infoset,
 )
 
@@ -24,14 +19,7 @@ def _make_state_and_solver():
         (Card.new("Qd"), Card.new("Jc")),
     )
     state = rules.create_initial_state(starting_stack=200, hole_cards=hole_cards, button=0)
-    config = make_test_config(seed=42)
-    action_model = ActionModel(config)
-    solver = MCCFRSolver(
-        action_model=action_model,
-        card_abstraction=DummyCardAbstraction(),
-        storage=InMemoryStorage(),
-        config=config,
-    )
+    solver = build_trained_test_solver(0, starting_stack=200)
     return state, solver
 
 

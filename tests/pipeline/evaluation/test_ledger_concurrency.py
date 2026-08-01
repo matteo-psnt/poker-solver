@@ -22,7 +22,6 @@ def _provenance(run_id="run-a"):
         config_name="quick_test",
         card_abstraction_hash="deadbeef",
         action_config_hash="beefcafe",
-        representation_version=3,
     )
 
 

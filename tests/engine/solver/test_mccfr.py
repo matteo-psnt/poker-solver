@@ -4,32 +4,24 @@ import pytest
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.state import Card, GameState, Street
-from src.engine.solver.mccfr import MCCFRSolver
-from tests.test_helpers import DummyCardAbstraction, build_test_storage, make_test_config
+from tests.test_helpers import DummyCardAbstraction, build_test_solver, make_test_config
 
 
 class TestMCCFRSolver:
     """Tests for MCCFRSolver."""
 
     def test_create_solver(self):
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
+        solver, _storage = build_test_solver(make_test_config(), card_abs)
 
         assert solver.iteration == 0
         assert solver.num_infosets() == 0
 
     def test_deal_initial_state(self):
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
+        solver, _storage = build_test_solver(make_test_config(), card_abs)
 
         state = solver.deal_initial_state()
 
@@ -43,12 +35,9 @@ class TestMCCFRSolver:
 
     def test_train_iteration_executes(self):
         """Test that one iteration completes without error."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
+        solver, _storage = build_test_solver(make_test_config(seed=42), card_abs)
 
         utility = solver.train_iteration()
 
@@ -59,12 +48,9 @@ class TestMCCFRSolver:
 
     def test_multiple_iterations(self):
         """Test multiple training iterations."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
+        solver, _storage = build_test_solver(make_test_config(seed=42), card_abs)
 
         for _ in range(5):
             solver.train_iteration()
@@ -74,12 +60,9 @@ class TestMCCFRSolver:
 
     def test_infosets_accumulate(self):
         """Test that infosets accumulate over iterations."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
+        solver, _storage = build_test_solver(make_test_config(seed=42), card_abs)
 
         # Run first iteration
         solver.train_iteration()
@@ -95,17 +78,11 @@ class TestMCCFRSolver:
 
     def test_strategies_update(self):
         """Test that strategies are updated during training."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
         # Use external sampling which updates strategy_sum for all actions
-        solver = MCCFRSolver(
-            action_abs,
-            card_abs,
-            storage,
-            config=make_test_config(seed=42, sampling_method="external"),
+        solver, storage = build_test_solver(
+            make_test_config(seed=42, sampling_method="external"), card_abs
         )
 
         # Train for enough iterations to update strategies
@@ -122,12 +99,9 @@ class TestMCCFRSolver:
 
     def test_is_chance_node(self):
         """Test chance node detection."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
+        solver, _storage = build_test_solver(make_test_config(), card_abs)
 
         state = solver.deal_initial_state()
 
@@ -138,12 +112,9 @@ class TestMCCFRSolver:
 
     def test_sample_chance_outcome_deals_cards(self):
         """Test that chance node sampling deals cards."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
+        solver, _storage = build_test_solver(make_test_config(), card_abs)
 
         # Create state needing flop
         state = GameState(
@@ -183,23 +154,17 @@ class TestMCCFRSolver:
         - Card dealing randomness
         - Action abstraction consistency
         """
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
 
         # Run with seed 42
-        storage1 = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test1", is_coordinator=True
-        )
-        solver1 = MCCFRSolver(action_abs, card_abs, storage1, config=make_test_config(seed=42))
+        solver1, _storage1 = build_test_solver(make_test_config(seed=42), card_abs)
         for _ in range(5):
             solver1.train_iteration()
         infosets1 = solver1.num_infosets()
 
         # Run again with same seed
-        storage2 = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test2", is_coordinator=True
-        )
-        solver2 = MCCFRSolver(action_abs, card_abs, storage2, config=make_test_config(seed=42))
+        solver2, _storage2 = build_test_solver(make_test_config(seed=42), card_abs)
         for _ in range(5):
             solver2.train_iteration()
         infosets2 = solver2.num_infosets()
@@ -212,80 +177,32 @@ class TestMCCFRSolver:
             f"Variance {variance:.2%} exceeds 20% (infosets: {infosets1} vs {infosets2})"
         )
 
-    def test_checkpoint(self):
+    def test_checkpoint(self, tmp_path):
         """Test that checkpoint doesn't crash."""
-        action_abs = ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
+        solver, _storage = build_test_solver(make_test_config(), card_abs, checkpoint_dir=tmp_path)
 
         for _ in range(10):
             solver.train_iteration()
         solver.checkpoint()  # Should not crash
 
     def test_str_representation(self):
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(action_abs, card_abs, storage, config=action_abs.config)
+        solver, _storage = build_test_solver(make_test_config(), card_abs)
 
         s = str(solver)
-        assert "MCCFRSolver" in s
+        assert "StaticTreeSolver" in s
         assert "iteration" in s
 
     def test_custom_stack_size(self):
         """Test solver with custom stack size."""
-        action_abs = ActionModel(make_test_config())
+        ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=1, worker_id=0, session_id="test", is_coordinator=True
-        )
-        solver = MCCFRSolver(
-            action_abs, card_abs, storage, config=make_test_config(starting_stack=100)
-        )
+        solver, _storage = build_test_solver(make_test_config(starting_stack=100), card_abs)
 
         state = solver.deal_initial_state()
 
         # Check custom stack size
         assert state.stacks[0] == 99  # 100 - 1 (SB)
         assert state.stacks[1] == 98  # 100 - 2 (BB)
-
-    def test_traversal_skips_unknown_remote_infosets(self):
-        """Partitioned traversal must skip placeholder infosets, not crash on them.
-
-        With num_workers=2 and no second worker running, every non-owned infoset
-        stays at UNKNOWN_ID (a read-only placeholder view). Traversal writes to
-        every writable infoset it visits and must silently skip the placeholders,
-        leaving the UNKNOWN_ID row untouched.
-        """
-        import uuid
-
-        action_abs = ActionModel(make_test_config())
-        card_abs = DummyCardAbstraction()
-        storage = build_test_storage(
-            num_workers=2,
-            worker_id=0,
-            session_id=f"test_{uuid.uuid4().hex[:8]}",
-            initial_capacity=100_000,
-            is_coordinator=True,
-        )
-        try:
-            solver = MCCFRSolver(action_abs, card_abs, storage, config=make_test_config(seed=42))
-
-            for _ in range(20):
-                solver.train_iteration()
-
-            # Owned infosets received updates.
-            reach_total = int(storage.shared_reach_counts[1:].sum())
-            assert reach_total > 0, "owned infosets should accumulate updates"
-
-            # The UNKNOWN_ID placeholder row was never written.
-            assert not storage.shared_regrets[0].any()
-            assert not storage.shared_strategy_sum[0].any()
-            assert storage.shared_reach_counts[0] == 0
-        finally:
-            storage.cleanup()

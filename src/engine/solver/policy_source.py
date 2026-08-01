@@ -27,15 +27,11 @@ from src.core.game.actions import Action
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState, Street
 from src.engine.solver.betting_tree import BettingTree
-from src.engine.solver.infoset import InfoSet, InfoSetKey
-from src.engine.solver.infoset_encoder import encode_infoset_key, get_spr_bucket
+from src.engine.solver.infoset import InfoSet
 from src.engine.solver.infoset_index import (
-    NUM_PREFLOP_HANDS,
     bucket_of,
-    preflop_hand_string_at,
 )
 from src.engine.solver.protocols import BucketingStrategy
-from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.shared.config import Config
 
@@ -43,16 +39,11 @@ from src.shared.config import Config
 class ScorableBlueprint(Protocol):
     """The minimum an evaluator needs from a blueprint.
 
-    Identical to :class:`~src.engine.solver.protocols.Blueprint` except that it
-    does NOT declare ``storage``. The two backends type that attribute
-    incompatibly — ``Storage`` vs ``StaticArrayStorage`` — and a mutable protocol
-    attribute cannot be satisfied by both, so declaring it would exclude one
-    backend from every consumer that names the protocol.
-
-    Nothing here needs it. Policy access goes through :func:`policy_source_for`,
-    which dispatches on the concrete backend, and that is the only reason a
-    consumer ever reached for storage. Any consumer still touching
-    ``blueprint.storage`` directly is one that has not been bridged yet.
+    Deliberately does NOT declare ``storage``. Policy access goes through
+    :func:`policy_source_for`, and reaching for storage directly is the habit
+    that hard-wired consumers to a particular backend in the first place. This
+    protocol once had a storage-declaring twin so the two backends could both be
+    named; the twin is gone with the backend that needed it.
     """
 
     action_model: ActionModel
@@ -119,44 +110,6 @@ class PolicySource(Protocol):
         ...
 
 
-class KeyedPolicySource:
-    """Policy source over the key-addressed (dynamic) backend."""
-
-    def __init__(self, storage: Storage, card_abstraction: BucketingStrategy):
-        self._storage = storage
-        self._abstraction = card_abstraction
-
-    def num_buckets(self, street: Street) -> int:
-        if street == Street.PREFLOP:
-            return NUM_PREFLOP_HANDS
-        return self._abstraction.num_buckets(street)
-
-    def bucket_for(self, state: GameState, player: int) -> int:
-        return bucket_of(state, player, self._abstraction)
-
-    def infoset_for(self, state: GameState, player: int) -> InfoSet | None:
-        return self._storage.get_infoset(self._key(state, player))
-
-    def identity(self, state: GameState, player: int) -> Hashable:
-        return self._key(state, player)
-
-    def _key(self, state: GameState, player: int) -> InfoSetKey:
-        return encode_infoset_key(state, player, self._abstraction)
-
-    def infoset_at(self, state: GameState, bucket: int) -> InfoSet | None:
-        spr = min(state.stacks) / state.pot if state.pot > 0 else 0
-        preflop = state.street == Street.PREFLOP
-        key = InfoSetKey(
-            player_position=state.current_player,
-            street=state.street,
-            betting_sequence=state.normalized_betting_sequence(),
-            preflop_hand=preflop_hand_string_at(bucket) if preflop else None,
-            postflop_bucket=None if preflop else bucket,
-            spr_bucket=get_spr_bucket(spr),
-        )
-        return self._storage.get_infoset(key)
-
-
 class TreePolicySource:
     """Policy source over the tree-addressed (static) backend.
 
@@ -194,25 +147,38 @@ class TreePolicySource:
             return None
         # view(), not infoset_at(): evaluation must not mark coverage, or a
         # scoring pass would report an untrained tree as fully explored.
-        return self._storage.view(node_id, bucket)
+        infoset = self._storage.view(node_id, bucket)
+        # An UNVISITED row is not an answer, it is an allocation. The static
+        # table holds every row from the start, so without this check a caller
+        # asking "does the blueprint have a policy here?" is always told yes --
+        # and the fallback-mass diagnostic, which exists to reveal exactly how
+        # much of a score came from untrained regions, silently reads zero on
+        # every run. Numerically this changes nothing (a zeroed row already
+        # yields the uniform distribution the caller falls back to); it restores
+        # the caller's ability to KNOW that is what happened.
+        if not self._storage.visited[infoset.row]:
+            return None
+        return infoset
 
 
 def policy_source_for(blueprint: object) -> PolicySource:
-    """Pick the policy source matching a blueprint's storage backend.
+    """The policy source over a blueprint's storage.
 
-    Typed ``object`` because the dispatch IS on the concrete backend; declaring
-    a ``storage`` attribute here would reintroduce the incompatibility
-    ``ScorableBlueprint`` exists to avoid.
+    Typed ``object`` rather than declaring a ``storage`` attribute: naming it
+    here would reintroduce the very incompatibility ``ScorableBlueprint`` exists
+    to avoid. A non-static storage is a caller error rather than a second
+    branch — the key-addressed backend it would have selected is gone.
     """
     storage = getattr(blueprint, "storage")
-    if isinstance(storage, StaticArrayStorage):
-        tree = getattr(blueprint, "tree", None) or storage.tree
-        return TreePolicySource(tree, storage, getattr(blueprint, "card_abstraction"))
-    return KeyedPolicySource(storage, getattr(blueprint, "card_abstraction"))
+    if not isinstance(storage, StaticArrayStorage):
+        raise TypeError(
+            f"Scoring requires a static-tree blueprint; got storage {type(storage).__name__}."
+        )
+    tree = getattr(blueprint, "tree", None) or storage.tree
+    return TreePolicySource(tree, storage, getattr(blueprint, "card_abstraction"))
 
 
 __all__ = (
-    "KeyedPolicySource",
     "PolicySource",
     "ScorableBlueprint",
     "TreePolicySource",

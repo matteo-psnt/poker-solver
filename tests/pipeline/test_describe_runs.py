@@ -2,16 +2,15 @@
 
 from types import SimpleNamespace
 
+from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE
 from src.pipeline.services import runs as services_runs
-from src.pipeline.training.versioning import REPRESENTATION_VERSION
 
 
-def _patch_metadata(monkeypatch, *, version, commit="abc123", dirty=False):
+def _patch_metadata(monkeypatch, *, commit="abc123", dirty=False):
     monkeypatch.setattr(
         services_runs,
         "load_run_metadata",
         lambda _dir: SimpleNamespace(
-            representation_version=version,
             git_commit=commit,
             git_dirty=dirty,
             iterations=6000,
@@ -25,7 +24,7 @@ def _patch_metadata(monkeypatch, *, version, commit="abc123", dirty=False):
 
 def test_missing_checkpoint_is_not_loadable(tmp_path, monkeypatch):
     (tmp_path / "run-x").mkdir()
-    _patch_metadata(monkeypatch, version=REPRESENTATION_VERSION)
+    _patch_metadata(monkeypatch)
 
     summary = services_runs._summarize_run(tmp_path, "run-x")
 
@@ -34,23 +33,11 @@ def test_missing_checkpoint_is_not_loadable(tmp_path, monkeypatch):
     assert summary.commits_ago == 4
 
 
-def test_stale_format_is_not_loadable(tmp_path, monkeypatch):
-    run = tmp_path / "run-old"
-    run.mkdir()
-    (run / "CHECKPOINT.json").write_text("{}")
-    _patch_metadata(monkeypatch, version=REPRESENTATION_VERSION - 1)
-
-    summary = services_runs._summarize_run(tmp_path, "run-old")
-
-    assert not summary.loadable
-    assert summary.blocker is not None and "format" in summary.blocker
-
-
 def test_current_run_is_loadable(tmp_path, monkeypatch):
     run = tmp_path / "run-cur"
     run.mkdir()
-    (run / "CHECKPOINT.json").write_text("{}")
-    _patch_metadata(monkeypatch, version=REPRESENTATION_VERSION, dirty=True)
+    (run / MANIFEST_FILE).write_text("{}")
+    _patch_metadata(monkeypatch, dirty=True)
 
     summary = services_runs._summarize_run(tmp_path, "run-cur")
 
@@ -59,13 +46,19 @@ def test_current_run_is_loadable(tmp_path, monkeypatch):
     assert summary.git_dirty is True
 
 
-def test_legacy_zarr_layout_counts_as_checkpoint(tmp_path, monkeypatch):
-    run = tmp_path / "run-legacy"
-    run.mkdir()
-    (run / "checkpoint-6000.zarr").mkdir()
-    _patch_metadata(monkeypatch, version=REPRESENTATION_VERSION)
+def test_a_run_without_the_static_manifest_is_not_loadable(tmp_path, monkeypatch):
+    """Loadability is decided by the manifest, not by a stray zarr directory.
 
-    assert services_runs._summarize_run(tmp_path, "run-legacy").loadable
+    A bare ``*.zarr`` is not evidence a run can be opened: the manifest is what
+    is committed atomically with the arrays, so a directory carrying only the
+    zarr is exactly the torn-copy case the marker exists to reject.
+    """
+    run = tmp_path / "run-zarr-only"
+    run.mkdir()
+    (run / "static-6000.zarr").mkdir()
+    _patch_metadata(monkeypatch)
+
+    assert not services_runs._summarize_run(tmp_path, "run-zarr-only").loadable
 
 
 def test_unreadable_metadata_is_blocked(tmp_path, monkeypatch):

@@ -40,6 +40,7 @@ from pathlib import Path
 
 from src.core.actions.action_model import ActionModel
 from src.pipeline.training import components
+from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared.config import Config
@@ -108,6 +109,7 @@ def train_static(
 
     Raises:
         FileNotFoundError: The card abstraction is missing (precompute it first).
+        AbstractionHashMismatchError: The abstraction on disk is stale (recompute it).
     """
     overrides: dict[str, object] = dict(config_overrides or {})
     if seed is not None:
@@ -136,12 +138,28 @@ def train_static(
         tracker.mark_resumed()
     else:
         tag = experiment or ExperimentTag()
+        # Resolve the abstraction BEFORE anything is written, and translate its
+        # two failure modes into messages that name the fix. Bare "no such file"
+        # from deep inside the resolver does not tell a caller that the answer is
+        # `precompute`, and this is the first thing a fresh checkout hits.
+        try:
+            abstraction_hash = components.resolve_card_abstraction_hash(config)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Card abstraction '{config.card_abstraction.config}' for training config "
+                f"'{config_name}' is missing. Precompute it before training. ({e})"
+            ) from e
+        except AbstractionHashMismatchError as e:
+            raise AbstractionHashMismatchError(
+                f"Card abstraction '{config.card_abstraction.config}' for training config "
+                f"'{config_name}' is stale (config hash mismatch). Recompute it. ({e})"
+            ) from e
         tracker = RunTracker(
             run_dir=run_dir,
             config_name=config.system.config_name,
             config=config,
             action_config_hash=action_model.get_config_hash(),
-            card_abstraction_hash=components.resolve_card_abstraction_hash(config),
+            card_abstraction_hash=abstraction_hash,
             experiment_id=tag.experiment_id,
             arm=tag.arm,
             parent_run_id=tag.parent_run_id,

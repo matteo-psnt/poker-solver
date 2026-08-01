@@ -266,20 +266,33 @@ def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
 
 
 def _start_training(config: Config, num_workers: int) -> None:
-    trainer = services.create_training_session(config)
-
     print("\nStarting training...")
-    print(f"Run directory: {trainer.run_dir}")
-    print(f"Checkpoint frequency: every {config.training.checkpoint_frequency} iterations")
-    print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
-    services.run_training(trainer, num_workers=num_workers)
+    out = services.train_static(
+        config.system.config_name,
+        num_workers=num_workers,
+        num_iterations=config.training.num_iterations,
+    )
+    print(f"Run directory: {Path(out.runs_dir) / out.run_id}")
+    print(f"Iterations: {out.iterations:,}   coverage: {out.coverage:.1%}")
 
 
 def _resume_training(run_dir: Path, additional_iters: int) -> None:
-    trainer, latest_iter = services.create_resumed_session(run_dir)
+    """Continue a run to an ABSOLUTE target.
 
-    print(f"\nResuming training from iteration {latest_iter}...")
-    target_total = latest_iter + additional_iters
-    print(f"Target: {target_total} iterations (+{additional_iters})")
-    print("\n[!] Press Ctrl+C to save checkpoint and exit\n")
-    services.run_training(trainer, num_iterations=additional_iters)
+    ``train_static`` targets an absolute iteration count rather than an
+    increment, so the prompt's "additional" is added to what the run already
+    has. Re-running past the target is a no-op, which is what makes a retry
+    converge instead of training the increment twice.
+    """
+    meta = services.load_run_metadata(run_dir)
+    target_total = meta.iterations + additional_iters
+
+    print(f"\nResuming training from iteration {meta.iterations:,}...")
+    print(f"Target: {target_total:,} iterations (+{additional_iters:,})")
+    out = services.train_static(
+        meta.config_name,
+        num_iterations=target_total,
+        run_id=run_dir.name,
+        runs_dir=run_dir.parent,
+    )
+    print(f"Iterations: {out.iterations:,}   coverage: {out.coverage:.1%}")

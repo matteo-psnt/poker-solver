@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 from src.engine.solver.policy_source import ScorableBlueprint
-from src.engine.solver.protocols import Blueprint
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.blueprint_match import play_blueprint_match
 from src.pipeline.evaluation.hunl_local_best_response import (
@@ -30,7 +29,6 @@ from src.pipeline.evaluation.resolver_match import play_resolver_match
 from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
 from src.pipeline.training.components import (
-    build_evaluation_solver,
     build_static_evaluation_solver,
     evaluate_solver_exploitability,
 )
@@ -40,20 +38,6 @@ from src.shared.units import pair_mean_mbb
 
 logger = logging.getLogger(__name__)
 
-# The two backends need different loaders (hashed key vs (node_id, bucket)), but
-# everything above `policy_source_for` is shared, so the split stops here.
-STATIC_MANIFEST = "STATIC_CHECKPOINT.json"
-
-
-def is_static_run(run_dir: Path) -> bool:
-    """Whether ``run_dir`` holds a static-tree checkpoint.
-
-    Detected from the artifact rather than a flag on the run: a flag can be
-    absent on runs written before it existed, while the manifest is what the
-    loader actually needs.
-    """
-    return (run_dir / STATIC_MANIFEST).exists()
-
 
 def build_blueprint_for(
     run_dir: Path,
@@ -61,15 +45,8 @@ def build_blueprint_for(
     abstraction_hash: str | None,
     at_iteration: int | None,
 ):
-    """Load a scoreable blueprint from either backend."""
-    if is_static_run(run_dir):
-        return build_static_evaluation_solver(
-            metadata.config,
-            checkpoint_dir=run_dir,
-            abstraction_hash=abstraction_hash,
-            at_iteration=at_iteration,
-        )
-    return build_evaluation_solver(
+    """Load a scoreable blueprint from a run's static checkpoint."""
+    return build_static_evaluation_solver(
         metadata.config,
         checkpoint_dir=run_dir,
         abstraction_hash=abstraction_hash,
@@ -147,29 +124,13 @@ def _load_blueprint(
     checkpoint_dir: Path,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
-) -> Blueprint:
+) -> ScorableBlueprint:
     """Build a fresh evaluation blueprint (solver) from a checkpoint.
 
-    Used as a picklable factory (via ``functools.partial``) so parallel-LBR worker
-    processes each construct their own solver — the solver holds a non-picklable
-    Cython member and cannot be sent across a process boundary.
+    Used as a picklable factory (via ``functools.partial``) so parallel scoring
+    worker processes each construct their own solver — the solver holds a
+    non-picklable Cython member and cannot be sent across a process boundary.
     """
-    solver, _ = build_evaluation_solver(
-        config,
-        checkpoint_dir=checkpoint_dir,
-        abstraction_hash=abstraction_hash,
-        at_iteration=at_iteration,
-    )
-    return solver
-
-
-def _load_static_blueprint(
-    config: Config,
-    checkpoint_dir: Path,
-    abstraction_hash: str | None = None,
-    at_iteration: int | None = None,
-) -> ScorableBlueprint:
-    """Picklable factory for a static blueprint, for parallel scoring workers."""
     solver, _ = build_static_evaluation_solver(
         config,
         checkpoint_dir=checkpoint_dir,
@@ -259,7 +220,7 @@ def evaluate_run_lbr(
     # args (config + checkpoint dir). Loader chosen per backend, matching the
     # blueprint above -- a static run loaded by the key-addressed loader dies on a
     # missing checkpoint.zarr, which is what LBR-on-static did before this.
-    loader = _load_static_blueprint if is_static_run(run_dir) else _load_blueprint
+    loader = _load_blueprint
     factory = (
         functools.partial(loader, metadata.config, run_dir, effective_hash, at_iteration)
         if config.num_workers > 1
@@ -323,7 +284,7 @@ def evaluate_run_exact_br(
     # The four (seat, button) walks are independent; workers rebuild the
     # blueprint because the solver is not picklable. Same factory shape parallel
     # LBR uses, so only picklable args are captured.
-    loader = _load_static_blueprint if is_static_run(run_dir) else _load_blueprint
+    loader = _load_blueprint
     factory = (
         functools.partial(loader, metadata.config, run_dir, effective_hash, at_iteration)
         if config.num_workers > 1
@@ -383,7 +344,7 @@ def evaluate_run_resolver_gate(
         ValueError: Invalid configuration or checkpoint state.
     """
     metadata = load_run_metadata(run_dir)
-    solver, storage = build_evaluation_solver(metadata.config, checkpoint_dir=run_dir)
+    solver, storage = build_static_evaluation_solver(metadata.config, checkpoint_dir=run_dir)
     result = play_resolver_match(
         solver,
         num_deals=num_deals,
@@ -434,12 +395,12 @@ def evaluate_blueprint_match(
             f"{metadata_b.config.game}); a chip match would be meaningless."
         )
 
-    solver_a, storage_a = build_evaluation_solver(
+    solver_a, storage_a = build_static_evaluation_solver(
         metadata_a.config,
         checkpoint_dir=run_dir_a,
         abstraction_hash=metadata_a.card_abstraction_hash,
     )
-    solver_b, storage_b = build_evaluation_solver(
+    solver_b, storage_b = build_static_evaluation_solver(
         metadata_b.config,
         checkpoint_dir=run_dir_b,
         abstraction_hash=metadata_b.card_abstraction_hash,
@@ -497,7 +458,6 @@ def record_blueprint_match(
             "config_name": meta.config_name,
             "card_abstraction_hash": meta.card_abstraction_hash,
             "action_config_hash": meta.action_config_hash,
-            "representation_version": meta.representation_version,
         }
 
     payload: dict[str, Any] = {
@@ -538,7 +498,7 @@ def evaluate_run_rollout(
     metadata = load_run_metadata(run_dir)
     config = metadata.config
 
-    solver, storage = build_evaluation_solver(
+    solver, storage = build_static_evaluation_solver(
         config,
         checkpoint_dir=run_dir,
     )
@@ -644,7 +604,6 @@ def evaluate_and_record(
                 config_name=metadata.config_name,
                 card_abstraction_hash=metadata.card_abstraction_hash,
                 action_config_hash=metadata.action_config_hash,
-                representation_version=metadata.representation_version,
                 experiment_id=metadata.experiment_id,
                 arm=metadata.arm,
                 parent_run_id=metadata.parent_run_id,

@@ -14,28 +14,20 @@ from src.interfaces.cli import headless, headless_render
 from src.pipeline import services
 
 PAYLOADS: dict[str, dict] = {
-    "train": {
-        "op": "train",
+    "train-static": {
+        "op": "train-static",
         "run_id": "run-a",
         "runs_dir": "data/runs",
         "config_name": "quick_test",
         "iterations": 1000,
-        "num_infosets": 42,
+        "num_rows": 32_240_608,
+        "touched_rows": 31_970_418,
+        "coverage": 0.9916,
+        "mean_visits_per_touched": 32.5,
         "runtime_seconds": 1.5,
         "iterations_per_second": 666.7,
-        "storage_capacity": 1_000_000,
+        "dropped_updates": 0,
         "status": "completed",
-    },
-    "resume": {
-        "op": "resume",
-        "run_id": "run-a",
-        "runs_dir": "data/runs",
-        "resumed_from_iteration": 1000,
-        "target_iteration": 2000,
-        "iterations": 2000,
-        "num_infosets": 42,
-        "status": "completed",
-        "no_op": False,
     },
     "precompute": {
         "op": "precompute",
@@ -166,8 +158,7 @@ class TestFixturesMatchTheRealPayloads:
 
     def test_fixture_keys_come_from_the_service_dataclasses(self):
         for op, cls, extra in (
-            ("train", services.TrainingOutput, set()),
-            ("resume", services.ResumeOutput, {"runs_dir"}),
+            ("train-static", services.StaticTrainingOutput, set()),
             ("promote", services.Baseline, {"baseline"}),
             ("report", services.ExperimentReport, set()),
             ("curve", services.CurveOutput, {"decay_ratio"}),
