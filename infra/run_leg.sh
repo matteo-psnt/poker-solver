@@ -201,7 +201,11 @@ uv sync --quiet
 #
 # The manifest IS the definition of what is complete. Anything it does not name
 # is by construction unfinished, and is ignored.
-if [ -n "${RUN_ID:-}" ] && [ -d "$ARCHIVE/$RUN_ID" ]; then
+# repair-ladder reads the share IN PLACE and needs nothing on the node, so it
+# must not pay this. Without the guard it fell to the catch-all copy below and
+# spent 25+ minutes duplicating a 16 GB ladder it then ignored.
+if [ "${RUN_OP:-train}" != "repair-ladder" ] \
+   && [ -n "${RUN_ID:-}" ] && [ -d "$ARCHIVE/$RUN_ID" ]; then
   log "fetching published checkpoint for $RUN_ID"
   mkdir -p "$RUNS/$RUN_ID"
   src="$ARCHIVE/$RUN_ID"
