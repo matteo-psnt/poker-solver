@@ -39,7 +39,10 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from itertools import repeat
 
 import numpy as np
 
@@ -88,6 +91,11 @@ class PublicBRConfig:
         means exact enumeration for that street).
     board_seed: seeds every board draw; identical seeds give identical board
         samples and therefore exactly paired evaluations.
+    num_workers: processes over the four (responder seat, button) walks, which
+        are independent. 1 keeps everything in-process. Above 1 requires a
+        ``blueprint_factory``, since the solver is not picklable. Does NOT
+        change the result: each walk is deterministic and the aggregate is a
+        mean over the same four numbers.
 
     Node count scales ~linearly in num_flops * num_turns * num_rivers, but
     wall-clock is strongly sublinear: per-context policy tables and showdown
@@ -101,6 +109,7 @@ class PublicBRConfig:
     num_turns: int = 2
     num_rivers: int = 2
     board_seed: int = 7
+    num_workers: int = 1
 
 
 @dataclass(frozen=True)
@@ -184,9 +193,15 @@ class PublicTreeBestResponse:
     """Exact best response of one seat against the blueprint on the sampled tree."""
 
     def __init__(
-        self, blueprint: ScorableBlueprint, config: PublicBRConfig, *, starting_stack: int
+        self,
+        blueprint: ScorableBlueprint,
+        config: PublicBRConfig,
+        *,
+        starting_stack: int,
+        blueprint_factory: Callable[[], ScorableBlueprint] | None = None,
     ):
         self._policy_source = policy_source_for(blueprint)
+        self._factory = blueprint_factory
         self._rules = blueprint.rules
         self._action_model = blueprint.action_model
         self._abstraction = blueprint.card_abstraction
@@ -210,21 +225,38 @@ class PublicTreeBestResponse:
         total_nodes = 0
         total_decision = 0.0
         total_missing = 0.0
-        for br_seat in (0, 1):
-            for button in (0, 1):
-                chips = self._run(br_seat, button)
-                fraction = self._missing_mass / self._decision_mass if self._decision_mass else 0.0
-                seat_results.append(
-                    SeatResult(
-                        br_seat=br_seat,
-                        button=button,
-                        value_mbb=chips / big_blind * 1000.0,
-                        missing_policy_mass=fraction,
+        walks = [(s, b) for s in (0, 1) for b in (0, 1)]
+        if self._config.num_workers > 1 and self._factory is not None:
+            # Independent walks: same tree, disjoint responder/button, no shared
+            # mutable state. Ordered results, so seat_results stays in the same
+            # order the serial path produces.
+            with ProcessPoolExecutor(max_workers=min(self._config.num_workers, len(walks))) as pool:
+                parts = list(
+                    pool.map(
+                        _walk_worker,
+                        repeat(self._factory),
+                        repeat(self._config),
+                        repeat(self._starting_stack),
+                        [s for s, _ in walks],
+                        [b for _, b in walks],
                     )
                 )
-                total_nodes += self._nodes
-                total_decision += self._decision_mass
-                total_missing += self._missing_mass
+        else:
+            parts = [self.run_walk(br_seat, button) for br_seat, button in walks]
+
+        for (br_seat, button), (chips, nodes, decision, missing) in zip(walks, parts, strict=True):
+            fraction = missing / decision if decision else 0.0
+            seat_results.append(
+                SeatResult(
+                    br_seat=br_seat,
+                    button=button,
+                    value_mbb=chips / big_blind * 1000.0,
+                    missing_policy_mass=fraction,
+                )
+            )
+            total_nodes += nodes
+            total_decision += decision
+            total_missing += missing
         exploitability = float(np.mean([r.value_mbb for r in seat_results]))
         return PublicBRResult(
             exploitability_mbb=exploitability,
@@ -257,6 +289,16 @@ class PublicTreeBestResponse:
     def _run(self, br_seat: int, button: int) -> float:
         values = self.responder_values(br_seat, button, np.ones(NUM_COMBOS, dtype=np.float64))
         return float(values.sum()) / (NUM_COMBOS * _NUM_OPP_DEALS)
+
+    def run_walk(self, br_seat: int, button: int) -> tuple[float, int, float, float]:
+        """One walk's chips plus the telemetry the aggregate needs.
+
+        Public because a worker process runs exactly this and nothing else, and
+        because returning the raw parts keeps the value/mass arithmetic in ONE
+        place -- the serial and parallel paths then cannot drift.
+        """
+        chips = self._run(br_seat, button)
+        return chips, self._nodes, self._decision_mass, self._missing_mass
 
     def _walk(self, state: GameState, opp_reach: np.ndarray) -> np.ndarray:
         """Responder's per-combo counterfactual values under best play below ``state``."""
@@ -416,11 +458,40 @@ class PublicTreeBestResponse:
         return cached
 
 
+def _walk_worker(
+    factory: Callable[[], ScorableBlueprint],
+    config: PublicBRConfig,
+    starting_stack: int,
+    br_seat: int,
+    button: int,
+) -> tuple[float, int, float, float]:
+    """One (responder seat, button) walk, in its own process.
+
+    Rebuilds the blueprint rather than receiving it: the solver holds a
+    non-picklable member, which is the same reason parallel LBR takes a factory.
+    Returns the raw parts so the parent aggregates exactly as the serial path
+    does -- deriving the seat value here would duplicate that arithmetic in two
+    places and let the two drift.
+    """
+    engine = PublicTreeBestResponse(factory(), config, starting_stack=starting_stack)
+    return engine.run_walk(br_seat, button)
+
+
 def compute_public_tree_br(
-    blueprint: ScorableBlueprint, config: PublicBRConfig, *, starting_stack: int
+    blueprint: ScorableBlueprint,
+    config: PublicBRConfig,
+    *,
+    starting_stack: int,
+    blueprint_factory: Callable[[], ScorableBlueprint] | None = None,
 ) -> PublicBRResult:
-    """Exact best response against ``blueprint`` on the sampled public tree."""
-    engine = PublicTreeBestResponse(blueprint, config, starting_stack=starting_stack)
+    """Exact best response against ``blueprint`` on the sampled public tree.
+
+    ``blueprint_factory`` enables ``config.num_workers > 1``: workers rebuild the
+    blueprint rather than receiving it, since the solver is not picklable.
+    """
+    engine = PublicTreeBestResponse(
+        blueprint, config, starting_stack=starting_stack, blueprint_factory=blueprint_factory
+    )
     result = engine.evaluate()
     logger.info(
         "public-tree BR: %.1f mbb over %d flops (%d nodes, %.1fs, %.1f%% uniform-fallback mass)",

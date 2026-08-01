@@ -24,6 +24,7 @@ from src.pipeline.training.parallel_sync import (
 )
 from src.shared.config import Config
 from src.shared.log import configure_logging
+from src.shared.procinfo import rss_mb
 
 # Re-arm the unresolved cross-worker ID frontier only every N exchanges, not
 # every one. The frontier (keys referenced but not yet allocated by their owner)
@@ -129,6 +130,7 @@ def _worker_loop(
             zarr_compression_level=config.storage.zarr_compression_level,
             zarr_chunk_size=config.storage.zarr_chunk_size,
             checkpoint_retain_every=config.storage.checkpoint_retain_every,
+            remote_key_cache_size=config.storage.remote_key_cache_size,
         )
 
         # Create solver config with worker-specific seed
@@ -331,6 +333,8 @@ def _worker_loop(
                             "utilities": utilities,
                             "num_owned_infosets": storage.num_owned_infosets(),
                             "capacity_usage": storage.get_capacity_usage(),
+                            "rss_mb": rss_mb(),
+                            "remote_cache_evictions": storage.state.remote_keys.evictions,
                             "iter_time": iter_time,
                             "dropped_unknown_id_updates": (
                                 solver.dropped_unknown_id_updates - dropped_before

@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from src.engine.solver.policy_source import ScorableBlueprint
 from src.engine.solver.protocols import Blueprint
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.blueprint_match import play_blueprint_match
@@ -30,6 +31,7 @@ from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
 from src.pipeline.training.components import (
     build_evaluation_solver,
+    build_static_evaluation_solver,
     evaluate_solver_exploitability,
 )
 from src.pipeline.training.run_tracker import RunMetadata
@@ -37,6 +39,43 @@ from src.shared.config import Config
 from src.shared.units import pair_mean_mbb
 
 logger = logging.getLogger(__name__)
+
+# The two backends need different loaders (hashed key vs (node_id, bucket)), but
+# everything above `policy_source_for` is shared, so the split stops here.
+STATIC_MANIFEST = "STATIC_CHECKPOINT.json"
+
+
+def is_static_run(run_dir: Path) -> bool:
+    """Whether ``run_dir`` holds a static-tree checkpoint.
+
+    Detected from the artifact rather than a flag on the run: a flag can be
+    absent on runs written before it existed, while the manifest is what the
+    loader actually needs.
+    """
+    return (run_dir / STATIC_MANIFEST).exists()
+
+
+def build_blueprint_for(
+    run_dir: Path,
+    metadata: RunMetadata,
+    abstraction_hash: str | None,
+    at_iteration: int | None,
+):
+    """Load a scoreable blueprint from either backend."""
+    if is_static_run(run_dir):
+        return build_static_evaluation_solver(
+            metadata.config,
+            checkpoint_dir=run_dir,
+            abstraction_hash=abstraction_hash,
+            at_iteration=at_iteration,
+        )
+    return build_evaluation_solver(
+        metadata.config,
+        checkpoint_dir=run_dir,
+        abstraction_hash=abstraction_hash,
+        at_iteration=at_iteration,
+    )
+
 
 # Local Best Response: a rigorous lower bound on exploitability (LBR <= exact BR,
 # validated on Kuhn/Leduc). This is the trustworthy default metric.
@@ -116,6 +155,22 @@ def _load_blueprint(
     Cython member and cannot be sent across a process boundary.
     """
     solver, _ = build_evaluation_solver(
+        config,
+        checkpoint_dir=checkpoint_dir,
+        abstraction_hash=abstraction_hash,
+        at_iteration=at_iteration,
+    )
+    return solver
+
+
+def _load_static_blueprint(
+    config: Config,
+    checkpoint_dir: Path,
+    abstraction_hash: str | None = None,
+    at_iteration: int | None = None,
+) -> ScorableBlueprint:
+    """Picklable factory for a static blueprint, for parallel scoring workers."""
+    solver, _ = build_static_evaluation_solver(
         config,
         checkpoint_dir=checkpoint_dir,
         abstraction_hash=abstraction_hash,
@@ -266,14 +321,21 @@ def evaluate_run_exact_br(
     config = config or PublicBRConfig()
     metadata = load_run_metadata(run_dir)
     effective_hash = _effective_abstraction_hash(run_dir, metadata, abstraction_hash)
-    solver, storage = build_evaluation_solver(
-        metadata.config,
-        checkpoint_dir=run_dir,
-        abstraction_hash=effective_hash,
-        at_iteration=at_iteration,
+    solver, storage = build_blueprint_for(run_dir, metadata, effective_hash, at_iteration)
+    # The four (seat, button) walks are independent; workers rebuild the
+    # blueprint because the solver is not picklable. Same factory shape parallel
+    # LBR uses, so only picklable args are captured.
+    loader = _load_static_blueprint if is_static_run(run_dir) else _load_blueprint
+    factory = (
+        functools.partial(loader, metadata.config, run_dir, effective_hash, at_iteration)
+        if config.num_workers > 1
+        else None
     )
     result = compute_public_tree_br(
-        solver, config, starting_stack=metadata.config.game.starting_stack
+        solver,
+        config,
+        starting_stack=metadata.config.game.starting_stack,
+        blueprint_factory=factory,
     )
     results: dict[str, Any] = {
         "exploitability_mbb": result.exploitability_mbb,

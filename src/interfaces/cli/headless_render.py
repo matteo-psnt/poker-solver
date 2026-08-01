@@ -227,8 +227,30 @@ def _render_checkpoint_profile(payload: dict[str, Any]) -> None:
                 print(f"    {name:<24} {secs:>8.2f}s")
 
 
+def _render_train_static(payload: dict[str, Any]) -> None:
+    print("Static-tree training complete.")
+    print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
+    print(f"  Config:      {payload['config_name']}")
+    print(f"  Iterations:  {payload['iterations']:,}")
+    # Coverage is what only this path can report: the table size is known up
+    # front, so "how much of the tree did we actually touch" is answerable.
+    print(
+        f"  Coverage:    {payload['touched_rows']:,} / {payload['num_rows']:,} rows "
+        f"({payload['coverage']:.1%})"
+    )
+    print(f"  Visits/row:  {payload['mean_visits_per_touched']:.1f} mean, on touched rows")
+    print(
+        f"  Runtime:     {payload['runtime_seconds']:.2f}s "
+        f"({payload['iterations_per_second']:.1f} it/s)"
+    )
+    if payload["dropped_updates"]:
+        print(f"  Dropped:     {payload['dropped_updates']:,} updates")
+    print(f"  Status:      {payload['status']}")
+
+
 RENDERERS: dict[str, Callable[[dict[str, Any]], None]] = {
     "train": _render_train,
+    "train-static": _render_train_static,
     "resume": _render_resume,
     "precompute": _render_precompute,
     "promote": _render_promote,

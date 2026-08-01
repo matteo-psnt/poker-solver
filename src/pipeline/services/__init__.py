@@ -56,6 +56,7 @@ from src.pipeline.services.runs import (
     list_runs,
     load_run_metadata,
 )
+from src.pipeline.services.static_training import StaticTrainingOutput, train_static
 from src.pipeline.services.training import (
     ResumeOutput,
     TrainingOutput,
@@ -84,6 +85,7 @@ __all__ = [
     "ResumeOutput",
     "RolloutParams",
     "RunSummary",
+    "StaticTrainingOutput",
     "TrainingOutput",
     "checkpoint_iteration_of",
     "create_resumed_session",
@@ -107,4 +109,5 @@ __all__ = [
     "run_training",
     "sweep_bucket_counts",
     "train",
+    "train_static",
 ]

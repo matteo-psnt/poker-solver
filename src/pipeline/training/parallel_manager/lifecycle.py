@@ -37,6 +37,7 @@ def initialize_runtime(manager: SharedArrayWorkerManager) -> None:
         zarr_compression_level=manager.config.storage.zarr_compression_level,
         zarr_chunk_size=manager.config.storage.zarr_chunk_size,
         checkpoint_retain_every=manager.config.storage.checkpoint_retain_every,
+        remote_key_cache_size=manager.config.storage.remote_key_cache_size,
     )
 
     total_mb = manager.capacity * manager.max_actions * 4 * 2 // 1024 // 1024
@@ -84,7 +85,16 @@ def start_workers(manager: SharedArrayWorkerManager) -> None:
 
 
 def shutdown(manager: SharedArrayWorkerManager) -> None:
-    """Shutdown all workers and cleanup shared memory."""
+    """Shut down all workers and clean up shared memory.
+
+    Escalates politeness -> SIGTERM -> SIGKILL, and JOINS after each step. The
+    escalation is the point: ``terminate()`` alone is a request, and a worker
+    wedged in an uninterruptible syscall ignores it. Previously the reference was
+    then dropped by ``processes.clear()``, so nobody ever reaped it and the
+    interpreter -- which joins surviving children at exit -- could not exit
+    either. Under a scheduler that is not a hung process but a node billing at
+    full rate until the wall clock expires, which is exactly what one leg did.
+    """
     logger.info("[Master] Shutting down workers...")
 
     for _ in range(manager.num_workers):
@@ -92,9 +102,24 @@ def shutdown(manager: SharedArrayWorkerManager) -> None:
 
     for process in manager.processes:
         process.join(timeout=10)
+        if not process.is_alive():
+            continue
+        logger.warning(f"[Master] Worker {process.pid} ignored shutdown; sending SIGTERM")
+        process.terminate()
+        process.join(timeout=10)
+        if not process.is_alive():
+            continue
+        logger.error(f"[Master] Worker {process.pid} survived SIGTERM; sending SIGKILL")
+        process.kill()
+        # SIGKILL cannot be caught, but the join still matters: it reaps the
+        # zombie. Without it the child stays in the process table and the exit
+        # handler waits on it forever.
+        process.join(timeout=10)
         if process.is_alive():
-            logger.info(f"[Master] Force terminating worker {process.pid}")
-            process.terminate()
+            logger.error(
+                f"[Master] Worker {process.pid} survived SIGKILL -- almost certainly "
+                "blocked in uninterruptible I/O. This process cannot exit cleanly."
+            )
 
     manager.processes.clear()
     manager.storage.cleanup()

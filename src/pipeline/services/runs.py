@@ -11,6 +11,7 @@ from src.engine.solver.storage.helpers import (
     CHECKPOINT_MANIFEST_FILE,
     read_checkpoint_manifest,
 )
+from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
 from src.pipeline.training.versioning import REPRESENTATION_VERSION
 from src.shared.gitinfo import commits_ahead_of
@@ -31,7 +32,14 @@ def checkpoint_iteration_of(run_dir: Path, at_iteration: int | None = None) -> i
     if at_iteration is not None:
         return at_iteration
     manifest = read_checkpoint_manifest(run_dir)
-    return int(manifest["iteration"]) if manifest is not None else None
+    if manifest is not None:
+        return int(manifest["iteration"])
+    # Static runs carry their own manifest. Falling through to None here left
+    # every static eval unplaceable on an axis -- `curve` drops rows with no
+    # checkpoint_iteration, so the convergence curve the static ladder exists to
+    # produce would have come out empty while the evals looked fine.
+    static = StaticCheckpointManifest.read(run_dir)
+    return static.iteration if static is not None else None
 
 
 def list_runs(runs_dir: Path) -> list[str]:
