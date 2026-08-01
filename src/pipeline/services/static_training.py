@@ -81,6 +81,8 @@ def train_static(
     config_overrides: dict[str, object] | None = None,
     experiment: ExperimentTag | None = None,
     runs_dir: Path | None = None,
+    checkpoint_every: int = 0,
+    run_id: str | None = None,
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
 
@@ -89,7 +91,13 @@ def train_static(
         num_workers: Worker processes. Unlike the dynamic path, raising this does
             NOT raise memory: the table is shared and there are no per-worker key
             maps, so worker count is a pure throughput knob.
-        num_iterations: Overrides the config's iteration count.
+        num_iterations: ABSOLUTE iteration target. Resuming past it is a no-op,
+            so a retried leg converges rather than repeating -- the same contract
+            the dynamic resume relies on.
+        checkpoint_every: Checkpoint every N iterations (0 = only at the end).
+            This is the bound on what a killed run loses.
+        run_id: Continue an EXISTING run directory instead of creating one. The
+            checkpoint there is loaded first and training continues from it.
         seed: Overrides ``system.seed``.
         config_overrides: Nested config overrides (``__`` separator).
         experiment: Experiment/arm/parent recorded on the run.
@@ -108,21 +116,28 @@ def train_static(
     # Same id shape as the dynamic path, including the random suffix: second
     # resolution collides when runs start simultaneously, and two runs sharing a
     # directory interleave their checkpoints silently.
-    run_id = f"run-{datetime.now().strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    resuming = run_id is not None
+    if run_id is None:
+        run_id = f"run-{datetime.now().strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
     run_dir = base_dir / run_id
 
     action_model = ActionModel(config)
-    tag = experiment or ExperimentTag()
-    tracker = RunTracker(
-        run_dir=run_dir,
-        config_name=config.system.config_name,
-        config=config,
-        action_config_hash=action_model.get_config_hash(),
-        card_abstraction_hash=components.resolve_card_abstraction_hash(config),
-        experiment_id=tag.experiment_id,
-        arm=tag.arm,
-        parent_run_id=tag.parent_run_id,
-    )
+    if resuming:
+        tracker = RunTracker.load(run_dir)
+        tracker.verify_action_config_hash(action_model.get_config_hash())
+        tracker.mark_resumed()
+    else:
+        tag = experiment or ExperimentTag()
+        tracker = RunTracker(
+            run_dir=run_dir,
+            config_name=config.system.config_name,
+            config=config,
+            action_config_hash=action_model.get_config_hash(),
+            card_abstraction_hash=components.resolve_card_abstraction_hash(config),
+            experiment_id=tag.experiment_id,
+            arm=tag.arm,
+            parent_run_id=tag.parent_run_id,
+        )
     run_dir.mkdir(parents=True, exist_ok=True)
 
     started = time.time()
@@ -137,6 +152,8 @@ def train_static(
             # value because worker seeds are derived from it deterministically.
             base_seed=config.system.seed if config.system.seed is not None else 42,
             checkpoint_retain_every=config.storage.checkpoint_retain_every,
+            checkpoint_every=checkpoint_every,
+            resume=resuming,
         )
     except Exception:
         # cleanup_if_empty so a run that died before writing anything does not

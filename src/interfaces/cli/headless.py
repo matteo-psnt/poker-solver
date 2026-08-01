@@ -104,6 +104,8 @@ def _cmd_train_static(args: argparse.Namespace) -> dict[str, Any]:
             arm=args.arm,
             parent_run_id=args.parent,
         ),
+        checkpoint_every=args.checkpoint_every,
+        run_id=args.run,
     )
     payload: dict[str, Any] = {"op": "train-static", **dataclasses.asdict(out)}
     _write_result(Path(out.runs_dir) / out.run_id, payload)
@@ -430,6 +432,20 @@ def _add_train_static_parser(sub: _SubParsers, common: argparse.ArgumentParser) 
     p_ts.add_argument("--experiment", default=None, help="Experiment id this run is an arm of.")
     p_ts.add_argument("--arm", default=None, help="Arm within the experiment.")
     p_ts.add_argument("--parent", default=None, help="Run id this was forked from.")
+    p_ts.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        dest="checkpoint_every",
+        help="Checkpoint every N iterations (0 = only at the end). This is the bound "
+        "on what a killed run loses, so set it for any long run.",
+    )
+    p_ts.add_argument(
+        "--run",
+        default=None,
+        help="Continue an EXISTING run instead of starting one. --iterations is an "
+        "ABSOLUTE target, so re-running past it is a no-op and a retry converges.",
+    )
     p_ts.set_defaults(func=_cmd_train_static)
 
 
