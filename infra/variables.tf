@@ -50,12 +50,16 @@ variable "max_nodes" {
       4 x D8als_v6  ~$1.60/hr  ~$38/day   (blows a $250 budget in ~6 days)
       4 x D16als_v6 ~$3.20/hr  ~$77/day   (~3 days)
 
-    Deliberately 2 while the Batch path is unproven -- it is a one-line change
-    once a real leg has completed end to end, and until then the extra
-    parallelism cannot be used anyway. Regional quota allows 8 x D8 or 4 x D16.
+    Raised to 4 once a real leg completed end to end (30M iterations, 2.64 h,
+    no failures), which was the stated condition. 4 x D16als_v6 = 64 vCPU
+    against a 65 vCPU regional quota, so this is the ceiling the subscription
+    allows at this size -- going higher needs a quota increase, not a variable.
+
+    The parallelism is now usable: scoring submits one task per ladder rung, so
+    a curve fans out across the pool instead of queueing behind one node.
   EOT
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "data_disk_gb" {

@@ -414,17 +414,27 @@ leg-logs:
 #   just score run-... exact_br 10000000,20000000,30000000
 #   just score run-... exact_br "" --br-flops 8
 #
-# On the node because the share is a LOCAL mount there: one checkpoint is ~540 MB
+# On a node because the share is a LOCAL mount there: one checkpoint is ~540 MB
 # of small zarr chunks, ~20 minutes to pull over SMB, which makes scoring a
-# 30-rung ladder from a laptop impractical. `rungs` is comma-separated and scored
-# in ONE task -- the fetch dominates, so a whole curve costs about one download.
-[doc("Score a published run on a node. Args: run [method] [rungs] [flags...]")]
+# ladder from a laptop impractical.
+#
+# ONE TASK PER RUNG, not one task looping over them. Rungs are independent, so
+# Batch is the scheduler: it spreads them across nodes up to max_nodes and
+# queues the rest. A single looping task pinned the whole curve to one node no
+# matter how much pool was available. Each task also parallelises its own four
+# BR walks internally, so a rung uses ~4 cores and a node can hold one comfortably.
+[doc("Score a published run on a node, one task per rung. Args: run [method] [rungs] [flags...]")]
 score run method="exact_br" rungs="" *flags:
     #!/usr/bin/env bash
     set -euo pipefail
     SNAP=$(just push-code)
     echo "  code snapshot: $SNAP"
     HEX=$(printf '%s' "{{flags}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
-    RUN_OP=evaluate RUN_EVAL_METHOD="{{method}}" RUN_EVAL_AT="{{rungs}}" \
-      RUN_EVAL_FLAGS_HEX="$HEX" RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
-      just _task "$SNAP" "" "0" "{{run}}" "" "" "" ""
+    IFS=',' read -ra RUNGS <<< "{{rungs}}"
+    [ "${#RUNGS[@]}" -eq 0 ] && RUNGS=("")
+    for rung in "${RUNGS[@]}"; do
+        RUN_OP=evaluate RUN_EVAL_METHOD="{{method}}" RUN_EVAL_AT="$rung" \
+          RUN_EVAL_FLAGS_HEX="$HEX" RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
+          just _task "$SNAP" "" "0" "{{run}}" "" "" "" ""
+    done
+    echo "  ${#RUNGS[@]} rung(s) queued — Batch runs them across the pool"
