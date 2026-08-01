@@ -213,6 +213,9 @@ def _cmd_evaluate(args: argparse.Namespace) -> dict[str, Any]:
             num_turns=args.br_turns,
             num_rivers=args.br_rivers,
             board_seed=args.br_board_seed,
+            # --workers is shared with lbr; exact_br splits its four independent
+            # (seat, button) walks over it, so 4 saturates the useful range.
+            num_workers=args.workers,
         ),
         resolver_iterations=args.resolver_iterations,
         abstraction_hash=args.abstraction_hash,
