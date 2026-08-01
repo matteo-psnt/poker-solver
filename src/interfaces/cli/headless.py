@@ -435,10 +435,12 @@ def _add_train_static_parser(sub: _SubParsers, common: argparse.ArgumentParser) 
     p_ts.add_argument(
         "--checkpoint-every",
         type=int,
-        default=0,
+        default=1_000_000,
         dest="checkpoint_every",
         help="Checkpoint every N iterations (0 = only at the end). This is the bound "
-        "on what a killed run loses, so set it for any long run.",
+        "on what a killed run loses, traded against disk and write time: a full table "
+        "is written each time, and at 250k the writes were ~17%% of a 30M run's wall "
+        "clock and left 120 snapshots on the share.",
     )
     p_ts.add_argument(
         "--run",

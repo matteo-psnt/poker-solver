@@ -313,7 +313,8 @@ if [ "${RUN_OP:-train}" = "evaluate" ]; then
   # shellcheck disable=SC2206
   EXTRA=($EVAL_FLAGS)
   METHOD="${RUN_EVAL_METHOD:-exact_br}"
-  rc=0
+  ok=0
+  bad=0
   IFS=',' read -ra RUNGS <<< "${RUN_EVAL_AT:-}"
   [ "${#RUNGS[@]}" -eq 0 ] && RUNGS=("")
   for rung in "${RUNGS[@]}"; do
@@ -327,11 +328,20 @@ if [ "${RUN_OP:-train}" = "evaluate" ]; then
     set -o pipefail
     # One bad rung must not abandon the rest: a partial curve beats none, and
     # the failure is visible in the log and absent from the ledger.
-    [ "$step" = 0 ] || { log "WARN rung ${rung:-latest} failed (rc=$step)"; rc=$step; }
+    if [ "$step" = 0 ]; then ok=$((ok + 1)); else
+      bad=$((bad + 1)); log "WARN rung ${rung:-latest} failed (rc=$step)"
+    fi
     publish_log
   done
-  log "evaluate complete"
-  exit "$rc"
+  log "evaluate complete: $ok scored, $bad failed"
+  # Exit 0 when ANYTHING scored. A non-zero exit makes Batch retry the WHOLE
+  # task, re-fetching and re-scoring the rungs that already succeeded -- one bad
+  # rung turned a 30-minute job into nearly four hours and wrote every record
+  # twice. A partial result is not a failure to retry; the gap is visible in this
+  # log and absent from the ledger. Only a clean sweep of failures is worth a
+  # retry, since that is what a transient node fault looks like.
+  [ "$ok" -gt 0 ] && exit 0
+  exit 1
 fi
 
 # RUN_STATIC=1 selects the statically-enumerated tree. One command covers both

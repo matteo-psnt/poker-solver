@@ -81,7 +81,7 @@ def train_static(
     config_overrides: dict[str, object] | None = None,
     experiment: ExperimentTag | None = None,
     runs_dir: Path | None = None,
-    checkpoint_every: int = 0,
+    checkpoint_every: int = 1_000_000,
     run_id: str | None = None,
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
@@ -95,7 +95,10 @@ def train_static(
             so a retried leg converges rather than repeating -- the same contract
             the dynamic resume relies on.
         checkpoint_every: Checkpoint every N iterations (0 = only at the end).
-            This is the bound on what a killed run loses.
+            The bound on what a killed run loses, traded against disk and write
+            time: a full table is written each time. At 250k the writes were
+            ~17% of a 30M run's wall clock and left 120 snapshots on the share;
+            1M costs ~4% and loses at most ~5 minutes of work.
         run_id: Continue an EXISTING run directory instead of creating one. The
             checkpoint there is loaded first and training continues from it.
         seed: Overrides ``system.seed``.
