@@ -59,6 +59,36 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Checkpoint interval in iterations.",
     )
     parser.add_argument(
+        "--kernel",
+        choices=("scalar", "board-free"),
+        default="scalar",
+        help="scalar = external-sampling MCCFR over the real game (train-static). "
+        "board-free = the vector kernel, which updates every row every iteration "
+        "but solves a bucket-transition approximation of the chance layer.",
+    )
+    parser.add_argument(
+        "--universe-boards",
+        type=int,
+        default=2000,
+        dest="universe_boards",
+        help="[board-free] Real boards the bucket-transition matrices are estimated "
+        "from. They define the chance layer, so they define the game.",
+    )
+    parser.add_argument(
+        "--universe-seed",
+        type=int,
+        default=7,
+        dest="universe_seed",
+        help="[board-free] Draws the universe; part of the game's identity.",
+    )
+    parser.add_argument(
+        "--dtype",
+        default="",
+        choices=("", "float32", "float64"),
+        help="[board-free] Kernel precision. Default float32, measured to cost "
+        "nothing in strategy quality.",
+    )
+    parser.add_argument(
         "--timeout",
         default=spec.DEFAULT_TIMEOUT,
         help="Wall-clock ceiling on the TRAINING process. It fires before the task-level "
@@ -93,7 +123,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         lambda snapshot: [
             spec.TaskSpec(
                 code_snapshot=snapshot,
-                op=TaskName.TRAIN,
+                op=TaskName.TRAIN if args.kernel == "scalar" else TaskName.TRAIN_VECTOR,
                 config=args.config,
                 to=args.to,
                 run_id=args.run,
@@ -104,6 +134,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 workers=args.workers,
                 checkpoint_every=args.checkpoint_every,
                 timeout=args.timeout,
+                universe_boards=args.universe_boards if args.kernel == "board-free" else 0,
+                universe_seed=args.universe_seed if args.kernel == "board-free" else 0,
+                dtype=args.dtype,
             )
         ]
     )

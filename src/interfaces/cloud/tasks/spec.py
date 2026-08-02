@@ -144,6 +144,9 @@ class TaskSpec:
     eval_method: str = ""
     eval_at: str = ""
     eval_flags: tuple[str, ...] = field(default_factory=tuple)
+    universe_boards: int = 0
+    universe_seed: int = 0
+    dtype: str = ""
     force_publish: bool = False
     # Stamped by `dispatch.stage_and_queue`, never by a caller: the node has no
     # `.git` (the snapshot excludes it), so the submitting machine is the only
@@ -197,6 +200,9 @@ class TaskSpec:
             # distinction is what makes a bare hash worth recording.
             "RUN_GIT_DIRTY": self.git_dirty,
             "RUN_GIT_BRANCH": self.git_branch,
+            "RUN_UNIVERSE_BOARDS": str(self.universe_boards) if self.universe_boards else "",
+            "RUN_UNIVERSE_SEED": str(self.universe_seed) if self.universe_seed else "",
+            "RUN_DTYPE": self.dtype,
         }
 
     def validate(self) -> None:

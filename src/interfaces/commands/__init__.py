@@ -105,6 +105,10 @@ COMMANDS: tuple[CommandRef, ...] = (
         "train-static", "Train over the statically-enumerated tree (fixed memory, no key maps)."
     ),
     CommandRef(
+        "train-vector",
+        "Train the board-free vector kernel, stored as an ordinary static checkpoint.",
+    ),
+    CommandRef(
         "vector-sweep", "Exploitability vs iteration for one vector-CFR kernel on one abstraction."
     ),
     CommandRef("precompute", "Precompute a combo abstraction into data/combo_abstraction/."),
