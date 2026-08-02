@@ -1,0 +1,28 @@
+# OCHS river dose-response, r=100 — TREATMENT arm (OCHS river).
+#
+# Byte-identical to ochs_dose_r100_scalar.yaml except `river_feature` (and
+# `ochs_clusters`, which only has meaning for OCHS). Same bucket counts, so the
+# betting-tree row layout is identical and both arms train over the same table
+# shape — any difference isolates the FEATURE.
+#
+# See ochs_dose_r100_scalar.yaml for why r=100 and what this point is for.
+
+buckets:
+  flop: 20
+  turn: 20
+  river: 100
+
+flop_runouts: null
+
+equity_histogram_bins: 8
+
+river_feature: ochs
+# 8 opponent clusters is the count used in the originating work
+# (Johanson, Burch, Valenzano & Bowling, AAMAS 2013).
+ochs_clusters: 8
+
+kmeans_max_iter: 300
+kmeans_n_init: 10
+
+num_workers: null
+seed: 42

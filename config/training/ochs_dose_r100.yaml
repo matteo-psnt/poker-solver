@@ -1,0 +1,28 @@
+# OCHS river dose-response at r=100 — training side.
+#
+# Defaults to the CONTROL abstraction so the arm is a single override:
+#
+#   uv run poker-solver-run ab --config ochs_dose_r100 --iterations 500000 --seed 42 \
+#     --arm 'ochs:card_abstraction__config=ochs_dose_r100_ochs'
+#
+# Matches config/training/ochs_gate.yaml in every solver setting, so the r=20
+# and r=100 points differ only in river bucket count and are directly
+# comparable as a dose-response.
+#
+# Table size: ~5.18M rows versus the gate's 298,472 — 17x larger, because the
+# river owns 50,308 of the 57,604 betting-tree nodes. Coverage at a given
+# iteration count therefore falls sharply relative to the gate run; that costs
+# sensitivity (more uniform-fallback mass in the evaluator) but does not bias
+# the comparison, since both arms share the bucket counts and so the row layout.
+
+solver:
+  # No discounting: keeps regrets accumulating linearly, so the comparison is
+  # not entangled with a weighting schedule.
+  iteration_weighting: none
+
+card_abstraction:
+  config: ochs_dose_r100_scalar
+
+system:
+  seed: 42
+  config_name: "ochs_dose_r100"
