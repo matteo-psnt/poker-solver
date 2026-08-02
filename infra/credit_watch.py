@@ -257,7 +257,14 @@ def check_expiry(report: Report, ba: str, bp: str, warn_days: int) -> None:
         raw = props.get("expirationDate")
         if not raw:
             continue
-        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00").split(".")[0] + "+00:00")
+        # `fromisoformat` parses the trailing `Z` natively on 3.11+, with or
+        # without fractional seconds. The hand-rolled
+        # `.replace("Z","+00:00").split(".")[0] + "+00:00"` only worked when a
+        # fraction was present; on the plain `...T00:00:00Z` Azure usually
+        # returns it produced a DOUBLE offset and raised. The broad
+        # `except Exception` in main() then turned that into exit 3, so the
+        # credit-expiry half of the watchdog stopped answering silently.
+        stamp = datetime.fromisoformat(raw)
         source = props.get("source", lot.get("name", "?"))
         if soonest is None or stamp < soonest[0]:
             soonest = (stamp, source)
