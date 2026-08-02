@@ -32,17 +32,17 @@ class TestLiveJobFilter:
 
     def test_running_task_under_a_completed_job_is_not_live(self):
         stale = _job("BatchJobState.COMPLETED", "BatchTaskState.RUNNING")
-        assert not jobs._is_live(stale)
+        assert not jobs.is_live(stale)
 
     def test_active_task_under_a_completed_job_is_not_live(self):
         stale = _job("BatchJobState.COMPLETED", "BatchTaskState.ACTIVE")
-        assert not jobs._is_live(stale)
+        assert not jobs.is_live(stale)
 
     def test_running_task_under_an_active_job_is_live(self):
-        assert jobs._is_live(_job("BatchJobState.ACTIVE", "BatchTaskState.RUNNING"))
+        assert jobs.is_live(_job("BatchJobState.ACTIVE", "BatchTaskState.RUNNING"))
 
     def test_finished_task_under_an_active_job_is_not_live(self):
-        assert not jobs._is_live(_job("BatchJobState.ACTIVE", "BatchTaskState.COMPLETED"))
+        assert not jobs.is_live(_job("BatchJobState.ACTIVE", "BatchTaskState.COMPLETED"))
 
 
 class TestResizeErrorValuesAreUnpacked:
