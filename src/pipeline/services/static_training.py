@@ -1,9 +1,10 @@
 """Training over the statically-enumerated betting tree.
 
-WHY THIS EXISTS. The dynamic path keys infosets by a hashed ``InfoSetKey`` and
-discovers them as it goes, so the tree never stops growing and every worker
-holds Python dicts proportional to it. Fitted against a live run
-(``infosets ~ 1.96 * iters^1.058`` -- still superlinear at 1.6M iterations):
+WHY THIS EXISTS -- kept because the measurement is the whole argument. The
+approach this replaced keyed infosets by a hash and discovered them as it went,
+so the space never stopped growing and every worker held dicts proportional to
+it. Fitted against a live run (``infosets ~ 1.96 * iters^1.058`` -- still
+superlinear at 1.6M iterations):
 
       iters      infosets   shared GB   per-worker GB   8w node GB
   5,000,000    24,169,390        2.4            2.6         23.3
@@ -55,8 +56,9 @@ class StaticTrainingOutput:
 
     Mirrors :class:`~src.pipeline.services.training.TrainingOutput` where the
     fields mean the same thing, and adds what only the static path can report:
-    coverage of a table whose size is known up front, which the dynamic path
-    cannot express because it never knows how many infosets there ought to be.
+    ``coverage`` is meaningful only because the table's size is known up front:
+    it is the fraction of the infoset space training actually reached, which is
+    the diagnostic that makes under-training visible.
     """
 
     run_id: str
@@ -89,12 +91,11 @@ def train_static(
 
     Args:
         config_name: Stem of a config under ``config/training``.
-        num_workers: Worker processes. Unlike the dynamic path, raising this does
-            NOT raise memory: the table is shared and there are no per-worker key
-            maps, so worker count is a pure throughput knob.
-        num_iterations: ABSOLUTE iteration target. Resuming past it is a no-op,
-            so a retried leg converges rather than repeating -- the same contract
-            the dynamic resume relies on.
+        num_workers: Worker processes. A pure throughput knob: the table is
+            shared and there are no per-worker maps, so raising it does not
+            raise memory.
+        num_iterations: ABSOLUTE iteration target. Continuing past it is a
+            no-op, so a retried leg converges rather than repeating.
         checkpoint_every: Checkpoint every N iterations (0 = only at the end).
             The bound on what a killed run loses, traded against disk and write
             time: a full table is written each time. At 250k the writes were
@@ -118,17 +119,16 @@ def train_static(
     iterations = num_iterations or config.training.num_iterations
 
     base_dir = Path(runs_dir) if runs_dir is not None else Path(config.training.runs_dir)
-    # Same id shape as the dynamic path, including the random suffix: second
-    # resolution collides when runs start simultaneously, and two runs sharing a
-    # directory interleave their checkpoints silently.
+    # The random suffix is not decoration: second resolution collides when two
+    # runs start simultaneously, and two runs sharing a directory interleave
+    # their checkpoints silently.
     if run_id is None:
         run_id = f"run-{datetime.now().strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
     run_dir = base_dir / run_id
-    # A NAMED run that does not exist yet is a fresh start, not an error. This is
-    # what makes a scheduler retry safe on the static path: the first attempt
-    # creates the directory, and a retry under the same name resumes it instead
-    # of starting a second run from zero -- the hazard that keeps retries off the
-    # dynamic fresh-train path.
+    # A NAMED run that does not exist yet is a fresh start, not an error. That
+    # is what makes a scheduler retry safe: the first attempt creates the
+    # directory, and a retry under the same name continues it instead of
+    # starting a second run from zero.
     resuming = (run_dir / ".run.json").exists()
 
     action_model = ActionModel(config)

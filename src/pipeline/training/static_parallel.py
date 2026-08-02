@@ -1,16 +1,15 @@
 """Multi-process training over static, tree-indexed storage.
 
-The dynamic backend needed ~1,300 lines of worker machinery — per-worker ID
-request/response queues, an ownership hash, a frontier re-send with a throttle,
-a resize protocol, and job re-targeting so one worker could not consume
-another's message. Every line of it existed to answer one question at runtime:
-*which row is this infoset?*
+Static enumeration answers "which row is this infoset?" from config alone,
+identically in every process, before anything starts. So this module has no
+queues but the job queue: no ownership, no id exchange, no resize protocol, and
+no state in which a worker does not yet know a row.
 
-Static enumeration answers that from config alone, identically in every
-process, before anything starts. So this module has no queues but the job queue,
-no ownership, no exchange, no resize, and no notion of a worker "not yet
-knowing" a row — which is what made the measured 39-74% dropped-update rate
-possible in the first place. A worker here can always write.
+That absence is the design. Answering the same question at runtime previously
+took ~1,300 lines of worker machinery — per-worker id request/response queues,
+an ownership hash, a throttled frontier re-send, job re-targeting — and still
+dropped a measured 39-74% of update samples, because a worker that had not yet
+learned an id simply wrote nothing. A worker here can always write.
 
 What crosses a process boundary: the config, a seed, and an iteration count.
 Notably NOT the tree or the abstraction. Each worker rebuilds the tree from
@@ -206,7 +205,7 @@ def train_static_parallel(
             except FileNotFoundError:
                 start = 0  # nothing banked yet; a fresh run
         if start >= num_iterations:
-            # Absolute target already met. Same contract as the dynamic resume:
+            # Absolute target already met, so this call is a no-op:
             # a retried leg past its target is a no-op, not a repeat.
             logger.info(
                 f"[static] already at {start:,} >= target {num_iterations:,}; nothing to do"

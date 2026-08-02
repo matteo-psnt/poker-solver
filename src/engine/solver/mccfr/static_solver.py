@@ -51,12 +51,13 @@ from .solver import MCCFRSolver
 class StaticTreeSolver(MCCFRSolver):
     """MCCFR whose infosets are preallocated rows of a static betting tree.
 
-    ``dropped_unknown_id_updates`` stays at zero for the solver's whole lifetime:
-    every row exists in every process from the start, so there is no state in
-    which a worker knows an infoset but cannot write it. The counter is retained
-    (rather than deleted) so metrics consumers keep working and so a nonzero
-    value would be an unmissable signal that something reintroduced dynamic
-    allocation.
+    ``dropped_unknown_id_updates`` stays at zero for the solver's whole
+    lifetime: every row exists in every process from the start, so there is no
+    state in which a worker knows an infoset but cannot write it. It is still
+    reported (through ``StaticTrainingOutput.dropped_updates``, which the
+    headless renderer prints) precisely BECAUSE it should be zero — a nonzero
+    value means something reintroduced allocation-at-runtime, and that is worth
+    finding out loudly rather than never measuring.
     """
 
     # ``StaticArrayStorage`` deliberately does not implement the key-addressed
