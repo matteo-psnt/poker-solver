@@ -195,6 +195,8 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
             RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-1000000}" \
             RUN_OP="${RUN_OP:-}" RUN_EVAL_METHOD="${RUN_EVAL_METHOD:-}" \
             RUN_EVAL_AT="${RUN_EVAL_AT:-}" RUN_EVAL_FLAGS_HEX="${RUN_EVAL_FLAGS_HEX:-}" \
+            RUN_AB_SEED="${RUN_AB_SEED:-}" RUN_AB_ARMS_HEX="${RUN_AB_ARMS_HEX:-}" \
+            RUN_AB_VERIFY="${RUN_AB_VERIFY:-}" \
         -o none
     echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
     if [ "${RUN_OP:-}" = "evaluate" ]; then
@@ -203,6 +205,33 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
         echo "  retries:  $RETRIES (stable run id + absolute target, so a retry continues)"
     fi
     echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
+
+# Run a paired knob A/B ON A NODE: control plus every arm, trained and scored.
+#
+#   just ab quick_test 200000 42 'prune110:solver__enable_pruning=true,solver__pruning_threshold=110.0'
+#   just ab ochs_gate 100000 42 'ochs:card_abstraction__config=ochs_gate_ochs'
+#
+# Args: config iterations seed, then one or more NAME:key=value[,key=value] arms.
+# The control is generated from the config's defaults -- do not pass it.
+#
+# ONE task, not one per arm. The harness exists to make the preconditions
+# impossible to skip (single worker, one fixed seed, zero-variance exact_br
+# scoring), and splitting it across tasks would put that back on whoever writes
+# the submission -- the hand-rolled protocol this replaces.
+#
+# RUN_AB_VERIFY=1 trains and scores the control TWICE and fails the leg unless
+# they match exactly. Worth it the first time a config or code version is used.
+[doc("Paired A/B on a node. Args: config iterations seed NAME:k=v [NAME:k=v...]")]
+ab config iterations seed *arms:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -n "{{arms}}" ] || { echo "error: at least one --arm is required"; exit 1; }
+    SNAP=$(just push-code)
+    echo "  code snapshot: $SNAP"
+    ARMS_HEX=$(printf '%s' "{{arms}}" | python3 -c "import sys; print(sys.stdin.read().encode().hex())")
+    RUN_OP=ab RUN_AB_SEED="{{seed}}" RUN_AB_ARMS_HEX="$ARMS_HEX" \
+      RUN_AB_VERIFY="${RUN_AB_VERIFY:-}" RUN_TIMEOUT="${RUN_TIMEOUT:-6h}" \
+      just _task "$SNAP" "{{config}}" "{{iterations}}" "" "" "" "" ""
 
 # Build a card abstraction ON A NODE and publish it to the share.
 #
