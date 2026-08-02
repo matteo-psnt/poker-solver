@@ -80,6 +80,21 @@ bash "$LEG" >"$ROOT/out4.log" 2>&1
 check "unmarked dir refused" \
   "$([ -d "$WORK/data/combo_abstraction/buckets-PARTIAL-def456" ] && echo yes || echo no)" "no"
 
+echo "=== case 6: an abstraction ALREADY on the share is never republished ==="
+# Regression: keying the skip on the completion marker alone made every
+# precompute leg rm -rf and re-upload marker-less abstractions that push-data
+# had put there -- live artifacts, ~773 MB, on every run.
+rm -rf "$WORK/data/combo_abstraction" "$SHARE/combo_abstraction"
+mkdir -p "$WORK/data/combo_abstraction" "$SHARE/combo_abstraction"
+# A legacy, marker-LESS abstraction present on both share and node.
+mkdir -p "$SHARE/combo_abstraction/buckets-LEGACY-old111" "$WORK/data/combo_abstraction/buckets-LEGACY-old111"
+echo original > "$SHARE/combo_abstraction/buckets-LEGACY-old111/payload"
+echo original > "$WORK/data/combo_abstraction/buckets-LEGACY-old111/payload"
+bash "$LEG" >"$ROOT/out6.log" 2>&1
+check "legacy dir survives untouched" "$(cat "$SHARE/combo_abstraction/buckets-LEGACY-old111/payload")" "original"
+check "no marker invented for it" "$([ -f "$SHARE/combo_abstraction/.complete-buckets-LEGACY-old111" ] && echo yes || echo no)" "no"
+check "only the NEW abstraction published" "$(grep -c 'precompute complete: 1' "$ROOT/out6.log")" "1"
+
 echo "=== case 5: missing RUN_CONFIG fails loudly ==="
 RUN_CONFIG="" bash "$LEG" >"$ROOT/out5.log" 2>&1; rc=$?
 check "nonzero exit" "$([ "$rc" != 0 ] && echo yes || echo no)" "yes"

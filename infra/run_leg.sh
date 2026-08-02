@@ -405,7 +405,20 @@ if [ "${RUN_OP:-train}" = "precompute" ]; then
   for src in "$DATA"/combo_abstraction/*/; do
     [ -d "$src" ] || continue
     name=$(basename "$src")
-    if [ -f "$SHARE/combo_abstraction/.complete-$name" ]; then
+    # Skip anything the share ALREADY HOLDS, marker or not.
+    #
+    # Keying only on the marker was wrong and shipped once: abstractions
+    # uploaded by the older `just push-data` carry no marker, so the first
+    # precompute leg "re-published" all three of them -- rm -rf'ing live
+    # artifacts another task could have been reading, and re-uploading ~773 MB
+    # to add a marker file. The node holds every abstraction the share had (its
+    # start task copies them down), so without this guard EVERY precompute leg
+    # republishes the entire library.
+    #
+    # A marker-less directory that is already present is left exactly as it is:
+    # the refresh above will not pull it down, but the start task still does, so
+    # nothing that works today stops working.
+    if [ -d "$SHARE/combo_abstraction/$name" ]; then
       continue
     fi
     log "  publishing $name"

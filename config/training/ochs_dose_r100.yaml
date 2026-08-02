@@ -9,11 +9,12 @@
 # and r=100 points differ only in river bucket count and are directly
 # comparable as a dose-response.
 #
-# Table size: ~5.18M rows versus the gate's 298,472 — 17x larger, because the
-# river owns 50,308 of the 57,604 betting-tree nodes. Coverage at a given
-# iteration count therefore falls sharply relative to the gate run; that costs
-# sensitivity (more uniform-fallback mass in the evaluator) but does not bias
-# the comparison, since both arms share the bucket counts and so the row layout.
+# Table size: 1,365,992 rows versus the gate's 298,472 — 4.6x, on the DEFAULT
+# action model's 14,864 nodes (this config does not select production's action
+# model, so it does not get production's 57,604). MEASURED at 1M iterations,
+# single worker: 96.4% coverage, 17.3 visits per touched row — better-trained
+# than the gate run's 90.2%, not worse as an earlier version of this comment
+# predicted from the wrong node counts.
 
 solver:
   # No discounting: keeps regrets accumulating linearly, so the comparison is
