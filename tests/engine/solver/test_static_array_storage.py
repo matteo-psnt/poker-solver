@@ -8,6 +8,8 @@ unrelated infosets. Several tests below exist only to make that loud.
 
 from __future__ import annotations
 
+from multiprocessing import resource_tracker
+
 import numpy as np
 import pytest
 
@@ -242,6 +244,57 @@ class TestSharedNamesAreTreeKeyed:
                 assert len(storage._shm_name(array)) <= 30
         finally:
             storage.close()
+
+
+class TestAttachingCannotDestroy:
+    """A process that only ATTACHES must never be able to unlink the arrays.
+
+    POSIX SharedMemory registers with the attaching process's resource tracker by
+    default, and a tracker unlinks what it holds when its process dies. Measured:
+    a spawned child shares the coordinator's tracker and is harmless, but a
+    SEPARATE interpreter that attaches and then dies — a second leg on the node, a
+    probe, a worker re-parented onto a fresh tracker — destroys the segments the
+    coordinator is still training on. A 50M leg died at 38,000,000 exactly this
+    way, mid-run, with no error until the next chunk failed to attach.
+    """
+
+    def test_attach_leaves_no_segment_in_this_process_tracker(self, tree, monkeypatch):
+        """Every attached segment must be unregistered from the resource tracker.
+
+        White-box on purpose. The BEHAVIOUR — a dying tracker-holding attacher
+        unlinks the segment — is a property of CPython, reproduced separately;
+        what this repo has to keep true is that attaching hands ownership back.
+        Asserting on the unregister call is deterministic, where racing a real
+        tracker is not.
+        """
+        owner = StaticArrayStorage(tree, session_id="attach-untracked")
+        released: list[tuple] = []
+        real = resource_tracker.unregister
+
+        def spy(name, rtype):
+            released.append((name, rtype))
+            return real(name, rtype)
+
+        monkeypatch.setattr(resource_tracker, "unregister", spy)
+        try:
+            reader = StaticArrayStorage(tree, session_id="attach-untracked", attach=True)
+            expected = {f"/{reader._shm_name(a)}" for a in reader._spec()}
+            reader.close()
+            # SNAPSHOT HERE, before the owner closes. The owner's close() unlinks,
+            # and unlink() unregisters the very same names — so letting it run
+            # first would satisfy the assertion whether or not attaching detached
+            # anything, which is exactly how an earlier version of this test
+            # passed against the unfixed code.
+            snapshot = set(released)
+        finally:
+            owner.close()
+
+        assert {n for n, _ in snapshot} == expected, (
+            "an attached segment stayed registered with this process's resource "
+            "tracker; when the process dies the tracker unlinks the coordinator's "
+            "arrays mid-run"
+        )
+        assert all(rtype == "shared_memory" for _, rtype in snapshot)
 
 
 class TestAbandonedSegmentsAreReclaimed:
