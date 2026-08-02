@@ -40,7 +40,13 @@ DATA="$WORK/data"
 RUNS="$DATA/runs"
 ARCHIVE="$SHARE/archive"
 
-log() { echo "[run_leg $(date -u +%H:%M:%S)] $*"; }
+# Tee'd into the published leg log, not just stdout. Batch keeps a task's
+# stdout ON THE NODE and the pool drains within minutes of a task ending, so
+# anything only echoed here is gone for exactly the legs worth reading later.
+# The wrapper's own lines -- which op ran, how many overrides were applied,
+# what got published -- are the ones that explain a leg, and they were the ones
+# not surviving. `${LEG_LOG:-/dev/null}` because this is defined before it.
+log() { echo "[run_leg $(date -u +%H:%M:%S)] $*" | tee -a "${LEG_LOG:-/dev/null}"; }
 
 # --- publish ----------------------------------------------------------------- #
 # Idempotent and safe to call while training continues. `cp -u` skips rungs
