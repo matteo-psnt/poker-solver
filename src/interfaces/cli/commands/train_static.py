@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-from pathlib import Path
 from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
     parse_overrides,
-    write_result,
 )
 from src.pipeline import services
 
@@ -74,9 +72,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         checkpoint_every=args.checkpoint_every,
         run_id=args.run,
     )
-    payload: dict[str, Any] = {"op": "train-static", **dataclasses.asdict(out)}
-    write_result(Path(out.runs_dir) / out.run_id, payload)
-    return payload
+    return {"op": "train-static", **dataclasses.asdict(out)}
 
 
 def render(payload: dict[str, Any]) -> None:

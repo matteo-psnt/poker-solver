@@ -2,7 +2,7 @@
 
 Renderers are pure formatting, so the only failure they can have is a key the
 payload does not carry -- the failure that shipped once, when
-``checkpoint-profile`` fell through to the evaluate branch and died on
+a command with no renderer of its own fell through to the evaluate branch and died on
 ``payload["results"]``. These pin each op's payload shape against its renderer.
 
 "Every subcommand HAS a renderer" is no longer tested: a ``Command`` cannot be
@@ -158,17 +158,188 @@ PAYLOADS: dict[str, dict] = {
         "infosets": 42,
         "results": {"exploitability_mbb": 900.0, "std_error_mbb": 12.0},
     },
-    "checkpoint-profile": {
-        "op": "checkpoint-profile",
-        "run": "run-a",
-        "num_checkpoints": 3,
-        "checkpoint_seconds": 30.0,
-        "volume_commit_seconds": 10.0,
-        "total_seconds": 40.0,
-        "commit_share": 0.25,
-        "top_level_phases": {"collect_keys": 5.0, "storage_write": 25.0},
-        "write_phases": {"write_key_table": 20.0},
+    "runinfo": {
+        "op": "runinfo",
+        "run_id": "run-a",
+        "config_name": "production",
+        "status": "completed",
+        "experiment_id": "exp-7",
+        "arm": "control",
+        "parent_run_id": None,
+        "git_commit": "cafebabe" * 5,
+        "git_dirty": False,
+        "card_abstraction_hash": "ae5a7e6648d7cd02",
+        "iterations": 30_000_000,
+        "runtime_seconds": 9000.0,
+        "attempts": 4,
+        "total_progress_rows": 2,
+        "progress": [
+            {
+                "iteration": 1_000_000,
+                "coverage": 0.08,
+                "mean_visits_per_touched": 2.1,
+                "iters_per_sec": 1204.0,
+            },
+            {
+                "iteration": 30_000_000,
+                "coverage": 0.287,
+                "mean_visits_per_touched": 11.4,
+                "iters_per_sec": 980.0,
+            },
+        ],
+        "coverage_flat_from": 20_000_000,
+        "curve": {
+            "run_id": "run-a",
+            "tier": "exact_br flops=8",
+            "points": [
+                {
+                    "iteration": 10_000_000,
+                    "exploitability_mbb": 1800.0,
+                    "std_error_mbb": 0.0,
+                    "num_hands": 0,
+                    "eval_git_commit": None,
+                },
+            ],
+            "missing_iterations": [5_000_000, 20_000_000],
+        },
+        "legs": [{"task_id": "prod-101010-1", "attempt": 1, "cause": "killed"}],
+        "gaps": ["unscored ladder rungs: 5,000,000, 20,000,000"],
     },
+    "legs": {
+        "op": "legs",
+        "reconciled": 1,
+        "rows": [
+            {
+                "task_id": "prod-101010-1",
+                "attempt": 1,
+                "op": "train-static",
+                "run_id": "run-a",
+                "cause": "killed",
+                "exit_code": 137,
+                "ended_at": "2026-08-02T10:00:00Z",
+            }
+        ],
+    },
+    "progress": {
+        "op": "progress",
+        "run_id": "run-a",
+        "total_rows": 2,
+        "schema_version_min": 1,
+        "schema_version_max": 1,
+        "coverage_plateau_iteration": 2000000,
+        "rows": [
+            {
+                "schema_version": 1,
+                "iteration": 1000000,
+                "elapsed_s": 900.0,
+                "iters_per_sec": 1111.0,
+                "touched_rows": 1000,
+                "num_rows": 10000,
+                "coverage": 0.1,
+                "mean_visits_per_touched": 4.2,
+                "dropped_updates": 0,
+                "checkpoint_seconds": 12.5,
+            },
+            # A row from before a field existed: the renderer must blank it, not
+            # crash and not print a placeholder that reads as a real measurement.
+            {"schema_version": 0, "iteration": 2000000, "coverage": 0.101},
+        ],
+    },
+    "jobs": {
+        "op": "jobs",
+        "jobs": [
+            {
+                "job": "poker-20260802",
+                "state": "BatchJobState.ACTIVE",
+                "tasks": [
+                    {
+                        "task": "production-1",
+                        "state": "BatchTaskState.RUNNING",
+                        "exit_code": None,
+                        "node": "tvmps_x",
+                    }
+                ],
+            }
+        ],
+        "total_jobs": 3,
+        "hidden_jobs": 2,
+    },
+    "logs": {
+        "op": "logs",
+        "listing": None,
+        "task": "production-1",
+        "lines": ["train-static: config=production", "publish complete"],
+    },
+    # A resize error whose real cause is escaped JSON inside a value. This is
+    # the shape the renderer exists to unpack -- Batch reports the generic
+    # `AllocationFailed` and hides the actionable half in here.
+    "pool-status": {
+        "op": "pool-status",
+        "pool_id": "train",
+        "hourly_cost": "$0.80/hr/node",
+        "allocation_state": "AllocationState.STEADY",
+        "current_dedicated_nodes": 0,
+        "target_dedicated_nodes": 0,
+        "vm_size": "standard_d16als_v6",
+        "resize_errors": [
+            {
+                "code": "AllocationFailed",
+                "message": "Desired number of dedicated nodes could not be allocated",
+                "values": {"ErrorJson": '{"code":"AllocationFailed"}', "Plain": "not json"},
+            }
+        ],
+    },
+    "autoscale-check": {
+        "op": "autoscale-check",
+        "pool_id": "train",
+        "variables": ["$TargetDedicatedNodes=0", "pending=0"],
+        "error": None,
+    },
+    "submit": {
+        "op": "submit",
+        "target_iteration": 25_000_000,
+        "code_snapshot": "code-20260802_000000",
+        "job_id": "poker-20260802",
+        "tasks": ["production-000000-1"],
+    },
+    "score": {
+        "op": "score",
+        "run_id": "run-a",
+        "method": "exact_br",
+        "rungs": ["10000000", "20000000"],
+        "code_snapshot": "code-20260802_000000",
+        "job_id": "poker-20260802",
+        "tasks": ["run-a-000000-1", "run-a-000000-2"],
+    },
+    "repair-ladder": {
+        "op": "repair-ladder",
+        "run_id": "run-a",
+        "code_snapshot": "code-20260802_000000",
+        "job_id": "poker-20260802",
+        "tasks": ["run-a-000000-1"],
+    },
+    "cancel": {"op": "cancel", "job_id": "poker-20260802", "task_id": "run-a-000000-1"},
+    "fetch": {
+        "op": "fetch",
+        "runs": ["run-a"],
+        "files": 12,
+        "skipped_unnamed": 3,
+        "mode": "metadata",
+        "ledger_rows": 40,
+        "ledger_preserved": 2,
+    },
+    "push-code": {"op": "push-code", "code_snapshot": "code-20260802_000000"},
+    "submit-precompute": {
+        "op": "submit-precompute",
+        "abstraction_config": "ochs_gate_ochs",
+        "target_name": "buckets-F20T20R20-rexact-deadbeef",
+        "already_published": ["buckets-F50T100R200-rexact-b59ef7b2"],
+        "force": False,
+        "code_snapshot": "code-20260802_000000",
+        "job_id": "poker-20260802",
+        "tasks": ["ochs_gate_ochs-000000-1"],
+    },
+    "push-data": {"op": "push-data", "uploaded": {"buckets-F50T100R200": 9}},
 }
 
 
@@ -204,9 +375,17 @@ class TestEveryOpRenders:
         """A command with no fixture here is a command nothing pins."""
         assert set(BY_NAME) == set(PAYLOADS)
 
-    def test_checkpoint_profile_does_not_borrow_the_evaluate_renderer(self, capsys):
-        # The exact regression: it used to fall through and KeyError on "results".
-        BY_NAME["checkpoint-profile"].render(PAYLOADS["checkpoint-profile"])
+    def test_a_new_command_does_not_borrow_the_evaluate_renderer(self, capsys):
+        # The original regression's shape: a command with no renderer of its own
+        # fell through to the evaluate branch and died on payload["results"].
+        BY_NAME["runinfo"].render(PAYLOADS["runinfo"])
         out = capsys.readouterr().out
-        assert "Checkpoint profile for run-a" in out
+        assert "run-a" in out
         assert "Evaluation complete" not in out
+
+    def test_progress_blanks_fields_a_legacy_row_predates(self, capsys):
+        """A resumed run appends across legs, so one log spans code versions."""
+        BY_NAME["progress"].render(PAYLOADS["progress"])
+        out = capsys.readouterr().out
+        assert "2,000,000" in out, "the legacy row must still be shown"
+        assert "10.1%" in out, "and the fields it does carry must render"

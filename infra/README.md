@@ -54,7 +54,7 @@ az role assignment create --assignee-object-id 2736183d-125f-4bd0-8cc8-4f1189c65
 
 ## Setup
 
-Needs `terraform`, `az`, `just` and `jq` locally.
+Needs `terraform`, `az` and `just` locally, plus `az login` for the credential.
 
 ```bash
 az login
@@ -65,20 +65,43 @@ just push-data      # card abstractions to the share (~773 MB, one time)
 
 ## Daily use
 
+Dispatch is `poker-solver-run`, a Python CLI over the Batch SDK
+(`src/interfaces/cloud/`). The `just` recipes below are one-line aliases kept
+for discoverability; anything needing a flag they do not forward should be run
+against the CLI directly.
+
 ```bash
-just submit quick_test 3000                                   # smoke
-just submit production 25000000 exp-7 control                 # an arm
-just submit production 25000000 exp-7 variant:pruning solver__pruning=true
+poker-solver-run submit --config quick_test --to 3000                  # smoke
+poker-solver-run submit --config production --to 25000000 \
+    --experiment exp-7 --arm control                                   # an arm
+poker-solver-run submit --config production --to 25000000 \
+    --experiment exp-7 --arm variant:pruning --set solver__pruning=true
+poker-solver-run submit --run run-20260728_011716-ca70cf --to 50000000 # continue
 
-just jobs           # task states
-just pool-status    # node counts + the REAL cause of any allocation failure
-just job-log poker-20260728 <task>       # stdout   (add `err` for stderr)
-just fetch          # published runs back, then `ledger --rebuild`
+poker-solver-run jobs                 # live tasks (--all for finished jobs)
+poker-solver-run pool-status          # nodes + the REAL cause of any allocation failure
+poker-solver-run logs --task <task>   # the published leg log; --list to enumerate
+poker-solver-run logs --task <task> --source node --job <job>   # live, node-side
+poker-solver-run cancel --job <job> --task <task>
+poker-solver-run score --run <id> --at 10000000,20000000 -- --br-flops 8
+poker-solver-run fetch                # JSON record back + `ledger --rebuild`
+poker-solver-run fetch --run <id> --full   # ...including checkpoint data
 
-uv run poker-solver-run report --experiment exp-7
-uv run poker-solver-run curve --run <id>
-uv run poker-solver-run promote --run <winner> --rationale "..."
+poker-solver-run report --experiment exp-7
+poker-solver-run curve --run <id>
+poker-solver-run promote --run <winner> --rationale "..."
 ```
+
+Two things worth knowing at the seams:
+
+- **`score` passthrough needs a `--` separator.** `-- --br-flops 8`, not
+  `--br-flops 8`: argparse rejects a bare unknown option as an argument of
+  `score` itself rather than handing it to the passthrough.
+- **`fetch` is metadata-only by default.** Analysis commands read nothing but
+  small JSON, and the checkpoints beside them are ~540 MB each. `--full` obeys
+  `CHECKPOINT.json`: a snapshot directory the manifest does not name is
+  unfinished by construction and is skipped, which is what stops a killed
+  task's orphans from being pulled down and then cached forever.
 
 `to` is an **absolute** iteration target. That is what makes Batch's automatic
 retry safe: a retried task re-reads a newer checkpoint and converges on the same
@@ -95,6 +118,38 @@ failure as `REBUILD.md` Decision 5 in a new form. With rung publishing, a killed
 task loses at most one rung interval and the next attempt resumes from the last
 published rung.
 
+## How you find out *why* a leg died
+
+`just legs`.
+
+A run's `.run.json` records what a *living* process did. It structurally cannot
+record how an attempt died: a container killed by the OOM killer, by
+`maxWallClockTime`, or by losing its node is gone before it can write anything.
+Batch sees those deaths — but retains them for far less time than the run lives.
+
+So the record is written from both sides, into `<share>/legs/`:
+
+- **The node's own account.** `run_leg.sh` writes `<task>.<attempt>.start.json`
+  at entry and `<task>.<attempt>.exit.json` from the EXIT trap. This covers every
+  death the shell survives, and is the only side that can tell a *hang*
+  (`RUN_TIMEOUT`, exit 124) from an *OOM* (exit 137) from a *cancel* (SIGTERM).
+  Batch reports all three as `failure`.
+- **Batch's account.** `just legs` asks about legs still stuck at `started` —
+  precisely the ones whose trap never ran — and writes `<task>.observed.json`.
+
+Numbered by attempt because a Batch retry reuses the task id and Batch describes
+only the latest attempt; without the number the retry would erase the failed
+attempt that caused it. Separate start/exit files because `write_text` truncates,
+so a kill mid-write would otherwise make the leg vanish from the listing
+entirely — in exactly the SIGKILL window this exists for.
+
+`src/shared/leg_log.py` imports **only the standard library**, on purpose:
+`run_leg.sh` calls it with the node's system `python3` before `uv sync` has run.
+A test enforces that.
+
+`just legs skip-reconcile` reads the share without querying Batch, and
+`just leg-log <task> errors` filters a published log to WARN/ERROR.
+
 ## What must never go on the share
 
 **Active run directories.** A checkpoint is ~2,000 small files and the read path
@@ -109,12 +164,10 @@ task owning one run preserves it.
 
 ## What actually protects you from a bill
 
-Be clear-eyed: **there is no hard spending cap, and there cannot be one.** The
-subscription reports `spendingLimit: Off`. The blocker is the *pricing*, not the
-sponsorship: the Azure spending limit "isn't available for subscriptions with
-commitment plans or with pay-as-you-go pricing", which is what a Microsoft Azure
-Plan under MCA is. It is not a setting anyone forgot to turn on. Azure budgets
-are *alerts*, not caps, and cost data lags several hours.
+Be clear-eyed: **there is no hard spending cap.** The subscription reports
+`spendingLimit: Off` and there is no supported way to turn it on for a
+Sponsorship offer. Azure budgets are *alerts*, not caps, and cost data lags
+several hours.
 
 Every control bounds either the RATE of spend or the DURATION of one piece of
 work. Read them that way — most of them do not stop anything by themselves.
@@ -163,48 +216,23 @@ work. Read them that way — most of them do not stop anything by themselves.
    one that warns you while there is still time to act. At ~$19/day the default
    $250 budget is about two weeks of a total runaway.
 
-**When something is wrong:** `just panic` terminates every job and forces the
+**When something is wrong:** `just panic <rg> <account> <pool>` terminates every job and forces the
 pool to zero, killing running tasks rather than waiting. Whatever a leg published
-up to its last retained rung survives, and `just resume <run> <to>` picks it up.
+up to its last retained rung survives, and
+`poker-solver-run submit --run <id> --to <n>` picks it up.
 
-**Alerts that watch the card specifically:**
+It takes its coordinates as arguments deliberately. `panic` is the one recipe
+that uses neither the Python CLI nor Terraform state, so it still works when the
+checkout is broken, the venv is missing, or you are on a phone in Azure Cloud
+Shell — the same property `just credit-check` has. It previously *claimed* that
+while calling `just _login` and `terraform output -raw pool_id`, neither of
+which exists in Cloud Shell.
 
-7. **`just credit-check`** (`infra/credit_watch.py`). Budgets measure burn; this
-   measures whether the *card* is reachable. Two routes, both watched: credit
-   depletion/expiry, and charges that were never credit-eligible. Exit codes are
-   the interface — 0 clear, 1 alert, **3 could not evaluate**, which a caller must
-   treat as failure rather than as an all-clear.
-
-### The payment method, and why it cannot be removed here
-
-The only *absolute* control is the billing account having no payment method. That
-is **not** achievable on this account, and the reasons are worth recording so it
-is not re-litigated:
-
-- MasterCard `...6136` is attached to billing profile `EPHL-5ZRZ-BG7-PGB`, which
-  bills every resource here.
-- **There is no API operation to detach a payment-method link from a billing
-  profile.** The Billing API's only delete is `Delete By User`, which removes a
-  method *owned by the caller* — and both `paymentMethods` at user scope and at
-  billing-account scope return `[]`. Detaching is portal-only.
-- The portal blocks deleting a card that is the *default* method for a profile,
-  which this one is.
-
-Note it would be a bad trade even if it worked: an unpayable card does not cap
-spend, it converts spend into unpaid debt. The subscription is disabled, VMs
-deallocate, **data is deleted 90 days after service ends**, and the balance is
-still owed. Prepaid and virtual cards are rejected outright as payment
-instruments, so that variant does not start either.
-
-So **if the credit is exhausted or expires, real charges follow.** Confirm the
-balance and end date with `just credit-check` — *not* at
-microsoftazuresponsorships.com, which is the classic-sponsorship portal and shows
-nothing for this account. This grant is an **MCA credit lot** (`Azure for
-startups credit`, $10,000, expiring 2028-07-26) read from the Consumption `lots`
-and `credits/balanceSummary` APIs, which are authoritative here.
-
-One trap in reading it: `currentBalance` is the last *closed* balance and reads
-as the full grant until an invoice issues. The live number is `estimatedBalance`.
+The only *absolute* control is the billing account having no payment method —
+and that is **not** the case here: the account is a `MicrosoftCustomerAgreement`
+(Individual), which normally has a card attached. So **if the sponsorship credit
+is exhausted or expires, real charges follow.** Confirm the balance and end date
+at <https://www.microsoftazuresponsorships.com/> before relying on this.
 
 
 ## Region and SKU availability

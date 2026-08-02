@@ -8,6 +8,9 @@ from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
+    add_source_argument,
+    ledger_for,
+    records_root,
 )
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
@@ -15,6 +18,7 @@ from src.pipeline.evaluation.statistics import compare_paired_samples
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run compare`."""
+    add_source_argument(parser)
     parser.add_argument("--a", required=True, help="First run id (baseline).")
     parser.add_argument("--b", required=True, help="Second run id (candidate).")
     parser.add_argument(
@@ -49,7 +53,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Paired (common-random-numbers) comparison of two runs' latest evals."""
-    ledger_path = Path(args.ledger)
+    with records_root(args) as root:
+        return _compare(args, root)
+
+
+def _compare(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    ledger_path = ledger_for(args, root)
     rec_a = eval_ledger.latest_record_for_run(args.a, ledger_path, args.a_at)
     rec_b = eval_ledger.latest_record_for_run(args.b, ledger_path, args.b_at)
     if rec_a is None or rec_b is None:
@@ -67,7 +76,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "to override (the resulting p-value will not be trustworthy)."
         )
 
-    runs_dir = Path(args.runs_dir)
+    runs_dir = root
     payload_a = eval_ledger.load_payload(rec_a, runs_dir)
     payload_b = eval_ledger.load_payload(rec_b, runs_dir)
 

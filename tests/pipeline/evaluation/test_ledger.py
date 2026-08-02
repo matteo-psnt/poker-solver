@@ -1,5 +1,6 @@
 """Tests for the append-only evaluation ledger and its comparison guard."""
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -75,13 +76,38 @@ class TestKnobs:
 
 
 class TestWriteAndAppend:
-    def test_write_payload_never_clobbers(self, tmp_path):
+    def test_write_eval_never_clobbers(self, tmp_path):
         knobs = {"scorer": "myopic", "base_seed": 7}
-        p1 = ledger.write_payload(tmp_path, {"op": "evaluate", "n": 1}, ledger.eval_slug(knobs))
-        p2 = ledger.write_payload(tmp_path, {"op": "evaluate", "n": 2}, ledger.eval_slug(knobs))
+        p1 = ledger.write_eval(tmp_path, {"op": "evaluate", "n": 1}, ledger.eval_slug(knobs))
+        p2 = ledger.write_eval(tmp_path, {"op": "evaluate", "n": 2}, ledger.eval_slug(knobs))
         assert p1 != p2
         assert p1.exists()
         assert p2.exists()
+
+    def test_one_file_per_eval(self, tmp_path):
+        """Was three shapes: a payload, a record summarising it, and a ledger row."""
+        knobs = {"scorer": "myopic", "base_seed": 7}
+        ledger.write_eval(tmp_path, {"op": "evaluate"}, ledger.eval_slug(knobs))
+        assert len(list((tmp_path / "evals").glob("*.json"))) == 1
+
+    def test_the_ledger_row_is_derived_from_the_document(self, tmp_path):
+        """Derivability is what makes `ledger --rebuild` able to regenerate."""
+        document = {
+            "run_id": "run-a",
+            "timestamp": "2026-08-02T00:00:00",
+            "results": {
+                "exploitability_mbb": 1200.0,
+                "std_error_mbb": 12.0,
+                "num_hands": 3,
+                "pair_samples_mbb": [1.0, 2.0, 3.0],
+                "hand_records": ["bulk"] * 100,
+            },
+        }
+        row = ledger.ledger_row(document)
+        assert row["run_id"] == "run-a"
+        assert row["results"]["n"] == 3
+        assert "pair_samples_mbb" not in row["results"], "bulk stays in the document"
+        assert "hand_records" not in row["results"]
 
     def test_append_and_read_roundtrip(self, tmp_path):
         led = tmp_path / "eval_ledger.jsonl"
@@ -103,10 +129,10 @@ class TestWriteAndAppend:
         assert latest["v"] == 2
         assert ledger.latest_record_for_run("missing", led) is None
 
-    def test_build_record_shape_and_provenance(self, tmp_path):
+    def test_the_document_carries_provenance_and_full_results(self, tmp_path):
         results = _results()
         knobs = ledger.build_lbr_knobs(_lbr_config(), results)
-        payload_path = ledger.write_payload(tmp_path, {"results": results}, ledger.eval_slug(knobs))
+        payload_path = ledger.write_eval(tmp_path, {"results": results}, ledger.eval_slug(knobs))
         record = ledger.build_record(
             provenance=_fake_provenance("run-x"),
             method="lbr",
@@ -119,10 +145,13 @@ class TestWriteAndAppend:
         )
         assert record["run_id"] == "run-x"
         assert record["train_git_commit"] == _fake_provenance("run-x").git_commit
-        assert record["results"]["n"] == 100
         assert record["results"]["exploitability_mbb"] == 100.0
+        # The FULL results, samples and all: provenance and samples used to live
+        # in different files, so neither could be rebuilt from the other.
+        assert len(record["results"]["pair_samples_mbb"]) == 100
         # eval_git_* are stamped from the current checkout (str/None, bool/None)
         assert "eval_git_commit" in record
+        assert ledger.ledger_row(record)["results"]["n"] == 100
 
 
 class TestRecordEvaluation:
@@ -193,3 +222,111 @@ class TestLoadPayload:
     def test_missing_payload_raises(self):
         with pytest.raises(FileNotFoundError):
             ledger.load_payload({"run_id": "r", "result_path": "/no/such/file.json"})
+
+
+class TestEvalConsolidationMigration:
+    """The old layout: a payload, a record summarising it, and a ledger row.
+
+    Provenance lived only in the record and samples only in the payload, so
+    neither could rebuild the other. On the real tree 59 of 78 payloads had no
+    record at all.
+    """
+
+    def _legacy(self, tmp_path, run_id, slug, *, record=True, ledger_row=True):
+        run_dir = tmp_path / run_id
+        evals = run_dir / "evals"
+        evals.mkdir(parents=True, exist_ok=True)
+        (evals / f"eval-{slug}.json").write_text(
+            json.dumps({"run_id": run_id, "results": {"exploitability_mbb": 12.0, "n": 3}})
+        )
+        if record:
+            (evals / f"record-{slug}.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "timestamp": "2026-07-18T00:00:00",
+                        "knobs": {"scorer": "myopic"},
+                        "train_git_commit": "abc",
+                        "results": {"exploitability_mbb": 12.0},
+                        "result_path": f"{run_id}/evals/eval-{slug}.json",
+                    }
+                )
+            )
+        led = tmp_path / "led.jsonl"
+        if ledger_row:
+            with led.open("a") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "run_id": run_id,
+                            "timestamp": "2026-07-18T00:00:00",
+                            "knobs": {"scorer": "myopic"},
+                            "result_path": f"{run_id}/evals/eval-{slug}.json",
+                        }
+                    )
+                    + "\n"
+                )
+        return run_dir, led
+
+    def test_a_pair_becomes_one_document_carrying_both_halves(self, tmp_path):
+        run_dir, led = self._legacy(tmp_path, "run-a", "s1")
+        counts = ledger.migrate_eval_files(tmp_path, led)
+
+        assert counts["merged"] == 1
+        document = json.loads((run_dir / "evals" / "s1.json").read_text())
+        assert document["train_git_commit"] == "abc", "provenance from the record"
+        assert document["results"]["n"] == 3, "samples from the payload"
+
+    def test_a_payload_with_no_record_is_recovered_from_the_ledger(self, tmp_path):
+        """The ledger is the fullest history, so it -- not record-*.json -- is the key."""
+        run_dir, led = self._legacy(tmp_path, "run-a", "s1", record=False)
+        counts = ledger.migrate_eval_files(tmp_path, led)
+
+        assert counts["merged"] == 1
+        assert json.loads((run_dir / "evals" / "s1.json").read_text())["knobs"]
+
+    def test_a_payload_with_no_provenance_anywhere_is_still_kept(self, tmp_path):
+        """The measurement is real; a document that says less beats one that invents."""
+        run_dir, led = self._legacy(tmp_path, "run-a", "s1", record=False, ledger_row=False)
+        counts = ledger.migrate_eval_files(tmp_path, led)
+
+        assert counts["payload_only"] == 1
+        assert (run_dir / "evals" / "s1.json").exists()
+
+    def test_it_is_non_destructive_and_idempotent(self, tmp_path):
+        run_dir, led = self._legacy(tmp_path, "run-a", "s1")
+        ledger.migrate_eval_files(tmp_path, led)
+        again = ledger.migrate_eval_files(tmp_path, led)
+
+        assert again["skipped"] == 1
+        assert again["merged"] == 0
+        assert (run_dir / "evals" / "eval-s1.json").exists(), "originals stay for the operator"
+
+    def test_ledger_rows_are_repointed_so_nothing_is_indexed_twice(self, tmp_path):
+        """The move renames the file a row names. Measured before this: 63 rows
+        became 110, the same evaluation under two pointers."""
+        _, led = self._legacy(tmp_path, "run-a", "s1")
+        ledger.migrate_eval_files(tmp_path, led)
+        ledger.rebuild_ledger(tmp_path, led)
+
+        rows = ledger.read_records(led)
+        assert len(rows) == 1
+        assert rows[0]["result_path"] == "run-a/evals/s1.json"
+
+    def test_legacy_files_are_not_read_as_documents(self, tmp_path):
+        """Both layouts coexist during the migration window."""
+        _, led = self._legacy(tmp_path, "run-a", "s1")
+        ledger.migrate_eval_files(tmp_path, led)
+        recovered, _ = ledger.rebuild_ledger(tmp_path, led)
+        assert recovered == 1
+
+    def test_an_untierable_document_is_not_indexed(self, tmp_path):
+        """It would hash into a tier of (method, None, None, ...) and sort to year
+        1 AD -- and since tiers rank by coverage, a pile of them would become the
+        DEFAULT curve. The document stays on disk; only the index is withheld."""
+        run_dir, led = self._legacy(tmp_path, "run-a", "s1", record=False, ledger_row=False)
+        ledger.migrate_eval_files(tmp_path, led)
+        recovered, _ = ledger.rebuild_ledger(tmp_path, led)
+
+        assert (run_dir / "evals" / "s1.json").exists()
+        assert recovered == 0

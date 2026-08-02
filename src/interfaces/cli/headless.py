@@ -18,13 +18,22 @@ import sys
 
 from src.interfaces.cli.commands import COMMANDS
 from src.shared.jsonio import json_default
-from src.shared.log import configure_logging
+from src.shared.log import configure_logging, pin_level_for_children
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Assemble the CLI from the command registry."""
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="Emit the result as JSON on stdout.")
+    common.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default=None,
+        help=(
+            "Override the run config's system.log_level. Exported to spawned "
+            "workers, so a whole run answers to one setting."
+        ),
+    )
 
     parser = argparse.ArgumentParser(
         prog="poker-solver-run",
@@ -44,6 +53,11 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging()
     args = build_parser().parse_args(argv)
     command = args.command_impl
+    if args.log_level:
+        # Into the environment, not just this logger: spawned workers build
+        # their level from the run config, and the flag must outrank it there.
+        pin_level_for_children(args.log_level)
+        configure_logging(args.log_level)
     if args.json:
         # Library layers log to stderr, but third-party writers (numba, zarr) can
         # still print to stdout; redirect so the JSON blob is the ONLY thing on

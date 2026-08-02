@@ -42,10 +42,12 @@ from src.pipeline.services.experiments import (
     CurveOutput,
     CurvePoint,
     ExperimentReport,
+    RunDigest,
     experiment_report,
     exploitability_curve,
     load_baseline,
     promote_baseline,
+    run_digest,
 )
 from src.pipeline.services.runs import (
     RunSummary,
@@ -73,6 +75,7 @@ __all__ = [
     "EvaluationOutput",
     "ExperimentReport",
     "ExperimentTag",
+    "RunDigest",
     "RunSummary",
     "StaticTrainingOutput",
     "checkpoint_iteration_of",
@@ -92,6 +95,7 @@ __all__ = [
     "promote_baseline",
     "record_blueprint_match",
     "run_ab",
+    "run_digest",
     "sweep_bucket_counts",
     "train_static",
 ]

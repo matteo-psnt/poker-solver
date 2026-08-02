@@ -15,7 +15,6 @@ Every legal postflop state resolves to a bucket computed on its own board —
 there is no board clustering, no representative sampling, and no fallback.
 """
 
-import json
 import logging
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -41,6 +40,8 @@ from src.pipeline.abstraction.postflop.canonical_hands import enumerate_hand_cla
 from src.pipeline.abstraction.postflop.quality import compute_street_quality
 from src.pipeline.abstraction.preflop.opponent_clusters import opponent_cluster_assignment
 from src.pipeline.abstraction.utils.equity import RangeEquityEngine
+from src.shared import records
+from src.shared.log import progress_bars_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,7 @@ class PostflopPrecomputer:
                 as_completed(futures),
                 total=len(futures),
                 desc=f"Computing {street.name} equities",
+                disable=not progress_bars_enabled(),
             ):
                 for row, cols, equities, multiplicities, histograms in future.result():
                     equity_matrix[row, cols] = equities
@@ -458,8 +460,9 @@ class PostflopPrecomputer:
             "num_preflop_buckets": 169,
             "streets": streets,
         }
-        with (path / METADATA_FILENAME).open("w") as f:
-            json.dump(metadata, f, indent=2)
+        records.write_snapshot(
+            path / METADATA_FILENAME, metadata, records.REGISTRY[METADATA_FILENAME]
+        )
 
         logger.info(f"Saved abstraction to {path}")
 

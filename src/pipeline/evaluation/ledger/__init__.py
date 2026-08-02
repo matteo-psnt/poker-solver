@@ -7,6 +7,7 @@ written down (`records`), and how they are read back (`queries`).
 from src.pipeline.evaluation.ledger.queries import (
     curve_series,
     latest_record_for_run,
+    migrate_eval_files,
     read_records,
     rebuild_ledger,
 )
@@ -17,12 +18,12 @@ from src.pipeline.evaluation.ledger.records import (
     append_record,
     build_record,
     eval_slug,
+    ledger_row,
     load_payload,
     payload_pointer,
     record_evaluation,
     record_instant,
-    write_payload,
-    write_record,
+    write_eval,
 )
 from src.pipeline.evaluation.ledger.tiers import (
     CONDITIONAL_TIER_KNOBS,
@@ -49,7 +50,9 @@ __all__ = (
     "curve_series",
     "eval_slug",
     "latest_record_for_run",
+    "ledger_row",
     "load_payload",
+    "migrate_eval_files",
     "payload_pointer",
     "read_records",
     "rebuild_ledger",
@@ -58,6 +61,5 @@ __all__ = (
     "tier_key",
     "tier_label",
     "tier_mismatches",
-    "write_payload",
-    "write_record",
+    "write_eval",
 )

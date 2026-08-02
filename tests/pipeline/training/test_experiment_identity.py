@@ -7,6 +7,7 @@ matter: they survive a round trip, they default on every pre-experiment run, and
 
 from src.core.actions.action_model import ActionModel
 from src.pipeline.training.run_tracker import ExperimentTag, RunMetadata, RunTracker
+from src.shared import run_events
 from src.shared.config import Config
 
 
@@ -62,10 +63,12 @@ class TestMetadataRoundTrip:
         )
         assert meta.config_hash == config.content_hash()
 
-    def test_survives_a_save_load_cycle(self, tmp_path):
+    def test_survives_a_write_and_fold_cycle(self, tmp_path):
+        """Through the event log, which is how a run is actually persisted."""
         config = Config.default()
-        path = tmp_path / ".run.json"
-        RunMetadata.new(
+        run_dir = tmp_path / "run-x"
+        run_dir.mkdir()
+        metadata = RunMetadata.new(
             "run-x",
             "test",
             config,
@@ -73,9 +76,10 @@ class TestMetadataRoundTrip:
             experiment_id="exp-1",
             arm="control",
             parent_run_id="run-base",
-        ).save(path)
+        )
+        run_events.append(run_dir, run_events.CREATED, **metadata.creation_facts())
 
-        loaded = RunMetadata.load(path)
+        loaded = RunMetadata.load(run_dir)
         assert loaded.experiment_id == "exp-1"
         assert loaded.arm == "control"
         assert loaded.parent_run_id == "run-base"
@@ -83,12 +87,14 @@ class TestMetadataRoundTrip:
 
     def test_unaffiliated_run_records_none_not_empty_string(self, tmp_path):
         config = Config.default()
-        path = tmp_path / ".run.json"
-        RunMetadata.new(
+        run_dir = tmp_path / "run-x"
+        run_dir.mkdir()
+        metadata = RunMetadata.new(
             "run-x", "test", config, action_config_hash=_action_config_hash(config)
-        ).save(path)
+        )
+        run_events.append(run_dir, run_events.CREATED, **metadata.creation_facts())
 
-        loaded = RunMetadata.load(path)
+        loaded = RunMetadata.load(run_dir)
         assert loaded.experiment_id is None
         assert loaded.arm is None
         assert loaded.parent_run_id is None
