@@ -164,7 +164,7 @@ def test_resolver_unknown_field_rejected(field):
         make_test_config(seed=42, **{field: "any_value"})
 
 
-def _trained_solver(config, session_id: str):
+def _trained_solver(config):
     """Small trained solver so blueprint lookups have real bite."""
     action_model = ActionModel(config)
     solver, _storage = build_test_solver(config, DummyCardAbstraction())
@@ -192,7 +192,7 @@ def test_strategy_matrix_rows_are_distributions_and_call_is_pure():
     config = make_test_config(
         seed=42, **{"resolver.max_iterations": 10, "resolver.leaf_rollouts": 2}
     )
-    solver, action_model = _trained_solver(config, "resolver-matrix-pure")
+    solver, action_model = _trained_solver(config)
 
     actions, matrix = _fresh_matrix(solver, action_model, rules, config, state)
 
@@ -226,7 +226,7 @@ def test_solve_does_not_mutate_ranges():
     config = make_test_config(
         seed=42, **{"resolver.max_iterations": 8, "resolver.leaf_rollouts": 2}
     )
-    solver, action_model = _trained_solver(config, "resolver-solve-pure")
+    solver, action_model = _trained_solver(config)
     resolver = HUResolver(
         blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
     )
@@ -244,7 +244,7 @@ def test_observe_replays_history_for_both_seats():
     config = make_test_config(
         seed=42, **{"resolver.max_iterations": 8, "resolver.leaf_rollouts": 2}
     )
-    solver, action_model = _trained_solver(config, "resolver-observe")
+    solver, action_model = _trained_solver(config)
     resolver = HUResolver(
         blueprint=solver, action_model=action_model, rules=rules, config=config.resolver
     )
@@ -290,7 +290,7 @@ def test_strategy_matrix_is_invariant_to_all_dealt_cards():
     config = make_test_config(
         seed=42, **{"resolver.max_iterations": 10, "resolver.leaf_rollouts": 2}
     )
-    solver, action_model = _trained_solver(config, "resolver-matrix-honest")
+    solver, action_model = _trained_solver(config)
 
     state_alt = replace_actor_hole_cards(
         state, actor=state.current_player, combo=(Card.new("9s"), Card.new("3h"))
@@ -316,7 +316,7 @@ def test_strategy_matrix_row_matches_solve_strategy():
     config = make_test_config(
         seed=42, **{"resolver.max_iterations": 10, "resolver.leaf_rollouts": 2}
     )
-    solver, action_model = _trained_solver(config, "resolver-matrix-row")
+    solver, action_model = _trained_solver(config)
 
     actions, matrix = _fresh_matrix(solver, action_model, rules, config, state)
 
@@ -349,7 +349,7 @@ def test_strategy_matrix_alpha_zero_equals_blueprint_rows():
             "resolver.min_strategy_prob": 0.0,
         },
     )
-    solver, action_model = _trained_solver(config, "resolver-matrix-alpha0")
+    solver, action_model = _trained_solver(config)
 
     resolver = HUResolver(
         blueprint=solver, action_model=action_model, rules=rules, config=config.resolver

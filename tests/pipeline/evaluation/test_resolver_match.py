@@ -16,7 +16,7 @@ from tests.test_helpers import build_trained_test_solver
 
 
 def _build_solver(iterations: int) -> StaticTreeSolver:
-    return build_trained_test_solver(iterations, session_id="resolver-match")
+    return build_trained_test_solver(iterations)
 
 
 class TestDuplicateDealing:

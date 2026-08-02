@@ -46,7 +46,7 @@ def test_update_ranges_updates_only_the_actors_slot():
     update nothing to grip), so the raise provably up-weights AA in the
     actor's slot — deterministically, with no training.
     """
-    solver = build_trained_test_solver(0, session_id="range-slots")
+    solver = build_trained_test_solver(0)
     hole_cards = (
         (Card.new("As"), Card.new("Kh")),
         (Card.new("Qd"), Card.new("Jc")),
