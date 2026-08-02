@@ -26,7 +26,7 @@
 #   RUN_EXPERIMENT  experiment id      RUN_ARM     arm label
 #   RUN_PARENT      parent run id
 #   RUN_SETS_JSON   JSON array of k=v config overrides
-#   RUN_WORKERS     worker count (empty = all CPUs)
+#   RUN_WORKERS     worker count (empty = `nproc`, filled in below)
 #   RUN_CHECKPOINT_EVERY  static only: checkpoint every N iterations
 #   RUN_OP          train (default) | evaluate
 #   RUN_EVAL_METHOD lbr | exact_br | rollout      RUN_EVAL_AT  comma-separated rungs
@@ -340,7 +340,15 @@ trap 'kill "$WATCHER" 2>/dev/null || true; publish_all' EXIT
 # Optional flags are appended only when set: passing `--arm ""` would record an
 # arm literally named empty string rather than an unaffiliated run.
 ARGS=()
-[ -n "${RUN_WORKERS:-}" ] && ARGS+=(--workers "$RUN_WORKERS")
+# "Empty means all CPUs" was documented but never implemented: `train-static`
+# defaults --workers to 1, so an omitted worker count trained SINGLE-THREADED on
+# a 16-vCPU node -- a ~16x throughput loss that looks like a slow leg rather than
+# a misconfiguration, and that turns a 1.8h leg into one the 6h ceiling kills.
+# The node is the only place that knows its own core count, so it fills the
+# default in rather than leaving the CLI's local-friendly 1 to stand.
+# `|| echo 1` because a bare failing $(nproc) under `set -e` would abort the leg
+# outright -- a missing core-count utility must degrade, not kill the run.
+ARGS+=(--workers "${RUN_WORKERS:-$(nproc 2>/dev/null || echo 1)}")
 [ -n "${RUN_EXPERIMENT:-}" ] && ARGS+=(--experiment "$RUN_EXPERIMENT")
 [ -n "${RUN_ARM:-}" ] && ARGS+=(--arm "$RUN_ARM")
 [ -n "${RUN_PARENT:-}" ] && ARGS+=(--parent "$RUN_PARENT")
