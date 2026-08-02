@@ -38,6 +38,9 @@ def _play(hand: int, base_seed: int, monkeypatch) -> list[int]:
         opponent=opponent,
         play_hand=lambda seat, state: SimpleNamespace(seat=seat),
     )
+    # The real engine rebinds its RNG and its collaborators' through reseed();
+    # the double has to offer the same seam or it is testing a different object.
+    engine.reseed = lambda rng: setattr(engine, "rng", rng)
     monkeypatch.setattr(lbr, "_deal_initial_state", lambda *_a, **_k: object())
     lbr._play_hand_pair(cast(_HUNLLocalBestResponse, engine), hand, base_seed, starting_stack=200)
     return opponent.seeds

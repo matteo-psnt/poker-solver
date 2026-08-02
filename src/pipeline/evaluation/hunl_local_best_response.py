@@ -81,9 +81,10 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
 from src.core.game.evaluator import get_evaluator
 from src.core.game.rules import GameRules
-from src.core.game.state import FULL_DECK, Card, GameState, Street
-from src.engine.search.range_inference import ALL_COMBOS, COMBO_MASKS, NUM_COMBOS
+from src.core.game.state import FULL_DECK, Card, GameState
+from src.engine.search.range_inference import COMBO_MASKS, NUM_COMBOS
 from src.engine.solver.policy_source import ScorableBlueprint
+from src.pipeline.evaluation.lbr_showdown import ShowdownValuer
 from src.pipeline.evaluation.lookahead_scorer import BlueprintDistMemo, LookaheadScorer
 from src.pipeline.evaluation.opponent_model import (
     BlueprintOpponent,
@@ -218,6 +219,7 @@ class _HUNLLocalBestResponse:
         self.action_model: ActionModel = blueprint.action_model
         self.card_abstraction = blueprint.card_abstraction
         self.evaluator = get_evaluator()
+        self.showdown = ShowdownValuer(self)
         # On-tree shadow state for rigorous off-tree play (see module docs).
         self.shadow = ShadowTracker(self.rules, self.action_model)
         if config.scorer not in ("myopic", "lookahead"):
@@ -258,6 +260,10 @@ class _HUNLLocalBestResponse:
             raise ValueError(f"Unknown LBRConfig.opponent: {config.opponent!r}")
 
     # -- Realized play -----------------------------------------------------
+
+    def reseed(self, rng: np.random.Generator) -> None:
+        """Point this engine at a new RNG. The driver reseeds PER HAND."""
+        self.rng = rng
 
     def play_hand(self, lbr_player: int, initial_state: GameState) -> HandOutcome:
         """Play one hand with ``lbr_player`` using LBR; return its realized outcome.
@@ -409,84 +415,8 @@ class _HUNLLocalBestResponse:
         if not self._is_showdown(state):
             return float(state.get_payoff(lbr_player, self.rules))
         if len(state.board) == 5:
-            return self._showdown_value(state, lbr_player, opp, belief)
-        return self._allin_showdown_value(state, lbr_player, opp, belief)
-
-    def _showdown_value(
-        self, state: GameState, lbr_player: int, opp: int, belief: np.ndarray
-    ) -> float:
-        """Belief-weighted payoff over the surviving range on a complete board.
-
-        Payoffs are pot arithmetic on hand-rank comparisons (win: pot - invested,
-        tie: pot/2 - invested, lose: -invested — exactly ``get_payoff``'s showdown
-        cases), so no per-combo GameState construction is needed.
-        """
-        known = known_mask(state, opp)
-        weights = np.where((COMBO_MASKS & known) == 0, belief, 0.0)
-        total = weights.sum()
-        if total <= NORMALIZE_EPS:
-            return float(state.get_payoff(lbr_player, self.rules))
-
-        pot = float(state.pot)
-        invested = self.rules.invested_chips(state)[lbr_player]
-        win_payoff = pot - invested
-        tie_payoff = pot / 2.0 - invested
-        lose_payoff = -invested
-        lbr_rank = self.evaluator.evaluate(state.hole_cards[lbr_player], state.board)
-
-        ev = 0.0
-        for idx in np.nonzero(weights)[0]:
-            opp_rank = self.evaluator.evaluate(ALL_COMBOS[idx], state.board)
-            if lbr_rank < opp_rank:
-                payoff = win_payoff
-            elif lbr_rank == opp_rank:
-                payoff = tie_payoff
-            else:
-                payoff = lose_payoff
-            ev += float(weights[idx]) * payoff
-        return ev / float(total)
-
-    def _allin_showdown_value(
-        self, state: GameState, lbr_player: int, opp: int, belief: np.ndarray
-    ) -> float:
-        """All-in showdown value averaged over board runouts.
-
-        Runouts draw from the cards the LBR player cannot see (its holes + board);
-        the opponent's *dealt* hand is deliberately not excluded — it is a fiction
-        this evaluator integrates out, so letting runouts cover those cards matches
-        the range convention (combos colliding with a runout drop out per runout,
-        exactly as on a real river). One missing card is enumerated exactly; more
-        are sampled ``allin_runouts`` times from the per-hand deterministic RNG.
-        """
-        known = known_mask(state, opp)
-        missing = 5 - len(state.board)
-        unseen = [card for card in FULL_DECK if not (card.mask & known)]
-        runouts: list[tuple[Card, ...]]
-        if missing == 1:
-            runouts = [(card,) for card in unseen]
-        else:
-            count = max(1, self.config.allin_runouts)
-            runouts = []
-            for _ in range(count):
-                picks = self.rng.choice(len(unseen), size=missing, replace=False)
-                runouts.append(tuple(unseen[int(i)] for i in picks))
-
-        total = 0.0
-        for extra in runouts:
-            runout_state = self._with_runout(state, extra)
-            total += self._showdown_value(runout_state, lbr_player, opp, belief)
-        return total / len(runouts)
-
-    @staticmethod
-    def _with_runout(state: GameState, extra: tuple[Card, ...]) -> GameState:
-        """Terminal copy of ``state`` with the board completed by ``extra``."""
-        return state.replace(
-            street=Street.RIVER,
-            board=state.board + extra,
-            is_terminal=True,
-            to_call=0,
-            validate=False,
-        )
+            return self.showdown.showdown_value(state, lbr_player, opp, belief)
+        return self.showdown.allin_showdown_value(state, lbr_player, opp, belief)
 
     # -- LBR action choice -------------------------------------------------
 
@@ -688,52 +618,14 @@ class _HUNLLocalBestResponse:
             return 0.5
 
         if len(board) >= 5:
-            return self._showdown_equity(lbr_hand, board, opp_weights, active)
+            return self.showdown.showdown_equity(lbr_hand, board, opp_weights, active)
 
         runouts = max(1, self.config.equity_runouts)
         total = 0.0
         for _ in range(runouts):
-            full_board = self._complete_board(board, known)
-            total += self._showdown_equity(lbr_hand, full_board, opp_weights, active)
+            full_board = self.showdown.complete_board(board, known)
+            total += self.showdown.showdown_equity(lbr_hand, full_board, opp_weights, active)
         return total / runouts
-
-    def _showdown_equity(
-        self,
-        lbr_hand: tuple[Card, Card],
-        board: tuple[Card, ...],
-        opp_weights: np.ndarray,
-        active: np.ndarray,
-    ) -> float:
-        board_mask = 0
-        for card in board:
-            board_mask |= card.mask
-        lbr_rank = self.evaluator.evaluate(lbr_hand, board)
-        acc = 0.0
-        weight = 0.0
-        for idx in active:
-            if COMBO_MASKS[idx] & board_mask:
-                continue
-            w = opp_weights[idx]
-            opp_rank = self.evaluator.evaluate(ALL_COMBOS[idx], board)
-            if lbr_rank < opp_rank:
-                acc += w
-            elif lbr_rank == opp_rank:
-                acc += 0.5 * w
-            weight += w
-        return acc / weight if weight > NORMALIZE_EPS else 0.5
-
-    def _complete_board(self, board: tuple[Card, ...], known: int) -> tuple[Card, ...]:
-        needed = 5 - len(board)
-        drawn: list[Card] = []
-        used = known
-        while len(drawn) < needed:
-            idx = int(self.rng.integers(0, 52))
-            mask = int(_DECK_MASKS[idx])
-            if used & mask:
-                continue
-            used |= mask
-            drawn.append(FULL_DECK[idx])
-        return tuple(board) + tuple(drawn)
 
     # -- Helpers -----------------------------------------------------------
 
@@ -881,7 +773,7 @@ def _play_hand_pair(
     s_h = _hand_seed(base_seed, hand)
     random.seed(s_h)
     np.random.seed(s_h)
-    engine.rng = np.random.default_rng(s_h)
+    engine.reseed(np.random.default_rng(s_h))
     s_opp = _opponent_hand_seed(base_seed, hand)
     button = hand % 2
     state = _deal_initial_state(engine, starting_stack, button, engine.rng)
