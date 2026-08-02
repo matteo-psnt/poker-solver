@@ -8,6 +8,10 @@ import numpy as np
 import pytest
 
 from src.interfaces.cli import headless
+from src.interfaces.cli.commands import _base
+from src.interfaces.cli.commands import compare as compare_cmd
+from src.interfaces.cli.commands import ledger as ledger_cmd
+from src.interfaces.cli.commands import train_static as train_static_cmd
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import (
     LBR_ESTIMATOR_LABEL,
@@ -32,25 +36,25 @@ def test_resolve_run_dir_prefers_direct_path(tmp_path):
     """An existing directory path should resolve to itself."""
     run = tmp_path / "run-a"
     run.mkdir()
-    assert headless._resolve_run_dir(str(run), str(tmp_path / "other")) == run
+    assert _base.resolve_run_dir(str(run), str(tmp_path / "other")) == run
 
 
 def test_resolve_run_dir_resolves_id_under_runs_dir(tmp_path):
     """A bare run id should resolve under runs_dir."""
     (tmp_path / "run-b").mkdir()
-    assert headless._resolve_run_dir("run-b", str(tmp_path)) == tmp_path / "run-b"
+    assert _base.resolve_run_dir("run-b", str(tmp_path)) == tmp_path / "run-b"
 
 
 def test_resolve_run_dir_missing_raises_system_exit(tmp_path):
     """An unknown run should raise SystemExit with a helpful message."""
     with pytest.raises(SystemExit, match="Run not found"):
-        headless._resolve_run_dir("nope", str(tmp_path))
+        _base.resolve_run_dir("nope", str(tmp_path))
 
 
 def test_write_result_is_namespaced_by_op_and_no_clobber(tmp_path):
     """train and evaluate results must coexist under distinct filenames."""
-    headless._write_result(tmp_path, {"op": "train-static", "run_id": "r"})
-    headless._write_result(tmp_path, {"op": "evaluate", "run_id": "r"})
+    _base.write_result(tmp_path, {"op": "train-static", "run_id": "r"})
+    _base.write_result(tmp_path, {"op": "evaluate", "run_id": "r"})
 
     train_json = json.loads((tmp_path / "train-static_result.json").read_text())
     eval_json = json.loads((tmp_path / "evaluate_result.json").read_text())
@@ -79,7 +83,7 @@ def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
         print("noisy training log line")  # must NOT land on stdout under --json
         return out
 
-    monkeypatch.setattr(headless.services, "train_static", _fake_train)
+    monkeypatch.setattr(train_static_cmd.services, "train_static", _fake_train)
 
     rc = headless.main(["train-static", "--config", "quick_test", "--json"])
 
@@ -163,7 +167,7 @@ def test_cmd_ledger_lists_rows(tmp_path):
     run_dir.mkdir()
     _seed_eval(led, run_dir, "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
 
-    payload = headless._cmd_ledger(
+    payload = ledger_cmd.run(
         argparse.Namespace(
             ledger=str(led),
             run=None,
@@ -187,7 +191,7 @@ def test_cmd_compare_valid_pairs(tmp_path):
     _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[10.0, 20.0, 30.0])
     _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=7, mbb=50.0, samples=[5.0, 10.0, 15.0])
 
-    payload = headless._cmd_compare(
+    payload = compare_cmd.run(
         argparse.Namespace(
             a="run-a",
             b="run-b",
@@ -212,7 +216,7 @@ def test_cmd_compare_refuses_seed_mismatch(tmp_path):
     _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[1.0, 2.0, 3.0])
 
     with pytest.raises(SystemExit, match="Refusing to compare"):
-        headless._cmd_compare(
+        compare_cmd.run(
             argparse.Namespace(
                 a="run-a",
                 b="run-b",
@@ -232,7 +236,7 @@ def test_cmd_compare_force_overrides_mismatch(tmp_path):
     _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
     _seed_eval(led, tmp_path / "run-b", "run-b", base_seed=9, mbb=50.0, samples=[4.0, 5.0, 6.0])
 
-    payload = headless._cmd_compare(
+    payload = compare_cmd.run(
         argparse.Namespace(
             a="run-a",
             b="run-b",
@@ -253,7 +257,7 @@ def test_cmd_compare_missing_run_raises(tmp_path):
     _seed_eval(led, tmp_path / "run-a", "run-a", base_seed=7, mbb=1.0, samples=[1.0, 2.0])
 
     with pytest.raises(SystemExit, match="No ledger entry"):
-        headless._cmd_compare(
+        compare_cmd.run(
             argparse.Namespace(
                 a="run-a",
                 b="ghost",
@@ -288,7 +292,7 @@ def test_compare_refuses_samples_free_evals_even_under_force(tmp_path):
         eval_ledger.append_record(row, led)
 
     with pytest.raises(SystemExit, match="no per-hand samples"):
-        headless._cmd_compare(
+        compare_cmd.run(
             argparse.Namespace(
                 a="run-a",
                 b="run-b",
@@ -328,7 +332,7 @@ def test_since_filter_compares_instants_not_strings(tmp_path):
     for run_id, ts in (("old", old_naive), ("new", new_utc)):
         eval_ledger.append_record({"run_id": run_id, "timestamp": ts}, led)
 
-    payload = headless._cmd_ledger(_ledger_ns(led, tmp_path, since=now.isoformat()))
+    payload = ledger_cmd.run(_ledger_ns(led, tmp_path, since=now.isoformat()))
     assert [r["run_id"] for r in payload["rows"]] == ["new"]
 
 
@@ -339,8 +343,8 @@ def test_rebuild_counts_are_printed_in_human_mode(tmp_path, capsys):
     eval_ledger.append_record(
         {"run_id": "r", "timestamp": "2026-01-01T00:00:00+00:00", "result_path": "x"}, led
     )
-    payload = headless._cmd_ledger(_ledger_ns(led, tmp_path, rebuild=True))
-    headless.print_human(payload)
+    payload = ledger_cmd.run(_ledger_ns(led, tmp_path, rebuild=True))
+    ledger_cmd.render(payload)
     out = capsys.readouterr().out
     assert "Rebuilt" in out
     assert "preserved" in out
@@ -368,7 +372,7 @@ def test_missing_samples_error_names_the_right_record(tmp_path):
     )
 
     with pytest.raises(SystemExit, match="exact_br"):
-        headless._cmd_compare(
+        compare_cmd.run(
             argparse.Namespace(
                 a="run-a",
                 b="run-b",
