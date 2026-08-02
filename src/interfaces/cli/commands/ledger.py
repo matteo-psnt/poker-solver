@@ -55,6 +55,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """List recent eval-ledger rows as a compact table, optionally rebuilding first."""
+    if getattr(args, "source", "local") == "share" and args.migrate:
+        # `--source share` materialises a THROWAWAY copy, so migrating it wrote
+        # consolidated documents into a temporary directory and then deleted it
+        # -- while printing "Originals left in place", which reads as though the
+        # published record had been migrated. Refusing beats a silent no-op that
+        # reports success.
+        raise SystemExit(
+            "--migrate rewrites records in place, and --source share reads a temporary "
+            "copy that is discarded. Nothing on the share would change.\n"
+            "Migrating the published record is not wired up yet; run it against a local "
+            "runs directory instead."
+        )
     with records_root(args) as root:
         return _list(args, root)
 

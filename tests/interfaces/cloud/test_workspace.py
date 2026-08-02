@@ -35,9 +35,17 @@ def fake(monkeypatch):
         }
     )
 
-    def walk_files(service, share_name, path):
+    def walk_files(service, share_name, path, *, skip_dir=None):
         prefix = f"{path}/"
-        return [p for p in service.files if p.startswith(prefix)]
+        found = []
+        for p in service.files:
+            if not p.startswith(prefix):
+                continue
+            parts = p[len(prefix) :].split("/")
+            if skip_dir is not None and any(skip_dir(part) for part in parts[:-1]):
+                continue
+            found.append(p)
+        return found
 
     def list_entries(service, share_name, path):
         names = set()
@@ -146,3 +154,24 @@ class TestSourceSeam:
         derived = _base.ledger_for(args, tmp_path)
         assert derived.parent == tmp_path, "derived inside the materialised tree"
         assert derived.is_file(), "rebuild_ledger ran"
+
+
+class TestTheWalkIsPruned:
+    """Filtering checkpoint data out AFTER the walk still paid for the walk.
+
+    A run's .zarr snapshots hold thousands of chunk files and listing them is a
+    round trip per directory -- measured at 167s to pull 146 small JSON files.
+    """
+
+    def test_it_never_lists_inside_a_snapshot_directory(self, fake, tmp_path, monkeypatch):
+        listed: list[str] = []
+        original = share.list_entries
+
+        def spy(service, share_name, path):
+            listed.append(path)
+            return original(service, share_name, path)
+
+        monkeypatch.setattr(share, "list_entries", spy)
+        workspace.pull_metadata(fake, "s", tmp_path)
+
+        assert not [p for p in listed if ".zarr" in p], f"descended into a snapshot: {listed}"

@@ -23,7 +23,7 @@ import contextlib
 import json
 import tarfile
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -131,16 +131,29 @@ def write_text(service: ShareServiceClient, share: str, path: str, body: str) ->
     share_client.get_file_client(path).upload_file(body.encode("utf-8"))
 
 
-def walk_files(service: ShareServiceClient, share: str, path: str) -> Iterator[str]:
+def walk_files(
+    service: ShareServiceClient,
+    share: str,
+    path: str,
+    *,
+    skip_dir: Callable[[str], bool] | None = None,
+) -> Iterator[str]:
     """Yield every file path beneath ``path``, depth first.
 
     Used by the metadata sync, which needs to see the whole published tree in
     order to pick the small JSON out of it.
+
+    ``skip_dir`` prunes a subtree without descending into it. A run's ``.zarr``
+    snapshots hold thousands of chunk files each, and listing them is a round
+    trip per directory -- filtering them out AFTER the walk still paid for the
+    walk, which is where the time went: 167s to pull 146 small JSON files.
     """
     for entry in list_entries(service, share, path):
         child = f"{path}/{entry.name}"
         if entry.is_directory:
-            yield from walk_files(service, share, child)
+            if skip_dir is not None and skip_dir(entry.name):
+                continue
+            yield from walk_files(service, share, child, skip_dir=skip_dir)
         else:
             yield child
 

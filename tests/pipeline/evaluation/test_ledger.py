@@ -330,3 +330,62 @@ class TestEvalConsolidationMigration:
 
         assert (run_dir / "evals" / "s1.json").exists()
         assert recovered == 0
+
+
+class TestRepointDoesNotLoseRows:
+    """`--migrate` rewrites the ledger, so anything it drops is gone for good."""
+
+    def _legacy(self, tmp_path, run_id, slug):
+        evals = tmp_path / run_id / "evals"
+        evals.mkdir(parents=True, exist_ok=True)
+        (evals / f"eval-{slug}.json").write_text(
+            json.dumps({"run_id": run_id, "results": {"exploitability_mbb": 12.0, "n": 3}})
+        )
+        return evals
+
+    def test_a_torn_line_survives_the_rewrite(self, tmp_path):
+        """`--rebuild` preserves rows it cannot regenerate; `--migrate` rewriting
+        from the PARSED rows deleted them instead."""
+        self._legacy(tmp_path, "run-a", "s1")
+        led = tmp_path / "led.jsonl"
+        led.write_text(
+            json.dumps(
+                {
+                    "run_id": "run-a",
+                    "timestamp": "2026-07-18T00:00:00",
+                    "knobs": {"scorer": "myopic"},
+                    "result_path": "run-a/evals/eval-s1.json",
+                }
+            )
+            + "\n"
+            + '{"run_id": "run-torn", "resu\n'
+        )
+
+        ledger.migrate_eval_files(tmp_path, led)
+
+        lines = [line for line in led.read_text().splitlines() if line.strip()]
+        assert any("run-torn" in line for line in lines), "the torn line was deleted"
+        assert len(lines) == 2
+
+    def test_a_row_is_not_repointed_at_a_document_that_was_never_written(self, tmp_path):
+        """Migration skips a payload it cannot read; repointing it anyway leaves
+        the row naming a file that does not exist."""
+        evals = self._legacy(tmp_path, "run-a", "s1")
+        (evals / "eval-s1.json").write_text("{ not json")
+        led = tmp_path / "led.jsonl"
+        led.write_text(
+            json.dumps(
+                {
+                    "run_id": "run-a",
+                    "timestamp": "2026-07-18T00:00:00",
+                    "knobs": {"scorer": "myopic"},
+                    "result_path": "run-a/evals/eval-s1.json",
+                }
+            )
+            + "\n"
+        )
+
+        ledger.migrate_eval_files(tmp_path, led)
+
+        pointer = json.loads(led.read_text().strip())["result_path"]
+        assert (tmp_path / pointer).exists(), f"row points at a missing file: {pointer}"

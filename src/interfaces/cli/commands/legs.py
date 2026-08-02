@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from src.interfaces.cli.commands import jobs
 from src.interfaces.cli.commands._base import Command
 from src.interfaces.cloud import batch, share
 from src.interfaces.cloud.config import CloudConfig
@@ -56,8 +57,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         # decides which those are, so the criterion lives in one place rather than
         # being re-derived from a rendered table.
         if not args.skip_reconcile and leg_log.unresolved_task_ids(local):
+            # Batch's vocabulary is translated HERE, not in leg_log: the record
+            # module is stdlib-only shared code that the node imports, and
+            # `observed_cause` compares against bare `completed`/`success`. A raw
+            # `BatchTaskState.COMPLETED` matches neither, so every reconciled leg
+            # would read as its own state string instead of an outcome.
             tasks = [
-                {**task, "jobId": job["id"]}
+                {
+                    **task,
+                    "job": job["job"],
+                    "state": jobs.short_state(task.get("state")),
+                    "result": jobs.short_state(task.get("result")) or None,
+                }
                 for job in batch.list_jobs_with_tasks(batch.client(config))
                 for task in job.get("tasks", [])
             ]

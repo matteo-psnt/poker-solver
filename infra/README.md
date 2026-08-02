@@ -147,7 +147,7 @@ entirely — in exactly the SIGKILL window this exists for.
 `run_leg.sh` calls it with the node's system `python3` before `uv sync` has run.
 A test enforces that.
 
-`just legs skip-reconcile` reads the share without querying Batch, and
+`just legs --skip-reconcile` reads the share without querying Batch, and
 `just leg-log <task> errors` filters a published log to WARN/ERROR.
 
 ## What must never go on the share
