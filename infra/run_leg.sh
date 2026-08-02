@@ -16,7 +16,9 @@
 # the absolute target is what makes it correct.
 #
 # Env (set by the justfile's `_task` recipe):
-#   RUN_CONFIG      training config stem, e.g. production  (fresh runs only)
+#   RUN_CONFIG      training config stem, e.g. production. Needed by a CONTINUING
+#                   leg too: the config builds the tree and the solver, and the
+#                   checkpoint stores neither.
 #   RUN_TO          ABSOLUTE target iteration
 #   RUN_ID          run id to resume; empty for a fresh train
 #   CODE_SNAPSHOT   names <share>/code/<snapshot>.tar.gz, pinned by this submission
@@ -110,12 +112,20 @@ publish_all() {
         *) cp -ru "$d" "$ARCHIVE/$name/" 2>>/tmp/publish_err || failed=1 ;;
       esac
     done
-    # Loose files (.run.json, metrics.jsonl, result json), manifest excluded.
-    find "$run_dir" -maxdepth 1 -type f ! -name CHECKPOINT.json \
+    # Loose files (.run.json, metrics.jsonl, result json), manifests excluded.
+    # BOTH manifests: the static backend writes STATIC_CHECKPOINT.json, which fell
+    # to this unguarded copy and so was published even when a snapshot copy above
+    # had failed -- a manifest naming a half-copied rung, exactly what publishing
+    # the manifest last exists to prevent. The static ladder was the unguarded one.
+    find "$run_dir" -maxdepth 1 -type f \
+        ! -name CHECKPOINT.json ! -name STATIC_CHECKPOINT.json \
         -exec cp -u {} "$ARCHIVE/$name/" \; 2>>/tmp/publish_err || failed=1
-    if [ "$failed" -eq 0 ] && [ -f "$run_dir/CHECKPOINT.json" ]; then
-      cp -u "$run_dir/CHECKPOINT.json" "$ARCHIVE/$name/" 2>>/tmp/publish_err || failed=1
-    fi
+    local manifest
+    for manifest in CHECKPOINT.json STATIC_CHECKPOINT.json; do
+      if [ "$failed" -eq 0 ] && [ -f "$run_dir/$manifest" ]; then
+        cp -u "$run_dir/$manifest" "$ARCHIVE/$name/" 2>>/tmp/publish_err || failed=1
+      fi
+    done
 
     if [ "$failed" -eq 0 ]; then
       log "published $name"
@@ -242,6 +252,47 @@ print(chr(10).join(sorted(n for n in names if n)))
     # Manifest last here too, so a torn fetch never claims more than it copied.
     cp -u "$src/CHECKPOINT.json" "$RUNS/$RUN_ID/" 2>/dev/null || true
     log "fetched $kept complete snapshot dir(s)"
+  elif [ "${RUN_OP:-train}" = "train" ] && [ -f "$src/STATIC_CHECKPOINT.json" ]; then
+    # CONTINUING A STATIC RUN NEEDS EXACTLY ONE RUNG: the manifest's current
+    # snapshot. Falling to the catch-all below took the whole retained ladder --
+    # 31 rungs, ~25 GB over SMB, ~40 minutes -- to load the 809 MB the trainer
+    # actually reads.
+    #
+    # Leaving the older rungs on the share is not a loss. `_extend_ladder` builds
+    # the next manifest from the PREVIOUS manifest, not from what is on disk, so
+    # the ladder's history survives; `_prune` only deletes what the manifest does
+    # not name, and absent rungs are simply absent; and publish copies per
+    # directory, so rungs this node never had are neither re-uploaded nor removed.
+    cur=$(python3 -c "
+import json, sys
+print(json.load(open(sys.argv[1]))['zarr'])
+" "$src/STATIC_CHECKPOINT.json" || true)
+    find "$src" -maxdepth 1 -mindepth 1 \
+         ! -name 'static-*' ! -name STATIC_CHECKPOINT.json \
+         -exec cp -ru {} "$RUNS/$RUN_ID/" \; 2>/dev/null || true
+    if [ -z "$cur" ]; then
+      log "FATAL STATIC_CHECKPOINT.json on the share names no current snapshot"
+      exit 1
+    elif [ ! -d "$src/$cur" ]; then
+      log "FATAL manifest names $cur but it is not on the share"
+      exit 1
+    elif [ ! -f "$src/.complete-$cur" ]; then
+      # Same reasoning as the evaluate branch: an unmarked rung is either
+      # pre-marker or interrupted, and resuming from a truncated one would train
+      # on garbage rather than fail. `repair-ladder` is how a rung earns a marker.
+      log "FATAL $cur has no completion marker -- refusing to resume from a"
+      log "      possibly-partial snapshot. Run repair-ladder on this run first."
+      exit 1
+    else
+      # rm first and NO -u, for the reason the evaluate branch documents: a
+      # cancelled task's partial rung on the node would be skipped as present.
+      rm -rf "$RUNS/$RUN_ID/$cur"
+      cp -r "$src/$cur" "$RUNS/$RUN_ID/" 2>/tmp/fetch_err || {
+        log "FATAL fetching $cur failed: $(tail -1 /tmp/fetch_err 2>/dev/null)"; exit 1
+      }
+      cp -u "$src/STATIC_CHECKPOINT.json" "$RUNS/$RUN_ID/" 2>/dev/null || true
+      log "fetched current rung $cur (ladder left on the share)"
+    fi
   elif [ "${RUN_OP:-train}" = "evaluate" ] && [ -n "${RUN_EVAL_AT:-}" ]; then
     # SELECTIVE. A static run has no CHECKPOINT.json, so the copy below would
     # take the WHOLE ladder -- thirty ~540 MB rungs, ~16 GB, to score three of
