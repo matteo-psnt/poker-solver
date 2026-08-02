@@ -1,10 +1,8 @@
 """Checkpointing for :class:`StaticArrayStorage`.
 
-A checkpoint is the flat arrays plus a tree fingerprint, and nothing else. It
-stores no record of which infoset each row belongs to because the tree already
-says that, and the tree is a pure function of config — so what is written is
-numbers plus a 16-byte fingerprint proving which tree those numbers index.
-(The layout this replaced carried that mapping explicitly, at ~83% of the
+A checkpoint is the flat arrays plus a 16-byte tree fingerprint, and nothing
+else: the tree already says which infoset each row is, and the tree is a pure
+function of config. (Carrying that mapping explicitly was ~83% of the old
 write cost.)
 
 That fingerprint is load-bearing rather than defensive. A checkpoint carries no

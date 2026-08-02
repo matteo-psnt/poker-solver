@@ -1,9 +1,7 @@
 """Chance-node and board-dealing helpers for MCCFR solver.
 
-Only :func:`deal_initial_state` needs the solver -- for the stack size, the
-rules and the button alternation. The rest are pure functions of the state
-and say so; they took a ``self`` they never read purely because they happen
-to be called through the solver.
+Only :func:`deal_initial_state` needs the solver (stack, rules, button
+alternation); the rest are pure functions of the state.
 """
 
 from __future__ import annotations

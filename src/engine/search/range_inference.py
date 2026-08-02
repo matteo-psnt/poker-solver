@@ -163,10 +163,8 @@ def _action_likelihood_vector(
         try:
             infoset = source.infoset_at(hypo_state, infoset_key)
         except KeyError:
-            # Off-tree: the observed line left the blueprint's action
-            # abstraction. Treat it as "no prior" and fall through to the
-            # uniform likelihood below -- a Bayes update needs SOME likelihood,
-            # and refusing to update at all would freeze the range mid-hand.
+            # Off-tree: no prior. Falls through to the uniform likelihood --
+            # refusing to update at all would freeze the range mid-hand.
             infoset = None
         action_prob = blueprint_action_distribution(
             infoset, hypo_state, blueprint.rules, legal_actions, use_average=True

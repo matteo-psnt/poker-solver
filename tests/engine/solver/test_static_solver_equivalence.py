@@ -40,7 +40,7 @@ class BucketsByStreet:
         self.counts = counts
 
     def get_bucket(self, hole_cards, board, street):
-        h = hash((repr(hole_cards[0]), repr(hole_cards[1]), repr(board[0]), street.name))
+        h = hole_cards[0].rank_eval7() + hole_cards[1].rank_eval7() + board[0].rank_eval7()
         return h % self.counts[street]
 
     def num_buckets(self, street):

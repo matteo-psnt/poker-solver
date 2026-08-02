@@ -254,7 +254,7 @@ class TestSolverIntegration:
             def get_bucket(
                 self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
             ) -> int:
-                return hash((repr(hole_cards[0]), repr(board[0]))) % BUCKETS[street]
+                return (hole_cards[0].rank_eval7() + board[0].rank_eval7()) % BUCKETS[street]
 
             def num_buckets(self, street: Street) -> int:
                 return BUCKETS[street]

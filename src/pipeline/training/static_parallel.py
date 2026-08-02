@@ -1,15 +1,10 @@
 """Multi-process training over static, tree-indexed storage.
 
 Static enumeration answers "which row is this infoset?" from config alone,
-identically in every process, before anything starts. So this module has no
-queues but the job queue: no ownership, no id exchange, no resize protocol, and
-no state in which a worker does not yet know a row.
-
-That absence is the design. Answering the same question at runtime previously
-took ~1,300 lines of worker machinery — per-worker id request/response queues,
-an ownership hash, a throttled frontier re-send, job re-targeting — and still
-dropped a measured 39-74% of update samples, because a worker that had not yet
-learned an id simply wrote nothing. A worker here can always write.
+identically in every process. So this module has no queues but the job queue:
+no ownership, no id exchange, no resize. Answering it at runtime instead
+previously took ~1,300 lines and still dropped a measured 39-74% of update
+samples. A worker here can always write.
 
 What crosses a process boundary: the config, a seed, and an iteration count.
 Notably NOT the tree or the abstraction. Each worker rebuilds the tree from

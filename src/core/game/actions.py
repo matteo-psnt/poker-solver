@@ -82,9 +82,7 @@ class Action:
         if self.amount < 0:
             raise ValueError(f"Action amount cannot be negative: {self.amount}")
 
-        # Fold, check and call commit nothing; bet, raise and all-in must commit
-        # something. An action carrying the wrong amount is indistinguishable
-        # from a legal one downstream, so it is rejected at construction.
+        # A wrong amount is indistinguishable from a legal action downstream.
         if self.type in (ActionType.FOLD, ActionType.CHECK, ActionType.CALL) and self.amount != 0:
             raise ValueError(f"{self.type} must have amount=0, got {self.amount}")
 

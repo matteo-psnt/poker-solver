@@ -1,18 +1,8 @@
 """A dict-backed :class:`Storage` for the Kuhn/Leduc conformance harness.
 
-WHY THIS IS IN tests/. The conformance harness validates the CFR kernel against
-games with exact analytic equilibria, and it does so by driving ``MCCFRSolver``
-over a generic ``ExtensiveGame`` rather than HUNL. Those games have no betting
-tree to enumerate, so the production static backend -- which addresses infosets
-by ``(node_id, bucket)`` over a tree built from a poker config -- cannot back
-them at all.
-
-It used to borrow the dynamic backend's key-addressed storage. That backend is
-gone, and re-adding one to ``src/`` purely to keep this harness running would
-put a second, unused storage implementation back into production code. So the
-harness carries its own: a dict, which is all a few-thousand-infoset toy game
-ever needed, and which cannot drift from a production backend because it is not
-pretending to be one.
+Lives in tests/ because Kuhn and Leduc have no betting tree, so the production
+static backend cannot back them -- and a second storage implementation in
+``src/`` that nothing ships would be worse than a dict here.
 """
 
 from __future__ import annotations

@@ -1,14 +1,8 @@
 """How a consumer asks "what is the blueprint's infoset here?".
 
-A blueprint is addressed by ``(node_id, bucket)`` — an index into the betting
-tree, with no keys anywhere.
-
-Evaluation code should not have to know that. Before this seam the exact-BR
-engine built infoset keys inline, which put a solver concern inside the
-evaluation layer and hard-wired that layer to one storage layout; changing the
-layout meant editing every scorer. A policy source moves it back behind one
-method, and is why the scorers survived the storage layout being replaced
-underneath them.
+Evaluation should not know that a blueprint is addressed by ``(node_id,
+bucket)``. The exact-BR engine used to build infoset keys inline, so replacing
+the storage layout meant editing every scorer. This seam is why it didn't.
 
 The seam is deliberately ``(state, bucket) -> InfoSet`` rather than
 ``-> distribution``: consumers already own the filtering and fallback policy via
@@ -39,11 +33,8 @@ from src.shared.config import Config
 class ScorableBlueprint(Protocol):
     """The minimum an evaluator needs from a blueprint.
 
-    Declares ``policy_source``, not ``storage``. Every consumer here wants to
-    ask "what does the blueprint play at this state", and routing that through
-    the source rather than the table is what keeps them from re-implementing
-    infoset addressing -- the habit that once hard-wired the exact-BR engine to
-    one backend.
+    Declares ``policy_source``, not ``storage``: consumers want "what does this
+    play here", not the table.
     """
 
     action_model: ActionModel
@@ -149,14 +140,10 @@ class TreePolicySource:
         # view(), not infoset_at(): evaluation must not mark coverage, or a
         # scoring pass would report an untrained tree as fully explored.
         infoset = self._storage.view(node_id, bucket)
-        # An UNVISITED row is not an answer, it is an allocation. The static
-        # table holds every row from the start, so without this check a caller
-        # asking "does the blueprint have a policy here?" is always told yes --
-        # and the fallback-mass diagnostic, which exists to reveal exactly how
-        # much of a score came from untrained regions, silently reads zero on
-        # every run. Numerically this changes nothing (a zeroed row already
-        # yields the uniform distribution the caller falls back to); it restores
-        # the caller's ability to KNOW that is what happened.
+        # An unvisited row is an allocation, not an answer. Every row exists
+        # from the start, so without this the fallback-mass diagnostic reads
+        # zero on every run. Numerically identical (a zeroed row already yields
+        # uniform) -- it just makes the fallback visible.
         if not self._storage.visited[infoset.row]:
             return None
         return infoset

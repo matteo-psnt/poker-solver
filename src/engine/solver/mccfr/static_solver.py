@@ -51,13 +51,9 @@ from .solver import MCCFRSolver
 class StaticTreeSolver(MCCFRSolver):
     """MCCFR whose infosets are preallocated rows of a static betting tree.
 
-    ``dropped_unknown_id_updates`` stays at zero for the solver's whole
-    lifetime: every row exists in every process from the start, so there is no
-    state in which a worker knows an infoset but cannot write it. It is still
-    reported (through ``StaticTrainingOutput.dropped_updates``, which the
-    headless renderer prints) precisely BECAUSE it should be zero — a nonzero
-    value means something reintroduced allocation-at-runtime, and that is worth
-    finding out loudly rather than never measuring.
+    ``dropped_unknown_id_updates`` stays at zero: every row exists in every
+    process from the start. It is still reported because a nonzero value means
+    allocation-at-runtime came back.
     """
 
     # ``StaticArrayStorage`` deliberately does not implement the key-addressed
@@ -174,13 +170,10 @@ class StaticTreeSolver(MCCFRSolver):
 
     @functools.cached_property
     def policy_source(self) -> PolicySource:
-        """Policy access for the runtime paths (play, search, range inference).
+        """Policy access for play, search and range inference.
 
-        Lives here rather than on ``MCCFRSolver`` because it is a BLUEPRINT
-        concern, not a CFR one: the base class is the game-agnostic kernel the
-        Kuhn/Leduc conformance harness drives, and those games have no tree to
-        address. Cached because the backend cannot change over a solver's life
-        and this is reached once per decision during play.
+        Here rather than on ``MCCFRSolver``: the base class is the game-agnostic
+        kernel, and those games have no tree to address.
         """
         return TreePolicySource(self.tree, self.storage, self.card_abstraction)
 
