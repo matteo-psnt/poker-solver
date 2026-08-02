@@ -172,20 +172,14 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
     # RUN_TIMEOUT must stay comfortably below it or the cheap stop never fires.
     RUN_TIMEOUT="${RUN_TIMEOUT:-6h}"
     MAX_WALL="${MAX_WALL:-P1D}"
-    # Retries, but ONLY for a resume. This is the property the whole design was
-    # built on and had switched off: `--to-iteration` is ABSOLUTE and no-ops once
-    # reached, so re-running a resume converges on the same endpoint however many
-    # times it runs, and Batch reschedules onto a healthy node. A FRESH submit is
-    # not idempotent -- retrying it starts a second run from zero -- so it stays
-    # at 0. Two nodes have now gone `unusable` mid-leg with
-    # MountConfigurationError; without this, each costs a manual restart.
-    # A static leg is idempotent even when fresh: run_leg.sh derives a stable run
-    # id from the task id, so a retry resumes rather than starting a second run.
-    if [ -n "{{run}}" ] || [ "${RUN_STATIC:-}" = "1" ]; then
-        RETRIES="${RUN_RETRIES:-2}"
-    else
-        RETRIES="${RUN_RETRIES:-0}"
-    fi
+    # Retries are ALWAYS safe now. `--iterations` is absolute and no-ops once
+    # reached, and run_leg.sh derives a stable run id from the task id, so a
+    # retry continues the same run rather than starting a second one from zero
+    # -- true even for a fresh submit. That was the one case the dynamic path
+    # could not make idempotent, which is why retries used to be conditional.
+    # Two nodes have gone `unusable` mid-leg with MountConfigurationError;
+    # without retries, each costs a manual restart.
+    RETRIES="${RUN_RETRIES:-2}"
     # RUN_WORKERS empty = all CPUs. Worth setting BELOW the core count on a big
     # abstraction: every worker pickle.loads its own copy (385 MB for production),
     # so 16 workers cost 6.2 GB in duplicates alone before any training state.
@@ -198,19 +192,15 @@ _task snap config to run="" experiment="" arm="" parent="" sets="":
             RUN_ID="{{run}}" RUN_EXPERIMENT="{{experiment}}" RUN_ARM="{{arm}}" \
             RUN_PARENT="{{parent}}" RUN_SETS_HEX="$SETS_HEX" \
             RUN_TIMEOUT="$RUN_TIMEOUT" RUN_WORKERS="${RUN_WORKERS:-}" \
-            RUN_STATIC="${RUN_STATIC:-}" RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-1000000}" \
+            RUN_CHECKPOINT_EVERY="${RUN_CHECKPOINT_EVERY:-1000000}" \
             RUN_OP="${RUN_OP:-}" RUN_EVAL_METHOD="${RUN_EVAL_METHOD:-}" \
             RUN_EVAL_AT="${RUN_EVAL_AT:-}" RUN_EVAL_FLAGS_HEX="${RUN_EVAL_FLAGS_HEX:-}" \
         -o none
     echo "  ceilings: RUN_TIMEOUT=$RUN_TIMEOUT (training), maxWallClockTime=$MAX_WALL (task)"
-    if [ "$RETRIES" = "0" ]; then
-        echo "  retries:  0 (a fresh dynamic submit is not idempotent -- a retry would start a second run)"
-    elif [ "${RUN_OP:-}" = "evaluate" ]; then
+    if [ "${RUN_OP:-}" = "evaluate" ]; then
         echo "  retries:  $RETRIES (scoring is idempotent: re-scoring rewrites the same record)"
-    elif [ "${RUN_STATIC:-}" = "1" ]; then
-        echo "  retries:  $RETRIES (static leg: stable run id, so a retry resumes)"
     else
-        echo "  retries:  $RETRIES (resume is idempotent: --to-iteration is absolute)"
+        echo "  retries:  $RETRIES (stable run id + absolute target, so a retry continues)"
     fi
     echo "  submitted $TASK to job $JOB — walk away; watch with: just jobs"
 

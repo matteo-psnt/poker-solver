@@ -1,25 +1,35 @@
 # Repository Guidelines
 
 ## Layout & Architecture
-`src/` is layered — `interfaces/` (cli, api, chart) → `pipeline/` (training,
-evaluation, abstraction) → `engine/` (solver, search) → `core/` (game,
-actions), with `shared/` importable by all layers. The layering is
-hard-enforced by import-linter (`.importlinter`, run via pre-commit).
+`src/` is layered — `interfaces/` (cli) → `pipeline/` (training, evaluation,
+abstraction) → `engine/` (solver, search) → `core/` (game, actions), with
+`shared/` importable by all layers. The layering is hard-enforced by
+import-linter (`.importlinter`, run via pre-commit).
+
+**One solver backend: the statically-enumerated tree.** An infoset is
+`(node_id, bucket)` — an index into a table allocated once at full size, so
+memory is flat in iteration count. The old dynamic backend (hashed
+`InfoSetKey`, discovered as it went) is gone, and with it every checkpoint it
+wrote: those are unreadable at HEAD by design, not by accident. Runs are
+identified as loadable by `STATIC_CHECKPOINT.json`.
 
 Tests in `tests/` mirror this layout. Config YAML lives under `config/`
 (source of truth for training setups; name new files for their purpose).
-Runtime artifacts go in `data/` (`runs/`, `profiles/`, `combo_abstraction/`,
-`eval_ledger.jsonl`); avoid committing large training outputs. The React
-frontend lives in `ui/` (`npm run dev` / `npm run build` from `ui/`).
+Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
+`eval_ledger.jsonl`); avoid committing large training outputs.
 
 ## Commands
 - `uv sync --group dev` — install dependencies.
 - `uv run poker-solver` — interactive CLI.
-- `uv run poker-solver-run` — headless entrypoint: `train`, `resume`,
+- `uv run poker-solver-run` — headless entrypoint: `train-static`,
   `precompute`, `evaluate`, `curve`, `report`, `promote`, `ledger`, `compare`,
   `checkpoint-profile`. Every long-running operation is reachable here, so cloud
   jobs are shell invocations of this module rather than provider-specific
   reimplementations.
+- **`train-static` covers both starting and continuing a run.** `--iterations`
+  is an ABSOLUTE target and `--run <id>` continues an existing directory, so
+  re-running past the target is a no-op. That is what makes a scheduler retry
+  converge instead of training twice; there is no separate `resume`.
 - **Experiment bookkeeping.** Tag runs with `--experiment`/`--arm`/`--parent`
   (`--set k=v` for config overrides); `report --experiment` pins every arm to the
   control's knob tier and pairs each variant against its control. `curve --run`
@@ -41,9 +51,6 @@ frontend lives in `ui/` (`npm run dev` / `npm run build` from `ui/`).
   look arbitrary but are measured (UserSubscription mode, `Dals_v6` not
   `Dalds_v6`, Gen2-only images, the SKU policy) are documented in
   `infra/README.md`; read it before changing pool config.
-- `modal_app.py` — the previous Modal substrate. Its train/resume/evaluate/
-  precompute entrypoints still work but are superseded by `infra/`; prefer it for
-  the one-off experiments (noise floor, pruning calibration, gating tests).
 - `uv run pytest -m "not slow"` — fast gate; `uv run pytest` — full suite.
 - `uv run pre-commit run --all-files` — full quality gate (ruff lint+format,
   ty, import-linter, deptry, vulture). Run before handing off changes.

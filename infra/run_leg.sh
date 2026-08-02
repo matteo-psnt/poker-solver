@@ -10,7 +10,7 @@
 # as REBUILD.md Decision 5 ("checkpoint retention destroyed the primary
 # evidence"), in a new form.
 #
-# WHY that is safe to retry: `poker-solver-run resume --to-iteration` is ABSOLUTE
+# WHY that is safe to retry: `poker-solver-run train-static --iterations` is ABSOLUTE
 # and no-ops once the target is reached, so a Batch retry converges on the same
 # endpoint however many times it runs. Publishing the ladder makes a retry cheap;
 # the absolute target is what makes it correct.
@@ -25,7 +25,6 @@
 #   RUN_PARENT      parent run id
 #   RUN_SETS_HEX    hex-encoded, space-separated k=v config overrides
 #   RUN_WORKERS     worker count (empty = all CPUs)
-#   RUN_STATIC      1 = statically-enumerated tree (fixed memory, resumable)
 #   RUN_CHECKPOINT_EVERY  static only: checkpoint every N iterations
 #   RUN_OP          train (default) | evaluate
 #   RUN_EVAL_METHOD lbr | exact_br | rollout      RUN_EVAL_AT  comma-separated rungs
@@ -386,42 +385,25 @@ if [ "${RUN_OP:-train}" = "evaluate" ]; then
   exit 1
 fi
 
-# RUN_STATIC=1 selects the statically-enumerated tree. One command covers both
-# fresh and resume there, because `train-static --run <id>` continues an existing
-# run and `--iterations` is an absolute target -- so the fresh/resume split the
-# dynamic path needs does not exist.
+# One command covers both fresh and continuing: `train-static --run <id>`
+# continues an existing run and `--iterations` is an ABSOLUTE target, so
+# re-running past it is a no-op. The fresh/resume split the dynamic path needed
+# no longer exists, and neither does the dynamic path.
 rc=0
-if [ "${RUN_STATIC:-}" = "1" ]; then
-  # Derive a STABLE run id from the task when none was given. A Batch retry keeps
-  # the same task id, so the retry resumes this run rather than starting a second
-  # one from zero -- which is what makes retries safe here and not on the dynamic
-  # fresh-train path.
-  STATIC_RUN="${RUN_ID:-run-${AZ_BATCH_TASK_ID:-local}}"
-  STATIC_ARGS=(--run "$STATIC_RUN")
-  [ -n "${RUN_CHECKPOINT_EVERY:-}" ] && STATIC_ARGS+=(--checkpoint-every "$RUN_CHECKPOINT_EVERY")
-  log "static: config=${RUN_CONFIG:-} run=${RUN_ID:-<new>} to=$RUN_TO (timeout $RUN_TIMEOUT)"
-  set +o pipefail
-  "${GUARD[@]}" uv run poker-solver-run train-static \
-    --config "$RUN_CONFIG" --iterations "$RUN_TO" \
-    "${STATIC_ARGS[@]}" "${ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
-  rc=${PIPESTATUS[0]}
-  set -o pipefail
-elif [ -z "${RUN_ID:-}" ]; then
-  log "fresh train: config=$RUN_CONFIG iterations=$RUN_TO (timeout $RUN_TIMEOUT)"
-  set +o pipefail
-  "${GUARD[@]}" uv run poker-solver-run train \
-    --config "$RUN_CONFIG" --iterations "$RUN_TO" "${ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
-  rc=${PIPESTATUS[0]}
-  set -o pipefail
-else
-  log "resume: run=$RUN_ID to=$RUN_TO (absolute) (timeout $RUN_TIMEOUT)"
-  set +o pipefail
-  "${GUARD[@]}" uv run poker-solver-run resume \
-    --run "$RUN_ID" --to-iteration "$RUN_TO" \
-    ${RUN_WORKERS:+--workers "$RUN_WORKERS"} 2>&1 | tee -a "$LEG_LOG"
-  rc=${PIPESTATUS[0]}
-  set -o pipefail
-fi
+# Derive a STABLE run id from the task when none was given. A Batch retry keeps
+# the same task id, so the retry continues this run rather than starting a second
+# one from zero -- which is what makes retries safe here.
+STATIC_RUN="${RUN_ID:-run-${AZ_BATCH_TASK_ID:-local}}"
+STATIC_ARGS=(--run "$STATIC_RUN")
+[ -n "${RUN_CHECKPOINT_EVERY:-}" ] && STATIC_ARGS+=(--checkpoint-every "$RUN_CHECKPOINT_EVERY")
+[ -n "${RUN_WORKERS:-}" ] && STATIC_ARGS+=(--workers "$RUN_WORKERS")
+log "train-static: config=${RUN_CONFIG:-} run=$STATIC_RUN to=$RUN_TO (timeout $RUN_TIMEOUT)"
+set +o pipefail
+"${GUARD[@]}" uv run poker-solver-run train-static \
+  --config "$RUN_CONFIG" --iterations "$RUN_TO" \
+  "${STATIC_ARGS[@]}" "${ARGS[@]}" 2>&1 | tee -a "$LEG_LOG"
+rc=${PIPESTATUS[0]}
+set -o pipefail
 publish_log
 # 124 is timeout's own "deadline expired"; surface it as itself rather than as a
 # training failure, so `just jobs` distinguishes a hang from a crash.
