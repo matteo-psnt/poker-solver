@@ -20,3 +20,10 @@ forbidden_modules =
     src.pipeline
     src.engine
     src.core
+
+[importlinter:contract:training_and_evaluation_are_independent]
+name = Training and evaluation must not import each other
+type = independence
+modules =
+    src.pipeline.training
+    src.pipeline.evaluation

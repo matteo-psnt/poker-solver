@@ -7,7 +7,6 @@ to eliminate code duplication.
 """
 
 from pathlib import Path
-from typing import Any
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
@@ -17,7 +16,6 @@ from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
 from src.pipeline.abstraction.base import BucketingStrategy
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
-from src.pipeline.evaluation.exploitability import compute_exploitability
 from src.pipeline.training.abstraction_resolver import ComboAbstractionResolver
 from src.shared.config import Config
 
@@ -69,28 +67,6 @@ def resolve_card_abstraction_hash(
         loader=PostflopPrecomputer.load,
     )
     return resolver.resolved_hash(abstraction_config=config.card_abstraction.config)
-
-
-def evaluate_solver_exploitability(
-    solver: StaticTreeSolver,
-    *,
-    num_samples: int,
-    num_rollouts_per_infoset: int,
-    use_average_strategy: bool = True,
-    seed: int | None = None,
-) -> dict[str, Any]:
-    """Compute exploitability for a solver instance with a shared evaluation path.
-
-    Takes the concrete solver, not ``ScorableBlueprint``: it walks the table and
-    deals its own chance outcomes.
-    """
-    return compute_exploitability(
-        solver,
-        num_samples=num_samples,
-        use_average_strategy=use_average_strategy,
-        num_rollouts_per_infoset=num_rollouts_per_infoset,
-        seed=seed,
-    )
 
 
 def build_static_evaluation_solver(

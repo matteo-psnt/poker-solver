@@ -11,7 +11,6 @@ from src.interfaces.cli import headless
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import (
     LBR_ESTIMATOR_LABEL,
-    ROLLOUT_ESTIMATOR_LABEL,
     StaticTrainingOutput,
 )
 from src.pipeline.services import evaluation as services_evaluation
@@ -115,37 +114,6 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     assert payload["method"] == "lbr"
     assert payload["estimator"] == LBR_ESTIMATOR_LABEL
     assert payload["infosets"] == 42
-
-
-def test_main_evaluate_rollout_opt_in(monkeypatch, tmp_path, capsys):
-    """--method rollout uses the legacy estimator and its label."""
-    run_dir = tmp_path / "run-xyz"
-    run_dir.mkdir()
-
-    fake_out = SimpleNamespace(
-        infosets=7,
-        checkpoint_iteration=1000,
-        results={"exploitability_mbb": 9.0, "std_error_mbb": 0.5},
-    )
-    monkeypatch.setattr(services_evaluation, "evaluate_run_rollout", lambda *a, **kw: fake_out)
-
-    rc = headless.main(
-        [
-            "evaluate",
-            "--run",
-            "run-xyz",
-            "--runs-dir",
-            str(tmp_path),
-            "--method",
-            "rollout",
-            "--json",
-        ]
-    )
-
-    payload = json.loads(capsys.readouterr().out)
-    assert rc == 0
-    assert payload["method"] == "rollout"
-    assert payload["estimator"] == ROLLOUT_ESTIMATOR_LABEL
 
 
 def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):

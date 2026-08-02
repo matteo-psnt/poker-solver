@@ -28,10 +28,7 @@ from src.pipeline.evaluation.public_tree_br import PublicBRConfig, compute_publi
 from src.pipeline.evaluation.resolver_match import play_resolver_match
 from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
-from src.pipeline.training.components import (
-    build_static_evaluation_solver,
-    evaluate_solver_exploitability,
-)
+from src.pipeline.training.components import build_static_evaluation_solver
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.config import Config
 from src.shared.units import pair_mean_mbb
@@ -59,13 +56,6 @@ def build_blueprint_for(
 LBR_ESTIMATOR_LABEL = "local_best_response (rigorous lower bound on exploitability)"
 
 
-# The legacy `evaluate_run` metric is a one-ply rollout that both understates the
-# structure it explores AND is upward-biased by a recursive max over noisy MC
-# estimates — it is not a valid bound in either direction. Kept as an explicit
-# opt-in for diagnostics/comparison only; do NOT treat it as exploitability.
-ROLLOUT_ESTIMATOR_LABEL = "rollout_one_ply (uninformative; not a valid bound — diagnostic only)"
-
-
 # Exact best response on a deterministic sampled public tree: zero evaluation
 # variance, exactly paired across checkpoints under one board plan. The absolute
 # value is exploitability of the board-restricted game, not full HUNL — compare
@@ -90,16 +80,6 @@ class EvaluationOutput:
     # result, which is exactly how a 10M-iteration checkpoint was once silently
     # reported as the score of a 16M-iteration run. None only for pre-manifest runs.
     checkpoint_iteration: int | None = None
-
-
-@dataclass(frozen=True)
-class RolloutParams:
-    """Settings for the legacy one-ply rollout estimator (diagnostic opt-in only)."""
-
-    num_samples: int = 500
-    num_rollouts: int = 50
-    use_average_strategy: bool = True
-    seed: int | None = None
 
 
 def _effective_abstraction_hash(
@@ -481,47 +461,11 @@ def record_blueprint_match(
     return payload
 
 
-def evaluate_run_rollout(
-    run_dir: Path,
-    params: RolloutParams | None = None,
-) -> EvaluationOutput:
-    """Evaluate a run with the legacy one-ply rollout estimator (diagnostic opt-in only).
-
-    NOT a valid exploitability bound (see ``ROLLOUT_ESTIMATOR_LABEL``); prefer
-    :func:`evaluate_run_lbr`. Kept for comparison/diagnostics.
-
-    Raises:
-        FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
-        ValueError: Invalid configuration or checkpoint state.
-    """
-    params = params or RolloutParams()
-    metadata = load_run_metadata(run_dir)
-    config = metadata.config
-
-    solver, storage = build_static_evaluation_solver(
-        config,
-        checkpoint_dir=run_dir,
-    )
-    results = evaluate_solver_exploitability(
-        solver,
-        num_samples=params.num_samples,
-        use_average_strategy=params.use_average_strategy,
-        num_rollouts_per_infoset=params.num_rollouts,
-        seed=params.seed,
-    )
-    return EvaluationOutput(
-        infosets=storage.num_infosets(),
-        results=results,
-        checkpoint_iteration=checkpoint_iteration_of(run_dir),
-    )
-
-
 def evaluate_and_record(
     run_dir: Path,
     *,
     method: str = "lbr",
     lbr: LBRConfig | None = None,
-    rollout: RolloutParams | None = None,
     exact_br: PublicBRConfig | None = None,
     resolver_iterations: int = 64,
     abstraction_hash: str | None = None,
@@ -530,10 +474,9 @@ def evaluate_and_record(
 ) -> dict[str, Any]:
     """Evaluate a run and persist the result to the eval ledger (best-effort).
 
-    The single evaluate orchestrator shared by every transport (headless CLI,
-    Modal): method dispatch, payload shape, knob-tier derivation, and the
-    best-effort ledger recording live here once, so a cloud eval and a local
-    eval cannot drift in what they run or record.
+    The single evaluate orchestrator every transport calls: method dispatch,
+    payload shape, knob-tier derivation and best-effort ledger recording live
+    here once, so a cloud eval and a local eval cannot drift.
 
     Returns the portable evaluate payload; when recording succeeded it carries
     ``ledger_result_path``. Recording failures print a warning but never fail
@@ -543,24 +486,7 @@ def evaluate_and_record(
     snapshot; each rung records its own ``checkpoint_iteration``, so a run's
     convergence curve arrives as ordinary ledger rows.
     """
-    if method == "rollout":
-        if at_iteration is not None:
-            # Refuse rather than silently score the published snapshot and label the
-            # row with a rung that was never loaded.
-            raise ValueError(
-                "--at is not supported for method 'rollout' (a diagnostic estimator, "
-                "not a curve tool); use exact_br for within-run convergence curves."
-            )
-        params = rollout or RolloutParams()
-        out = evaluate_run_rollout(run_dir, params)
-        estimator = ROLLOUT_ESTIMATOR_LABEL
-        knobs = eval_ledger.build_rollout_knobs_from_params(
-            samples=params.num_samples,
-            rollouts=params.num_rollouts,
-            use_current=not params.use_average_strategy,
-            base_seed=out.results.get("base_seed", params.seed),
-        )
-    elif method == "exact_br":
+    if method == "exact_br":
         br_config = exact_br or PublicBRConfig()
         out = evaluate_run_exact_br(
             run_dir, br_config, abstraction_hash=abstraction_hash, at_iteration=at_iteration

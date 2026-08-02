@@ -521,6 +521,7 @@ class TestExploitability:
         assert result.exploitability_mbb > 0.0
         assert result.num_hands == 60
 
+    @pytest.mark.timeout(30)
     def test_deterministic_under_fixed_seed(self):
         solver = _build_solver(3, starting_stack=400)
         cfg = LBRConfig(num_hands=8, equity_runouts=2, seed=99)

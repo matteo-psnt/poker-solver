@@ -146,18 +146,6 @@ def build_lbr_knobs(config: LBRConfig, results: dict[str, Any]) -> dict[str, Any
     )
 
 
-def build_rollout_knobs_from_params(
-    *, samples: int, rollouts: int, use_current: bool, base_seed: Any
-) -> dict[str, Any]:
-    """Canonical rollout knob tier, built from explicit values (see LBR counterpart)."""
-    return {
-        "samples": samples,
-        "rollouts": rollouts,
-        "use_current": bool(use_current),
-        "base_seed": base_seed,
-    }
-
-
 def build_exact_br_knobs_from_params(
     *, num_flops: int, num_turns: int, num_rivers: int, board_seed: int
 ) -> dict[str, Any]:
