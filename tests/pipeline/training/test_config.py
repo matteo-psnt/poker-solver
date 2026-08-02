@@ -242,16 +242,6 @@ class TestValidation:
         with pytest.raises(ValidationError):
             SolverConfig(dcfr_alpha=0.0)
 
-    def test_sampling_method_literal(self):
-        """Invalid sampling_method value should raise ValidationError."""
-        with pytest.raises(ValidationError):
-            SolverConfig(sampling_method="bad_method")  # type: ignore[arg-type]
-
-    def test_sampling_method_valid_values(self):
-        """Both valid sampling methods should be accepted."""
-        SolverConfig(sampling_method="external")
-        SolverConfig(sampling_method="outcome")
-
     def test_big_blind_must_exceed_small_blind(self):
         """big_blind <= small_blind should raise ValidationError."""
         with pytest.raises(ValidationError, match="big_blind"):

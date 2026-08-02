@@ -144,7 +144,7 @@ def cfr_external_sampling(
 ) -> float:
     """Recursive MCCFR traversal with external sampling.
 
-    Carries no reach vector, unlike the outcome-sampling traversal below. Both
+    Carries no reach vector: the traverser enumerates its own actions, so its
     accumulators here take their weight from the visit frequency instead: the
     opponent's and chance's actions are sampled, so a node is reached exactly
     pi_{-i} of the time, and threading an explicit reach would apply that same
@@ -284,78 +284,3 @@ def cfr_external_sampling(
         next_state = self.sample_chance_outcome(next_state)
 
     return cfr_external_sampling(self, next_state, traversing_player)
-
-
-def cfr_outcome_sampling(
-    self: MCCFRSolver,
-    state: GameState,
-    traversing_player: int,
-    reach_probs: list[float],
-) -> float:
-    """Recursive MCCFR traversal with outcome sampling."""
-    if state.is_terminal:
-        return _terminal_utility(self, state, traversing_player)
-
-    if self.is_chance_node(state):
-        next_state = self.sample_chance_outcome(state)
-        return cfr_outcome_sampling(self, next_state, traversing_player, reach_probs)
-
-    current_player = state.current_player
-    infoset, legal_actions, valid_indices, strategy = _infoset_context(
-        self,
-        state,
-        current_player,
-    )
-
-    action_idx = _sample_action_index(strategy)
-    action = legal_actions[action_idx]
-
-    next_state = state.apply_action(action, self.rules)
-    if self.is_chance_node(next_state):
-        next_state = self.sample_chance_outcome(next_state)
-
-    new_reach_probs = reach_probs.copy()
-    new_reach_probs[current_player] *= float(strategy[action_idx])
-
-    sampled_utility = cfr_outcome_sampling(self, next_state, traversing_player, new_reach_probs)
-
-    if current_player == traversing_player and infoset.writable:
-        opponent = 1 - current_player
-        baseline = sampled_utility
-
-        for local_idx in range(len(legal_actions)):
-            original_idx = valid_indices[local_idx]
-            strategy_prob = float(strategy[local_idx])
-            if strategy_prob <= 0:
-                continue
-
-            importance_weight = reach_probs[opponent] / strategy_prob
-            if local_idx == action_idx:
-                regret = (sampled_utility - baseline) * importance_weight
-            else:
-                regret = -baseline * importance_weight
-
-            infoset.update_regret(
-                original_idx,
-                regret,
-                cfr_plus=self.config.solver.cfr_plus,
-                iteration=self.iteration,
-                iteration_weighting=self.config.solver.iteration_weighting,
-                dcfr_alpha=self.config.solver.dcfr_alpha,
-                dcfr_beta=self.config.solver.dcfr_beta,
-            )
-
-        # Unchanged pending the outcome-sampling audit: here the traverser's
-        # reach IS threaded (both players multiply into reach_probs above), so
-        # the explicit weight is live, unlike the external-sampling site.
-        _accumulate_average_strategy(
-            self,
-            infoset,
-            valid_indices,
-            strategy,
-            reach_weight=reach_probs[current_player],
-        )
-        infoset.increment_reach_count()
-        infoset.add_cumulative_utility(sampled_utility)
-
-    return sampled_utility

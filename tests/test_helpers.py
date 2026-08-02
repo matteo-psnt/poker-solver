@@ -75,7 +75,6 @@ def make_test_config(**overrides) -> Config:
 
     Examples:
         make_test_config(seed=42)
-        make_test_config(seed=42, sampling_method="outcome")
         make_test_config(starting_stack=100)
     """
     # Map common shorthand overrides to nested dict structure
@@ -84,7 +83,6 @@ def make_test_config(**overrides) -> Config:
         "starting_stack": ("game", "starting_stack"),
         "small_blind": ("game", "small_blind"),
         "big_blind": ("game", "big_blind"),
-        "sampling_method": ("solver", "sampling_method"),
         "cfr_plus": ("solver", "cfr_plus"),
         "iteration_weighting": ("solver", "iteration_weighting"),
         # DCFR parameters

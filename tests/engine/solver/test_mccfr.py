@@ -81,9 +81,7 @@ class TestMCCFRSolver:
         ActionModel(make_test_config())
         card_abs = DummyCardAbstraction()
         # Use external sampling which updates strategy_sum for all actions
-        solver, storage = build_test_solver(
-            make_test_config(seed=42, sampling_method="external"), card_abs
-        )
+        solver, storage = build_test_solver(make_test_config(seed=42), card_abs)
 
         # Train for enough iterations to update strategies
         for _ in range(10):

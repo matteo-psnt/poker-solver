@@ -10,22 +10,6 @@ def edit_solver_settings(ctx: CliContext, config: Config) -> Config:
     print("Solver Settings")
     print("-" * 40)
 
-    sampling = prompts.select(
-        ctx,
-        "Sampling method:",
-        choices=[
-            "external (lower variance, recommended for production)",
-            "outcome (higher variance, faster per iteration)",
-        ],
-        default=(
-            "outcome (higher variance, faster per iteration)"
-            if config.solver.sampling_method == "outcome"
-            else "external (lower variance, recommended for production)"
-        ),
-    )
-    if sampling is None:
-        return config
-
     cfr_plus = prompts.confirm(
         ctx,
         "Use CFR+? (floors regrets at 0 - ~100x faster convergence)",
@@ -55,7 +39,6 @@ def edit_solver_settings(ctx: CliContext, config: Config) -> Config:
 
     overrides: dict = {
         "solver": {
-            "sampling_method": "outcome" if "outcome" in sampling else "external",
             "cfr_plus": cfr_plus,
             "iteration_weighting": iteration_weighting,
         }

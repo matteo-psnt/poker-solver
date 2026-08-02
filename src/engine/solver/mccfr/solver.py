@@ -20,7 +20,7 @@ from . import chance, traversal
 
 class MCCFRSolver:
     """
-    Monte Carlo CFR with external sampling or outcome sampling.
+    Monte Carlo CFR with external sampling.
 
     External sampling (default):
     - Explores all actions for traversing player
@@ -69,14 +69,10 @@ class MCCFRSolver:
         return self.storage.num_infosets()
 
     def train_iteration(self) -> float:
-        """Execute one MCCFR iteration using configured sampling method."""
+        """Execute one external-sampling MCCFR iteration."""
         state = self.deal_initial_state()
         traversing_player = self.iteration % 2
-
-        if self.config.solver.sampling_method == "external":
-            util = self._cfr_external_sampling(state, traversing_player)
-        else:
-            util = self._cfr_outcome_sampling(state, traversing_player, [1.0, 1.0])
+        util = self._cfr_external_sampling(state, traversing_player)
 
         self.iteration += 1
         if traversing_player == 1:
@@ -118,17 +114,8 @@ class MCCFRSolver:
     def _cfr_external_sampling(self, state: GameState, traversing_player: int) -> float:
         return traversal.cfr_external_sampling(self, state, traversing_player)
 
-    def _cfr_outcome_sampling(
-        self,
-        state: GameState,
-        traversing_player: int,
-        reach_probs: list[float],
-    ) -> float:
-        return traversal.cfr_outcome_sampling(self, state, traversing_player, reach_probs)
-
     def __str__(self) -> str:
         return (
             f"MCCFRSolver(iteration={self.iteration}, infosets={self.num_infosets()}, "
-            f"sampling={self.config.solver.sampling_method}, "
             f"stack={self.config.game.starting_stack})"
         )

@@ -105,7 +105,6 @@
       "min_strategy_prob": 1e-06
     },
     "solver": {
-      "sampling_method": "external",
       "cfr_plus": true,
       "iteration_weighting": "none",
       "dcfr_alpha": 1.5,

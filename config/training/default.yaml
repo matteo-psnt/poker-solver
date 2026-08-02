@@ -48,7 +48,6 @@
 #   # Sampling method options:
 #   # - "external": Lower variance, slower (recommended for production)
 #   # - "outcome": Higher variance, faster (good for testing)
-#   # sampling_method: "external"  # default: "external"
 #
 #   # CFR+ regret floor. Off by default: the floor locks in sampling noise under
 #   # MCCFR (Burch 2017); DCFR's beta discount decays negative regrets instead.
