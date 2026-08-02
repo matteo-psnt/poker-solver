@@ -20,6 +20,8 @@ def _fake_config(runs_dir: str = "data/runs", abstraction: str = "quick_test") -
     return SimpleNamespace(
         training=SimpleNamespace(runs_dir=runs_dir, num_iterations=2000),
         card_abstraction=SimpleNamespace(config=abstraction),
+        # train_static applies the run's own log level once loaded.
+        system=SimpleNamespace(log_level="INFO"),
     )
 
 

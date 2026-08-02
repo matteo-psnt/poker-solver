@@ -52,15 +52,16 @@ def test_resolve_run_dir_missing_raises_system_exit(tmp_path):
         _base.resolve_run_dir("nope", str(tmp_path))
 
 
-def test_write_result_is_namespaced_by_op_and_no_clobber(tmp_path):
-    """train and evaluate results must coexist under distinct filenames."""
-    _base.write_result(tmp_path, {"op": "train-static", "run_id": "r"})
-    _base.write_result(tmp_path, {"op": "evaluate", "run_id": "r"})
+def test_no_command_writes_a_self_overwriting_result_file():
+    """The run dir must not accumulate ``<op>_result.json``.
 
-    train_json = json.loads((tmp_path / "train-static_result.json").read_text())
-    eval_json = json.loads((tmp_path / "evaluate_result.json").read_text())
-    assert train_json["op"] == "train-static"
-    assert eval_json["op"] == "evaluate"
+    It namespaced by op but not by invocation, so a repeated op overwrote
+    itself -- a thirty-leg run kept one summary. The durable records are the
+    run's event log and evals/ + the ledger.
+    """
+    from src.interfaces.cli.commands import _base
+
+    assert not hasattr(_base, "write_result")
 
 
 def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
@@ -95,7 +96,7 @@ def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
     payload = json.loads(captured.out)  # would raise if stdout were polluted
     assert payload["op"] == "train-static"
     assert payload["run_id"] == "run-xyz"
-    assert (tmp_path / "run-xyz" / "train-static_result.json").exists()
+    assert not (tmp_path / "run-xyz").exists()  # the transport creates no files of its own
 
 
 def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
@@ -138,9 +139,7 @@ def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
         "base_seed": base_seed,
         "pair_samples_mbb": samples,
     }
-    payload_path = eval_ledger.write_payload(
-        run_dir, {"results": results}, eval_ledger.eval_slug(knobs)
-    )
+    slug = eval_ledger.eval_slug(knobs)
     provenance = eval_ledger.RunProvenance(
         run_id=run_id,
         git_commit="cafebabe" * 5,
@@ -156,10 +155,11 @@ def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples):
         infosets=10,
         knobs=knobs,
         results=results,
-        result_path=payload_path,
+        result_path=run_dir / "evals" / f"{slug}.json",
         timestamp="2026-07-17T00:00:00",
     )
-    eval_ledger.append_record(record, led_path)
+    eval_ledger.write_eval(run_dir, record, slug)
+    eval_ledger.append_record(eval_ledger.ledger_row(record), led_path)
 
 
 def test_cmd_ledger_lists_rows(tmp_path):
@@ -177,6 +177,7 @@ def test_cmd_ledger_lists_rows(tmp_path):
             method=None,
             since=None,
             rebuild=False,
+            migrate=False,
             runs_dir=str(tmp_path),
         )
     )
@@ -315,6 +316,7 @@ def _ledger_ns(led, tmp_path, **over):
         "method": None,
         "since": None,
         "rebuild": False,
+        "migrate": False,
         "runs_dir": str(tmp_path),
     }
     base.update(over)

@@ -8,7 +8,6 @@ actually measured beside.
 """
 
 import dataclasses
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +16,9 @@ from typing import Any
 from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
+from src.pipeline.services.runs import load_run_metadata
+from src.pipeline.training.run_tracker import RunMetadata
+from src.shared import leg_log, records, run_events
 
 
 @dataclass(frozen=True)
@@ -148,18 +150,15 @@ class Baseline:
 
 def load_baseline(path: Path = DEFAULT_BASELINE_PATH) -> Baseline | None:
     """Current baseline pointer, or None if none has been promoted."""
-    if not path.exists():
+    data = records.read_snapshot(path)
+    if data is None or "run_id" not in data:
         return None
-    try:
-        data = json.loads(path.read_text())
-        return Baseline(
-            run_id=data["run_id"],
-            rationale=data.get("rationale", ""),
-            promoted_at=data.get("promoted_at", ""),
-            checkpoint_iteration=data.get("checkpoint_iteration"),
-        )
-    except (OSError, ValueError, KeyError):
-        return None
+    return Baseline(
+        run_id=data["run_id"],
+        rationale=data.get("rationale", ""),
+        promoted_at=data.get("promoted_at", ""),
+        checkpoint_iteration=data.get("checkpoint_iteration"),
+    )
 
 
 def promote_baseline(
@@ -173,8 +172,9 @@ def promote_baseline(
 
     ``rationale`` is required by the caller rather than optional: a baseline that
     moved for a reason nobody wrote down is how a lineage becomes unauditable.
-    Written via a temp file and an atomic replace so a kill mid-write cannot leave
-    the pointer unreadable.
+    Written through :mod:`src.shared.records`, so it gains a schema version and
+    keeps the atomic replace that stops a kill mid-write leaving the pointer
+    unreadable.
     """
     baseline = Baseline(
         run_id=run_id,
@@ -182,10 +182,7 @@ def promote_baseline(
         promoted_at=datetime.now(UTC).isoformat(),
         checkpoint_iteration=checkpoint_iteration,
     )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(dataclasses.asdict(baseline), indent=2))
-    tmp.replace(path)
+    records.write_snapshot(path, dataclasses.asdict(baseline), records.REGISTRY["baseline.json"])
     return baseline
 
 
@@ -350,3 +347,124 @@ def experiment_report(
         arms=arms,
         notes=notes,
     )
+
+
+@dataclass(frozen=True)
+class RunDigest:
+    """Everything recorded about one run, joined into a single view.
+
+    A run's evidence is spread across five artifacts written by four subsystems
+    -- identity in ``.run.json``, the curve in ``progress.jsonl``, scores in the
+    eval ledger, the ladder in the checkpoint manifest, deaths in the share's
+    leg records. Answering "is this run trustworthy yet" meant opening all of
+    them and holding the joins in your head.
+
+    ``gaps`` is the part that matters: what this run cannot yet support a
+    conclusion about. A missing rung and an unscored run look identical in a
+    plot, and a run whose coverage stopped climbing is a different object from
+    one still opening up the tree.
+    """
+
+    run_id: str
+    config_name: str
+    status: str
+    experiment_id: str | None
+    arm: str | None
+    parent_run_id: str | None
+    git_commit: str | None
+    git_dirty: bool | None
+    card_abstraction_hash: str | None
+    iterations: int
+    runtime_seconds: float
+    attempts: int
+    progress: list[dict[str, Any]]
+    coverage_flat_from: int | None
+    curve: CurveOutput
+    legs: list[dict[str, Any]]
+    gaps: list[str]
+
+
+def run_digest(
+    run_dir: Path,
+    *,
+    ledger_path: Path = eval_ledger.DEFAULT_LEDGER_PATH,
+    tier_index: int = 0,
+    legs_dir: Path | None = None,
+) -> RunDigest:
+    """Join every record this run left behind. Pure reader.
+
+    ``legs_dir`` points at a local copy of the share's ``legs/`` (``just fetch``
+    brings one down). Omitted for a purely local run, which has no legs.
+    """
+    metadata = load_run_metadata(run_dir)
+    progress = run_events.checkpoints(run_events.read(run_dir))
+    curve = exploitability_curve(run_dir, ledger_path=ledger_path, tier_index=tier_index)
+    legs = (
+        [row for row in leg_log.read_legs(legs_dir) if row["run_id"] == run_dir.name]
+        if legs_dir
+        else []
+    )
+
+    return RunDigest(
+        run_id=metadata.run_id,
+        config_name=metadata.config_name,
+        status=metadata.status,
+        experiment_id=metadata.experiment_id,
+        arm=metadata.arm,
+        parent_run_id=metadata.parent_run_id,
+        git_commit=metadata.git_commit,
+        git_dirty=metadata.git_dirty,
+        card_abstraction_hash=metadata.card_abstraction_hash,
+        iterations=metadata.iterations,
+        runtime_seconds=metadata.runtime_seconds,
+        attempts=len(metadata.attempts),
+        progress=progress,
+        coverage_flat_from=run_events.plateau_iteration(progress),
+        curve=curve,
+        legs=legs,
+        gaps=_digest_gaps(metadata, progress, curve, legs),
+    )
+
+
+def _digest_gaps(
+    metadata: RunMetadata,
+    progress: list[dict[str, Any]],
+    curve: CurveOutput,
+    legs: list[dict[str, Any]],
+) -> list[str]:
+    """What this run cannot yet support a conclusion about.
+
+    Stated rather than left to be noticed. Every entry here has been an actual
+    source of a wrong reading in this project's history: an unscored ladder read
+    as a flat curve, a single point read as convergence, a dirty tree read as a
+    reproducible result.
+    """
+    gaps = []
+    if not progress:
+        gaps.append(
+            "no progress history — the run predates it, or died before its first checkpoint"
+        )
+    if not curve.points:
+        gaps.append(
+            f"no evaluations recorded — `evaluate --run {metadata.run_id}` to start the curve"
+        )
+    elif len(curve.points) == 1:
+        gaps.append("one curve point: a single score cannot show convergence, only a level")
+    if curve.missing_iterations:
+        rungs = ", ".join(f"{i:,}" for i in curve.missing_iterations[:6])
+        more = (
+            ""
+            if len(curve.missing_iterations) <= 6
+            else f" (+{len(curve.missing_iterations) - 6} more)"
+        )
+        gaps.append(f"unscored ladder rungs: {rungs}{more}")
+    if metadata.card_abstraction_hash is None:
+        gaps.append("no abstraction hash recorded — this run cannot be evaluated faithfully")
+    if metadata.git_dirty:
+        gaps.append("trained from a dirty working tree — the commit does not identify the code")
+    if metadata.status != "completed":
+        gaps.append(f"status is '{metadata.status}', not 'completed'")
+    unresolved = [row for row in legs if row["cause"] not in leg_log.TERMINAL_CAUSES]
+    if unresolved:
+        gaps.append(f"{len(unresolved)} leg(s) with no terminal record — `just legs` to reconcile")
+    return gaps

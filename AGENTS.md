@@ -77,6 +77,10 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
   look arbitrary but are measured (UserSubscription mode, `Dals_v6` not
   `Dalds_v6`, Gen2-only images, the SKU policy) are documented in
   `infra/README.md`; read it before changing pool config.
+  **`just legs` is how you find out why a leg died** — the run log cannot
+  record a death (the container is gone first), so `run_leg.sh` writes its own
+  account to `<share>/legs/` and `legs` reconciles the ones whose trap never ran
+  against Batch's view.
 - `uv run pytest -m "not slow"` — fast gate; `uv run pytest` — full suite.
 - `uv run pre-commit run --all-files` — full quality gate (ruff lint+format,
   ty, import-linter, deptry, vulture). Run before handing off changes.

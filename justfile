@@ -152,6 +152,11 @@ pool-status:
 autoscale-check:
     uv run poker-solver-run autoscale-check
 
+# What happened to every leg, including the ones that died without saying so.
+[doc("Per-leg outcomes from the share, reconciled against Batch.")]
+legs *flags:
+    uv run poker-solver-run legs {{flags}}
+
 # A leg's log, from the share by default (survives node teardown).
 [doc("Read a leg's log. Args: [flags...] e.g. --task <id> or --list")]
 leg-log *flags:

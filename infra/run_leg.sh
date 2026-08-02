@@ -50,6 +50,40 @@ ARCHIVE="$SHARE/archive"
 # not surviving. `${LEG_LOG:-/dev/null}` because this is defined before it.
 log() { echo "[run_leg $(date -u +%H:%M:%S)] $*" | tee -a "${LEG_LOG:-/dev/null}"; }
 
+# --- leg outcome record ------------------------------------------------------- #
+# .run.json cannot record how an attempt died -- a killed container is gone
+# first. This writes the node's own account to the share: `started` on entry,
+# a terminal event from the EXIT trap. `just legs` fills in the deaths the trap
+# never survives (OOM, SIGKILL, node loss) from Batch's view.
+#
+# SYSTEM python3, and leg_log is stdlib-only: this must work before `uv sync`,
+# so a leg dying during dependency install still leaves a record. Never fatal.
+leg_record() {
+  python3 - "$CODE" "$1" "${2:-}" <<'PY' 2>/dev/null || true
+import sys
+sys.path.insert(0, sys.argv[1])
+import os
+from src.shared.leg_log import write_node_record
+
+event, cause = sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None)
+code = os.environ.get("LEG_EXIT_CODE") or ""
+write_node_record(
+    os.environ["LEG_SHARE"],
+    task_id=os.environ.get("AZ_BATCH_TASK_ID", "local"),
+    job_id=os.environ.get("AZ_BATCH_JOB_ID", ""),
+    node_id=os.environ.get("AZ_BATCH_NODE_ID", ""),
+    run_id=os.environ.get("RUN_ID", ""),
+    op=os.environ.get("RUN_OP") or "train-static",
+    config=os.environ.get("RUN_CONFIG", ""),
+    target_iteration=os.environ.get("RUN_TO", ""),
+    event=event,
+    cause=cause,
+    exit_code=int(code) if code.isdigit() else None,
+)
+PY
+}
+export LEG_SHARE="$SHARE"
+
 # --- publish ----------------------------------------------------------------- #
 # Idempotent and safe to call while training continues. `cp -u` skips rungs
 # already on the share, so the cost tracks what is NEW rather than the run's total
@@ -158,7 +192,36 @@ publish_log() {
 
 # Publish on ANY exit -- success, failure, or cancellation. An operator-cancelled
 # task still leaves its progress on the share.
-trap publish_all EXIT
+#
+# SIGNAL TRAPS FIRST, not optional. Reading `$?` in the EXIT trap does NOT see a
+# signal death: killed while blocked on a foreground child, the shell reports the
+# last COMPLETED command's status -- zero. Measured: SIGTERM ran the EXIT trap
+# with `$? = 0` and exited 143, so `just cancel` recorded a clean completion and
+# was never reconciled. Re-raising via `exit` sets what the trap reads.
+on_signal() {
+  exit $((128 + $1))
+}
+trap 'on_signal 15' TERM
+trap 'on_signal 2' INT
+
+# `$?` must be read as the trap's FIRST statement: anything before it overwrites
+# the status the leg exited with.
+on_exit() {
+  LEG_EXIT_CODE=$?
+  export LEG_EXIT_CODE
+  kill "${WATCHER:-}" 2>/dev/null || true
+  publish_all
+  case "$LEG_EXIT_CODE" in
+    0)   leg_record finished "${LEG_OUTCOME:-completed}" ;;
+    124) leg_record finished timeout ;;        # RUN_TIMEOUT guard expired: a hang
+    130|143) leg_record finished cancelled ;;  # SIGINT / SIGTERM: operator or Batch
+    137) leg_record finished killed ;;         # SIGKILL from outside: the OOM killer
+    *)   leg_record finished failed ;;
+  esac
+}
+trap on_exit EXIT
+
+leg_record started
 
 # --- watcher ----------------------------------------------------------------- #
 # Polls the checkpoint manifest rather than hooking the trainer, so the training
@@ -334,7 +397,6 @@ fi
 
 watch_rungs &
 WATCHER=$!
-trap 'kill "$WATCHER" 2>/dev/null || true; publish_all' EXIT
 
 # --- run --------------------------------------------------------------------- #
 # Optional flags are appended only when set: passing `--arm ""` would record an
@@ -541,7 +603,12 @@ for item in json.loads(sys.argv[1]):
   # twice. A partial result is not a failure to retry; the gap is visible in this
   # log and absent from the ledger. Only a clean sweep of failures is worth a
   # retry, since that is what a transient node fault looks like.
-  [ "$ok" -gt 0 ] && exit 0
+  # "exit 0 so Batch does not retry" is not "this leg succeeded": 1 of 30 rungs
+  # would be recorded as `completed`. LEG_OUTCOME carries what the code drops.
+  if [ "$ok" -gt 0 ]; then
+    [ "$bad" -gt 0 ] && export LEG_OUTCOME=partial
+    exit 0
+  fi
   exit 1
 fi
 
@@ -566,9 +633,18 @@ set -o pipefail
 publish_log
 # 124 is timeout's own "deadline expired"; surface it as itself rather than as a
 # training failure, so `just jobs` distinguishes a hang from a crash.
-if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
-  log "TIMEOUT after $RUN_TIMEOUT -- leg killed; published rungs are on the share"
+# 124 and 137 are DIFFERENT deaths. `timeout` returns 124 whenever its deadline
+# expires, including when its own --kill-after SIGKILL fires, so 124 always means
+# the guard; 137 is SIGKILL from elsewhere -- on a training node, the OOM killer.
+# Calling an OOM a hang would mislead AND, being terminal, stop `just legs` from
+# asking Batch, the only source that can confirm it.
+if [ "$rc" = 124 ]; then
+  log "TIMEOUT after $RUN_TIMEOUT -- guard fired; published rungs are on the share"
   exit 124
+fi
+if [ "$rc" = 137 ]; then
+  log "KILLED (SIGKILL, not the guard -- suspect OOM); published rungs are on the share"
+  exit 137
 fi
 [ "$rc" = 0 ] || exit "$rc"
 

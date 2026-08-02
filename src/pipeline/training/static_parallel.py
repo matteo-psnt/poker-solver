@@ -24,6 +24,7 @@ import multiprocessing as mp
 import random
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +37,9 @@ from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.pipeline.training.abstraction_resolver import ComboAbstractionResolver
+from src.shared import run_events
 from src.shared.config import Config
+from src.shared.log import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +124,9 @@ def _worker_entry(
     There is no message loop: nothing needs saying between workers. The whole
     body is attach, seed, train, report.
     """
+    # Spawned: no logging config is inherited, so without this everything
+    # _build_local logs falls below lastResort's WARNING floor.
+    configure_logging(config.system.log_level)
     storage = None
     try:
         action_model, abstraction, tree = _build_local(config, abstraction)
@@ -285,10 +291,36 @@ def train_static_parallel(
 
             # Checkpoint per chunk, so the bound on loss is the chunk, not the run.
             if checkpoint_dir is not None:
+                write_started = time.time()
                 save_checkpoint(storage, checkpoint_dir, done, retain_every=checkpoint_retain_every)
+                checkpoint_seconds = time.time() - write_started
+                coverage = storage.coverage()
                 logger.info(
-                    f"[static] {done:,}/{num_iterations:,} "
-                    f"({storage.coverage():.1%} coverage) checkpointed"
+                    f"[static] {done:,}/{num_iterations:,} ({coverage:.1%} coverage) checkpointed"
+                )
+                # The one place a run can record what it looked like mid-flight.
+                # After save_checkpoint, so a row never describes state the
+                # arrays did not reach.
+                leg_elapsed = time.time() - started
+                run_events.append(
+                    checkpoint_dir,
+                    run_events.CHECKPOINT,
+                    ts=datetime.now(UTC).isoformat(),
+                    iteration=done,
+                    # Scoped to the LEG: a resumed leg restarts its clock while
+                    # `iteration` keeps counting, so an absolute iteration over a
+                    # leg's elapsed time reports a rate the run never achieved.
+                    leg_iterations=done - start,
+                    leg_elapsed_s=round(leg_elapsed, 3),
+                    iters_per_sec=(
+                        round((done - start) / leg_elapsed, 1) if leg_elapsed > 0 else 0.0
+                    ),
+                    touched_rows=storage.num_touched_infosets(),
+                    num_rows=tree.num_rows,
+                    coverage=round(coverage, 6),
+                    mean_visits_per_touched=round(storage.mean_visits_per_touched_infoset(), 3),
+                    dropped_updates=dropped,
+                    checkpoint_seconds=round(checkpoint_seconds, 3),
                 )
 
         elapsed = time.time() - started

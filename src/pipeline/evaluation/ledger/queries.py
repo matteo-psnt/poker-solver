@@ -7,8 +7,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.pipeline.evaluation.ledger.records import DEFAULT_LEDGER_PATH, record_instant
+from src.pipeline.evaluation.ledger.records import (
+    DEFAULT_LEDGER_PATH,
+    ledger_row,
+    payload_pointer,
+    record_instant,
+)
 from src.pipeline.evaluation.ledger.tiers import tier_key, tier_label
+from src.shared import records as record_store
 from src.shared.jsonio import json_default
 
 logger = logging.getLogger(__name__)
@@ -25,24 +31,18 @@ def read_records(ledger_path: Path = DEFAULT_LEDGER_PATH) -> list[dict[str, Any]
     would otherwise make the whole ledger unreadable -- including by
     ``ledger --rebuild``, the one command able to repair it.
     """
-    if not ledger_path.exists():
-        return []
-    records = []
-    with ledger_path.open(encoding="utf-8") as handle:
-        for number, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except ValueError:
-                logger.warning(
-                    "Skipping unparseable ledger line %d in %s; `ledger --rebuild` "
-                    "can regenerate rows that have a per-run record.",
-                    number,
-                    ledger_path,
-                )
-    return sorted(records, key=record_instant)
+
+    def _report(number: int) -> None:
+        # The substrate skips a torn line; only this caller can name the repair.
+        logger.warning(
+            "Skipping unparseable ledger line %d in %s; `ledger --rebuild` "
+            "can regenerate rows that have a per-run record.",
+            number,
+            ledger_path,
+        )
+
+    rows = record_store.read_log(ledger_path, on_bad_line=_report)
+    return sorted(rows, key=record_instant)
 
 
 def rebuild_ledger(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) -> tuple[int, int]:
@@ -58,14 +58,30 @@ def rebuild_ledger(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) -> t
     existing = read_records(ledger_path)
 
     recovered: dict[str, dict[str, Any]] = {}
-    for path in sorted(runs_dir.glob("*/evals/record-*.json")):
-        try:
-            record = json.loads(path.read_text())
-        except (OSError, ValueError):
+    # ANY eval document, not just the ones that happened to have a record file.
+    # Provenance and samples used to live in different files, so 59 of the 78
+    # evals on disk could not be rebuilt at all.
+    for path in sorted(runs_dir.glob("*/evals/*.json")):
+        # Legacy names are skipped, not read. `migrate_eval_files` is
+        # deliberately non-destructive, so during the migration window both
+        # layouts sit in one directory -- and a legacy record points at the OLD
+        # filename, so reading both enters the same evaluation twice under two
+        # pointers. Measured: 63 ledger rows became 110.
+        if path.name.startswith(("eval-", "record-")):
             continue
-        key = record.get("result_path")
+        document = record_store.read_snapshot(path)
+        if document is None or "run_id" not in document:
+            continue
+        # The ledger is the COMPARISON index, so a row that cannot be tiered has
+        # no business in it: with no knobs and no timestamp it hashes into a tier
+        # of (method, None, ...) and sorts to year 1 AD -- and since tiers rank
+        # by coverage, a pile of them would become the DEFAULT curve. The
+        # document stays on disk; only the index is withheld.
+        if not document.get("knobs") or not document.get("timestamp"):
+            continue
+        key = document.get("result_path")
         if key:
-            recovered[key] = record
+            recovered[key] = ledger_row(document)
 
     # Every row without a record file is kept verbatim, duplicates included. The
     # historical ledger genuinely contains rows sharing a result_path (an eval
@@ -144,3 +160,97 @@ def _series_rank(item: tuple[tuple[Any, ...], dict[int, dict[str, Any]]]) -> tup
     """Most-covered series first; ties broken by the deepest checkpoint reached."""
     _, points = item
     return (-len(points), -max(points, default=0))
+
+
+def migrate_eval_files(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) -> dict[str, int]:
+    """Convert the old three-shape eval layout into one document per evaluation.
+
+    An evaluation used to be a payload (samples, almost no provenance), a record
+    (provenance, a four-key summary), and a ledger row identical to the record.
+    Provenance and samples lived in different files, so most evals could not be
+    rebuilt from either alone -- on the tree this was written against, 59 of 78
+    payloads had no matching record.
+
+    The LEDGER is the fullest history, not the records, so it is the key: each
+    row names a payload, and the row supplies the provenance that payload lacks.
+    Merging the two yields a document strictly richer than either.
+
+    Forward-only and non-destructive: the originals are left in place for an
+    operator to delete once satisfied. Returns counts, so a caller can report
+    what happened rather than claim success.
+    """
+    rows_by_pointer = {
+        r.get("result_path"): r for r in read_records(ledger_path) if r.get("result_path")
+    }
+    counts = {"merged": 0, "payload_only": 0, "record_only": 0, "skipped": 0}
+
+    for payload_path in sorted(runs_dir.glob("*/evals/eval-*.json")):
+        slug = payload_path.name.removeprefix("eval-").removesuffix(".json")
+        run_dir = payload_path.parent.parent
+        target = payload_path.parent / f"{slug}.json"
+        if target.exists():
+            counts["skipped"] += 1
+            continue
+
+        payload = record_store.read_snapshot(payload_path)
+        if payload is None:
+            counts["skipped"] += 1
+            continue
+
+        record = record_store.read_snapshot(payload_path.parent / f"record-{slug}.json")
+        if record is None:
+            record = rows_by_pointer.get(payload_pointer(payload_path, run_dir.name))
+        if record is None:
+            # No provenance anywhere. Kept rather than dropped: the measurement
+            # is still real, and a document that says less is better than one
+            # that invents what it cannot know.
+            document = dict(payload)
+            counts["payload_only"] += 1
+        else:
+            document = {**record, "results": payload.get("results", record.get("results", {}))}
+            counts["merged"] += 1
+        document["result_path"] = payload_pointer(target, run_dir.name)
+        record_store.write_snapshot(target, document, record_store.REGISTRY["evals/*.json"])
+
+    # The move renames the file a row points at, so every row naming an old
+    # payload must be re-pointed. Without this the rebuilt ledger holds the same
+    # evaluation twice -- once under the old pointer, once under the new -- which
+    # is exactly the silent duplication the ledger exists to prevent. Measured on
+    # the real tree: 63 rows became 110.
+    _repoint_ledger(ledger_path)
+
+    # Records whose payload is gone still carry provenance and a summary.
+    for record_path in sorted(runs_dir.glob("*/evals/record-*.json")):
+        slug = record_path.name.removeprefix("record-").removesuffix(".json")
+        target = record_path.parent / f"{slug}.json"
+        if target.exists():
+            continue
+        record = record_store.read_snapshot(record_path)
+        if record is None:
+            counts["skipped"] += 1
+            continue
+        record["result_path"] = payload_pointer(target, record_path.parent.parent.name)
+        record_store.write_snapshot(target, record, record_store.REGISTRY["evals/*.json"])
+        counts["record_only"] += 1
+
+    return counts
+
+
+def _repoint_ledger(ledger_path: Path) -> None:
+    """Re-point ledger rows at the consolidated document they now live in.
+
+    ``<run>/evals/eval-<slug>.json`` becomes ``<run>/evals/<slug>.json``. Written
+    through a temporary file and replaced, so a kill cannot leave the ledger
+    half-repointed.
+    """
+    rows = read_records(ledger_path)
+    if not rows:
+        return
+    for row in rows:
+        pointer = str(row.get("result_path") or "")
+        head, _, name = pointer.rpartition("/")
+        if name.startswith("eval-"):
+            row["result_path"] = f"{head}/{name.removeprefix('eval-')}"
+    tmp = ledger_path.with_suffix(ledger_path.suffix + ".tmp")
+    tmp.write_text("".join(json.dumps(r, default=json_default) + "\n" for r in rows))
+    tmp.replace(ledger_path)

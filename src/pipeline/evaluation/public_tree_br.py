@@ -55,6 +55,7 @@ from src.engine.solver.infoset_index import preflop_hand_index
 from src.engine.solver.policy_lookup import blueprint_action_distribution
 from src.engine.solver.policy_source import ScorableBlueprint
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.shared.log import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -475,6 +476,9 @@ def _walk_worker(
     does -- deriving the seat value here would duplicate that arithmetic in two
     places and let the two drift.
     """
+    # Spawned: logging config does not inherit, and factory() rebuilds the
+    # blueprint, which logs.
+    configure_logging()
     engine = PublicTreeBestResponse(factory(), config, starting_stack=starting_stack)
     return engine.run_walk(br_seat, button)
 

@@ -9,7 +9,6 @@ from typing import Any
 from src.interfaces.cli.commands._base import (
     Command,
     resolve_run_dir,
-    write_result,
 )
 from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
@@ -128,7 +127,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     stderr — keeping the machine-readable payload clean.
     """
     run_dir = resolve_run_dir(args.run, args.runs_dir)
-    payload = services.evaluate_and_record(
+    return services.evaluate_and_record(
         run_dir,
         method=args.method,
         lbr=LBRConfig(
@@ -157,8 +156,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         at_iteration=args.at,
         ledger_path=Path(args.ledger),
     )
-    write_result(run_dir, payload)
-    return payload
 
 
 def render(payload: dict[str, Any]) -> None:
