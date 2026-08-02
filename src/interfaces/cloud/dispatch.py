@@ -73,7 +73,14 @@ def stage_and_queue(
     for index, leg in enumerate(legs):
         nonce = index * NONCE_CEILING + secrets.randbelow(NONCE_CEILING)
         task = spec.task_id(leg.label, now, nonce)
-        batch.submit_leg(client, job_id, task, leg)
+        # A precompute is NOT retried. Everything else here is cheap to repeat --
+        # training resumes from its last published rung, scoring is idempotent --
+        # but a precompute has no partial-progress marker (`metadata.json` is
+        # written only on success), so a retry restarts the whole enumeration.
+        # A deterministic failure would then bill three full runs to fail three
+        # times, which is the one shape where the default retry is a liability.
+        retries = 0 if leg.op == spec.PRECOMPUTE else batch.TASK_RETRIES
+        batch.submit_leg(client, job_id, task, leg, retries=retries)
         queued.append(Queued(task_id=task, job_id=job_id, label=leg.label))
 
     return {

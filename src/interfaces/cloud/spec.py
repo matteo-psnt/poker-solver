@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 TRAIN = "train"
 EVALUATE = "evaluate"
 REPAIR_LADDER = "repair-ladder"
+PRECOMPUTE = "precompute"
 
 DEFAULT_TIMEOUT = "6h"
 DEFAULT_CHECKPOINT_EVERY = 1_000_000
@@ -111,6 +112,7 @@ class LegSpec:
     eval_method: str = ""
     eval_at: str = ""
     eval_flags: tuple[str, ...] = field(default_factory=tuple)
+    force_publish: bool = False
 
     @property
     def label(self) -> str:
@@ -141,11 +143,12 @@ class LegSpec:
             "RUN_EVAL_METHOD": self.eval_method,
             "RUN_EVAL_AT": self.eval_at,
             "RUN_EVAL_FLAGS_JSON": json.dumps(list(self.eval_flags)),
+            "RUN_FORCE_PUBLISH": "1" if self.force_publish else "",
         }
 
     def validate(self) -> None:
         """Reject the submissions that would waste a node rather than fail fast."""
-        if self.op not in (TRAIN, EVALUATE, REPAIR_LADDER):
+        if self.op not in (TRAIN, EVALUATE, REPAIR_LADDER, PRECOMPUTE):
             raise ValueError(f"Unknown op '{self.op}'.")
         if self.op == TRAIN and not self.config and not self.run_id:
             raise ValueError(
@@ -155,6 +158,8 @@ class LegSpec:
             raise ValueError("--to must be a positive ABSOLUTE iteration target, not an increment.")
         if self.op in (EVALUATE, REPAIR_LADDER) and not self.run_id:
             raise ValueError(f"op '{self.op}' scores an existing run, so --run is required.")
+        if self.op == PRECOMPUTE and not self.config:
+            raise ValueError("A precompute leg needs --config (an abstraction config stem).")
         for override in self.sets:
             if "=" not in override:
                 raise ValueError(f"--set expects key=value, got '{override}'.")
