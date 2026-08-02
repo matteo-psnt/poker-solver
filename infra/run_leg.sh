@@ -23,12 +23,12 @@
 #   CODE_DIR        where the task already extracted that tarball
 #   RUN_EXPERIMENT  experiment id      RUN_ARM     arm label
 #   RUN_PARENT      parent run id
-#   RUN_SETS_HEX    hex-encoded, space-separated k=v config overrides
+#   RUN_SETS_JSON   JSON array of k=v config overrides
 #   RUN_WORKERS     worker count (empty = all CPUs)
 #   RUN_CHECKPOINT_EVERY  static only: checkpoint every N iterations
 #   RUN_OP          train (default) | evaluate
 #   RUN_EVAL_METHOD lbr | exact_br | rollout      RUN_EVAL_AT  comma-separated rungs
-#   RUN_EVAL_FLAGS_HEX  hex-encoded extra evaluate flags
+#   RUN_EVAL_FLAGS_JSON JSON array of extra evaluate flags
 set -euo pipefail
 
 WORK=/mnt/work
@@ -287,14 +287,46 @@ ARGS=()
 [ -n "${RUN_EXPERIMENT:-}" ] && ARGS+=(--experiment "$RUN_EXPERIMENT")
 [ -n "${RUN_ARM:-}" ] && ARGS+=(--arm "$RUN_ARM")
 [ -n "${RUN_PARENT:-}" ] && ARGS+=(--parent "$RUN_PARENT")
-# Hex-decoded: see the justfile -- a config override's value contains `=`, which
-# Batch's KEY=VALUE environment-setting parser rejects.
-RUN_SETS=""
-if [ -n "${RUN_SETS_HEX:-}" ]; then
-  RUN_SETS=$(python3 -c "import sys; sys.stdout.write(bytes.fromhex(sys.argv[1]).decode())" "$RUN_SETS_HEX")
-fi
-if [ -n "$RUN_SETS" ]; then
-  for kv in $RUN_SETS; do [ -n "$kv" ] && ARGS+=(--set "$kv"); done
+# A JSON ARRAY, not a space-separated string. The submitter passes environment
+# settings as typed name/value pairs, so the old hex encoding (which existed
+# only because the `az` CLI parses `--environment-settings` as KEY=VALUE, and a
+# config override's value contains `=`) is gone. JSON stays because these are
+# LISTS whose elements may contain spaces: the previous `for kv in $RUN_SETS`
+# split on whitespace, silently cutting any such value in half.
+#
+# NUL-separated, read with `read -d ''`, because a newline inside a value would
+# defeat line-splitting the same way a space defeated word-splitting. `read -d`
+# rather than `mapfile -d`: the latter needs bash 4.4+, and a node-side script
+# should not carry a bash-version floor it does not need.
+# Decoded to a FILE first, and a decode failure is FATAL. Reading straight from
+# a process substitution would hide the failure: `set -e` does not see into it,
+# so a malformed payload would yield zero overrides and the leg would train with
+# the BASE config -- an experiment arm silently running as its own control, and
+# recorded that way in .run.json. That exact class of silent rebucketing has
+# already cost one curve.
+if [ -n "${RUN_SETS_JSON:-}" ]; then
+  SETS_FILE="$WORK/sets-${AZ_BATCH_TASK_ID:-local}.nul"
+  python3 -c '
+import json, sys
+for item in json.loads(sys.argv[1]):
+    sys.stdout.write(item + "\0")
+' "$RUN_SETS_JSON" > "$SETS_FILE" || {
+    log "FATAL could not decode RUN_SETS_JSON: $RUN_SETS_JSON"
+    exit 1
+  }
+  n_sets=0
+  while IFS= read -r -d '' kv; do
+    if [ -n "$kv" ]; then
+      ARGS+=(--set "$kv")
+      n_sets=$((n_sets + 1))
+      log "  override: $kv"
+    fi
+  done < "$SETS_FILE"
+  # Count the OVERRIDES, not ${#ARGS[@]} -- ARGS already holds the --workers /
+  # --experiment / --arm / --parent pairs, so a tagged leg with zero overrides
+  # would report eight. The one diagnostic this block exists to emit has to be
+  # the one number that can be trusted.
+  log "overrides: $n_sets from RUN_SETS_JSON"
 fi
 
 # Wall-clock ceiling for the training process itself. The task-level
@@ -347,12 +379,26 @@ fi
 # RUN_EVAL_AT takes a COMMA-SEPARATED list of rungs, scored in one task. The
 # fetch dominates the cost, so a whole convergence curve for the price of one.
 if [ "${RUN_OP:-train}" = "evaluate" ]; then
-  EVAL_FLAGS=""
-  if [ -n "${RUN_EVAL_FLAGS_HEX:-}" ]; then
-    EVAL_FLAGS=$(python3 -c "import sys; sys.stdout.write(bytes.fromhex(sys.argv[1]).decode())" "$RUN_EVAL_FLAGS_HEX")
+  # A JSON array, decoded exactly like RUN_SETS_JSON above: an eval flag's
+  # value can contain a space, which the old word-split form could not carry.
+  # Same file-first decode as RUN_SETS_JSON, and fatal for the same reason:
+  # scoring with silently-dropped flags produces a number measured by a
+  # different instrument than the one asked for, which is worse than no number.
+  EXTRA=()
+  if [ -n "${RUN_EVAL_FLAGS_JSON:-}" ]; then
+    FLAGS_FILE="$WORK/evalflags-${AZ_BATCH_TASK_ID:-local}.nul"
+    python3 -c '
+import json, sys
+for item in json.loads(sys.argv[1]):
+    sys.stdout.write(item + "\0")
+' "$RUN_EVAL_FLAGS_JSON" > "$FLAGS_FILE" || {
+      log "FATAL could not decode RUN_EVAL_FLAGS_JSON: $RUN_EVAL_FLAGS_JSON"
+      exit 1
+    }
+    while IFS= read -r -d '' flag; do
+      [ -n "$flag" ] && EXTRA+=("$flag")
+    done < "$FLAGS_FILE"
   fi
-  # shellcheck disable=SC2206
-  EXTRA=($EVAL_FLAGS)
   METHOD="${RUN_EVAL_METHOD:-exact_br}"
   ok=0
   bad=0

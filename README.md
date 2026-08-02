@@ -19,7 +19,7 @@ This solver uses **Monte Carlo Counterfactual Regret Minimization (MCCFR)** with
 - **Rigorous Evaluation**: Local Best Response (LBR) exploitability lower bounds with confidence intervals, recorded to an append-only eval ledger with paired run comparison
 - **Production-Ready Checkpointing**: Async Zarr-based snapshots with resume capability
 - **Reproducibility**: Runs record git provenance, config hashes, and the exact card-abstraction hash; evaluation auto-pins to it
-- **Interactive CLI, Headless CLI & Web UI**: Train, evaluate, and visualize strategies
+- **Cloud-first execution**: training and evaluation run on an autoscale-to-zero Azure Batch pool, dispatched from Python (`src/interfaces/cloud/`). The laptop submits and reads JSON; it does not train.
 
 ## Quick Start
 
@@ -41,23 +41,37 @@ uv sync --group dev
 uv run poker-solver
 ```
 
-The interactive CLI offers: **Train Solver**, **Resume Training**, **View Past Runs**, **Evaluate Solver**, **View Preflop Chart**, and **Combo Abstraction Tools** (precompute abstractions, inspect quality metrics).
+The interactive CLI offers: **Submit Training Leg**, **Score a Run**, **Cloud
+Status**, **View Past Runs**, and **Combo Abstraction Tools**. It is a thin
+client over the cloud: the first two build a submission spec and queue it on
+the pool.
 
-For scripted/remote use there is a headless CLI:
+Everything it does is also a flag-driven subcommand of the single headless
+entrypoint:
 
 ```bash
-uv run poker-solver-run train-static --config production
-uv run poker-solver-run evaluate --run <id> --scorer lookahead
-uv run poker-solver-run ledger                 # browse recorded evaluations
-uv run poker-solver-run compare --a <run> --b <run>   # paired comparison with p-value
+uv run poker-solver-run submit --config production --to 25000000   # queue a leg
+uv run poker-solver-run jobs                                       # what is running
+uv run poker-solver-run score --run <id> --at 10000000,20000000    # one task per rung
+uv run poker-solver-run fetch                                      # bring the JSON record back
+uv run poker-solver-run compare --a <run> --b <run>                # paired comparison with p-value
 ```
 
 ### Training Your First Solver
 
-1. Launch the CLI: `uv run poker-solver`
-2. Select "Train Solver"
-3. Choose a configuration (`quick_test` for a fast smoke run, `production` for a real run)
-4. Training runs with live progress updates and automatic checkpointing
+1. `just create` once, then `just push-data` to publish the card abstractions.
+2. `uv run poker-solver-run submit --config quick_test --to 3000`
+3. Watch with `poker-solver-run jobs`; read the leg with
+   `poker-solver-run logs --task <id>`.
+4. `poker-solver-run fetch` brings the record back and rebuilds the ledger.
+
+The iteration target is **absolute**: re-submitting the same run with the same
+number is a no-op, which is what makes a retry converge instead of training
+twice. Continuing a run is `submit --run <id> --to <larger-number>`; there is no
+separate resume.
+
+`train-static`, `precompute` and `evaluate` still exist as local subcommands —
+they are what a node invokes, and they remain useful for seconds-long probes.
 
 ## Architecture
 
@@ -198,7 +212,7 @@ uv run lint-imports
 ```
 poker-solver/
 ├── src/
-│   ├── interfaces/      # User-facing entrypoints (interactive CLI, headless CLI)
+│   ├── interfaces/      # Entrypoints (interactive CLI, headless CLI) + cloud/ dispatch
 │   ├── pipeline/        # Training, evaluation, abstraction workflows
 │   ├── engine/          # Solver/search internals
 │   ├── core/            # Poker domain foundations (game/actions)
@@ -211,8 +225,8 @@ poker-solver/
 │   ├── runs/            # Training runs and checkpoints
 │   ├── combo_abstraction/  # Precomputed card abstractions
 │   └── eval_ledger.jsonl   # Append-only evaluation ledger
-├── infra/               # Azure Batch training substrate (Terraform + justfile)
-└── justfile             # just submit / jobs / fetch / score
+├── infra/               # Azure Batch substrate (Terraform) + run_leg.sh node wrapper
+└── justfile             # Terraform lifecycle, `panic`, and aliases for the CLI
 ```
 
 ## License

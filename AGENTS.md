@@ -20,12 +20,28 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
 
 ## Commands
 - `uv sync --group dev` — install dependencies.
-- `uv run poker-solver` — interactive CLI.
-- `uv run poker-solver-run` — headless entrypoint: `train-static`,
-  `precompute`, `evaluate`, `curve`, `report`, `promote`, `ledger`, `compare`,
-  `checkpoint-profile`. Every long-running operation is reachable here, so cloud
-  jobs are shell invocations of this module rather than provider-specific
-  reimplementations.
+- `uv run poker-solver` — interactive CLI. **It is a cloud client**: its
+  Train/Score items build the same `LegSpec` the headless commands build and
+  submit it to the pool. There is no local-training door in the menu.
+- `uv run poker-solver-run` — the single entrypoint, in three groups:
+  - **dispatch to the pool** — `submit`, `score`, `jobs`, `logs`, `cancel`,
+    `pool-status`, `autoscale-check`, `repair-ladder`, `fetch`, `push-code`,
+    `push-data`
+  - **run here** (what a node invokes) — `train-static`, `precompute`,
+    `evaluate`
+  - **read the record** — `ledger`, `curve`, `report`, `promote`, `compare`,
+    `checkpoint-profile`
+- **Azure dispatch is Python, in `src/interfaces/cloud/`** — `spec.py` (pure,
+  the testable core: what a leg IS), `batch.py`, `share.py`, `dispatch.py`,
+  `config.py`. It lives under `interfaces` so nothing in
+  `pipeline`/`engine`/`core` can reach Azure. **Auth is `AzureCliCredential`,
+  never `DefaultAzureCredential`** — the default chain probes the link-local
+  IMDS address, which on a laptop hangs rather than refusing (measured: >120s
+  vs 1.3s).
+- `just` is now **Terraform lifecycle + `panic` + thin aliases**, ~175 lines.
+  `just panic <rg> <account> <pool>` is the one recipe that deliberately avoids
+  the Python CLI and reads no Terraform state, so it works from a phone in Azure
+  Cloud Shell.
 - **`train-static` covers both starting and continuing a run.** `--iterations`
   is an ABSOLUTE target and `--run <id>` continues an existing directory, so
   re-running past the target is a no-op. That is what makes a scheduler retry
@@ -40,11 +56,21 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
   complete row into `<run_dir>/evals/record-*.json`, and `data/eval_ledger.jsonl`
   is a rebuildable cache (`ledger --rebuild`). This is what makes concurrent
   evaluation from several boxes safe.
-- `infra/` — **fire-and-forget cloud training on Azure Batch**. `just submit
-  <config> <absolute-iteration> [experiment] [arm] [k=v...]` queues a leg and
-  returns; the pool scales 0→N→0 on its own. `just jobs` / `pool-status` /
-  `fetch`. Terraform owns the account and pool; jobs and tasks are created at
-  runtime by the justfile, never in HCL. `infra/store/` is a **separate**
+- **`fetch` defaults to metadata only.** Every analysis command reads nothing
+  but small JSON, so the default pulls `*.json`/`*.jsonl` and leaves the ~540 MB
+  zarr checkpoints on the share. `--full` / `--run <id> --full` pull checkpoint
+  data, and both obey the manifest: only what `CHECKPOINT.json` names is fetched,
+  because a killed task leaves partially-copied snapshot directories behind and
+  an unnamed one is unfinished by construction.
+- `infra/` — **fire-and-forget cloud training on Azure Batch**.
+  `poker-solver-run submit --config <c> --to <absolute-iteration>` queues a leg
+  and returns; the pool scales 0→N→0 on its own. Terraform owns the account and
+  pool; jobs and tasks are created at runtime by `src/interfaces/cloud/`, never
+  in HCL. `infra/run_leg.sh` stays shell on purpose — it does disk discovery,
+  mount handling and publish-on-exit traps *around* the Python process, and it
+  reads the leg's `RUN_*` environment (overrides arrive as `RUN_SETS_JSON`, a
+  JSON array, decoded with `read -d ''` so a value containing `=`, a space or a
+  newline survives). `infra/store/` is a **separate**
   Terraform state holding the durable share, so `just destroy` cannot reach the
   experiment record. Active runs live on the node's `/mnt/work` data disk and are
   *published* to the share — never point `runs_dir` at the share. Constraints that

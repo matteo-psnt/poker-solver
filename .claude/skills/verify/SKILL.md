@@ -15,21 +15,45 @@ Surfaces, in order of preference:
 
 | Change touches | Surface |
 |---|---|
-| anything reachable from a command | `uv run poker-solver-run <cmd>` (`train`, `resume`, `precompute`, `evaluate`, `curve`, `report`, `promote`, `ledger`, `compare`, `checkpoint-profile`) |
-| interactive flows | `uv run poker-solver` |
-| `src/pipeline/training/static_parallel.py`, `src/engine/solver/storage/static_array.py`, `static_solver.py` | **no CLI wiring yet** — see below |
-| `ui/` | `npm run dev` from `ui/` |
+| anything reachable from a command | `uv run poker-solver-run <cmd>` (`train-static`, `precompute`, `evaluate`, `curve`, `report`, `promote`, `ledger`, `compare`, `checkpoint-profile`) |
+| interactive flows | `uv run poker-solver` — note it **submits to the cloud**; it no longer trains locally |
+| Azure dispatch (`src/interfaces/cloud/`) | see below |
+| `src/pipeline/training/static_parallel.py`, `src/engine/solver/storage/static_array.py`, `static_solver.py` | drive directly — see below |
 
-## The static-tree path has no CLI entrypoint
+## Azure dispatch without spending anything
 
-As of the `worktree-static-tree-rebuild` line, nothing in `src/` calls
-`train_static_parallel` — only tests do. Check first:
+The read-only verbs hit the live account and cost nothing. Run these first
+after touching `src/interfaces/cloud/`:
 
 ```bash
-grep -rn "train_static_parallel" src/
+uv run poker-solver-run pool-status      # proves the credential + endpoint
+uv run poker-solver-run jobs             # live tasks only; --all for history
+uv run poker-solver-run autoscale-check  # server-side, free, instant
+uv run poker-solver-run logs --list      # published leg logs
+uv run poker-solver-run fetch            # metadata only; safe to repeat
 ```
 
-If that is still empty, the outermost real surface is the function itself,
+`spec.py` is pure and has no SDK import, so everything that decides *what* gets
+dispatched is covered by `uv run pytest tests/interfaces/cloud/` — reach for a
+real submission only when the change is in `batch.py`/`share.py`.
+
+A real end-to-end leg is `submit --config quick_test --to 3000`: ~7s of
+training, a few cents, and it exercises snapshot upload → job → node →
+publish → `fetch`. The pool takes ~3 min to allocate a node, so poll
+`jobs` rather than waiting on it.
+
+**Auth gotcha, already paid for once:** use `AzureCliCredential`, never
+`DefaultAzureCredential`. The default chain probes the link-local IMDS address
+first, and on a laptop that never answers — every call hangs past 120s while
+`az account get-access-token` stays healthy, which makes it look like a Batch
+problem rather than a credential one.
+
+## Driving the static-tree path directly
+
+`train_static_parallel` spawns real OS processes and real POSIX shared memory,
+so a scratchpad script is a better harness than the CLI when you need to crash
+it, restart it, and inspect segments. The outermost real surface is the
+function itself,
 which spawns real OS processes and real POSIX shared memory. Drive it from a
 scratchpad script (NOT pytest) so you can crash it, restart it, and inspect
 segments:

@@ -54,7 +54,7 @@ az role assignment create --assignee-object-id 2736183d-125f-4bd0-8cc8-4f1189c65
 
 ## Setup
 
-Needs `terraform`, `az`, `just` and `jq` locally.
+Needs `terraform`, `az` and `just` locally, plus `az login` for the credential.
 
 ```bash
 az login
@@ -65,20 +65,43 @@ just push-data      # card abstractions to the share (~773 MB, one time)
 
 ## Daily use
 
+Dispatch is `poker-solver-run`, a Python CLI over the Batch SDK
+(`src/interfaces/cloud/`). The `just` recipes below are one-line aliases kept
+for discoverability; anything needing a flag they do not forward should be run
+against the CLI directly.
+
 ```bash
-just submit quick_test 3000                                   # smoke
-just submit production 25000000 exp-7 control                 # an arm
-just submit production 25000000 exp-7 variant:pruning solver__pruning=true
+poker-solver-run submit --config quick_test --to 3000                  # smoke
+poker-solver-run submit --config production --to 25000000 \
+    --experiment exp-7 --arm control                                   # an arm
+poker-solver-run submit --config production --to 25000000 \
+    --experiment exp-7 --arm variant:pruning --set solver__pruning=true
+poker-solver-run submit --run run-20260728_011716-ca70cf --to 50000000 # continue
 
-just jobs           # task states
-just pool-status    # node counts + the REAL cause of any allocation failure
-just job-log poker-20260728 <task>       # stdout   (add `err` for stderr)
-just fetch          # published runs back, then `ledger --rebuild`
+poker-solver-run jobs                 # live tasks (--all for finished jobs)
+poker-solver-run pool-status          # nodes + the REAL cause of any allocation failure
+poker-solver-run logs --task <task>   # the published leg log; --list to enumerate
+poker-solver-run logs --task <task> --source node --job <job>   # live, node-side
+poker-solver-run cancel --job <job> --task <task>
+poker-solver-run score --run <id> --at 10000000,20000000 -- --br-flops 8
+poker-solver-run fetch                # JSON record back + `ledger --rebuild`
+poker-solver-run fetch --run <id> --full   # ...including checkpoint data
 
-uv run poker-solver-run report --experiment exp-7
-uv run poker-solver-run curve --run <id>
-uv run poker-solver-run promote --run <winner> --rationale "..."
+poker-solver-run report --experiment exp-7
+poker-solver-run curve --run <id>
+poker-solver-run promote --run <winner> --rationale "..."
 ```
+
+Two things worth knowing at the seams:
+
+- **`score` passthrough needs a `--` separator.** `-- --br-flops 8`, not
+  `--br-flops 8`: argparse rejects a bare unknown option as an argument of
+  `score` itself rather than handing it to the passthrough.
+- **`fetch` is metadata-only by default.** Analysis commands read nothing but
+  small JSON, and the checkpoints beside them are ~540 MB each. `--full` obeys
+  `CHECKPOINT.json`: a snapshot directory the manifest does not name is
+  unfinished by construction and is skipped, which is what stops a killed
+  task's orphans from being pulled down and then cached forever.
 
 `to` is an **absolute** iteration target. That is what makes Batch's automatic
 retry safe: a retried task re-reads a newer checkpoint and converges on the same
@@ -163,9 +186,17 @@ work. Read them that way — most of them do not stop anything by themselves.
    one that warns you while there is still time to act. At ~$19/day the default
    $250 budget is about two weeks of a total runaway.
 
-**When something is wrong:** `just panic` terminates every job and forces the
+**When something is wrong:** `just panic <rg> <account> <pool>` terminates every job and forces the
 pool to zero, killing running tasks rather than waiting. Whatever a leg published
-up to its last retained rung survives, and `just resume <run> <to>` picks it up.
+up to its last retained rung survives, and
+`poker-solver-run submit --run <id> --to <n>` picks it up.
+
+It takes its coordinates as arguments deliberately. `panic` is the one recipe
+that uses neither the Python CLI nor Terraform state, so it still works when the
+checkout is broken, the venv is missing, or you are on a phone in Azure Cloud
+Shell — the same property `just credit-check` has. It previously *claimed* that
+while calling `just _login` and `terraform output -raw pool_id`, neither of
+which exists in Cloud Shell.
 
 **Alerts that watch the card specifically:**
 
