@@ -8,9 +8,10 @@ import pytest
 from src.pipeline import services
 from src.pipeline.evaluation.hunl_local_best_response import HandOutcome, LBRConfig
 from src.pipeline.services import abstraction as services_abstraction
-from src.pipeline.services import evaluation as services_evaluation
 from src.pipeline.services import runs as services_runs
 from src.pipeline.services import static_training as services_training
+from src.pipeline.services.evaluation import _shared as services_shared
+from src.pipeline.services.evaluation import lbr as services_lbr
 from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
 from src.shared.config_loader import load_training_config
 
@@ -177,7 +178,7 @@ def test_evaluate_run_lbr_refuses_run_without_recorded_abstraction(monkeypatch, 
     """
     metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash=None)
     metadata.config.game.big_blind = 100
-    monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
 
     with pytest.raises(ValueError, match="does not record which card abstraction"):
         services.evaluate_run_lbr(tmp_path / "run-legacy", LBRConfig(num_hands=1))
@@ -191,9 +192,9 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
     storage.num_infosets.return_value = 1
     seen = {}
 
-    monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
-        services_evaluation,
+        services_shared,
         "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
@@ -201,7 +202,7 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
         or (object(), storage),
     )
     monkeypatch.setattr(
-        services_evaluation,
+        services_lbr,
         "compute_lbr_exploitability",
         lambda solver, cfg, **kw: SimpleNamespace(
             exploitability_mbb=1.0,
@@ -233,9 +234,9 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
     storage.num_infosets.return_value = 1
     seen = {}
 
-    monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
-        services_evaluation,
+        services_shared,
         "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
@@ -243,7 +244,7 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
         or (object(), storage),
     )
     monkeypatch.setattr(
-        services_evaluation,
+        services_lbr,
         "compute_lbr_exploitability",
         lambda solver, cfg, **kw: SimpleNamespace(
             exploitability_mbb=1.0,
@@ -292,9 +293,9 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     )
     seen = {}
 
-    monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
-        services_evaluation,
+        services_shared,
         "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
@@ -302,7 +303,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
         or (object(), storage),
     )
     monkeypatch.setattr(
-        services_evaluation,
+        services_lbr,
         "compute_lbr_exploitability",
         lambda solver, cfg, **kw: seen.update(cfg=cfg) or lbr_result,
     )
@@ -381,14 +382,14 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
         ],
     )
     seen = {}
-    monkeypatch.setattr(services_evaluation, "load_run_metadata", lambda run_dir: metadata)
+    monkeypatch.setattr(services_lbr, "load_run_metadata", lambda run_dir: metadata)
     monkeypatch.setattr(
-        services_evaluation,
+        services_shared,
         "build_static_evaluation_solver",
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (object(), storage),
     )
     monkeypatch.setattr(
-        services_evaluation,
+        services_lbr,
         "compute_lbr_exploitability",
         lambda solver, cfg, **kw: seen.update(cfg=cfg) or lbr_result,
     )
