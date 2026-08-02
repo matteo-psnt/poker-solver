@@ -334,16 +334,16 @@ def test_compare_refuses_samples_free_evals_even_under_force(tmp_path):
 
 
 def _ledger_ns(led, tmp_path, **over):
-    base = dict(
-        ledger=str(led),
-        run=None,
-        limit=25,
-        experiment=None,
-        method=None,
-        since=None,
-        rebuild=False,
-        runs_dir=str(tmp_path),
-    )
+    base = {
+        "ledger": str(led),
+        "run": None,
+        "limit": 25,
+        "experiment": None,
+        "method": None,
+        "since": None,
+        "rebuild": False,
+        "runs_dir": str(tmp_path),
+    }
     base.update(over)
     return argparse.Namespace(**base)
 

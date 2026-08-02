@@ -12,7 +12,6 @@ from typing import Any
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
-from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
@@ -73,16 +72,19 @@ def resolve_card_abstraction_hash(
 
 
 def evaluate_solver_exploitability(
-    solver: MCCFRSolver,
+    solver: StaticTreeSolver,
     *,
     num_samples: int,
     num_rollouts_per_infoset: int,
     use_average_strategy: bool = True,
     seed: int | None = None,
 ) -> dict[str, Any]:
-    """Compute exploitability for a solver instance with a shared evaluation path."""
-    if not isinstance(solver, MCCFRSolver):
-        raise TypeError("Exploitability computation requires MCCFRSolver")
+    """Compute exploitability for a solver instance with a shared evaluation path.
+
+    Takes the concrete solver rather than ``ScorableBlueprint``: this estimator
+    walks the table (``storage.iter_infosets``) and deals its own chance
+    outcomes, which is more than a blueprint is asked to expose.
+    """
     return compute_exploitability(
         solver,
         num_samples=num_samples,

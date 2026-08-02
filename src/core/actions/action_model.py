@@ -169,7 +169,7 @@ class ActionModel:
                 if parsed is not None:
                     sizes.append(parsed)
 
-        return sorted(set(s for s in sizes if s > 0))
+        return sorted({s for s in sizes if s > 0})
 
     def _parse_preflop_raise_token(self, token: str, *, to_call: int, stack: int) -> int | None:
         normalized = token.strip().lower()
@@ -220,12 +220,12 @@ class ActionModel:
                     sizes.append(bet_size)
             elif isinstance(token, str):
                 t = token.lower()
-                if t in JAM_TOKENS and stack > 0:
-                    sizes.append(stack)
-                elif t == "jam_low_spr" and stack > 0 and spr <= jam_spr_cutoff:
+                if (t in JAM_TOKENS and stack > 0) or (
+                    t == "jam_low_spr" and stack > 0 and spr <= jam_spr_cutoff
+                ):
                     sizes.append(stack)
 
-        return sorted(set(s for s in sizes if s > 0))
+        return sorted({s for s in sizes if s > 0})
 
     def _postflop_raise_sizes_from_tokens(
         self, state: GameState, tokens: list[float | str]
@@ -253,16 +253,12 @@ class ActionModel:
                 raise_size = pot
                 if raise_size > 0 and (to_call + raise_size) <= stack:
                     sizes.append(raise_size)
-            elif t in JAM_TOKENS:
-                jam_raise = stack - to_call
-                if jam_raise > 0:
-                    sizes.append(jam_raise)
-            elif t == "jam_low_spr" and spr <= jam_spr_cutoff:
+            elif t in JAM_TOKENS or (t == "jam_low_spr" and spr <= jam_spr_cutoff):
                 jam_raise = stack - to_call
                 if jam_raise > 0:
                     sizes.append(jam_raise)
 
-        return sorted(set(s for s in sizes if s > 0))
+        return sorted({s for s in sizes if s > 0})
 
     def _count_raises_on_current_street(self, state: GameState) -> int:
         raises_count = 0

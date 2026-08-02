@@ -40,9 +40,8 @@ def regret_matching(regrets):
     if sum_positive > 0:
         # Normalize to probability distribution
         return positive_regrets / sum_positive
-    else:
-        # Uniform distribution (float64)
-        return np.ones(num_actions, dtype=np.float64) / np.float64(num_actions)
+    # Uniform distribution (float64)
+    return np.ones(num_actions, dtype=np.float64) / np.float64(num_actions)
 
 
 @jit(nopython=True, cache=True)
@@ -63,9 +62,8 @@ def average_strategy(strategy_sum):
 
     if sum_total > 0:
         return sums / sum_total
-    else:
-        # Return uniform strategy (float64)
-        return np.ones(num_actions, dtype=np.float64) / np.float64(num_actions)
+    # Return uniform strategy (float64)
+    return np.ones(num_actions, dtype=np.float64) / np.float64(num_actions)
 
 
 @jit(nopython=True, cache=True)

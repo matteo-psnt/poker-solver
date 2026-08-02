@@ -23,6 +23,7 @@ quantity that was starving.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
@@ -36,6 +37,8 @@ from src.core.game.state import GameState
 from src.engine.solver.betting_tree import BettingTree, build_betting_tree
 from src.engine.solver.infoset import InfoSet
 from src.engine.solver.infoset_index import bucket_of
+from src.engine.solver.mccfr import policy
+from src.engine.solver.policy_source import PolicySource, TreePolicySource
 from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.static_array import StaticArrayStorage
@@ -167,6 +170,21 @@ class StaticTreeSolver(MCCFRSolver):
             abstraction_id=self.abstraction_id,
         )
         return self.iteration
+
+    @functools.cached_property
+    def policy_source(self) -> PolicySource:
+        """Policy access for the runtime paths (play, search, range inference).
+
+        Lives here rather than on ``MCCFRSolver`` because it is a BLUEPRINT
+        concern, not a CFR one: the base class is the game-agnostic kernel the
+        Kuhn/Leduc conformance harness drives, and those games have no tree to
+        address. Cached because the backend cannot change over a solver's life
+        and this is reached once per decision during play.
+        """
+        return TreePolicySource(self.tree, self.storage, self.card_abstraction)
+
+    def sample_action_from_strategy(self, state: GameState, *, use_average: bool = True) -> Action:
+        return policy.sample_action_from_strategy(self, state, use_average=use_average)
 
     def __str__(self) -> str:
         return (

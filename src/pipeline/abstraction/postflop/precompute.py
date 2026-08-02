@@ -458,7 +458,7 @@ class PostflopPrecomputer:
             "num_preflop_buckets": 169,
             "streets": streets,
         }
-        with open(path / METADATA_FILENAME, "w") as f:
+        with (path / METADATA_FILENAME).open("w") as f:
             json.dump(metadata, f, indent=2)
 
         logger.info(f"Saved abstraction to {path}")

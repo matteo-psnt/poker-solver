@@ -106,8 +106,7 @@ class PreflopHandClasses:
 
         if suffix == "s":
             return 13 + position
-        else:
-            return 13 + 78 + position
+        return 13 + 78 + position
 
     @staticmethod
     def get_all_hands() -> list[str]:

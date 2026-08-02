@@ -102,7 +102,7 @@ def best_response_value(
                 # opponent never reaches (whose best-response actions are moot).
                 result = sum(
                     prob * value(game.next_state(state, action))
-                    for action, prob in zip(legal, probs)
+                    for action, prob in zip(legal, probs, strict=True)
                     if prob > 0.0
                 )
         value_cache[state] = result
@@ -133,7 +133,7 @@ def on_policy_value(game: ExtensiveGame[StateT, ActionT], player: int, policy: P
                 probs = policy(game.information_state_key(state, actor), legal)
                 result = sum(
                     prob * value(game.next_state(state, action))
-                    for action, prob in zip(legal, probs)
+                    for action, prob in zip(legal, probs, strict=True)
                 )
         value_cache[state] = result
         return result

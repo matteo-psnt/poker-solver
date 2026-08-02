@@ -82,15 +82,14 @@ class Action:
         if self.amount < 0:
             raise ValueError(f"Action amount cannot be negative: {self.amount}")
 
-        # Fold, check, call should have 0 amount
-        if self.type in (ActionType.FOLD, ActionType.CHECK, ActionType.CALL):
-            if self.amount != 0:
-                raise ValueError(f"{self.type} must have amount=0, got {self.amount}")
+        # Fold, check and call commit nothing; bet, raise and all-in must commit
+        # something. An action carrying the wrong amount is indistinguishable
+        # from a legal one downstream, so it is rejected at construction.
+        if self.type in (ActionType.FOLD, ActionType.CHECK, ActionType.CALL) and self.amount != 0:
+            raise ValueError(f"{self.type} must have amount=0, got {self.amount}")
 
-        # Bet, raise, all-in must have positive amount
-        if self.type in (ActionType.BET, ActionType.RAISE, ActionType.ALL_IN):
-            if self.amount <= 0:
-                raise ValueError(f"{self.type} must have positive amount, got {self.amount}")
+        if self.type in (ActionType.BET, ActionType.RAISE, ActionType.ALL_IN) and self.amount <= 0:
+            raise ValueError(f"{self.type} must have positive amount, got {self.amount}")
 
     def is_aggressive(self) -> bool:
         """Check if action is aggressive (bet, raise, all-in)."""
@@ -113,11 +112,11 @@ class Action:
         # Fast path for common non-amount actions (no computation needed)
         if self.type == ActionType.FOLD:
             return "f"
-        elif self.type == ActionType.CHECK:
+        if self.type == ActionType.CHECK:
             return "x"
-        elif self.type == ActionType.CALL:
+        if self.type == ActionType.CALL:
             return "c"
-        elif self.type == ActionType.ALL_IN:
+        if self.type == ActionType.ALL_IN:
             return "a"
 
         # For amount-based actions, use LRU cache

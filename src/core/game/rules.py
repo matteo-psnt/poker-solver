@@ -83,9 +83,9 @@ class GameRules:
             street=Street.PREFLOP,
             pot=pot,
             stacks=self._stacks_to_tuple(stacks),
-            board=tuple(),
+            board=(),
             hole_cards=hole_cards,
-            betting_history=tuple(),
+            betting_history=(),
             button_position=button,
             current_player=current_player,
             is_terminal=False,
@@ -120,28 +120,28 @@ class GameRules:
             # Can only fold when facing a bet
             return to_call > 0
 
-        elif action.type == ActionType.CHECK:
+        if action.type == ActionType.CHECK:
             # Can only check when not facing a bet
             return to_call == 0
 
-        elif action.type == ActionType.CALL:
+        if action.type == ActionType.CALL:
             # Can only call when facing a bet and have chips
             return to_call > 0 and current_stack > 0
 
-        elif action.type == ActionType.BET:
+        if action.type == ActionType.BET:
             # Can only bet when not facing a bet and have enough chips
             if to_call != 0:
                 return False
             return action.amount <= current_stack and action.amount > 0
 
-        elif action.type == ActionType.RAISE:
+        if action.type == ActionType.RAISE:
             # Can only raise when facing a bet and have enough chips for call + raise
             if to_call == 0:
                 return False
             total_needed = to_call + action.amount
             return total_needed <= current_stack and action.amount > 0
 
-        elif action.type == ActionType.ALL_IN:
+        if action.type == ActionType.ALL_IN:
             # All-in is always valid if we have chips
             return current_stack > 0 and action.amount == current_stack
 
@@ -239,11 +239,10 @@ class GameRules:
                 # Without abstraction, just allow all-in
                 actions.append(all_in(current_stack))
 
-        # Can always go all-in if have chips
-        if current_stack > 0:
-            # Check if all-in not already added
-            if not any(a.type == ActionType.ALL_IN for a in actions):
-                actions.append(all_in(current_stack))
+        # All-in is always available with chips behind, unless a sizing above
+        # already resolved to the whole stack and added it.
+        if current_stack > 0 and not any(a.type == ActionType.ALL_IN for a in actions):
+            actions.append(all_in(current_stack))
 
         return actions
 
@@ -291,7 +290,7 @@ class GameRules:
             # Opponent wins (winner determined by last action being FOLD)
             return self._create_terminal_state(state, tuple(betting_history))
 
-        elif action.type == ActionType.CHECK:
+        if action.type == ActionType.CHECK:
             # Check is only legal if to_call == 0
             if to_call != 0:
                 raise ValueError("Cannot check when facing a bet")
@@ -300,15 +299,13 @@ class GameRules:
             # Note: betting_history already includes the current action
             actions_this_street = self._get_actions_on_current_street(betting_history)
 
-            # Check-check: both players have checked on this street
-            if len(actions_this_street) >= 2:
-                # At least 2 actions on this street, check if last two are both checks
-                if (
-                    actions_this_street[-1].type == ActionType.CHECK
-                    and actions_this_street[-2].type == ActionType.CHECK
-                ):
-                    # Check-check: advance to next street
-                    return self._advance_street(state, tuple(betting_history))
+            # Check-check ends the street; a lone check just passes the action.
+            if (
+                len(actions_this_street) >= 2
+                and actions_this_street[-1].type == ActionType.CHECK
+                and actions_this_street[-2].type == ActionType.CHECK
+            ):
+                return self._advance_street(state, tuple(betting_history))
 
             # First check or not check-check: pass action to opponent
             return state.replace(
@@ -318,7 +315,7 @@ class GameRules:
                 last_aggressor=None,  # No aggression on this street
             )
 
-        elif action.type == ActionType.CALL:
+        if action.type == ActionType.CALL:
             # Add chips to pot
             call_amount = min(to_call, stacks[current_player])
             stacks[current_player] -= call_amount
@@ -331,18 +328,15 @@ class GameRules:
                 return self._advance_to_showdown(
                     state, tuple(betting_history), pot, self._stacks_to_tuple(stacks)
                 )
-            else:
-                # Move to next street
-                return self._advance_street(
-                    state, tuple(betting_history), pot=pot, stacks=self._stacks_to_tuple(stacks)
-                )
+            # Move to next street
+            return self._advance_street(
+                state, tuple(betting_history), pot=pot, stacks=self._stacks_to_tuple(stacks)
+            )
 
-        elif action.type in (ActionType.BET, ActionType.RAISE):
-            # Add chips to pot
-            if action.type == ActionType.BET:
-                bet_amount = action.amount
-            else:  # RAISE
-                bet_amount = to_call + action.amount
+        if action.type in (ActionType.BET, ActionType.RAISE):
+            # A BET's amount IS the chips committed; a RAISE's is the amount ON TOP
+            # of the call, so the call has to be added back in.
+            bet_amount = action.amount if action.type == ActionType.BET else to_call + action.amount
 
             if bet_amount <= 0:
                 raise ValueError("Bet amount must be positive")
@@ -366,7 +360,7 @@ class GameRules:
                 last_aggressor=current_player,
             )
 
-        elif action.type == ActionType.ALL_IN:
+        if action.type == ActionType.ALL_IN:
             # Player goes all-in
             all_in_amount = stacks[current_player]
             stacks[current_player] = 0
@@ -382,34 +376,30 @@ class GameRules:
                         return self._advance_to_showdown(
                             state, tuple(betting_history), pot, self._stacks_to_tuple(stacks)
                         )
-                    else:
-                        # All-in raise
-                        return state.replace(
-                            pot=pot,
-                            stacks=self._stacks_to_tuple(stacks),
-                            betting_history=tuple(betting_history),
-                            current_player=opponent,
-                            to_call=new_to_call,
-                            last_aggressor=current_player,
-                        )
-                else:
-                    # All-in for less than call, treat as call
-                    return self._advance_to_showdown(
-                        state, tuple(betting_history), pot, self._stacks_to_tuple(stacks)
+                    # All-in raise
+                    return state.replace(
+                        pot=pot,
+                        stacks=self._stacks_to_tuple(stacks),
+                        betting_history=tuple(betting_history),
+                        current_player=opponent,
+                        to_call=new_to_call,
+                        last_aggressor=current_player,
                     )
-            else:
-                # All-in bet
-                return state.replace(
-                    pot=pot,
-                    stacks=self._stacks_to_tuple(stacks),
-                    betting_history=tuple(betting_history),
-                    current_player=opponent,
-                    to_call=all_in_amount,
-                    last_aggressor=current_player,
+                # All-in for less than call, treat as call
+                return self._advance_to_showdown(
+                    state, tuple(betting_history), pot, self._stacks_to_tuple(stacks)
                 )
+            # All-in bet
+            return state.replace(
+                pot=pot,
+                stacks=self._stacks_to_tuple(stacks),
+                betting_history=tuple(betting_history),
+                current_player=opponent,
+                to_call=all_in_amount,
+                last_aggressor=current_player,
+            )
 
-        else:
-            raise ValueError(f"Unknown action type: {action.type}")
+        raise ValueError(f"Unknown action type: {action.type}")
 
     def _get_actions_on_current_street(self, betting_history: list[Action]) -> list[Action]:
         """
@@ -529,10 +519,9 @@ class GameRules:
         result = self.evaluator.compare_hands(hole_cards[0], hole_cards[1], board)
         if result == -1:
             return 0  # Player 0 wins
-        elif result == 1:
+        if result == 1:
             return 1  # Player 1 wins
-        else:
-            return -1  # Tie (will split pot)
+        return -1  # Tie (will split pot)
 
     def _create_terminal_state(
         self,

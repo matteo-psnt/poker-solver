@@ -125,7 +125,7 @@ class TestEquityWorker:
 
         assert len(results) == 2
         for (row, _board), (result_row, cols, equities, multiplicities, hists) in zip(
-            boards, results
+            boards, results, strict=True
         ):
             assert result_row == row
             n_classes = len(enumerate_hand_classes(_board))

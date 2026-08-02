@@ -91,7 +91,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
 
-    with open(path) as f:
+    with path.open() as f:
         data: dict[str, Any] = yaml.safe_load(f) or {}
 
     if "extends" in data:

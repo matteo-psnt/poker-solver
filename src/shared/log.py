@@ -13,6 +13,7 @@ replaced. Records go to stderr, keeping stdout reserved for payloads.
 
 import logging
 import sys
+from typing import TextIO
 
 
 class _DynamicStderrHandler(logging.StreamHandler):
@@ -27,12 +28,17 @@ class _DynamicStderrHandler(logging.StreamHandler):
         super().__init__(sys.stderr)
 
     @property
-    def stream(self):  # type: ignore[override]
+    def stream(self) -> TextIO:
         return sys.stderr
 
     @stream.setter
-    def stream(self, value) -> None:
-        pass  # always resolve dynamically; ignore the base-class assignment
+    def stream(self, value: TextIO) -> None:
+        """Ignored: the stream is resolved dynamically on every read.
+
+        pytest's capture machinery swaps ``sys.stderr`` after the handler is
+        built, so a handler that cached the stream at construction would keep
+        writing to the pre-capture one.
+        """
 
 
 def configure_logging(level: int = logging.INFO) -> None:

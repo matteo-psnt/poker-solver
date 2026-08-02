@@ -108,10 +108,7 @@ class LeducPoker:
     def legal_actions(self, state: LeducState) -> Sequence[str]:
         p = state.to_act
         diff = state.committed[1 - p] - state.committed[p]
-        if diff > 0:
-            actions = ["f", "c"]
-        else:
-            actions = ["c"]
+        actions = ["f", "c"] if diff > 0 else ["c"]
         if state.num_raises < MAX_RAISES:
             actions.append("r")
         return actions

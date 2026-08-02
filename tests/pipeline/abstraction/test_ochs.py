@@ -56,9 +56,12 @@ class TestCountingIsExact:
         combos, ochs = engine.board_ochs(BOARD, one_cluster, 1)
 
         table = engine.board_equities(BOARD)
-        scalar = {frozenset((a.mask, b.mask)): e for (a, b), e in zip(table.combos, table.equities)}
+        scalar = {
+            frozenset((a.mask, b.mask)): e
+            for (a, b), e in zip(table.combos, table.equities, strict=True)
+        }
         compared = 0
-        for (card_a, card_b), value in zip(combos, ochs[:, 0]):
+        for (card_a, card_b), value in zip(combos, ochs[:, 0], strict=True):
             reference = scalar[frozenset((card_a.mask, card_b.mask))]
             if np.isnan(reference):
                 continue
@@ -119,7 +122,10 @@ class TestSeparatesWhatEquityCannot:
         """
         combos, ochs = engine.board_ochs(WET_BOARD, clusters, 8)
         table = engine.board_equities(WET_BOARD)
-        scalar = {frozenset((a.mask, b.mask)): e for (a, b), e in zip(table.combos, table.equities)}
+        scalar = {
+            frozenset((a.mask, b.mask)): e
+            for (a, b), e in zip(table.combos, table.equities, strict=True)
+        }
         equities = np.array(
             [scalar[frozenset((a.mask, b.mask))] for a, b in combos], dtype=np.float64
         )

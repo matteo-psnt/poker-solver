@@ -157,7 +157,12 @@ class TestRecordEvaluation:
 
 class TestTierMismatches:
     def _row(self, **knobs):
-        base = dict(scorer="myopic", opponent="blueprint", include_off_tree=False, base_seed=7)
+        base = {
+            "scorer": "myopic",
+            "opponent": "blueprint",
+            "include_off_tree": False,
+            "base_seed": 7,
+        }
         base.update(knobs)
         return {"knobs": base, "results": {"num_hands": 100}}
 

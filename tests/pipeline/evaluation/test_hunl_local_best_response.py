@@ -22,7 +22,7 @@ from src.engine.search.range_inference import (
     combo_index_for,
     replace_actor_hole_cards,
 )
-from src.engine.solver.mccfr import MCCFRSolver
+from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.pipeline.evaluation.hunl_local_best_response import (
     LBRConfig,
     _deal_initial_state,
@@ -38,13 +38,13 @@ from tests.test_helpers import build_trained_test_solver, skew_preflop_infoset
 
 def _build_solver(
     iterations: int, *, starting_stack: int = 2000, session_id: str = "lbr-test"
-) -> MCCFRSolver:
+) -> StaticTreeSolver:
     return build_trained_test_solver(
         iterations, starting_stack=starting_stack, session_id=session_id
     )
 
 
-def _rebuild_parallel_test_blueprint() -> MCCFRSolver:
+def _rebuild_parallel_test_blueprint() -> StaticTreeSolver:
     """Picklable factory: rebuild the deterministic test blueprint inside a worker.
 
     Must match the serial blueprint's params exactly (same seed/stack/iterations) so
@@ -53,7 +53,7 @@ def _rebuild_parallel_test_blueprint() -> MCCFRSolver:
     return _build_solver(4, starting_stack=400, session_id=f"lbr-par-{os.getpid()}")
 
 
-def _engine(solver: MCCFRSolver, **cfg) -> _HUNLLocalBestResponse:
+def _engine(solver: StaticTreeSolver, **cfg) -> _HUNLLocalBestResponse:
     cfg.setdefault("seed", 7)
     cfg.setdefault("equity_runouts", 8)
     config = LBRConfig(**cfg)
@@ -319,7 +319,7 @@ class TestTerminalBranching:
         engine.rng = np.random.default_rng(0)
         probs = np.array([float(np.dot(belief, vecs[action])) for action in legal])
         expected = 0.0
-        for weight, action in zip(probs / probs.sum(), legal):
+        for weight, action in zip(probs / probs.sum(), legal, strict=True):
             if weight <= 0.0:
                 continue
             posterior = belief * vecs[action]

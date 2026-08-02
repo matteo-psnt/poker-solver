@@ -11,7 +11,7 @@ from src.pipeline.abstraction.config import PrecomputeConfig
 
 def _load_yaml_config(name: str) -> dict:
     config_dir = Path(__file__).resolve().parents[3] / "config" / "abstraction"
-    with open(config_dir / f"{name}.yaml") as f:
+    with (config_dir / f"{name}.yaml").open() as f:
         return yaml.safe_load(f)
 
 

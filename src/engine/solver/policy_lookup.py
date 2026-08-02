@@ -71,6 +71,6 @@ def blueprint_action_distribution(
         return None
     strategy = infoset.get_filtered_strategy(valid_indices=valid_indices, use_average=use_average)
     distribution: dict[Action, float] = {}
-    for action, probability in zip(valid_actions, strategy):
+    for action, probability in zip(valid_actions, strategy, strict=True):
         distribution[action] = distribution.get(action, 0.0) + float(probability)
     return distribution

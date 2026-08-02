@@ -48,7 +48,7 @@ def _list_existing_abstractions(base_path: Path) -> list[AbstractionEntry]:
     abstractions: list[AbstractionEntry] = []
     for path in base_path.iterdir():
         if path.is_dir() and (path / "metadata.json").exists():
-            with open(path / "metadata.json") as f:
+            with (path / "metadata.json").open() as f:
                 metadata = json.load(f)
             abstractions.append(AbstractionEntry(path=path, metadata=metadata))
     return abstractions

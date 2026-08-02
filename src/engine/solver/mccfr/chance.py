@@ -1,4 +1,10 @@
-"""Chance-node and board-dealing helpers for MCCFR solver."""
+"""Chance-node and board-dealing helpers for MCCFR solver.
+
+Only :func:`deal_initial_state` needs the solver -- for the stack size, the
+rules and the button alternation. The rest are pure functions of the state
+and say so; they took a ``self`` they never read purely because they happen
+to be called through the solver.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +29,7 @@ def deal_initial_state(self: MCCFRSolver) -> GameState:
     )
 
 
-def is_chance_node(self: MCCFRSolver, state: GameState) -> bool:
+def is_chance_node(state: GameState) -> bool:
     """Check if state still needs chance-card dealing."""
     return len(state.board) < state.street.board_card_count
 
@@ -53,15 +59,15 @@ def draw_cards(state: GameState, count: int) -> list[Card]:
     return drawn
 
 
-def sample_chance_outcome(self: MCCFRSolver, state: GameState) -> GameState:
+def sample_chance_outcome(state: GameState) -> GameState:
     """Sample the next chance outcome (flop/turn/river card deals)."""
     board_size = len(state.board)
 
     if state.street == Street.FLOP and board_size == 0:
         count = 3
-    elif state.street == Street.TURN and board_size == 3:
-        count = 1
-    elif state.street == Street.RIVER and board_size == 4:
+    elif (state.street == Street.TURN and board_size == 3) or (
+        state.street == Street.RIVER and board_size == 4
+    ):
         count = 1
     else:
         # is_chance_node reported this state needs dealing, but (street, board_size)
@@ -80,7 +86,7 @@ def sample_chance_outcome(self: MCCFRSolver, state: GameState) -> GameState:
     )
 
 
-def deal_remaining_cards(self: MCCFRSolver, state: GameState) -> GameState:
+def deal_remaining_cards(state: GameState) -> GameState:
     """Deal all remaining board cards for terminal all-in showdowns.
 
     A complete board returns ``state`` unchanged, so callers can run every

@@ -146,7 +146,7 @@ class DenseBucketer(BucketingStrategy):
                 f"No abstraction metadata at {metadata_path}. "
                 "Run 'Precompute Combo Abstraction' from the CLI to generate it."
             )
-        with open(metadata_path) as f:
+        with metadata_path.open() as f:
             metadata = json.load(f)
 
         version = metadata.get("storage_version")

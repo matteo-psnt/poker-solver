@@ -95,7 +95,7 @@ class TestRunTracker:
         }
 
         metadata_file = run_dir / ".run.json"
-        with open(metadata_file, "w") as f:
+        with metadata_file.open("w") as f:
             json.dump(metadata, f)
 
         # Load tracker

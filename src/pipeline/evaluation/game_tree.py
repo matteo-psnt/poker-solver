@@ -127,7 +127,7 @@ def collect_infoset_states[StateT: Hashable, ActionT: Hashable](
             return
         legal = game.legal_actions(state)
         probs = policy(game.information_state_key(state, actor), legal)
-        for action, prob in zip(legal, probs):
+        for action, prob in zip(legal, probs, strict=True):
             collect(game.next_state(state, action), cf_reach * prob)
 
     collect(game.initial_state(), 1.0)

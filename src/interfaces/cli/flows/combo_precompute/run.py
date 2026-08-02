@@ -33,8 +33,7 @@ def _get_config_choice(ctx: CliContext) -> PrecomputeConfig | None:
     config_name = choice.replace(".yaml", "")
 
     try:
-        config = PrecomputeConfig.from_yaml(config_name)
-        return config
+        return PrecomputeConfig.from_yaml(config_name)
     except Exception as exc:
         print(f"\nError loading config '{config_name}': {exc}")
         return None

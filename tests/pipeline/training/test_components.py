@@ -26,7 +26,7 @@ class TestBuildCardAbstraction:
         base_path = tmp_path / "data" / "combo_abstraction"
         candidate = base_path / "default-a"
         candidate.mkdir(parents=True)
-        with open(candidate / "metadata.json", "w") as f:
+        with (candidate / "metadata.json").open("w") as f:
             json.dump(
                 {
                     "config_hash": expected_hash,
@@ -62,7 +62,7 @@ class TestBuildCardAbstraction:
         for name in ["default-a", "default-b"]:
             candidate = base_path / name
             candidate.mkdir(parents=True)
-            with open(candidate / "metadata.json", "w") as f:
+            with (candidate / "metadata.json").open("w") as f:
                 json.dump(
                     {
                         "config_hash": expected_hash,

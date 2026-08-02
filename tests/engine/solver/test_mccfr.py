@@ -31,7 +31,7 @@ class TestMCCFRSolver:
         assert state.stacks[1] == 198  # 200 - 2 (BB)
         assert len(state.hole_cards[0]) == 2
         assert len(state.hole_cards[1]) == 2
-        assert state.board == tuple()  # No board yet
+        assert state.board == ()  # No board yet
 
     def test_train_iteration_executes(self):
         """Test that one iteration completes without error."""
@@ -121,12 +121,12 @@ class TestMCCFRSolver:
             street=Street.FLOP,  # Flop street but no cards yet
             pot=10,
             stacks=(195, 195),
-            board=tuple(),
+            board=(),
             hole_cards=(
                 (Card.new("As"), Card.new("Kh")),
                 (Card.new("Qd"), Card.new("Jc")),
             ),
-            betting_history=tuple(),
+            betting_history=(),
             button_position=0,
             current_player=0,
             is_terminal=False,

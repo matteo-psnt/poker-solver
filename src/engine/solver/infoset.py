@@ -112,7 +112,7 @@ class InfoSetKey:
             "postflop_bucket",
             "spr_bucket",
         )
-        for name, value in zip(names, values):
+        for name, value in zip(names, values, strict=True):
             object.__setattr__(self, name, value)
         object.__setattr__(self, "_hash", hash(values))
 

@@ -62,9 +62,7 @@ def check_conflicts(args):
 
     # Check for conflicts
     all_cards = set(hole_cards) | set(board)
-    has_conflict = len(all_cards) < len(hole_cards) + len(board)
-
-    return has_conflict
+    return len(all_cards) < len(hole_cards) + len(board)
 
 
 def compute_mock_equity(args):

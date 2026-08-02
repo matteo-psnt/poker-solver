@@ -364,7 +364,9 @@ class _HUNLLocalBestResponse:
 
         value = 0.0
         terminal, pot = "fold", 0
-        for weight, (decision, _), next_state in zip(probs / total, pairs, next_states):
+        for weight, (decision, _), next_state in zip(
+            probs / total, pairs, next_states, strict=True
+        ):
             if weight <= 0.0:
                 continue
             posterior = belief * vecs[decision]
@@ -509,7 +511,7 @@ class _HUNLLocalBestResponse:
         best = candidates[0]
         best_value = float("-inf")
         if self._lookahead is None:
-            for candidate, value in zip(candidates, myopic):
+            for candidate, value in zip(candidates, myopic, strict=True):
                 if value > best_value:
                     best_value = value
                     best = candidate
@@ -797,10 +799,7 @@ def compute_lbr_exploitability(
     samples = [(o0.value + o1.value) / 2.0 for o0, o1 in pairs]
 
     exploitability = float(np.mean(samples)) if samples else float("nan")
-    if len(samples) >= 2:
-        se = float(np.std(samples, ddof=1) / np.sqrt(len(samples)))
-    else:
-        se = 0.0
+    se = float(np.std(samples, ddof=1) / np.sqrt(len(samples))) if len(samples) >= 2 else 0.0
 
     exploitability_mbb = chips_to_mbb(exploitability, big_blind)
     se_mbb = chips_to_mbb(se, big_blind)

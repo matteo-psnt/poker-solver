@@ -23,7 +23,6 @@ from collections.abc import Sequence
 
 from src.core.game.state import Card
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import policy_source_for
 from src.pipeline.evaluation.game_tree import CHANCE, Policy
 
 DEAL = "DEAL"
@@ -140,7 +139,7 @@ def blueprint_policy(blueprint) -> Policy:
     the source is what the real scorers use, so a test that reached past it
     would be validating a lookup path nothing in production takes.
     """
-    source = policy_source_for(blueprint)
+    source = blueprint.policy_source
 
     def policy(info_key, legal_actions):
         player, state = info_key

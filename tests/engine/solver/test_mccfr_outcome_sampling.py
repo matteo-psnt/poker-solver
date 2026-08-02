@@ -181,10 +181,10 @@ class TestOutcomeSampling:
         # (indicating the solver is updating correctly)
         infosets_with_regrets = 0
         for infoset in storage.iter_infosets():
-            if len(infoset.legal_actions) > 1:
-                # Check if any regret is non-zero (solver is learning)
-                if any(abs(r) > 0.001 for r in infoset.regrets):
-                    infosets_with_regrets += 1
+            # A decision point (>1 action) carrying non-zero regret is one the
+            # solver actually learned something at.
+            if len(infoset.legal_actions) > 1 and any(abs(r) > 0.001 for r in infoset.regrets):
+                infosets_with_regrets += 1
 
         # At least some infosets should have accumulated regrets
         # (100 iterations with outcome sampling explores a subset of the tree)
