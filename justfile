@@ -346,6 +346,35 @@ autoscale-check:
     fi
     jq -r '(.results // "") | split(";")[] | select(length > 0) | "    " + .' "$OUT"
 
+# Alert before Azure charges can ever reach the credit card.
+#
+# There is no hard spending cap on this subscription and there cannot be one --
+# the Azure spending limit is unavailable for Azure Plan pricing. A MasterCard is
+# attached to the billing profile and cannot be detached via any API. So the card
+# is guarded by watching the two routes to it: the credit running out/expiring,
+# and charges that were never credit-eligible (Marketplace, support plans, Entra
+# P1/P2) which bill the card TODAY while the balance sits untouched.
+#
+# THE MONTHLY BUDGET CANNOT SEE THE SECOND ROUTE. A budget measures burn, not
+# eligibility, and stays quiet while a Marketplace charge goes to the card. That
+# gap is the whole reason this exists.
+#
+# Exit codes are the interface -- 0 clear, 1 alert, 3 COULD NOT EVALUATE. A cron
+# wrapper must treat 3 as a failure: a watchdog that dies silently on an expired
+# token looks exactly like an all-clear.
+#
+# Stdlib only and no repo imports, so it runs from Azure Cloud Shell on a phone
+# exactly like `just panic` does.
+#
+#   0 6 * * *  cd ~/Projects/poker-solver && python3 infra/credit_watch.py \
+#                || echo "azure credit watch: exit $?" | mail -s "azure" you@example.com
+#
+# Raise --daily-burn whenever max_nodes or pool_vm_size goes up; it is the
+# denominator of the runway number and is not derived automatically.
+[doc("Alert before Azure charges can reach the credit card. 0 clear / 1 alert / 3 unevaluable.")]
+credit-check *flags:
+    @python3 infra/credit_watch.py {{flags}}
+
 # Bring published runs and eval records back, then rebuild the ledger.
 #
 # `ledger --rebuild` is what makes this safe with several legs finishing at once:

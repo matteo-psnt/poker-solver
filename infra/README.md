@@ -109,10 +109,12 @@ task owning one run preserves it.
 
 ## What actually protects you from a bill
 
-Be clear-eyed: **there is no hard spending cap.** The subscription reports
-`spendingLimit: Off` and there is no supported way to turn it on for a
-Sponsorship offer. Azure budgets are *alerts*, not caps, and cost data lags
-several hours.
+Be clear-eyed: **there is no hard spending cap, and there cannot be one.** The
+subscription reports `spendingLimit: Off`. The blocker is the *pricing*, not the
+sponsorship: the Azure spending limit "isn't available for subscriptions with
+commitment plans or with pay-as-you-go pricing", which is what a Microsoft Azure
+Plan under MCA is. It is not a setting anyone forgot to turn on. Azure budgets
+are *alerts*, not caps, and cost data lags several hours.
 
 Every control bounds either the RATE of spend or the DURATION of one piece of
 work. Read them that way — most of them do not stop anything by themselves.
@@ -165,11 +167,44 @@ work. Read them that way — most of them do not stop anything by themselves.
 pool to zero, killing running tasks rather than waiting. Whatever a leg published
 up to its last retained rung survives, and `just resume <run> <to>` picks it up.
 
-The only *absolute* control is the billing account having no payment method —
-and that is **not** the case here: the account is a `MicrosoftCustomerAgreement`
-(Individual), which normally has a card attached. So **if the sponsorship credit
-is exhausted or expires, real charges follow.** Confirm the balance and end date
-at <https://www.microsoftazuresponsorships.com/> before relying on this.
+**Alerts that watch the card specifically:**
+
+7. **`just credit-check`** (`infra/credit_watch.py`). Budgets measure burn; this
+   measures whether the *card* is reachable. Two routes, both watched: credit
+   depletion/expiry, and charges that were never credit-eligible. Exit codes are
+   the interface — 0 clear, 1 alert, **3 could not evaluate**, which a caller must
+   treat as failure rather than as an all-clear.
+
+### The payment method, and why it cannot be removed here
+
+The only *absolute* control is the billing account having no payment method. That
+is **not** achievable on this account, and the reasons are worth recording so it
+is not re-litigated:
+
+- MasterCard `...6136` is attached to billing profile `EPHL-5ZRZ-BG7-PGB`, which
+  bills every resource here.
+- **There is no API operation to detach a payment-method link from a billing
+  profile.** The Billing API's only delete is `Delete By User`, which removes a
+  method *owned by the caller* — and both `paymentMethods` at user scope and at
+  billing-account scope return `[]`. Detaching is portal-only.
+- The portal blocks deleting a card that is the *default* method for a profile,
+  which this one is.
+
+Note it would be a bad trade even if it worked: an unpayable card does not cap
+spend, it converts spend into unpaid debt. The subscription is disabled, VMs
+deallocate, **data is deleted 90 days after service ends**, and the balance is
+still owed. Prepaid and virtual cards are rejected outright as payment
+instruments, so that variant does not start either.
+
+So **if the credit is exhausted or expires, real charges follow.** Confirm the
+balance and end date with `just credit-check` — *not* at
+microsoftazuresponsorships.com, which is the classic-sponsorship portal and shows
+nothing for this account. This grant is an **MCA credit lot** (`Azure for
+startups credit`, $10,000, expiring 2028-07-26) read from the Consumption `lots`
+and `credits/balanceSummary` APIs, which are authoritative here.
+
+One trap in reading it: `currentBalance` is the last *closed* balance and reads
+as the full grant until an invoice issues. The live number is `estimatedBalance`.
 
 
 ## Region and SKU availability
