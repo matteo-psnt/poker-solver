@@ -56,7 +56,8 @@ class TestFilterStoredActions:
     def test_empty_when_nothing_survives(self):
         infoset = _infoset([bet(50)])
         indices, actions = filter_stored_actions(infoset, STATE, _rules(), [fold(), call()])
-        assert indices == [] and actions == []
+        assert indices == []
+        assert actions == []
 
 
 class TestBlueprintActionDistribution:

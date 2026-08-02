@@ -21,8 +21,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(900, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,  # Out of position acts first
             is_terminal=False,
@@ -45,8 +45,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(900, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -70,8 +70,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(850, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -99,8 +99,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(850, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -121,8 +121,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(900, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -167,8 +167,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(850, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,
             is_terminal=False,

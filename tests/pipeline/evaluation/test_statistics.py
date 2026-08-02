@@ -22,10 +22,12 @@ class TestSummarizeSamples:
 
     def test_zero_variance_conventions(self):
         null = summarize_samples([0.0, 0.0, 0.0])
-        assert null["p_value"] == 1.0 and not null["is_significant"]
+        assert null["p_value"] == 1.0
+        assert not null["is_significant"]
 
         shifted = summarize_samples([2.0, 2.0, 2.0])
-        assert shifted["p_value"] == 0.0 and shifted["is_significant"]
+        assert shifted["p_value"] == 0.0
+        assert shifted["is_significant"]
         assert shifted["ci_lower"] == shifted["ci_upper"] == pytest.approx(2.0)
 
     def test_too_few_samples_raises(self):

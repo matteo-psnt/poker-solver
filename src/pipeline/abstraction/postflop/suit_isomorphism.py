@@ -190,7 +190,8 @@ def canonicalize_board(
             best_key = key
             best_perm = perm
 
-    assert best_key is not None and best_perm is not None
+    assert best_key is not None
+    assert best_perm is not None
     best_canonical = tuple(CanonicalCard(code >> 2, code & 3) for code in best_key)
     best_mapping = {suit: best_perm[pos] for suit, pos in suit_positions.items()}
     final_mapping = SuitMapping(best_mapping, len(best_mapping))

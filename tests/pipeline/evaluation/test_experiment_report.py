@@ -183,7 +183,8 @@ class TestBaseline:
         services.promote_baseline("run-a", "first", path=path)
         services.promote_baseline("run-b", "second", path=path)
         loaded = services.load_baseline(path)
-        assert loaded is not None and loaded.run_id == "run-b"
+        assert loaded is not None
+        assert loaded.run_id == "run-b"
 
     def test_report_surfaces_the_current_baseline(self, store, tmp_path):
         led, runs, base = store([_row("control", "run-c", 100.0)])

@@ -245,7 +245,7 @@ class TestValidation:
     def test_sampling_method_literal(self):
         """Invalid sampling_method value should raise ValidationError."""
         with pytest.raises(ValidationError):
-            SolverConfig(sampling_method="bad_method")  # type: ignore
+            SolverConfig(sampling_method="bad_method")  # type: ignore[arg-type]
 
     def test_sampling_method_valid_values(self):
         """Both valid sampling methods should be accepted."""
@@ -263,7 +263,7 @@ class TestValidation:
     def test_log_level_literal(self):
         """Invalid log_level should raise ValidationError."""
         with pytest.raises(ValidationError):
-            SystemConfig(log_level="VERBOSE")  # type: ignore
+            SystemConfig(log_level="VERBOSE")  # type: ignore[arg-type]
 
     def test_log_level_valid_values(self):
         """All valid log levels should be accepted."""

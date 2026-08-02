@@ -128,8 +128,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=150,  # After bet: 100 + 50
             stacks=(850, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -151,8 +151,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=275,  # Correct pot: 100 + 50 + 125 = 275
             stacks=(850, 775),  # Player 0: 900 - 50 = 850, Player 1: 900 - 125 = 775
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -173,8 +173,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=275,  # 100 + 50 + 125 = 275
             stacks=(850, 775),  # Player 0: 900 - 50, Player 1: 900 - 125
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -188,8 +188,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=550,  # 200 + 100 + 250 = 550
             stacks=(700, 550),  # Player 0: 800 - 100, Player 1: 800 - 250
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -217,8 +217,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=200,  # 100 + 50 + 50
             stacks=(900, 850),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -237,8 +237,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=100,
             stacks=(900, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -260,8 +260,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=280,  # 100 + 30 + 90 + 60 = 280
             stacks=(810, 810),  # Player 0: 900 - 30 - 60, Player 1: 900 - 90
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -287,8 +287,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=325,  # 100 + 25 + 75 + 125 = 325
             stacks=(750, 825),  # P0: 900 - 25 - 125, P1: 900 - 75
-            board=("Ah", "Kh", "Qh"),  # type: ignore
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore
+            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
+            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
             button_position=0,
             current_player=0,
             is_terminal=False,

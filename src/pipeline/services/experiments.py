@@ -295,8 +295,10 @@ def experiment_report(
     control = by_arm.get(CONTROL_ARM)
     if control is not None:
         notes.append(f"Tier: {eval_ledger.tier_label(control)}")
-        for arm in {r.get("arm") for r in records if r.get("arm")} - set(by_arm):
-            notes.append(f"Arm '{arm}' has no evaluation in the control's tier; omitted.")
+        notes.extend(
+            f"Arm '{arm}' has no evaluation in the control's tier; omitted."
+            for arm in {r.get("arm") for r in records if r.get("arm")} - set(by_arm)
+        )
 
     control_samples: list[float] | None = None
     if control is not None:

@@ -274,7 +274,7 @@ class TestNoConflicts:
 
         # All hands in each group should be suit-isomorphic
         # (This is the key property that eliminates conflicts)
-        for _canonical, hands in canonical_to_hands.items():
+        for hands in canonical_to_hands.values():
             # Hands mapping to same canonical are strategically equivalent
             assert len(hands) >= 1
 
@@ -351,7 +351,7 @@ class TestBoardOrderInvariance:
     """
 
     @pytest.mark.parametrize(
-        "label,board_str,hand_str",
+        ("label", "board_str", "hand_str"),
         _ORDER_INVARIANCE_CASES,
         ids=[c[0] for c in _ORDER_INVARIANCE_CASES],
     )

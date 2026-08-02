@@ -87,7 +87,8 @@ class TestRunoutEvaluatorMasses:
 
         blocker = _combo_index("As", "9c")  # shares the As
         assert alive[blocker] == 0.0
-        assert win[blocker] == 0.0 and tie[blocker] == 0.0
+        assert win[blocker] == 0.0
+        assert tie[blocker] == 0.0
 
         independent = _combo_index("Jh", "Jc")
         assert alive[independent] == pytest.approx(1.0)

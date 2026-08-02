@@ -40,10 +40,11 @@ class ActionModel:
     def get_preflop_open_sizes_bb(self) -> list[float]:
         """Return configured SB first-in non-all-in open sizes in BB units."""
         options = self.config.action_model.preflop_templates["sb_first_in"]
-        sizes: list[float] = []
-        for token in options:
-            if isinstance(token, (int, float)) and float(token) > 0:
-                sizes.append(float(token))
+        sizes = [
+            float(token)
+            for token in options
+            if isinstance(token, (int, float)) and float(token) > 0
+        ]
         return sorted(set(sizes))
 
     def get_bet_sizes(self, state: GameState) -> list[int]:

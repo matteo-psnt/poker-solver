@@ -96,7 +96,8 @@ class TestCheckpointAndResume:
             abstraction=Buckets(),
         )
         manifest = StaticCheckpointManifest.read(tmp_path)
-        assert manifest is not None and manifest.iteration == 300
+        assert manifest is not None
+        assert manifest.iteration == 300
 
     def test_resume_continues_from_the_checkpoint(self, tmp_path):
         first = train_static_parallel(

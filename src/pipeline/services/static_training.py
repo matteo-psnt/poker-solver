@@ -34,7 +34,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.core.actions.action_model import ActionModel
@@ -119,7 +119,7 @@ def train_static(
     # Random suffix: second resolution collides, and two runs sharing a
     # directory interleave their checkpoints silently.
     if run_id is None:
-        run_id = f"run-{datetime.now().strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
+        run_id = f"run-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
     run_dir = base_dir / run_id
     # A named run that does not exist yet is a fresh start, not an error --
     # that is what makes a scheduler retry continue rather than restart.
