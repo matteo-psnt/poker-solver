@@ -113,13 +113,15 @@ class TestEstimatorNamesAgree:
 
 
 class TestReportedLedgerPath:
-    """`ledger` must name the file it read, not the one it was asked for.
+    """`ledger` must name the file it actually read.
 
-    Under `--source share` the index is derived into a temp dir, so echoing
-    `--ledger` had an empty share blaming a local file nothing had opened.
+    The index is DERIVED into a temp tree on every read, so a payload that
+    echoed a configured path would have an empty result blaming a file nothing
+    had opened. There is no configured path any more, which makes reporting the
+    real one the only option -- pinned so it stays that way.
     """
 
-    def test_it_names_the_derived_path_not_the_requested_one(self, tmp_path, monkeypatch):
+    def test_it_names_the_derived_path(self, tmp_path, published, monkeypatch):
         import argparse
 
         from src.interfaces.cli.commands import ledger as ledger_cmd
@@ -128,9 +130,6 @@ class TestReportedLedgerPath:
         derived.write_text("")
         monkeypatch.setattr(ledger_cmd, "ledger_for", lambda args, root: derived)
         args = argparse.Namespace(
-            source="local",
-            runs_dir=str(tmp_path),
-            ledger="data/eval_ledger.jsonl",
             run=None,
             experiment=None,
             method=None,
