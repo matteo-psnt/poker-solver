@@ -6,7 +6,7 @@ import argparse
 import dataclasses
 from typing import Any
 
-from src.interfaces.commands._base import Command
+from src.interfaces.commands._base import Command, parse_overrides
 from src.pipeline import services
 
 
@@ -52,6 +52,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "is U-shaped, so score the ladder and take the minimum rather than the last.",
     )
     parser.add_argument("--dtype", default="float32", choices=("float32", "float64"))
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="overrides",
+        metavar="KEY=VALUE",
+        help="Nested config override, `__` as the separator. Repeatable.",
+    )
     parser.add_argument("--experiment", default=None, help="Experiment id this run is an arm of.")
     parser.add_argument("--arm", default=None, help="Arm within the experiment.")
     parser.add_argument("--parent", default=None, help="Run id this was forked from.")
@@ -72,6 +80,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         checkpoint_every=args.checkpoint_every,
         retain_every=args.retain_every,
         dtype=args.dtype,
+        config_overrides=parse_overrides(args.overrides),
         run_id=args.run,
         experiment=services.ExperimentTag(
             experiment_id=args.experiment,
