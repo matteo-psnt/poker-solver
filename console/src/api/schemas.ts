@@ -156,6 +156,21 @@ export const ledgerSchema = z
   })
   .passthrough();
 
+export const costSchema = z
+  .object({
+    op: z.literal("cost"),
+    hours: z.number(),
+    node_hours: z.number(),
+    unobserved_seconds: z.number(),
+    samples: z.number(),
+    first_at: z.string().nullable(),
+    last_at: z.string().nullable(),
+    rate_per_node_hour: z.number().nullable(),
+    dollars: z.number().nullable(),
+    series: z.array(z.object({ at: z.string(), nodes: z.number().nullable() })),
+  })
+  .passthrough();
+
 export type Pool = z.infer<typeof poolSchema>;
 export type Jobs = z.infer<typeof jobsSchema>;
 export type Legs = z.infer<typeof legsSchema>;
@@ -165,3 +180,4 @@ export type RunSummary = z.infer<typeof runSummarySchema>;
 export type RunInfo = z.infer<typeof runinfoSchema>;
 export type Curve = z.infer<typeof curveSchema>;
 export type Ledger = z.infer<typeof ledgerSchema>;
+export type Cost = z.infer<typeof costSchema>;

@@ -9,6 +9,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { get } from "./client";
 import {
+  type Cost,
   type Curve,
   type Jobs,
   type Ledger,
@@ -16,6 +17,7 @@ import {
   type Pool,
   type RunInfo,
   type Runs,
+  costSchema,
   curveSchema,
   jobsSchema,
   ledgerSchema,
@@ -69,6 +71,14 @@ export const useCurve = (runId: string) =>
     queryKey: ["curve", runId],
     queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}/curve`, curveSchema),
     refetchInterval: SLOW,
+  });
+
+export const useCost = (hours = 24) =>
+  useQuery<Cost>({
+    queryKey: ["cost", hours],
+    queryFn: () => get(`/api/cost?hours=${hours}`, costSchema),
+    // Cheap: it reads a local file the sampler wrote, not the cloud.
+    refetchInterval: FAST,
   });
 
 export const useEvals = (limit = 50) =>

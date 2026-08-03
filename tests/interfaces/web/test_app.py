@@ -27,7 +27,7 @@ def client() -> TestClient:
     Nothing to reset: the cache belongs to the app `create_app` built, so it
     cannot outlive this fixture or be seen by the next test.
     """
-    return TestClient(web_app.create_app())
+    return TestClient(web_app.create_app(sample=False))
 
 
 @pytest.fixture
@@ -130,7 +130,7 @@ class TestTheMemo:
         above depend on the order it ran in.
         """
         client.get("/api/pool")
-        assert TestClient(web_app.create_app()).get("/api/pool").status_code == 200
+        assert TestClient(web_app.create_app(sample=False)).get("/api/pool").status_code == 200
         assert len(invoked) == 2
 
 
@@ -145,7 +145,7 @@ class TestServingTheConsole:
 
     def _app_with_dist(self, monkeypatch, dist: Path) -> TestClient:
         monkeypatch.setattr(web_app, "CONSOLE_DIST", dist)
-        return TestClient(web_app.create_app())
+        return TestClient(web_app.create_app(sample=False))
 
     def test_a_missing_build_is_reported_not_served_blank(self, tmp_path, monkeypatch):
         """A blank page reads as a broken app rather than a skipped build step."""

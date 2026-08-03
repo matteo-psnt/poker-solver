@@ -2,13 +2,14 @@ import { useJobs, usePool } from "@/api/queries";
 import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { Activity, FlaskConical, LayoutDashboard, ScrollText } from "lucide-react";
+import { Activity, DollarSign, FlaskConical, LayoutDashboard, ScrollText } from "lucide-react";
 
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/legs", label: "Legs", icon: ScrollText },
   { to: "/runs", label: "Runs", icon: Activity },
   { to: "/evals", label: "Evals", icon: FlaskConical },
+  { to: "/cost", label: "Cost", icon: DollarSign },
 ] as const;
 
 /**
