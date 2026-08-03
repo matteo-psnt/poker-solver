@@ -137,6 +137,21 @@ publish_all() {
         # during blosc decompression: 0". Publishing every ~250k iterations
         # meant many chances to be interrupted mid-copy.
         checkpoint-*|keys-*|static-*)
+          # ALREADY COMPLETE ON THE SHARE => NOTHING TO DO. A snapshot is
+          # write-once: the trainer never revisits static-<iter>.zarr, so a
+          # marker means the share's copy is final and identical. Re-copying it
+          # is not merely wasted -- `rm -f` below strips the marker FIRST, so a
+          # republish leaves a known-good rung transiently unmarked, and a leg
+          # that dies in that window makes the manifest name a rung the next
+          # fetch then refuses.
+          #
+          # It is not a rare cost either. The selective fetch copies the resume
+          # rung onto the node fresh, giving it a newer mtime than the share's
+          # copy, so `cp -u` sees every resumed leg's starting rung as changed:
+          # measured at 6.6 minutes re-uploading 809 MB that was already there.
+          if [ -f "$ARCHIVE/$name/.complete-$base" ]; then
+            continue
+          fi
           rm -f "$ARCHIVE/$name/.complete-$base" 2>/dev/null || true
           if cp -ru "$d" "$ARCHIVE/$name/" 2>>/tmp/publish_err; then
             : > "$ARCHIVE/$name/.complete-$base" 2>/dev/null || true
