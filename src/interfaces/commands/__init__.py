@@ -111,6 +111,11 @@ COMMANDS: tuple[CommandRef, ...] = (
     CommandRef(
         "vector-sweep", "Exploitability vs iteration for one vector-CFR kernel on one abstraction."
     ),
+    CommandRef(
+        "warm-start",
+        "Seed a scalar run from another kernel's strategy "
+        "(regrets encode it; average does not).",
+    ),
     CommandRef("precompute", "Precompute a combo abstraction into data/combo_abstraction/."),
     CommandRef("evaluate", "Evaluate a run's exploitability (Local Best Response by default)."),
     CommandRef("ledger", "List recorded evaluations from the eval ledger."),
