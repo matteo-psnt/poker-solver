@@ -1,43 +1,32 @@
-"""Precompute execution flow for combo abstraction CLI."""
+"""Submitting a combo abstraction precompute to the pool.
 
-import multiprocessing as mp
+This flow used to call ``PostflopPrecomputer.precompute_all`` directly, on the
+laptop, from a menu item whose own estimator printed a figure in hours. It was
+the last local-compute door in the interactive CLI.
+
+It queues a ``PRECOMPUTE`` leg instead. The invariant that made precompute look
+local-only is *computed once, never recomputed* -- not *computed on a laptop* --
+and a node satisfies it while also publishing the result to the share, which is
+where every other machine reads it from. That is the same leg
+``poker-solver-run submit-precompute`` builds, including its refusal to
+republish a name that already exists.
+"""
+
+from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
 from src.core.game.state import Street
+from src.interfaces.cli.commands.submit_precompute import (
+    PRECOMPUTE_TIMEOUT,
+    published_abstractions,
+    target_name,
+)
 from src.interfaces.cli.flows.config_helpers import list_config_names
-from src.interfaces.cli.ui import prompts
+from src.interfaces.cli.flows.queueing import queue_legs
+from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
+from src.interfaces.cloud import spec
+from src.interfaces.cloud.config import CloudConfig, CloudConfigError
 from src.pipeline.abstraction.config import PrecomputeConfig
-from src.pipeline.abstraction.paths import abstraction_output_path
-from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
-
-
-def _get_config_choice(ctx: CliContext) -> PrecomputeConfig | None:
-    """Prompt user for configuration choice."""
-    available_configs = list_config_names(ctx.config_dir / "abstraction")
-
-    if not available_configs:
-        print("\nNo configuration files found in config/abstraction/")
-        print("Please create a YAML config file first.")
-        return None
-
-    choices = [f"{name}.yaml" for name in available_configs]
-    choice = prompts.select(
-        ctx,
-        "Select abstraction configuration:",
-        choices=choices,
-    )
-
-    if choice is None:
-        return None
-
-    config_name = choice.replace(".yaml", "")
-
-    try:
-        return PrecomputeConfig.from_yaml(config_name)
-    except Exception as exc:
-        print(f"\nError loading config '{config_name}': {exc}")
-        return None
-
 
 # Measured single-core seconds per canonical board with the exact
 # range-vs-range engine (flop scales linearly with enumerated runouts),
@@ -59,12 +48,54 @@ CANONICAL_BOARD_COUNTS = {
 }
 FLOP_TOTAL_RUNOUTS = 1176
 
+# A prompt default, not a measured property of the pool: it matches the current
+# D16als_v6 node, and `pool_vm_size` can change under it. Whatever the user
+# picks is what the leg carries, so a stale value here costs an edit, not a run.
+DEFAULT_NODE_WORKERS = 16
 
-def _estimate_time(config: PrecomputeConfig) -> None:
-    """Show time estimate for precomputation."""
-    print("\nEstimating precomputation time...")
 
-    workers = config.num_workers or mp.cpu_count()
+def _get_config_choice(ctx: CliContext) -> tuple[str, PrecomputeConfig] | None:
+    """Prompt for an abstraction config, returning its STEM and the loaded config.
+
+    The stem is what travels, not ``PrecomputeConfig.config_name``. A leg carries
+    the stem (``LegSpec.config``) and the node resolves the YAML from it, so
+    deriving the published name from anything else risks a collision check that
+    describes a different abstraction than the one the node will build.
+    """
+    available_configs = list_config_names(ctx.config_dir / "abstraction")
+
+    if not available_configs:
+        print("\nNo configuration files found in config/abstraction/")
+        print("Please create a YAML config file first.")
+        return None
+
+    choices = [f"{name}.yaml" for name in available_configs]
+    choice = prompts.select(
+        ctx,
+        "Select abstraction configuration:",
+        choices=choices,
+    )
+
+    if choice is None:
+        return None
+
+    stem = choice.removesuffix(".yaml")
+
+    try:
+        return stem, PrecomputeConfig.from_yaml(stem)
+    except Exception as exc:
+        print(f"\nError loading config '{stem}': {exc}")
+        return None
+
+
+def _estimate_time(config: PrecomputeConfig, workers: int) -> None:
+    """Show the wall-clock estimate for precomputing on a node.
+
+    ``workers`` is the count the LEG will use, not this machine's core count.
+    The old version read ``mp.cpu_count()``, which described the laptop -- the
+    one machine that no longer does the work.
+    """
+    print(f"\nEstimated precomputation on a node at {workers} workers:")
 
     flop_runout_factor = (config.flop_runouts or FLOP_TOTAL_RUNOUTS) / FLOP_TOTAL_RUNOUTS
 
@@ -85,7 +116,6 @@ def _estimate_time(config: PrecomputeConfig) -> None:
         }
         total_seconds += street_seconds
 
-    print("\nEstimated precomputation (full coverage):")
     print("-" * 50)
     for street, est in estimates.items():
         minutes = est["est_minutes"]
@@ -101,54 +131,58 @@ def _estimate_time(config: PrecomputeConfig) -> None:
     print("-" * 50)
     total_minutes = total_seconds / 60
     if total_minutes < 60:
-        print(f"  TOTAL: ~{total_minutes:.1f} minutes (with {workers} workers)")
+        print(f"  TOTAL: ~{total_minutes:.1f} minutes")
     else:
-        print(
-            f"  TOTAL: ~{total_minutes / 60:.1f} hours ({total_minutes:.0f} min, {workers} workers)"
-        )
+        print(f"  TOTAL: ~{total_minutes / 60:.1f} hours ({total_minutes:.0f} min)")
     print()
 
 
 def handle_combo_precompute(ctx: CliContext) -> None:
-    """Handle combo-level abstraction precomputation."""
-    print()
-    print("=" * 60)
-    print("  COMBO-LEVEL ABSTRACTION PRECOMPUTATION")
-    print("=" * 60)
-    print()
+    """Queue a card-abstraction precompute on the pool."""
+    ui.header("Precompute Abstraction (on the pool)")
 
-    config = _get_config_choice(ctx)
-    if config is None:
+    chosen = _get_config_choice(ctx)
+    if chosen is None:
         print("Cancelled.")
         return
-    config_name = config.config_name or "unknown"
+    config_stem, config = chosen
 
-    output_path = abstraction_output_path(ctx.base_dir, config)
+    try:
+        cloud = CloudConfig.load()
+        already_published = published_abstractions(cloud)
+    except (CloudConfigError, ClientAuthenticationError, HttpResponseError) as error:
+        ui.error(f"Could not read the share: {error}")
+        print("  If this is an auth failure, `az login` and try again.")
+        ui.pause()
+        return
 
-    if output_path.exists() and (output_path / "combo_abstraction.pkl").exists():
-        print(f"\n[!] Abstraction already exists: {output_path}")
-        print("\nThis configuration has already been precomputed.")
+    target = target_name(config_stem)
+    if target in already_published:
+        # The same refusal `submit-precompute` makes, for the same reason:
+        # bucket ASSIGNMENT is not pinned by the abstraction hash, so replacing
+        # a published copy silently invalidates every run trained against it.
+        ui.error(f"'{target}' is already published on the share.")
+        print("  Republishing would silently change bucket assignment under an")
+        print("  unchanged abstraction hash, invalidating the provenance of every")
+        print("  run trained against it. Use `poker-solver-run submit-precompute")
+        print("  --config <name> --force` if no such run matters.")
+        ui.pause()
+        return
 
-        overwrite = prompts.confirm(
-            ctx,
-            "Do you want to recompute anyway (this will overwrite)?",
-            default=False,
-        )
+    workers = prompts.prompt_int(
+        ctx,
+        "Workers on the node:",
+        default=DEFAULT_NODE_WORKERS,
+        min_value=1,
+    )
+    if workers is None:
+        return
 
-        if not overwrite:
-            print("\nSkipping recomputation. Using existing abstraction.")
-            print(f"Location: {output_path}")
-            return
+    _estimate_time(config, workers)
 
-    _estimate_time(config)
-
-    streets = [Street.FLOP, Street.TURN, Street.RIVER]
-
-    print("\n" + "=" * 60)
     print("CONFIGURATION SUMMARY")
     print("=" * 60)
-    print(f"Config: {config_name}.yaml")
-    print(f"Streets: {[s.name for s in streets]}")
+    print(f"Config: {config_stem}.yaml")
     print(
         f"Buckets: F={config.num_buckets[Street.FLOP]}, "
         f"T={config.num_buckets[Street.TURN]}, "
@@ -157,40 +191,24 @@ def handle_combo_precompute(ctx: CliContext) -> None:
     print("Coverage: all canonical boards (no clustering)")
     flop_runouts = "exact (1176)" if config.flop_runouts is None else str(config.flop_runouts)
     print(f"Flop runouts: {flop_runouts} (turn/river exact)")
-    print(f"Workers: {config.num_workers or mp.cpu_count()}")
-    print(f"Output: {output_path}")
+    print(f"Publishes to the share as: {target}")
+    print(f"Leg timeout: {PRECOMPUTE_TIMEOUT}")
     print("=" * 60)
 
-    confirm = prompts.confirm(
-        ctx,
-        "Start precomputation?",
-        default=True,
-    )
+    confirm = prompts.confirm(ctx, "Queue this precompute on the pool?", default=True)
     if not confirm:
         print("Cancelled.")
         return
 
-    print("\nStarting precomputation...")
-    print("This may take a while. Progress will be shown.\n")
-
-    try:
-        precomputer = PostflopPrecomputer(config)
-        abstraction = precomputer.precompute_all(streets=streets)
-        precomputer.save(output_path)
-
-        print("\n" + "=" * 60)
-        print("PRECOMPUTATION COMPLETE!")
-        print("=" * 60)
-        print(f"Output saved to: {output_path}")
-        print(f"Config: {config_name}")
-
-        print("\nBucket summary:")
-        for street in streets:
-            num_buckets = abstraction.num_buckets(street)
-            print(f"  {street.name}: {num_buckets} buckets")
-
-    except KeyboardInterrupt:
-        print("\n\nPrecomputation interrupted by user.")
-    except Exception as exc:
-        print(f"\nError during precomputation: {exc}")
-        raise
+    queue_legs(
+        lambda snapshot: [
+            spec.LegSpec(
+                code_snapshot=snapshot,
+                op=spec.PRECOMPUTE,
+                config=config_stem,
+                workers=workers,
+                timeout=PRECOMPUTE_TIMEOUT,
+            )
+        ]
+    )
+    ui.pause()

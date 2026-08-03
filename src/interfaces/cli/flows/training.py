@@ -11,25 +11,28 @@ prompt for *additional* iterations, which made it the one surface in the
 project speaking a relative-target dialect -- and runs started from it could
 never appear in ``report --experiment``, because it had nowhere to put an
 experiment id.
+
+Nothing here reads a card abstraction, either. Submitting used to call
+``build_card_abstraction`` first, which is not an existence check: it loads the
+artifact (~773 MB) into the laptop. Worse, it answered the question about the
+wrong machine -- the abstraction a leg needs is the one on the share, which the
+node mounts. A laptop that has never precomputed anything can submit perfectly
+valid work, and the node refuses the leg if the abstraction is genuinely
+missing.
 """
 
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
 from src.interfaces.cli.commands import jobs as jobs_command
 from src.interfaces.cli.commands.evaluate import EVAL_METHODS
-from src.interfaces.cli.flows.combo_precompute import handle_combo_precompute
 from src.interfaces.cli.flows.config_menu import select_config
+from src.interfaces.cli.flows.queueing import queue_legs
 from src.interfaces.cli.flows.run_picker import select_run
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
-from src.interfaces.cloud import batch, dispatch, spec
+from src.interfaces.cloud import batch, spec
 from src.interfaces.cloud.config import CloudConfig, CloudConfigError
 from src.pipeline import services
-from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
-from src.pipeline.training.components import (
-    build_card_abstraction,
-)
-from src.shared.config import Config
 
 MENU_EVAL_METHODS = ("exact_br", *(m for m in EVAL_METHODS if m != "exact_br"))
 
@@ -59,9 +62,6 @@ def submit_training_leg(ctx: CliContext) -> None:
         if config is None:
             return
         ctx.set_runs_dir(config.training.runs_dir)
-        if not _ensure_combo_abstraction(ctx, config):
-            ui.pause()
-            return
         config_name = config.system.config_name
 
     target = prompts.prompt_int(
@@ -78,7 +78,7 @@ def submit_training_leg(ctx: CliContext) -> None:
         return
     experiment, arm, parent = tags
 
-    _queue(
+    queue_legs(
         lambda snapshot: [
             spec.LegSpec(
                 code_snapshot=snapshot,
@@ -115,32 +115,6 @@ def _prompt_experiment_tags(ctx: CliContext) -> tuple[str, str, str] | None:
     if parent is None:
         return None
     return experiment.strip(), arm.strip(), parent.strip()
-
-
-def _queue(make_legs) -> None:
-    """Stage and queue, turning infrastructure problems into readable messages.
-
-    The Azure exceptions are caught by name alongside our own. An expired
-    ``az login`` raises ``ClientAuthenticationError`` and an unreachable
-    endpoint raises ``HttpResponseError``; uncaught, either tracebacks out of
-    the menu. ``SystemExit`` is caught for the same reason -- the shared
-    dispatch path raises it for a caller that is a command-line process, and
-    letting it through would close the whole interactive session.
-    """
-    try:
-        payload = dispatch.stage_and_queue(make_legs)
-    except (CloudConfigError, ValueError) as error:
-        ui.error(str(error))
-        return
-    except (ClientAuthenticationError, HttpResponseError) as error:
-        ui.error(f"Azure rejected the request: {error}")
-        print("  If this is an auth failure, `az login` and try again.")
-        return
-    except SystemExit as error:
-        ui.error(str(error))
-        return
-    print()
-    dispatch.render_queued(payload)
 
 
 def cloud_status(ctx: CliContext) -> None:  # noqa: ARG001
@@ -206,7 +180,7 @@ def score_run(ctx: CliContext) -> None:
         return
     rungs = [part.strip() for part in rungs_text.split(",") if part.strip()] or [""]
 
-    _queue(
+    queue_legs(
         lambda snapshot: [
             spec.LegSpec(
                 code_snapshot=snapshot,
@@ -252,71 +226,3 @@ def view_runs(ctx: CliContext) -> None:
     print(f"\nConfig: {meta.config_name or 'unknown'}")
 
     ui.pause()
-
-
-def _run_precompute_and_verify(ctx: CliContext, config: Config) -> bool:
-    """Run precomputation and verify it completed successfully."""
-    print("\n" + "=" * 60)
-    print("RUNNING PRECOMPUTATION")
-    print("=" * 60)
-    handle_combo_precompute(ctx)
-
-    try:
-        build_card_abstraction(config)
-        print("\n✓ Precomputation completed successfully!")
-        print("Continuing with training setup...\n")
-        return True
-    except (FileNotFoundError, ValueError):
-        ui.error("\nPrecomputation did not complete successfully.")
-        print("Training cancelled.")
-        return False
-
-
-def _ensure_combo_abstraction(ctx: CliContext, config: Config) -> bool:
-    """
-    Ensure combo abstraction exists for the given config.
-
-    If the abstraction is missing, prompts the user to run precomputation.
-
-    Returns:
-        True if abstraction exists or was successfully created, False otherwise
-    """
-    try:
-        build_card_abstraction(config)
-        return True
-    except FileNotFoundError as e:
-        ui.error(str(e))
-        print()
-
-        run_precompute = prompts.confirm(
-            ctx,
-            "Would you like to run precomputation now?",
-            default=True,
-        )
-
-        if not run_precompute:
-            print("\nTraining cancelled. Please run precomputation from the main menu first.")
-            return False
-
-        return _run_precompute_and_verify(ctx, config)
-
-    except AbstractionHashMismatchError as e:
-        ui.error(str(e))
-        print()
-
-        run_precompute = prompts.confirm(
-            ctx,
-            "Would you like to recompute the abstraction now?",
-            default=True,
-        )
-
-        if not run_precompute:
-            print("\nTraining cancelled.")
-            return False
-
-        return _run_precompute_and_verify(ctx, config)
-
-    except ValueError as e:
-        ui.error(str(e))
-        print()
-        return False
