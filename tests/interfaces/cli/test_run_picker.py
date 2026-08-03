@@ -1,9 +1,27 @@
 """Tests for the shared run-selector choice logic."""
 
+import pytest
+from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 from questionary import Choice, Separator
 
+from src.interfaces.cli.commands._base import Command
 from src.interfaces.cli.flows import run_picker
+from src.interfaces.cli.ui.context import CliContext
+from src.interfaces.errors import CommandError
 from src.pipeline.services import RunSummary
+
+
+def _invoke_raises(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+    """Make every `Command.invoke` fail.
+
+    Patched on the CLASS: `Command` is frozen, so a per-instance stub is
+    impossible -- and the class attribute is the contract the picker depends on.
+    """
+
+    def _invoke(self: Command, **kwargs: object) -> dict[str, object]:
+        raise error
+
+    monkeypatch.setattr(Command, "invoke", _invoke)
 
 
 def _summary(name, *, commits_ago, loadable, blocker=None, dirty=False) -> RunSummary:
@@ -108,3 +126,43 @@ def test_separator_present_but_not_a_value():
         summaries, show_all=False, cancel_label="Cancel", allow_unloadable=False
     )
     assert any(isinstance(c, Separator) for c in choices)
+
+
+class TestAFailedShareReadDoesNotEscapeTheMenu:
+    """`select_run` now asks the share, so it can fail where a glob could not.
+
+    The picker is reached from an interactive menu: whatever it raises lands on
+    the user as a traceback and takes the session with it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _quiet(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(run_picker.ui, "pause", lambda *a, **k: None)
+
+    @pytest.fixture
+    def ctx(self) -> CliContext:
+        """A real context. It is never used on these paths -- the read fails
+        before a prompt is drawn -- but a `None` here would type-check as a lie
+        about what `select_run` accepts."""
+        return CliContext.from_project_root()
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(CommandError("the share is unreachable"), id="refusal"),
+            pytest.param(ClientAuthenticationError("token expired"), id="stale-az-login"),
+            pytest.param(HttpResponseError("504"), id="azure-unreachable"),
+        ],
+    )
+    def test_it_is_reported_and_cancels(self, monkeypatch, ctx, error):
+        _invoke_raises(monkeypatch, error)
+
+        assert run_picker.select_run(ctx, "Pick a run") is None
+
+    def test_a_bug_still_propagates(self, monkeypatch, ctx):
+        """Only the known failures are absorbed. Swallowing a KeyError would
+        show 'no runs' for a defect in the payload the command returned."""
+        _invoke_raises(monkeypatch, KeyError("runs"))
+
+        with pytest.raises(KeyError):
+            run_picker.select_run(ctx, "Pick a run")

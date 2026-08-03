@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* Dark by default, light supported. The rest of this project is read in a
+   terminal; the console should feel like the same instrument. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --border: #e4e4e7;
+  --fg: #18181b;
+  --fg-muted: #52525b;
+  --fg-faint: #a1a1aa;
+}
+
+.dark {
+  --bg: #09090b;
+  --panel: #0e0e11;
+  --border: #232329;
+  --fg: #f4f4f5;
+  --fg-muted: #a1a1aa;
+  --fg-faint: #6b6b76;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+/* Numbers line up as columns, or magnitudes cannot be compared by shape. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

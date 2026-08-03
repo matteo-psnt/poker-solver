@@ -10,8 +10,12 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# ANCHORED. These are setuptools' root-level build artifacts, but a bare `lib/`
+# matches a directory of that name at ANY depth -- it was silently excluding
+# `console/src/lib/`, three files the app imports, so a fresh clone would have
+# failed to build with no hint why.
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -90,3 +94,4 @@ infra/store/*.tfvars
 # console build output
 console/dist/
 console/node_modules/
+console/*.tsbuildinfo

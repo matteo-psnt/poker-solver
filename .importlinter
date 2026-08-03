@@ -21,6 +21,23 @@ forbidden_modules =
     src.engine
     src.core
 
+; The console reads through `Command.invoke` or not at all. The layers contract
+; above permits `interfaces -> pipeline`, so this is the one place the rule can
+; be stated. `allow_indirect_imports` is required, not a loophole: the web
+; package imports the command layer, which imports pipeline, and that chain is
+; the whole point -- what must not exist is a DIRECT reach past it, which is how
+; the previous browser UI grew a second read path and then drifted from the CLI.
+[importlinter:contract:web_reads_through_the_command_layer]
+name = The console must not reach past the command layer
+type = forbidden
+source_modules =
+    src.interfaces.web
+forbidden_modules =
+    src.pipeline
+    src.engine
+    src.core
+allow_indirect_imports = True
+
 [importlinter:contract:training_and_evaluation_are_independent]
 name = Training and evaluation must not import each other
 type = independence
