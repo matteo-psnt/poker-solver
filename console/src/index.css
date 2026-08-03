@@ -52,3 +52,28 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* uPlot ships a light-ish, content-sized default. Three overrides:
+   `width: min-content` collapses the chart instead of filling its panel; the
+   drag-select overlay is a black wash that is invisible on a dark panel; and
+   the cursor guides are a hardcoded blue-grey. Everything the CANVAS draws is
+   themed in `lib/theme.ts` instead, because a canvas cannot read a CSS
+   variable. */
+.uplot {
+  width: 100%;
+  font-family: inherit;
+}
+
+.u-select {
+  background: rgb(255 255 255 / 0.08);
+}
+
+.u-hz .u-cursor-x,
+.u-vt .u-cursor-y {
+  border-right-color: var(--fg-faint);
+}
+
+.u-hz .u-cursor-y,
+.u-vt .u-cursor-x {
+  border-bottom-color: var(--fg-faint);
+}

@@ -62,11 +62,14 @@ export function Cost() {
       </Panel>
 
       {/* A caption, not a footnote: this number invites being quoted. */}
-      <p className="px-1 text-[11px] leading-relaxed text-[var(--fg-faint)]">
-        This is <strong className="text-[var(--fg-muted)]">pool allocation</strong>, not billed
-        cost. It cannot see anything Azure bills outside the pool, and the rate comes from Terraform
-        rather than an invoice — <code className="font-mono">just credit-check</code> is the
-        authority.
+      <p className="max-w-[70ch] px-1 text-[12px] leading-relaxed text-[var(--fg-muted)]">
+        This is <strong className="font-medium text-[var(--fg)]">pool allocation</strong>, not
+        billed cost. It cannot see anything Azure bills outside the pool, and the rate comes from
+        Terraform rather than an invoice —{" "}
+        <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono text-[var(--fg)]">
+          just credit-check
+        </code>{" "}
+        is the authority.
         {cost.data && cost.data.unobserved_seconds > 0 && (
           <>
             {" "}
