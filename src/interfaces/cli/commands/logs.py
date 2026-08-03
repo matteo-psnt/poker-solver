@@ -69,7 +69,23 @@ def _clean(text: str, *, raw: bool, lines: int) -> list[str]:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    """Read one leg's log, or list what is published."""
+    """Read one leg's log, or list what is published.
+
+    Ordering:
+        Everything the caller could have got right is refused first. `CloudConfig.load()`
+        shells out to Terraform, so validating after it charges a round trip for a typo
+        -- and made a "refused before any call" test pass only where `infra/.terraform`
+        happened to be populated.
+    """
+    if not args.list and not args.task:
+        raise CommandError("logs: --task is required unless --list is given.")
+
+    if not args.list and args.source == "node" and not args.job:
+        raise CommandError(
+            "logs --source node needs --job: node-side files are addressed by "
+            "(job, task). Use --source share to read by task id alone."
+        )
+
     config = CloudConfig.load()
     if args.list:
         service = share.share_client(config)
@@ -80,15 +96,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "task": None,
         }
 
-    if not args.task:
-        raise CommandError("logs: --task is required unless --list is given.")
-
     if args.source == "node":
-        if not args.job:
-            raise CommandError(
-                "logs --source node needs --job: node-side files are addressed by "
-                "(job, task). Use --source share to read by task id alone."
-            )
         try:
             text = batch.task_file(batch.client(config), args.job, args.task, f"{args.stream}.txt")
         except ResourceNotFoundError as error:
