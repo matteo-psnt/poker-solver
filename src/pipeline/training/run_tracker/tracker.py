@@ -11,6 +11,8 @@ from src.pipeline.training.run_tracker.metadata import RunMetadata
 from src.shared import records, run_events
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from src.pipeline.training.run_tracker.attempts import AttemptRecord
     from src.shared.config import Config
 
@@ -217,6 +219,30 @@ class RunTracker:
                 "The abstraction was recomputed since this run was trained; resuming "
                 "would rebucket its existing infosets and silently corrupt it."
             )
+
+    def verify_trainer_knobs(self, config: Config, blocks: Sequence[str]) -> None:
+        """Ensure a continuation trains the same algorithm the run was started with.
+
+        ``--set`` overrides do NOT survive a continuation: the node rebuilds the
+        config from ``--config`` plus whatever flags THAT task carried. Forget
+        one and the ladder holds rungs from two different trainers, while the
+        action hash, the card-abstraction hash and the kernel name all match --
+        so nothing else here catches it. Near-miss that put this in: a CFR-BR
+        run was one missing ``--set pcs__cfr_br=river`` from having plain-PCS
+        rungs appended to it over ten hours.
+
+        ``blocks`` are the config sections that decide the algorithm, which
+        differ by trainer -- the scalar one has no ``pcs`` section to change.
+        """
+        for block in blocks:
+            was, now = getattr(self.metadata.config, block), getattr(config, block)
+            if was != now:
+                raise ValueError(
+                    f"This run was trained with {block}={was!r}, and this task would "
+                    f"continue it with {block}={now!r}. A `--set` does not carry into a "
+                    "continuation: repeat every override the run was started with, or "
+                    "the ladder ends up holding rungs from two different trainers."
+                )
 
     def _emit_attempt_started(self, attempt: AttemptRecord | None = None) -> None:
         attempt = attempt or self.metadata.current_attempt
