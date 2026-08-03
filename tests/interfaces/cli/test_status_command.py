@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
+from src.interfaces.cli import headless
 from src.interfaces.cli.commands import legs, status
 from src.interfaces.cli.commands._base import Command
 from src.interfaces.errors import CommandError
@@ -118,6 +119,22 @@ class TestWatch:
         monkeypatch.setitem(status.PANEL_RENDERERS, "pool", lambda p: print(p["op"]))
         status.render(payload)
         assert "pool" in capsys.readouterr().out
+
+    def test_ctrl_c_leaves_the_loop_without_a_traceback(self, monkeypatch):
+        """Ctrl-C is the documented way out, so it is a normal exit.
+
+        Uncaught it unwinds through `headless.main`, which translates only
+        `CommandError` -- so stopping a watch printed a traceback every time.
+        A `timeout`-based probe never catches this: SIGTERM is not SIGINT.
+        """
+        monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")),))
+        monkeypatch.setitem(status.PANEL_RENDERERS, "pool", lambda _p: None)
+
+        def _interrupt(_seconds):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(status.time, "sleep", _interrupt)
+        assert headless.main(["status", "--watch", "30", "--no-legs"]) == 0
 
 
 class TestRenderDelegates:
