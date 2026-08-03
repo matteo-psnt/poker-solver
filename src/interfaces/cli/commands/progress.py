@@ -7,22 +7,16 @@ from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
-    add_source_argument,
     records_root,
     resolve_run_dir,
 )
 from src.interfaces.errors import CommandError
 from src.shared import records, run_events
-from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run progress`."""
-    add_source_argument(parser)
     parser.add_argument("--run", required=True, help="Run id (dir name) or path.")
-    parser.add_argument(
-        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Directory containing run directories."
-    )
     parser.add_argument(
         "--last", type=int, default=25, help="Show only the last N checkpoints (0 = all)."
     )

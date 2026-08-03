@@ -10,7 +10,6 @@ import pytest
 from src.interfaces.cli.commands import evaluate, jobs, pool_status, score
 from src.interfaces.cli.flows import training
 from src.interfaces.cli.headless import build_parser
-from src.interfaces.errors import CommandError
 
 
 def _job(job_state: str, task_state: str) -> dict:
@@ -141,30 +140,3 @@ class TestReportedLedgerPath:
             rebuild=False,
         )
         assert ledger_cmd.run(args)["ledger"] == str(derived)
-
-
-class TestShareMigrateIsRefused:
-    """`--source share` reads a throwaway copy, so migrating it changed nothing
-    while printing 'Originals left in place' -- a no-op reporting success."""
-
-    def test_it_refuses_rather_than_silently_doing_nothing(self, tmp_path):
-        import argparse
-
-        import pytest
-
-        from src.interfaces.cli.commands import ledger as ledger_cmd
-
-        args = argparse.Namespace(
-            source="share",
-            runs_dir=str(tmp_path),
-            ledger="led.jsonl",
-            run=None,
-            experiment=None,
-            method=None,
-            since=None,
-            limit=25,
-            migrate=True,
-            rebuild=False,
-        )
-        with pytest.raises(CommandError, match="Nothing on the share would change"):
-            ledger_cmd.run(args)

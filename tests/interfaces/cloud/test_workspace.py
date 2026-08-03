@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -121,28 +120,7 @@ class TestBaseline:
 
 
 class TestSourceSeam:
-    """`--source local` must not require the cloud to be configured at all."""
-
-    def test_local_yields_the_runs_dir_without_touching_azure(self, tmp_path, monkeypatch):
-        import argparse
-
-        from src.interfaces.cli.commands import _base
-
-        def _explode(*a, **k):
-            raise AssertionError("--source local must not build a cloud client")
-
-        monkeypatch.setattr(share, "share_client", _explode)
-        args = argparse.Namespace(source="local", runs_dir=str(tmp_path), ledger="led.jsonl")
-        with _base.records_root(args) as root:
-            assert root == Path(tmp_path)
-
-    def test_local_uses_the_ledger_it_was_given(self, tmp_path):
-        import argparse
-
-        from src.interfaces.cli.commands import _base
-
-        args = argparse.Namespace(source="local", runs_dir=str(tmp_path), ledger="given.jsonl")
-        assert _base.ledger_for(args, tmp_path) == Path("given.jsonl")
+    """There is only one source now: the published record."""
 
     def test_share_derives_the_index_rather_than_reading_a_shared_file(self, tmp_path):
         """A second writable file on a share with no atomic append is the

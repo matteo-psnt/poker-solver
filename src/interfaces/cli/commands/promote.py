@@ -9,50 +9,53 @@ from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
+    records_root,
     resolve_run_dir,
 )
+from src.interfaces.errors import CommandError
 from src.pipeline import services
-from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run promote`."""
-    parser.add_argument(
-        "--local-only",
-        action="store_true",
-        help="Do not publish the pointer to the share (offline, or a scratch baseline).",
-    )
-    parser.add_argument("--run", required=True, help="Run id to promote.")
+    parser.add_argument("--run", required=True, help="Run id to promote. Must be published.")
     parser.add_argument(
         "--rationale",
         required=True,
         help="Why this run becomes the baseline. Required — a lineage that moved for "
         "an unrecorded reason cannot be audited later.",
     )
-    parser.add_argument(
-        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Base runs dir for id resolution."
-    )
-    parser.add_argument(
-        "--baseline", default=str(services.DEFAULT_BASELINE_PATH), help="Baseline pointer file."
-    )
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    """Point the baseline at a run, closing one turn of the base-fork loop."""
-    run_dir = resolve_run_dir(args.run, args.runs_dir)
-    baseline = services.promote_baseline(
-        run_dir.name,
-        args.rationale,
-        path=Path(args.baseline),
-        checkpoint_iteration=services.checkpoint_iteration_of(run_dir),
-    )
-    published = _publish(Path(args.baseline)) if not args.local_only else None
-    return {
-        "op": "promote",
-        "baseline": str(args.baseline),
-        "published": published,
-        **dataclasses.asdict(baseline),
-    }
+    """Point the baseline at a run, closing one turn of the base-fork loop.
+
+    Publishing is no longer optional. A `--local-only` baseline was a pointer
+    that existed on one laptop, which is precisely the failure the published
+    baseline was introduced to fix -- and with no local runs left there is
+    nothing for it to point AT that another machine could resolve.
+
+    The pointer is still written to a temporary file first, because
+    :func:`services.promote_baseline` composes the document there; it is the
+    published copy that is the record.
+    """
+    with records_root(args) as root:
+        run_dir = resolve_run_dir(args.run, str(root))
+        local = root / "baseline.json"
+        baseline = services.promote_baseline(
+            run_dir.name,
+            args.rationale,
+            path=local,
+            checkpoint_iteration=services.checkpoint_iteration_of(run_dir),
+        )
+        published = _publish(local)
+    if not published:
+        raise CommandError(
+            "The baseline was composed but NOT published, so nothing has moved. "
+            "The share is the only copy now that local runs are gone — check "
+            "`az login` and Terraform state, then run this again."
+        )
+    return {"op": "promote", "published": published, **dataclasses.asdict(baseline)}
 
 
 def _publish(local: Path) -> bool | None:

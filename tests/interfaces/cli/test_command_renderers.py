@@ -31,28 +31,6 @@ PAYLOADS: dict[str, dict] = {
         "dropped_updates": 0,
         "status": "completed",
     },
-    "ab": {
-        "op": "ab",
-        "config_name": "quick_test",
-        "iterations": 200_000,
-        "seed": 42,
-        "determinism_verified": True,
-        # The service preformats the table, so the renderer only has to print it.
-        "table": "A/B  config=quick_test\ncontrol  6283.25\nprune110  11240.00  +79%",
-        "arms": [
-            {
-                "name": "control",
-                "run_id": "run-a",
-                "overrides": {},
-                "iterations": 200_000,
-                "touched_rows": 1_050_124,
-                "num_rows": 2_000_000,
-                "coverage": 0.525,
-                "runtime_seconds": 337.5,
-                "exploitability_mbb": 6283.25,
-            },
-        ],
-    },
     "precompute": {
         "op": "precompute",
         "abstraction_config": "production",
@@ -319,15 +297,6 @@ PAYLOADS: dict[str, dict] = {
         "tasks": ["run-a-000000-1"],
     },
     "cancel": {"op": "cancel", "job_id": "poker-20260802", "task_id": "run-a-000000-1"},
-    "fetch": {
-        "op": "fetch",
-        "runs": ["run-a"],
-        "files": 12,
-        "skipped_unnamed": 3,
-        "mode": "metadata",
-        "ledger_rows": 40,
-        "ledger_preserved": 2,
-    },
     "push-code": {"op": "push-code", "code_snapshot": "code-20260802_000000"},
     "submit-precompute": {
         "op": "submit-precompute",

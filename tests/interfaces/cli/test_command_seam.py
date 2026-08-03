@@ -106,10 +106,11 @@ class TestInvokeBuildsArgumentsFromTheParser:
 
 
 class TestARefusalIsAValue:
-    def test_a_real_command_refuses_without_exiting(self, tmp_path):
+    def test_a_real_command_refuses_without_exiting(self, published):
         """End-to-end: the wiring and the error channel in one call."""
+        assert published.is_dir()
         with pytest.raises(CommandError, match="Run not found"):
-            progress.COMMAND.invoke(run="nope", runs_dir=str(tmp_path), source="local", last=25)
+            progress.COMMAND.invoke(run="nope", last=25)
 
     def test_a_cloud_config_failure_is_one_too(self):
         """So a surface catches ONE type, not a list that grows per module."""
@@ -119,12 +120,13 @@ class TestARefusalIsAValue:
 class TestTheCommandLinePutsTheExitBack:
     """The CLI keeps its old behaviour; it just no longer imposes it on others."""
 
-    def test_a_refusal_is_exit_1_and_a_message_on_stderr(self, tmp_path, capsys):
-        code = headless.main(["progress", "--run", "nope", "--runs-dir", str(tmp_path)])
+    def test_a_refusal_is_exit_1_and_a_message_on_stderr(self, published, capsys):
+        assert published.is_dir()
+        code = headless.main(["progress", "--run", "nope"])
         assert code == 1
         assert "Run not found" in capsys.readouterr().err
 
-    def test_a_bug_still_tracebacks(self, monkeypatch, tmp_path):
+    def test_a_bug_still_tracebacks(self, monkeypatch, published):
         """Only CommandError is translated. A ValueError is a bug, and a
         traceback is the correct output for one."""
 
@@ -133,7 +135,7 @@ class TestTheCommandLinePutsTheExitBack:
 
         monkeypatch.setattr(progress, "resolve_run_dir", _boom)
         with pytest.raises(ValueError, match="kaboom"):
-            headless.main(["progress", "--run", "r", "--runs-dir", str(tmp_path)])
+            headless.main(["progress", "--run", "r"])
 
 
 def test_no_command_signals_a_refusal_by_exiting_the_process():

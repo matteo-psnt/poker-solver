@@ -20,7 +20,6 @@ group by concern only:
     Read the experiment record — curves, baselines, arm-vs-control attribution.
 """
 
-from src.pipeline.services.ab import AbResult, Arm, DeterminismError, format_ab_table, run_ab
 from src.pipeline.services.abstraction import precompute_abstraction, sweep_bucket_counts
 from src.pipeline.services.evaluation import (
     BLUEPRINT_MATCH_ESTIMATOR_LABEL,
@@ -65,13 +64,10 @@ __all__ = [
     "DEFAULT_BASELINE_PATH",
     "EXACT_BR_ESTIMATOR_LABEL",
     "LBR_ESTIMATOR_LABEL",
-    "AbResult",
-    "Arm",
     "ArmResult",
     "Baseline",
     "CurveOutput",
     "CurvePoint",
-    "DeterminismError",
     "EvaluationOutput",
     "ExperimentReport",
     "ExperimentTag",
@@ -87,14 +83,12 @@ __all__ = [
     "evaluate_run_resolver_gate",
     "experiment_report",
     "exploitability_curve",
-    "format_ab_table",
     "list_runs",
     "load_baseline",
     "load_run_metadata",
     "precompute_abstraction",
     "promote_baseline",
     "record_blueprint_match",
-    "run_ab",
     "run_digest",
     "sweep_bucket_counts",
     "train_static",

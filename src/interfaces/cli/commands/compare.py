@@ -8,24 +8,18 @@ from typing import Any
 
 from src.interfaces.cli.commands._base import (
     Command,
-    add_source_argument,
     ledger_for,
     records_root,
 )
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
-from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run compare`."""
-    add_source_argument(parser)
     parser.add_argument("--a", required=True, help="First run id (baseline).")
     parser.add_argument("--b", required=True, help="Second run id (candidate).")
-    parser.add_argument(
-        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Runs dir, for resolving eval payloads."
-    )
     parser.add_argument(
         "--a-at",
         type=int,

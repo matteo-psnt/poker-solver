@@ -15,8 +15,9 @@ identified as loadable by `STATIC_CHECKPOINT.json`.
 
 Tests in `tests/` mirror this layout. Config YAML lives under `config/`
 (source of truth for training setups; name new files for their purpose).
-Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
-`eval_ledger.jsonl`); avoid committing large training outputs.
+Runtime artifacts go in `data/`, which now holds only `combo_abstraction/` (a
+test fixture) and `cache/` (regenerable). **There is no `data/runs`**: runs
+live on the share and nowhere else.
 
 ## Commands
 - `uv sync --group dev` — install dependencies.
@@ -29,9 +30,9 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
   irrelevant). It also has no config *editor*: a leg carries a config name plus
   `LegSpec.sets`, so overrides go through `--set k=v` and nothing else.
 - `uv run poker-solver-run` — the single entrypoint, in three groups:
-  - **see and dispatch** — `status`, `ab`, `submit`, `score`,
-    `submit-precompute`, `jobs`, `logs`, `legs`, `cancel`, `pool-status`,
-    `autoscale-check`, `repair-ladder`, `fetch`, `push-code`, `push-data`.
+  - **see and dispatch** — `status`, `submit`, `score`, `submit-precompute`,
+    `jobs`, `logs`, `legs`, `cancel`, `pool-status`, `autoscale-check`,
+    `repair-ladder`, `push-code`, `push-data`.
     **`status` is the one screen for "what is the pool doing right now"** —
     it composes `pool-status` + `jobs` + `legs` through `invoke()` and renders
     each with the command that owns it. Panels are fetched CONCURRENTLY and
@@ -41,19 +42,23 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
     never list tasks for a job you will discard (`jobs` fetched all 44 to render
     2); issue independent round trips together (47 leg records serially was
     9.1s); and never sync `keys-*` key tables, which are the deleted dynamic
-    backend's and were 37 of the 38 MB a `--source share` read pulled. Measured
-    warm before → after: `jobs` 11s → 2.5s, `legs` 23s → 2.0s,
-    `ledger --source share` 20s → 4.5s, the whole status screen 22s → 2.0s. The interactive menu's "Cloud Status"
+    backend's and were 37 of the 38 MB a share read pulled. Measured warm
+    before → after: `jobs` 11s → 2.5s, `legs` 23s → 2.0s, `ledger` 20s → 4.5s,
+    the whole status screen 22s → 2.0s. The interactive menu's "Cloud Status"
     is the same call; it used to be a second renderer that could disagree with
     `jobs` and could not see the leg log at all.
-  - **run here** (what a node invokes) — `train-static`, `precompute`,
-    `evaluate`
+  - **run on a node** — `train-static`, `precompute`, `evaluate`. These are
+    invoked BY `run_leg.sh`, on whichever box executes the leg; they are not a
+    local-compute door, and they keep `--runs-dir` because a node writes to
+    `/mnt/work` before publishing.
   - **read the record** — `ledger`, `curve`, `progress`, `runinfo`, `report`,
-    `compare`, `promote`. Every one takes `--source local|share`: `local` reads
-    the copy `fetch` left in `--runs-dir`, `share` answers against the published
-    record without keeping one — the eval index is rebuilt from the per-run
-    documents rather than read from a second writable file on a share that has
-    no atomic append.
+    `compare`, `promote`. **There is no `--source` and no `--runs-dir`: every
+    reader answers against the published record**, materialised into a temp
+    tree and discarded. Nothing on a laptop is a source of truth about a run,
+    so a local copy could only be a stale second answer. The eval index is
+    REBUILT from the per-run documents on every read rather than stored — which
+    is why `ledger --rebuild` is gone (every read is a rebuild) and
+    `--migrate` is gone (it rewrites in place, and the tree is a throwaway).
 
   A subcommand is one module under `src/interfaces/cli/commands/`, listed once
   in the `COMMANDS` tuple. The `Command` dataclass carries parser, handler AND
@@ -96,15 +101,21 @@ Runtime artifacts go in `data/` (`runs/`, `combo_abstraction/`,
   baseline. Never hand-transcribe scores — and never compare arms across knob
   tiers, which `compare`/`report` refuse by design.
 - **Eval records are per-run files**, not ledger appends: `evaluate` writes the
-  complete row into `<run_dir>/evals/record-*.json`, and `data/eval_ledger.jsonl`
-  is a rebuildable cache (`ledger --rebuild`). This is what makes concurrent
-  evaluation from several boxes safe.
-- **`fetch` defaults to metadata only.** Every analysis command reads nothing
-  but small JSON, so the default pulls `*.json`/`*.jsonl` and leaves the ~540 MB
-  zarr checkpoints on the share. `--full` / `--run <id> --full` pull checkpoint
-  data, and both obey the manifest: only what `CHECKPOINT.json` names is fetched,
-  because a killed task leaves partially-copied snapshot directories behind and
-  an unnamed one is unfinished by construction.
+  complete row into `<run_dir>/evals/<slug>.json`. There is no stored index at
+  all any more — `ledger` DERIVES one from the published documents on every
+  read, which is what makes concurrent evaluation from several boxes safe.
+  **`eval-*.json` and `record-*.json` are LEGACY** — two of the three
+  pre-substrate shapes — and the rebuild skips both on purpose: a legacy record
+  points at the old filename, so reading both enters one evaluation twice
+  (measured: 63 rows became 110). A sparse `ledger` therefore means
+  un-migrated legacy files on the share, NOT a broken rebuild.
+- **There is no local run storage, and no local compute.** `data/runs`, the
+  local eval ledger, `fetch` and the `ab` command are all deleted: `ab` trained
+  on whatever box invoked it, which is the one thing this project does not do.
+  Experiment arms go through `submit --experiment/--arm` and pair up under
+  `report --experiment`. What a reader pulls is metadata only — `*.json`/
+  `*.jsonl`, never `*.zarr` and never `keys-*` (the deleted dynamic backend's
+  key tables, which were 37 of the 38 MB a share read used to fetch).
 - `infra/` — **fire-and-forget cloud training on Azure Batch**.
   `poker-solver-run submit --config <c> --to <absolute-iteration>` queues a leg
   and returns; the pool scales 0→N→0 on its own. Terraform owns the account and

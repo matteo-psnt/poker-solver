@@ -29,7 +29,6 @@ from src.interfaces.cli.flows.run_picker import select_run
 from src.interfaces.cli.ui import prompts, ui
 from src.interfaces.cli.ui.context import CliContext
 from src.interfaces.cloud import spec
-from src.pipeline import services
 
 MENU_EVAL_METHODS = ("exact_br", *(m for m in EVAL_METHODS if m != "exact_br"))
 
@@ -174,37 +173,4 @@ def score_run(ctx: CliContext) -> None:
             for rung in rungs
         ]
     )
-    ui.pause()
-
-
-def view_runs(ctx: CliContext) -> None:
-    """View past training runs."""
-    ui.header("Past Training Runs")
-
-    selected = select_run(
-        ctx, "Select run to view details:", cancel_label="Back", allow_unloadable=True
-    )
-    if selected is None:
-        return
-
-    run_dir = ctx.runs_dir / selected
-    meta = services.load_run_metadata(run_dir)
-
-    print(f"\nRun: {selected}")
-    print("-" * 60)
-    print(f"Status: {meta.status or 'unknown'}")
-    print(f"Started: {meta.started_at or 'N/A'}")
-    if meta.completed_at:
-        print(f"Completed: {meta.completed_at}")
-
-    print("\nStatistics:")
-    print(f"  Iterations: {meta.iterations}")
-    runtime = meta.runtime_seconds
-    print(f"  Runtime: {runtime:.2f}s ({runtime / 60:.1f}m)")
-    if runtime > 0 and meta.iterations > 0:
-        print(f"  Speed: {meta.iterations / runtime:.2f} it/s")
-    print(f"  Infosets: {meta.num_infosets:,}")
-
-    print(f"\nConfig: {meta.config_name or 'unknown'}")
-
     ui.pause()
