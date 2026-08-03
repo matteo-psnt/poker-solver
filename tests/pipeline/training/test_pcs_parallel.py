@@ -15,6 +15,7 @@ import pytest
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
+from src.core.game.state import Street
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest, load_checkpoint
@@ -153,3 +154,93 @@ class TestCoordinator:
 @pytest.mark.skipif(os.cpu_count() is None, reason="no core count to size against")
 def test_node_memory_is_readable():
     assert pcs_parallel.node_memory_bytes() > 0
+
+
+class TestSharedTurnSampling:
+    """What a LEGAL turn best response needs from the sampler.
+
+    With runouts that share only the flop, every turn is alone in its partition
+    and a per-hand argmax there chooses using a river that has not been dealt.
+    Sharing the turn puts them in one partition, so the maximisation is a real
+    sample of the turn's continuation.
+    """
+
+    def test_every_runout_shares_the_flop_and_the_turn(self):
+        rng = np.random.default_rng(5)
+        for _ in range(200):
+            boards = pcs_parallel.sample_boards_shared_turn(rng, 4)
+            assert len(boards) == 4
+            assert all(len(set(b.tolist())) == 5 for b in boards)
+            for b in boards:
+                assert np.array_equal(b[:4], boards[0][:4])
+
+    def test_the_rivers_are_distinct(self):
+        """Two identical boards are one observation counted twice."""
+        rng = np.random.default_rng(6)
+        for _ in range(200):
+            boards = pcs_parallel.sample_boards_shared_turn(rng, 6)
+            assert len({int(b[4]) for b in boards}) == 6
+
+    def test_the_turn_partition_is_one_group_so_the_argmax_is_joint(self):
+        """The property the whole sampler exists for, checked through the driver."""
+        rng = np.random.default_rng(7)
+        boards = pcs_parallel.sample_boards_shared_turn(rng, 4)
+        visible = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}
+        for street, seen in visible.items():
+            groups = {tuple(sorted(int(c) for c in b[:seen])) for b in boards}
+            expected = 1 if street in (Street.FLOP, Street.TURN) else len(boards)
+            assert len(groups) == expected, street
+
+    def test_the_flop_sampler_does_not_share_the_turn(self):
+        """The contrast that makes the turn BR illegal under the old sampler."""
+        rng = np.random.default_rng(8)
+        turns = set()
+        for _ in range(50):
+            boards = pcs_parallel.sample_boards(rng, 4)
+            turns.add(len({tuple(sorted(int(c) for c in b[:4])) for b in boards}))
+        assert max(turns) > 1
+
+
+class TestMultiKernelSizing:
+    """A legal turn BR holds one kernel per runout, and the sizer has to know.
+
+    The joint maximisation needs the runouts' values at the same time, so the
+    ~3.7 GB of hand-space scratch multiplies. Sizing a node as if one kernel
+    were live would over-subscribe it and the run dies on the OOM killer rather
+    than refusing at submit.
+    """
+
+    def _tree(self):
+        config = make_test_config(seed=1, starting_stack=20)
+        return build_betting_tree(
+            GameRules(config.game.small_blind, config.game.big_blind),
+            ActionModel(config),
+            Buckets(),
+            starting_stack=20,
+        )
+
+    def test_scratch_scales_linearly_with_the_kernel_count(self):
+        """Exact, so it does not depend on the fixture tree's size.
+
+        Only the per-kernel terms move; the interpreter overhead and the one
+        chunk of block temporaries are fixed however many kernels are live.
+        """
+        tree = self._tree()
+        sizes = {
+            k: pcs_parallel.worker_bytes(tree, 100, br_streets="river", kernels=k)
+            for k in (1, 2, 4)
+        }
+        step = sizes[2] - sizes[1]
+        assert step > 0
+        assert sizes[4] - sizes[1] == 3 * step
+
+    def test_more_kernels_means_fewer_workers(self):
+        tree = self._tree()
+        one = pcs_parallel.ram_safe_workers(
+            tree, 100, shared_bytes=0, memory=64 * 1024**3, br_streets="river", kernels=1
+        )
+        four = pcs_parallel.ram_safe_workers(
+            tree, 100, shared_bytes=0, memory=64 * 1024**3, br_streets="river", kernels=4
+        )
+        assert four < one
+        assert four >= 1

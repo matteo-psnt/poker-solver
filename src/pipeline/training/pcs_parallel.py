@@ -90,11 +90,38 @@ def sample_boards(rng: np.random.Generator, runouts: int) -> list[np.ndarray]:
     return boards
 
 
+def sample_boards_shared_turn(rng: np.random.Generator, runouts: int) -> list[np.ndarray]:
+    """``runouts`` boards sharing a flop AND a turn, differing only in the river.
+
+    What makes a TURN best response legal. With runouts that share only the
+    flop, each turn falls in its own partition and a per-hand argmax there reads
+    a river that has not been dealt -- clairvoyance. Sharing the turn puts all
+    ``runouts`` boards in one turn partition, so the joint maximisation over
+    them is a real ``runouts``-sample of the turn's continuation and the chosen
+    action depends on nothing the player cannot see.
+
+    The flop stays in the trunk: one sampled turn is not a sample of the flop's
+    continuations, so a flop argmax would still be clairvoyant.
+    """
+    opening = rng.choice(NUM_CARDS, 4, replace=False)
+    rest = np.setdiff1d(np.arange(NUM_CARDS), opening)
+    rivers = rng.choice(rest, runouts, replace=False)
+    return [np.concatenate([opening, [river]]) for river in rivers]
+
+
 def iteration_contexts(
-    rng: np.random.Generator, abstraction: BucketingStrategy, runouts: int
+    rng: np.random.Generator,
+    abstraction: BucketingStrategy,
+    runouts: int,
+    mode: str = "flop",
 ) -> tuple[list[HandContext], list[np.ndarray]]:
-    """Contexts and the boards behind them; CFR-BR needs the cards themselves."""
-    boards = sample_boards(rng, runouts)
+    """Contexts and the boards behind them; CFR-BR needs the cards themselves.
+
+    ``mode`` picks which chance event the runouts share -- ``flop`` for the
+    historical sampler, ``turn`` for the one a legal turn best response needs.
+    """
+    sampler = sample_boards_shared_turn if mode == "turn" else sample_boards
+    boards = sampler(rng, runouts)
     return [build_hand_context(board, abstraction) for board in boards], boards
 
 
@@ -109,17 +136,23 @@ def trunk_arrays(config: Config, tree: BettingTree) -> dict[str, int]:
 
 
 def worker_bytes(
-    tree: BettingTree, num_terminals: int, *, br_streets: str = "off", runouts: int = 1
+    tree: BettingTree,
+    num_terminals: int,
+    *,
+    br_streets: str = "off",
+    runouts: int = 1,
+    kernels: int = 1,
 ) -> int:
-    """Private bytes one worker's kernel allocates, from the tree's shape.
+    """Private bytes one worker allocates, from the tree's shape.
 
-    ONE kernel whatever ``runouts`` is: CFR-BR rebinds a single kernel per
-    runout rather than holding one each, which is the only reason
-    ``runouts_per_flop`` above 1 fits a 32 GiB node at all.
+    ``kernels`` is 1 whenever the driver can rebind a single kernel per runout,
+    which is what keeps ``runouts_per_flop`` above 1 affordable. A LEGAL TURN
+    best response cannot: its maximisation is joint over the runouts sharing the
+    turn, so their values must exist together and the scratch multiplies.
     """
     per_hand = 4 * LIVE_HANDS * np.dtype(DTYPE).itemsize
-    scratch = (len(tree) + num_terminals) * per_hand  # reach, value, both players
-    cache = tree.num_slots * np.dtype(DTYPE).itemsize  # bucket-space strategy cache
+    scratch = kernels * (len(tree) + num_terminals) * per_hand  # reach, value, both players
+    cache = kernels * tree.num_slots * np.dtype(DTYPE).itemsize  # bucket-space strategy cache
     temporaries = 6 * MAX_BLOCK_ELEMENTS * np.dtype(DTYPE).itemsize  # one chunk's blocks
     picks = 0
     if br_streets != "off":
@@ -143,11 +176,14 @@ def ram_safe_workers(
     memory: int | None = None,
     br_streets: str = "off",
     runouts: int = 1,
+    kernels: int = 1,
 ) -> int:
     """How many workers this node can hold, from the arithmetic above."""
     total = node_memory_bytes() if memory is None else memory
     available = total - shared_bytes - NODE_HEADROOM_BYTES
-    per_worker = worker_bytes(tree, num_terminals, br_streets=br_streets, runouts=runouts)
+    per_worker = worker_bytes(
+        tree, num_terminals, br_streets=br_streets, runouts=runouts, kernels=kernels
+    )
     return max(1, int(available // per_worker))
 
 
@@ -217,7 +253,9 @@ def pcs_worker(
                 cfr_plus=solver.cfr_plus,
                 showdown=pcs.showdown,
                 num_boards=pcs.runouts_per_flop,
-                sequential=True,
+                # A legal turn best response maximises JOINTLY over the runouts
+                # sharing the turn, so they cannot be rebound one at a time.
+                sequential=pcs.runout_mode != "turn",
             )
             logger.info(
                 "[cfr-br worker %d] hybrid opponent best-responds on %s; "
@@ -234,7 +272,9 @@ def pcs_worker(
         banked = int(counters[worker_id]) if counters is not None else 0
         count = 0
         for iteration in indices:
-            contexts, boards = iteration_contexts(rng, abstraction, pcs.runouts_per_flop)
+            contexts, boards = iteration_contexts(
+                rng, abstraction, pcs.runouts_per_flop, pcs.runout_mode
+            )
             if isinstance(kernel, CFRBestResponse):
                 kernel.iterate(contexts, int(iteration), boards=boards)
             else:
@@ -287,6 +327,7 @@ __all__ = (
     "pcs_worker",
     "ram_safe_workers",
     "sample_boards",
+    "sample_boards_shared_turn",
     "trunk_arrays",
     "worker_bytes",
 )
