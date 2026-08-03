@@ -52,7 +52,30 @@ class TestTheNodeIsGone:
         assert "logs --task prod-220218-7098" in str(caught.value)
 
 
-def test_source_node_without_a_job_is_refused_before_any_call():
-    """Node-side files are addressed by (job, task); this cannot be guessed."""
+def test_source_node_without_a_job_is_refused_before_any_call(monkeypatch):
+    """Node-side files are addressed by (job, task); this cannot be guessed.
+
+    The refusal must land before `CloudConfig.load()`, which shells out to
+    Terraform -- so this stubs the load into a failure rather than trusting the
+    checkout. Without the stub the assertion passes under either ordering
+    wherever `infra/.terraform` happens to be populated, which is what let the
+    load-first version of `run()` ship.
+    """
+
+    def _never(*_args, **_kwargs):
+        raise AssertionError("CloudConfig.load ran before the arguments were validated")
+
+    monkeypatch.setattr(logs.CloudConfig, "load", staticmethod(_never))
     with pytest.raises(CommandError, match="needs --job"):
         logs.run(_args(job=None))
+
+
+def test_missing_task_is_refused_before_any_call(monkeypatch):
+    """The other pure refusal, guarded the same way."""
+
+    def _never(*_args, **_kwargs):
+        raise AssertionError("CloudConfig.load ran before the arguments were validated")
+
+    monkeypatch.setattr(logs.CloudConfig, "load", staticmethod(_never))
+    with pytest.raises(CommandError, match="--task is required"):
+        logs.run(_args(task=None))
