@@ -214,16 +214,33 @@ def manifest_members(service: ShareServiceClient, share: str, run_path: str) -> 
     return members
 
 
+def is_snapshot_dir(name: str) -> bool:
+    """A directory holding checkpoint data, never worth descending into.
+
+    Two kinds. ``*.zarr`` is the static backend's snapshot. ``keys-<iter>`` is
+    the DYNAMIC backend's key table, and it is pure dead weight: that backend
+    was deleted, its checkpoints are permanently unreadable at HEAD, and
+    nothing in ``src/`` opens a ``vocab.json``. It was still being fetched
+    because it is JSON and every metadata sync matches on the suffix --
+    **37.17 MB of the 37.8 MB** a ``--source share`` read pulled, to answer a
+    question that needed 0.06 MB of eval documents.
+
+    Skipped, not deleted: leaving the bytes on the share costs nothing and
+    removing them is not this function's decision.
+    """
+    return name.endswith(".zarr") or name.startswith("keys-")
+
+
 def is_snapshot_path(relative: str) -> bool:
     """Whether a published path is checkpoint data rather than record.
 
-    Keyed on a ``.zarr`` component, NOT on nesting depth. Depth is wrong and
+    Keyed on a snapshot COMPONENT, NOT on nesting depth. Depth is wrong and
     was: ``<run>/evals/record-*.json`` is three components deep and would be
     classified as checkpoint data, which silently excluded the eval records
     from every fetch -- the exact files ``ledger --rebuild`` globs, and the
     reason the command exists.
     """
-    return any(part.endswith(".zarr") for part in Path(relative).parts)
+    return any(is_snapshot_dir(part) for part in Path(relative).parts)
 
 
 def is_metadata(name: str) -> bool:

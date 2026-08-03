@@ -13,6 +13,8 @@ Entra ID is the only way in), so there is no fallback to configure.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -31,6 +33,10 @@ from azure.identity import AzureCliCredential
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.spec import LegSpec, daily_job_id, leg_command, suffixed_job_id
+
+# Batch calls are latency-bound round trips, not work, so independent ones are
+# worth issuing together. 16 matches the share downloader.
+_PARALLEL_CALLS = 16
 
 JOB_MAX_WALL_CLOCK = timedelta(days=2)
 TASK_MAX_WALL_CLOCK = timedelta(days=1)
@@ -85,18 +91,59 @@ def _failure(execution: Any) -> dict[str, Any] | None:
     return {"code": info.code, "message": info.message, "category": str(info.category or "")}
 
 
-def list_jobs_with_tasks(batch: BatchClient) -> list[dict[str, Any]]:
-    """Every job and the state of every task under it.
+def list_jobs(batch: BatchClient) -> list[dict[str, Any]]:
+    """Every job, WITHOUT its tasks. One call, ~1.1s against 44 jobs.
+
+    Split from the tasks deliberately. Listing tasks costs ~0.39s per job, so
+    the caller that wants only the live ones must be able to decide WHICH jobs
+    are worth that before paying it -- see :func:`attach_tasks`.
+    """
+    return [
+        {"job": job.id, "state": str(job.state) if job.state else None} for job in batch.list_jobs()
+    ]
+
+
+def attach_tasks(
+    batch: BatchClient,
+    jobs: list[dict[str, Any]],
+    *,
+    want: Callable[[dict[str, Any]], bool] | None = None,
+) -> list[dict[str, Any]]:
+    """Fill in ``tasks`` for the jobs ``want`` selects; ``[]`` for the rest.
+
+    Two costs are removed here, and the first is the larger. Tasks used to be
+    listed for EVERY job and then discarded by the caller: 44 jobs at ~0.39s to
+    render the 2 that were active. Whatever survives the filter is then fetched
+    CONCURRENTLY, because the calls are independent and the latency is the
+    round trip, not the work.
 
     ``exit_code`` is surfaced beside ``state`` because a task that completed is
     not necessarily a task that succeeded, and the two together are what tells
     a drained pool from a failed leg.
     """
-    jobs: list[dict[str, Any]] = []
-    for job in batch.list_jobs():
-        tasks = [_task_record(task) for task in batch.list_tasks(job.id)]
-        jobs.append({"job": job.id, "state": str(job.state) if job.state else None, "tasks": tasks})
-    return jobs
+    wanted = [job for job in jobs if want is None or want(job)]
+    if not wanted:
+        return [{**job, "tasks": []} for job in jobs]
+
+    def _tasks(job: dict[str, Any]) -> list[dict[str, Any]]:
+        return [_task_record(task) for task in batch.list_tasks(job["job"])]
+
+    with ThreadPoolExecutor(max_workers=min(_PARALLEL_CALLS, len(wanted))) as pool:
+        fetched = dict(zip([job["job"] for job in wanted], pool.map(_tasks, wanted), strict=True))
+    return [{**job, "tasks": fetched.get(job["job"], [])} for job in jobs]
+
+
+def task_record(batch: BatchClient, job_id: str, task_id: str) -> dict[str, Any] | None:
+    """One task, asked for by name. ``None`` if Batch has forgotten it.
+
+    The targeted alternative to enumerating every job: a reconcile knows the
+    exact (job, task) pairs it has open questions about, so asking about those
+    costs one call each rather than one call per job in the account's history.
+    """
+    try:
+        return {**_task_record(batch.get_task(job_id, task_id)), "job": job_id}
+    except ResourceNotFoundError:
+        return None
 
 
 def pool_status(batch: BatchClient, pool_id: str) -> dict[str, Any]:

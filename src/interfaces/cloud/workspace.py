@@ -44,8 +44,13 @@ _PARALLEL_DOWNLOADS = 16
 
 
 def _is_snapshot_dir(name: str) -> bool:
-    """A checkpoint directory, never worth descending into to ask a question."""
-    return name.endswith(".zarr")
+    """A checkpoint directory, never worth descending into to ask a question.
+
+    Delegates to :func:`share.is_snapshot_dir` so the walk and the per-path
+    filter below cannot disagree about what a snapshot is -- when they did, a
+    directory was descended into and then discarded file by file.
+    """
+    return share.is_snapshot_dir(name)
 
 
 def pull_metadata(
@@ -68,8 +73,12 @@ def pull_metadata(
             )
         published = [run]
 
-    wanted: list[tuple[str, Path]] = []
-    for name in published:
+    # The WALK, not only the downloads. Each run is an independent traversal of
+    # directory listings, and a listing is a round trip like any other: 18 runs
+    # walked one after another was 12.4s of the ~20s a `--source share` read
+    # took, before a single file had been fetched.
+    def _walk(name: str) -> list[tuple[str, Path]]:
+        found: list[tuple[str, Path]] = []
         for remote in share.walk_files(
             service,
             share_name,
@@ -82,7 +91,11 @@ def pull_metadata(
                 continue
             if leaf.endswith(DEAD_SUFFIX):
                 continue
-            wanted.append((remote, destination / relative))
+            found.append((remote, destination / relative))
+        return found
+
+    with ThreadPoolExecutor(max_workers=min(_PARALLEL_DOWNLOADS, len(published) or 1)) as pool:
+        wanted = [entry for batch in pool.map(_walk, published) for entry in batch]
 
     # One round trip per file, and a run's eval documents now carry their full
     # sample vectors -- so this is latency-bound on a link where latency is the

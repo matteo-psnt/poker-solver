@@ -31,26 +31,38 @@ def short_state(state: str | None) -> str:
     return (state or "").rsplit(".", 1)[-1].lower()
 
 
-def is_live(job: dict[str, Any]) -> bool:
-    """A job worth showing by default: real work, still in flight.
+def is_active(job: dict[str, Any]) -> bool:
+    """The half of ``is_live`` that can be decided WITHOUT listing tasks.
 
-    The job's own state is checked FIRST, and it is the load-bearing half. A
-    terminated job leaves its tasks frozen in whatever state they held when the
-    node went away, so the account is full of tasks reading ``running`` or
-    ``active`` that have not existed for days -- 13 of them against a pool
-    sitting at zero nodes, at the time this was written. Trusting task state
-    alone reports an idle pool as busy, which is precisely backwards for the
-    one question this command exists to answer.
+    Load-bearing on its own, and not only as an optimisation. A terminated job
+    leaves its tasks frozen in whatever state they held when the node went
+    away, so the account is full of tasks reading ``running`` or ``active``
+    that have not existed for days -- 13 of them against a pool sitting at zero
+    nodes, at the time this was written. Trusting task state alone reports an
+    idle pool as busy, which is precisely backwards for the one question this
+    command exists to answer.
     """
-    if short_state(job["state"]) != "active":
+    return short_state(job["state"]) == "active"
+
+
+def is_live(job: dict[str, Any]) -> bool:
+    """A job worth showing by default: real work, still in flight."""
+    if not is_active(job):
         return False
     return any(short_state(task["state"]) in LIVE_TASK_STATES for task in job["tasks"])
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    """List jobs and their tasks, newest last."""
-    config = CloudConfig.load()
-    jobs = batch.list_jobs_with_tasks(batch.client(config))
+    """List jobs and their tasks, newest last.
+
+    Tasks are fetched only for the jobs that can survive the filter. Listing
+    them costs ~0.39s per job against ~1.1s for the whole job list, so fetching
+    all 44 to render the 2 that were active was the entire cost of this command
+    -- measured at ~11s, and paid again by every caller, including `legs` and
+    the status screen.
+    """
+    client = batch.client(CloudConfig.load())
+    jobs = batch.attach_tasks(client, batch.list_jobs(client), want=None if args.all else is_active)
     shown = jobs if args.all else [job for job in jobs if is_live(job)]
     if args.limit > 0:
         shown = shown[-args.limit :]
