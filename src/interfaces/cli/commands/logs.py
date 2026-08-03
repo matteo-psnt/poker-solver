@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
+from azure.core.exceptions import ResourceNotFoundError
+
 from src.interfaces.cli.commands._base import Command
 from src.interfaces.cloud import batch, share
 from src.interfaces.cloud.config import CloudConfig
@@ -87,7 +89,21 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "logs --source node needs --job: node-side files are addressed by "
                 "(job, task). Use --source share to read by task id alone."
             )
-        text = batch.task_file(batch.client(config), args.job, args.task, f"{args.stream}.txt")
+        try:
+            text = batch.task_file(batch.client(config), args.job, args.task, f"{args.stream}.txt")
+        except ResourceNotFoundError as error:
+            # The normal end state, not an exotic one: the pool scales to zero
+            # within minutes of a task ending, and Batch then answers "The
+            # specified node does not exist." Uncaught it was a 40-line Azure
+            # traceback at the exact moment someone was trying to find out why a
+            # leg died -- and it buried the fact that the answer is one flag
+            # away, on the share, which is what the publish-on-exit trap is for.
+            raise CommandError(
+                f"No node-side files for {args.task}: {error.message.strip()}\n"
+                "The node is released once the pool scales down, so this path only "
+                "works while a task is running.\n"
+                f"Read the published copy instead: logs --task {args.task}"
+            ) from error
     else:
         found = share.read_leg_log(share.share_client(config), config.share_name, args.task)
         if found is None:
