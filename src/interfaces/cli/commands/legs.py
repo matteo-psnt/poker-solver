@@ -39,12 +39,31 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Read a local copy instead of the share (see `fetch`). Implies --skip-reconcile.",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Show only the last N attempts (0 = all, the default). Unlike `jobs`, "
+        "this does NOT truncate by default: the row worth finding here is a death, "
+        "and hiding old rows by default would hide exactly the ones being looked for.",
+    )
+
+
+def _result(rows: list[dict[str, Any]], reconciled: int | None, limit: int) -> dict[str, Any]:
+    """One payload shape for both sources, newest last."""
+    shown = rows[-limit:] if limit > 0 else rows
+    return {
+        "op": "legs",
+        "rows": shown,
+        "reconciled": reconciled,
+        "hidden_rows": len(rows) - len(shown),
+    }
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Join the node's account with Batch's, and report one row per attempt."""
     if args.legs_dir:
-        return {"op": "legs", "rows": leg_log.read_legs(Path(args.legs_dir)), "reconciled": None}
+        return _result(leg_log.read_legs(Path(args.legs_dir)), None, args.limit)
 
     config = CloudConfig.load()
     service = share.share_client(config)
@@ -76,7 +95,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             _upload_observed(service, config.share_name, local, explained)
             reconciled = len(explained)
 
-        return {"op": "legs", "rows": leg_log.read_legs(local), "reconciled": reconciled}
+        return _result(leg_log.read_legs(local), reconciled, args.limit)
 
 
 def _download_legs(service: Any, share_name: str, local: Path) -> None:
@@ -105,6 +124,8 @@ def render(payload: dict[str, Any]) -> None:
     if reconciled:
         print(f"Asked Batch about {reconciled} leg(s) the share could not explain.")
     print(leg_log.format_table(rows))
+    if payload.get("hidden_rows"):
+        print(f"  {payload['hidden_rows']} earlier attempt(s) hidden — show with --limit 0")
 
 
 COMMAND = Command(

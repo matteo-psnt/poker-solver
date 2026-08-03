@@ -27,6 +27,7 @@ from src.interfaces.cli.commands.repair_ladder import COMMAND as REPAIR_LADDER
 from src.interfaces.cli.commands.report import COMMAND as REPORT
 from src.interfaces.cli.commands.runinfo import COMMAND as RUNINFO
 from src.interfaces.cli.commands.score import COMMAND as SCORE
+from src.interfaces.cli.commands.status import COMMAND as STATUS
 from src.interfaces.cli.commands.submit import COMMAND as SUBMIT
 from src.interfaces.cli.commands.submit_precompute import COMMAND as SUBMIT_PRECOMPUTE
 from src.interfaces.cli.commands.train_static import COMMAND as TRAIN_STATIC
@@ -34,6 +35,7 @@ from src.interfaces.cli.commands.train_static import COMMAND as TRAIN_STATIC
 # Order is the order they appear in `--help`, in three groups: dispatch work to
 # the pool, run it here (these are what a node invokes), then read the record.
 COMMANDS: tuple[Command, ...] = (
+    STATUS,
     AB,
     SUBMIT,
     SCORE,
