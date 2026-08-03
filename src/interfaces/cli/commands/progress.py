@@ -12,6 +12,7 @@ from src.interfaces.cli.commands._base import (
     resolve_run_dir,
 )
 from src.shared import records, run_events
+from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -19,7 +20,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     add_source_argument(parser)
     parser.add_argument("--run", required=True, help="Run id (dir name) or path.")
     parser.add_argument(
-        "--runs-dir", default="data/runs", help="Directory containing run directories."
+        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Directory containing run directories."
     )
     parser.add_argument(
         "--last", type=int, default=25, help="Show only the last N checkpoints (0 = all)."

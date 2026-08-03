@@ -13,6 +13,7 @@ from typing import Any
 
 from src.interfaces.cli.commands._base import Command, parse_overrides
 from src.pipeline import services
+from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def _parse_arm(spec: str) -> services.Arm:
@@ -56,7 +57,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "Repeatable. The control is generated automatically."
         ),
     )
-    parser.add_argument("--runs-dir", default="data/runs", help="Base runs dir.")
+    parser.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR, help="Base runs dir.")
     parser.add_argument(
         "--verify-determinism",
         action="store_true",

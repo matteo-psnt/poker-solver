@@ -19,6 +19,12 @@ from src.shared.dicts import deep_merge_dicts
 
 logger = logging.getLogger(__name__)
 
+# Where runs live when nothing says otherwise. Backs both this module's
+# ``TrainingConfig.runs_dir`` and the ``--runs-dir`` flag on every command that
+# takes one -- ten of which used to spell it as a bare literal, while their
+# sibling ``--ledger`` correctly pointed at ``DEFAULT_LEDGER_PATH``.
+DEFAULT_RUNS_DIR = "data/runs"
+
 # ---------------------------------------------------------------------------
 # Shared type aliases for common constraints
 # ---------------------------------------------------------------------------
@@ -58,7 +64,7 @@ class TrainingConfig(StrictFrozenModel):
     checkpoint_frequency: PositiveInt = Field(default=50_000)
     iterations_per_worker: PositiveInt = Field(default=1_000)
     verbose: bool = Field(default=True)
-    runs_dir: str = Field(default="data/runs")
+    runs_dir: str = Field(default=DEFAULT_RUNS_DIR)
 
 
 class StorageConfig(StrictFrozenModel):

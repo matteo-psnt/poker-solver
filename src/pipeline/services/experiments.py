@@ -19,6 +19,7 @@ from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared import leg_log, records, run_events
+from src.shared.config import DEFAULT_RUNS_DIR
 
 
 @dataclass(frozen=True)
@@ -246,7 +247,7 @@ def experiment_report(
     experiment_id: str,
     *,
     ledger_path: Path = eval_ledger.DEFAULT_LEDGER_PATH,
-    runs_dir: Path = Path("data/runs"),
+    runs_dir: Path = Path(DEFAULT_RUNS_DIR),
     baseline_path: Path = DEFAULT_BASELINE_PATH,
 ) -> ExperimentReport:
     """Score every arm of an experiment and attribute each variant to its control."""

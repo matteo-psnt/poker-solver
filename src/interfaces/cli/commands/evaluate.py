@@ -14,6 +14,7 @@ from src.pipeline import services
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
 from src.pipeline.evaluation.public_tree_br import PublicBRConfig
+from src.shared.config import DEFAULT_RUNS_DIR
 
 # The estimators a node can actually run. `score` imports this rather than
 # repeating it: a value the submitter accepts but `evaluate` rejects is not
@@ -25,7 +26,9 @@ EVAL_METHODS = ("lbr", "exact_br")
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run evaluate`."""
     parser.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
-    parser.add_argument("--runs-dir", default="data/runs", help="Base runs dir for id resolution.")
+    parser.add_argument(
+        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Base runs dir for id resolution."
+    )
     parser.add_argument(
         "--ledger",
         default=str(eval_ledger.DEFAULT_LEDGER_PATH),

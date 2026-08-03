@@ -14,6 +14,7 @@ from src.interfaces.cli.commands._base import (
 )
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.training.run_tracker import migrate_run_log
+from src.shared.config import DEFAULT_RUNS_DIR
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -35,7 +36,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--limit", type=int, default=25, help="Show only the last N rows (0 = all)."
     )
-    parser.add_argument("--runs-dir", default="data/runs", help="Runs dir scanned by --rebuild.")
+    parser.add_argument(
+        "--runs-dir", default=DEFAULT_RUNS_DIR, help="Runs dir scanned by --rebuild."
+    )
     parser.add_argument(
         "--migrate",
         action="store_true",
