@@ -24,6 +24,7 @@ from azure.storage.fileshare import ShareServiceClient
 from src.interfaces.cli.commands._base import Command
 from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.errors import CommandError
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.shared.config import DEFAULT_RUNS_DIR
 
@@ -92,7 +93,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     ]
     wanted = [args.run] if args.run else published
     if args.run and args.run not in published:
-        raise SystemExit(f"'{args.run}' is not published. Published runs: {', '.join(published)}")
+        raise CommandError(f"'{args.run}' is not published. Published runs: {', '.join(published)}")
 
     total = 0
     skipped = 0

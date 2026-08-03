@@ -17,6 +17,7 @@ from typing import Any
 from src.interfaces.cloud import batch, share, spec
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.spec import LegSpec
+from src.interfaces.errors import CommandError
 
 NONCE_CEILING = 32768
 
@@ -60,7 +61,7 @@ def stage_and_queue(
     snapshot = share.publish_code_snapshot(share.share_client(config), config.share_name, root, now)
     legs = make_legs(snapshot)
     if not legs:
-        raise SystemExit("Nothing to submit.")
+        raise CommandError("Nothing to submit.")
 
     client = batch.client(config)
     job_id = batch.ensure_job(client, config.pool_id, now)

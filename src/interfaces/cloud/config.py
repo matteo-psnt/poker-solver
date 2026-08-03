@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from src.interfaces.errors import CommandError
+
 INFRA_DIR = Path("infra")
 STORE_DIR = Path("infra/store")
 
@@ -32,12 +34,16 @@ _TERRAFORM_MISSING = (
 )
 
 
-class CloudConfigError(RuntimeError):
+class CloudConfigError(CommandError):
     """Infrastructure coordinates could not be read.
 
     Raised in preference to letting a ``FileNotFoundError`` on ``terraform``
     surface: the cloud commands carry an undeclared dependency on terraform and
     the az CLI credential, and a bare OSError gives no hint which is missing.
+
+    A :class:`CommandError` because it is one: a checkout with no applied
+    Terraform state is something the caller can fix, and every surface should be
+    able to say so in the same clause it uses for every other readable failure.
     """
 
 

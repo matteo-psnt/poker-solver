@@ -10,6 +10,7 @@ import pytest
 from src.interfaces.cli.commands import evaluate, jobs, pool_status, score
 from src.interfaces.cli.flows import training
 from src.interfaces.cli.headless import build_parser
+from src.interfaces.errors import CommandError
 
 
 def _job(job_state: str, task_state: str) -> dict:
@@ -165,5 +166,5 @@ class TestShareMigrateIsRefused:
             migrate=True,
             rebuild=False,
         )
-        with pytest.raises(SystemExit, match="Nothing on the share would change"):
+        with pytest.raises(CommandError, match="Nothing on the share would change"):
             ledger_cmd.run(args)
