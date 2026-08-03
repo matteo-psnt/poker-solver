@@ -40,6 +40,7 @@
     "hours": 24.0,
     "last_at": "2026-08-03T12:00:00+00:00",
     "node_hours": 12.5,
+    "observed_seconds": 46800.0,
     "op": "cost",
     "rate_per_node_hour": 0.8,
     "samples": 4200,

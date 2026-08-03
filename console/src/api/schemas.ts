@@ -161,6 +161,7 @@ export const costSchema = z
     op: z.literal("cost"),
     hours: z.number(),
     node_hours: z.number(),
+    observed_seconds: z.number(),
     unobserved_seconds: z.number(),
     samples: z.number(),
     first_at: z.string().nullable(),

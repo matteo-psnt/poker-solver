@@ -194,6 +194,7 @@ PAYLOADS: dict[str, dict] = {
         "op": "cost",
         "hours": 24.0,
         "node_hours": 12.5,
+        "observed_seconds": 46800.0,
         # A window with a hole in it: the renderer must SAY so rather than fold
         # the gap into the total, which would read as a complete accounting.
         "unobserved_seconds": 3600.0,

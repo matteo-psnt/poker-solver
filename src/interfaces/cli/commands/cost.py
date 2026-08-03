@@ -40,7 +40,7 @@ def _within(rows: list[dict[str, Any]], hours: float) -> list[dict[str, Any]]:
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
     kept = []
     for row in rows:
-        instant = pool_samples._instant(row)  # noqa: SLF001
+        instant = pool_samples.instant(row)
         if instant is not None and instant >= cutoff:
             kept.append(row)
     return kept
@@ -63,6 +63,30 @@ def _rate(args: argparse.Namespace) -> float | None:
         return None
 
 
+def _series_with_gaps(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The samples, with a null inserted wherever nothing was recording.
+
+    Without this a chart joins the two sides of a ten-hour outage with a flat
+    line at the last-seen node count -- which reads as "the pool held 4 nodes
+    all night". That is precisely the claim :func:`pool_samples.integrate`
+    refuses to make, so a plot that made it would contradict the total printed
+    beside it. The break is the honest shape: nothing was known here.
+    """
+    out: list[dict[str, Any]] = []
+    previous: datetime | None = None
+    for row in rows:
+        instant = pool_samples.instant(row)
+        if (
+            previous is not None
+            and instant is not None
+            and (instant - previous).total_seconds() > pool_samples.MAX_GAP_SECONDS
+        ):
+            out.append({"at": previous.isoformat(), "nodes": None})
+        out.append({"at": row["at"], "nodes": row.get("nodes")})
+        previous = instant or previous
+    return out
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Summarise the recorded node series over a window."""
     rows = _within(pool_samples.read(Path(args.samples_path)), args.hours)
@@ -74,7 +98,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "rate_per_node_hour": rate,
         "dollars": None if rate is None else totals["node_hours"] * rate,
         # The series itself, so the page can draw it without a second endpoint.
-        "series": [{"at": row["at"], "nodes": row.get("nodes")} for row in rows],
+        "series": _series_with_gaps(rows),
         **totals,
     }
 
@@ -84,14 +108,25 @@ def render(payload: dict[str, Any]) -> None:
         print("No pool samples recorded. The console's server writes them while it runs;")
         print("Batch keeps no node history, so this cannot be backfilled.")
         return
-    print(f"Pool allocation over the last {payload['hours']:g}h — NOT billed cost")
-    print(f"  samples:     {payload['samples']:,} ({payload['first_at']} → {payload['last_at']})")
-    print(f"  node-hours:  {payload['node_hours']:.2f}")
+    observed = payload["observed_seconds"] / 3600.0
+    window = payload["hours"]
+    print("Pool allocation — NOT billed cost")
+    print(f"  node-hours:  {payload['node_hours']:.2f}", end="")
     if payload["dollars"] is not None:
-        print(f"  at {payload['rate_per_node_hour']:.2f}/node-hr: ${payload['dollars']:.2f}")
+        print(f"   (${payload['dollars']:.2f} at ${payload['rate_per_node_hour']:.2f}/node-hr)")
+    else:
+        print("   (rate unknown)")
+    # Coverage before anything else, because it decides how to read the total.
+    # $2.15 across 47 observed minutes of a 24h window is not "$2.15 today".
+    if window:
+        share = observed / window if window else 0.0
+        print(f"  observed:    {observed:.2f}h of the last {window:g}h ({share:.0%})")
+    else:
+        print(f"  observed:    {observed:.2f}h")
+    print(f"  window:      {payload['first_at']} → {payload['last_at']}")
     if payload["unobserved_seconds"]:
         gap = payload["unobserved_seconds"] / 3600.0
-        print(f"  {gap:.1f}h unobserved (nothing was recording) — excluded from the total")
+        print(f"  NOT counted: {gap:.1f}h in which nothing was recording")
 
 
 COMMAND = Command(
