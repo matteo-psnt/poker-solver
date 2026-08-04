@@ -201,7 +201,7 @@ class TestAdaptiveFormat:
         assert "checkpointed" in line
 
     def test_captured_output_is_greppable_by_severity(self, monkeypatch):
-        """The whole point: `just leg-log <task> errors` must be able to work."""
+        """The whole point: `just logs --task <id> | grep -E ' (WARN|ERROR|CRIT) '`."""
         info = self._emit(monkeypatch, isatty=False, level=logging.INFO)
         error = self._emit(monkeypatch, isatty=False, level=logging.ERROR)
 

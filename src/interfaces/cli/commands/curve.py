@@ -13,17 +13,11 @@ from src.interfaces.cli.commands._base import (
     resolve_run_dir,
 )
 from src.pipeline import services
-from src.pipeline.evaluation import ledger as eval_ledger
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver-run curve`."""
     parser.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
-    parser.add_argument(
-        "--ledger",
-        default=str(eval_ledger.DEFAULT_LEDGER_PATH),
-        help="Eval ledger path to read.",
-    )
     parser.add_argument(
         "--tier",
         type=int,
