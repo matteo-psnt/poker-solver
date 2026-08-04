@@ -18,7 +18,7 @@ from src.interfaces.cloud import dispatch, spec
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run submit`."""
+    """Flags for `poker-solver submit`."""
     parser.add_argument("--config", default="", help="Training config stem (fresh runs).")
     parser.add_argument(
         "--to",

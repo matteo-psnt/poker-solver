@@ -21,7 +21,7 @@ from src.interfaces.errors import CommandError
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run push-data`."""
+    """Flags for `poker-solver push-data`."""
     parser.add_argument(
         "--source",
         default="data/combo_abstraction",

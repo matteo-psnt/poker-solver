@@ -13,7 +13,7 @@ LIVE_TASK_STATES = {"active", "preparing", "running"}
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run jobs`."""
+    """Flags for `poker-solver jobs`."""
     parser.add_argument(
         "--all",
         action="store_true",

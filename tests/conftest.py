@@ -43,7 +43,7 @@ def requires_card_abstraction():
         pytest.skip(
             "no local `quick_test` combo abstraction (~194 MB, gitignored). "
             "This test trains for real and needs one. To run it: "
-            "`uv run poker-solver-run submit-precompute --config quick_test` "
+            "`uv run poker-solver submit-precompute --config quick_test` "
             "and copy the result into data/combo_abstraction/, or pull it from "
             "the share. Everything else in the suite runs without it."
         )

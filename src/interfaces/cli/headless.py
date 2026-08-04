@@ -44,8 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser = argparse.ArgumentParser(
-        prog="poker-solver-run",
-        description="Headless training/evaluation entrypoint for scripts and cloud runs.",
+        prog="poker-solver",
+        description="Train, dispatch and read the record. Every operation is flag-driven.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     for command in COMMANDS:

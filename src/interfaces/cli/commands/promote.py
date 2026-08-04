@@ -20,7 +20,7 @@ from src.pipeline import services
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run promote`."""
+    """Flags for `poker-solver promote`."""
     parser.add_argument("--run", required=True, help="Run id to promote. Must be published.")
     parser.add_argument(
         "--rationale",

@@ -38,16 +38,16 @@ uv sync --group dev
 
 There are two surfaces, split by who is asking.
 
-**`poker-solver-run` is the scriptable one** — what a cloud job, a shell and an
+**`poker-solver` is the scriptable one** — what a cloud job, a shell and an
 AI agent drive. It is the complete surface; everything the project can do is a
 flag-driven subcommand of it:
 
 ```bash
-uv run poker-solver-run submit --config production --to 25000000   # queue a leg
-uv run poker-solver-run jobs                                       # what is running
-uv run poker-solver-run score --run <id> --at 10000000,20000000    # one task per rung
-uv run poker-solver-run ledger                                     # every evaluation, from the share
-uv run poker-solver-run compare --a <run> --b <run>                # paired comparison with p-value
+uv run poker-solver submit --config production --to 25000000   # queue a leg
+uv run poker-solver jobs                                       # what is running
+uv run poker-solver score --run <id> --at 10000000,20000000    # one task per rung
+uv run poker-solver ledger                                     # every evaluation, from the share
+uv run poker-solver compare --a <run> --b <run>                # paired comparison with p-value
 ```
 
 **The web console is the one a human reads** — `just console`, then
@@ -62,10 +62,10 @@ just console-dev   # Vite on :5173 with hot reload, proxying /api to :8765
 ### Training Your First Solver
 
 1. `just create` once, then `just cli push-data` to publish the card abstractions.
-2. `uv run poker-solver-run submit --config quick_test --to 3000`
-3. Watch with `poker-solver-run jobs`; read the leg with
-   `poker-solver-run logs --task <id>`.
-4. `poker-solver-run ledger` shows the evaluations. It reads the share and
+2. `uv run poker-solver submit --config quick_test --to 3000`
+3. Watch with `poker-solver jobs`; read the leg with
+   `poker-solver logs --task <id>`.
+4. `poker-solver ledger` shows the evaluations. It reads the share and
    derives the index on every call — there is nothing to fetch and no local copy.
 
 The iteration target is **absolute**: re-submitting the same run with the same
@@ -178,7 +178,7 @@ The primary quality metric is **exploitability**, measured with **Local Best Res
 - `--opponent blueprint|deployed` — raw strategy table vs. blueprint + runtime resolver
 - `--include-off-tree` — allow the exploiter off the trained action tree (shadow-state translation)
 
-Every evaluation is recorded to `data/eval_ledger.jsonl` with git provenance and the pinned abstraction hash; `poker-solver-run compare` runs a paired statistical comparison and refuses mismatched seeds or tiers.
+Every evaluation is recorded to `data/eval_ledger.jsonl` with git provenance and the pinned abstraction hash; `poker-solver compare` runs a paired statistical comparison and refuses mismatched seeds or tiers.
 
 An older rollout-based estimator (`compute_exploitability`) is retained as a fast smoke test only — it measures a one-ply deviation gain and is not a trustworthy exploitability figure.
 

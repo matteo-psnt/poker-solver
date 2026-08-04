@@ -19,7 +19,7 @@ from src.interfaces.cloud.config import CloudConfig
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run push-code`."""
+    """Flags for `poker-solver push-code`."""
     parser.add_argument("--root", default=".", help="Tree to snapshot.")
 
 

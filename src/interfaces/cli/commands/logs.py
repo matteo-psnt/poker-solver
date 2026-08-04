@@ -29,7 +29,7 @@ PROGRESS_PREFIX = "Training batches:"
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run logs`."""
+    """Flags for `poker-solver logs`."""
     parser.add_argument("--task", default=None, help="Task id to read.")
     parser.add_argument(
         "--list", action="store_true", help="List published leg logs instead of reading one."

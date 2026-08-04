@@ -20,7 +20,7 @@ from src.interfaces.cloud import dispatch, spec
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run repair-ladder`."""
+    """Flags for `poker-solver repair-ladder`."""
     parser.add_argument("--run", required=True, help="Published run id whose ladder to verify.")
     parser.add_argument(
         "--config", required=True, help="Training config stem the run was trained with."

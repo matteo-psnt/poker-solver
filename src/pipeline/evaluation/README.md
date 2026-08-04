@@ -138,13 +138,13 @@ task per ladder rung; `evaluate` is what the node then executes.
 
 ```bash
 # Score a published run on the pool
-poker-solver-run score --run <id> --method lbr -- --scorer lookahead --opponent deployed
+poker-solver score --run <id> --method lbr -- --scorer lookahead --opponent deployed
 
 # Read the record back
-poker-solver-run ledger [--run <id>] [--limit N]
-poker-solver-run compare --a <run> --b <run>
-poker-solver-run report --experiment <name>
-poker-solver-run curve --run <id>
+poker-solver ledger [--run <id>] [--limit N]
+poker-solver compare --a <run> --b <run>
+poker-solver report --experiment <name>
+poker-solver curve --run <id>
 ```
 
 `--method` is `lbr` or `exact_br`. `compare` runs a paired test

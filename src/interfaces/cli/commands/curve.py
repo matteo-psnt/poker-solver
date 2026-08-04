@@ -16,7 +16,7 @@ from src.pipeline import services
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run curve`."""
+    """Flags for `poker-solver curve`."""
     parser.add_argument("--run", required=True, help="Run id (dir name) or path to a run dir.")
     parser.add_argument(
         "--tier",

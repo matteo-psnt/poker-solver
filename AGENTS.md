@@ -36,7 +36,7 @@ definition: never a source of truth, never worth backing up.
 
 ## Commands
 - `uv sync --group dev` — install dependencies.
-- **There are TWO surfaces, split by who is asking.** `poker-solver-run` is the
+- **There are TWO surfaces, split by who is asking.** `poker-solver` is the
   scriptable one — what a cloud job, a shell, and an AI agent drive. The web
   console is the one a human reads. The console does not reimplement anything:
   every endpoint is a single `Command.invoke`, so the two cannot drift. The
@@ -45,14 +45,14 @@ definition: never a source of truth, never worth backing up.
 - **There is no interactive CLI.** `uv run poker-solver` — a questionary menu —
   was deleted (`src/interfaces/cli/{app,flows,ui}`, plus the `questionary`
   dependency). It had been hollowed out over time until every item was a wizard
-  around flags `poker-solver-run` already accepted, and four abstraction-browsing
+  around flags `poker-solver` already accepted, and four abstraction-browsing
   items too specific to keep. Its one non-obvious rule survives and still binds
   anything that submits: **nothing on the laptop reads a card abstraction.**
   Submitting used to call `build_card_abstraction` first, loading ~773 MB to
   answer a question about the wrong machine — the node mounts the share, and the
   laptop's copy is irrelevant. Config overrides likewise go through `--set k=v`
   and nothing else: a leg carries a config name plus `LegSpec.sets`.
-- `uv run poker-solver-run` — the single entrypoint, in three groups:
+- `uv run poker-solver` — the single entrypoint, in three groups:
   - **see and dispatch** — `status`, `submit`, `score`, `submit-precompute`,
     `jobs`, `logs`, `legs`, `cancel`, `pool-status`, `autoscale-check`,
     `repair-ladder`, `push-code`, `push-data`.
@@ -116,7 +116,7 @@ definition: never a source of truth, never worth backing up.
   (`tests/interfaces/cli/test_justfile_aliases.py`) fails if one names a
   subcommand that does not exist, which is how a `just fetch` recipe outlived
   the command it called by weeks. Anything needing a flag that is not aliased
-  goes through `uv run poker-solver-run <cmd>`, or `just cli <cmd> [flags...]`.
+  goes through `uv run poker-solver <cmd>`, or `just cli <cmd> [flags...]`.
 - **`train-static` covers both starting and continuing a run.** `--iterations`
   is an ABSOLUTE target and `--run <id>` continues an existing directory, so
   re-running past the target is a no-op. That is what makes a scheduler retry
@@ -144,7 +144,7 @@ definition: never a source of truth, never worth backing up.
   `*.jsonl`, never `*.zarr` and never `keys-*` (the deleted dynamic backend's
   key tables, which were 37 of the 38 MB a share read used to fetch).
 - `infra/` — **fire-and-forget cloud training on Azure Batch**.
-  `poker-solver-run submit --config <c> --to <absolute-iteration>` queues a leg
+  `poker-solver submit --config <c> --to <absolute-iteration>` queues a leg
   and returns; the pool scales 0→N→0 on its own. Terraform owns the account and
   pool; jobs and tasks are created at runtime by `src/interfaces/cloud/`, never
   in HCL. **The node-side wrapper is Python, in `src/shared/node/`** —
@@ -169,7 +169,7 @@ definition: never a source of truth, never worth backing up.
   look arbitrary but are measured (UserSubscription mode, `Dals_v6` not
   `Dalds_v6`, Gen2-only images, the SKU policy) are documented in
   `infra/README.md`; read it before changing pool config.
-  **`poker-solver-run legs` is how you find out why a leg died** — the run log cannot
+  **`poker-solver legs` is how you find out why a leg died** — the run log cannot
   record a death (the container is gone first), so the wrapper writes its own
   account to `<share>/legs/` and `legs` reconciles the ones whose exit record
   never landed against Batch's view. 124 (the guard's deadline — a hang) and

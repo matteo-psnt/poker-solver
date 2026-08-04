@@ -15,7 +15,7 @@ from src.shared import records, run_events
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run progress`."""
+    """Flags for `poker-solver progress`."""
     parser.add_argument("--run", required=True, help="Run id (dir name) or path.")
     parser.add_argument(
         "--last", type=int, default=25, help="Show only the last N checkpoints (0 = all)."

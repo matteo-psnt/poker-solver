@@ -17,7 +17,7 @@ from src.pipeline.evaluation.statistics import compare_paired_samples
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run compare`."""
+    """Flags for `poker-solver compare`."""
     parser.add_argument("--a", required=True, help="First run id (baseline).")
     parser.add_argument("--b", required=True, help="Second run id (candidate).")
     parser.add_argument(

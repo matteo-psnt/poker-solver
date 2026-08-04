@@ -36,7 +36,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 """Set by ``LegSpec.environment()`` on the submitting machine, and inherited all
 the way down: Batch sets it on the task, ``infra/run_leg.py`` inherits it, and
-the ``uv run poker-solver-run`` child inherits it in turn. Nothing has to thread
+the ``uv run poker-solver`` child inherits it in turn. Nothing has to thread
 it through a command line."""
 COMMIT_ENV = "RUN_GIT_COMMIT"
 

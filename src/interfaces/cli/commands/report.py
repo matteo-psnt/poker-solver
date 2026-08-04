@@ -15,7 +15,7 @@ from src.pipeline import services
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run report`."""
+    """Flags for `poker-solver report`."""
     parser.add_argument("--experiment", required=True, help="Experiment id to report on.")
 
 

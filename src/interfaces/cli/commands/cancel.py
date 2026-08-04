@@ -16,7 +16,7 @@ from src.interfaces.cloud.config import CloudConfig
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run cancel`."""
+    """Flags for `poker-solver cancel`."""
     parser.add_argument("--job", required=True, help="Job id holding the task.")
     parser.add_argument("--task", required=True, help="Task id to terminate.")
 

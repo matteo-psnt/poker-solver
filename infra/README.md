@@ -5,7 +5,7 @@ nodes appear while work is queued and disappear when it drains. There is nothing
 to start, nothing to remember to stop, and no idle compute bill.
 
 **Terraform owns what exists** (Batch account, pool, guardrails) — `infra/*.tf`.
-**`poker-solver-run` owns what happens** (submissions) — `src/interfaces/cloud/`. Jobs and
+**`poker-solver` owns what happens** (submissions) — `src/interfaces/cloud/`. Jobs and
 tasks are deliberately *not* in Terraform: `azurerm_batch_job` exposes no useful
 properties and tasks have no resource at all. A submission is a runtime act.
 
@@ -65,32 +65,32 @@ just cli push-data  # card abstractions to the share (~773 MB, one time)
 
 ## Daily use
 
-Dispatch is `poker-solver-run`, a Python CLI over the Batch SDK
+Dispatch is `poker-solver`, a Python CLI over the Batch SDK
 (`src/interfaces/cloud/`). It is THE surface: `just` keeps only Terraform,
 `panic`, `credit-check` and the three recipes that reshape positionals into
 flags. Prefix with `uv run`, or go through `just cli <cmd> [flags...]`.
 
 ```bash
-poker-solver-run submit --config quick_test --to 3000                  # smoke
-poker-solver-run submit --config production --to 25000000 \
-    --experiment exp-7 --arm control                                   # an arm
-poker-solver-run submit --config production --to 25000000 \
+poker-solver submit --config quick_test --to 3000                   # smoke
+poker-solver submit --config production --to 25000000 \
+    --experiment exp-7 --arm control                                 # an arm
+poker-solver submit --config production --to 25000000 \
     --experiment exp-7 --arm variant:pruning --set solver__pruning=true
-poker-solver-run submit --run run-20260728_011716-ca70cf --to 50000000 # continue
+poker-solver submit --run run-20260728_011716-ca70cf --to 50000000  # continue
 
-poker-solver-run jobs                 # live tasks (--all for finished jobs)
-poker-solver-run pool-status          # nodes + the REAL cause of any allocation failure
-poker-solver-run logs --task <task>   # the published leg log; --list to enumerate
-poker-solver-run logs --task <task> --source node --job <job>   # live, node-side
-poker-solver-run cancel --job <job> --task <task>
-poker-solver-run score --run <id> --at 10000000,20000000 -- --br-flops 8
+poker-solver jobs                 # live tasks (--all for finished jobs)
+poker-solver pool-status          # nodes + the REAL cause of any allocation failure
+poker-solver logs --task <task>   # the published leg log; --list to enumerate
+poker-solver logs --task <task> --source node --job <job>   # live, node-side
+poker-solver cancel --job <job> --task <task>
+poker-solver score --run <id> --at 10000000,20000000 -- --br-flops 8
 
-poker-solver-run ledger               # every evaluation, derived from the share
-poker-solver-run runs                 # every published run, newest first
+poker-solver ledger               # every evaluation, derived from the share
+poker-solver runs                 # every published run, newest first
 
-poker-solver-run report --experiment exp-7
-poker-solver-run curve --run <id>
-poker-solver-run promote --run <winner> --rationale "..."
+poker-solver report --experiment exp-7
+poker-solver curve --run <id>
+poker-solver promote --run <winner> --rationale "..."
 ```
 
 Two things worth knowing at the seams:
@@ -123,7 +123,7 @@ published rung.
 
 ## How you find out *why* a leg died
 
-`poker-solver-run legs`.
+`poker-solver legs`.
 
 A run's `.run.json` records what a *living* process did. It structurally cannot
 record how an attempt died: a container killed by the OOM killer, by
@@ -140,7 +140,7 @@ So the record is written from both sides, into `<share>/legs/`:
   is what the bash version could not do: its EXIT trap read `$?` as zero when the
   shell was killed while blocked on a child, so `cancel` recorded clean
   completions that were never reconciled.
-- **Batch's account.** `poker-solver-run legs` asks about legs still stuck at `started` —
+- **Batch's account.** `poker-solver legs` asks about legs still stuck at `started` —
   precisely the ones whose exit record never landed — and writes
   `<task>.observed.json`.
 
@@ -159,8 +159,8 @@ importing the whole package on a real 3.10 (`uv run --python 3.10
 `datetime.UTC`: it passed every test and silently disabled leg records on the
 only machine that runs them.
 
-`poker-solver-run legs --skip-reconcile` reads the share without querying Batch,
-and `poker-solver-run logs --task <task>` prints a published log. There is no
+`poker-solver legs --skip-reconcile` reads the share without querying Batch,
+and `poker-solver logs --task <task>` prints a published log. There is no
 severity flag —
 the format is greppable on purpose, so `| grep -E ' (WARN|ERROR|CRIT) '`
 narrows it to the failures.
@@ -220,7 +220,7 @@ work. Read them that way — most of them do not stop anything by themselves.
    coverage before acting, so a freshly-created pool with no CPU history cannot
    scale itself down before it starts.
 
-   **Verify it before trusting it:** `poker-solver-run autoscale-check` evaluates the live
+   **Verify it before trusting it:** `poker-solver autoscale-check` evaluates the live
    formula server-side and prints `cpuAvg` and `stalled`. The clause assumes
    `$CPUPercent` is a 0-1 fraction; if it is not, the threshold never fires and
    the backstop is silently absent.
@@ -234,7 +234,7 @@ work. Read them that way — most of them do not stop anything by themselves.
 **When something is wrong:** `just panic <rg> <account> <pool>` terminates every job and forces the
 pool to zero, killing running tasks rather than waiting. Whatever a leg published
 up to its last retained rung survives, and
-`poker-solver-run submit --run <id> --to <n>` picks it up.
+`poker-solver submit --run <id> --to <n>` picks it up.
 
 It takes its coordinates as arguments deliberately. `panic` is the one recipe
 that uses neither the Python CLI nor Terraform state, so it still works when the

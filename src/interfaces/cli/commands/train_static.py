@@ -14,7 +14,7 @@ from src.pipeline import services
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run train-static`."""
+    """Flags for `poker-solver train-static`."""
     parser.add_argument("--config", required=True, help="Config stem under config/training/.")
     parser.add_argument(
         "--workers",

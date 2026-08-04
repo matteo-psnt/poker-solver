@@ -39,7 +39,7 @@ TrainingSession.resume(run_dir: Path, capacity_override: int | None = None)
 evaluate(num_samples=10000, num_rollouts_per_infoset=100,
          use_average_strategy=True, seed=None)
     # Legacy rollout diagnostic only. For trustworthy numbers use the LBR
-    # evaluator via `poker-solver-run evaluate` (see evaluation README).
+    # evaluator via `poker-solver evaluate` (see evaluation README).
 ```
 
 **Attributes:**
@@ -262,15 +262,15 @@ Unset fields fall back to defaults in `src/shared/config.py`.
 
 ## CLI Integration
 
-**`poker-solver-run`** (`src/interfaces/cli/headless.py`) is the only CLI; the
+**`poker-solver`** (`src/interfaces/cli/headless.py`) is the only CLI; the
 interactive menu that used to sit beside it is deleted. Commands delegate to
 `src/pipeline/services.py`.
 
 ```bash
-poker-solver-run train --config production
-poker-solver-run evaluate --run <id> --scorer lookahead
-poker-solver-run ledger            # browse recorded evaluations
-poker-solver-run compare --a <run> --b <run>   # paired comparison
+poker-solver train --config production
+poker-solver evaluate --run <id> --scorer lookahead
+poker-solver ledger            # browse recorded evaluations
+poker-solver compare --a <run> --b <run>   # paired comparison
 ```
 
 ---

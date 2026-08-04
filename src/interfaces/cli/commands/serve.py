@@ -21,7 +21,7 @@ DEFAULT_PORT = 8765
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Flags for `poker-solver-run serve`."""
+    """Flags for `poker-solver serve`."""
     parser.add_argument(
         "--port",
         type=int,

@@ -13,7 +13,7 @@ defaults to 1 and once trained single-threaded on a 16-vCPU node -- and a newer
 `train-vector` branch splatted that same array into a command declaring no
 `--workers`. Three identical attempts, each dead about four seconds in.
 
-It used to regex `run_leg.sh` for `uv run poker-solver-run` call sites and
+It used to regex `run_leg.sh` for `uv run poker-solver` call sites and
 trace shell array splats, because the argv existed only as shell. Now
 `plan.LegPlan` BUILDS the argv, so this asks the real parser to accept the real
 list -- which also removes the regex's blind spot: a flag assembled from a
@@ -28,11 +28,14 @@ the registry already is.
 from __future__ import annotations
 
 import argparse
+import pathlib
+import tomllib
 
 import pytest
 
 from src.interfaces.cli.commands import COMMANDS
 from src.shared.node import plan as node_plan
+from src.shared.node import runner as node_runner
 
 # Added by `headless.build_parser` to every subcommand, so they are legal
 # everywhere and appear in no command's own `add_arguments`.
@@ -128,3 +131,34 @@ class TestTheCheckCatchesTheRealDefect:
 
     def test_the_common_flags_are_legal_everywhere(self):
         assert _undeclared(["progress", "--run", "run-a", "--json"]) == []
+
+
+class TestTheWrapperInvokesACommandThatExists:
+    """The flags are checked above; this checks the BINARY they are passed to.
+
+    `runner.py` hardcodes `["uv", "run", "<name>", *argv]` and `pyproject.toml`
+    declares what `<name>` installs. Nothing tied them together, so renaming the
+    script -- which is exactly what happened when `poker-solver-run` lost its
+    suffix -- could leave the node calling a binary that no longer exists.
+
+    That failure is invisible locally and expensive remotely: `uv run` on an
+    unknown script fails after the code snapshot upload and the pool spin-up,
+    with an error about the launcher rather than about the leg. Same shape as
+    the undeclared-flag defect this module was written for, one level up.
+    """
+
+    def _script_names(self) -> set[str]:
+        pyproject = pathlib.Path(__file__).resolve().parents[3] / "pyproject.toml"
+        return set(tomllib.loads(pyproject.read_text())["project"]["scripts"])
+
+    def test_the_node_calls_a_script_the_project_installs(self):
+        argv = node_runner._cli(["progress", "--run", "run-a"])
+        assert argv[:2] == ["uv", "run"], argv
+        assert argv[2] in self._script_names(), (
+            f"the node invokes `{argv[2]}`, which pyproject.toml does not install. "
+            f"Declared scripts: {sorted(self._script_names())}"
+        )
+
+    def test_the_check_would_notice_a_rename(self):
+        """Guards the guard: a typo'd name must not silently pass."""
+        assert "poker-solver-run" not in self._script_names()

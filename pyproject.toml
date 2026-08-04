@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.scripts]
-poker-solver-run = "src.interfaces.cli.headless:main"
+poker-solver = "src.interfaces.cli.headless:main"
 
 [build-system]
 requires = ["hatchling"]

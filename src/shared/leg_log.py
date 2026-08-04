@@ -9,7 +9,7 @@ Under ``<share>/legs/``, per task and per attempt::
 
     <task>.<attempt>.start.json   run_leg.py, at entry
     <task>.<attempt>.exit.json    run_leg.py, from its exit accounting
-    <task>.observed.json          poker-solver-run legs, from Batch's executionInfo
+    <task>.observed.json          poker-solver legs, from Batch's executionInfo
 
 One writer per file, because the share is SMB: no atomic rename, no atomic
 append, so a read-modify-write from two sides would interleave. Start and exit
