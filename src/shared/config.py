@@ -268,7 +268,9 @@ class ResolverConfig(StrictFrozenModel):
 
     enabled: bool = Field(default=True)
     time_budget_ms: PositiveInt = Field(default=300)
-    max_depth: PositiveInt = Field(default=2)
+    # Where a river subgame is fully expanded. At 2 it was half-truncated, and
+    # its error ROSE with more compute -- see test_lookahead_depth.
+    max_depth: PositiveInt = Field(default=6)
     max_raises_per_street: PositiveInt = Field(default=2)
     # Board runouts sampled for range-vs-range leaf valuation in the subgame CFR
     # (exact single board when the root is already on the river).
