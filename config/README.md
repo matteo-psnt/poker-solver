@@ -96,8 +96,10 @@ tokens, numeric open sizes, and multiplier tokens like `"3.5x_open"` /
    template of every field).
 2. Set `system.config_name` to the profile name you want in run metadata.
 3. Optionally `extends:` another YAML in the directory.
-4. If a field should be CLI-editable, update prompts in
-   `src/interfaces/cli/flows/config.py`.
+
+There is no config *editor* to update: a leg carries a config name plus
+`LegSpec.sets`, so overrides reach a run through `--set key=value` and nothing
+else.
 
 ## Add a new training config field (schema change)
 
@@ -105,9 +107,8 @@ tokens, numeric open sizes, and multiplier tokens like `"3.5x_open"` /
    `src/shared/config.py` — constraints live there, nowhere else.
 2. Wire usage where relevant, typically
    `src/pipeline/training/components.py`,
-   `src/pipeline/training/trainer/`, or `src/engine/solver|search/`.
-3. Optionally expose it in `src/interfaces/cli/flows/config.py`.
-4. Add/update tests in the mirrored test packages and document the field in
+   `src/pipeline/training/static_parallel.py`, or `src/engine/solver|search/`.
+3. Add/update tests in the mirrored test packages and document the field in
    `config/training/default.yaml`.
 
 ## Abstraction precompute reference (`PrecomputeConfig`)
@@ -144,7 +145,7 @@ the identity.
 
 - Training runs record `config_name`, `action_config_hash`, and
   `card_abstraction_hash` in `.run.json` via `RunTracker`
-  (`src/pipeline/training/run_tracker.py`).
+  (`src/pipeline/training/run_tracker/tracker.py`).
 - Abstractions are resolved by config name/hash through
   `AbstractionResolver` and `build_card_abstraction(...)`
   (`src/pipeline/training/abstraction_resolver.py`,
