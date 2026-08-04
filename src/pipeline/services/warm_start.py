@@ -60,6 +60,7 @@ from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_ch
 from src.pipeline.training import components
 from src.pipeline.training.run_tracker import RunTracker
 from src.pipeline.training.run_tracker.attempts import ExperimentTag
+from src.shared.config import Config
 from src.shared.config_loader import load_training_config
 from src.shared.numeric import NORMALIZE_EPS
 
@@ -112,6 +113,59 @@ def regrets_encoding(
     return normalised * float(weight), seeded
 
 
+def seed_checkpoint(
+    config: Config,
+    *,
+    source_run: Path,
+    run_dir: Path,
+    effective_iterations: int,
+    abstraction_hash: str | None,
+    at_iteration: int | None = None,
+) -> int:
+    """Write iteration-0 regrets encoding ``source_run``'s average strategy.
+
+    Lower level than :func:`warm_start_run`: the caller already owns ``run_dir``
+    and its tracker, which is what lets ``train_static`` seed and train in ONE
+    leg rather than two. Returns the number of rows that carry a prior.
+    """
+    if effective_iterations <= 0:
+        raise ValueError("effective_iterations must be positive; it scales the prior's weight.")
+
+    action_model = ActionModel(config)
+    abstraction = components.build_card_abstraction(config)
+    rules = GameRules(config.game.small_blind, config.game.big_blind)
+    tree = build_betting_tree(
+        rules, action_model, abstraction, starting_stack=config.game.starting_stack
+    )
+
+    source = StaticArrayStorage(tree)
+    # Verifies the tree fingerprint, so a strategy from a different tree is
+    # refused rather than reinterpreted row-for-row.
+    load_checkpoint(source, source_run, at_iteration=at_iteration)
+
+    starts = _row_slot_starts(tree)
+    slot_width = np.repeat(tree.num_actions, tree.buckets_per_node)
+    regrets, seeded = regrets_encoding(
+        source.strategy_sum, starts, slot_width, float(effective_iterations)
+    )
+
+    target = StaticArrayStorage(tree)
+    target.regrets[:] = regrets.astype(target.regrets.dtype)
+    # strategy_sum stays ZERO: the reported blueprint must average the real game
+    # only. See the module docstring.
+    target.visited[:] = seeded
+    save_checkpoint(target, run_dir, iteration=0, abstraction_id=abstraction_hash)
+
+    logger.info(
+        "seeded %s from %s at weight %d: %.2f%% of rows carry a prior",
+        run_dir.name,
+        source_run.name,
+        effective_iterations,
+        float(seeded.mean()) * 100.0,
+    )
+    return int(seeded.sum())
+
+
 def warm_start_run(
     config_name: str,
     *,
@@ -156,25 +210,6 @@ def warm_start_run(
         rules, action_model, abstraction, starting_stack=config.game.starting_stack
     )
 
-    source = StaticArrayStorage(tree)
-    # Verifies the tree fingerprint, so a strategy from a different tree is
-    # refused rather than reinterpreted row-for-row.
-    load_checkpoint(source, source_run, at_iteration=at_iteration)
-
-    starts = _row_slot_starts(tree)
-    slot_width = np.repeat(tree.num_actions, tree.buckets_per_node)
-    # sigma(a) = R+(a)/sum(R+), so regrets proportional to the average strategy
-    # reproduce it exactly. The scale is what the prior claims to have learned.
-    regrets, seeded = regrets_encoding(
-        source.strategy_sum, starts, slot_width, float(effective_iterations)
-    )
-
-    target = StaticArrayStorage(tree)
-    target.regrets[:] = regrets.astype(target.regrets.dtype)
-    # strategy_sum stays ZERO on purpose: the reported blueprint must be an
-    # average over the real game only. See the module docstring.
-    target.visited[:] = seeded
-
     tag = experiment or ExperimentTag()
     tracker = RunTracker(
         run_dir=run_dir,
@@ -188,22 +223,21 @@ def warm_start_run(
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     tracker.initialize()
-    save_checkpoint(target, run_dir, iteration=0, abstraction_id=abstraction_hash)
+    seeded_rows = seed_checkpoint(
+        config,
+        source_run=source_run,
+        run_dir=run_dir,
+        effective_iterations=effective_iterations,
+        abstraction_hash=abstraction_hash,
+        at_iteration=at_iteration,
+    )
     tracker.update(
         iterations=0,
         runtime_seconds=0.0,
-        num_infosets=int(seeded.sum()),
+        num_infosets=seeded_rows,
         storage_capacity=tree.num_rows,
     )
-
-    fraction = float(seeded.mean())
-    logger.info(
-        "seeded %s from %s at weight %d: %.2f%% of rows carry a prior",
-        run_id,
-        source_run.name,
-        effective_iterations,
-        fraction * 100.0,
-    )
+    fraction = seeded_rows / tree.num_rows
     return WarmStartOutput(
         run_id=run_id,
         runs_dir=str(base_dir),
@@ -211,10 +245,16 @@ def warm_start_run(
         source_run_id=source_run.name,
         effective_iterations=effective_iterations,
         num_rows=tree.num_rows,
-        seeded_rows=int(seeded.sum()),
+        seeded_rows=seeded_rows,
         seeded_fraction=fraction,
         status="seeded",
     )
 
 
-__all__ = ("DEFAULT_EFFECTIVE_ITERATIONS", "WarmStartOutput", "warm_start_run")
+__all__ = (
+    "DEFAULT_EFFECTIVE_ITERATIONS",
+    "WarmStartOutput",
+    "regrets_encoding",
+    "seed_checkpoint",
+    "warm_start_run",
+)

@@ -89,6 +89,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "nothing in strategy quality.",
     )
     parser.add_argument(
+        "--warm-start-from",
+        default="",
+        dest="warm_start_from",
+        help="[scalar] Seed a FRESH run from this run's average strategy. Board-free "
+        "reaches a 30M-iteration blueprint's quality in ~100 iterations, so it is "
+        "worth a try as a prior even though it is capped as a blueprint.",
+    )
+    parser.add_argument(
+        "--warm-start-weight",
+        type=int,
+        default=0,
+        dest="warm_start_weight",
+        help="[scalar] How much regret the prior claims, i.e. how many real "
+        "iterations it takes to overrule. The experiment's independent variable.",
+    )
+    parser.add_argument(
         "--timeout",
         default=spec.DEFAULT_TIMEOUT,
         help="Wall-clock ceiling on the TRAINING process. It fires before the task-level "
@@ -137,6 +153,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 universe_boards=args.universe_boards if args.kernel == "board-free" else 0,
                 universe_seed=args.universe_seed if args.kernel == "board-free" else 0,
                 dtype=args.dtype,
+                warm_start_from=args.warm_start_from,
+                warm_start_weight=args.warm_start_weight,
             )
         ]
     )

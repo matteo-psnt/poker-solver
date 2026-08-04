@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+from pathlib import Path
 from typing import Any
 
 from src.interfaces.commands._base import (
@@ -49,6 +50,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "clock and left 120 snapshots on the share.",
     )
     parser.add_argument(
+        "--warm-start-from",
+        default=None,
+        dest="warm_start_from",
+        help="Seed a FRESH run from this run's average strategy before training. "
+        "Ignored when continuing, so a retried leg cannot lay the prior back over "
+        "the progress it already made.",
+    )
+    parser.add_argument(
+        "--warm-start-weight",
+        type=int,
+        default=services.DEFAULT_EFFECTIVE_ITERATIONS,
+        dest="warm_start_weight",
+        help="How much accumulated regret the prior CLAIMS, and so how many real "
+        "iterations it takes to overrule. The experiment's independent variable.",
+    )
+    parser.add_argument(
         "--run",
         default=None,
         help="Continue an EXISTING run instead of starting one. --iterations is an "
@@ -71,6 +88,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         ),
         checkpoint_every=args.checkpoint_every,
         run_id=args.run,
+        warm_start_from=Path(args.warm_start_from) if args.warm_start_from else None,
+        warm_start_weight=args.warm_start_weight,
     )
     return {"op": "train-static", **dataclasses.asdict(out)}
 

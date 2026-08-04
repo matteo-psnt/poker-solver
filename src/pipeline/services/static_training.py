@@ -40,6 +40,7 @@ from pathlib import Path
 from src.core.actions.action_model import ActionModel
 from src.pipeline import blueprint
 from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
+from src.pipeline.services import warm_start
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import run_events
@@ -85,6 +86,8 @@ def train_static(
     runs_dir: Path | None = None,
     checkpoint_every: int = 1_000_000,
     run_id: str | None = None,
+    warm_start_from: Path | None = None,
+    warm_start_weight: int = warm_start.DEFAULT_EFFECTIVE_ITERATIONS,
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
 
@@ -102,6 +105,10 @@ def train_static(
             1M costs ~4% and loses at most ~5 minutes of work.
         run_id: Continue an EXISTING run directory instead of creating one. The
             checkpoint there is loaded first and training continues from it.
+        warm_start_from: Seed a FRESH run from this run's average strategy
+            before training. Ignored when continuing, so a retried leg does
+            not re-seed over its own progress.
+        warm_start_weight: How much accumulated regret the prior claims.
         seed: Overrides ``system.seed``.
         config_overrides: Nested config overrides (``__`` separator).
         experiment: Experiment/arm/parent recorded on the run.
@@ -173,6 +180,19 @@ def train_static(
     # listing reads identity from that one line rather than folding.
     tracker.initialize()
 
+    # Only on a FRESH run. A retry finds the run dir populated, resumes, and
+    # must not lay the prior back over the progress it already made.
+    seeded = False
+    if warm_start_from is not None and not resuming:
+        warm_start.seed_checkpoint(
+            config,
+            source_run=Path(warm_start_from),
+            run_dir=run_dir,
+            effective_iterations=warm_start_weight,
+            abstraction_hash=tracker.metadata.card_abstraction_hash,
+        )
+        seeded = True
+
     started = time.time()
     try:
         result = train_static_parallel(
@@ -186,7 +206,7 @@ def train_static(
             base_seed=config.system.seed if config.system.seed is not None else 42,
             checkpoint_retain_every=config.storage.checkpoint_retain_every,
             checkpoint_every=checkpoint_every,
-            resume=resuming,
+            resume=resuming or seeded,
         )
     except Exception:
         # cleanup_if_empty so a run that died before writing anything does not
