@@ -359,6 +359,9 @@ class TestPerHandRecords:
             float(np.mean(samples)) / big_blind * 1000.0
         )
 
+    # 30s not 5s: coverage instrumentation runs this file ~3.3x slower, and
+    # every other expensive test here already carries an explicit mark.
+    @pytest.mark.timeout(30)
     def test_same_seed_yields_identical_records_and_null_paired_diff(self):
         """CRN foundation: same seed => hand-for-hand identical deals/outcomes."""
         solver = _build_solver(3, starting_stack=400)
