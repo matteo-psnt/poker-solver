@@ -50,7 +50,7 @@ export function Cost() {
                 note="time legs spent executing"
               />
               <Stat
-                label="at Terraform's rate"
+                label="estimated spend"
                 value={data.dollars == null ? "—" : `$${data.dollars.toFixed(2)}`}
                 note={
                   data.rate_per_node_hour == null
@@ -63,7 +63,7 @@ export function Cost() {
                 value={count(data.legs)}
                 note={`peak ${data.peak_concurrency} at once`}
               />
-              <Stat label="since" value={since(data.first_at)} note="first leg on record" />
+              <Stat label="first leg" value={since(data.first_at)} note="start of the record" />
             </div>
 
             <div className="px-2 pb-1">
