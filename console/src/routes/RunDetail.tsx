@@ -1,9 +1,10 @@
-import { useCurve, useRun } from "@/api/queries";
+import { useCurve, useLegs, useRun } from "@/api/queries";
 import { Panel } from "@/components/Panel";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
+import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { count, duration, mbb, percent, rate } from "@/lib/format";
-import { getRouteApi } from "@tanstack/react-router";
+import { count, duration, mbb, percent, rate, since } from "@/lib/format";
+import { Link, getRouteApi } from "@tanstack/react-router";
 import {
   CartesianGrid,
   Line,
@@ -142,7 +143,91 @@ export function RunDetail() {
           )}
         </Panel>
       </div>
+
+      <RunLegs runId={runId} />
     </div>
+  );
+}
+
+/**
+ * The legs that built this run.
+ *
+ * Filtered client-side from the full leg log rather than read from
+ * `runinfo.legs`, which comes back EMPTY for runs whose records predate that
+ * field — including the production run. The leg log is the durable account, so
+ * it is the one to join against.
+ *
+ * The join is `leg.run_id`, and it crosses daily jobs: a run outlives the job
+ * its legs happen to land in, so grouping by job here would split one lineage
+ * across three headings for a reason that is purely about scheduling.
+ */
+function RunLegs({ runId }: { runId: string }) {
+  const legs = useLegs(0);
+  const mine = (legs.data?.rows ?? []).filter((row) => row.run_id === runId).reverse();
+  const ops = [...new Set(mine.map((row) => row.op).filter(Boolean))];
+
+  return (
+    <Panel
+      title="Legs"
+      updatedAt={legs.dataUpdatedAt}
+      staleAfterMs={180_000}
+      error={errorOf(legs.error)}
+      loading={legs.isLoading}
+      empty={legs.data && mine.length === 0 ? "No legs recorded for this run." : null}
+      onRefresh={() => legs.refetch()}
+      refreshing={legs.isFetching}
+    >
+      {mine.length > 0 && (
+        <>
+          <p className="px-3 pt-2 text-[11px] text-[var(--fg-faint)]">
+            {mine.length} attempt{mine.length === 1 ? "" : "s"} built this run
+            {ops.length > 0 && ` — ${ops.join(", ")}`}
+          </p>
+          <Table>
+            <thead>
+              <tr>
+                <Th>task</Th>
+                <Th right>#</Th>
+                <Th>op</Th>
+                <Th>cause</Th>
+                <Th right>exit</Th>
+                <Th right>ended</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {mine.map((row) => (
+                <tr key={`${row.task_id}-${row.attempt}`}>
+                  <Td mono>
+                    <Link
+                      to="/legs/$taskId"
+                      params={{ taskId: row.task_id }}
+                      className="hover:underline"
+                    >
+                      {row.task_id}
+                    </Link>
+                  </Td>
+                  <Td right className="text-[var(--fg-faint)]">
+                    {row.attempt ?? "—"}
+                  </Td>
+                  <Td className="text-[var(--fg-muted)]">{row.op ?? "—"}</Td>
+                  <Td>
+                    <StatusBadge
+                      state={displayName(row.cause)}
+                      tone={toneFor(row.cause)}
+                      title={`recorded as "${row.cause}"`}
+                    />
+                  </Td>
+                  <Td right>{row.exit_code ?? "—"}</Td>
+                  <Td right className="text-[var(--fg-faint)]">
+                    {since(row.ended_at)}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </>
+      )}
+    </Panel>
   );
 }
 
