@@ -611,6 +611,7 @@ def main() -> int:
     code, outcome = 1, None
     try:
         plan = parse_environment()
+        log(f"code provenance: {plan.provenance}")
         sync = _stage(paths, log)
         if sync != 0:
             log(f"FATAL dependency sync failed rc={sync}")

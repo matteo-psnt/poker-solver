@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ from src.interfaces.cloud import batch, share, spec
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.spec import LegSpec
 from src.interfaces.errors import CommandError
+from src.shared import gitinfo
 
 NONCE_CEILING = 32768
 
@@ -59,7 +60,7 @@ def stage_and_queue(
         leg.validate()
 
     snapshot = share.publish_code_snapshot(share.share_client(config), config.share_name, root, now)
-    legs = make_legs(snapshot)
+    legs = [_stamped(leg) for leg in make_legs(snapshot)]
     if not legs:
         raise CommandError("Nothing to submit.")
 
@@ -89,6 +90,26 @@ def stage_and_queue(
         "job_id": job_id,
         "tasks": [item.task_id for item in queued],
     }
+
+
+def _stamped(leg: LegSpec) -> LegSpec:
+    """Attach this machine's git provenance to a leg.
+
+    HERE rather than in each caller, for the reason this module exists: a
+    property that every submission must have cannot be a step three callers
+    have to remember. It is applied after ``make_legs`` so a caller cannot
+    forget it, and cannot get it wrong either.
+
+    The snapshot id above is strictly MORE precise -- it names the actual bytes,
+    dirty tree and all -- but nothing in the record has a field for it, while
+    `train_git_commit`/`eval_git_commit` have had columns since the ledger
+    existed and have been null on every cloud row.
+    """
+    return replace(
+        leg,
+        git_commit=gitinfo.get_git_commit() or "",
+        git_dirty=gitinfo.encode_dirty(gitinfo.is_git_dirty()),
+    )
 
 
 def render_queued(payload: dict[str, Any]) -> None:

@@ -63,6 +63,13 @@ class LegPlan:
     eval_rungs: tuple[str, ...] = ()
     eval_flags: tuple[str, ...] = field(default_factory=tuple)
     force_publish: bool = False
+    # Not used to build an argv -- `gitinfo` reads these straight out of the
+    # environment, which the `uv run` child inherits, so nothing has to thread
+    # them through a command line. Carried here so the wrapper can SAY what code
+    # it is running: a leg log that names its commit is the only place the
+    # answer appears while the leg is alive.
+    git_commit: str = ""
+    git_dirty: str = ""
 
     @property
     def train_run_id(self) -> str:
@@ -128,6 +135,22 @@ class LegPlan:
     def precompute_argv(self) -> list[str]:
         return ["precompute", "--config", self.config, "--json"]
 
+    @property
+    def provenance(self) -> str:
+        """What code this leg runs, for the log.
+
+        The node has no `.git` -- the code snapshot excludes it -- so this is
+        the submitter's answer, passed down. Until it existed, every
+        cloud-trained run and every cloud-run evaluation recorded a null
+        commit.
+        """
+        if not self.git_commit:
+            return "unknown (nothing stamped this leg)"
+        state = {"1": " (DIRTY tree)", "0": " (clean tree)"}.get(
+            self.git_dirty, " (tree state unknown)"
+        )
+        return self.git_commit[:12] + state
+
 
 def parse_environment(environ: dict[str, str] | None = None) -> LegPlan:
     """Read the ``RUN_*`` contract out of the task's environment.
@@ -157,6 +180,8 @@ def parse_environment(environ: dict[str, str] | None = None) -> LegPlan:
         eval_rungs=tuple(r for r in (env.get("RUN_EVAL_AT") or "").split(",") if r),
         eval_flags=_json_list(env.get("RUN_EVAL_FLAGS_JSON"), "RUN_EVAL_FLAGS_JSON"),
         force_publish=bool(env.get("RUN_FORCE_PUBLISH")),
+        git_commit=env.get("RUN_GIT_COMMIT", ""),
+        git_dirty=env.get("RUN_GIT_DIRTY", ""),
     )
     _validate(plan)
     return plan
