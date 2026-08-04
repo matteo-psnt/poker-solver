@@ -73,12 +73,12 @@ export const useCurve = (runId: string) =>
     refetchInterval: SLOW,
   });
 
-export const useCost = (hours = 24) =>
+export const useCost = (hours = 0) =>
   useQuery<Cost>({
     queryKey: ["cost", hours],
     queryFn: () => get(`/api/cost?hours=${hours}`, costSchema),
-    // Cheap: it reads a local file the sampler wrote, not the cloud.
-    refetchInterval: FAST,
+    // Derived from the leg log, so it costs what `legs` costs.
+    refetchInterval: SLOW,
   });
 
 export const useEvals = (limit = 50) =>
