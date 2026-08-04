@@ -97,9 +97,23 @@ class TestPreflopTokens:
     def test_passive_and_jam_words_are_accepted(self):
         assert _build(preflop_templates={**PREFLOP, "bb_vs_open": ["fold", "call", "jam"]})
 
-    def test_an_unparseable_multiplier_is_refused(self):
+    def test_a_word_carrying_no_multiplier_is_refused(self):
+        """`parse_multiplier_token` answers None for a token with no suffix."""
         with pytest.raises(ValidationError, match=r"Invalid preflop token 'wat'"):
             _build(preflop_templates={**PREFLOP, "bb_vs_open": ["wat"]})
+
+    def test_a_multiplier_suffix_with_a_bad_prefix_is_refused(self):
+        """The other branch: the suffix is there, so float() raises rather than
+        returning None. Both spellings must reach the same refusal."""
+        with pytest.raises(ValidationError, match=r"Invalid preflop token 'xx_open'"):
+            _build(preflop_templates={**PREFLOP, "bb_vs_open": ["xx_open"]})
+
+    def test_a_non_positive_multiplier_is_refused(self):
+        with pytest.raises(ValidationError, match=r"Invalid preflop token '0x_open'"):
+            _build(preflop_templates={**PREFLOP, "bb_vs_open": ["0x_open"]})
+
+    def test_a_valid_multiplier_is_accepted(self):
+        assert _build(preflop_templates={**PREFLOP, "bb_vs_open": ["fold", "2.5x_open"]})
 
 
 class TestPostflopTokens:
