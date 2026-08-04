@@ -15,9 +15,17 @@ identified as loadable by `STATIC_CHECKPOINT.json`.
 
 Tests in `tests/` mirror this layout. Config YAML lives under `config/`
 (source of truth for training setups; name new files for their purpose).
-Runtime artifacts go in `data/`, which now holds only `combo_abstraction/` (a
-test fixture) and `cache/` (regenerable). **There is no `data/runs`**: runs
-live on the share and nowhere else.
+**The laptop holds no run data and no training artifact.** Runs live on the
+share and nowhere else, and `data/` now holds only `cache/canonical_boards`,
+which the code regenerates on demand — delete the whole directory and the FULL
+suite still passes (measured: 1371 passed, 2 skipped). The 194 MB
+`combo_abstraction` that survived earlier prunes was a fixture for exactly ONE
+test, and while it was missing that test FAILED with a `FileNotFoundError`
+pointing at `precompute` — an environment report dressed as a regression, on
+an artifact that is gitignored, unversioned, and had already come back once
+after being deleted. `tests/conftest.py::requires_card_abstraction` makes it a
+skip that names the fix. Anything under `data/` is therefore a cache by
+definition: never a source of truth, never worth backing up.
 
 ## Commands
 - `uv sync --group dev` — install dependencies.

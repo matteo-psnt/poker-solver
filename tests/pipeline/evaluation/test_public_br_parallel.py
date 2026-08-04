@@ -79,7 +79,7 @@ class TestParallelMatchesSerial:
         )
         return result.exploitability_mbb, result.nodes_visited
 
-    def test_same_value_and_same_node_count(self, tmp_path):
+    def test_same_value_and_same_node_count(self, tmp_path, requires_card_abstraction):
         # ONE blueprint, scored two ways. Training twice would compare two
         # different blueprints and measure training variance, not scheduling.
         solver, metadata, run_dir = self._blueprint(tmp_path)
