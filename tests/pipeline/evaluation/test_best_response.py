@@ -53,6 +53,23 @@ class TestExactBestResponseGroundTruth:
         assert on_policy_value(game, 0, policy) == pytest.approx(0.0)
         assert on_policy_value(game, 1, policy) == pytest.approx(0.0)
 
+    def test_on_policy_value_never_enters_a_zero_probability_branch(self):
+        """A branch the policy never takes is not walked, only weighted by zero.
+
+        ``0 * v`` leaves the expectation unchanged whether or not ``v`` is
+        computed, so this cannot be caught by a value assertion -- which is why
+        the descent went unnoticed. The three sibling walks in this package
+        already skipped; this pins that ``on_policy_value`` does too.
+        """
+
+        class _RefusesTheBet(KuhnPoker):
+            def next_state(self, state, action):
+                if action == "b":
+                    raise AssertionError("expanded a branch the policy assigns probability 0")
+                return super().next_state(state, action)
+
+        assert on_policy_value(_RefusesTheBet(), 0, _always_pass_strategy()) == pytest.approx(0.0)
+
     def test_always_pass_exploitability_is_one(self):
         """NashConv per player = ((1 - 0) + (1 - 0)) / 2 = 1."""
         game = KuhnPoker()
