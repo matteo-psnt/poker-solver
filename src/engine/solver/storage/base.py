@@ -28,5 +28,5 @@ class Storage(ABC):
         """Iterate over infosets owned by this storage."""
 
     @abstractmethod
-    def checkpoint(self, iteration: int):
+    def checkpoint(self, iteration: int) -> None:
         """Save a checkpoint at given iteration."""

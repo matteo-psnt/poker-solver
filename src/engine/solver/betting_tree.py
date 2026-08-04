@@ -52,6 +52,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
+from src.engine.solver.protocols import BucketingStrategy
 
 # Enumeration needs a concrete state to walk, but the betting tree does not
 # depend on card identities — only on street, pot, stacks and to_call. These are
@@ -269,7 +270,7 @@ class BettingTree:
         )
 
 
-def buckets_from_abstraction(card_abstraction) -> dict[Street, int]:
+def buckets_from_abstraction(card_abstraction: BucketingStrategy) -> dict[Street, int]:
     """Read per-street bucket counts off a bucketing strategy."""
     return {
         street: card_abstraction.num_buckets(street)
@@ -280,7 +281,7 @@ def buckets_from_abstraction(card_abstraction) -> dict[Street, int]:
 def build_betting_tree(
     rules: GameRules,
     action_model: ActionModel,
-    card_abstraction,
+    card_abstraction: BucketingStrategy,
     *,
     starting_stack: int,
 ) -> BettingTree:

@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.pipeline.training.components import build_static_evaluation_solver
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.config import Config
@@ -18,7 +20,7 @@ def build_blueprint_for(
     metadata: RunMetadata,
     abstraction_hash: str | None,
     at_iteration: int | None,
-):
+) -> tuple[StaticTreeSolver, StaticArrayStorage]:
     """Load a scoreable blueprint from a run's static checkpoint."""
     return build_static_evaluation_solver(
         metadata.config,

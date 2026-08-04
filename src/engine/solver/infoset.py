@@ -350,7 +350,7 @@ class InfoSet:
         iteration_weighting: Literal["none", "linear", "dcfr"] = "none",
         dcfr_alpha: float = 1.5,
         dcfr_beta: float = 0.0,
-    ):
+    ) -> None:
         """
         Update cumulative regret for one action.
 
