@@ -8,7 +8,6 @@ either one still looks perfectly healthy.
 import pytest
 
 from src.interfaces.cli.commands import evaluate, jobs, pool_status, score
-from src.interfaces.cli.flows import training
 from src.interfaces.cli.headless import build_parser
 
 
@@ -103,9 +102,6 @@ class TestEstimatorNamesAgree:
 
     def test_score_offers_exactly_what_evaluate_accepts(self):
         assert set(score.EVAL_METHODS) == set(evaluate.EVAL_METHODS)
-
-    def test_the_interactive_menu_offers_the_same_set(self):
-        assert set(training.MENU_EVAL_METHODS) == set(evaluate.EVAL_METHODS)
 
     def test_a_deleted_estimator_is_rejected_before_a_node_is_allocated(self):
         with pytest.raises(SystemExit):

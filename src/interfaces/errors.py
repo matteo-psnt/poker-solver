@@ -2,17 +2,19 @@
 
 Every headless command used to signal a bad request by raising ``SystemExit``.
 That is a correct thing for a command-line process to do exactly once, and it is
-the assumption no other surface can make. The interactive menu already had to
-catch ``SystemExit`` in :mod:`src.interfaces.cli.flows.queueing` to stop a
-missing config from closing the whole session -- one surface paying, in a
-``except SystemExit`` clause, for the other surface's convention.
+the assumption no other surface can make. It was first paid for by a menu that
+had to wrap its own calls in ``except SystemExit`` so a missing config would not
+close the whole session -- one surface paying, in an exception clause, for
+another surface's convention. That menu is gone; the constraint outlived it,
+because the console is a worse case of the same thing.
 
 ``CommandError`` is that same signal carried as a value. :mod:`headless` turns
 it back into a message and an exit code, so the command line behaves exactly as
-it did; anything else -- a menu, a live status view, an HTTP handler -- catches
-it and renders one panel unavailable instead of dying. That is the property
-that makes a second surface cheap to add: the core reports, and the surface
-decides what a report means.
+it did. Anything else -- the console's ``/api`` handlers above all -- catches it
+and renders ONE panel unavailable instead of dying: a status screen fetches
+several commands concurrently, so a single unpublished run must grey out its own
+panel and nothing else. ``raise SystemExit`` at 16 call sites made that
+impossible. The core reports; the surface decides what a report means.
 
 Deliberately NOT covered here: the Azure SDK's ``ClientAuthenticationError`` and
 ``HttpResponseError``. They are raised from a dozen call sites in

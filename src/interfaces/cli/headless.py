@@ -1,12 +1,19 @@
-"""Non-interactive (headless) entrypoint for training and evaluation.
+"""THE entrypoint. Every operation is fully specified by flags.
 
-Unlike the questionary menu in :mod:`src.interfaces.cli.app`, every operation
-here is fully specified by flags and emits a machine-readable summary. This is
-the surface scripts and cloud jobs use, so a cloud job is a shell invocation of
-this module rather than a provider-specific reimplementation.
+There is no interactive counterpart any more. A questionary menu sat beside this
+for a long time and was progressively hollowed out -- no local-compute door, no
+config editor, nothing that read an abstraction -- until every item it still
+offered was a wizard around flags this file already accepts. It was deleted
+rather than maintained as a worse second way to say the same thing.
 
-The subcommands themselves live in :mod:`src.interfaces.cli.commands`, one
-module each. This file only wires them up and decides how output is printed.
+That leaves two surfaces, split by who is asking. This one is for anything that
+can be scripted -- a cloud job is a shell invocation of this module rather than
+a provider-specific reimplementation, and an agent drives it the same way. The
+web console is for a human reading, and it reaches these same commands through
+``Command.invoke`` rather than reimplementing them.
+
+The subcommands live in :mod:`src.interfaces.cli.commands`, one module each.
+This file only wires them up and decides how output is printed.
 """
 
 from __future__ import annotations

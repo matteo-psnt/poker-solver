@@ -36,18 +36,11 @@ uv sync --group dev
 
 ### Basic Usage
 
-```bash
-# Launch the interactive CLI
-uv run poker-solver
-```
+There are two surfaces, split by who is asking.
 
-The interactive CLI offers: **Submit Training Leg**, **Score a Run**, **Cloud
-Status**, **View Past Runs**, and **Combo Abstraction Tools**. It is a thin
-client over the cloud: the first two build a submission spec and queue it on
-the pool.
-
-Everything it does is also a flag-driven subcommand of the single headless
-entrypoint:
+**`poker-solver-run` is the scriptable one** — what a cloud job, a shell and an
+AI agent drive. It is the complete surface; everything the project can do is a
+flag-driven subcommand of it:
 
 ```bash
 uv run poker-solver-run submit --config production --to 25000000   # queue a leg
@@ -55,6 +48,15 @@ uv run poker-solver-run jobs                                       # what is run
 uv run poker-solver-run score --run <id> --at 10000000,20000000    # one task per rung
 uv run poker-solver-run ledger                                     # every evaluation, from the share
 uv run poker-solver-run compare --a <run> --b <run>                # paired comparison with p-value
+```
+
+**The web console is the one a human reads** — `just console`, then
+http://127.0.0.1:8765. It does not reimplement anything: every endpoint is a
+single `Command.invoke` against the list above, so the two cannot disagree.
+
+```bash
+just console       # build, then serve
+just console-dev   # Vite on :5173 with hot reload, proxying /api to :8765
 ```
 
 ### Training Your First Solver
@@ -213,22 +215,25 @@ uv run lint-imports
 ```
 poker-solver/
 ├── src/
-│   ├── interfaces/      # Entrypoints (interactive CLI, headless CLI) + cloud/ dispatch
+│   ├── interfaces/      # cli/ (the CLI) + web/ (the console's API) + cloud/ dispatch
 │   ├── pipeline/        # Training, evaluation, abstraction workflows
 │   ├── engine/          # Solver/search internals
 │   ├── core/            # Poker domain foundations (game/actions)
-│   └── shared/          # Cross-layer utilities (config, helpers)
+│   └── shared/          # Cross-layer utilities (config, node/ wrapper, cache)
+├── console/             # The web console (Vite + React); its own npm toolchain
 ├── tests/               # Mirrors src/ layout + integration tests
 ├── config/
 │   ├── training/        # Training configuration presets
 │   └── abstraction/     # Card abstraction presets
-├── data/
-│   ├── runs/            # Training runs and checkpoints
-│   ├── combo_abstraction/  # Precomputed card abstractions
-│   └── eval_ledger.jsonl   # Append-only evaluation ledger
 ├── infra/               # Azure Batch substrate (Terraform) + run_leg.py node wrapper
-└── justfile             # Terraform lifecycle, `panic`, and aliases for the CLI
+└── justfile             # Terraform lifecycle, `panic`, `credit-check`
 ```
+
+**There is no `data/` directory and nothing recreates one.** Runs live on the
+share; regenerable caches resolve through `src/shared/cache.py` to
+`$POKER_SOLVER_CACHE`, else `$XDG_CACHE_HOME`, else `~/.cache/poker-solver`.
+A `data/` path inside `src/` fails `tests/shared/test_cache.py` — which is how
+the directory came back after each of the two previous prunes.
 
 ## License
 
