@@ -95,7 +95,7 @@ class HUResolver:
         try:
             result = self.solve(state, time_budget_ms=budget)
             return result.action
-        except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        except Exception as exc:  # pragma: no cover - defensive runtime fallback  # noqa: BLE001 -- defensive runtime fallback; the blueprint still answers
             self.fallback_count += 1
             warnings.warn(
                 f"Resolver failed at runtime, falling back to blueprint strategy: {exc}",

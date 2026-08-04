@@ -66,7 +66,7 @@ def main(argv: list[str]) -> int:
             # Loading reads every chunk, which IS the verification -- there is no
             # cheaper check that would still catch a truncated or torn copy.
             load_checkpoint(storage, share, at_iteration=iteration)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- any load failure IS the corruption being reported
             print(
                 f"[repair] {iteration:>12,}: CORRUPT -- {type(exc).__name__}: {exc}"[:180],
                 flush=True,

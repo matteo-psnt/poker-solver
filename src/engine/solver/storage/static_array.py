@@ -74,7 +74,7 @@ def _detach_from_tracker(shm: shared_memory.SharedMemory) -> None:
         return
     try:
         resource_tracker.unregister(name, "shared_memory")
-    except Exception:  # pragma: no cover - tracker already gone
+    except Exception:  # pragma: no cover - tracker already gone  # noqa: BLE001 -- the resource tracker may already be gone
         logger.debug("Could not unregister %s from the resource tracker.", name)
 
 

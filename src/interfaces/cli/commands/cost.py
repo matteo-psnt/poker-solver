@@ -58,7 +58,7 @@ def _rate(explicit: str) -> float | None:
         from src.interfaces.cloud.config import CloudConfig
 
         return parse(CloudConfig.load().hourly_cost)
-    except Exception:
+    except Exception:  # noqa: BLE001 -- cost is a display value; unavailable reads as unknown
         return None
 
 

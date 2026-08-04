@@ -83,7 +83,7 @@ def _get_config_choice(ctx: CliContext) -> tuple[str, PrecomputeConfig] | None:
 
     try:
         return stem, PrecomputeConfig.from_yaml(stem)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- interactive flow: report and return
         print(f"\nError loading config '{stem}': {exc}")
         return None
 

@@ -45,7 +45,7 @@ def handle_combo_validate(ctx: CliContext) -> None:
 
     try:
         abstraction = PostflopPrecomputer.load(abstraction_path)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- interactive flow: report and return
         print(f"\n✗ Error loading abstraction: {exc}")
         return
 
@@ -84,7 +84,7 @@ def _run_basic_validation(abstraction: DenseBucketer, num_samples: int = 100) ->
                 bucket = abstraction.get_bucket(hole_cards_pair, board_cards, street)
                 if bucket < 0 or bucket >= num_buckets:
                     raise ValueError(f"Bucket {bucket} out of range (0..{num_buckets - 1})")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- per-hand sweep: tally the failure, keep sweeping
                 failures += 1
                 if failures == 1:
                     print(f"\n  [DEBUG] First error on {street.name}: {exc}")

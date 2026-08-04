@@ -52,7 +52,7 @@ def _load_abstraction(abstraction_path: Path) -> DenseBucketer | None:
     print(f"\nLoading abstraction from {abstraction_path.name}...")
     try:
         abstraction: DenseBucketer = PostflopPrecomputer.load(abstraction_path)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- interactive flow: report and return
         print(f"✗ Failed to load: {exc}")
         return None
     print("✓ Loaded successfully")
@@ -97,5 +97,5 @@ def _lookup_once(ctx: CliContext, abstraction: DenseBucketer, street: Street) ->
             print(f"✓ Isomorphic board maps to same bucket: {iso_bucket}")
         else:
             print(f"⚠ Different bucket: {iso_bucket} (expected {bucket})")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- a REPL over typed cards: a typo costs one line
         print(f"\n✗ Error: {exc}")
