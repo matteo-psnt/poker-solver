@@ -46,7 +46,7 @@ class TestTheNodeIsGone:
 
     def test_it_names_the_command_that_does_work(self, dead_node):
         """The share copy exists precisely for this case -- the publish-on-exit
-        trap in run_leg.sh writes it because the node cannot be relied on."""
+        node wrapper writes it because the node cannot be relied on."""
         with pytest.raises(CommandError) as caught:
             logs.run(_args())
         assert "logs --task prod-220218-7098" in str(caught.value)

@@ -1,14 +1,15 @@
 # Terraform lifecycle, the emergency stop, and shorthands for the Python CLI.
 #
 #   Terraform owns what EXISTS   (infra/*.tf)        -> just create
-#   poker-solver-run owns what HAPPENS (submissions) -> just submit / jobs / fetch
+#   poker-solver-run owns what HAPPENS (submissions) -> just submit / status / legs
 #
 # Dispatch used to live here as ~450 lines of `az` invocations. It is now
 # `src/interfaces/cloud/`, where a leg spec is a typed object a test can look
 # at rather than a shell string -- which is also how the hex-encoding of config
 # overrides disappeared: the SDK takes name/value pairs, so nothing has to
-# survive a `KEY=VALUE` parser. What remains below is what genuinely belongs in
-# a task runner.
+# survive a `KEY=VALUE` parser. The node-side wrapper went the same way, to
+# `src/shared/node/`. What remains below is what genuinely belongs in a task
+# runner: Terraform lifecycle, the emergency stop, and passthrough aliases.
 #
 # The pool holds ZERO nodes at rest. You submit legs and walk away; nodes appear
 # while work is queued and disappear when it drains.
@@ -121,16 +122,36 @@ credit-check *flags:
 # shorthands for `poker-solver-run`
 # --------------------------------------------------------------------------- #
 #
-# Aliases, not logic. Every one of these is reachable directly as
+# Aliases, not logic. Every one is reachable directly as
 # `uv run poker-solver-run <cmd>`; they exist so `just --list` still answers
-# "what can I do here?" and so muscle memory keeps working. Anything that needs
-# a flag not listed here should be run against the CLI directly.
+# "what can I do here?" and so muscle memory keeps working.
+#
+# This list is HAND-MAINTAINED and therefore drifts. `just fetch` called a
+# command deleted with the local-storage path and sat here for weeks, failing
+# only when someone typed it. `tests/interfaces/cli/test_justfile_aliases.py`
+# now fails if a recipe names a subcommand that is not in `COMMANDS`.
+#
+# Keep it SHORT: the CLI is the surface, this is muscle memory. Anything
+# needing a flag that is not here goes through `just cli <cmd> [flags...]`.
+
+# Any subcommand, with any flags. The escape hatch, so the list above does not
+# have to grow a recipe per flag: `just cli ledger --experiment exp-7`.
+[doc("Run any poker-solver-run subcommand. Args: cmd [flags...]")]
+cli *args:
+    uv run poker-solver-run {{args}}
+
+# The one screen for "what is the pool doing right now".
+status *flags:
+    uv run poker-solver-run status {{flags}}
 
 # Start or continue a run, to an ABSOLUTE iteration target.
 #
+# `--config` is required even when continuing: it builds the tree and the
+# solver, and the checkpoint stores neither.
+#
 #   just submit quick_test 3000
 #   just submit production 25000000 --experiment exp-7 --arm control
-#   just submit "" 50000000 --run run-20260728_011716-ca70cf
+#   just submit production 50000000 --run run-20260728_011716-ca70cf
 [doc("Start/continue a run to an ABSOLUTE target. Args: config to [flags...]")]
 submit config to *flags:
     uv run poker-solver-run submit --config "{{config}}" --to "{{to}}" {{flags}}
@@ -143,6 +164,10 @@ score run *flags:
 # Every queued/running task on the pool.
 jobs *flags:
     uv run poker-solver-run jobs {{flags}}
+
+# Stop queued or running work.
+cancel *flags:
+    uv run poker-solver-run cancel {{flags}}
 
 # Pool node counts, and the real cause of any allocation failure.
 pool-status:
@@ -162,10 +187,6 @@ legs *flags:
 leg-log *flags:
     uv run poker-solver-run logs {{flags}}
 
-# Bring published runs back. JSON only unless --full is passed.
-fetch *flags:
-    uv run poker-solver-run fetch {{flags}}
-
 # Upload card abstractions to the share (~773 MB, one time).
 push-data *flags:
     uv run poker-solver-run push-data {{flags}}
@@ -178,6 +199,10 @@ push-code:
 [doc("Verify a published ladder. Args: run config")]
 repair-ladder run config:
     uv run poker-solver-run repair-ladder --run "{{run}}" --config "{{config}}"
+
+# The experiment record: every evaluation, derived from the share on each read.
+ledger *flags:
+    uv run poker-solver-run ledger {{flags}}
 
 # --- console ---------------------------------------------------------------- #
 # The web console. Its toolchain is npm and lives entirely under `console/`;

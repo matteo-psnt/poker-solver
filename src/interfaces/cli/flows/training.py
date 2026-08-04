@@ -47,18 +47,23 @@ def submit_training_leg(ctx: CliContext) -> None:
         return
 
     run_id = ""
-    config_name = ""
     if continuing:
         selected = select_run(ctx, "Select run to continue:", allow_unloadable=True)
         if selected is None:
             return
         run_id = selected
-    else:
-        config = select_config(ctx)
-        if config is None:
-            return
-        ctx.set_runs_dir(config.training.runs_dir)
-        config_name = config.system.config_name
+
+    # BOTH branches. The config builds the tree and the solver, and the
+    # checkpoint stores neither, so a continuing leg needs it just as much as a
+    # fresh one. This used to skip the prompt when continuing and send an empty
+    # config to the node, which died on
+    # `Config file not found: config/training/.yaml` after the snapshot upload,
+    # the pool spin-up and every Batch retry.
+    config = select_config(ctx)
+    if config is None:
+        return
+    ctx.set_runs_dir(config.training.runs_dir)
+    config_name = config.system.config_name
 
     target = prompts.prompt_int(
         ctx,

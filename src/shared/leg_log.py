@@ -7,8 +7,8 @@ time than the run lives. This is the join.
 
 Under ``<share>/legs/``, per task and per attempt::
 
-    <task>.<attempt>.start.json   run_leg.sh, at entry
-    <task>.<attempt>.exit.json    run_leg.sh, from its EXIT trap
+    <task>.<attempt>.start.json   run_leg.py, at entry
+    <task>.<attempt>.exit.json    run_leg.py, from its exit accounting
     <task>.observed.json          just legs, from Batch's executionInfo
 
 One writer per file, because the share is SMB: no atomic rename, no atomic
@@ -26,8 +26,9 @@ SNAPSHOTs in :mod:`src.shared.records` terms, share-scoped -- which is why they
 are written directly rather than through a temporary file: SMB has no atomic
 rename, so the per-file layout carries the safety instead.
 
-Stdlib-only AND 3.10-compatible, both enforced by tests: ``run_leg.sh`` imports
-this with the NODE's system ``python3``, which on the pinned Ubuntu 22.04 image
+Stdlib-only AND 3.10-compatible, both enforced by
+``tests/shared/node/test_node_interpreter.py``: the node wrapper imports this
+with the NODE's system ``python3``, which on the pinned Ubuntu 22.04 image
 is 3.10 -- not the 3.12+ this project is developed against. ``datetime.UTC`` is
 3.11+, and importing it here raised inside a call whose errors are swallowed, so
 the whole feature was silently dead on the only machine that runs it.

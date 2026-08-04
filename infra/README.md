@@ -109,7 +109,7 @@ endpoint instead of compounding an increment.
 
 ## How a leg survives being killed
 
-`infra/run_leg.sh` publishes to the share **every time a retained checkpoint rung
+`infra/run_leg.py` publishes to the share **every time a retained checkpoint rung
 appears**, and again on any exit — success, failure, or cancellation.
 
 The node's disk is ephemeral. Publishing only at the end would mean an OOM or a
@@ -129,13 +129,17 @@ Batch sees those deaths — but retains them for far less time than the run live
 
 So the record is written from both sides, into `<share>/legs/`:
 
-- **The node's own account.** `run_leg.sh` writes `<task>.<attempt>.start.json`
-  at entry and `<task>.<attempt>.exit.json` from the EXIT trap. This covers every
-  death the shell survives, and is the only side that can tell a *hang*
-  (`RUN_TIMEOUT`, exit 124) from an *OOM* (exit 137) from a *cancel* (SIGTERM).
-  Batch reports all three as `failure`.
+- **The node's own account.** `run_leg.py` writes `<task>.<attempt>.start.json`
+  at entry and `<task>.<attempt>.exit.json` from its `finally`. This covers every
+  death the wrapper survives, and is the only side that can tell a *hang*
+  (`RUN_TIMEOUT`, exit 124) from an *OOM* (exit 137) from a *cancel* (SIGTERM,
+  143). Batch reports all three as `failure`. The signal handler *raises*, which
+  is what the bash version could not do: its EXIT trap read `$?` as zero when the
+  shell was killed while blocked on a child, so `just cancel` recorded clean
+  completions that were never reconciled.
 - **Batch's account.** `just legs` asks about legs still stuck at `started` —
-  precisely the ones whose trap never ran — and writes `<task>.observed.json`.
+  precisely the ones whose exit record never landed — and writes
+  `<task>.observed.json`.
 
 Numbered by attempt because a Batch retry reuses the task id and Batch describes
 only the latest attempt; without the number the retry would erase the failed
@@ -143,9 +147,14 @@ attempt that caused it. Separate start/exit files because `write_text` truncates
 so a kill mid-write would otherwise make the leg vanish from the listing
 entirely — in exactly the SIGKILL window this exists for.
 
-`src/shared/leg_log.py` imports **only the standard library**, on purpose:
-`run_leg.sh` calls it with the node's system `python3` before `uv sync` has run.
-A test enforces that.
+`src/shared/leg_log.py` and all of `src/shared/node/` import **only the standard
+library** and stay **Python 3.10 compatible**, on purpose: the node runs them
+with its system `python3` — 3.10 on the pinned Ubuntu 22.04 image — before
+`uv sync` has run. `tests/shared/node/test_node_interpreter.py` enforces both by
+importing the whole package on a real 3.10 (`uv run --python 3.10
+--no-project`), because the substring scan that preceded it could not catch
+`datetime.UTC`: it passed every test and silently disabled leg records on the
+only machine that runs them.
 
 `just legs --skip-reconcile` reads the share without querying Batch, and
 `just leg-log <task> errors` filters a published log to WARN/ERROR.

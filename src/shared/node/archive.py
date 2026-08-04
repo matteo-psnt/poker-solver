@@ -1,0 +1,391 @@
+"""Copying a run between the node's data disk and the SMB share.
+
+Every rule below is a production failure, not a preference. They are collected
+here rather than spread through the wrapper so the argument for each one sits
+next to the code that honours it.
+
+Why publish mid-run at all
+    The node's disk is ephemeral. A task killed by OOM or ``maxWallClockTime``
+    loses everything it has not published, so a multi-hour leg would die with
+    nothing to show. Retrying is safe because ``train-static --iterations`` is
+    an ABSOLUTE target that no-ops once reached: publishing the ladder makes a
+    retry cheap, and the absolute target is what makes it correct.
+
+Why the manifest goes last
+    Training continues during the copy, and committing a checkpoint prunes
+    superseded snapshots. Publish the manifest first and an interrupted copy
+    leaves the share naming a snapshot that was only half copied -- which a
+    later fetch reads as complete. Silent corruption of the durable artifact is
+    worse than losing it.
+
+Why every snapshot carries a completion marker
+    Manifest-last protects the manifest, but a kill during one snapshot's copy
+    still leaves that directory partial, and the manifest may already name it.
+    A marker written only after a clean copy moves the same guarantee down to
+    per-directory granularity, and needs no atomic rename -- SMB has none. The
+    30M run's ``static-10000000.zarr`` became a corrupt artifact exactly this
+    way: it was fetched cleanly, then died with "error during blosc
+    decompression: 0".
+
+Why neither timestamps nor modes are preserved
+    The SMB mount refuses ``utime`` with "Operation not permitted", and ``cp``
+    reported that as failure AFTER copying the data -- which then suppressed
+    the manifest and made a successful publish look broken. Modes are no safer:
+    ``infra/main.tf`` mounts the share ``file_mode=0777,dir_mode=0777``, so the
+    server decides them and ``chmod`` is at best a no-op and at worst the same
+    class of spurious failure. Every copy here is :func:`shutil.copyfile`,
+    which touches neither -- and notably NOT :func:`shutil.copytree`, whose
+    default ``copy_function`` is ``copy2``.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import shutil
+from collections.abc import Callable, Iterable, Sequence
+from pathlib import Path
+
+MANIFEST = "STATIC_CHECKPOINT.json"
+
+"""The deleted dynamic backend's manifest. Recognised only so that a run
+predating the static tree is REFUSED with an explanation rather than fetched:
+nothing at HEAD can read a ``checkpoint-*.zarr``, so copying one down would buy
+a confusing failure several minutes deeper."""
+LEGACY_MANIFEST = "CHECKPOINT.json"
+
+MANIFESTS = (MANIFEST, LEGACY_MANIFEST)
+
+"""Directory names that are WRITE-ONCE, and only those.
+
+The completion marker doubles as "already published, skip it", which is sound
+only for a directory the trainer never revisits. ``evals/`` grows over time, so
+marking it would freeze it at its first published state. ``checkpoint-``/
+``keys-`` belong to the dynamic backend and can no longer be produced; they
+stay listed because naming a dead prefix costs nothing and missing a live one
+costs a partial rung indistinguishable from a whole one."""
+SNAPSHOT_PREFIXES = ("static-", "checkpoint-", "keys-")
+
+MARKER_PREFIX = ".complete-"
+
+Log = Callable[[str], None]
+
+
+def _quiet(message: str) -> None:
+    """Default sink, so every function here is callable from a test."""
+
+
+def is_snapshot(name: str) -> bool:
+    return name.startswith(SNAPSHOT_PREFIXES)
+
+
+def marker_for(snapshot: str) -> str:
+    return MARKER_PREFIX + snapshot
+
+
+def needs_copy(source: Path, destination: Path) -> bool:
+    """``cp -u``: copy when the destination is missing or older.
+
+    Correct precisely BECAUSE timestamps are not preserved. The destination
+    takes the copy time, which is newer than the source it came from, so an
+    already-published file compares as up to date while a genuinely newer one
+    does not.
+    """
+    if not destination.exists():
+        return True
+    return source.stat().st_mtime > destination.stat().st_mtime
+
+
+def copy_file(source: Path, destination: Path) -> None:
+    """Content only -- no mode, no timestamps. See the module docstring."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+
+
+def copy_tree(source: Path, destination: Path, *, update: bool = True) -> None:
+    """Merge ``source`` into ``destination``, file by file.
+
+    Merging rather than replacing is what makes an interrupted publish
+    resumable. ``update=False`` copies unconditionally, for the fetch
+    direction -- where a file already on the node is not evidence of a complete
+    copy but of a cancelled task.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    for item in sorted(source.rglob("*")):
+        target = destination / item.relative_to(source)
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        elif not update or needs_copy(item, target):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(item, target)
+
+
+def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
+    """Copy one run directory to the share. Returns False if anything failed.
+
+    Idempotent and safe to call while training continues, which is what lets
+    the mid-run watcher use it. Never raises: a failed publish must not kill a
+    leg that is still making progress on local disk.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    children = sorted(run_dir.iterdir())
+    failed = False
+
+    for child in children:
+        if not child.is_dir():
+            continue
+        if not is_snapshot(child.name):
+            failed |= not _copy_dir(child, destination / child.name, log)
+            continue
+
+        marker = destination / marker_for(child.name)
+        # ALREADY COMPLETE => NOTHING TO DO. Not merely an optimisation: the
+        # republish below removes the marker FIRST, so re-copying a known-good
+        # rung leaves it transiently unmarked, and a leg that dies in that
+        # window makes the manifest name a rung the next fetch then refuses.
+        #
+        # Nor is it a rare cost. A resumed leg copies its starting rung onto
+        # the node fresh, giving it a newer mtime than the share's copy, so the
+        # update rule sees every resumed leg's starting rung as changed:
+        # measured at 6.6 minutes re-uploading 809 MB that was already there.
+        if marker.exists():
+            continue
+        _unlink(marker)
+        # UNCONDITIONAL, not the update rule -- the same argument the fetch
+        # direction makes, in reverse. An unmarked destination is the residue
+        # of an interrupted publish, and the file that was mid-copy when the
+        # kill landed is TRUNCATED yet NEWER than the node's source, so the
+        # update rule skips exactly the one file that is wrong and then the
+        # marker blesses the rung as complete. `cp -ru` had this hole too; it
+        # needed a leg to die mid-publish and a later leg to republish the
+        # same rung, which is precisely what a Batch retry does.
+        if _copy_dir(child, destination / child.name, log, update=False):
+            _touch(marker)
+        else:
+            failed = True
+
+    # Loose files -- .run.json, metrics.jsonl, result json -- manifests excluded.
+    for child in children:
+        if child.is_file() and child.name not in MANIFESTS:
+            failed |= not _copy_one(child, destination / child.name, log)
+
+    if failed:
+        # Reported, never swallowed: a publish that silently fails every time
+        # turns "a killed task loses one rung" into "a killed task loses
+        # everything".
+        log(f"WARN publish incomplete for {run_dir.name} -- manifest NOT updated, so the")
+        log("     share still describes the last fully-copied checkpoint.")
+        return False
+
+    # BOTH manifest names, and only now. The static backend's was once copied
+    # by the unguarded loose-file pass above, so it was published even when a
+    # snapshot copy had failed -- a manifest naming a half-copied rung, exactly
+    # what publishing the manifest last exists to prevent.
+    for name in MANIFESTS:
+        manifest = run_dir / name
+        stale = manifest.is_file() and needs_copy(manifest, destination / name)
+        if stale and not _copy_one(manifest, destination / name, log):
+            return False
+    log(f"published {run_dir.name}")
+    return True
+
+
+def publish_all(runs_root: Path, archive_root: Path, log: Log = _quiet) -> bool:
+    """Publish every run on the node's disk. Returns False if any failed."""
+    if not runs_root.is_dir():
+        return True
+    ok = True
+    for run_dir in sorted(runs_root.iterdir()):
+        if run_dir.is_dir():
+            ok &= publish_run(run_dir, archive_root / run_dir.name, log)
+    return ok
+
+
+def _copy_dir(source: Path, destination: Path, log: Log, *, update: bool = True) -> bool:
+    try:
+        copy_tree(source, destination, update=update)
+    except OSError as error:
+        log(f"WARN copying {source.name} failed: {error}")
+        return False
+    return True
+
+
+def _copy_one(source: Path, destination: Path, log: Log) -> bool:
+    try:
+        copy_file(source, destination)
+    except OSError as error:
+        log(f"WARN copying {source.name} failed: {error}")
+        return False
+    return True
+
+
+def _unlink(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
+def _touch(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        path.write_text("")
+
+
+class FetchRefusedError(Exception):
+    """The share cannot supply what this leg needs, and guessing would be worse.
+
+    Raised rather than logged because every case is one where continuing means
+    training or scoring against data that is absent, truncated, or written by a
+    backend this tree cannot read -- each of which surfaces minutes later as a
+    confusing error in a different subsystem.
+    """
+
+
+def read_manifest(manifest: Path) -> dict:
+    """Parse a checkpoint manifest, or ``{}`` if it is absent or torn."""
+    try:
+        parsed = json.loads(manifest.read_text())
+    except (OSError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def fetch_metadata(source: Path, destination: Path) -> None:
+    """Everything that is not a snapshot: .run.json, metrics, eval records."""
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in sorted(source.iterdir()):
+        if child.name.startswith(MARKER_PREFIX) or is_snapshot(child.name):
+            continue
+        if child.is_dir():
+            copy_tree(child, destination / child.name, update=False)
+        else:
+            copy_file(child, destination / child.name)
+
+
+def fetch_snapshot(source: Path, destination: Path, name: str) -> None:
+    """Copy one snapshot down, replacing whatever is on the node.
+
+    Remove first, and no update check. A cancelled task leaves partial rungs on
+    the node, and treating those as already-present means the next task
+    inherits a TRUNCATED checkpoint and dies inside zarr. That is what happened
+    to rung 10000000: "fetched" in one second, then a read error. Node-local
+    state is never evidence of a complete copy.
+    """
+    target = destination / name
+    shutil.rmtree(target, ignore_errors=True)
+    copy_tree(source / name, target, update=False)
+
+
+def require_complete(source: Path, name: str) -> None:
+    """A rung without its marker is either pre-marker or was interrupted.
+
+    The two are indistinguishable from here, and loading a truncated one yields
+    a corrupt-chunk error deep inside zarr several minutes later.
+    ``repair-ladder`` is how such a rung earns its marker.
+    """
+    if not (source / name).is_dir():
+        raise FetchRefusedError(f"the manifest names {name} but it is not on the share")
+    if not (source / marker_for(name)).exists():
+        raise FetchRefusedError(
+            f"{name} has no completion marker -- refusing a possibly-partial "
+            f"snapshot. Run repair-ladder on this run first."
+        )
+
+
+def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet) -> str:
+    """Fetch the one rung the manifest calls current. Returns its name, or "".
+
+    What both continuing a run and scoring "the latest checkpoint" need, and in
+    both cases ONE rung, not the ladder. Taking the whole retained ladder was 31
+    rungs, ~25 GB over SMB and ~40 minutes, to load the 809 MB actually read.
+
+    Leaving the older rungs on the share loses nothing: ``_extend_ladder``
+    builds the next manifest from the PREVIOUS manifest rather than from what
+    is on disk, ``_prune`` only deletes what the manifest does not name, and
+    publish copies per directory -- so rungs this node never had are neither
+    re-uploaded nor removed.
+    """
+    fetch_metadata(source, destination)
+    if (source / LEGACY_MANIFEST).is_file() and not (source / MANIFEST).is_file():
+        raise FetchRefusedError(
+            f"{source.name} was trained by the dynamic backend, which no longer "
+            f"exists. Its checkpoints are unreadable at HEAD by design, so this "
+            f"run cannot be continued."
+        )
+    manifest = read_manifest(source / MANIFEST)
+    if not manifest:
+        # An absent manifest is not an error: a leg that died before its first
+        # checkpoint publishes .run.json and nothing else, and the right thing
+        # is to start the ladder rather than refuse.
+        log(f"no published checkpoint for {source.name}")
+        return ""
+    current = manifest.get("zarr") or ""
+    if not current:
+        raise FetchRefusedError(f"{MANIFEST} on the share names no current snapshot")
+    require_complete(source, current)
+    fetch_snapshot(source, destination, current)
+    copy_file(source / MANIFEST, destination / MANIFEST)
+    log(f"fetched current rung {current} (ladder left on the share)")
+    return current
+
+
+def fetch_for_evaluation(
+    source: Path, destination: Path, rungs: Sequence[str], log: Log = _quiet
+) -> list[str]:
+    """Fetch only the rungs being scored. Returns the ones that arrived.
+
+    Selective because the whole ladder is thirty ~540 MB rungs, ~16 GB, to
+    score three of them. A rung that cannot be fetched is skipped and named
+    rather than fatal: a partial curve beats none.
+    """
+    fetch_metadata(source, destination)
+    fetched = []
+    for rung in rungs:
+        name = f"static-{rung}.zarr"
+        try:
+            require_complete(source, name)
+        except FetchRefusedError as refusal:
+            log(f"  WARN rung {rung}: {refusal}")
+            continue
+        try:
+            fetch_snapshot(source, destination, name)
+        except OSError as error:
+            # Reported, not swallowed: a silent copy failure becomes a
+            # confusing load error minutes later, in a different subsystem.
+            log(f"  WARN rung {rung} copy FAILED: {error}")
+            continue
+        fetched.append(rung)
+        log(f"  fetched rung {rung}")
+    return fetched
+
+
+def ladder_state(runs_root: Path) -> str:
+    """A fingerprint of every run's publishable progress, for the watcher.
+
+    Watches the whole runs directory, so it covers a FRESH train too: that
+    run's id does not exist until the trainer creates it, and waiting for the
+    id would leave exactly the long unprotected window mid-run publishing
+    exists to close.
+
+    ``iteration`` as well as the retained ladder: with ``checkpoint_every``
+    below the retain interval the current snapshot advances while the ladder
+    does not, and watching only the ladder would sit idle through exactly those
+    chunks.
+    """
+    if not runs_root.is_dir():
+        return ""
+    parts = []
+    for run_dir in sorted(runs_root.iterdir()):
+        for name in MANIFESTS:
+            manifest = read_manifest(run_dir / name)
+            if not manifest:
+                continue
+            retained = ",".join(
+                str(entry.get("iteration", "")) for entry in _entries(manifest.get("retained"))
+            )
+            parts.append(f"{run_dir.name}:{manifest.get('iteration', '')}:{retained}")
+    return "|".join(parts)
+
+
+def _entries(retained: object) -> Iterable[dict]:
+    if not isinstance(retained, list):
+        return []
+    return [entry for entry in retained if isinstance(entry, dict)]

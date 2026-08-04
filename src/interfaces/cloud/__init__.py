@@ -11,7 +11,11 @@ The division of labour this package sits inside:
   the policy denials. Not this package's business.
 * **This package owns what HAPPENS** -- snapshotting the tree, building a leg
   spec, creating jobs and tasks, reading their state back.
-* **``infra/run_leg.sh`` owns what happens ON the node** -- disk discovery,
-  mount handling, publish-on-exit traps. It stays shell because it wraps the
-  Python process rather than living inside it.
+* **``src/shared/node/`` owns what happens ON the node** -- fetching the
+  published checkpoint, guarding and teeing the training process, publishing
+  each rung as it appears, and accounting for however the leg ended. It sits in
+  ``shared`` rather than here because the node runs it BEFORE ``uv sync``, on
+  the system ``python3``, so it can import neither this package nor anything
+  third-party. ``infra/main.tf``'s start task is the one node-side thing still
+  shell: it formats and mounts the data disk before any code exists to run.
 """

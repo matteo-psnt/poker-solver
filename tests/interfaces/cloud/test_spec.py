@@ -52,7 +52,7 @@ class TestLegCommand:
 
     def test_it_bootstraps_the_wrapper_from_inside_the_tarball(self):
         command = spec.leg_command("snap")
-        assert command.index("tar xzf") < command.index("run_leg.sh")
+        assert command.index("tar xzf") < command.index("run_leg.py")
 
 
 class TestEnvironment:
@@ -82,7 +82,7 @@ class TestEnvironment:
         assert json.loads(env["RUN_EVAL_FLAGS_JSON"]) == ["--br-flops", "8"]
 
     def test_every_key_the_wrapper_reads_is_present(self):
-        """run_leg.sh reads these by name; a missing one is a silent default."""
+        """The node reads these by name; a missing one is a silent default."""
         env = spec.LegSpec(code_snapshot="s", config="p", to=1).environment()
         assert set(env) == {
             "CODE_SNAPSHOT",
@@ -126,12 +126,17 @@ class TestValidate:
         with pytest.raises(ValueError, match="ABSOLUTE"):
             spec.LegSpec(code_snapshot="s", config="production", to=0).validate()
 
-    def test_a_training_leg_needs_a_config_or_a_run(self):
+    def test_a_training_leg_needs_a_config(self):
         with pytest.raises(ValueError, match="--config"):
             spec.LegSpec(code_snapshot="s", to=1000).validate()
 
-    def test_continuing_a_run_needs_no_config(self):
-        spec.LegSpec(code_snapshot="s", run_id="run-a", to=1000).validate()
+    def test_continuing_a_run_needs_a_config_too(self):
+        """The config builds the tree and the solver; the checkpoint stores
+        neither. This was permitted, and died on the node with
+        `Config file not found: config/training/.yaml` -- after the upload, the
+        spin-up and three retries."""
+        with pytest.raises(ValueError, match="CONTINUING"):
+            spec.LegSpec(code_snapshot="s", run_id="run-a", to=1000).validate()
 
     def test_scoring_needs_a_run(self):
         with pytest.raises(ValueError, match="--run"):

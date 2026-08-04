@@ -104,16 +104,22 @@ class TestTheMenuSpeaksTheSameContractAsSubmit:
         assert leg.run_id == ""
         leg.validate()
 
-    def test_continuing_a_run_carries_a_run_id_and_no_config(self, tmp_path, monkeypatch):
+    def test_continuing_a_run_carries_a_config_too(self, tmp_path, monkeypatch):
+        """The menu used to skip the config prompt when continuing and send an
+        empty one to the node, where the leg died on
+        `Config file not found: config/training/.yaml` -- after the snapshot
+        upload, the pool spin-up and every Batch retry. The config builds the
+        tree and the solver, and the checkpoint stores neither."""
         ctx = _make_ctx(tmp_path)
-        captured = _stub_flow(monkeypatch, Config.default(), continuing=True)
+        config = Config.default().merge({"system": {"config_name": "production"}})
+        captured = _stub_flow(monkeypatch, config, continuing=True)
         monkeypatch.setattr(training, "select_run", lambda *a, **k: "run-a")
 
         training.submit_training_leg(ctx)
 
         (leg,) = captured[0]
         assert leg.run_id == "run-a"
-        assert leg.config == ""
+        assert leg.config == "production"
         leg.validate()
 
 
