@@ -3,8 +3,9 @@
 The eval ledger is the one piece of shared mutable state in the system, and the
 one piece that has actually lost data: 12 of 14 rows vanished in a parallel sweep
 because every writer did read-append-publish on one shared file. The fix is that
-the durable copy is a uniquely-named file under the run directory, and the shared
-JSONL is a rebuildable cache. These tests pin that property.
+an evaluation IS a uniquely-named document under the run directory, and the index
+is derived from those documents on every read -- recording writes no index at
+all. These tests pin that property.
 """
 
 import json
@@ -26,7 +27,7 @@ def _provenance(run_id="run-a"):
     )
 
 
-def _record_one(run_dir: Path, ledger_path: Path, index: int):
+def _record_one(run_dir: Path, index: int):
     knobs = {
         "scorer": "myopic",
         "opponent": "blueprint",
@@ -52,7 +53,6 @@ def _record_one(run_dir: Path, ledger_path: Path, index: int):
         method="lbr",
         estimator="lbr",
         knobs=knobs,
-        ledger_path=ledger_path,
     )
 
 
@@ -67,7 +67,7 @@ class TestUniqueNaming:
         """Was two -- a payload and a record summarising it -- plus a ledger row."""
         run_dir = tmp_path / "run-a"
         run_dir.mkdir()
-        result_path, document = _record_one(run_dir, tmp_path / "led.jsonl", 0)
+        result_path, document = _record_one(run_dir, 0)
         assert result_path.exists()
         written = list((run_dir / "evals").glob("*.json"))
         assert len(written) == 1
@@ -78,10 +78,9 @@ class TestConcurrentWriters:
     def test_no_record_is_lost_under_concurrent_evaluation(self, tmp_path):
         run_dir = tmp_path / "run-a"
         run_dir.mkdir()
-        ledger_path = tmp_path / "led.jsonl"
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            list(pool.map(lambda i: _record_one(run_dir, ledger_path, i), range(24)))
+            list(pool.map(lambda i: _record_one(run_dir, i), range(24)))
 
         durable = list((run_dir / "evals").glob("*.json"))
         assert len(durable) == 24, "every writer's durable record must survive"
@@ -91,7 +90,8 @@ class TestConcurrentWriters:
         run_dir.mkdir()
         ledger_path = tmp_path / "led.jsonl"
         for i in range(5):
-            _record_one(run_dir, ledger_path, i)
+            _record_one(run_dir, i)
+        ledger.rebuild_ledger(tmp_path, ledger_path)
 
         # Simulate the clobber: a last-writer-wins publish leaves only one row.
         surviving = ledger.read_records(ledger_path)[-1]
@@ -142,7 +142,7 @@ class TestRebuildIsNonDestructive:
         run_dir.mkdir()
         ledger_path = tmp_path / "led.jsonl"
         for i in range(3):
-            _record_one(run_dir, ledger_path, i)
+            _record_one(run_dir, i)
 
         ledger.rebuild_ledger(tmp_path, ledger_path)
         first = ledger_path.read_text()
@@ -176,7 +176,7 @@ class TestOrdering:
     def test_recorded_timestamps_are_utc_aware(self, tmp_path):
         run_dir = tmp_path / "run-a"
         run_dir.mkdir()
-        _, record = _record_one(run_dir, tmp_path / "led.jsonl", 0)
+        _, record = _record_one(run_dir, 0)
         # Boxes in different timezones must produce comparable timestamps.
         assert record["timestamp"].endswith("+00:00")
 
@@ -185,7 +185,7 @@ class TestPayloadResolution:
     def test_falls_back_to_run_dir_when_the_recorded_path_moved(self, tmp_path):
         run_dir = tmp_path / "run-a"
         run_dir.mkdir()
-        _, record = _record_one(run_dir, tmp_path / "led.jsonl", 0)
+        _, record = _record_one(run_dir, 0)
 
         # A ledger pulled from a box that mounted its data elsewhere.
         record["result_path"] = "/nonexistent/elsewhere/" + Path(record["result_path"]).name
@@ -208,7 +208,7 @@ class TestReviewFixes:
         run_dir = tmp_path / "run-a"
         run_dir.mkdir()
         path = tmp_path / "led.jsonl"
-        _record_one(run_dir, path, 0)
+        _record_one(run_dir, 0)
         with path.open("a") as fh:
             fh.write('{"half')
         recovered, _ = ledger.rebuild_ledger(tmp_path, path)
@@ -218,7 +218,7 @@ class TestReviewFixes:
         run_dir = tmp_path / "run-a"
         run_dir.mkdir()
         path = tmp_path / "led.jsonl"
-        _record_one(run_dir, path, 0)
+        _record_one(run_dir, 0)
         ledger.rebuild_ledger(tmp_path, path)
         assert list(tmp_path.glob("*.tmp")) == []
 

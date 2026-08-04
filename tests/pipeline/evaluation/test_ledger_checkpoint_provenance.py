@@ -14,6 +14,7 @@ from pathlib import Path
 from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import checkpoint_iteration_of
+from tests.test_helpers import seed_ledger
 
 PROVENANCE = eval_ledger.RunProvenance(
     run_id="run-abc",
@@ -47,7 +48,6 @@ def test_record_carries_checkpoint_iteration_and_infosets():
 
 
 def test_record_evaluation_threads_the_iteration_from_the_payload(tmp_path):
-    ledger_path = tmp_path / "ledger.jsonl"
     _, record = eval_ledger.record_evaluation(
         run_dir=tmp_path / "run",
         payload={
@@ -59,7 +59,6 @@ def test_record_evaluation_threads_the_iteration_from_the_payload(tmp_path):
         method="lbr",
         estimator="local_best_response",
         knobs={"base_seed": 1},
-        ledger_path=ledger_path,
     )
     assert record["checkpoint_iteration"] == 16_160_000
 
@@ -67,8 +66,8 @@ def test_record_evaluation_threads_the_iteration_from_the_payload(tmp_path):
 def test_two_checkpoints_of_one_run_are_selectable(tmp_path):
     """The comparison that was previously impossible to express."""
     ledger_path = tmp_path / "ledger.jsonl"
-    eval_ledger.append_record(_record(10_000_000, 10_611_180, "2026-07-18T08:00:00"), ledger_path)
-    eval_ledger.append_record(_record(16_160_000, 18_090_076, "2026-07-18T21:00:00"), ledger_path)
+    seed_ledger(ledger_path, _record(10_000_000, 10_611_180, "2026-07-18T08:00:00"))
+    seed_ledger(ledger_path, _record(16_160_000, 18_090_076, "2026-07-18T21:00:00"))
 
     older = eval_ledger.latest_record_for_run("run-abc", ledger_path, 10_000_000)
     newer = eval_ledger.latest_record_for_run("run-abc", ledger_path, 16_160_000)
@@ -81,8 +80,8 @@ def test_two_checkpoints_of_one_run_are_selectable(tmp_path):
 def test_unselected_lookup_still_returns_the_newest_row(tmp_path):
     """Existing callers that pass no iteration keep their behavior."""
     ledger_path = tmp_path / "ledger.jsonl"
-    eval_ledger.append_record(_record(10_000_000, 10_611_180, "2026-07-18T08:00:00"), ledger_path)
-    eval_ledger.append_record(_record(16_160_000, 18_090_076, "2026-07-18T21:00:00"), ledger_path)
+    seed_ledger(ledger_path, _record(10_000_000, 10_611_180, "2026-07-18T08:00:00"))
+    seed_ledger(ledger_path, _record(16_160_000, 18_090_076, "2026-07-18T21:00:00"))
 
     latest = eval_ledger.latest_record_for_run("run-abc", ledger_path)
     assert latest is not None
@@ -131,5 +130,5 @@ def test_pre_manifest_runs_report_no_iteration(tmp_path):
 def test_missing_checkpoint_iteration_never_matches_a_selector(tmp_path):
     """Pre-manifest rows carry None; they must not satisfy a specific request."""
     ledger_path = tmp_path / "ledger.jsonl"
-    eval_ledger.append_record(_record(None, 10_611_180, "2026-07-18T08:00:00"), ledger_path)
+    seed_ledger(ledger_path, _record(None, 10_611_180, "2026-07-18T08:00:00"))
     assert eval_ledger.latest_record_for_run("run-abc", ledger_path, 10_000_000) is None

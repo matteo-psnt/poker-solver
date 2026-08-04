@@ -12,10 +12,8 @@ from src.pipeline.evaluation.ledger.queries import (
     rebuild_ledger,
 )
 from src.pipeline.evaluation.ledger.records import (
-    DEFAULT_LEDGER_PATH,
     LEDGER_SCHEMA_VERSION,
     RunProvenance,
-    append_record,
     build_record,
     eval_slug,
     ledger_row,
@@ -38,11 +36,9 @@ from src.pipeline.evaluation.ledger.tiers import (
 
 __all__ = (
     "CONDITIONAL_TIER_KNOBS",
-    "DEFAULT_LEDGER_PATH",
     "LEDGER_SCHEMA_VERSION",
     "TIER_KNOBS",
     "RunProvenance",
-    "append_record",
     "build_exact_br_knobs_from_params",
     "build_lbr_knobs",
     "build_lbr_knobs_from_params",

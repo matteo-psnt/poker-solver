@@ -1,8 +1,13 @@
 """Building and persisting one evaluation record.
 
-The per-run `evals/record-*.json` file is the source of truth; the ledger is a
-rebuildable cache, which is what makes concurrent evaluation from several
-machines safe."""
+The per-run `evals/<slug>.json` document is the ONLY thing written. There is no
+stored ledger: the index is derived from these documents on every read, which is
+what makes concurrent evaluation from several machines safe.
+
+Recording used to also append a row to `data/eval_ledger.jsonl`, defaulted at
+module scope and never overridden by the node wrapper, so every cloud eval wrote
+a stored index the architecture said did not exist. A stored index beside a
+derived one is a second answer waiting to disagree."""
 
 from __future__ import annotations
 
@@ -15,11 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.ledger.tiers import _knob_hash
+from src.shared import leg_log
 from src.shared import records as record_store
 from src.shared.gitinfo import get_git_commit, is_git_dirty
 
 LEDGER_SCHEMA_VERSION = record_store.REGISTRY["eval_ledger.jsonl"].version
-DEFAULT_LEDGER_PATH = Path("data/eval_ledger.jsonl")
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +103,14 @@ def build_record(
         # real result. ``infosets`` was already being passed in and silently dropped.
         "checkpoint_iteration": checkpoint_iteration,
         "infosets": infosets,
+        # WHICH leg produced this number. Ambient, like the git commits above.
+        # Without it there is no key joining an eval document to the leg that
+        # wrote it: three evaluations of one checkpoint at three board seeds
+        # produced three documents and three legs with nothing connecting the
+        # pairs, and correlating them by timestamp is exactly what fails here --
+        # concurrent evals of one run have completely overlapping intervals.
+        # Empty off a node, where there is no leg to point at.
+        "task_id": leg_log.current_task_id(),
         "knobs": knobs,
         "results": results,
         "result_path": payload_pointer(result_path, provenance.run_id),
@@ -112,17 +125,16 @@ def record_evaluation(
     method: str,
     estimator: str,
     knobs: dict[str, Any],
-    ledger_path: Path = DEFAULT_LEDGER_PATH,
     timestamp: str | None = None,
 ) -> tuple[Path, dict[str, Any]]:
-    """Persist one evaluation: non-clobbering payload under the run dir + a ledger row.
+    """Persist one evaluation as a single non-clobbering document under the run dir.
 
-    The single recording path shared by every caller (local CLI and Modal), so a
+    The single recording path shared by every caller (local CLI and node), so a
     cloud eval and a local eval produce the same on-disk provenance and can be paired
     by :func:`tier_mismatches` without either surface reimplementing the schema.
 
     ``payload`` must carry ``results`` (with the per-hand ``pair_samples_mbb``) and
-    ``infosets``. Returns the payload path and the appended record.
+    ``infosets``. Returns the document path and the document.
     """
     slug = eval_slug(knobs)
     document = build_record(
@@ -137,7 +149,6 @@ def record_evaluation(
         checkpoint_iteration=payload.get("checkpoint_iteration"),
     )
     path = write_eval(run_dir, document, slug)
-    append_record(ledger_row(document), ledger_path)
     return path, document
 
 
@@ -186,16 +197,6 @@ def write_eval(run_dir: Path, document: dict[str, Any], slug: str) -> Path:
     path = evals_dir / f"{slug}.json"
     record_store.write_snapshot(path, document, record_store.REGISTRY["evals/*.json"])
     return path
-
-
-def append_record(record: dict[str, Any], ledger_path: Path = DEFAULT_LEDGER_PATH) -> None:
-    """Append one row to the ledger JSONL cache, creating it if needed.
-
-    Best-effort convenience so the common single-machine case needs no rebuild.
-    The durable copy is :func:`write_record`; anything lost here is recoverable
-    with ``ledger --rebuild``.
-    """
-    record_store.append_log(ledger_path, record, record_store.REGISTRY["eval_ledger.jsonl"])
 
 
 def record_instant(record: dict[str, Any]) -> datetime:

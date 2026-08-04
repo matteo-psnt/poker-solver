@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.ledger.records import (
-    DEFAULT_LEDGER_PATH,
     ledger_row,
     payload_pointer,
     record_instant,
@@ -20,7 +19,7 @@ from src.shared.jsonio import json_default
 logger = logging.getLogger(__name__)
 
 
-def read_records(ledger_path: Path = DEFAULT_LEDGER_PATH) -> list[dict[str, Any]]:
+def read_records(ledger_path: Path) -> list[dict[str, Any]]:
     """Read all ledger rows, oldest first. Missing ledger → empty list.
 
     Sorted by recorded instant rather than file order: rows written by different
@@ -45,7 +44,7 @@ def read_records(ledger_path: Path = DEFAULT_LEDGER_PATH) -> list[dict[str, Any]
     return sorted(rows, key=record_instant)
 
 
-def rebuild_ledger(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) -> tuple[int, int]:
+def rebuild_ledger(runs_dir: Path, ledger_path: Path) -> tuple[int, int]:
     """Regenerate the ledger cache from the per-run records on disk.
 
     Forward-only by necessity: rows written before :func:`write_record` existed have
@@ -104,7 +103,7 @@ def rebuild_ledger(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) -> t
 
 def latest_record_for_run(
     run_id: str,
-    ledger_path: Path = DEFAULT_LEDGER_PATH,
+    ledger_path: Path,
     checkpoint_iteration: int | None = None,
 ) -> dict[str, Any] | None:
     """Most recent ledger row for a run id (by append order), or None.
@@ -162,7 +161,7 @@ def _series_rank(item: tuple[tuple[Any, ...], dict[int, dict[str, Any]]]) -> tup
     return (-len(points), -max(points, default=0))
 
 
-def migrate_eval_files(runs_dir: Path, ledger_path: Path = DEFAULT_LEDGER_PATH) -> dict[str, int]:
+def migrate_eval_files(runs_dir: Path, ledger_path: Path) -> dict[str, int]:
     """Convert the old three-shape eval layout into one document per evaluation.
 
     An evaluation used to be a payload (samples, almost no provenance), a record

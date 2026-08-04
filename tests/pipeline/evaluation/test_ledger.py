@@ -1,4 +1,4 @@
-"""Tests for the append-only evaluation ledger and its comparison guard."""
+"""Tests for the derived evaluation index and its comparison guard."""
 
 import json
 from dataclasses import replace
@@ -7,6 +7,8 @@ import pytest
 
 from src.pipeline.evaluation import ledger
 from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
+from src.shared import leg_log
+from tests.test_helpers import seed_ledger
 
 
 def _fake_provenance(run_id="run-x"):
@@ -109,10 +111,9 @@ class TestWriteAndAppend:
         assert "pair_samples_mbb" not in row["results"], "bulk stays in the document"
         assert "hand_records" not in row["results"]
 
-    def test_append_and_read_roundtrip(self, tmp_path):
+    def test_read_roundtrip(self, tmp_path):
         led = tmp_path / "eval_ledger.jsonl"
-        ledger.append_record({"run_id": "r1", "x": 1}, led)
-        ledger.append_record({"run_id": "r2", "x": 2}, led)
+        seed_ledger(led, {"run_id": "r1", "x": 1}, {"run_id": "r2", "x": 2})
         rows = ledger.read_records(led)
         assert [r["run_id"] for r in rows] == ["r1", "r2"]
 
@@ -121,9 +122,9 @@ class TestWriteAndAppend:
 
     def test_latest_record_for_run_returns_last(self, tmp_path):
         led = tmp_path / "l.jsonl"
-        ledger.append_record({"run_id": "r1", "v": 1}, led)
-        ledger.append_record({"run_id": "r1", "v": 2}, led)
-        ledger.append_record({"run_id": "r2", "v": 9}, led)
+        seed_ledger(
+            led, {"run_id": "r1", "v": 1}, {"run_id": "r1", "v": 2}, {"run_id": "r2", "v": 9}
+        )
         latest = ledger.latest_record_for_run("r1", led)
         assert latest is not None
         assert latest["v"] == 2
@@ -155,13 +156,12 @@ class TestWriteAndAppend:
 
 
 class TestRecordEvaluation:
-    def test_writes_payload_and_appends_row(self, tmp_path):
+    def test_writes_one_document_and_no_index(self, tmp_path):
         run_dir = tmp_path / "run-x"
         run_dir.mkdir()
         results = _results(base_seed=7)
         knobs = ledger.build_lbr_knobs(_lbr_config(), results)
         payload = {"op": "evaluate", "infosets": 10, "results": results}
-        led = tmp_path / "eval_ledger.jsonl"
 
         result_path, record = ledger.record_evaluation(
             run_dir=run_dir,
@@ -170,18 +170,19 @@ class TestRecordEvaluation:
             method="lbr",
             estimator="lbr",
             knobs=knobs,
-            ledger_path=led,
         )
 
         assert result_path.exists()
         assert result_path.parent == run_dir / "evals"
-        rows = ledger.read_records(led)
-        assert len(rows) == 1
-        assert rows[0]["run_id"] == "run-x"
+        # The document is the ONLY thing written. Recording used to also append
+        # to a module-default `data/eval_ledger.jsonl`, so every cloud eval wrote
+        # a stored index the architecture says is derived on read.
+        assert list(tmp_path.rglob("*.jsonl")) == []
+        assert record["run_id"] == "run-x"
         # Stored run-relative, not CWD-relative: the pointer must mean the same
         # thing on a machine that mounts its runs directory somewhere else.
-        assert rows[0]["result_path"] == f"run-x/evals/{result_path.name}"
-        # The appended row round-trips to its full payload, including per-hand samples.
+        assert record["result_path"] == f"run-x/evals/{result_path.name}"
+        # The document round-trips to its full payload, including per-hand samples.
         assert ledger.load_payload(record, tmp_path)["results"]["base_seed"] == 7
 
 
@@ -389,3 +390,39 @@ class TestRepointDoesNotLoseRows:
 
         pointer = json.loads(led.read_text().strip())["result_path"]
         assert (tmp_path / pointer).exists(), f"row points at a missing file: {pointer}"
+
+
+class TestEvalDocumentNamesItsLeg:
+    """Without a task id there is no key joining a number to the leg that made it.
+
+    Correlating by timestamp is what fails here specifically: concurrent
+    evaluations of ONE run have completely overlapping intervals, so every
+    document falls inside every leg's window.
+    """
+
+    def _build(self, tmp_path):
+        return ledger.build_record(
+            provenance=_fake_provenance(),
+            method="exact_br",
+            estimator="public_tree_exact_br",
+            checkpoint_iteration=150_000_000,
+            infosets=1,
+            knobs={"base_seed": 7},
+            results={},
+            result_path=tmp_path / "evals" / "x.json",
+            timestamp="2026-08-04T09:04:56+00:00",
+        )
+
+    def test_it_records_the_batch_task_that_produced_it(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(leg_log.TASK_ID_ENV, "score-production-1095-150M-seed7-090456-18475")
+        assert self._build(tmp_path)["task_id"].endswith("seed7-090456-18475")
+
+    def test_off_a_node_it_is_empty_rather_than_a_placeholder(self, tmp_path, monkeypatch):
+        """An evaluation run anywhere else genuinely has no leg to point at."""
+        monkeypatch.delenv(leg_log.TASK_ID_ENV, raising=False)
+        assert self._build(tmp_path)["task_id"] == ""
+
+    def test_the_ledger_row_carries_it_through(self, tmp_path, monkeypatch):
+        """The index is derived from the document; a field it drops is unqueryable."""
+        monkeypatch.setenv(leg_log.TASK_ID_ENV, "t-1")
+        assert ledger.ledger_row(self._build(tmp_path))["task_id"] == "t-1"

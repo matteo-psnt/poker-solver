@@ -12,6 +12,7 @@ from src.engine.solver.mccfr import MCCFRSolver
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.pipeline.abstraction.base import BucketingStrategy
+from src.shared import records as record_store
 from src.shared.config import Config
 
 
@@ -156,3 +157,16 @@ class DummyCardAbstraction(BucketingStrategy):
     def num_buckets(self, street):
         """Single bucket per street."""
         return 1
+
+
+def seed_ledger(path: Any, *rows: dict[str, Any]) -> None:
+    """Write a derived eval index containing exactly ``rows``.
+
+    Production never appends to an index -- `record_evaluation` writes one
+    document per eval and `rebuild_ledger` derives the index from those on every
+    read. Reader tests still need an index to read, and building one through a
+    full rebuild would test the rebuild rather than the reader, so this writes
+    the rows directly through the same record substrate.
+    """
+    for row in rows:
+        record_store.append_log(path, row, record_store.REGISTRY["eval_ledger.jsonl"])

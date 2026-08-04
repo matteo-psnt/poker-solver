@@ -21,6 +21,7 @@ from src.pipeline.services import (
 )
 from src.pipeline.services import evaluation as services_evaluation
 from src.shared.jsonio import json_default
+from tests.test_helpers import seed_ledger
 
 
 def test_json_default_coerces_numpy_scalar():
@@ -168,7 +169,7 @@ def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples, method="lb
         timestamp=timestamp or "2026-07-17T00:00:00",
     )
     eval_ledger.write_eval(run_dir, record, slug)
-    eval_ledger.append_record(eval_ledger.ledger_row(record), led_path)
+    seed_ledger(led_path, eval_ledger.ledger_row(record))
 
 
 def test_cmd_ledger_lists_rows(tmp_path, published):

@@ -68,7 +68,7 @@ class CurveOutput:
 def exploitability_curve(
     run_dir: Path,
     *,
-    ledger_path: Path = eval_ledger.DEFAULT_LEDGER_PATH,
+    ledger_path: Path,
     tier_index: int = 0,
 ) -> CurveOutput:
     """Join the retained checkpoint ladder to recorded evaluations, as a curve.
@@ -246,7 +246,7 @@ def _latest_by_arm(
 def experiment_report(
     experiment_id: str,
     *,
-    ledger_path: Path = eval_ledger.DEFAULT_LEDGER_PATH,
+    ledger_path: Path,
     runs_dir: Path = Path(DEFAULT_RUNS_DIR),
     baseline_path: Path = DEFAULT_BASELINE_PATH,
 ) -> ExperimentReport:
@@ -388,7 +388,7 @@ class RunDigest:
 def run_digest(
     run_dir: Path,
     *,
-    ledger_path: Path = eval_ledger.DEFAULT_LEDGER_PATH,
+    ledger_path: Path,
     tier_index: int = 0,
     legs_dir: Path | None = None,
 ) -> RunDigest:
