@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.pipeline import services
 from src.pipeline.evaluation.hunl_local_best_response import HandOutcome, LBRConfig
 from src.pipeline.services import abstraction as services_abstraction
@@ -190,7 +191,7 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
     """The run's own recorded hash pins the abstraction without the caller passing it."""
     metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash="recorded99")
     metadata.config.game.big_blind = 100
-    storage = MagicMock(name="storage")
+    storage = MagicMock(name="storage", spec=StaticArrayStorage)
     storage.num_infosets.return_value = 1
     seen = {}
 
@@ -232,7 +233,7 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
     """
     metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash="rec1")
     metadata.config.game.big_blind = 100
-    storage = MagicMock(name="storage")
+    storage = MagicMock(name="storage", spec=StaticArrayStorage)
     storage.num_infosets.return_value = 1
     seen = {}
 
@@ -270,7 +271,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     """evaluate_run_lbr should run LBR and map LBRResult into the results dict."""
     metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash="rec1")
     metadata.config.game.big_blind = 100
-    storage = MagicMock(name="storage")
+    storage = MagicMock(name="storage", spec=StaticArrayStorage)
     storage.num_infosets.return_value = 4321
     hand_outcomes = [
         (
@@ -365,7 +366,7 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
     """scorer/lookahead knobs must reach LBRConfig and the results dict."""
     metadata = SimpleNamespace(config=MagicMock(name="config"), card_abstraction_hash="rec1")
     metadata.config.game.big_blind = 100
-    storage = MagicMock(name="storage")
+    storage = MagicMock(name="storage", spec=StaticArrayStorage)
     storage.num_infosets.return_value = 1
     lbr_result = SimpleNamespace(
         exploitability_mbb=1.0,

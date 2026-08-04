@@ -69,7 +69,7 @@ class TestCountingIsExact:
             compared += 1
         assert compared > 1000, "expected ~1081 comparable combos"
 
-    @pytest.mark.parametrize("board", [BOARD, WET_BOARD])
+    @pytest.mark.parametrize("board", [BOARD, WET_BOARD], ids=["dry-board", "wet-board"])
     def test_matches_brute_force_pairwise(self, engine, clusters, board):
         """Direct enumeration over every disjoint opponent combo, per cluster."""
         combos, ochs = engine.board_ochs(board, clusters, 8)

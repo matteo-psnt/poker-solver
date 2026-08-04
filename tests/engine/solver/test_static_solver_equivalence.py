@@ -154,6 +154,7 @@ class TestLayoutEquivalence:
         """No stray writes outside the infosets the traversal actually visited."""
         tree, flat, oracle, _, _ = trained_pair
         touched = set(oracle._infosets)
+        checked = 0
         for node in tree.nodes:
             for bucket in range(tree.num_buckets(node.street)):
                 if (node.node_id, bucket) in touched:
@@ -163,6 +164,8 @@ class TestLayoutEquivalence:
                     f"untouched infoset node={node.node_id} bucket={bucket} was written"
                 )
                 assert not flat.strategy_sum[start:end].any()
+                checked += 1
+        assert checked, "every row was touched — this test would prove nothing"
 
 
 class TestDeterminism:

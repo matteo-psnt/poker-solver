@@ -90,6 +90,7 @@ class TestFoldPayoffIsBoardIndependent:
         """The load-bearing claim: no completion of the board moves the payoff."""
         config, action_model, rules, _, _ = setup
         folds = _collect_fold_terminals(config, action_model, rules)
+        assert folds, "no fold terminals collected — this test would prove nothing"
         rng = random.Random(11)
 
         for state in folds:
