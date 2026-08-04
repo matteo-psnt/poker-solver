@@ -7,7 +7,6 @@ written down (`records`), and how they are read back (`queries`).
 from src.pipeline.evaluation.ledger.queries import (
     curve_series,
     latest_record_for_run,
-    migrate_eval_files,
     read_records,
     rebuild_ledger,
 )
@@ -48,7 +47,6 @@ __all__ = (
     "latest_record_for_run",
     "ledger_row",
     "load_payload",
-    "migrate_eval_files",
     "payload_pointer",
     "read_records",
     "rebuild_ledger",
