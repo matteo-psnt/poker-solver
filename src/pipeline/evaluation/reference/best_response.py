@@ -1,10 +1,16 @@
 """Exact best response and exploitability for extensive-form games.
 
-Unlike the rollout-based estimator in :mod:`exploitability`, this computes an
-*exact*, information-set-consistent best response by full tree traversal. It is
-only tractable for small games, so its role is to validate the evaluation
-methodology against known equilibria (see the Kuhn poker tests) and to serve as
-ground truth for abstracted subgames.
+This computes an *exact*, information-set-consistent best response by full tree
+traversal. It is only tractable for small games, so its role is to validate the
+evaluation methodology against known equilibria (see the Kuhn poker tests) and
+to serve as ground truth for abstracted subgames.
+
+It is NOT a blueprint scorer, despite the name: full-HUNL exact BR is
+intractable, and the evaluators that do score a blueprint live one level up
+(:mod:`~src.pipeline.evaluation.public_tree_br` exactly on a board-restricted
+game, :mod:`~src.pipeline.evaluation.lbr` from below). What this proves is that
+those are right -- ``tests/pipeline/evaluation/restricted_hunl.py`` checks the
+vectorised public-tree engine against this traversal to 1e-9.
 
 Correctness hinges on information-set consistency: a best responder must commit
 to a single action per information set, aggregating counterfactual value across

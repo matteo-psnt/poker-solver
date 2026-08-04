@@ -7,12 +7,11 @@ its decisions it picks, over a menu of actions, the one maximizing a cheap
 *myopic* value that assumes it then checks/calls to showdown. Because that is a
 realizable strategy, its **realized** value against the blueprint is a lower
 bound on the blueprint's true exploitability — the same property validated
-exactly on Kuhn/Leduc in :mod:`local_best_response`.
+exactly on Kuhn/Leduc in :mod:`~src.pipeline.evaluation.reference.local_best_response`.
 
 The LBR player re-decides at *every* node against the full, Bayes-updated
-opponent range (not just its first action, as the one-ply rollout in
-:mod:`exploitability` does), which already makes it a far more informative
-lower bound.
+opponent range, rather than deviating once and rolling out -- which is what
+makes it a far more informative lower bound than a one-ply estimate.
 
 Off-tree bets (opt-in, ``include_off_tree``)
 --------------------------------------------
