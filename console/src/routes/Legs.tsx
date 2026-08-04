@@ -3,7 +3,7 @@ import { Panel } from "@/components/Panel";
 import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { legLabel, runLabel, since } from "@/lib/format";
+import { clock, legLabel, runLabel, since, span } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Link, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
@@ -21,6 +21,9 @@ export function Legs() {
   const { cause } = route.useSearch();
   const navigate = useNavigate({ from: "/legs" });
   const legs = useLegs(0);
+  // One `now` for the whole table, so every open-ended duration in a render is
+  // measured against the same instant rather than drifting down the rows.
+  const now = Date.now();
 
   const causes = useMemo(() => {
     const seen = new Set<string>();
@@ -60,10 +63,11 @@ export function Legs() {
             <tr>
               <Th>task</Th>
               <Th right>#</Th>
-              <Th>op</Th>
+              <Th>what</Th>
               <Th>run</Th>
               <Th>cause</Th>
-              <Th right>exit</Th>
+              <Th right>started</Th>
+              <Th right>took</Th>
               <Th right>ended</Th>
             </tr>
           </thead>
@@ -93,7 +97,7 @@ export function Legs() {
                   <Td right className="text-[var(--fg-faint)]">
                     {row.attempt ?? "—"}
                   </Td>
-                  <Td className="text-[var(--fg-muted)]">{row.op ?? "—"}</Td>
+                  <Td className="text-[var(--fg-muted)]">{row.what || row.op || "—"}</Td>
                   {/* Not every leg has a run: a `vector-sweep` is a measurement
                       that produces none, so this is blank rather than broken. */}
                   <Td mono className="text-[var(--fg-muted)]">
@@ -114,15 +118,30 @@ export function Legs() {
                     {/* Tone from the WIRE value, label from the display name:
                         `toneFor` keys off what the leg log recorded, so passing
                         it a renamed word would silently mute every badge. */}
+                    {/* The exit code is IN the badge now, not beside it. The
+                        number was only ever read through its meaning — 124 is
+                        the guard's deadline, 137 the OOM killer, -9 a
+                        cancellation — and `displayName` already says that in
+                        words. The raw code stays in the tooltip for the rare
+                        case where an unmapped one turns up. */}
                     <StatusBadge
                       state={displayName(row.cause)}
                       tone={tone}
-                      title={`recorded as "${row.cause}"`}
+                      title={`recorded as "${row.cause}"${
+                        row.exit_code == null ? "" : `, exit ${row.exit_code}`
+                      }`}
                     />
                   </Td>
-                  <Td right>{row.exit_code ?? "—"}</Td>
-                  <Td right className="text-[var(--fg-faint)]">
-                    {since(row.ended_at)}
+                  <Td right className="text-[var(--fg-faint)]" title={row.started_at ?? undefined}>
+                    {clock(row.started_at)}
+                  </Td>
+                  {/* Open-ended for a leg still running, so "running 2h" and
+                      "took 2h" stay distinguishable from "unknown". */}
+                  <Td right className="tnum text-[var(--fg-muted)]">
+                    {span(row.started_at, row.ended_at, now)}
+                  </Td>
+                  <Td right className="text-[var(--fg-faint)]" title={row.ended_at ?? undefined}>
+                    {row.ended_at ? since(row.ended_at) : "—"}
                   </Td>
                 </tr>
               );

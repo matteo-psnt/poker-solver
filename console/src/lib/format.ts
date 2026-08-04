@@ -39,6 +39,40 @@ export function duration(seconds: number | null | undefined): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
+/** Epoch millis, or null when absent/unparseable — so callers can branch once. */
+export function instant(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const parsed = Date.parse(iso);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * How long something took, from its two ends.
+ *
+ * `now` closes an open interval, so a leg still running reports how long it has
+ * been going rather than a dash. That distinction is the point: "running 2h"
+ * and "took 2h" are different facts and a blank cell conflates them with
+ * "unknown".
+ */
+export function span(
+  from: string | null | undefined,
+  to: string | null | undefined,
+  now?: number,
+): string {
+  const start = instant(from);
+  if (start == null) return "—";
+  const end = instant(to) ?? now;
+  if (end == null) return "—";
+  return duration(Math.max(0, end - start) / 1000);
+}
+
+/** `09:27` in the viewer's zone — the wall-clock a leg started, for correlating. */
+export function clock(iso: string | null | undefined): string {
+  const at = instant(iso);
+  if (at == null) return "—";
+  return new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 /** Relative, because "is this current?" is the only question being asked. */
 export function since(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return "—";
