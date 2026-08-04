@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.shared import run_names
+from src.interfaces import run_names
 
 PUBLISHED = [
     "run-production-025433-1095",

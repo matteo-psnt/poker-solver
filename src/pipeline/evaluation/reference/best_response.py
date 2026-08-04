@@ -21,7 +21,7 @@ References:
 
 from __future__ import annotations
 
-from src.pipeline.evaluation.game_tree import (
+from src.pipeline.evaluation.reference.game_tree import (
     CHANCE,
     ActionT,
     ExtensiveGame,

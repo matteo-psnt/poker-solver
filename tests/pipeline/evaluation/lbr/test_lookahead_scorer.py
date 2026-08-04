@@ -16,12 +16,12 @@ from src.core.game.actions import Action, all_in, bet, call, check, fold, raises
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 from src.engine.search.range_inference import NUM_COMBOS
-from src.pipeline.evaluation.lookahead_scorer import (
+from src.pipeline.evaluation.lbr.lookahead_scorer import (
     BlueprintDistMemo,
     LookaheadScorer,
     committed_chips,
 )
-from src.pipeline.evaluation.shadow_state import MenuCandidate
+from src.pipeline.evaluation.lbr.shadow_state import MenuCandidate
 from tests.test_helpers import make_test_config
 
 RULES = GameRules(small_blind=50, big_blind=100)

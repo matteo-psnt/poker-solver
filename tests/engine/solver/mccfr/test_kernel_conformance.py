@@ -45,7 +45,7 @@ from __future__ import annotations
 import pytest
 
 from src.core.game.actions import bet, call, check, fold, raises
-from src.pipeline.evaluation.best_response import exploitability, on_policy_value
+from src.pipeline.evaluation.reference.best_response import exploitability, on_policy_value
 from tests.engine.solver.mccfr.dict_storage import DictStorage
 from tests.engine.solver.mccfr.extensive_game_solver import (
     ExtensiveGameSolver,

@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from src.pipeline.evaluation import ledger
-from src.pipeline.evaluation.hunl_local_best_response import LBRConfig
+from src.pipeline.evaluation.lbr.hunl_local_best_response import LBRConfig
 from src.shared import leg_log
 from tests.test_helpers import seed_ledger
 

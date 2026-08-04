@@ -24,7 +24,7 @@ cumulative across streets), so a naively-played off-tree amount would normalize
 to an unseen pot fraction (``b0.63``) and poison every later opponent lookup of
 the hand (miss → uniform-random play → invalid upward bias). To keep the number
 rigorous the evaluator carries a persistent on-tree **shadow state**
-(:mod:`~src.pipeline.evaluation.shadow_state`) alongside the real one: each
+(:mod:`~src.pipeline.evaluation.lbr.shadow_state`) alongside the real one: each
 off-tree exploiter size is committed to an on-tree proxy on the shadow (sampled
 once from the pseudo-harmonic translation weights), every opponent lookup keys
 off the shadow, and the opponent's shadow decision is realized in the real game
@@ -84,19 +84,19 @@ from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card, GameState
 from src.engine.search.range_inference import COMBO_MASKS, NUM_COMBOS
 from src.engine.solver.policy_source import ScorableBlueprint
-from src.pipeline.evaluation.lbr_showdown import ShowdownValuer
-from src.pipeline.evaluation.lookahead_scorer import BlueprintDistMemo, LookaheadScorer
-from src.pipeline.evaluation.opponent_model import (
+from src.pipeline.evaluation.lbr.lbr_showdown import ShowdownValuer
+from src.pipeline.evaluation.lbr.lookahead_scorer import BlueprintDistMemo, LookaheadScorer
+from src.pipeline.evaluation.lbr.opponent_model import (
     BlueprintOpponent,
     OpponentModel,
     ResolvedOpponent,
     known_mask,
 )
-from src.pipeline.evaluation.shadow_state import MenuCandidate, ShadowTracker
+from src.pipeline.evaluation.lbr.shadow_state import MenuCandidate, ShadowTracker
+from src.pipeline.evaluation.units import chips_to_bb, chips_to_mbb
 from src.shared.config import ResolverConfig
 from src.shared.log import configure_logging, progress_bars_enabled
 from src.shared.numeric import NORMALIZE_EPS
-from src.shared.units import chips_to_bb, chips_to_mbb
 
 _DECK_MASKS: np.ndarray = np.array([card.mask for card in FULL_DECK], dtype=np.int64)
 

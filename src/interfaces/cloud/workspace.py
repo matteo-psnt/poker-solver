@@ -28,10 +28,10 @@ from pathlib import Path
 
 from azure.storage.fileshare import ShareServiceClient
 
+from src.interfaces import run_names
 from src.interfaces.cloud import share
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.errors import CommandError
-from src.shared import run_names
 
 BASELINE_NAME = "baseline.json"
 
@@ -71,7 +71,7 @@ def pull_metadata(
         # Resolved HERE, against the share's own listing, because this decides
         # what gets downloaded -- a fragment rejected at this point never
         # reaches `resolve_run_dir`, and the reader would refuse a run that
-        # exists. Same rule on both sides: `src.shared.run_names`.
+        # exists. Same rule on both sides: `src.interfaces.run_names`.
         matches = run_names.matching(run, published)
         if len(matches) > 1:
             raise CommandError(run_names.ambiguous_message(run, matches))

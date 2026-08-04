@@ -4,11 +4,12 @@ Run ids are long, share a prefix and differ only at the end
 (``run-production-025433-1095``), so the piece a person remembers is the tail.
 Every reader accepts a fragment for that reason.
 
-This lives in ``shared`` because two layers resolve one: the cloud side decides
-which run to MATERIALISE from the share, and the command side then resolves a
-directory inside the tree it got. If those two disagreed about what ``1095``
-means, a reader would pull one run and answer about another -- so there is one
-definition and both import it.
+This sits at the top of ``interfaces`` because two surfaces UNDER it resolve one:
+``cloud.workspace`` decides which run to MATERIALISE from the share, and
+``cli.commands`` then resolves a directory inside the tree it got. If those two
+disagreed about what ``1095`` means, a reader would pull one run and answer
+about another -- so there is one definition and both import it. Nothing below
+``interfaces`` resolves a fragment: a run id reaches ``pipeline`` already whole.
 """
 
 from __future__ import annotations

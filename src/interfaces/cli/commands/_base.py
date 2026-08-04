@@ -27,9 +27,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.interfaces import run_names
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation.ledger import rebuild_ledger
-from src.shared import run_names
 
 
 @dataclass(frozen=True)

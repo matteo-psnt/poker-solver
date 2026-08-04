@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.pipeline.evaluation.best_response import (
+from src.pipeline.evaluation.reference.best_response import (
     best_response_value,
     exploitability,
     on_policy_value,
 )
-from src.pipeline.evaluation.game_tree import TabularStrategy
-from src.pipeline.evaluation.tabular_cfr import TabularCFRSolver
+from src.pipeline.evaluation.reference.game_tree import TabularStrategy
+from src.pipeline.evaluation.reference.tabular_cfr import TabularCFRSolver
 from tests.pipeline.evaluation.kuhn_poker import KuhnPoker
 
 KUHN_GAME_VALUE_P0 = -1.0 / 18.0

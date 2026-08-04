@@ -7,7 +7,7 @@ import pytest
 
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.pipeline import services
-from src.pipeline.evaluation.hunl_local_best_response import HandOutcome, LBRConfig
+from src.pipeline.evaluation.lbr.hunl_local_best_response import HandOutcome, LBRConfig
 from src.pipeline.services import abstraction as services_abstraction
 from src.pipeline.services import runs as services_runs
 from src.pipeline.services import static_training as services_training

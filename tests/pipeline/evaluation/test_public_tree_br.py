@@ -16,12 +16,12 @@ import pytest
 
 from src.core.game.state import Card
 from src.engine.search.range_inference import NUM_COMBOS, combo_index_for
-from src.pipeline.evaluation.best_response import best_response_value, on_policy_value
 from src.pipeline.evaluation.public_tree_br import (
     PublicBRConfig,
     PublicTreeBestResponse,
     compute_public_tree_br,
 )
+from src.pipeline.evaluation.reference.best_response import best_response_value, on_policy_value
 from tests.pipeline.evaluation.restricted_hunl import RestrictedHUNL, blueprint_policy
 from tests.test_helpers import build_trained_test_solver
 

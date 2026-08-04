@@ -16,8 +16,8 @@ from typing import cast
 
 import numpy as np
 
-from src.pipeline.evaluation import hunl_local_best_response as lbr
-from src.pipeline.evaluation.hunl_local_best_response import _HUNLLocalBestResponse
+from src.pipeline.evaluation.lbr import hunl_local_best_response as lbr
+from src.pipeline.evaluation.lbr.hunl_local_best_response import _HUNLLocalBestResponse
 
 
 class _RecordingOpponent:
@@ -74,7 +74,7 @@ def test_opponent_stream_is_independent_of_the_deal_stream():
 
 def test_resolved_opponent_reseed_replaces_the_resolver_generator():
     """reseed() must reach the generator solve_subgame actually consumes."""
-    from src.pipeline.evaluation.opponent_model import ResolvedOpponent
+    from src.pipeline.evaluation.lbr.opponent_model import ResolvedOpponent
 
     opponent = object.__new__(ResolvedOpponent)
     opponent._resolver = SimpleNamespace(rng=None)

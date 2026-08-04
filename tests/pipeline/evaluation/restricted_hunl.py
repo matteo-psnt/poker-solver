@@ -23,7 +23,7 @@ from collections.abc import Sequence
 
 from src.core.game.state import Card
 from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.pipeline.evaluation.game_tree import CHANCE, Policy
+from src.pipeline.evaluation.reference.game_tree import CHANCE, Policy
 
 DEAL = "DEAL"
 ANNULLED = "ANNULLED"
