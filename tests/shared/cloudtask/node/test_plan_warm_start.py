@@ -10,6 +10,8 @@ and the node just passes the flags through.
 
 from __future__ import annotations
 
+import pathlib
+
 from src.shared.node import plan as node_plan
 
 ENV = {
@@ -53,3 +55,18 @@ class TestWarmStartArgv:
     def test_workers_is_still_passed(self):
         """The scalar trainer needs it; only the vector kernel does not."""
         assert "--workers" in _argv()
+
+
+class TestTheNodeFetchesThePrior:
+    """A leg that seeds must bring the prior down first.
+
+    The trainer resolves a bare run id under its runs directory, so if nothing
+    fetched that run the path names an empty directory and the leg dies on a
+    missing checkpoint -- on a node, after a snapshot upload and a pool spin-up.
+    """
+
+    def test_the_runner_fetches_a_named_prior(self):
+        source = pathlib.Path("src/shared/node/runner.py").read_text()
+        train = source.split("def _train(", 1)[1].split("\ndef ", 1)[0]
+        assert "warm_start_from" in train, "the runner never looks at the prior"
+        assert "fetch_current_rung" in train
