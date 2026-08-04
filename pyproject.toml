@@ -132,6 +132,21 @@ dev = [
     "import-linter>=2.10",
     "deptry>=0.24.0",
     "vulture>=2.14",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.coverage.run]
+source = ["src"]
+# Workers are separate processes; without this they report nothing.
+concurrency = ["multiprocessing"]
+parallel = true
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "\\.\\.\\.$",
 ]
 
 [tool.uv]
