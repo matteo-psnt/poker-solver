@@ -18,6 +18,33 @@ from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, parse_multiplie
 from src.shared.config import Config
 
 
+def _postflop_candidate_size(
+    token: float | str,
+    *,
+    pot: int,
+    to_call: int,
+    stack: int,
+    spr: float,
+    jam_spr_cutoff: float,
+) -> int | None:
+    """The raise this token asks for, before asking whether it is affordable.
+
+    Returns:
+        The raise amount, or None when the token names no postflop raise (a
+        passive word, or ``jam_low_spr`` above the SPR cutoff).
+    """
+    if isinstance(token, (int, float)):
+        return int(pot * float(token))
+    word = token.lower()
+    if word == "min_raise":
+        return to_call
+    if word == "pot_raise":
+        return pot
+    if word in JAM_TOKENS or (word == "jam_low_spr" and spr <= jam_spr_cutoff):
+        return stack - to_call
+    return None
+
+
 class ActionModel:
     """
     Legal-action generator backed by configurable node templates.
@@ -231,33 +258,32 @@ class ActionModel:
     def _postflop_raise_sizes_from_tokens(
         self, state: GameState, tokens: list[float | str]
     ) -> list[int]:
+        """Postflop raise sizes this state can actually afford.
+
+        Affordability:
+            One filter covers every token. The jam branch used to test only
+            ``> 0``, but a jam raises ``stack - to_call``, so ``to_call +
+            size == stack`` and the shared bound is satisfied by construction
+            -- the two spellings admit exactly the same sizes.
+        """
         pot = state.pot
         to_call = state.to_call
         stack = state.stacks[state.current_player]
         jam_spr_cutoff = self._jam_spr_cutoff()
         spr = self._spr(state)
+
         sizes: list[int] = []
-
         for token in tokens:
-            if isinstance(token, (int, float)):
-                raise_size = int(pot * float(token))
-                if raise_size > 0 and (to_call + raise_size) <= stack:
-                    sizes.append(raise_size)
-                continue
-
-            t = token.lower()
-            if t == "min_raise":
-                raise_size = to_call
-                if raise_size > 0 and (to_call + raise_size) <= stack:
-                    sizes.append(raise_size)
-            elif t == "pot_raise":
-                raise_size = pot
-                if raise_size > 0 and (to_call + raise_size) <= stack:
-                    sizes.append(raise_size)
-            elif t in JAM_TOKENS or (t == "jam_low_spr" and spr <= jam_spr_cutoff):
-                jam_raise = stack - to_call
-                if jam_raise > 0:
-                    sizes.append(jam_raise)
+            candidate = _postflop_candidate_size(
+                token,
+                pot=pot,
+                to_call=to_call,
+                stack=stack,
+                spr=spr,
+                jam_spr_cutoff=jam_spr_cutoff,
+            )
+            if candidate is not None and candidate > 0 and (to_call + candidate) <= stack:
+                sizes.append(candidate)
 
         return sorted({s for s in sizes if s > 0})
 
