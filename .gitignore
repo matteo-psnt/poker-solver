@@ -95,3 +95,6 @@ infra/store/*.tfvars
 console/dist/
 console/node_modules/
 console/*.tsbuildinfo
+
+# pyscn analysis output (local audit tool, regenerable)
+.pyscn/

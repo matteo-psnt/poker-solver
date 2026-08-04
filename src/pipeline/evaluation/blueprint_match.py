@@ -23,9 +23,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from src.core.game.rules import GameRules
-from src.core.game.state import FULL_DECK, Card
+from src.core.game.state import Card
 from src.engine.solver.policy_source import ScorableBlueprint
-from src.pipeline.evaluation.resolver_match import _complete_board, _deal_from_stack
+from src.pipeline.evaluation.resolver_match import (
+    _complete_board,
+    _deal_from_stack,
+    deal_for,
+)
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.shared.units import pair_mean_mbb
 
@@ -64,14 +68,7 @@ def play_blueprint_match(
     pair_samples_mbb: list[float] = []
 
     for deal in range(num_deals):
-        rng = np.random.default_rng(np.random.SeedSequence([seed, deal]))
-        order = [int(i) for i in rng.permutation(52)]
-        hole_cards = (
-            (FULL_DECK[order[0]], FULL_DECK[order[1]]),
-            (FULL_DECK[order[2]], FULL_DECK[order[3]]),
-        )
-        board_stack = [FULL_DECK[i] for i in order[4:9]]
-        button = deal % 2
+        hole_cards, board_stack, button = deal_for(seed, deal)
 
         # Both seat-swapped games replay the SAME sampling stream: while the two
         # blueprints agree, the games mirror each other exactly, so a self-match

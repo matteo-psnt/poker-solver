@@ -71,14 +71,7 @@ def play_resolver_match(
     fallbacks = 0
 
     for deal in range(num_deals):
-        rng = np.random.default_rng(np.random.SeedSequence([seed, deal]))
-        order = [int(i) for i in rng.permutation(52)]
-        hole_cards = (
-            (FULL_DECK[order[0]], FULL_DECK[order[1]]),
-            (FULL_DECK[order[2]], FULL_DECK[order[3]]),
-        )
-        board_stack = [FULL_DECK[i] for i in order[4:9]]  # flop, flop, flop, turn, river
-        button = deal % 2
+        hole_cards, board_stack, button = deal_for(seed, deal)
 
         seat_payoffs: list[float] = []
         for resolver_seat in (0, 1):
@@ -166,6 +159,27 @@ def _play_game(
 
     assert agent.resolver is not None  # use_resolver=True above
     return float(state.get_payoff(resolver_seat, rules)), decisions, agent.resolver.fallback_count
+
+
+def deal_for(
+    seed: int, deal: int
+) -> tuple[tuple[tuple[Card, Card], tuple[Card, Card]], list[Card], int]:
+    """The hole cards, board stack and button for one deal index.
+
+    Shared by both match scorers deliberately. Paired comparison is only valid
+    while they draw the SAME deals for a given ``(seed, deal)``: two copies of
+    this drifting apart would leave the scorers silently unpaired -- still
+    returning numbers, just no longer numbers that may be compared -- rather
+    than visibly broken.
+    """
+    rng = np.random.default_rng(np.random.SeedSequence([seed, deal]))
+    order = [int(i) for i in rng.permutation(52)]
+    hole_cards = (
+        (FULL_DECK[order[0]], FULL_DECK[order[1]]),
+        (FULL_DECK[order[2]], FULL_DECK[order[3]]),
+    )
+    board_stack = [FULL_DECK[i] for i in order[4:9]]  # flop, flop, flop, turn, river
+    return hole_cards, board_stack, deal % 2
 
 
 def _deal_from_stack(state: GameState, board_stack: list[Card]) -> GameState:
