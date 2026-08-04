@@ -1,6 +1,7 @@
 import { Shell } from "@/components/Shell";
 import { Cost } from "@/routes/Cost";
 import { Evals } from "@/routes/Evals";
+import { LegLog } from "@/routes/LegLog";
 import { Legs } from "@/routes/Legs";
 import { Overview } from "@/routes/Overview";
 import { RunDetail } from "@/routes/RunDetail";
@@ -23,6 +24,7 @@ const routes = [
     // Validated, so a hand-edited URL cannot put arbitrary state into the page.
     validateSearch: z.object({ cause: z.string().optional() }),
   }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/legs/$taskId", component: LegLog }),
   createRoute({ getParentRoute: () => rootRoute, path: "/runs", component: Runs }),
   createRoute({ getParentRoute: () => rootRoute, path: "/runs/$runId", component: RunDetail }),
   createRoute({ getParentRoute: () => rootRoute, path: "/evals", component: Evals }),

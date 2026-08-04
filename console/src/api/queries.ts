@@ -14,7 +14,9 @@ import {
   type Jobs,
   type Ledger,
   type Legs,
+  type LogLines,
   type Pool,
+  type Progress,
   type RunInfo,
   type Runs,
   costSchema,
@@ -22,7 +24,9 @@ import {
   jobsSchema,
   ledgerSchema,
   legsSchema,
+  logSchema,
   poolSchema,
+  progressSchema,
   runinfoSchema,
   runsSchema,
 } from "./schemas";
@@ -79,6 +83,29 @@ export const useCost = (hours = 0) =>
     queryFn: () => get(`/api/cost?hours=${hours}`, costSchema),
     // Derived from the leg log, so it costs what `legs` costs.
     refetchInterval: SLOW,
+  });
+
+export const useProgress = (runId: string) =>
+  useQuery<Progress>({
+    queryKey: ["progress", runId],
+    queryFn: () => get(`/api/runs/${encodeURIComponent(runId)}/progress`, progressSchema),
+    refetchInterval: SLOW,
+  });
+
+/**
+ * A leg's published log. `enabled` so the query does not fire until a task is
+ * actually selected — this is the slowest read in the console and there is no
+ * reason to pay for it on a page nobody has opened.
+ */
+export const useLog = (taskId: string | null, lines = 400) =>
+  useQuery<LogLines>({
+    queryKey: ["log", taskId, lines],
+    queryFn: () => get(`/api/logs/${encodeURIComponent(taskId ?? "")}?lines=${lines}`, logSchema),
+    enabled: Boolean(taskId),
+    // A published log for a finished leg does not change. Refetching it would
+    // be a cloud read for an answer that cannot have moved.
+    refetchInterval: false,
+    staleTime: 5 * 60_000,
   });
 
 export const useEvals = (limit = 50) =>

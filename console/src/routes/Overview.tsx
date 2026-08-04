@@ -10,6 +10,7 @@ import {
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { count, since } from "@/lib/format";
+import { Link } from "@tanstack/react-router";
 
 /** The page the console exists for: what is happening, and did anything die. */
 export function Overview() {
@@ -130,7 +131,15 @@ export function Overview() {
             <tbody>
               {[...legs.data.rows].reverse().map((row) => (
                 <tr key={`${row.task_id}-${row.attempt}`}>
-                  <Td mono>{row.task_id}</Td>
+                  <Td mono>
+                    <Link
+                      to="/legs/$taskId"
+                      params={{ taskId: row.task_id }}
+                      className="hover:underline"
+                    >
+                      {row.task_id}
+                    </Link>
+                  </Td>
                   <Td className="text-[var(--fg-muted)]">{row.op ?? "—"}</Td>
                   <Td>
                     <StatusBadge state={row.cause} />
