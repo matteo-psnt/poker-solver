@@ -27,15 +27,19 @@ export function Td({
   children,
   right,
   mono,
+  title,
   className,
 }: {
   children: ReactNode;
   right?: boolean;
   mono?: boolean;
+  /** Hover text. Used to explain a raw value (an exit code) in words. */
+  title?: string;
   className?: string;
 }) {
   return (
     <td
+      title={title}
       className={cn(
         "border-b border-[var(--border)]/60 px-3 py-1.5",
         right && "text-right tnum",
