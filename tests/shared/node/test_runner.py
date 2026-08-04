@@ -2,7 +2,7 @@
 
 Every case here stands in for something the shell got wrong once. The most
 expensive was the exit trap reading `$?` as zero on a signal death, which made
-`just cancel` record clean completions that were never reconciled.
+`cancel` record clean completions that were never reconciled.
 """
 
 from __future__ import annotations

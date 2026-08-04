@@ -467,5 +467,7 @@ def _digest_gaps(
         gaps.append(f"status is '{metadata.status}', not 'completed'")
     unresolved = [row for row in legs if row["cause"] not in leg_log.TERMINAL_CAUSES]
     if unresolved:
-        gaps.append(f"{len(unresolved)} leg(s) with no terminal record — `just legs` to reconcile")
+        gaps.append(
+            f"{len(unresolved)} leg(s) with no terminal record — `poker-solver-run legs` to reconcile"
+        )
     return gaps

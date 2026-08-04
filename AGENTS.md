@@ -161,7 +161,7 @@ definition: never a source of truth, never worth backing up.
   look arbitrary but are measured (UserSubscription mode, `Dals_v6` not
   `Dalds_v6`, Gen2-only images, the SKU policy) are documented in
   `infra/README.md`; read it before changing pool config.
-  **`just legs` is how you find out why a leg died** — the run log cannot
+  **`poker-solver-run legs` is how you find out why a leg died** — the run log cannot
   record a death (the container is gone first), so the wrapper writes its own
   account to `<share>/legs/` and `legs` reconciles the ones whose exit record
   never landed against Batch's view. 124 (the guard's deadline — a hang) and
