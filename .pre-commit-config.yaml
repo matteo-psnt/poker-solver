@@ -55,12 +55,13 @@ repos:
         args: [src, --min-confidence, "70"]
       # The console's gate. Its own toolchain -- ruff/ty/deptry/vulture never
       # see JavaScript -- but it runs beside them so one command still answers
-      # "is this repo clean". `files:` is what spares a Python-only checkout
-      # from needing an npm install: the hook simply never fires. So missing
-      # deps are an error, not a skip -- see console/check.sh.
+      # "is this repo clean". `files:` spares a Python-only checkout: with no
+      # console file staged the hook never fires. With deps missing it fails
+      # (npm exits 127 on the first missing binary) rather than passing having
+      # checked nothing, which is what a wrapper script used to do here.
       - id: console
         name: console (biome + tsc + vitest)
-        entry: bash console/check.sh
+        entry: npm --prefix console run ci
         language: system
         pass_filenames: false
         files: ^console/
