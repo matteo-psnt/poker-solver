@@ -175,12 +175,9 @@ class CanonicalBoardEnumerator:
             for j, canonical_card in enumerate(info.canonical_board):
                 canon_codes[i, j] = canonical_card.rank_idx * 4 + canonical_card.suit_label
 
-        # A CACHE MUST NEVER BE FATAL. Writing it can fail for reasons that have
-        # nothing to do with the work just completed -- a read-only mount, a full
-        # disk, or a directory another Batch task created under a different
-        # auto-user. Raising here would throw away a minute of finished
-        # enumeration and kill the leg, at the one moment the result is in hand.
-        # The cost of swallowing it is that the next process enumerates again.
+        # A CACHE MUST NEVER BE FATAL. A read-only mount, a full disk, or a
+        # directory another Batch task owns would otherwise throw away a minute
+        # of finished enumeration at the moment the result is in hand.
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             np.savez(

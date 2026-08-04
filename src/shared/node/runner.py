@@ -5,31 +5,11 @@ What a Batch task actually runs. The shape is::
     fetch the last published checkpoint -> train/score to an ABSOLUTE target
     -> publish each retained rung as it appears -> publish on ANY exit
 
-Four things here are not obvious and each replaced a shell construct that had
-already failed in production:
-
-The exit accounting must see the real cause
-    Bash's EXIT trap reads ``$?`` as zero when the shell is killed while
-    blocked on a foreground child -- measured: SIGTERM ran the trap with
-    ``$? = 0`` and exited 143, so ``just cancel`` recorded a clean completion
-    that was never reconciled. Here the signal handler raises, so the ``finally``
-    sees what actually happened.
-
-124 and 137 are DIFFERENT deaths
-    124 is this module's own deadline, 137 is SIGKILL from elsewhere -- on a
-    training node, the OOM killer. Calling an OOM a hang would mislead AND,
-    being terminal, stop ``legs`` from asking Batch, the only source that can
-    confirm it.
-
-The tee reads chunks, not lines
-    The training stream is tqdm: mostly carriage returns, few newlines. Reading
-    by line blocks for minutes at a time, so the published log would be empty
-    through exactly the window worth watching.
-
-The watcher is stopped and JOINED before the final publish
-    Publishing removes a completion marker, copies, then rewrites it. Two
-    publishers running at once can leave a known-good rung transiently
-    unmarked, and the next fetch refuses it.
+Four things replaced a shell construct that had already failed in production,
+each argued where it happens: the signal handler RAISES (bash's EXIT trap read
+``$?`` as zero on a signal death, so ``just cancel`` logged clean completions);
+124 and 137 are different deaths; the tee reads chunks because tqdm emits no
+newlines; and the watcher is joined before the final publish.
 """
 
 from __future__ import annotations
@@ -248,13 +228,11 @@ def run_guarded(
             stdout=sink if sink else subprocess.PIPE,
             stderr=subprocess.PIPE if sink else subprocess.STDOUT,
             close_fds=True,
-            # Its OWN process group, so the guard can signal the whole tree.
+            # Its OWN group, so the guard can signal the whole tree.
             # `terminate()` reaches only `uv`; the trainer and its 16 workers
-            # are grandchildren, and `timeout` had the same limitation -- a
-            # deadline could return 124 while the workers kept running, holding
-            # the /dev/shm segments that then killed the NEXT leg for that run.
-            # Batch's own task cleanup is by cgroup, so a new session does not
-            # escape it.
+            # are grandchildren, and a deadline used to return 124 with them
+            # still running, holding the /dev/shm segments that killed the NEXT
+            # leg. Batch cleans up by cgroup, so a new session does not escape.
             start_new_session=True,
         )
     except OSError as error:
@@ -411,15 +389,11 @@ def _evaluate(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, str
         log.publish()
 
     log(f"evaluate complete: {ok} scored, {bad} failed")
-    # Exit 0 when ANYTHING scored. A non-zero exit makes Batch retry the WHOLE
-    # task, re-fetching and re-scoring what already succeeded -- one bad rung
-    # turned a 30-minute job into nearly four hours and wrote every record
-    # twice. Only a clean sweep of failures is worth a retry, since that is
-    # what a transient node fault looks like.
-    #
-    # But "exit 0 so Batch does not retry" is NOT "this leg succeeded": 1 of 30
-    # rungs would be recorded as `completed`. The outcome carries what the exit
-    # code drops.
+    # Exit 0 when ANYTHING scored: a non-zero exit retries the WHOLE task, and
+    # one bad rung once turned a 30-minute job into nearly four hours of
+    # re-scoring, writing every record twice. Only a clean sweep is worth a
+    # retry. But exit 0 is not a claim of success -- 1 of 30 rungs would read
+    # as `completed`, so the outcome carries what the code drops.
     if ok:
         return 0, (leg_log.CAUSE_PARTIAL if bad else None)
     return 1, None
@@ -467,12 +441,10 @@ def _precompute(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, s
         return 1, None
 
     try:
-        # UNCONDITIONAL. Reaching here means either the name is new or the
-        # operator passed RUN_FORCE_PUBLISH to replace it -- and the update rule
-        # would skip exactly the files the existing copy has NEWER than the one
-        # just built, which is all of them. `cp -ru` had the same hole: "force"
-        # silently left the old abstraction in place, which is the one outcome
-        # the flag exists to prevent.
+        # UNCONDITIONAL. Either the name is new or RUN_FORCE_PUBLISH asked to
+        # replace it, and the update rule would skip every file the existing
+        # copy has newer -- which is all of them. `cp -ru` had the same hole:
+        # "force" left the old abstraction in place.
         archive.copy_tree(output, destination, update=False)
     except OSError as error:
         log(f"FATAL publish failed: {error}")
@@ -537,21 +509,15 @@ def _stage(paths: NodePaths, log: LegLogger) -> int:
             shutil.rmtree(link, ignore_errors=True)
     link.symlink_to(paths.data)
 
-    # ON THE DATA DISK, not in the task's home. The regenerable caches left the
-    # working tree so a checkout holds no runtime artifact, and their default is
-    # `~/.cache` -- but a Batch task's HOME is its own working directory, wiped
-    # with the task. Without this every leg would re-canonicalise the river's
-    # 2.6M boards (~1 min) before doing any work. `/mnt/work` is node-scoped, so
-    # the second leg on a node pays nothing.
+    # ON THE DATA DISK, not the task's HOME -- which is its working directory,
+    # wiped with the task, so the `~/.cache` default would re-canonicalise the
+    # river's 2.6M boards (~1 min) on every leg. /mnt/work is node-scoped.
     shared_cache = paths.work / "cache"
     os.environ[cache.ENV_OVERRIDE] = str(shared_cache)
-    # CREATED AND OPENED UP HERE, for the same reason the start task chmods
-    # /mnt/work: `submit_leg` sets no `user_identity`, so leg tasks run as
-    # Batch's DEFAULT auto-user. Left to whichever task got there first, the
-    # directory carries that task's ownership and umask, and the next leg on the
-    # node cannot write into it. Sharing the cache is the entire point of
-    # putting it on the data disk, so it has to be shared with every task and
-    # not merely with the one that created it.
+    # OPENED UP HERE, like the start task's `chmod -R a+rwX /mnt/work`:
+    # `submit_leg` sets no `user_identity`, so leg tasks run as Batch's default
+    # auto-user, and a directory left with the first task's ownership is one the
+    # next leg cannot write into -- which would undo the sharing entirely.
     try:
         shared_cache.mkdir(parents=True, exist_ok=True)
         shared_cache.chmod(0o777)
@@ -559,13 +525,10 @@ def _stage(paths: NodePaths, log: LegLogger) -> int:
         log(f"WARN could not prepare {shared_cache} ({error}); each leg will recompute")
     log(f"cache: {shared_cache}")
 
-    # Through the guard, so a dependency-install failure explains ITSELF in the
-    # published leg log. Left on inherited stdout it went only to Batch's
-    # node-local capture, which the pool destroys within minutes of the task
-    # ending -- the one window where the reason still exists.
-    # `--quiet` still writes FAILURES to stderr, and run_guarded merges stderr
-    # into the tee -- so the leg log keeps the diagnostic without the ~100 lines
-    # of resolved-package listing that a successful sync prints on every leg.
+    # Through the guard, so an install failure explains ITSELF in the published
+    # log rather than in Batch's node-local capture, which the pool destroys
+    # minutes after the task ends. `--quiet` still writes failures to stderr,
+    # which the tee catches, so this costs no diagnostic.
     log("syncing dependencies")
     return run_guarded(
         ["uv", "sync", "--quiet"], cwd=paths.code, timeout=SYNC_TIMEOUT_SECONDS, log=log

@@ -1,27 +1,15 @@
 """Where regenerable artifacts live, which is never inside the working tree.
 
-`data/` used to be the answer, and the trouble with that is not the disk: a
-directory inside the checkout reads as part of the project. It survived several
-prunes, it came back after each one, and it left the repo looking like it held
-state when everything in it was reproducible from code. The rule is now
-literal — **the working tree holds no runtime artifact at all** — and the only
-way to keep a rule like that is to give the caches somewhere else to go.
+`data/` used to be the answer. It was deleted twice and came back both times,
+because the caches named paths inside it -- so the rule only holds if they have
+somewhere else to go.
 
-Resolution order:
+Resolution order: ``POKER_SOLVER_CACHE`` (the node wrapper sets it to
+``/mnt/work/cache``, since a task's HOME is wiped with the task), then
+``XDG_CACHE_HOME``, then ``~/.cache/poker-solver``.
 
-``POKER_SOLVER_CACHE``
-    An explicit override. The node wrapper sets it to ``/mnt/work/cache`` so a
-    Batch node keeps its cache on the data disk, shared by every task that runs
-    there — previously achieved by symlinking ``$CODE/data`` at the same disk,
-    which only worked because the path was relative to the code tree.
-``XDG_CACHE_HOME``
-    The conventional location, honoured where it is set.
-otherwise
-    ``~/.cache/poker-solver``.
-
-A side benefit of leaving the tree: this project keeps several git worktrees,
-and they now share one cache instead of each recomputing the river's 2.6M
-boards (~1 min) the first time it is asked.
+Leaving the tree also means this project's several git worktrees share one
+cache instead of each recomputing the river's 2.6M boards (~1 min).
 """
 
 from __future__ import annotations

@@ -1,41 +1,19 @@
 """Copying a run between the node's data disk and the SMB share.
 
-Every rule below is a production failure, not a preference. They are collected
-here rather than spread through the wrapper so the argument for each one sits
-next to the code that honours it.
+Four rules, each a production failure rather than a preference, each argued at
+the code that honours it:
 
-Why publish mid-run at all
-    The node's disk is ephemeral. A task killed by OOM or ``maxWallClockTime``
-    loses everything it has not published, so a multi-hour leg would die with
-    nothing to show. Retrying is safe because ``train-static --iterations`` is
-    an ABSOLUTE target that no-ops once reached: publishing the ladder makes a
-    retry cheap, and the absolute target is what makes it correct.
+* publish mid-run -- the node's disk dies with the task
+* manifest LAST -- an interrupted copy must not leave the share naming a rung
+  that is only half there
+* a completion marker per snapshot -- manifest-last cannot protect a single
+  directory's copy
+* no timestamps, no modes -- the SMB mount refuses ``utime``, and reports it
+  as failure only AFTER copying the data
 
-Why the manifest goes last
-    Training continues during the copy, and committing a checkpoint prunes
-    superseded snapshots. Publish the manifest first and an interrupted copy
-    leaves the share naming a snapshot that was only half copied -- which a
-    later fetch reads as complete. Silent corruption of the durable artifact is
-    worse than losing it.
-
-Why every snapshot carries a completion marker
-    Manifest-last protects the manifest, but a kill during one snapshot's copy
-    still leaves that directory partial, and the manifest may already name it.
-    A marker written only after a clean copy moves the same guarantee down to
-    per-directory granularity, and needs no atomic rename -- SMB has none. The
-    30M run's ``static-10000000.zarr`` became a corrupt artifact exactly this
-    way: it was fetched cleanly, then died with "error during blosc
-    decompression: 0".
-
-Why neither timestamps nor modes are preserved
-    The SMB mount refuses ``utime`` with "Operation not permitted", and ``cp``
-    reported that as failure AFTER copying the data -- which then suppressed
-    the manifest and made a successful publish look broken. Modes are no safer:
-    ``infra/main.tf`` mounts the share ``file_mode=0777,dir_mode=0777``, so the
-    server decides them and ``chmod`` is at best a no-op and at worst the same
-    class of spurious failure. Every copy here is :func:`shutil.copyfile`,
-    which touches neither -- and notably NOT :func:`shutil.copytree`, whose
-    default ``copy_function`` is ``copy2``.
+The last one is the trap for an editor: every copy here must stay
+:func:`shutil.copyfile`, NOT :func:`shutil.copytree`, whose default
+``copy_function`` is ``copy2`` and would reintroduce it.
 """
 
 from __future__ import annotations
@@ -139,26 +117,19 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
             continue
 
         marker = destination / marker_for(child.name)
-        # ALREADY COMPLETE => NOTHING TO DO. Not merely an optimisation: the
-        # republish below removes the marker FIRST, so re-copying a known-good
-        # rung leaves it transiently unmarked, and a leg that dies in that
-        # window makes the manifest name a rung the next fetch then refuses.
-        #
-        # Nor is it a rare cost. A resumed leg copies its starting rung onto
-        # the node fresh, giving it a newer mtime than the share's copy, so the
-        # update rule sees every resumed leg's starting rung as changed:
-        # measured at 6.6 minutes re-uploading 809 MB that was already there.
+        # ALREADY COMPLETE => NOTHING TO DO. Not just an optimisation: the
+        # republish below drops the marker first, so re-copying a known-good
+        # rung leaves it briefly unmarked and a leg dying in that window makes
+        # the manifest name a rung the next fetch refuses. Nor is it rare --
+        # measured at 6.6 minutes re-uploading 809 MB already on the share.
         if marker.exists():
             continue
         _unlink(marker)
-        # UNCONDITIONAL, not the update rule -- the same argument the fetch
-        # direction makes, in reverse. An unmarked destination is the residue
-        # of an interrupted publish, and the file that was mid-copy when the
-        # kill landed is TRUNCATED yet NEWER than the node's source, so the
-        # update rule skips exactly the one file that is wrong and then the
-        # marker blesses the rung as complete. `cp -ru` had this hole too; it
-        # needed a leg to die mid-publish and a later leg to republish the
-        # same rung, which is precisely what a Batch retry does.
+        # UNCONDITIONAL, not the update rule. An unmarked destination is the
+        # residue of an interrupted publish, and the file that was mid-copy is
+        # TRUNCATED yet NEWER than the source -- so the update rule would skip
+        # exactly the wrong file and the marker would bless it. `cp -ru` had
+        # this hole too; a Batch retry is what triggers it.
         if _copy_dir(child, destination / child.name, log, update=False):
             _touch(marker)
         else:
