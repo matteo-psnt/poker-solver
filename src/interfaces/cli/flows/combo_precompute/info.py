@@ -100,7 +100,13 @@ def handle_combo_info(ctx: CliContext) -> None:
 
 
 def _show_detailed_info(ctx: CliContext, abstractions: list[AbstractionEntry]) -> None:
-    """Show detailed info for a selected abstraction."""
+    """Show detailed info for a selected abstraction.
+
+    ``Back`` is narrowed rather than compared against None: questionary falls
+    back to a Choice's title when its value is None, so the sentinel arrives as
+    the string ``"Back"`` and an ``is not None`` test lets it straight through
+    to ``.path``. See the same note on ``_select_abstraction``.
+    """
     choices: list[Choice] = [Choice(title=entry.label, value=entry) for entry in abstractions]
     choices.append(Choice(title="Back", value=None))
 
@@ -109,7 +115,7 @@ def _show_detailed_info(ctx: CliContext, abstractions: list[AbstractionEntry]) -
         "Select abstraction for detailed view:",
         choices=choices,
     )
-    if selected is not None:
+    if isinstance(selected, AbstractionEntry):
         path = selected.path
 
         print("\n" + "=" * 60)

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from src.core.game.state import Street
+from src.engine.solver.protocols import BucketingStrategy
 from src.interfaces.cli.flows.combo_precompute.common import (
     BOARD_CARDS_BY_STREET,
     _parse_cards,
@@ -59,7 +60,7 @@ def _load_abstraction(abstraction_path: Path) -> DenseBucketer | None:
     return abstraction
 
 
-def _lookup_once(ctx: CliContext, abstraction: DenseBucketer, street: Street) -> None:
+def _lookup_once(ctx: CliContext, abstraction: BucketingStrategy, street: Street) -> None:
     """One hand/board lookup, plus the optional isomorphic-board check.
 
     Errors are printed rather than raised: this is a REPL over user-typed cards,
