@@ -562,6 +562,21 @@ def _cause(code: int, outcome: str | None) -> str:
     }.get(code, leg_log.CAUSE_FAILED)
 
 
+def _eval_flags() -> tuple[str, ...]:
+    """The leg's eval flags, and NEVER an exception.
+
+    ``_record`` suppresses everything, so a raise in here would not surface --
+    it would silently cost the whole exit account, which is the one thing the
+    leg log exists to preserve. A malformed value is worth losing; the record
+    around it is not.
+    """
+    try:
+        parsed = json.loads(os.environ.get("RUN_EVAL_FLAGS_JSON") or "[]")
+    except ValueError:
+        return ()
+    return tuple(str(item) for item in parsed) if isinstance(parsed, list) else ()
+
+
 def _record(paths: NodePaths, event: str, *, code: int | None = None, cause: str | None = None):
     """Never fatal, and never allowed to be the reason a leg fails.
 
@@ -578,6 +593,12 @@ def _record(paths: NodePaths, event: str, *, code: int | None = None, cause: str
             op=os.environ.get("RUN_OP") or TRAIN,
             config=os.environ.get("RUN_CONFIG", ""),
             target_iteration=os.environ.get("RUN_TO", ""),
+            # `RUN_TO` is a TRAIN target and an evaluate leg leaves it 0, so
+            # without these two an evaluation records nothing about what it
+            # actually scored -- which is how 38 evaluate legs came to be
+            # indistinguishable in the record.
+            eval_at=os.environ.get("RUN_EVAL_AT", ""),
+            eval_flags=_eval_flags(),
             event=event,
             cause=cause,
             exit_code=code,

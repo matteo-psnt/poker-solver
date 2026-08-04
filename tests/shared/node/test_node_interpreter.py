@@ -41,6 +41,8 @@ GUARDED_SOURCES = [
     *sorted(NODE_PACKAGE.glob("*.py")),
     REPO_ROOT / "src" / "shared" / "leg_log.py",
     REPO_ROOT / "src" / "shared" / "cache.py",
+    # Imported by `leg_log` to word a leg the same way `spec` names it.
+    REPO_ROOT / "src" / "shared" / "describe.py",
 ]
 
 NODE_PYTHON = "3.10"

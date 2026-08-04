@@ -259,3 +259,60 @@ class TestNodeSideConstraints:
         assert result.returncode == 0, result.stderr
         assert "ok" in result.stdout
         assert (leg_log.legs_dir(tmp_path) / "t.1.start.json").exists()
+
+
+class TestWhatALegDid:
+    """`target_iteration` is RUN_TO, which an evaluate leg never sets.
+
+    38 evaluate legs on the share therefore recorded a target of `0`, and their
+    rung and board seed were written down nowhere — while the eval documents
+    they produced carry no task reference to join back on. This is what stops
+    the next set going the same way.
+    """
+
+    def test_an_evaluation_records_the_rung_and_the_seed_it_scored(self, tmp_path):
+        leg_log.write_node_record(
+            tmp_path,
+            task_id="t1",
+            event=leg_log.EVENT_STARTED,
+            run_id="run-production-025433-1095",
+            op="evaluate",
+            eval_at="150000000",
+            eval_flags=("--br-flops", "4", "--br-board-seed", "7"),
+        )
+        (row,) = leg_log.read_legs(tmp_path)
+        assert row["eval_at"] == "150000000"
+        assert row["what"] == "evaluate @150M seed7"
+
+    def test_three_seeds_on_one_checkpoint_are_now_distinguishable(self, tmp_path):
+        """The exact case that had to be kept in a scratchpad file."""
+        for index, seed in enumerate(("7", "13", "29")):
+            leg_log.write_node_record(
+                tmp_path,
+                task_id=f"t{index}",
+                event=leg_log.EVENT_STARTED,
+                run_id="run-production-025433-1095",
+                op="evaluate",
+                eval_at="150000000",
+                eval_flags=("--br-board-seed", seed),
+            )
+        assert len({row["what"] for row in leg_log.read_legs(tmp_path)}) == 3
+
+    def test_a_training_leg_says_what_it_was_aiming_at(self, tmp_path):
+        leg_log.write_node_record(
+            tmp_path,
+            task_id="t1",
+            event=leg_log.EVENT_STARTED,
+            op="train",
+            target_iteration="5000000",
+        )
+        (row,) = leg_log.read_legs(tmp_path)
+        assert row["what"] == "train ->5M"
+
+    def test_a_leg_from_before_these_fields_degrades_to_its_op(self, tmp_path):
+        """Honest: those records genuinely hold nothing more to show."""
+        leg_log.write_node_record(
+            tmp_path, task_id="t1", event=leg_log.EVENT_STARTED, op="evaluate", target_iteration="0"
+        )
+        (row,) = leg_log.read_legs(tmp_path)
+        assert row["what"] == "evaluate"

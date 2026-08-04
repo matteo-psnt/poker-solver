@@ -29,6 +29,7 @@ from typing import Any
 
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation.ledger import rebuild_ledger
+from src.shared import run_names
 
 
 @dataclass(frozen=True)
@@ -81,14 +82,33 @@ class Command:
 
 
 def resolve_run_dir(run: str, runs_dir: str) -> Path:
-    """Resolve a run identifier (name under ``runs_dir``) or an explicit path."""
+    """Resolve a run identifier (name under ``runs_dir``) or an explicit path.
+
+    A FRAGMENT resolves too, the way a git short hash does. Run ids are long,
+    share a prefix, and differ only at the end -- ``run-production-025433-1095``
+    -- so the piece that actually identifies one is usually its tail. Matching
+    anywhere in the name rather than only at the front is what makes ``runinfo
+    1095`` work, and typing the whole id was the single most tedious thing
+    about every reader command.
+
+    Ambiguity is an error that NAMES the candidates: silently taking the first
+    match would answer a question about a different run than the one asked
+    about, and every reader here is used to make a decision.
+    """
     as_path = Path(run)
     if as_path.is_dir():
         return as_path
-    candidate = Path(runs_dir) / run
-    if candidate.is_dir():
-        return candidate
-    raise CommandError(f"Run not found: '{run}' (looked at {as_path} and {candidate})")
+    root = Path(runs_dir)
+    exact = root / run
+    if exact.is_dir():
+        return exact
+    names = [p.name for p in root.iterdir() if p.is_dir()] if root.is_dir() else []
+    matches = run_names.matching(run, names)
+    if len(matches) == 1:
+        return root / matches[0]
+    if matches:
+        raise CommandError(run_names.ambiguous_message(run, matches))
+    raise CommandError(f"Run not found: '{run}' (looked at {as_path} and {exact})")
 
 
 def parse_overrides(pairs: list[str]) -> dict[str, Any]:

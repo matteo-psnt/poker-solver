@@ -57,3 +57,36 @@ export function shortId(id: string, head = 18, tail = 8): string {
   if (id.length <= head + tail + 1) return id;
   return `${id.slice(0, head)}…${id.slice(-tail)}`;
 }
+
+/**
+ * `run-production-025433-1095` → `production-1095`.
+ *
+ * Ids are long, share a prefix, and differ only at the END, so a column of them
+ * reads as one repeated string with noise on the tail. The config and the
+ * discriminator are the two parts that identify a run; the timestamp between
+ * them is the part nobody reads.
+ *
+ * Mirrors `run_token` in `src/interfaces/cloud/spec.py` — the SAME rule that
+ * now builds task ids — so what the console shows and what Batch shows are the
+ * same words. Always pair it with the full id in a `title`: this is a display
+ * form, never an identifier to copy.
+ */
+export function runLabel(id: string): string {
+  const stem = id.replace(/^run-/, "");
+  const parts = stem.split("-").filter(Boolean);
+  return parts.length > 2 ? `${parts[0]}-${parts[parts.length - 1]}` : stem;
+}
+
+/**
+ * `score-production-1095-150M-seed7-090456-18475` → `score-production-1095-150M-seed7`.
+ *
+ * A task id is `<label>-<HHMMSS>-<nonce>` (`task_id` in spec.py). The label
+ * says what the leg does; the suffix exists only to keep two submissions in
+ * one second apart, and it is what made a column of ids look identical.
+ *
+ * Legs queued before labels carried the op strip down to a bare run id — which
+ * is honest, because that is genuinely all those ids ever recorded.
+ */
+export function legLabel(taskId: string): string {
+  return taskId.replace(/-\d{6}-\d+$/, "");
+}

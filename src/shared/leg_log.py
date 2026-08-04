@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from src.shared import records
+from src.shared.describe import compact_count, flag_value
 
 LEGS_DIRNAME = "legs"
 
@@ -98,6 +99,46 @@ def legs_dir(share: str | os.PathLike[str]) -> Path:
     return Path(share) / LEGS_DIRNAME
 
 
+TASK_ID_ENV = "AZ_BATCH_TASK_ID"
+
+
+def current_task_id(default: str = "") -> str:
+    """Which Batch task this process IS, if it is one.
+
+    Defined here because this module owns "which leg is this" as its primary
+    key, and two callers need the same answer: the wrapper writing the leg
+    record, and the evaluator stamping its document so the number it produced
+    can be traced back to the leg that produced it.
+
+    Empty off a node, deliberately: an evaluation run from anywhere else
+    genuinely has no task, and "" says that where a placeholder would read as a
+    task that could be looked up.
+    """
+    return os.environ.get(TASK_ID_ENV, default)
+
+
+def _what(node: dict[str, Any]) -> str:
+    """What this leg DID, in a few characters: ``train ->5M``, ``score @150M seed7``.
+
+    Degrades to the bare op for a leg recorded before these fields existed, and
+    that is the honest answer -- an evaluate leg from before this change wrote
+    down neither its rung nor its seed, so there is nothing to recover.
+    """
+    op = node.get("op") or ""
+    # Which FIELD is populated, not which op string: the op constants already
+    # live in two places (`spec` and `node.plan`, pinned against each other by
+    # test_plan) and a third copy here would be one more thing to keep in step.
+    rung = str(node.get("eval_at") or "")
+    if rung.isdigit():
+        seed = flag_value(node.get("eval_flags") or [], "--br-board-seed")
+        detail = "@" + compact_count(int(rung))
+        return f"{op} {detail} seed{seed}" if seed else f"{op} {detail}"
+    target = str(node.get("target_iteration") or "")
+    if target.isdigit() and target != "0":
+        return f"{op} ->{compact_count(int(target))}"
+    return op
+
+
 def write_node_record(
     share: str | os.PathLike[str],
     *,
@@ -108,6 +149,8 @@ def write_node_record(
     op: str = "",
     config: str = "",
     target_iteration: str = "",
+    eval_at: str = "",
+    eval_flags: tuple[str, ...] = (),
     node_id: str = "",
     exit_code: int | None = None,
     cause: str | None = None,
@@ -116,6 +159,14 @@ def write_node_record(
 
     Never overwrites -- see the module docstring for why the attempt number and
     the start/exit split are both load-bearing.
+
+    ``eval_at`` and ``eval_flags`` exist because ``target_iteration`` is
+    ``RUN_TO``, which an evaluate leg does not use -- so every one of the 38
+    evaluate legs on the share recorded a target of ``0`` and the rung and board
+    seed were written down NOWHERE. Three evaluations of one checkpoint at three
+    seeds were indistinguishable in the record, and the eval documents they
+    produced carry no task reference to join back on. Nothing can recover those;
+    this is what stops the next set going the same way.
     """
     directory = legs_dir(share)
     directory.mkdir(parents=True, exist_ok=True)
@@ -133,6 +184,8 @@ def write_node_record(
         "op": op or "train",
         "config": config,
         "target_iteration": target_iteration,
+        "eval_at": eval_at,
+        "eval_flags": list(eval_flags),
         "node_id": node_id,
         "event": event,
         "ts": _utcnow(),
@@ -282,6 +335,11 @@ def read_legs(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
                 "op": node.get("op", ""),
                 "config": node.get("config", ""),
                 "target_iteration": node.get("target_iteration", ""),
+                "eval_at": node.get("eval_at", ""),
+                "eval_flags": node.get("eval_flags", []),
+                # One phrase saying what this leg DID, derived here so the
+                # terminal and the console cannot word it differently.
+                "what": _what(node),
                 "cause": cause,
                 "cause_source": cause_source,
                 # Not dict.get's default: the node record always carries the
@@ -333,7 +391,9 @@ def _load(path: Path) -> dict[str, Any] | None:
 
 def format_table(rows: Iterable[dict[str, Any]]) -> str:
     """Compact fixed-width listing, one row per leg."""
-    columns = ("task_id", "attempt", "op", "run_id", "cause", "exit_code", "ended_at")
+    # `what` rather than `op`: it IS the op for a leg that recorded nothing more,
+    # and the op plus what it was aimed at for one that did.
+    columns = ("task_id", "attempt", "what", "run_id", "cause", "exit_code", "ended_at")
     materialised = [{c: _cell(r.get(c)) for c in columns} for r in rows]
     if not materialised:
         return "  no leg records on the share"

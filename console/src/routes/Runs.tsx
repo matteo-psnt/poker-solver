@@ -3,7 +3,7 @@ import { Panel } from "@/components/Panel";
 import { StatusBadge, shortState } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { count } from "@/lib/format";
+import { count, runLabel } from "@/lib/format";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 
@@ -117,9 +117,10 @@ export function Runs() {
                     <Link
                       to="/runs/$runId"
                       params={{ runId: run.name }}
+                      title={run.name}
                       className="hover:underline"
                     >
-                      {run.name}
+                      {runLabel(run.name)}
                     </Link>
                     {!run.loadable && run.blocker && (
                       <span className="ml-2 text-[11px] text-amber-400">⚠ {run.blocker}</span>
