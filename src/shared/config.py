@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from typing import Annotated, Any, Literal
 
 import xxhash
@@ -129,6 +130,46 @@ class GameConfig(StrictFrozenModel):
         return self
 
 
+REQUIRED_PREFLOP_TEMPLATES = frozenset(
+    {"sb_first_in", "bb_vs_limp", "bb_vs_open", "sb_vs_3bet", "bb_vs_4bet", "sb_vs_5bet"}
+)
+REQUIRED_POSTFLOP_TEMPLATES = frozenset(
+    {"first_aggressive", "facing_bet", "after_one_raise", "after_two_raises"}
+)
+REQUIRED_RAISE_RULE_KEYS = frozenset({"facing_1", "facing_2", "facing_3_plus"})
+POSTFLOP_TOKENS = frozenset({"min_raise", "pot_raise", "jam", "allin", "all_in", "jam_low_spr"})
+
+
+def _require_keys(present: Iterable[str], required: frozenset[str], field: str) -> None:
+    """Refuse a mapping that omits any key the action model cannot run without."""
+    missing = required - set(present)
+    if missing:
+        raise ValueError(f"{field} missing required keys: {sorted(missing)}")
+
+
+def _size_or_word(token: float | str, field: str, template_name: str) -> str | None:
+    """Check the token grammar both streets share, and normalise the word form.
+
+    Returns:
+        The stripped, lowercased word for the caller to check against its own
+        street's vocabulary — or None when the token was a numeric size, which
+        needs nothing further.
+
+    Raises:
+        ValueError: the size was not positive, or the token was neither a
+            number nor a string.
+    """
+    if isinstance(token, (int, float)):
+        if float(token) <= 0:
+            raise ValueError(f"{field}[{template_name}] numeric sizes must be > 0")
+        return None
+    if not isinstance(token, str):
+        raise ValueError(
+            f"{field}[{template_name}] contains unsupported token type: {type(token).__name__}"
+        )
+    return token.strip().lower()
+
+
 class ActionModelConfig(StrictFrozenModel):
     """Action model configuration with node-template and SPR-aware defaults."""
 
@@ -163,110 +204,63 @@ class ActionModelConfig(StrictFrozenModel):
 
     @model_validator(mode="after")
     def validate_templates_and_rules(self) -> ActionModelConfig:
-        required_preflop_templates = {
-            "sb_first_in",
-            "bb_vs_limp",
-            "bb_vs_open",
-            "sb_vs_3bet",
-            "bb_vs_4bet",
-            "sb_vs_5bet",
-        }
-        required_postflop_templates = {
-            "first_aggressive",
-            "facing_bet",
-            "after_one_raise",
-            "after_two_raises",
-        }
-        required_raise_rule_keys = {
-            "facing_1",
-            "facing_2",
-            "facing_3_plus",
-        }
+        """Refuse an action model that cannot be built into a tree.
 
-        missing_preflop = required_preflop_templates - set(self.preflop_templates.keys())
-        if missing_preflop:
-            raise ValueError(f"preflop_templates missing required keys: {sorted(missing_preflop)}")
+        Order:
+            Structural failures are reported before grammatical ones. A config
+            missing ``bb_vs_open`` entirely and a config whose ``bb_vs_open``
+            holds a bad token are different mistakes, and hearing about the
+            token first sends the reader to the wrong line.
+        """
+        _require_keys(self.preflop_templates, REQUIRED_PREFLOP_TEMPLATES, "preflop_templates")
+        _require_keys(self.postflop_templates, REQUIRED_POSTFLOP_TEMPLATES, "postflop_templates")
+        _require_keys(self.raise_count_rules, REQUIRED_RAISE_RULE_KEYS, "raise_count_rules")
 
-        missing_postflop = required_postflop_templates - set(self.postflop_templates.keys())
-        if missing_postflop:
-            raise ValueError(
-                f"postflop_templates missing required keys: {sorted(missing_postflop)}"
-            )
-
-        missing_rule_keys = required_raise_rule_keys - set(self.raise_count_rules.keys())
-        if missing_rule_keys:
-            raise ValueError(
-                f"raise_count_rules missing required keys: {sorted(missing_rule_keys)}"
-            )
-
-        extra_rule_keys = set(self.raise_count_rules.keys()) - required_raise_rule_keys
+        extra_rule_keys = set(self.raise_count_rules) - REQUIRED_RAISE_RULE_KEYS
         if extra_rule_keys:
             raise ValueError(f"raise_count_rules has unknown keys: {sorted(extra_rule_keys)}")
 
+        self._validate_rules_point_at_real_templates()
+        self._validate_preflop_tokens()
+        self._validate_postflop_tokens()
+        return self
+
+    def _validate_rules_point_at_real_templates(self) -> None:
+        """Every raise-count rule must name a postflop template that exists."""
         for key, template_name in self.raise_count_rules.items():
             if template_name not in self.postflop_templates:
                 raise ValueError(
                     f"raise_count_rules[{key}] points to unknown postflop template: {template_name}"
                 )
 
+    def _validate_preflop_tokens(self) -> None:
+        """Preflop takes passive words, jams, or an open-ended raise multiplier."""
         for template_name, tokens in self.preflop_templates.items():
             if not tokens:
                 raise ValueError(f"preflop_templates[{template_name}] must not be empty")
             for token in tokens:
-                if isinstance(token, (int, float)):
-                    if float(token) <= 0:
-                        raise ValueError(
-                            f"preflop_templates[{template_name}] numeric sizes must be > 0"
-                        )
+                word = _size_or_word(token, "preflop_templates", template_name)
+                if word is None or word in PASSIVE_TOKENS | JAM_TOKENS:
                     continue
-                if not isinstance(token, str):
-                    raise ValueError(
-                        f"preflop_templates[{template_name}] contains unsupported token type: "
-                        f"{type(token).__name__}"
-                    )
-
-                if token.strip().lower() in PASSIVE_TOKENS | JAM_TOKENS:
-                    continue
+                invalid = f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
                 try:
-                    multiplier = parse_multiplier_token(token)
+                    multiplier = parse_multiplier_token(word)
                 except ValueError as exc:
-                    raise ValueError(
-                        f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
-                    ) from exc
+                    raise ValueError(invalid) from exc
                 if multiplier is None or multiplier <= 0:
-                    raise ValueError(
-                        f"Invalid preflop token '{token}' in preflop_templates[{template_name}]"
-                    )
+                    raise ValueError(invalid)
 
+    def _validate_postflop_tokens(self) -> None:
+        """Postflop takes a closed vocabulary, unlike preflop's multipliers."""
         for template_name, tokens in self.postflop_templates.items():
             if not tokens:
                 raise ValueError(f"postflop_templates[{template_name}] must not be empty")
             for token in tokens:
-                if isinstance(token, (int, float)):
-                    if float(token) <= 0:
-                        raise ValueError(
-                            f"postflop_templates[{template_name}] numeric sizes must be > 0"
-                        )
-                    continue
-                if not isinstance(token, str):
-                    raise ValueError(
-                        f"postflop_templates[{template_name}] contains unsupported token type: "
-                        f"{type(token).__name__}"
-                    )
-                normalized = token.strip().lower()
-                if normalized not in {
-                    "min_raise",
-                    "pot_raise",
-                    "jam",
-                    "allin",
-                    "all_in",
-                    "jam_low_spr",
-                }:
+                word = _size_or_word(token, "postflop_templates", template_name)
+                if word is not None and word not in POSTFLOP_TOKENS:
                     raise ValueError(
                         f"Invalid postflop token '{token}' in postflop_templates[{template_name}]"
                     )
-
-        return self
 
 
 class ResolverConfig(StrictFrozenModel):
