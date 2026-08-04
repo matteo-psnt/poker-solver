@@ -127,7 +127,7 @@ class TestSourceSeam:
         contention the per-run records exist to remove."""
         import argparse
 
-        from src.interfaces.cli.commands import _base
+        from src.interfaces.commands import _base
 
         args = argparse.Namespace(source="share", runs_dir="unused", ledger="unused.jsonl")
         derived = _base.ledger_for(args, tmp_path)

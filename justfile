@@ -132,7 +132,7 @@ credit-check *flags:
 # answered "what can I do here?" with 13 of 26 -- a hand-maintained subset that
 # `poker-solver --help` already answers in full and cannot drift from.
 # `just fetch` outlived the command it called by weeks for exactly that reason;
-# `tests/interfaces/cli/test_justfile_aliases.py` still guards what is left.
+# `tests/interfaces/commands/test_justfile_aliases.py` still guards what is left.
 
 # Any subcommand, with any flags. The escape hatch, so the list above does not
 # have to grow a recipe per flag: `just cli ledger --experiment exp-7`.

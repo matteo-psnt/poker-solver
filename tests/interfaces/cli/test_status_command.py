@@ -20,8 +20,8 @@ import pytest
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
 from src.interfaces.cli import headless
-from src.interfaces.cli.commands import legs, status
-from src.interfaces.cli.commands._base import Command
+from src.interfaces.commands import legs, status
+from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 
 

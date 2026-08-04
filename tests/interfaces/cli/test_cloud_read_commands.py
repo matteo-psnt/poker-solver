@@ -7,8 +7,8 @@ either one still looks perfectly healthy.
 
 import pytest
 
-from src.interfaces.cli.commands import evaluate, jobs, pool_status, score
 from src.interfaces.cli.headless import build_parser
+from src.interfaces.commands import evaluate, jobs, pool_status, score
 
 
 def _job(job_state: str, task_state: str) -> dict:
@@ -120,7 +120,7 @@ class TestReportedLedgerPath:
     def test_it_names_the_derived_path(self, tmp_path, published, monkeypatch):
         import argparse
 
-        from src.interfaces.cli.commands import ledger as ledger_cmd
+        from src.interfaces.commands import ledger as ledger_cmd
 
         derived = tmp_path / "derived.jsonl"
         derived.write_text("")

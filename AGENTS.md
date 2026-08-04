@@ -1,7 +1,8 @@
 # Repository Guidelines
 
 ## Layout & Architecture
-`src/` is layered — `interfaces/` (cli) → `pipeline/` (training, evaluation,
+`src/` is layered — `interfaces/` (commands, plus the cli and web surfaces that
+read through them) → `pipeline/` (training, evaluation,
 abstraction) → `engine/` (solver, search) → `core/` (game, actions), with
 `shared/` importable by all layers. The layering is hard-enforced by
 import-linter (`.importlinter`, run via pre-commit).
@@ -83,8 +84,13 @@ definition: never a source of truth, never worth backing up.
     is why `ledger --rebuild` is gone (every read is a rebuild) and
     `--migrate` is gone (it rewrites in place, and the tree is a throwaway).
 
-  A subcommand is one module under `src/interfaces/cli/commands/`, listed once
-  in the `COMMANDS` tuple. The `Command` dataclass carries parser, handler AND
+  A subcommand is one module under `src/interfaces/commands/`, listed once
+  in the `COMMANDS` tuple. **That package sits beside `cli/` and `web/`, not
+  inside either** — `cli.headless` renders a command to a terminal and
+  `web.app` invokes the same command and serves the payload, so a path under
+  `cli/` named one owner for a seam with two callers. `cli/` now holds only
+  `headless.py`: the genuinely terminal-specific half.
+  The `Command` dataclass carries parser, handler AND
   renderer together on purpose: when those lived apart, `checkpoint-profile`
   borrowed evaluate's renderer and died on a missing key.
 - **A command is callable without a command line, and refusals are values.**
@@ -113,7 +119,7 @@ definition: never a source of truth, never worth backing up.
   `just panic <rg> <account> <pool>` is the one recipe that deliberately avoids
   the Python CLI and reads no Terraform state, so it works from a phone in Azure
   Cloud Shell. The aliases are passthroughs and nothing else — a guard test
-  (`tests/interfaces/cli/test_justfile_aliases.py`) fails if one names a
+  (`tests/interfaces/commands/test_justfile_aliases.py`) fails if one names a
   subcommand that does not exist, which is how a `just fetch` recipe outlived
   the command it called by weeks. Anything needing a flag that is not aliased
   goes through `uv run poker-solver <cmd>`, or `just cli <cmd> [flags...]`.

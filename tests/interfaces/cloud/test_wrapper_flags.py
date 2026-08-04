@@ -33,7 +33,7 @@ import tomllib
 
 import pytest
 
-from src.interfaces.cli.commands import COMMANDS
+from src.interfaces.commands import COMMANDS
 from src.shared.node import plan as node_plan
 from src.shared.node import runner as node_runner
 

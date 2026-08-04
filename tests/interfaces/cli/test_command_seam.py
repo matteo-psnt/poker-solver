@@ -21,9 +21,9 @@ from typing import Any
 import pytest
 
 from src.interfaces.cli import headless
-from src.interfaces.cli.commands import COMMANDS, progress
-from src.interfaces.cli.commands._base import Command
 from src.interfaces.cloud.config import CloudConfigError
+from src.interfaces.commands import COMMANDS, progress
+from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 
 
