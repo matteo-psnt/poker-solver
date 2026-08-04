@@ -13,9 +13,10 @@ This module provides:
 2. Mapping from raw boards to their canonical representatives
 3. Storage-efficient board IDs for lookup tables
 
-Enumeration results are cached on disk (``data/cache/canonical_boards/`` by
-default) — the river's 2.6M raw boards take ~1 min to canonicalize but load
-from cache in under a second.
+Enumeration results are cached on disk — the river's 2.6M raw boards take
+~1 min to canonicalize but load from cache in under a second. The cache lives
+OUTSIDE the working tree (see :mod:`src.shared.cache`); it used to be
+``data/cache/canonical_boards`` and was the last thing recreating ``data/``.
 """
 
 from collections.abc import Iterator
@@ -31,8 +32,9 @@ from src.pipeline.abstraction.postflop.suit_isomorphism import (
     canonicalize_board,
     get_canonical_board_id,
 )
+from src.shared.cache import cache_dir
 
-DEFAULT_CACHE_DIR = Path("data/cache/canonical_boards")
+DEFAULT_CACHE_DIR = cache_dir("canonical_boards")
 _CACHE_FORMAT_VERSION = 1
 
 # eval7 encodings used to serialize concrete cards as rank*4 + suit codes.

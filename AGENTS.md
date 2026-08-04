@@ -15,10 +15,17 @@ identified as loadable by `STATIC_CHECKPOINT.json`.
 
 Tests in `tests/` mirror this layout. Config YAML lives under `config/`
 (source of truth for training setups; name new files for their purpose).
-**The laptop holds no run data and no training artifact.** Runs live on the
-share and nowhere else, and `data/` now holds only `cache/canonical_boards`,
-which the code regenerates on demand — delete the whole directory and the FULL
-suite still passes (measured: 1371 passed, 2 skipped). The 194 MB
+**There is no `data/` directory, and nothing recreates one.** Runs live on the
+share and nowhere else; the regenerable caches moved OUT of the working tree to
+`src/shared/cache.py`'s root (`$POKER_SOLVER_CACHE`, else `$XDG_CACHE_HOME`,
+else `~/.cache/poker-solver`), and `tests/shared/test_cache.py` fails if any
+module names a `data/cache` path again — which is how the directory came back
+after each of the two previous prunes. The node wrapper sets
+`POKER_SOLVER_CACHE=/mnt/work/cache`, because a Batch task's `HOME` is its own
+working directory and the default would re-canonicalise the river's 2.6M boards
+(~1 min) on every leg. `$CODE/data` is still symlinked on a node — that is
+where `precompute` writes and where `runs_dir` resolves — but it is a runtime
+path on `/mnt/work`, never a directory in the checkout. The 194 MB
 `combo_abstraction` that survived earlier prunes was a fixture for exactly ONE
 test, and while it was missing that test FAILED with a `FileNotFoundError`
 pointing at `precompute` — an environment report dressed as a regression, on

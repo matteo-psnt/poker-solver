@@ -37,10 +37,11 @@ from sklearn.cluster import KMeans
 
 from src.core.game.state import Card
 from src.pipeline.abstraction.preflop.hand_classes import PreflopHandClasses
+from src.shared.cache import cache_dir
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CACHE_DIR = Path("data/cache/preflop_equity")
+DEFAULT_CACHE_DIR = cache_dir("preflop_equity")
 DEFAULT_SAMPLES = 20_000
 DEFAULT_SEED = 42
 NUM_PREFLOP_CLASSES = 169
