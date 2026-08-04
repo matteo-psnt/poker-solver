@@ -467,7 +467,13 @@ def _precompute(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, s
         return 1, None
 
     try:
-        archive.copy_tree(output, destination)
+        # UNCONDITIONAL. Reaching here means either the name is new or the
+        # operator passed RUN_FORCE_PUBLISH to replace it -- and the update rule
+        # would skip exactly the files the existing copy has NEWER than the one
+        # just built, which is all of them. `cp -ru` had the same hole: "force"
+        # silently left the old abstraction in place, which is the one outcome
+        # the flag exists to prevent.
+        archive.copy_tree(output, destination, update=False)
     except OSError as error:
         log(f"FATAL publish failed: {error}")
         return 1, None

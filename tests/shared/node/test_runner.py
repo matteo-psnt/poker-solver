@@ -7,6 +7,7 @@ expensive was the exit trap reading `$?` as zero on a signal death, which made
 
 from __future__ import annotations
 
+import json
 import sys
 
 import pytest
@@ -377,3 +378,94 @@ class TestTheGuardReachesTheWholeTree:
         _time.sleep(0.5)
         after = marker.read_text() if marker.exists() else ""
         assert before == after, "the grandchild outlived the guard's deadline"
+
+
+class TestPrecompute:
+    """Never probed on the pool -- it is a rare, expensive op -- so the guard
+    that makes it safe to run in the cloud is only checked here."""
+
+    def _wrote(self, paths, name="ochs_gate_ochs"):
+        output = paths.data / "combo_abstraction" / name
+        (output / "buckets.npy").parent.mkdir(parents=True, exist_ok=True)
+        (output / "buckets.npy").write_text("buckets")
+        (paths.work / "precompute.json").parent.mkdir(parents=True, exist_ok=True)
+        (paths.work / "precompute.json").write_text(json.dumps({"output_dir": str(output)}))
+        return output
+
+    def test_a_fresh_abstraction_is_published(self, paths, log, monkeypatch):
+        self._wrote(paths)
+        monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
+        leg = node_plan.LegPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+
+        assert runner._precompute(leg, paths, log) == (0, None)
+        published = paths.share / "combo_abstraction" / "ochs_gate_ochs" / "buckets.npy"
+        assert published.read_text() == "buckets"
+
+    def test_republishing_over_an_existing_name_is_refused(self, paths, log, monkeypatch):
+        """Bucket ASSIGNMENT is not pinned by card_abstraction_hash, so
+        replacing it silently changes which bucket a hand lands in while every
+        run trained against the old copy keeps a provenance check that still
+        passes. This guard is what makes precompute-in-the-cloud as safe as on
+        a laptop."""
+        self._wrote(paths)
+        existing = paths.share / "combo_abstraction" / "ochs_gate_ochs"
+        existing.mkdir(parents=True)
+        (existing / "buckets.npy").write_text("THE ORIGINAL")
+        monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
+        leg = node_plan.LegPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+
+        assert runner._precompute(leg, paths, log) == (1, None)
+        assert (existing / "buckets.npy").read_text() == "THE ORIGINAL"
+        assert "REFUSING to republish" in log.path.read_text()
+
+    def test_force_publish_overrides_it(self, paths, log, monkeypatch):
+        self._wrote(paths)
+        existing = paths.share / "combo_abstraction" / "ochs_gate_ochs"
+        existing.mkdir(parents=True)
+        (existing / "buckets.npy").write_text("THE ORIGINAL")
+        monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
+        leg = node_plan.LegPlan(
+            op=node_plan.PRECOMPUTE, config="ochs_gate_ochs", force_publish=True
+        )
+
+        assert runner._precompute(leg, paths, log) == (0, None)
+        assert (existing / "buckets.npy").read_text() == "buckets"
+
+    def test_a_failed_build_publishes_nothing(self, paths, log, monkeypatch):
+        monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 2)
+        leg = node_plan.LegPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+
+        assert runner._precompute(leg, paths, log) == (2, None)
+        assert not (paths.share / "combo_abstraction").exists()
+
+    def test_an_unreadable_payload_is_not_a_traceback(self, paths, log, monkeypatch):
+        """The command REPORTS where it wrote; the directory name is never
+        re-derived. If that report is missing, guessing would publish the
+        wrong thing under a name that can never be corrected."""
+        (paths.work).mkdir(parents=True, exist_ok=True)
+        (paths.work / "precompute.json").write_text("not json")
+        monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
+        leg = node_plan.LegPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+
+        assert runner._precompute(leg, paths, log) == (1, None)
+        assert "no usable output_dir" in log.path.read_text()
+
+
+class TestRepairLadder:
+    def test_it_fetches_nothing(self, paths, log, monkeypatch):
+        """It reads the share IN PLACE. Without the exemption it once fell to a
+        catch-all copy and spent 25+ minutes duplicating a 16 GB ladder it then
+        ignored."""
+        share = paths.archive / "run-a"
+        (share / "static-1000.zarr").mkdir(parents=True)
+        (share / "static-1000.zarr" / "chunk").write_text("data")
+        monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
+        leg = node_plan.LegPlan(op=node_plan.REPAIR_LADDER, run_id="run-a", config="quick_test")
+
+        assert runner._repair_ladder(leg, paths, log) == (0, None)
+        assert not (paths.runs / "run-a").exists()
+
+    def test_an_absent_run_is_a_message_not_a_traceback(self, paths, log):
+        leg = node_plan.LegPlan(op=node_plan.REPAIR_LADDER, run_id="ghost", config="quick_test")
+        assert runner._repair_ladder(leg, paths, log) == (1, None)
+        assert "no such run on the share" in log.path.read_text()
