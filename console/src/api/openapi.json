@@ -3266,6 +3266,17 @@
             ],
             "title": "Method"
           },
+          "pool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool"
+          },
           "run": {
             "title": "Run",
             "type": "string"
