@@ -9,16 +9,19 @@ to start, nothing to remember to stop, and no idle compute bill.
 tasks are deliberately *not* in Terraform: `azurerm_batch_job` exposes no useful
 properties and tasks have no resource at all. A submission is a runtime act.
 
-## Two states, on purpose
+## Three states, on purpose
 
-| | `infra/` | `infra/store/` |
-|---|---|---|
-| Holds | Batch account, pool, guardrails | storage account + file share |
-| Lifetime | disposable — `just destroy` | **durable**, `prevent_destroy` |
-| Resource group | `poker-batch-rg` | `poker-solver-store-rg` |
+| | `infra/` | `infra/store/` | `infra/serve/` |
+|---|---|---|---|
+| Holds | Batch account, pool, guardrails | storage account + file share | one VM that serves a run for reading |
+| Lifetime | disposable — `just destroy` | **durable**, `prevent_destroy` | long-lived, but holds only copies |
+| Resource group | `poker-batch-rg` | `poker-solver-store-rg` | `poker-solver-serve-rg` |
 
 Separate root modules mean separate state, so tearing down compute **cannot**
-reach the experiment record.
+reach the experiment record — and cannot reach a box that is currently serving a
+run to a browser. The third is described under *Serving a run for reading* below;
+the short version is that the pool is for work that finishes, and a server is
+not.
 
 ## Measured constraints — do not "simplify" these away
 
@@ -307,9 +310,48 @@ response was already consumed". That is an `az` CLI bug in its error handler; th
 real Azure error is *above* the traceback. Terraform surfaces these properly,
 which is part of why provisioning moved there.
 
+## Serving a run for reading — `infra/serve/`
+
+A **third** Terraform state, and the third lifetime: one long-lived VM that loads
+a trained run and answers questions about it (`poker-solver blueprint-serve`).
+
+- `infra/` — the pool. Disposable; `just destroy` is routine.
+- `infra/store/` — the share. Outlives every box.
+- `infra/serve/` — the reader. Long-lived but **not precious**: it holds copies.
+
+**It is deliberately not a Batch task.** The pool is for work that *finishes* —
+the autoscale formula counts running tasks to size the pool, `taskcompletion`
+deallocation assumes tasks end, and the task `maxWallClockTime` exists to kill
+anything that does not. A server is the exact shape all three are aimed at, and
+`TaskName` being a closed enum of three training ops says the same thing in code.
+
+**It is a VM rather than Container Apps** because both artifacts it needs must be
+on local disk — a checkpoint is ~5,500 small files that the read path mmaps, and
+SMB makes every page fault a network round trip. A scale-to-zero container would
+re-copy ~1.6 GB on each cold start, so the one property that would justify the
+extra machinery (a container image, a registry) is the property this workload
+cannot use.
+
+**Nothing is exposed.** The only inbound rule is SSH from `ssh_source_address`;
+the server binds loopback and is reached by forwarding a port over SSH, so auth
+is the key's rather than something invented. Do not add the server's port to the
+NSG — that publishes an unauthenticated read interface to a trained run.
+
+```bash
+just serve-create           # once
+just serve-tunnel           # leave running in a second terminal
+just serve-ssh              # then, on the box:
+#   uv run poker-solver blueprint-serve --run <fragment> --runs-dir /mnt/work/runs
+POKER_SOLVER_BLUEPRINT_URL=http://127.0.0.1:8790 uv run poker-solver serve
+```
+
+The share is mounted **read-only** at `/mnt/shared`: this box publishes nothing,
+and a reader that cannot write cannot damage the one thing that is not a copy.
+
 ## State
 
-Terraform state is local (`infra/terraform.tfstate`, `infra/store/terraform.tfstate`) and gitignored — it can
+Terraform state is local (`infra/terraform.tfstate`, `infra/store/terraform.tfstate`,
+`infra/serve/terraform.tfstate`) and gitignored — it can
 contain resource detail you would not want committed. Solo use makes a remote
 backend unnecessary; if this ever becomes shared, move state to an Azure Storage
 backend before a second person runs `apply`.

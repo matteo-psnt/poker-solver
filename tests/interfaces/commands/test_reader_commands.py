@@ -17,10 +17,12 @@ import pytest
 
 from src.interfaces.commands import COMMANDS
 
-# The ones a node invokes. Three write to /mnt/work before publishing, so a
-# local directory is exactly what they need; `blueprint-serve` reads a
-# checkpoint and the card abstraction, which are on the share the node mounts
-# and are far too large to answer about from anywhere else.
+# The ones that run ON a box holding a run, rather than answering from the
+# published record. Three are pool tasks that write to /mnt/work before
+# publishing. `blueprint-serve` is NOT a pool task -- it runs on the long-lived
+# reader in `infra/serve/` -- but it belongs here for the same reason: it mmaps a
+# checkpoint and the card abstraction from local disk, which is a place, not a
+# record.
 NODE_SIDE = frozenset({"train-static", "precompute", "evaluate", "blueprint-serve"})
 
 LOCAL_SOURCE_FLAG = "--runs-dir"
