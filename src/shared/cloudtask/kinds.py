@@ -46,6 +46,7 @@ class TaskName(StrEnum):
     """
 
     TRAIN = "train"
+    TRAIN_VECTOR = "train-vector"
     EVALUATE = "evaluate"
     PRECOMPUTE = "precompute"
     VECTOR_SWEEP = "vector-sweep"
@@ -101,6 +102,10 @@ class Submission(TaskFields, Protocol):
     def eval_at(self) -> str: ...
     @property
     def eval_flags(self) -> Sequence[str]: ...
+    # Read by TrainVectorTask.validate: the sampled boards are the chance layer,
+    # so a submission that omits them names no game and must be refused here.
+    @property
+    def universe_boards(self) -> int: ...
 
 
 class NodePlan(TaskFields, Protocol):
@@ -133,6 +138,16 @@ class NodePlan(TaskFields, Protocol):
     def eval_flags(self) -> Sequence[str]: ...
     @property
     def progress_path(self) -> str: ...
+    @property
+    def universe_boards(self) -> int: ...
+    @property
+    def universe_seed(self) -> int: ...
+    @property
+    def dtype(self) -> str: ...
+    @property
+    def warm_start_from(self) -> str: ...
+    @property
+    def warm_start_weight(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -345,6 +360,12 @@ class TrainTask(TaskKind):
         ]
         if plan.checkpoint_every:
             argv += ["--checkpoint-every", str(plan.checkpoint_every)]
+        # Seeding is a property of a FRESH run; train_static ignores it when
+        # continuing, so a retry cannot lay the prior back over real progress.
+        if plan.warm_start_from:
+            argv += ["--warm-start-from", plan.warm_start_from]
+            if plan.warm_start_weight:
+                argv += ["--warm-start-weight", str(plan.warm_start_weight)]
         # Appended only when set: `--arm ""` records an arm literally named
         # empty string rather than an unaffiliated run.
         for flag, value in (
@@ -376,6 +397,88 @@ class TrainTask(TaskKind):
         The one kind that can already answer, because training writes a
         checkpoint as it goes and the manifest names its iteration.
         """
+        done = state.get("iteration")
+        if not isinstance(done, int | float) or plan.to <= 0:
+            return None
+        return Progress(float(done), float(plan.to), self.unit)
+
+
+class TrainVectorTask(TaskKind):
+    """Train a board-free blueprint over the whole tree at once.
+
+    The same absolute-target contract as :class:`TrainTask`, and two differences
+    that are not cosmetic.
+
+    It takes NO ``--workers``. The kernel is one process, and splatting a shared
+    array carrying that flag into a command declaring none is the defect this
+    module exists to make impossible -- three retries, each dead four seconds in.
+
+    The universe knobs have no scalar analogue. The sampled boards estimate the
+    bucket-transition matrices, so they are the chance layer, and therefore the
+    GAME rather than the schedule. An unspecified universe would silently pick
+    which game the task solves, so it is refused instead of defaulted.
+    """
+
+    name = TaskName.TRAIN_VECTOR
+    unit = "iterations"
+
+    def validate(self, task: Any) -> None:
+        if not task.config:
+            raise BadTaskError("a training task needs a config, even when continuing a run")
+        if task.to <= 0:
+            raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
+        if task.universe_boards <= 0:
+            raise BadTaskError(
+                "a board-free task needs --universe-boards: the sampled boards define "
+                "the chance layer, and so the game it solves"
+            )
+
+    def commands(self, plan: Any) -> list[list[str]]:
+        argv = [
+            "train-vector",
+            "--config",
+            plan.config,
+            "--iterations",
+            str(plan.to),
+            "--run",
+            plan.train_run_id,
+        ]
+        for flag, value in (
+            ("--universe-boards", plan.universe_boards),
+            ("--universe-seed", plan.universe_seed),
+            ("--checkpoint-every", plan.checkpoint_every),
+        ):
+            if value:
+                argv += [flag, str(value)]
+        if plan.dtype:
+            argv += ["--dtype", plan.dtype]
+        for flag, value in (
+            ("--experiment", plan.experiment),
+            ("--arm", plan.arm),
+            ("--parent", plan.parent),
+        ):
+            if value:
+                argv += [flag, value]
+        for override in plan.sets:
+            argv += ["--set", override]
+        return [argv]
+
+    def label(self, task: Any) -> str:
+        words = ["vector", _subject(task)]
+        if task.to:
+            words.append(f"to{compact(task.to)}")
+        if task.arm:
+            words.append(task.arm)
+        return "-".join(word for word in words if word)
+
+    def describe(self, record: Mapping[str, Any]) -> str:
+        target = str(record.get("target_iteration") or "")
+        if target.isdigit() and target != "0":
+            return f"board-free ->{compact(int(target))}"
+        return "board-free"
+
+    def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:
+        """Same manifest as the scalar trainer: it writes ordinary checkpoints."""
         done = state.get("iteration")
         if not isinstance(done, int | float) or plan.to <= 0:
             return None

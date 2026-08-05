@@ -1,4 +1,4 @@
-"""The board-free leg's contract, which differs from a scalar leg in one way.
+"""The board-free task's contract, which differs from a scalar task in one way.
 
 ``universe_boards`` is not a tuning knob. The bucket-transition and showdown
 matrices are estimated from those boards and they ARE the chance layer, so two
@@ -6,7 +6,7 @@ legs with different universes solve different games. Nothing downstream can
 detect that: the tree fingerprint covers node layout and bucket counts, and the
 abstraction hash covers bucket assignment; neither covers the matrices.
 
-So the spec refuses a board-free leg that does not say what universe it means.
+So the spec refuses a board-free task that does not say what universe it means.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from src.interfaces.cloud import spec
+from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
 
 def _leg(
@@ -23,10 +24,10 @@ def _leg(
     to: int = 400,
     universe_boards: int = 2000,
     universe_seed: int = 7,
-) -> spec.LegSpec:
-    return spec.LegSpec(
+) -> spec.TaskSpec:
+    return spec.TaskSpec(
         code_snapshot="snap-1",
-        op=spec.TRAIN_VECTOR,
+        op=TaskName.TRAIN_VECTOR,
         config=config,
         run_id=run_id,
         to=to,
@@ -40,21 +41,21 @@ class TestValidation:
         _leg().validate()
 
     def test_a_board_free_leg_must_name_its_universe(self):
-        with pytest.raises(ValueError, match="universe-boards"):
+        with pytest.raises(BadTaskError, match="universe-boards"):
             _leg(universe_boards=0).validate()
 
     def test_the_absolute_target_rule_applies_to_both_kernels(self):
         """Retry convergence is the reason ``to`` is absolute; it is not
         scalar-specific, so the same guard must cover the vector op."""
-        with pytest.raises(ValueError, match="ABSOLUTE"):
+        with pytest.raises(BadTaskError, match="ABSOLUTE"):
             _leg(to=0).validate()
 
     def test_a_board_free_leg_still_needs_a_config_or_a_run(self):
-        with pytest.raises(ValueError, match="--config"):
+        with pytest.raises(BadTaskError, match="config"):
             _leg(config="", run_id="").validate()
 
     def test_a_scalar_leg_needs_no_universe(self):
-        spec.LegSpec(code_snapshot="s", op=spec.TRAIN, config="production", to=1000).validate()
+        spec.TaskSpec(code_snapshot="s", op=TaskName.TRAIN, config="production", to=1000).validate()
 
 
 class TestEnvironment:
@@ -67,8 +68,8 @@ class TestEnvironment:
     def test_a_scalar_leg_leaves_the_vector_keys_empty(self):
         """Empty, not absent: ``run_leg.sh`` tests every key with ``-n``, so an
         empty value is how a knob says 'not mine'."""
-        env = spec.LegSpec(
-            code_snapshot="s", op=spec.TRAIN, config="production", to=1000
+        env = spec.TaskSpec(
+            code_snapshot="s", op=TaskName.TRAIN, config="production", to=1000
         ).environment()
         assert env["RUN_UNIVERSE_BOARDS"] == ""
         assert env["RUN_UNIVERSE_SEED"] == ""

@@ -25,6 +25,7 @@ def _spec(**kwargs):
         "arm": "",
         "eval_at": "",
         "eval_flags": (),
+        "universe_boards": 0,
     }
     return SimpleNamespace(**(base | kwargs))
 
@@ -48,6 +49,11 @@ def _plan(**kwargs):
         # not read: a stand-in that is missing one only proves the kinds tolerate
         # a shape the node never hands them.
         "progress_path": "",
+        "universe_boards": 0,
+        "universe_seed": 0,
+        "dtype": "",
+        "warm_start_from": "",
+        "warm_start_weight": 0,
     }
     return SimpleNamespace(**(base | kwargs))
 

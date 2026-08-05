@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pathlib
 
-from src.shared.node import plan as node_plan
+from src.shared.cloudtask.node import plan as node_plan
 
 ENV = {
     "RUN_OP": "train",
@@ -25,7 +25,7 @@ ENV = {
 
 
 def _argv(**overrides: str) -> list[str]:
-    return node_plan.parse_environment({**ENV, **overrides}).train_argv()
+    return node_plan.parse_environment({**ENV, **overrides}).commands[0]
 
 
 class TestWarmStartArgv:
@@ -66,7 +66,7 @@ class TestTheNodeFetchesThePrior:
     """
 
     def test_the_runner_fetches_a_named_prior(self):
-        source = pathlib.Path("src/shared/node/runner.py").read_text()
+        source = pathlib.Path("src/shared/cloudtask/node/handlers.py").read_text()
         train = source.split("def _train(", 1)[1].split("\ndef ", 1)[0]
         assert "warm_start_from" in train, "the runner never looks at the prior"
         assert "fetch_current_rung" in train

@@ -719,5 +719,34 @@
     "train_boards": 8,
     "uniform_baseline": 4.1869,
     "uniform_baseline_unconstrained": 4.4021
+  },
+  "train-vector": {
+    "abstract_exploitability": 1.16,
+    "config_name": "production",
+    "coverage": 1.0,
+    "dtype": "float32",
+    "iterations": 400,
+    "num_rows": 32240608,
+    "op": "train-vector",
+    "run_id": "vec-a",
+    "runs_dir": "data/runs",
+    "runtime_seconds": 1800.0,
+    "seconds_per_iteration": 4.5,
+    "status": "completed",
+    "touched_rows": 32240608,
+    "universe_boards": 2000,
+    "universe_seed": 7
+  },
+  "warm-start": {
+    "config_name": "production",
+    "effective_iterations": 1000,
+    "num_rows": 32240608,
+    "op": "warm-start",
+    "run_id": "warm-a",
+    "runs_dir": "data/runs",
+    "seeded_fraction": 1.0,
+    "seeded_rows": 32240608,
+    "source_run_id": "vec-a",
+    "status": "seeded"
   }
 }
