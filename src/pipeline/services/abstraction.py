@@ -1,13 +1,17 @@
 """Producing and measuring card abstractions."""
 
+import contextlib
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from src.core.game.state import Street
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.paths import abstraction_output_path
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
+from src.shared import records
+
+PROGRESS_ARTIFACT = "precompute-progress.json"
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,7 @@ def precompute_abstraction(
     num_workers: int | None = None,
     base_dir: Path | None = None,
     overwrite: bool = False,
+    progress_file: Path | None = None,
 ) -> Path:
     """Headless precompute of a combo abstraction; return the output directory.
 
@@ -80,6 +85,32 @@ def precompute_abstraction(
     if not overwrite and (out / "metadata.json").exists():
         return out
     precomputer = PostflopPrecomputer(config)
-    precomputer.precompute_all(streets=[Street.FLOP, Street.TURN, Street.RIVER])
+    precomputer.precompute_all(
+        streets=[Street.FLOP, Street.TURN, Street.RIVER],
+        on_street_done=_progress_writer(progress_file),
+    )
     precomputer.save(out)
     return out
+
+
+def _progress_writer(path: Path | None) -> Callable[[int, int], None] | None:
+    """Publish street completion for whoever is watching from outside.
+
+    Nothing reaches the output directory until `save()`, which is also why a
+    precompute is never retried -- so without this the work is opaque from the
+    first second to the last, and a multi-hour build looks identical to a hung
+    one.
+
+    Never fatal: a build must not die because the thing describing it could not
+    be written.
+    """
+    if path is None:
+        return None
+
+    def write(done: int, total: int) -> None:
+        with contextlib.suppress(OSError):
+            records.write_snapshot(
+                path, {"done": done, "total": total}, records.REGISTRY[PROGRESS_ARTIFACT]
+            )
+
+    return write

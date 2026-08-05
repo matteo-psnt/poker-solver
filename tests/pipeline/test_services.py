@@ -116,7 +116,7 @@ def test_precompute_abstraction_runs_and_saves(monkeypatch, tmp_path):
         def __init__(self, cfg):
             events.append(("init", cfg))
 
-        def precompute_all(self, streets):
+        def precompute_all(self, streets, on_street_done=None):
             events.append(("all", tuple(streets)))
 
         def save(self, path):
