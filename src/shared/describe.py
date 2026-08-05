@@ -6,8 +6,8 @@ Two callers, on opposite sides of a layering boundary, must agree exactly:
 those disagreed, one task would be called two things and the id would stop being
 a way to find it.
 
-Stdlib only, and 3.10-compatible: ``task_log`` imports this and runs on the
-node's system python before ``uv sync``. See
+Stdlib only: ``task_log`` imports this and runs on the node before
+``uv sync``. See
 ``tests/shared/node/test_node_interpreter.py``, which enforces both.
 """
 
