@@ -34,7 +34,6 @@ from src.interfaces.commands.progress import COMMAND as PROGRESS
 from src.interfaces.commands.promote import COMMAND as PROMOTE
 from src.interfaces.commands.push_code import COMMAND as PUSH_CODE
 from src.interfaces.commands.push_data import COMMAND as PUSH_DATA
-from src.interfaces.commands.repair_ladder import COMMAND as REPAIR_LADDER
 from src.interfaces.commands.report import COMMAND as REPORT
 from src.interfaces.commands.runinfo import COMMAND as RUNINFO
 from src.interfaces.commands.runs import COMMAND as RUNS
@@ -60,7 +59,6 @@ COMMANDS: tuple[Command, ...] = (
     CANCEL,
     POOL_STATUS,
     AUTOSCALE_CHECK,
-    REPAIR_LADDER,
     PUSH_CODE,
     PUSH_DATA,
     TRAIN_STATIC,

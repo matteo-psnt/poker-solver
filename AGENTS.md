@@ -56,7 +56,7 @@ definition: never a source of truth, never worth backing up.
 - `uv run poker-solver` — the single entrypoint, in three groups:
   - **see and dispatch** — `status`, `submit`, `score`, `submit-precompute`,
     `jobs`, `logs`, `legs`, `cancel`, `pool-status`, `autoscale-check`,
-    `repair-ladder`, `push-code`, `push-data`.
+    `push-code`, `push-data`.
     **`status` is the one screen for "what is the pool doing right now"** —
     it composes `pool-status` + `jobs` + `legs` through `invoke()` and renders
     each with the command that owns it. Panels are fetched CONCURRENTLY and

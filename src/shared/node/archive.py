@@ -249,15 +249,20 @@ def require_complete(source: Path, name: str) -> None:
     """A rung without its marker is either pre-marker or was interrupted.
 
     The two are indistinguishable from here, and loading a truncated one yields
-    a corrupt-chunk error deep inside zarr several minutes later.
-    ``repair-ladder`` is how such a rung earns its marker.
+    a corrupt-chunk error deep inside zarr several minutes later, so refuse.
+
+    There is deliberately no repair path. One existed, was never once run, and
+    could only ever have helped runs published before markers existed -- all of
+    which are gone. A rung that lands unmarked now means a publish was cut off,
+    and the answer to that is to publish it again from the node that has it,
+    not to bless whatever reached the share.
     """
     if not (source / name).is_dir():
         raise FetchRefusedError(f"the manifest names {name} but it is not on the share")
     if not (source / marker_for(name)).exists():
         raise FetchRefusedError(
             f"{name} has no completion marker -- refusing a possibly-partial "
-            f"snapshot. Run repair-ladder on this run first."
+            f"snapshot. Re-publish it from the node that produced it."
         )
 
 

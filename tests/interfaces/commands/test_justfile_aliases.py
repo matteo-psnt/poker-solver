@@ -31,13 +31,13 @@ NAMES = sorted(command.name for command in COMMANDS)
 """Why an exact set and not a floor.
 
 A recipe earns a place only by doing something the bare command does not:
-`submit`, `score` and `repair-ladder` reshape positionals into flags, and
+`submit` and `score` reshape positionals into flags, and
 `serve` is invoked by the `console` recipes as the second half of build-then-
 serve. Nine pure passthroughs were removed because they retyped a command
 unchanged. A `>= n` floor caught a broken regex but not a passthrough creeping
 back -- the failure that actually happens -- so the guard names all four.
 """
-INVOKED_SUBCOMMANDS = ["repair-ladder", "score", "serve", "submit"]
+INVOKED_SUBCOMMANDS = ["score", "serve", "submit"]
 
 
 def _invoked() -> list[str]:

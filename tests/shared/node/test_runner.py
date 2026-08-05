@@ -454,26 +454,6 @@ class TestPrecompute:
         assert "no usable output_dir" in log.path.read_text()
 
 
-class TestRepairLadder:
-    def test_it_fetches_nothing(self, paths, log, monkeypatch):
-        """It reads the share IN PLACE. Without the exemption it once fell to a
-        catch-all copy and spent 25+ minutes duplicating a 16 GB ladder it then
-        ignored."""
-        share = paths.archive / "run-a"
-        (share / "static-1000.zarr").mkdir(parents=True)
-        (share / "static-1000.zarr" / "chunk").write_text("data")
-        monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=node_plan.REPAIR_LADDER, run_id="run-a", config="quick_test")
-
-        assert runner._repair_ladder(task, paths, log) == (0, None)
-        assert not (paths.runs / "run-a").exists()
-
-    def test_an_absent_run_is_a_message_not_a_traceback(self, paths, log):
-        task = node_plan.TaskPlan(op=node_plan.REPAIR_LADDER, run_id="ghost", config="quick_test")
-        assert runner._repair_ladder(task, paths, log) == (1, None)
-        assert "no such run on the share" in log.path.read_text()
-
-
 class TestTheCacheSurvivesBetweenTasks:
     """Sharing the board cache across tasks on a node is the whole reason it
     lives on the data disk rather than in the task's HOME, which is wiped."""

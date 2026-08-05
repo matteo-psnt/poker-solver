@@ -357,13 +357,6 @@ PAYLOADS: dict[str, dict] = {
         "job_id": "poker-20260802",
         "tasks": ["run-a-000000-1", "run-a-000000-2"],
     },
-    "repair-ladder": {
-        "op": "repair-ladder",
-        "run_id": "run-a",
-        "code_snapshot": "code-20260802_000000",
-        "job_id": "poker-20260802",
-        "tasks": ["run-a-000000-1"],
-    },
     "cancel": {"op": "cancel", "job_id": "poker-20260802", "task_id": "run-a-000000-1"},
     "push-code": {"op": "push-code", "code_snapshot": "code-20260802_000000"},
     "submit-precompute": {

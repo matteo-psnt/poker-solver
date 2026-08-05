@@ -159,7 +159,7 @@ class TestValidation:
         with pytest.raises(node_plan.BadEnvironmentError, match="ABSOLUTE"):
             _plan(RUN_TO="0")
 
-    @pytest.mark.parametrize("op", ["evaluate", "repair-ladder"])
+    @pytest.mark.parametrize("op", ["evaluate"])
     def test_an_op_on_an_existing_run_needs_one(self, op):
         with pytest.raises(node_plan.BadEnvironmentError, match="RUN_ID"):
             _plan(RUN_OP=op, RUN_ID="", RUN_CONFIG="production")
@@ -167,10 +167,6 @@ class TestValidation:
     def test_precompute_needs_a_config(self):
         with pytest.raises(node_plan.BadEnvironmentError, match="RUN_CONFIG"):
             _plan(RUN_OP="precompute", RUN_CONFIG="")
-
-    def test_repair_ladder_needs_a_config_to_rebuild_the_tree(self):
-        with pytest.raises(node_plan.BadEnvironmentError, match="RUN_CONFIG"):
-            _plan(RUN_OP="repair-ladder", RUN_ID="run-a", RUN_CONFIG="")
 
 
 class TestDuration:

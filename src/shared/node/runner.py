@@ -32,7 +32,6 @@ from src.shared.node import archive
 from src.shared.node.plan import (
     EVALUATE,
     PRECOMPUTE,
-    REPAIR_LADDER,
     TRAIN,
     BadEnvironmentError,
     TaskPlan,
@@ -453,40 +452,15 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
     return 0, None
 
 
-def _repair_ladder(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-    """Prove each published rung by loading it, and mark the ones that survive.
+"""Which executor runs a task, by kind.
 
-    Reads the share IN PLACE and needs nothing on the node -- which is why this
-    op fetches nothing. Without that exemption it once fell to a catch-all copy
-    and spent 25+ minutes duplicating a 16 GB ladder it then ignored.
-    """
-    published = paths.archive / plan.run_id
-    if not published.is_dir():
-        log(f"FATAL no such run on the share: {plan.run_id}")
-        return 1, None
-    log(f"verifying ladder for {plan.run_id} (reading the share in place)")
-    code = run_guarded(
-        [
-            "uv",
-            "run",
-            "python",
-            str(paths.code / "infra" / "verify_ladder.py"),
-            plan.config,
-            str(published),
-        ],
-        cwd=paths.code,
-        timeout=plan.timeout_seconds,
-        log=log,
-    )
-    log(f"repair finished rc={code}")
-    return code, None
-
-
+Keyed by the kind's own name, so a kind with no executor is a KeyError naming
+it rather than a task that silently does nothing.
+"""
 HANDLERS = {
     TRAIN: _train,
     EVALUATE: _evaluate,
     PRECOMPUTE: _precompute,
-    REPAIR_LADDER: _repair_ladder,
 }
 
 

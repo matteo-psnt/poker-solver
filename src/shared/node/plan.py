@@ -24,10 +24,9 @@ from dataclasses import dataclass, field
 
 TRAIN = "train"
 EVALUATE = "evaluate"
-REPAIR_LADDER = "repair-ladder"
 PRECOMPUTE = "precompute"
 
-OPS = (TRAIN, EVALUATE, REPAIR_LADDER, PRECOMPUTE)
+OPS = (TRAIN, EVALUATE, PRECOMPUTE)
 
 DEFAULT_TIMEOUT_SECONDS = 6 * 3600
 DEFAULT_EVAL_METHOD = "exact_br"
@@ -194,14 +193,10 @@ def _validate(plan: TaskPlan) -> None:
             raise BadEnvironmentError("a training task needs RUN_CONFIG")
         if plan.to <= 0:
             raise BadEnvironmentError("RUN_TO must be a positive ABSOLUTE iteration target")
-    if plan.op in (EVALUATE, REPAIR_LADDER) and not plan.run_id:
+    if plan.op == EVALUATE and not plan.run_id:
         raise BadEnvironmentError(f"op '{plan.op}' works on an existing run, so RUN_ID is required")
     if plan.op == PRECOMPUTE and not plan.config:
         raise BadEnvironmentError("a precompute task needs RUN_CONFIG")
-    if plan.op == REPAIR_LADDER and not plan.config:
-        raise BadEnvironmentError(
-            "repair-ladder rebuilds the tree to load a rung, so RUN_CONFIG is required"
-        )
 
 
 def _node_cpus() -> int:
