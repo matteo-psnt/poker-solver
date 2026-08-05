@@ -1,6 +1,8 @@
-import { useLog } from "@/api/queries";
+import { useLog, useTasks } from "@/api/queries";
 import { Panel } from "@/components/Panel";
+import { StatusBadge } from "@/components/StatusBadge";
 import { errorOf } from "@/lib/error";
+import { clock, count, duration, runLabel, span } from "@/lib/format";
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 
@@ -18,7 +20,12 @@ const route = getRouteApi("/tasks/$taskId");
 export function TaskLog() {
   const { taskId } = route.useParams();
   const log = useLog(taskId);
+  const tasks = useTasks(0);
   const lines = log.data?.lines ?? [];
+  // The task's OWN record, which exists long before its log does: the log is
+  // published from the node and a running task has usually published none yet,
+  // so opening one used to show nothing at all.
+  const row = (tasks.data?.rows ?? []).find((r) => r.task_id === taskId);
 
   return (
     <div className="space-y-3">
@@ -31,7 +38,45 @@ export function TaskLog() {
       </Link>
 
       <Panel
-        title={taskId}
+        title={row?.what || taskId}
+        updatedAt={tasks.dataUpdatedAt}
+        staleAfterMs={120_000}
+        error={errorOf(tasks.error)}
+        loading={tasks.isLoading}
+        empty={tasks.data && !row ? "No record for this task." : null}
+        onRefresh={() => tasks.refetch()}
+        refreshing={tasks.isFetching}
+      >
+        {row && (
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3 p-3 sm:grid-cols-3 lg:grid-cols-4">
+            <Fact label="task" value={row.task_id} mono />
+            <div>
+              <Label>cause</Label>
+              <StatusBadge state={row.cause} />
+            </div>
+            <Fact label="run" value={row.run_id ? runLabel(row.run_id) : "—"} mono />
+            <Fact label="attempt" value={String(row.attempt ?? "—")} />
+            <Fact label="workers" value={String(row.workers ?? "—")} />
+            <Fact label="started" value={clock(row.started_at)} />
+            <Fact label="took" value={span(row.started_at, row.ended_at, Date.now())} />
+            {row.progress ? (
+              <Fact
+                label="progress"
+                value={`${count(row.progress.done)} / ${count(row.progress.total)} ${
+                  row.progress.unit
+                }`}
+              />
+            ) : (
+              <Fact label="did" value={row.units ? count(row.units) : "—"} />
+            )}
+            {row.eta_seconds != null && <Fact label="left" value={duration(row.eta_seconds)} />}
+            <Fact label="node" value={row.node_id ? row.node_id.slice(6, 18) : "—"} mono />
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        title="Published log"
         updatedAt={log.dataUpdatedAt}
         staleAfterMs={Number.POSITIVE_INFINITY}
         error={errorOf(log.error)}
@@ -69,4 +114,21 @@ function lineTone(line: string): string {
   if (/\b(warn|timeout|retry|killed)/.test(lower)) return "text-amber-400";
   if (line.startsWith("[run_task")) return "text-[var(--fg-faint)]";
   return "";
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[11px] text-[var(--fg-faint)] uppercase tracking-wider">{children}</div>
+  );
+}
+
+function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <div className={mono ? "truncate font-mono text-[12px]" : "tnum"} title={value}>
+        {value}
+      </div>
+    </div>
+  );
 }
