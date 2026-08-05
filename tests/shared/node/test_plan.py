@@ -54,7 +54,7 @@ class TestOverrides:
         assert _plan(RUN_SETS_JSON=json.dumps(["a=one\ntwo"])).sets == ("a=one\ntwo",)
 
     def test_overrides_reach_the_command_line_one_flag_each(self):
-        argv = _plan(RUN_SETS_JSON=json.dumps(["a=1", "b=2"])).train_argv()
+        argv = _plan(RUN_SETS_JSON=json.dumps(["a=1", "b=2"])).commands[0]
         assert argv[argv.index("--set") :] == ["--set", "a=1", "--set", "b=2"]
 
     def test_a_malformed_payload_is_fatal_not_empty(self):
@@ -72,40 +72,40 @@ class TestOverrides:
 class TestTrainArgv:
     def test_the_target_is_absolute(self):
         """What makes a Batch retry converge instead of training twice."""
-        argv = _plan(RUN_TO="25000000").train_argv()
+        argv = _plan(RUN_TO="25000000").commands[0]
         assert argv[argv.index("--iterations") + 1] == "25000000"
 
     def test_workers_is_always_passed(self):
         """Omitting it trained single-threaded on a 16-vCPU node: `train-static`
         defaults to 1, so the miss reads as a slow task, not a misconfiguration."""
-        assert "--workers" in _plan().train_argv()
+        assert "--workers" in _plan().commands[0]
 
     def test_an_empty_worker_count_falls_back_to_the_node_cpus(self, monkeypatch):
         monkeypatch.setattr(node_plan.os, "cpu_count", lambda: 16)
-        argv = _plan(RUN_WORKERS="").train_argv()
+        argv = _plan(RUN_WORKERS="").commands[0]
         assert argv[argv.index("--workers") + 1] == "16"
 
     def test_an_unknowable_cpu_count_degrades_rather_than_kills(self, monkeypatch):
         monkeypatch.setattr(node_plan.os, "cpu_count", lambda: None)
-        argv = _plan(RUN_WORKERS="").train_argv()
+        argv = _plan(RUN_WORKERS="").commands[0]
         assert argv[argv.index("--workers") + 1] == "1"
 
     def test_unset_tags_are_omitted_entirely(self):
         """`--arm ""` records an arm literally named empty string rather than
         an unaffiliated run."""
-        argv = _plan().train_argv()
+        argv = _plan().commands[0]
         assert "--arm" not in argv
         assert "--experiment" not in argv
         assert "--parent" not in argv
 
     def test_set_tags_are_passed(self):
-        argv = _plan(RUN_EXPERIMENT="exp-7", RUN_ARM="control", RUN_PARENT="run-x").train_argv()
+        argv = _plan(RUN_EXPERIMENT="exp-7", RUN_ARM="control", RUN_PARENT="run-x").commands[0]
         assert argv[argv.index("--experiment") + 1] == "exp-7"
         assert argv[argv.index("--arm") + 1] == "control"
         assert argv[argv.index("--parent") + 1] == "run-x"
 
     def test_an_absent_checkpoint_interval_is_left_to_the_cli(self):
-        assert "--checkpoint-every" not in _plan(RUN_CHECKPOINT_EVERY="").train_argv()
+        assert "--checkpoint-every" not in _plan(RUN_CHECKPOINT_EVERY="").commands[0]
 
     def test_a_given_run_id_is_continued(self):
         assert _plan(RUN_ID="run-abc").train_run_id == "run-abc"
@@ -121,16 +121,16 @@ class TestEvaluateArgv:
     def test_each_rung_is_its_own_command(self):
         task = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_AT="1000,2000")
         assert task.eval_rungs == ("1000", "2000")
-        assert task.evaluate_argv("1000")[-2:] == ["--at", "1000"]
+        assert [argv[argv.index("--at") + 1] for argv in task.commands] == ["1000", "2000"]
 
     def test_no_rung_means_the_latest_checkpoint(self):
         task = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_AT="")
         assert task.eval_rungs == ()
-        assert "--at" not in task.evaluate_argv("")
+        assert "--at" not in task.commands[0]
 
     def test_the_method_defaults_to_the_zero_variance_gate(self):
         task = _plan(RUN_OP="evaluate", RUN_ID="run-a", RUN_EVAL_METHOD="")
-        assert task.evaluate_argv("")[-1] == "exact_br"
+        assert task.commands[0][-1] == "exact_br"
 
     def test_passthrough_flags_survive_a_space(self):
         task = _plan(
@@ -138,35 +138,35 @@ class TestEvaluateArgv:
             RUN_ID="run-a",
             RUN_EVAL_FLAGS_JSON=json.dumps(["--opponent", "always call"]),
         )
-        assert task.evaluate_argv("")[-2:] == ["--opponent", "always call"]
+        assert task.commands[0][-2:] == ["--opponent", "always call"]
 
     def test_trailing_commas_do_not_become_an_empty_rung(self):
         assert _plan(RUN_OP="evaluate", RUN_ID="r", RUN_EVAL_AT="1000,").eval_rungs == ("1000",)
 
 
 class TestValidation:
-    def test_an_unknown_op_is_refused(self):
-        with pytest.raises(node_plan.BadEnvironmentError, match="unknown RUN_OP"):
-            _plan(RUN_OP="trian")
-
     def test_a_training_task_without_a_config_is_refused(self):
         """The config builds the tree and the solver; the checkpoint stores
         neither, so a CONTINUING task needs it too."""
-        with pytest.raises(node_plan.BadEnvironmentError, match="RUN_CONFIG"):
+        with pytest.raises(node_plan.BadEnvironmentError, match="needs a config"):
             _plan(RUN_CONFIG="")
 
     def test_a_relative_target_is_refused(self):
         with pytest.raises(node_plan.BadEnvironmentError, match="ABSOLUTE"):
             _plan(RUN_TO="0")
 
-    @pytest.mark.parametrize("op", ["evaluate"])
-    def test_an_op_on_an_existing_run_needs_one(self, op):
-        with pytest.raises(node_plan.BadEnvironmentError, match="RUN_ID"):
-            _plan(RUN_OP=op, RUN_ID="", RUN_CONFIG="production")
+    def test_an_evaluation_needs_a_run(self):
+        with pytest.raises(node_plan.BadEnvironmentError, match="run id"):
+            _plan(RUN_OP="evaluate", RUN_ID="", RUN_CONFIG="production")
 
     def test_precompute_needs_a_config(self):
-        with pytest.raises(node_plan.BadEnvironmentError, match="RUN_CONFIG"):
+        with pytest.raises(node_plan.BadEnvironmentError, match="abstraction config"):
             _plan(RUN_OP="precompute", RUN_CONFIG="")
+
+    def test_the_node_refuses_exactly_what_the_submitter_would_have(self):
+        """Both ends call the same kind, so neither can drift from the other."""
+        with pytest.raises(node_plan.BadEnvironmentError, match="Unknown task kind"):
+            _plan(RUN_OP="trian")
 
 
 class TestDuration:

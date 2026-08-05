@@ -22,11 +22,8 @@ import json
 import os
 from dataclasses import dataclass, field
 
-TRAIN = "train"
-EVALUATE = "evaluate"
-PRECOMPUTE = "precompute"
-
-OPS = (TRAIN, EVALUATE, PRECOMPUTE)
+from src.shared import tasks
+from src.shared.tasks import BadTaskError, TaskName
 
 DEFAULT_TIMEOUT_SECONDS = 6 * 3600
 DEFAULT_EVAL_METHOD = "exact_br"
@@ -80,59 +77,14 @@ class TaskPlan:
         """
         return self.run_id or f"run-{os.environ.get('AZ_BATCH_TASK_ID', 'local')}"
 
-    def train_argv(self) -> list[str]:
-        """``train-static`` covers both starting and continuing a run.
+    @property
+    def commands(self) -> list[list[str]]:
+        """The argv(s) this task runs, from its KIND -- so nothing here branches.
 
-        ``--iterations`` is an ABSOLUTE target and ``--run`` continues an
-        existing directory, so re-running past the target is a no-op. The
-        fresh/resume split the dynamic path needed no longer exists, and
-        neither does the dynamic path.
+        A list: scoring a ladder is one command per rung, and the wrapper
+        accounts for each separately.
         """
-        argv = [
-            "train-static",
-            "--config",
-            self.config,
-            "--iterations",
-            str(self.to),
-            "--run",
-            self.train_run_id,
-            # Never omitted. "Empty means all CPUs" was documented but never
-            # implemented: `train-static` defaults --workers to 1, so an
-            # omitted count trained SINGLE-THREADED on a 16-vCPU node -- a ~16x
-            # loss that reads as a slow task rather than a misconfiguration, and
-            # that turns a 1.8h task into one the wall-clock ceiling kills.
-            "--workers",
-            str(self.workers),
-        ]
-        if self.checkpoint_every:
-            argv += ["--checkpoint-every", str(self.checkpoint_every)]
-        # Appended only when set: `--arm ""` would record an arm literally
-        # named empty string rather than an unaffiliated run.
-        for flag, value in (
-            ("--experiment", self.experiment),
-            ("--arm", self.arm),
-            ("--parent", self.parent),
-        ):
-            if value:
-                argv += [flag, value]
-        for override in self.sets:
-            argv += ["--set", override]
-        return argv
-
-    def evaluate_argv(self, rung: str) -> list[str]:
-        """One rung's scoring command.
-
-        ``eval_flags`` is the submitter's passthrough (``score --run r --
-        --br-flops 8``); it is validated where it is built, in ``score.py``,
-        because its contents are unknowable here.
-        """
-        argv = ["evaluate", "--run", self.run_id, "--method", self.eval_method]
-        if rung:
-            argv += ["--at", rung]
-        return argv + list(self.eval_flags)
-
-    def precompute_argv(self) -> list[str]:
-        return ["precompute", "--config", self.config, "--json"]
+        return tasks.kind(self.op).commands(self)
 
     @property
     def provenance(self) -> str:
@@ -159,9 +111,7 @@ def parse_environment(environ: dict[str, str] | None = None) -> TaskPlan:
     one place rather than implied by which branch happened to set what.
     """
     env = dict(os.environ if environ is None else environ)
-    op = env.get("RUN_OP") or TRAIN
-    if op not in OPS:
-        raise BadEnvironmentError(f"unknown RUN_OP '{op}'; expected one of {', '.join(OPS)}")
+    op = env.get("RUN_OP") or TaskName.TRAIN
 
     plan = TaskPlan(
         op=op,
@@ -187,16 +137,17 @@ def parse_environment(environ: dict[str, str] | None = None) -> TaskPlan:
 
 
 def _validate(plan: TaskPlan) -> None:
-    """Refuse here rather than let argparse exit 2 several minutes in."""
-    if plan.op == TRAIN:
-        if not plan.config:
-            raise BadEnvironmentError("a training task needs RUN_CONFIG")
-        if plan.to <= 0:
-            raise BadEnvironmentError("RUN_TO must be a positive ABSOLUTE iteration target")
-    if plan.op == EVALUATE and not plan.run_id:
-        raise BadEnvironmentError(f"op '{plan.op}' works on an existing run, so RUN_ID is required")
-    if plan.op == PRECOMPUTE and not plan.config:
-        raise BadEnvironmentError("a precompute task needs RUN_CONFIG")
+    """Refuse here rather than let argparse exit 2 several minutes in.
+
+    The same check the submitter ran, from the same kind -- so the node cannot
+    accept something the submit path would have refused, and neither can drift
+    from the other. Re-raised as a `BadEnvironmentError` because that is what
+    the wrapper's exit accounting knows how to report.
+    """
+    try:
+        tasks.kind(plan.op).validate(plan)
+    except BadTaskError as error:
+        raise BadEnvironmentError(str(error)) from error
 
 
 def _node_cpus() -> int:

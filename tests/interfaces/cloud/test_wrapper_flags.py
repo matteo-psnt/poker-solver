@@ -36,6 +36,7 @@ import pytest
 from src.interfaces.commands import COMMANDS
 from src.shared.node import plan as node_plan
 from src.shared.node import runner as node_runner
+from src.shared.tasks import TaskName
 
 # Added by `headless.build_parser` to every subcommand, so they are legal
 # everywhere and appear in no command's own `add_arguments`.
@@ -60,7 +61,7 @@ def _undeclared(argv: list[str]) -> list[str]:
 
 
 def _plan(**overrides) -> node_plan.TaskPlan:
-    defaults: dict = {"op": node_plan.TRAIN, "config": "production", "to": 1}
+    defaults: dict = {"op": TaskName.TRAIN, "config": "production", "to": 1}
     return node_plan.TaskPlan(**{**defaults, **overrides})
 
 
@@ -76,10 +77,10 @@ TRAIN_CASES = {
 }
 
 EVAL_CASES = {
-    "at-a-rung": (_plan(op=node_plan.EVALUATE, run_id="run-a"), "1000000"),
-    "latest": (_plan(op=node_plan.EVALUATE, run_id="run-a"), ""),
+    "at-a-rung": (_plan(op=TaskName.EVALUATE, run_id="run-a"), "1000000"),
+    "latest": (_plan(op=TaskName.EVALUATE, run_id="run-a"), ""),
     "explicit-method": (
-        _plan(op=node_plan.EVALUATE, run_id="run-a", eval_method="lookahead"),
+        _plan(op=TaskName.EVALUATE, run_id="run-a", eval_method="lookahead"),
         "500000",
     ),
 }
@@ -87,7 +88,7 @@ EVAL_CASES = {
 
 @pytest.mark.parametrize("task", TRAIN_CASES.values(), ids=list(TRAIN_CASES))
 def test_every_flag_a_training_task_passes_is_declared(task):
-    argv = task.train_argv()
+    argv = task.commands[0]
     assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
     assert not _undeclared(argv), _message(argv)
 
@@ -97,12 +98,12 @@ def test_every_flag_an_evaluate_task_passes_is_declared(task, rung):
     # `eval_flags` is the SUBMITTER's passthrough (`score --run r --
     # --br-flops 8`); its contents are unknowable here and are validated
     # against `evaluate` by `score`'s own method/flag plumbing.
-    argv = task.evaluate_argv(rung)
+    argv = task.commands[0]
     assert not _undeclared(argv), _message(argv)
 
 
 def test_every_flag_a_precompute_task_passes_is_declared():
-    argv = _plan(op=node_plan.PRECOMPUTE).precompute_argv()
+    argv = _plan(op=TaskName.PRECOMPUTE).commands[0]
     assert not _undeclared(argv), _message(argv)
 
 

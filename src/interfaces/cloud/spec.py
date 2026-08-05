@@ -27,11 +27,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from src.shared.describe import compact_count, flag_value
-
-TRAIN = "train"
-EVALUATE = "evaluate"
-PRECOMPUTE = "precompute"
+from src.shared import tasks
+from src.shared.tasks import BadTaskError, TaskName
 
 DEFAULT_TIMEOUT = "6h"
 DEFAULT_CHECKPOINT_EVERY = 1_000_000
@@ -55,7 +52,6 @@ NODE_PYTHON = "3.13"
 NODE_PYTHON_BIN = f"/usr/local/bin/python{NODE_PYTHON}"
 
 TASK_ID_LIMIT = 64
-_OP_WORDS = {TRAIN: "train", EVALUATE: "score", PRECOMPUTE: "precompute"}
 
 _UNSAFE_TASK_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
@@ -106,20 +102,6 @@ def task_id(label: str, now: datetime, nonce: int) -> str:
     return f"{head}{suffix}"
 
 
-def run_token(run_id: str) -> str:
-    """A short but still recognisable form of a run id, for use inside a task id.
-
-    Run ids are themselves built from task ids (``plan.train_run_id``), so
-    pasting one in whole would grow every id by the length of the last one.
-    The first and last segments carry the config and the discriminator --
-    ``run-production-025433-1095`` -> ``production-1095``. The timestamp in the
-    middle is the part nobody reads and the part that makes ids look alike.
-    """
-    stem = run_id.removeprefix("run-")
-    parts = [part for part in stem.split("-") if part]
-    return f"{parts[0]}-{parts[-1]}" if len(parts) > 2 else stem
-
-
 def task_command(snapshot: str) -> str:
     """The task command line: extract the pinned snapshot, then run the wrapper.
 
@@ -148,7 +130,7 @@ class TaskSpec:
     """
 
     code_snapshot: str
-    op: str = TRAIN
+    op: str = TaskName.TRAIN
     config: str = ""
     to: int = 0
     run_id: str = ""
@@ -174,32 +156,10 @@ class TaskSpec:
     def label(self) -> str:
         """What the task id is built from: what this task DOES, not when it ran.
 
-        Every discriminating field is already on this spec, and returning the
-        bare run id threw all of them away. Three evaluations of ONE checkpoint
-        at three board seeds became three ids differing only in a timestamp and
-        a nonce, so nothing downstream -- the console, `tasks`, the log viewer --
-        could say which was which; the mapping lived only in the head of
-        whoever submitted them.
-
-        Uniqueness is ``task_id``'s nonce to guarantee. This only has to be
-        readable, which is why it carries the knob that usually differs rather
-        than every knob that could.
+        The words are the KIND's -- see `src.shared.tasks`. Uniqueness is
+        ``task_id``'s nonce to guarantee; this only has to be readable.
         """
-        words = [
-            _OP_WORDS.get(self.op, self.op),
-            run_token(self.run_id) if self.run_id else self.config,
-        ]
-        if self.op == TRAIN and self.to:
-            words.append(f"to{compact_count(self.to)}")
-        if self.op == EVALUATE:
-            if self.eval_at.isdigit():
-                words.append(compact_count(int(self.eval_at)))
-            seed = flag_value(self.eval_flags, "--br-board-seed")
-            if seed:
-                words.append(f"seed{seed}")
-        if self.arm:
-            words.append(self.arm)
-        return "-".join(word for word in words if word)
+        return tasks.kind(self.op).label(self)
 
     def environment(self) -> dict[str, str]:
         """The full RUN_* environment the node wrapper reads.
@@ -234,30 +194,15 @@ class TaskSpec:
         }
 
     def validate(self) -> None:
-        """Reject the submissions that would waste a node rather than fail fast."""
-        if self.op not in (TRAIN, EVALUATE, PRECOMPUTE):
-            raise ValueError(f"Unknown op '{self.op}'.")
-        if self.op == TRAIN and not self.config:
-            # A CONTINUING task needs it too. The config builds the tree and the
-            # solver and the checkpoint stores neither, so `--run x` without a
-            # config reached the node and died on
-            # `Config file not found: config/training/.yaml` -- after a snapshot
-            # upload, a ~3-minute pool spin-up and every Batch retry. This used
-            # to accept it, and the justfile documented it as the way to
-            # continue a run.
-            raise ValueError(
-                "A training task needs --config, a CONTINUING one included: the config "
-                "builds the tree and the solver, and the checkpoint stores neither."
-            )
-        if self.op == TRAIN and self.to <= 0:
-            raise ValueError("--to must be a positive ABSOLUTE iteration target, not an increment.")
-        if self.op == EVALUATE and not self.run_id:
-            raise ValueError(f"op '{self.op}' scores an existing run, so --run is required.")
-        if self.op == PRECOMPUTE and not self.config:
-            raise ValueError("A precompute task needs --config (an abstraction config stem).")
+        """Reject the submissions that would waste a node rather than fail fast.
+
+        The kind-specific half lives with the kind; an unknown op is refused by
+        the lookup itself, so a spec the node could not run cannot be built.
+        """
+        tasks.kind(self.op).validate(self)
         for override in self.sets:
             if "=" not in override:
-                raise ValueError(f"--set expects key=value, got '{override}'.")
+                raise BadTaskError(f"--set expects key=value, got '{override}'.")
 
 
 def utcnow() -> datetime:

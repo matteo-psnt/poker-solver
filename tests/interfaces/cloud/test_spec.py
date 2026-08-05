@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 import pytest
 
 from src.interfaces.cloud import spec
+from src.shared.tasks import BadTaskError, TaskName
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
@@ -129,7 +130,7 @@ class TestEnvironment:
 
     def test_eval_flags_round_trip_the_same_way(self):
         env = spec.TaskSpec(
-            code_snapshot="s", op=spec.EVALUATE, run_id="run-a", eval_flags=("--br-flops", "8")
+            code_snapshot="s", op=TaskName.EVALUATE, run_id="run-a", eval_flags=("--br-flops", "8")
         ).environment()
         assert json.loads(env["RUN_EVAL_FLAGS_JSON"]) == ["--br-flops", "8"]
 
@@ -188,7 +189,7 @@ class TestLabel:
         def score(seed: str) -> str:
             return spec.TaskSpec(
                 code_snapshot="s",
-                op=spec.EVALUATE,
+                op=TaskName.EVALUATE,
                 run_id="run-production-025433-1095",
                 eval_at="150000000",
                 eval_flags=("--br-flops", "4", "--br-board-seed", seed),
@@ -204,41 +205,20 @@ class TestLabel:
         assert task.label == "train-ochs_gate-to1M-river"
 
 
-class TestRunToken:
-    def test_the_unread_timestamp_in_the_middle_is_dropped(self):
-        assert spec.run_token("run-production-025433-1095") == "production-1095"
-
-    def test_a_two_segment_id_is_left_alone(self):
-        assert spec.run_token("run-20260802_201939-ee77cb") == "20260802_201939-ee77cb"
-
-
 class TestValidate:
-    def test_a_training_task_needs_a_positive_absolute_target(self):
-        with pytest.raises(ValueError, match="ABSOLUTE"):
+    """The kind-specific half moved to the kind. See tests/shared/test_tasks.py."""
+
+    def test_it_delegates_to_the_kind(self):
+        with pytest.raises(BadTaskError, match="ABSOLUTE"):
             spec.TaskSpec(code_snapshot="s", config="production", to=0).validate()
 
-    def test_a_training_task_needs_a_config(self):
-        with pytest.raises(ValueError, match="--config"):
-            spec.TaskSpec(code_snapshot="s", to=1000).validate()
-
-    def test_continuing_a_run_needs_a_config_too(self):
-        """The config builds the tree and the solver; the checkpoint stores
-        neither. This was permitted, and died on the node with
-        `Config file not found: config/training/.yaml` -- after the upload, the
-        spin-up and three retries."""
-        with pytest.raises(ValueError, match="CONTINUING"):
-            spec.TaskSpec(code_snapshot="s", run_id="run-a", to=1000).validate()
-
-    def test_scoring_needs_a_run(self):
-        with pytest.raises(ValueError, match="--run"):
-            spec.TaskSpec(code_snapshot="s", op=spec.EVALUATE).validate()
-
     def test_a_malformed_override_is_refused_before_it_reaches_a_node(self):
-        with pytest.raises(ValueError, match="key=value"):
+        with pytest.raises(BadTaskError, match="key=value"):
             spec.TaskSpec(code_snapshot="s", config="p", to=1, sets=("solver__dcfr",)).validate()
 
-    def test_an_unknown_op_is_refused(self):
-        with pytest.raises(ValueError, match="Unknown op"):
+    def test_an_op_no_node_can_run_cannot_be_validated(self):
+        """The lookup itself refuses it, so there is no branch to forget."""
+        with pytest.raises(BadTaskError, match="Unknown task kind"):
             spec.TaskSpec(code_snapshot="s", op="frobnicate", run_id="r").validate()
 
 
@@ -252,23 +232,23 @@ class TestPrecomputeTask:
 
     def test_it_needs_a_config(self):
         with pytest.raises(ValueError, match="abstraction config"):
-            spec.TaskSpec(code_snapshot="s", op=spec.PRECOMPUTE).validate()
+            spec.TaskSpec(code_snapshot="s", op=TaskName.PRECOMPUTE).validate()
 
     def test_a_config_is_all_it_needs(self):
-        spec.TaskSpec(code_snapshot="s", op=spec.PRECOMPUTE, config="ochs_gate_ochs").validate()
+        spec.TaskSpec(code_snapshot="s", op=TaskName.PRECOMPUTE, config="ochs_gate_ochs").validate()
 
     def test_it_needs_no_iteration_target(self):
         """Unlike a training task -- there is nothing to converge to."""
-        task = spec.TaskSpec(code_snapshot="s", op=spec.PRECOMPUTE, config="x", to=0)
+        task = spec.TaskSpec(code_snapshot="s", op=TaskName.PRECOMPUTE, config="x", to=0)
         task.validate()
         assert task.environment()["RUN_TO"] == "0"
 
     def test_force_publish_is_off_unless_asked(self):
-        env = spec.TaskSpec(code_snapshot="s", op=spec.PRECOMPUTE, config="x").environment()
+        env = spec.TaskSpec(code_snapshot="s", op=TaskName.PRECOMPUTE, config="x").environment()
         assert env["RUN_FORCE_PUBLISH"] == ""
 
     def test_force_publish_reaches_the_node(self):
         env = spec.TaskSpec(
-            code_snapshot="s", op=spec.PRECOMPUTE, config="x", force_publish=True
+            code_snapshot="s", op=TaskName.PRECOMPUTE, config="x", force_publish=True
         ).environment()
         assert env["RUN_FORCE_PUBLISH"] == "1"

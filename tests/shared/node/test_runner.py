@@ -16,6 +16,7 @@ import pytest
 from src.shared import cache, task_log
 from src.shared.node import plan as node_plan
 from src.shared.node import runner
+from src.shared.tasks import TaskName
 
 
 @pytest.fixture
@@ -229,7 +230,7 @@ class TestMain:
         `$? = 0` and exited 143, so a cancelled task was recorded as clean and
         never reconciled against Batch."""
         monkeypatch.setattr(runner, "_stage", lambda paths, log: 0)
-        monkeypatch.setitem(runner.HANDLERS, node_plan.TRAIN, _signalled)
+        monkeypatch.setitem(runner.HANDLERS, TaskName.TRAIN, _signalled)
 
         assert runner.main() == 143
         (row,) = task_log.read_tasks(paths.share)
@@ -259,7 +260,7 @@ class TestMain:
         run_dir.mkdir(parents=True)
         (run_dir / ".run.json").write_text("{}")
         monkeypatch.setattr(runner, "_stage", lambda paths, log: 0)
-        monkeypatch.setitem(runner.HANDLERS, node_plan.TRAIN, lambda *a: (1, None))
+        monkeypatch.setitem(runner.HANDLERS, TaskName.TRAIN, lambda *a: (1, None))
 
         runner.main()
         assert (paths.archive / "run-a" / ".run.json").exists()
@@ -314,14 +315,14 @@ class TestEvaluateFetch:
         the WHOLE published directory -- the entire ladder, to score one rung."""
         self._published(paths)
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=node_plan.EVALUATE, run_id="run-a")
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a")
 
         assert runner._evaluate(task, paths, log) == (0, None)
         assert (paths.runs / "run-a" / "static-2000.zarr" / "chunk").exists()
 
     def test_a_run_with_nothing_published_is_refused(self, paths, log):
         (paths.archive / "run-a").mkdir(parents=True)
-        task = node_plan.TaskPlan(op=node_plan.EVALUATE, run_id="run-a")
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a")
         assert runner._evaluate(task, paths, log) == (1, None)
         assert "no published checkpoint to score" in log.path.read_text()
 
@@ -334,9 +335,7 @@ class TestEvaluateFetch:
         (paths.archive / "run-a" / ".complete-static-1000.zarr").write_text("")
         codes = iter([0, 1])
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: next(codes))
-        task = node_plan.TaskPlan(
-            op=node_plan.EVALUATE, run_id="run-a", eval_rungs=("1000", "2000")
-        )
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("1000", "2000"))
 
         assert runner._evaluate(task, paths, log) == (0, task_log.CAUSE_PARTIAL)
 
@@ -344,7 +343,7 @@ class TestEvaluateFetch:
         """That is what a transient node fault looks like."""
         self._published(paths)
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 1)
-        task = node_plan.TaskPlan(op=node_plan.EVALUATE, run_id="run-a", eval_rungs=("2000",))
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("2000",))
 
         assert runner._evaluate(task, paths, log) == (1, None)
 
@@ -398,7 +397,7 @@ class TestPrecompute:
     def test_a_fresh_abstraction_is_published(self, paths, log, monkeypatch):
         self._wrote(paths)
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="ochs_gate_ochs")
 
         assert runner._precompute(task, paths, log) == (0, None)
         published = paths.share / "combo_abstraction" / "ochs_gate_ochs" / "buckets.npy"
@@ -415,7 +414,7 @@ class TestPrecompute:
         existing.mkdir(parents=True)
         (existing / "buckets.npy").write_text("THE ORIGINAL")
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="ochs_gate_ochs")
 
         assert runner._precompute(task, paths, log) == (1, None)
         assert (existing / "buckets.npy").read_text() == "THE ORIGINAL"
@@ -428,7 +427,7 @@ class TestPrecompute:
         (existing / "buckets.npy").write_text("THE ORIGINAL")
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(
-            op=node_plan.PRECOMPUTE, config="ochs_gate_ochs", force_publish=True
+            op=TaskName.PRECOMPUTE, config="ochs_gate_ochs", force_publish=True
         )
 
         assert runner._precompute(task, paths, log) == (0, None)
@@ -436,7 +435,7 @@ class TestPrecompute:
 
     def test_a_failed_build_publishes_nothing(self, paths, log, monkeypatch):
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 2)
-        task = node_plan.TaskPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="ochs_gate_ochs")
 
         assert runner._precompute(task, paths, log) == (2, None)
         assert not (paths.share / "combo_abstraction").exists()
@@ -448,7 +447,7 @@ class TestPrecompute:
         (paths.work).mkdir(parents=True, exist_ok=True)
         (paths.work / "precompute.json").write_text("not json")
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="ochs_gate_ochs")
 
         assert runner._precompute(task, paths, log) == (1, None)
         assert "no usable output_dir" in log.path.read_text()

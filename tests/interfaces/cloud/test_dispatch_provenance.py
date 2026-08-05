@@ -21,6 +21,7 @@ import pytest
 from src.interfaces.cloud import dispatch, spec
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo
+from src.shared.tasks import TaskName
 
 
 @pytest.fixture(autouse=True)
@@ -120,7 +121,7 @@ class TestTheNodeEnd:
         from src.shared.node import plan as node_plan
 
         task = node_plan.TaskPlan(
-            op=node_plan.TRAIN, config="p", to=1, git_commit="c" * 40, git_dirty=dirty
+            op=TaskName.TRAIN, config="p", to=1, git_commit="c" * 40, git_dirty=dirty
         )
         assert expected in task.provenance
         assert task.provenance.startswith("cccccccccccc")
@@ -128,7 +129,7 @@ class TestTheNodeEnd:
     def test_an_unstamped_task_says_so_rather_than_claiming_a_commit(self):
         from src.shared.node import plan as node_plan
 
-        task = node_plan.TaskPlan(op=node_plan.TRAIN, config="p", to=1)
+        task = node_plan.TaskPlan(op=TaskName.TRAIN, config="p", to=1)
         assert "unknown" in task.provenance
 
 
@@ -173,7 +174,7 @@ class TestQueueLoop:
 
         dispatch.stage_and_queue(
             lambda snap: [
-                spec.TaskSpec(code_snapshot=snap, op=spec.PRECOMPUTE, config="production"),
+                spec.TaskSpec(code_snapshot=snap, op=TaskName.PRECOMPUTE, config="production"),
                 _task(),
             ]
         )

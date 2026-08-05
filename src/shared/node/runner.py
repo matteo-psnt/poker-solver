@@ -23,20 +23,18 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import FrameType
 
 from src.shared import cache, task_log
 from src.shared.node import archive
 from src.shared.node.plan import (
-    EVALUATE,
-    PRECOMPUTE,
-    TRAIN,
     BadEnvironmentError,
     TaskPlan,
     parse_environment,
 )
+from src.shared.tasks import TaskName
 
 """`timeout`'s convention, kept because `task_log` maps it to a distinct cause
 and a wrong terminal cause is permanent -- it suppresses reconciliation."""
@@ -326,7 +324,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             f"(timeout {plan.timeout_seconds}s)"
         )
         code = run_guarded(
-            _cli(plan.train_argv()),
+            _cli(plan.commands[0]),
             cwd=paths.code,
             timeout=plan.timeout_seconds,
             log=log,
@@ -367,13 +365,17 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
             return 1, None
 
     ok, bad = 0, 0
-    for rung in rungs or [""]:
+    # Built from the rungs that FETCHED, not the ones requested: `fetch_for_evaluation`
+    # drops what is not on the share, and a command list built from the request
+    # would score the wrong rung for every drop before it.
+    commands = replace(plan, eval_rungs=tuple(rungs)).commands
+    for rung, argv in zip(rungs or [""], commands, strict=True):
         log(
             f"evaluate: run={plan.run_id} method={plan.eval_method}"
             + (f" at={rung}" if rung else "")
         )
         code = run_guarded(
-            _cli(plan.evaluate_argv(rung)),
+            _cli(argv),
             cwd=paths.code,
             timeout=plan.timeout_seconds,
             log=log,
@@ -413,7 +415,7 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
     payload = paths.work / "precompute.json"
     log(f"precompute: config={plan.config} (timeout {plan.timeout_seconds}s)")
     code = run_guarded(
-        _cli(plan.precompute_argv()),
+        _cli(plan.commands[0]),
         cwd=paths.code,
         timeout=plan.timeout_seconds,
         log=log,
@@ -458,9 +460,9 @@ Keyed by the kind's own name, so a kind with no executor is a KeyError naming
 it rather than a task that silently does nothing.
 """
 HANDLERS = {
-    TRAIN: _train,
-    EVALUATE: _evaluate,
-    PRECOMPUTE: _precompute,
+    TaskName.TRAIN: _train,
+    TaskName.EVALUATE: _evaluate,
+    TaskName.PRECOMPUTE: _precompute,
 }
 
 
@@ -564,7 +566,7 @@ def _record(paths: NodePaths, event: str, *, code: int | None = None, cause: str
             job_id=os.environ.get("AZ_BATCH_JOB_ID", ""),
             node_id=os.environ.get("AZ_BATCH_NODE_ID", ""),
             run_id=os.environ.get("RUN_ID", ""),
-            op=os.environ.get("RUN_OP") or TRAIN,
+            op=os.environ.get("RUN_OP") or TaskName.TRAIN,
             config=os.environ.get("RUN_CONFIG", ""),
             target_iteration=os.environ.get("RUN_TO", ""),
             # `RUN_TO` is a TRAIN target and an evaluate task leaves it 0, so
