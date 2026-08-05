@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from src.pipeline.blueprint import build_static_evaluation_solver
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.blueprint_match import play_blueprint_match
 from src.pipeline.evaluation.resolver_match import play_resolver_match
@@ -11,7 +12,6 @@ from src.pipeline.services.evaluation._shared import (
     EvaluationOutput,
 )
 from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
-from src.pipeline.training.components import build_static_evaluation_solver
 from src.pipeline.training.run_tracker import RunMetadata
 
 logger = logging.getLogger(__name__)

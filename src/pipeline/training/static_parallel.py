@@ -37,7 +37,7 @@ from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
-from src.pipeline.training.abstraction_resolver import ComboAbstractionResolver
+from src.pipeline.abstraction.resolver import ComboAbstractionResolver
 from src.shared import run_events
 from src.shared.config import Config
 from src.shared.log import configure_logging

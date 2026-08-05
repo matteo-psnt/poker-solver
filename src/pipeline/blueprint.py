@@ -1,8 +1,15 @@
-"""Shared builder functions for training components.
+"""Construction of a blueprint -- abstraction, betting tree, storage, solver.
 
-Centralized, reusable construction of solver components (abstraction, betting
-tree, storage, solver) from configuration, so training and evaluation build the
-same objects the same way rather than each assembling their own.
+One place that turns a config (plus, for a trained one, a checkpoint) into the
+objects a blueprint is made of, so every consumer builds the same objects the
+same way rather than assembling its own.
+
+**This sits beside `training/`, not inside it.** It lived under `training` while
+training was the only thing that built a solver, but the consumers are now
+training, evaluation and anything that serves a run for reading -- and reading
+outnumbers training here. Filing the constructor under one consumer made the
+others reach across the `training`/`evaluation` independence contract to get at
+it, which is exactly the coupling that contract exists to prevent.
 """
 
 from pathlib import Path
@@ -15,7 +22,7 @@ from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
 from src.pipeline.abstraction.base import BucketingStrategy
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
-from src.pipeline.training.abstraction_resolver import ComboAbstractionResolver
+from src.pipeline.abstraction.resolver import ComboAbstractionResolver
 from src.shared.config import Config
 
 

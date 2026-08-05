@@ -38,8 +38,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from src.core.actions.action_model import ActionModel
-from src.pipeline.training import components
-from src.pipeline.training.abstraction_resolver import AbstractionHashMismatchError
+from src.pipeline import blueprint
+from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import run_events
@@ -147,7 +147,7 @@ def train_static(
         # from deep inside the resolver does not tell a caller that the answer is
         # `precompute`, and this is the first thing a fresh checkout hits.
         try:
-            abstraction_hash = components.resolve_card_abstraction_hash(config)
+            abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
         except FileNotFoundError as e:
             raise FileNotFoundError(
                 f"Card abstraction '{config.card_abstraction.config}' for training config "
