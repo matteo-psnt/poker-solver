@@ -44,6 +44,7 @@ from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
 from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
+from src.interfaces.commands.profile import ProfilePayload
 from src.interfaces.commands.progress import ProgressPayload, ProgressRow
 from src.interfaces.commands.push_code import PushedCodePayload
 from src.interfaces.commands.push_data import PushedDataPayload
@@ -429,6 +430,9 @@ PAYLOADS: dict[str, Any] = {
             ),
         ],
     ),
+    # The listing, not the ask: `--list` is the shape the console polls, and the
+    # one where an empty answer still has to render.
+    "profile": ProfilePayload(available=["run-a-task.0.1.speedscope.json"]),
     "progress": ProgressPayload(
         run_id="run-a",
         total_rows=2,

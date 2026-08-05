@@ -345,6 +345,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profiles */
+        get: operations["_profiles_api_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/push-code": {
         parameters: {
             query?: never;
@@ -543,6 +560,23 @@ export interface paths {
         put?: never;
         /** Cancel */
         post: operations["_cancel_api_tasks__job_id___task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Profile */
+        post: operations["_profile_api_tasks__task_id__profile_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1714,6 +1748,34 @@ export interface components {
              * @default []
              */
             tasks: string[];
+        };
+        /**
+         * ProfilePayload
+         * @description What was asked for, and what came back.
+         *
+         *     `landed` is null for `--no-wait` and for a wait that timed out; the two are
+         *     told apart by `waited`, because a request that was served slowly and one
+         *     that was never served are different problems.
+         */
+        ProfilePayload: {
+            /** Available */
+            available?: string[] | null;
+            /** Downloaded */
+            downloaded?: string | null;
+            /** Landed */
+            landed?: string | null;
+            /**
+             * Op
+             * @default profile
+             * @constant
+             */
+            op: "profile";
+            /** Seconds */
+            seconds?: number | null;
+            /** Task */
+            task?: string | null;
+            /** Waited */
+            waited?: number | null;
         };
         /**
          * ProgressPayload
@@ -3274,6 +3336,44 @@ export interface operations {
             };
         };
     };
+    _profiles_api_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfilePayload"];
+                };
+            };
+            /** @description Understood, and the answer is no. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Azure did not answer. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     _push_code_api_push_code_post: {
         parameters: {
             query?: never;
@@ -3748,6 +3848,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CancelledPayload"];
+                };
+            };
+            /** @description Understood, and the answer is no. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Azure did not answer. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    _profile_api_tasks__task_id__profile_post: {
+        parameters: {
+            query?: {
+                seconds?: number;
+            };
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfilePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

@@ -57,6 +57,7 @@ from src.interfaces.commands.jobs import JobsPayload as Jobs
 from src.interfaces.commands.ledger import LedgerPayload as Ledger
 from src.interfaces.commands.logs import LogsPayload as LogLines
 from src.interfaces.commands.pool_status import PoolPayload as Pool
+from src.interfaces.commands.profile import ProfilePayload as Profile
 from src.interfaces.commands.progress import ProgressPayload as Progress
 from src.interfaces.commands.push_code import PushedCodePayload as PushedCode
 from src.interfaces.commands.push_data import PushedDataPayload as PushedData
@@ -108,6 +109,7 @@ __all__ = [
     "NodeGrid",
     "Pool",
     "PrecomputeDispatchPayload",
+    "Profile",
     "Progress",
     "PushedCode",
     "PushedData",

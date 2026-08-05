@@ -2530,6 +2530,88 @@
         "title": "PrecomputeDispatchPayload",
         "type": "object"
       },
+      "ProfilePayload": {
+        "description": "What was asked for, and what came back.\n\n`landed` is null for `--no-wait` and for a wait that timed out; the two are\ntold apart by `waited`, because a request that was served slowly and one\nthat was never served are different problems.",
+        "properties": {
+          "available": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available"
+          },
+          "downloaded": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downloaded"
+          },
+          "landed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Landed"
+          },
+          "op": {
+            "const": "profile",
+            "default": "profile",
+            "title": "Op",
+            "type": "string"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          },
+          "waited": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waited"
+          }
+        },
+        "title": "ProfilePayload",
+        "type": "object"
+      },
       "ProgressPayload": {
         "description": "A run's per-checkpoint history: the only thing that can say how it went.\n\n`rows` is TRUNCATED by `--last`; `total_rows` is how many there were. A\nchart drawn from a truncated series looks like a complete measurement, which\nis why the count travels beside it.",
         "properties": {
@@ -5324,6 +5406,44 @@
         "summary": " Precompute"
       }
     },
+    "/api/profiles": {
+      "get": {
+        "operationId": "_profiles_api_profiles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilePayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " Profiles"
+      }
+    },
     "/api/push-code": {
       "post": {
         "operationId": "_push_code_api_push_code_post",
@@ -5935,6 +6055,65 @@
           }
         },
         "summary": " Cancel"
+      }
+    },
+    "/api/tasks/{task_id}/profile": {
+      "post": {
+        "operationId": "_profile_api_tasks__task_id__profile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "seconds",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "title": "Seconds",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilePayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " Profile"
       }
     },
     "/api/view/now": {
