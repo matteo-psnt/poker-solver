@@ -55,3 +55,43 @@ export async function get<S extends z.ZodTypeAny>(path: string, schema: S): Prom
   }
   return parsed.data;
 }
+
+/**
+ * A mutation. The ONLY other verb this module speaks, and it exists for one
+ * reason: play is stateful, so sitting down and acting are not reads.
+ *
+ * Deliberately the same parse-at-the-boundary contract as `get` — a mutation's
+ * response is still a payload the UI renders, so letting it through unchecked
+ * would put the hole in exactly the place a wrong card would be least visible.
+ */
+export async function send<S extends z.ZodTypeAny>(
+  path: string,
+  schema: S,
+  body?: unknown,
+  method: "POST" | "DELETE" = "POST",
+): Promise<z.infer<S>> {
+  const response = await fetch(path, {
+    method,
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const reason =
+      payload && typeof payload === "object" && "error" in payload
+        ? String((payload as { error: unknown }).error)
+        : `${response.status} ${response.statusText}`;
+    throw new ApiError(reason, response.status);
+  }
+
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new ApiError(
+      `Payload from ${path} did not match the expected shape: ${issue?.path.join(".")} — ${issue?.message}`,
+      500,
+    );
+  }
+  return parsed.data;
+}

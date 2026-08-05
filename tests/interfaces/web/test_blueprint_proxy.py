@@ -39,7 +39,7 @@ class TestWhenTheServerIsUnreachable:
         def _refuse(*_args, **_kwargs):
             raise httpx.ConnectError("refused")
 
-        monkeypatch.setattr(httpx, "get", _refuse)
+        monkeypatch.setattr(httpx, "request", _refuse)
         response = client.get("/api/blueprint/run")
 
         assert response.status_code == 503
@@ -53,7 +53,7 @@ class TestForwarding:
         monkeypatch.setenv(blueprint_proxy.BLUEPRINT_URL_ENV, "http://server")
         monkeypatch.setattr(
             httpx,
-            "get",
+            "request",
             lambda *_a, **_k: httpx.Response(422, json={"error": "'b9' is not available here."}),
         )
         response = client.get("/api/blueprint/node", params={"path": "b9"})
@@ -65,22 +65,24 @@ class TestForwarding:
         monkeypatch.setenv(blueprint_proxy.BLUEPRINT_URL_ENV, "http://server/")
         seen: dict[str, object] = {}
 
-        def _capture(url, params=None, timeout=None):
+        def _capture(method, url, params=None, json=None, timeout=None):
+            seen["method"] = method
             seen["url"] = url
             seen["params"] = params
             return httpx.Response(200, json={"ok": True})
 
-        monkeypatch.setattr(httpx, "get", _capture)
+        monkeypatch.setattr(httpx, "request", _capture)
         client.get("/api/blueprint/node", params={"path": "c/x", "board": "2c7d9h"})
 
         # The trailing slash on the base must not survive into the path.
+        assert seen["method"] == "GET"
         assert seen["url"] == "http://server/api/node"
         assert seen["params"] == {"path": "c/x", "board": "2c7d9h", "average": True}
 
     def test_a_server_fault_becomes_a_503_not_a_500(self, client, monkeypatch):
         """The console is up; the thing it asked is not. That is a 503 to a client."""
         monkeypatch.setenv(blueprint_proxy.BLUEPRINT_URL_ENV, "http://server")
-        monkeypatch.setattr(httpx, "get", lambda *_a, **_k: httpx.Response(500, text="boom"))
+        monkeypatch.setattr(httpx, "request", lambda *_a, **_k: httpx.Response(500, text="boom"))
         response = client.get("/api/blueprint/run")
 
         assert response.status_code == 503

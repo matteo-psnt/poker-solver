@@ -21,12 +21,15 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from src.core.game.state import Card
+from src.engine.search.heads_up_session import HeadsUpHand
 from src.engine.search.range_inference import ALL_COMBOS
 from src.engine.solver.policy_source import ScorableBlueprint
+from src.interfaces.blueprint.sessions import Sessions, UnknownSessionError
 from src.pipeline.analysis.grid import StrategyGrid, strategy_grid
-from src.pipeline.analysis.paths import PathError, encode_action, replay
+from src.pipeline.analysis.paths import PathError, encode_action, match_action, replay
 
 
 # `repr`, not `str`: a Card's `__str__` is the pretty terminal form ("[ 2 ♣ ]")
@@ -90,6 +93,80 @@ def grid_payload(grid: StrategyGrid) -> dict[str, Any]:
             }
             for bucket, entry in grid.buckets.items()
         },
+    }
+
+
+class StartPlay(BaseModel):
+    """A request to sit down. ``seed`` is for replaying a hand you want to study."""
+
+    human_seat: int = 0
+    button: int | None = None
+    seed: int | None = None
+
+
+class SubmitAction(BaseModel):
+    """The human's move, as the same token the tree browser speaks."""
+
+    token: str
+
+
+_GONE = (
+    "That hand is no longer on the server — it ended, or was dropped to make room. Deal a new one."
+)
+
+
+def hand_payload(hand: HeadsUpHand) -> dict[str, Any]:
+    """One hand's visible state.
+
+    The bot's hole cards are withheld until the hand is over, which is not
+    politeness: a client that received them could show them, and a sit-down where
+    you can see the opponent's cards measures nothing at all.
+
+    ``untrained`` on a bot decision is the field that matters most. A human
+    explores far off the self-play distribution, so misses are common, and a bot
+    playing uniform-random because it has NO strategy there must not be read as a
+    bad blueprint.
+    """
+    state = hand.state
+    return {
+        "over": hand.is_over,
+        "street": str(state.street),
+        "board": [_card_text(card) for card in state.board],
+        "pot": state.pot,
+        "stacks": list(state.stacks),
+        "human_seat": hand.human_seat,
+        "button": hand.button,
+        "to_act": None if hand.is_over else state.current_player,
+        "hole_cards": [_card_text(card) for card in state.hole_cards[hand.human_seat]],
+        "bot_hole_cards": (
+            [_card_text(card) for card in state.hole_cards[1 - hand.human_seat]]
+            if hand.is_over
+            else None
+        ),
+        "legal": [
+            {"token": encode_action(action), "type": str(action.type), "amount": action.amount}
+            for action in hand.legal_actions()
+        ],
+        "payoff": hand.human_payoff() if hand.is_over else None,
+        "showdown": hand.showdown,
+        "bot_decisions": hand.bot_decisions,
+        "bot_untrained_decisions": hand.bot_untrained_decisions,
+        "log": [
+            {
+                "seat": event.seat,
+                "actor": event.actor,
+                "action": event.action_type,
+                "amount": event.amount,
+                "street": event.street,
+                "untrained": event.untrained,
+                # Revealed only at the end: the mix is what the bot WOULD have
+                # done, and seeing it mid-hand is seeing the opponent's strategy.
+                "mix": [[name, weight] for name, weight in event.mix]
+                if (hand.is_over and event.mix)
+                else None,
+            }
+            for event in hand.log
+        ],
     }
 
 
@@ -164,5 +241,46 @@ def create_app(
             )
         except PathError as error:
             return JSONResponse({"error": str(error)}, status_code=422)
+
+    sessions = Sessions(blueprint)
+
+    @app.post("/api/play")
+    def _start(request: StartPlay) -> JSONResponse:
+        """Deal a hand. The button alternates unless the caller pins it."""
+        try:
+            session_id, hand = sessions.start(
+                human_seat=request.human_seat, button=request.button, seed=request.seed
+            )
+        except ValueError as error:
+            return JSONResponse({"error": str(error)}, status_code=422)
+        return JSONResponse({"session": session_id, **hand_payload(hand)})
+
+    @app.get("/api/play/{session_id}")
+    def _hand(session_id: str) -> JSONResponse:
+        try:
+            return JSONResponse({"session": session_id, **hand_payload(sessions.get(session_id))})
+        except UnknownSessionError:
+            return JSONResponse({"error": _GONE}, status_code=404)
+
+    @app.post("/api/play/{session_id}/action")
+    def _act(session_id: str, request: SubmitAction) -> JSONResponse:
+        """Take the human's action, then auto-play to their next turn."""
+        try:
+            hand = sessions.get(session_id)
+        except UnknownSessionError:
+            return JSONResponse({"error": _GONE}, status_code=404)
+        legal = hand.legal_actions()
+        try:
+            hand.submit(match_action(request.token, legal))
+        except (PathError, ValueError) as error:
+            # A refusal, not a fault: the client offered a move that is not on
+            # the menu, or moved when it was not their turn.
+            return JSONResponse({"error": str(error)}, status_code=422)
+        return JSONResponse({"session": session_id, **hand_payload(hand)})
+
+    @app.delete("/api/play/{session_id}")
+    def _leave(session_id: str) -> JSONResponse:
+        sessions.drop(session_id)
+        return JSONResponse({"session": session_id, "dropped": True})
 
     return app

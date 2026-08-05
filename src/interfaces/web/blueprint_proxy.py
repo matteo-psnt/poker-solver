@@ -18,6 +18,7 @@ different fixes, and a bare `ConnectionRefused` conflates them.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import httpx
 from fastapi import FastAPI
@@ -36,12 +37,19 @@ def blueprint_url() -> str | None:
     return url.rstrip("/") or None
 
 
-def forward(path: str, params: dict[str, str | bool]) -> JSONResponse:
-    """One GET against the blueprint server, with its refusals preserved.
+def forward(
+    path: str,
+    params: dict[str, str | bool] | None = None,
+    *,
+    method: str = "GET",
+    json: Any = None,
+) -> JSONResponse:
+    """One request against the blueprint server, with its refusals preserved.
 
     A 422 from the far side is a refusal the analysis layer already phrased for a
     person -- passing it through unchanged is the whole point, since rewriting it
-    here would mean maintaining a second vocabulary for the same failures.
+    here would mean maintaining a second vocabulary for the same failures. A 404
+    likewise: only the far side knows whether a session still exists.
     """
     base = blueprint_url()
     if base is None:
@@ -53,7 +61,9 @@ def forward(path: str, params: dict[str, str | bool]) -> JSONResponse:
             status_code=503,
         )
     try:
-        response = httpx.get(f"{base}{path}", params=params, timeout=TIMEOUT_SECONDS)
+        response = httpx.request(
+            method, f"{base}{path}", params=params, json=json, timeout=TIMEOUT_SECONDS
+        )
     except httpx.HTTPError as error:
         return JSONResponse(
             {"error": f"The blueprint server at {base} did not answer: {error}"},
@@ -87,3 +97,22 @@ def mount(app: FastAPI) -> None:
     @app.get("/api/blueprint/node")
     def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:
         return forward("/api/node", {"path": path, "board": board, "average": average})
+
+    # Play is stateful, so these carry a body and a session id. The proxy still
+    # holds no state of its own: the session lives where the blueprint does, and
+    # a console restart therefore does not lose a hand in progress.
+    @app.post("/api/blueprint/play")
+    def _start(body: dict[str, Any]) -> JSONResponse:
+        return forward("/api/play", method="POST", json=body)
+
+    @app.get("/api/blueprint/play/{session_id}")
+    def _hand(session_id: str) -> JSONResponse:
+        return forward(f"/api/play/{session_id}")
+
+    @app.post("/api/blueprint/play/{session_id}/action")
+    def _act(session_id: str, body: dict[str, Any]) -> JSONResponse:
+        return forward(f"/api/play/{session_id}/action", method="POST", json=body)
+
+    @app.delete("/api/blueprint/play/{session_id}")
+    def _leave(session_id: str) -> JSONResponse:
+        return forward(f"/api/play/{session_id}", method="DELETE")

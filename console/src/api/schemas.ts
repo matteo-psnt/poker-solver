@@ -312,3 +312,49 @@ export type BlueprintRun = z.infer<typeof blueprintRunSchema>;
 export type Combos = z.infer<typeof combosSchema>;
 export type SolverNode = z.infer<typeof nodeSchema>;
 export type NodeGrid = NonNullable<SolverNode["grid"]>;
+
+/**
+ * A hand in progress.
+ *
+ * `bot_hole_cards` and every `mix` are null until `over` — the server withholds
+ * them, and the schema says so, because a client that received them could show
+ * them and a sit-down where you see the opponent's hand measures nothing.
+ */
+const handEventSchema = z
+  .object({
+    seat: z.number(),
+    actor: z.string(),
+    action: z.string(),
+    amount: z.number(),
+    street: z.string(),
+    untrained: z.boolean(),
+    mix: z.array(z.tuple([z.string(), z.number()])).nullable(),
+  })
+  .passthrough();
+
+export const handSchema = z
+  .object({
+    session: z.string(),
+    over: z.boolean(),
+    street: z.string(),
+    board: z.array(z.string()),
+    pot: z.number(),
+    stacks: z.array(z.number()),
+    human_seat: z.number(),
+    button: z.number(),
+    to_act: z.number().nullable(),
+    hole_cards: z.array(z.string()),
+    bot_hole_cards: z.array(z.string()).nullable(),
+    legal: z.array(
+      z.object({ token: z.string(), type: z.string(), amount: z.number() }).passthrough(),
+    ),
+    payoff: z.number().nullable(),
+    showdown: z.boolean(),
+    bot_decisions: z.number(),
+    bot_untrained_decisions: z.number(),
+    log: z.array(handEventSchema),
+  })
+  .passthrough();
+
+export type Hand = z.infer<typeof handSchema>;
+export type HandEvent = z.infer<typeof handEventSchema>;
