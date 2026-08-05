@@ -40,6 +40,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -52,6 +56,15 @@ provider "azurerm" {
       delete_os_disk_on_deletion = true
     }
   }
+}
+
+# The only thing standing between the internet and a trained run. Generated
+# rather than chosen so it cannot be a memorable string someone reuses, and held
+# in state rather than in the repo. `terraform output -raw api_token` is the one
+# path that prints it.
+resource "random_password" "api_token" {
+  length  = 48
+  special = false
 }
 
 data "azurerm_storage_account" "store" {
@@ -84,6 +97,9 @@ locals {
       - cifs-utils
       - git
       - curl
+      - debian-keyring
+      - debian-archive-keyring
+      - apt-transport-https
     write_files:
       # Credentials in a root-only file rather than in /etc/fstab, where the
       # mount options are world-readable.
@@ -93,6 +109,86 @@ locals {
         content: |
           username=${data.azurerm_storage_account.store.name}
           password=${data.azurerm_storage_account.store.primary_access_key}
+      # Caddy terminates TLS and checks the token. A reverse proxy rather than
+      # doing this in the app for one reason: the app must stay runnable on a
+      # laptop with no certificate and no secret, and an auth layer it could not
+      # be started without would make every test carry a token.
+      #
+      # `header_regexp` on the Authorization header, and a bare 404 otherwise --
+      # not 401. A 401 advertises that something authenticated lives here; a 404
+      # tells a scanner there is nothing at this address at all.
+      - path: /etc/caddy/Caddyfile
+        permissions: "0644"
+        content: |
+          ${var.dns_label}.${var.location}.cloudapp.azure.com {
+            @authorized header_regexp auth Authorization ^Bearer\s+${random_password.api_token.result}$$
+            handle @authorized {
+              reverse_proxy 127.0.0.1:8790
+            }
+            handle {
+              respond 404
+            }
+          }
+
+      # Which run this box serves. An env file rather than a baked-in argument,
+      # because the run changes far more often than the box does -- edit this and
+      # `systemctl restart blueprint`.
+      - path: /etc/blueprint.env
+        permissions: "0644"
+        content: |
+          RUN=
+          RUNS_DIR=/mnt/work/runs
+          IDLE_TIMEOUT=${var.idle_timeout_seconds}
+
+      # The unit, and the whole on-demand story in six lines.
+      #
+      # `ExecStopPost` is the hinge: the server exits when it has been idle, and
+      # THAT is what deallocates the box. Note the guard -- it fires only on a
+      # clean exit, so a crash restarts the service instead of billing you for a
+      # box that then sits there having failed. `Restart=on-failure` is the other
+      # half of that pair.
+      - path: /etc/systemd/system/blueprint.service
+        permissions: "0644"
+        content: |
+          [Unit]
+          Description=Blueprint server
+          After=network-online.target mnt-work.mount mnt-shared.mount
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=${var.admin_username}
+          EnvironmentFile=/etc/blueprint.env
+          Environment=POKER_SOLVER_CACHE=/mnt/work/cache
+          WorkingDirectory=/mnt/work/code
+          ExecStart=/home/${var.admin_username}/.local/bin/uv run poker-solver blueprint-serve \
+            --run ${"$"}{RUN} --runs-dir ${"$"}{RUNS_DIR} --idle-timeout ${"$"}{IDLE_TIMEOUT}
+          ExecStopPost=/usr/local/bin/deallocate-if-idle
+          Restart=on-failure
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+
+      # Only on a clean exit, and only via the VM's own managed identity -- there
+      # are no credentials on this box to steal, and the identity's role is
+      # scoped to this resource group and nothing else.
+      - path: /usr/local/bin/deallocate-if-idle
+        permissions: "0755"
+        content: |
+          #!/bin/bash
+          if [ "${"$"}{EXIT_STATUS:-1}" != "0" ]; then
+            echo "blueprint exited ${"$"}{EXIT_STATUS} -- not deallocating"
+            exit 0
+          fi
+          # The VM's own id from the instance metadata service, NOT from
+          # Terraform: interpolating it here would make custom_data depend on
+          # the machine custom_data configures, which is a cycle.
+          ID=${"$"}(curl -s -H Metadata:true --noproxy "*" \
+            "http://169.254.169.254/metadata/instance/compute/resourceId?api-version=2021-02-01&format=text")
+          az login --identity >/dev/null 2>&1 || exit 0
+          az vm deallocate --ids "${"$"}ID" --no-wait
+
     runcmd:
       # -- the data disk -------------------------------------------------------
       # By LUN, via the Azure Linux Agent's udev symlink. Unlike the Batch node
@@ -116,6 +212,20 @@ locals {
         mkdir -p /mnt/shared
         grep -q '/mnt/shared' /etc/fstab || echo "//${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.share_name} /mnt/shared cifs ro,nofail,vers=3.1.1,credentials=/etc/smbcredentials/store.cred,dir_mode=0555,file_mode=0444,serverino,nosharesock,actimeo=30,mfsymlinks 0 0" >> /etc/fstab
         mount -a
+
+      # -- caddy and the azure cli ---------------------------------------------
+      - |
+        set -euo pipefail
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+          | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
+          > /etc/apt/sources.list.d/caddy-stable.list
+        apt-get update
+        apt-get install -y caddy
+        curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+        systemctl enable --now caddy
+        systemctl daemon-reload
+        systemctl enable blueprint
 
       # -- the toolchain -------------------------------------------------------
       # uv brings its own Python, so the image's interpreter version is not a
@@ -160,11 +270,29 @@ resource "azurerm_network_security_group" "serve" {
   resource_group_name = azurerm_resource_group.serve.name
   tags                = local.tags
 
-  # The ONLY inbound rule. The blueprint server's own port is deliberately absent:
-  # it binds 127.0.0.1 on the box, so the only route to it is a forwarded port
-  # inside this SSH session. Adding 8790 here would publish an unauthenticated
-  # read interface to a trained run, which is a mistake worth making impossible
-  # rather than merely discouraged.
+  # Two rules, and the asymmetry is the point.
+  #
+  # 443 is open to the world because the console has to reach this from wherever
+  # you are, and a button that first needs an SSH tunnel is not a button. What
+  # answers there is Caddy, which checks a bearer token and returns 404 -- not
+  # 401 -- to everything else, so a scanner learns nothing.
+  #
+  # The server's OWN port (8790) is deliberately absent and must stay absent: it
+  # binds loopback and speaks to nobody but Caddy. Opening it would publish an
+  # unauthenticated read interface to a trained run, which is a mistake worth
+  # making impossible rather than merely discouraged.
+  security_rule {
+    name                       = "https"
+    priority                   = 90
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
   security_rule {
     name                       = "ssh"
     priority                   = 100
@@ -186,6 +314,10 @@ resource "azurerm_public_ip" "serve" {
   # line and the tunnel command you saved.
   allocation_method = "Static"
   sku               = "Standard"
+  # Gives the box a name Let's Encrypt will issue for. Without it Caddy has only
+  # an IP, no certificate is possible, and the console would have to be taught to
+  # skip verification -- a setting nobody ever turns back on.
+  domain_name_label = var.dns_label
   tags              = local.tags
 }
 
@@ -226,6 +358,12 @@ resource "azurerm_linux_virtual_machine" "serve" {
   # experiment store.
   disable_password_authentication = true
 
+  # How the box turns itself off. No credential is stored here to be stolen: the
+  # token is issued by the platform to this VM and to nothing else.
+  identity {
+    type = "SystemAssigned"
+  }
+
   admin_ssh_key {
     username   = var.admin_username
     public_key = local.ssh_key
@@ -252,6 +390,15 @@ resource "azurerm_linux_virtual_machine" "serve" {
     # the copied run for no gain. Change it deliberately, by tainting.
     ignore_changes = [custom_data]
   }
+}
+
+# Scoped to this resource group and no wider. "Virtual Machine Contributor"
+# rather than "Contributor" for the same reason: the box needs to stop itself and
+# nothing else, and a compromised reader should not be able to reach the store.
+resource "azurerm_role_assignment" "self_deallocate" {
+  scope                = azurerm_resource_group.serve.id
+  role_definition_name = "Virtual Machine Contributor"
+  principal_id         = azurerm_linux_virtual_machine.serve.identity[0].principal_id
 }
 
 resource "azurerm_managed_disk" "work" {

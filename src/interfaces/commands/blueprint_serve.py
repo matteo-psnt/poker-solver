@@ -41,6 +41,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--port", type=int, default=DEFAULT_PORT, help=f"Port (default {DEFAULT_PORT})."
     )
     parser.add_argument(
+        "--idle-timeout",
+        type=int,
+        default=0,
+        help="Exit after this many seconds with no request. 0 stays up. On the "
+        "hosted box the systemd unit turns this exit into a deallocate.",
+    )
+    parser.add_argument(
         "--at",
         type=int,
         default=None,
@@ -64,6 +71,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "run": run_dir.name,
         "run_dir": str(run_dir),
         "at_iteration": args.at,
+        "idle_timeout": args.idle_timeout,
         "url": f"http://{HOST}:{args.port}",
         "host": HOST,
         "port": args.port,
@@ -95,7 +103,7 @@ def render(payload: dict[str, Any]) -> None:
         return solver
 
     print(f"Loading {payload['run']} …")
-    app = create_app(_load, run_id=payload["run"])
+    app = create_app(_load, run_id=payload["run"], idle_timeout_seconds=payload["idle_timeout"])
     print(f"Blueprint server on {payload['url']}   (Ctrl-C to stop)")
     try:
         uvicorn.run(app, host=payload["host"], port=payload["port"], log_level="warning")

@@ -14,16 +14,20 @@ output "vm_name" {
   value = azurerm_linux_virtual_machine.serve.name
 }
 
-# The whole operational interface, in one string. The server binds loopback on
-# the box, so this forward IS the only route to it -- printing the command rather
-# than documenting the parts is what stops someone "simplifying" it into an NSG
-# rule that opens 8790 to the internet.
-output "tunnel" {
-  description = "Run this, then point POKER_SOLVER_BLUEPRINT_URL at http://127.0.0.1:8790."
-  value       = "ssh -N -L 8790:127.0.0.1:8790 ${var.admin_username}@${azurerm_public_ip.serve.ip_address}"
+output "url" {
+  description = "What POKER_SOLVER_BLUEPRINT_URL should be set to."
+  value       = "https://${azurerm_public_ip.serve.fqdn}"
+}
+
+# The one thing between the internet and a trained run. Sensitive, so it stays
+# out of logs and plan diffs; `terraform output -raw api_token` is the only path
+# that prints it, and `just serve-env` pipes it straight into a shell export.
+output "api_token" {
+  value     = random_password.api_token.result
+  sensitive = true
 }
 
 output "ssh" {
-  description = "A shell on the box, for starting the server against a run."
+  description = "A shell on the box, for pointing it at a run."
   value       = "ssh ${var.admin_username}@${azurerm_public_ip.serve.ip_address}"
 }

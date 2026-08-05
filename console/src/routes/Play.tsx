@@ -1,5 +1,6 @@
 import { useBlueprintRun, useDealHand, useSubmitAction } from "@/api/queries";
 import type { Hand, HandEvent } from "@/api/schemas";
+import { BoxControl } from "@/components/BoxControl";
 import { Panel } from "@/components/Panel";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -32,6 +33,7 @@ export function Play() {
 
   return (
     <div className="space-y-3 p-3">
+      <BoxControl />
       <Panel
         title="table"
         error={

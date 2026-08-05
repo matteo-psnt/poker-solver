@@ -12,6 +12,7 @@
   "blueprint-serve": {
     "at_iteration": null,
     "host": "127.0.0.1",
+    "idle_timeout": 1800,
     "op": "blueprint-serve",
     "port": 8790,
     "run": "run-production-025433-1095",
@@ -385,6 +386,15 @@
     "port": 8765,
     "reload": false,
     "url": "http://127.0.0.1:8765"
+  },
+  "serve-box": {
+    "action": "status",
+    "location": "swedencentral",
+    "op": "serve-box",
+    "power": "deallocated",
+    "resource_group": "poker-solver-serve-rg",
+    "usable": false,
+    "vm": "blueprint-server"
   },
   "status": {
     "at": "2026-08-03T00:24:48-07:00",

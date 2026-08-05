@@ -1,4 +1,5 @@
 import { useBlueprintRun, useCombos, useSolverNode } from "@/api/queries";
+import { BoxControl } from "@/components/BoxControl";
 import { Panel } from "@/components/Panel";
 import { RangeGrid } from "@/components/RangeGrid";
 import { type Cell, actionColour, aggregate } from "@/lib/range";
@@ -40,6 +41,7 @@ export function Solver() {
 
   return (
     <div className="space-y-3 p-3">
+      <BoxControl />
       <Panel
         title="blueprint"
         error={run.error ? String(run.error.message ?? run.error) : null}

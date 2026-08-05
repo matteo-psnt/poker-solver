@@ -65,10 +65,11 @@ class TestForwarding:
         monkeypatch.setenv(blueprint_proxy.BLUEPRINT_URL_ENV, "http://server/")
         seen: dict[str, object] = {}
 
-        def _capture(method, url, params=None, json=None, timeout=None):
+        def _capture(method, url, params=None, json=None, headers=None, timeout=None):
             seen["method"] = method
             seen["url"] = url
             seen["params"] = params
+            seen["headers"] = headers
             return httpx.Response(200, json={"ok": True})
 
         monkeypatch.setattr(httpx, "request", _capture)
@@ -78,6 +79,47 @@ class TestForwarding:
         assert seen["method"] == "GET"
         assert seen["url"] == "http://server/api/node"
         assert seen["params"] == {"path": "c/x", "board": "2c7d9h", "average": True}
+
+    def test_the_token_is_sent_when_configured(self, client, monkeypatch):
+        """Caddy checks this on the box; without it every request reads as a 404."""
+        monkeypatch.setenv(blueprint_proxy.BLUEPRINT_URL_ENV, "http://server")
+        monkeypatch.setenv(blueprint_proxy.BLUEPRINT_TOKEN_ENV, "s3cret")
+        seen: dict[str, object] = {}
+
+        def _capture(method, url, params=None, json=None, headers=None, timeout=None):
+            seen["headers"] = headers
+            return httpx.Response(200, json={"ok": True})
+
+        monkeypatch.setattr(httpx, "request", _capture)
+        client.get("/api/blueprint/run")
+
+        assert seen["headers"] == {"authorization": "Bearer s3cret"}
+
+    def test_no_token_means_no_header(self, client, monkeypatch):
+        """A laptop pointing at a local server has no token, and must still work."""
+        monkeypatch.setenv(blueprint_proxy.BLUEPRINT_URL_ENV, "http://server")
+        monkeypatch.delenv(blueprint_proxy.BLUEPRINT_TOKEN_ENV, raising=False)
+        seen: dict[str, object] = {}
+
+        def _capture(method, url, params=None, json=None, headers=None, timeout=None):
+            seen["headers"] = headers
+            return httpx.Response(200, json={"ok": True})
+
+        monkeypatch.setattr(httpx, "request", _capture)
+        client.get("/api/blueprint/run")
+
+        assert seen["headers"] == {}
+
+    def test_a_bare_404_is_reported_as_an_auth_problem(self, client, monkeypatch):
+        """Caddy hides an unauthorized request as a 404, so this is the likely cause."""
+        monkeypatch.setenv(blueprint_proxy.BLUEPRINT_URL_ENV, "http://server")
+        monkeypatch.setattr(
+            httpx, "request", lambda *_a, **_k: httpx.Response(404, text="not found")
+        )
+        response = client.get("/api/blueprint/run")
+
+        assert response.status_code == 503
+        assert blueprint_proxy.BLUEPRINT_TOKEN_ENV in response.json()["error"]
 
     def test_a_server_fault_becomes_a_503_not_a_500(self, client, monkeypatch):
         """The console is up; the thing it asked is not. That is a 503 to a client."""

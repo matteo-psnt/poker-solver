@@ -10,6 +10,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { get, send } from "./client";
 import {
   type BlueprintRun,
+  type Box,
   type Combos,
   type Cost,
   type Curve,
@@ -24,6 +25,7 @@ import {
   type SolverNode,
   type Tasks,
   blueprintRunSchema,
+  boxSchema,
   combosSchema,
   costSchema,
   curveSchema,
@@ -167,4 +169,24 @@ export const useSubmitAction = () =>
   useMutation<Hand, Error, { session: string; token: string }>({
     mutationFn: ({ session, token }) =>
       send(`/api/blueprint/play/${session}/action`, handSchema, { token }),
+  });
+
+/**
+ * The host's power state. Polled FAST only while it is mid-transition: a box
+ * that is settled will not change without someone clicking, and a box that is
+ * waking needs to be watched or the page lies for two minutes.
+ */
+export const useBox = () =>
+  useQuery<Box>({
+    queryKey: ["blueprint", "box"],
+    queryFn: () => get("/api/box", boxSchema),
+    refetchInterval: (query) => {
+      const power = query.state.data?.power;
+      return power === "running" || power === "deallocated" ? 30_000 : 5_000;
+    },
+  });
+
+export const useBoxAction = () =>
+  useMutation<Box, Error, "start" | "stop">({
+    mutationFn: (action) => send(`/api/box/${action}`, boxSchema),
   });

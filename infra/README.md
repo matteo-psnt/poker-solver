@@ -332,21 +332,31 @@ re-copy ~1.6 GB on each cold start, so the one property that would justify the
 extra machinery (a container image, a registry) is the property this workload
 cannot use.
 
-**Nothing is exposed.** The only inbound rule is SSH from `ssh_source_address`;
-the server binds loopback and is reached by forwarding a port over SSH, so auth
-is the key's rather than something invented. Do not add the server's port to the
-NSG — that publishes an unauthenticated read interface to a trained run.
+**It wakes on demand and switches itself off.** The console has a start/stop
+button (`poker-solver serve-box`), and the server exits after
+`idle_timeout_seconds` with no request — which its systemd unit escalates into
+deallocating the whole VM, using the box's own managed identity. A deallocated VM
+costs nothing but its disks (~$15/mo), and because the run lives on a **managed**
+data disk that survives deallocation, waking is a boot plus a checkpoint load
+(~2 min) rather than re-copying ~1.6 GB.
+
+**Two ports, asymmetric on purpose.** 443 is open to the world, and what answers
+is Caddy: it terminates TLS and checks a bearer token, returning a bare **404** —
+not 401 — to everything else, so a scanner learns nothing is there. The server's
+own port (8790) binds loopback and is deliberately absent from the NSG. Do not
+add it; that would publish an unauthenticated read interface to a trained run.
 
 ```bash
-just serve-create           # once
-just serve-tunnel           # leave running in a second terminal
-just serve-ssh              # then, on the box:
-#   uv run poker-solver blueprint-serve --run <fragment> --runs-dir /mnt/work/runs
-POKER_SOLVER_BLUEPRINT_URL=http://127.0.0.1:8790 uv run poker-solver serve
+just serve-create                 # once
+just serve-ssh                    # point it at a run: edit RUN= in /etc/blueprint.env
+eval "$(just serve-env)"          # URL + token into this shell
+uv run poker-solver serve         # console; Solver and Play now have a host
 ```
 
-The share is mounted **read-only** at `/mnt/shared`: this box publishes nothing,
-and a reader that cannot write cannot damage the one thing that is not a copy.
+`just serve-start` / `just serve-stop` do from a terminal what the console's
+button does. The share is mounted **read-only** at `/mnt/shared`: this box
+publishes nothing, and a reader that cannot write cannot damage the one thing
+that is not a copy.
 
 ## State
 
