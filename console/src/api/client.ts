@@ -27,7 +27,9 @@ export class ApiError extends Error {
  * and every consumer defensive about a value the parser guarantees.
  */
 export async function get<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.infer<S>> {
-  const response = await fetch(path, { headers: { accept: "application/json" } });
+  const response = await fetch(path, {
+    headers: { accept: "application/json" },
+  });
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {

@@ -4,6 +4,7 @@ import { Evals } from "@/routes/Evals";
 import { Overview } from "@/routes/Overview";
 import { RunDetail } from "@/routes/RunDetail";
 import { Runs } from "@/routes/Runs";
+import { Solver } from "@/routes/Solver";
 import { TaskLog } from "@/routes/TaskLog";
 import { Tasks } from "@/routes/Tasks";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -16,7 +17,11 @@ import "./index.css";
 const rootRoute = createRootRoute({ component: Shell });
 
 const routes = [
-  createRoute({ getParentRoute: () => rootRoute, path: "/", component: Overview }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: Overview,
+  }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/tasks",
@@ -24,11 +29,36 @@ const routes = [
     // Validated, so a hand-edited URL cannot put arbitrary state into the page.
     validateSearch: z.object({ cause: z.string().optional() }),
   }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/tasks/$taskId", component: TaskLog }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/runs", component: Runs }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/runs/$runId", component: RunDetail }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/evals", component: Evals }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cost", component: Cost }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/tasks/$taskId",
+    component: TaskLog,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/runs",
+    component: Runs,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/runs/$runId",
+    component: RunDetail,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/solver",
+    component: Solver,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/evals",
+    component: Evals,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/cost",
+    component: Cost,
+  }),
 ];
 
 const router = createRouter({ routeTree: rootRoute.addChildren(routes) });

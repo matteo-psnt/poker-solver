@@ -1,0 +1,102 @@
+"""The `blueprint-serve` subcommand: hold one run, and answer questions about it.
+
+This belongs to the **run on a node** group, beside `train-static`, `precompute`
+and `evaluate`, and for the same reason: it needs the run's checkpoint and the
+card abstraction, both of which live on the share the node mounts. It keeps
+`--runs-dir` because a node reads from `/mnt/work`.
+
+Loopback only, and not configurable -- same rule as `serve`. There is no
+authentication here, so binding anywhere reachable would publish a run to
+whoever finds the port. Reaching it from elsewhere is a tunnel's job, which
+keeps the authentication question with the thing that already answers it.
+"""
+
+from __future__ import annotations
+
+import argparse
+from typing import Any
+
+from src.interfaces.commands._base import Command, resolve_run_dir
+from src.interfaces.errors import CommandError
+
+HOST = "127.0.0.1"
+DEFAULT_PORT = 8790
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Flags for `poker-solver blueprint-serve`."""
+    parser.add_argument("--run", required=True, help="Run id, fragment, or path to a run dir.")
+    parser.add_argument("--runs-dir", default="data/runs", help="Where runs live on this box.")
+    parser.add_argument(
+        "--port", type=int, default=DEFAULT_PORT, help=f"Port (default {DEFAULT_PORT})."
+    )
+    parser.add_argument(
+        "--at",
+        type=int,
+        default=None,
+        help="Serve the checkpoint at this iteration rather than the newest.",
+    )
+
+
+def run(args: argparse.Namespace) -> dict[str, Any]:
+    """Resolve the run and describe what would be served; :func:`render` serves it.
+
+    Same shape as `serve`: a server never returns, which does not fit
+    ``run() -> payload``. Resolving the run HERE rather than in the renderer is
+    deliberate -- a bad `--run` is the most likely mistake, and it should be a
+    refusal before a minute of loading rather than after it.
+    """
+    run_dir = resolve_run_dir(args.run, args.runs_dir)
+    if not run_dir.is_dir():
+        raise CommandError(f"No run directory at {run_dir}.")
+    return {
+        "op": "blueprint-serve",
+        "run": run_dir.name,
+        "run_dir": str(run_dir),
+        "at_iteration": args.at,
+        "url": f"http://{HOST}:{args.port}",
+        "host": HOST,
+        "port": args.port,
+    }
+
+
+def render(payload: dict[str, Any]) -> None:
+    # Imported here, not at module scope, so `--help` and every other subcommand
+    # is spared uvicorn, FastAPI and the whole pipeline import chain.
+    from pathlib import Path
+
+    import uvicorn
+
+    from src.interfaces.blueprint.app import create_app
+    from src.pipeline.services.evaluation._shared import build_blueprint_for
+    from src.pipeline.training.run_tracker import RunTracker
+
+    run_dir = Path(payload["run_dir"])
+
+    def _load():
+        """Load once, at app construction. Takes ~1 min on a production run."""
+        metadata = RunTracker.load(run_dir).metadata
+        solver, _storage = build_blueprint_for(
+            run_dir,
+            metadata,
+            abstraction_hash=metadata.card_abstraction_hash,
+            at_iteration=payload["at_iteration"],
+        )
+        return solver
+
+    print(f"Loading {payload['run']} …")
+    app = create_app(_load, run_id=payload["run"])
+    print(f"Blueprint server on {payload['url']}   (Ctrl-C to stop)")
+    try:
+        uvicorn.run(app, host=payload["host"], port=payload["port"], log_level="warning")
+    except KeyboardInterrupt:
+        print()
+
+
+COMMAND = Command(
+    name="blueprint-serve",
+    help="Serve one trained run for reading, on localhost.",
+    add_arguments=add_arguments,
+    run=run,
+    render=render,
+)

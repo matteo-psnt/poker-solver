@@ -20,6 +20,7 @@ apart a command borrowed another's renderer and died on a missing key.
 
 from src.interfaces.commands._base import Command
 from src.interfaces.commands.autoscale_check import COMMAND as AUTOSCALE_CHECK
+from src.interfaces.commands.blueprint_serve import COMMAND as BLUEPRINT_SERVE
 from src.interfaces.commands.cancel import COMMAND as CANCEL
 from src.interfaces.commands.compare import COMMAND as COMPARE
 from src.interfaces.commands.cost import COMMAND as COST
@@ -50,6 +51,7 @@ from src.interfaces.commands.train_static import COMMAND as TRAIN_STATIC
 COMMANDS: tuple[Command, ...] = (
     STATUS,
     SERVE,
+    BLUEPRINT_SERVE,
     SUBMIT,
     SCORE,
     SUBMIT_PRECOMPUTE,

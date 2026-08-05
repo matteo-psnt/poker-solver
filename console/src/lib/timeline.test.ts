@@ -44,7 +44,10 @@ describe("timelineBars", () => {
         timestamps hides best. */
     const t = timelineBars(
       [
-        task({ started_at: "2026-08-01T00:00:00Z", ended_at: "2026-08-01T01:00:00Z" }),
+        task({
+          started_at: "2026-08-01T00:00:00Z",
+          ended_at: "2026-08-01T01:00:00Z",
+        }),
         task({
           task_id: "b",
           started_at: "2026-08-04T11:00:00Z",
@@ -62,7 +65,10 @@ describe("timelineBars", () => {
     /** The shortest bar is the most interesting one on the chart. */
     const t = timelineBars(
       [
-        task({ started_at: "2026-08-01T00:00:00Z", ended_at: "2026-08-04T00:00:00Z" }),
+        task({
+          started_at: "2026-08-01T00:00:00Z",
+          ended_at: "2026-08-04T00:00:00Z",
+        }),
         task({
           task_id: "died",
           cause: "failed",
@@ -79,7 +85,13 @@ describe("timelineBars", () => {
 
   it("runs an unfinished task to now and says so", () => {
     const t = timelineBars(
-      [task({ task_id: "live", cause: "running", started_at: "2026-08-04T11:00:00Z" })],
+      [
+        task({
+          task_id: "live",
+          cause: "running",
+          started_at: "2026-08-04T11:00:00Z",
+        }),
+      ],
       NOW,
     );
     expect(t?.bars[0]?.running).toBe(true);
@@ -89,8 +101,15 @@ describe("timelineBars", () => {
   it("never lets a bar overflow the axis", () => {
     const t = timelineBars(
       [
-        task({ started_at: "2026-08-04T10:00:00Z", ended_at: "2026-08-04T10:30:00Z" }),
-        task({ task_id: "late", started_at: "2026-08-04T11:59:59Z", ended_at: null }),
+        task({
+          started_at: "2026-08-04T10:00:00Z",
+          ended_at: "2026-08-04T10:30:00Z",
+        }),
+        task({
+          task_id: "late",
+          started_at: "2026-08-04T11:59:59Z",
+          ended_at: null,
+        }),
       ],
       NOW,
     );
@@ -107,8 +126,16 @@ describe("timelineBars", () => {
   it("labels a bar with what the task did, falling back to its op", () => {
     const t = timelineBars(
       [
-        task({ what: "evaluate @150M seed7", started_at: "2026-08-04T11:00:00Z" }),
-        task({ task_id: "b", what: "", op: "train", started_at: "2026-08-04T11:30:00Z" }),
+        task({
+          what: "evaluate @150M seed7",
+          started_at: "2026-08-04T11:00:00Z",
+        }),
+        task({
+          task_id: "b",
+          what: "",
+          op: "train",
+          started_at: "2026-08-04T11:30:00Z",
+        }),
       ],
       NOW,
     );

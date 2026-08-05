@@ -7,7 +7,10 @@
  * they share a long prefix (`run-production-…`) and differ only at the end.
  */
 
-const RELATIVE = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "narrow" });
+const RELATIVE = new Intl.RelativeTimeFormat("en", {
+  numeric: "auto",
+  style: "narrow",
+});
 
 export function count(value: number | null | undefined): string {
   return value == null ? "—" : value.toLocaleString("en-US");
@@ -70,7 +73,10 @@ export function span(
 export function clock(iso: string | null | undefined): string {
   const at = instant(iso);
   if (at == null) return "—";
-  return new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return new Date(at).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /** Relative, because "is this current?" is the only question being asked. */

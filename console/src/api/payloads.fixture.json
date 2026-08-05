@@ -9,6 +9,15 @@
       "pending=0"
     ]
   },
+  "blueprint-serve": {
+    "at_iteration": null,
+    "host": "127.0.0.1",
+    "op": "blueprint-serve",
+    "port": 8790,
+    "run": "run-production-025433-1095",
+    "run_dir": "/mnt/work/runs/run-production-025433-1095",
+    "url": "http://127.0.0.1:8790"
+  },
   "cancel": {
     "job_id": "poker-20260802",
     "op": "cancel",

@@ -54,7 +54,11 @@ export const jobsSchema = z
   .object({
     op: z.literal("jobs"),
     jobs: z.array(
-      z.object({ job: z.string(), state: z.string().nullable(), tasks: z.array(taskSchema) }),
+      z.object({
+        job: z.string(),
+        state: z.string().nullable(),
+        tasks: z.array(taskSchema),
+      }),
     ),
     total_jobs: z.number(),
     hidden_jobs: z.number(),
@@ -244,3 +248,67 @@ export type Ledger = z.infer<typeof ledgerSchema>;
 export type Cost = z.infer<typeof costSchema>;
 export type Progress = z.infer<typeof progressSchema>;
 export type LogLines = z.infer<typeof logSchema>;
+
+/**
+ * The blueprint server's shapes, proxied through `/api/blueprint/*`.
+ *
+ * Unlike every other schema here these do NOT correspond to a command: the
+ * blueprint server is a separate process holding a loaded run, and the console
+ * reaches it over HTTP precisely so it never imports the engine. Its refusals
+ * arrive as the same `{error}` body, so `client.get` needs no special case.
+ */
+export const blueprintRunSchema = z
+  .object({
+    run: z.string(),
+    starting_stack: z.number(),
+    small_blind: z.number(),
+    big_blind: z.number(),
+    combos: z.number(),
+  })
+  .passthrough();
+
+export const combosSchema = z.object({ combos: z.array(z.string()) }).passthrough();
+
+/**
+ * `strategy` is null exactly when `trained` is false — the server refuses to
+ * emit the uniform an allocated-but-unvisited row would otherwise read as, and
+ * the schema keeps that distinction rather than defaulting it away.
+ */
+const bucketSchema = z
+  .object({
+    trained: z.boolean(),
+    strategy: z.array(z.number()).nullable(),
+    reach_count: z.number(),
+  })
+  .passthrough();
+
+export const nodeSchema = z
+  .object({
+    path: z.string(),
+    terminal: z.boolean(),
+    board: z.array(z.string()),
+    grid: z
+      .object({
+        street: z.string(),
+        board: z.array(z.string()),
+        actor: z.number(),
+        actions: z.array(z.string()),
+        // -1 where the board blocks the combo. Kept in place rather than
+        // filtered, so index i is always ALL_COMBOS[i].
+        combo_buckets: z.array(z.number()),
+        blocked: z.number(),
+        trained_buckets: z.number(),
+        buckets: z.record(bucketSchema),
+      })
+      .passthrough()
+      .nullable(),
+    children: z.array(
+      z.object({ token: z.string(), type: z.string(), amount: z.number() }).passthrough(),
+    ),
+  })
+  .passthrough();
+
+export type BlueprintRun = z.infer<typeof blueprintRunSchema>;
+export type Combos = z.infer<typeof combosSchema>;
+export type SolverNode = z.infer<typeof nodeSchema>;
+export type NodeGrid = NonNullable<SolverNode["grid"]>;

@@ -21,9 +21,21 @@ describe("poolShape", () => {
   it("separates the three things a pool has, which one flat list could not show", () => {
     const shape = poolShape(
       jobs(
-        T({ task: "done", state: "BatchTaskState.COMPLETED", end_time: "2026-08-04T09:00:00Z" }),
-        T({ task: "live", state: "BatchTaskState.RUNNING", start_time: "2026-08-04T09:30:00Z" }),
-        T({ task: "next", state: "BatchTaskState.ACTIVE", created: "2026-08-04T09:31:00Z" }),
+        T({
+          task: "done",
+          state: "BatchTaskState.COMPLETED",
+          end_time: "2026-08-04T09:00:00Z",
+        }),
+        T({
+          task: "live",
+          state: "BatchTaskState.RUNNING",
+          start_time: "2026-08-04T09:30:00Z",
+        }),
+        T({
+          task: "next",
+          state: "BatchTaskState.ACTIVE",
+          created: "2026-08-04T09:31:00Z",
+        }),
       ),
       2,
     );
@@ -56,9 +68,21 @@ describe("poolShape", () => {
   it("orders the queue by submission, which is the order Batch dispatches", () => {
     const shape = poolShape(
       jobs(
-        T({ task: "third", state: "BatchTaskState.ACTIVE", created: "2026-08-04T09:05:00Z" }),
-        T({ task: "first", state: "BatchTaskState.ACTIVE", created: "2026-08-04T09:01:00Z" }),
-        T({ task: "second", state: "BatchTaskState.ACTIVE", created: "2026-08-04T09:03:00Z" }),
+        T({
+          task: "third",
+          state: "BatchTaskState.ACTIVE",
+          created: "2026-08-04T09:05:00Z",
+        }),
+        T({
+          task: "first",
+          state: "BatchTaskState.ACTIVE",
+          created: "2026-08-04T09:01:00Z",
+        }),
+        T({
+          task: "second",
+          state: "BatchTaskState.ACTIVE",
+          created: "2026-08-04T09:03:00Z",
+        }),
       ),
       0,
     );
@@ -68,8 +92,16 @@ describe("poolShape", () => {
   it("puts the longest-running task first, because its slot frees up next", () => {
     const shape = poolShape(
       jobs(
-        T({ task: "young", state: "BatchTaskState.RUNNING", start_time: "2026-08-04T09:30:00Z" }),
-        T({ task: "old", state: "BatchTaskState.RUNNING", start_time: "2026-08-04T06:00:00Z" }),
+        T({
+          task: "young",
+          state: "BatchTaskState.RUNNING",
+          start_time: "2026-08-04T09:30:00Z",
+        }),
+        T({
+          task: "old",
+          state: "BatchTaskState.RUNNING",
+          start_time: "2026-08-04T06:00:00Z",
+        }),
       ),
       2,
     );
@@ -114,7 +146,12 @@ describe("poolShape", () => {
 
   it("is empty, not broken, before the first fetch", () => {
     const shape = poolShape(undefined, null);
-    expect(shape).toMatchObject({ slots: [], queue: [], history: [], starved: 0 });
+    expect(shape).toMatchObject({
+      slots: [],
+      queue: [],
+      history: [],
+      starved: 0,
+    });
   });
 });
 

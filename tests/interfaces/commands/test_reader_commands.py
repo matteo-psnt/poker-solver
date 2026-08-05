@@ -17,9 +17,11 @@ import pytest
 
 from src.interfaces.commands import COMMANDS
 
-# The three a node invokes. They write to /mnt/work before publishing, so a
-# local directory is exactly what they need.
-NODE_SIDE = frozenset({"train-static", "precompute", "evaluate"})
+# The ones a node invokes. Three write to /mnt/work before publishing, so a
+# local directory is exactly what they need; `blueprint-serve` reads a
+# checkpoint and the card abstraction, which are on the share the node mounts
+# and are far too large to answer about from anywhere else.
+NODE_SIDE = frozenset({"train-static", "precompute", "evaluate", "blueprint-serve"})
 
 LOCAL_SOURCE_FLAG = "--runs-dir"
 

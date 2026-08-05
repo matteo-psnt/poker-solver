@@ -9,6 +9,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { get } from "./client";
 import {
+  type BlueprintRun,
+  type Combos,
   type Cost,
   type Curve,
   type Jobs,
@@ -18,12 +20,16 @@ import {
   type Progress,
   type RunInfo,
   type Runs,
+  type SolverNode,
   type Tasks,
+  blueprintRunSchema,
+  combosSchema,
   costSchema,
   curveSchema,
   jobsSchema,
   ledgerSchema,
   logSchema,
+  nodeSchema,
   poolSchema,
   progressSchema,
   runinfoSchema,
@@ -113,4 +119,35 @@ export const useEvals = (limit = 50) =>
     queryKey: ["evals", limit],
     queryFn: () => get(`/api/evals?limit=${limit}`, ledgerSchema),
     refetchInterval: SLOW,
+  });
+
+/**
+ * The blueprint server. Not polled: a loaded run does not change under you, so
+ * a refetch interval would be pure cost. `combos` is the canonical 1326-entry
+ * order and never changes at all, hence `staleTime: Infinity`.
+ */
+export const useBlueprintRun = () =>
+  useQuery<BlueprintRun>({
+    queryKey: ["blueprint", "run"],
+    queryFn: () => get("/api/blueprint/run", blueprintRunSchema),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+export const useCombos = (enabled: boolean) =>
+  useQuery<Combos>({
+    queryKey: ["blueprint", "combos"],
+    queryFn: () => get("/api/blueprint/combos", combosSchema),
+    staleTime: Number.POSITIVE_INFINITY,
+    enabled,
+  });
+
+export const useSolverNode = (path: string, board: string, average: boolean, enabled: boolean) =>
+  useQuery<SolverNode>({
+    queryKey: ["blueprint", "node", path, board, average],
+    queryFn: () =>
+      get(
+        `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}&average=${average}`,
+        nodeSchema,
+      ),
+    enabled,
   });
