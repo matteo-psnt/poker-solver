@@ -35,7 +35,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Iterator
-from multiprocessing import resource_tracker, shared_memory
+from multiprocessing import shared_memory
 
 import numpy as np
 
@@ -43,39 +43,6 @@ from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.infoset import InfoSet
 
 logger = logging.getLogger(__name__)
-
-
-def _detach_from_tracker(shm: shared_memory.SharedMemory) -> None:
-    """Stop this process's resource tracker from owning a segment it only ATTACHED to.
-
-    On POSIX, ``SharedMemory`` registers every segment it opens -- including one
-    it merely attaches to -- with the interpreter's resource tracker, and a
-    tracker UNLINKS what it holds when its process dies. An attacher that dies
-    therefore destroys arrays the coordinator is still training on. Measured, and
-    the distinction is what makes this subtle:
-
-        spawned child (shares the parent's tracker), SIGKILLed  -> SURVIVES
-        SEPARATE interpreter, SIGTERM or SIGKILL               -> DESTROYED
-
-    So an ordinary worker is safe and anything holding its own tracker is not: a
-    second task on the node, a probe, or a worker re-parented onto a fresh
-    tracker. A 50M task died at 38,000,000 with all 16 workers of the next chunk
-    raising FileNotFoundError on segments that existed moments earlier -- this
-    class of failure, however it was seeded. Unregistering makes attaching
-    incapable of destroying, so who is attached stops mattering.
-
-    ``SharedMemory(track=False)`` says this directly but is 3.13+, and this
-    project supports 3.12. ``resource_tracker`` is private but stable, and the
-    reclaim path above already depends on the same register/unregister pairing.
-    Never fatal: failing to unregister is the status quo ante, not a new hazard.
-    """
-    name = getattr(shm, "_name", None)
-    if not name:  # pragma: no cover - non-POSIX has no tracker to leave
-        return
-    try:
-        resource_tracker.unregister(name, "shared_memory")
-    except Exception:  # pragma: no cover - tracker already gone  # noqa: BLE001 -- the resource tracker may already be gone
-        logger.debug("Could not unregister %s from the resource tracker.", name)
 
 
 # float32 halves the footprint of the two hot arrays at a measured relative error
@@ -193,16 +160,14 @@ class StaticArrayStorage:
                 name,
                 self.session_id,
             )
-            # Attaching registers the name with this interpreter's resource
-            # tracker and unlink() unregisters it again, so the pair balances and
-            # no tracker entry outlives the reclaim. (`track=False` would say that
-            # directly, but it is 3.13+ and this project supports 3.12.)
+            # `track=False`: this process is destroying the segment, not adopting
+            # it, so the tracker should never hear about it in either direction.
             #
             # FileNotFoundError is not an error here: it means the segment vanished
             # between the failed create and this attach (the dead task's resource
             # tracker getting there first), which is the outcome we wanted.
             try:
-                stale = shared_memory.SharedMemory(name=name, create=False)
+                stale = shared_memory.SharedMemory(name=name, create=False, track=False)
                 stale.close()
                 stale.unlink()
             except FileNotFoundError:
@@ -210,15 +175,47 @@ class StaticArrayStorage:
             return shared_memory.SharedMemory(name=name, create=True, size=size)
 
     def _map_shared(self, *, create: bool) -> None:
-        """Create or attach the shared segments and bind them as array views."""
+        """Create or attach the shared segments and bind them as array views.
+
+        Attaching is UNTRACKED, and that word carries two failures.
+
+        On POSIX a resource tracker unlinks whatever it holds when its process
+        dies, and ``SharedMemory`` registers every segment it opens -- including
+        one it merely attached to. So an attacher that dies destroys arrays the
+        coordinator is still training on. Measured, and the distinction is what
+        makes it subtle:
+
+            spawned child (shares the parent's tracker), SIGKILLed  -> SURVIVES
+            SEPARATE interpreter, SIGTERM or SIGKILL                -> DESTROYED
+
+        A 50M task died at 38,000,000 with all 16 workers of the next chunk
+        raising FileNotFoundError on segments that existed moments earlier.
+
+        The first fix was to attach normally and then unregister. That closed
+        the hazard above and opened a quieter one, because a spawned worker
+        SHARES the coordinator's tracker: the worker's unregister removed the
+        COORDINATOR's entry, and the tracker holds one entry per name, not one
+        per process. Two consequences, both seen in production. The coordinator's
+        own ``unlink()`` then unregistered a name no longer in the cache, so the
+        tracker raised ``KeyError`` and printed a traceback -- five per chunk
+        boundary, in the log a human reads to find out why a task died. And the
+        segments were left untracked, so a coordinator lost to SIGKILL, an OOM or
+        the wall-clock guard no longer had its arrays reclaimed at all, which is
+        what :meth:`_create_segment` keeps finding in ``/dev/shm``.
+
+        ``track=False`` states the actual intent -- an attacher takes no
+        ownership -- and leaves the creator's registration, the one that SHOULD
+        clean up after a kill, untouched.
+        """
         self._owns_shm = create
         for name, (length, dtype) in self._spec().items():
             if create:
                 shm = self._create_segment(name, max(1, length * dtype.itemsize))
             else:
                 try:
-                    shm = shared_memory.SharedMemory(name=self._shm_name(name), create=False)
-                    _detach_from_tracker(shm)
+                    shm = shared_memory.SharedMemory(
+                        name=self._shm_name(name), create=False, track=False
+                    )
                 except FileNotFoundError as exc:
                     raise FileNotFoundError(
                         f"No shared segment for array {name!r} in session "

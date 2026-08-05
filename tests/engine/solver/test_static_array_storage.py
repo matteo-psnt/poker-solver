@@ -8,7 +8,10 @@ unrelated infosets. Several tests below exist only to make that loud.
 
 from __future__ import annotations
 
-from multiprocessing import resource_tracker
+import subprocess
+import sys
+from multiprocessing import resource_tracker, shared_memory
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -21,10 +24,17 @@ from src.engine.solver.storage.static_array import StaticArrayStorage
 from tests.test_helpers import make_test_config
 
 BUCKETS = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-@pytest.fixture(scope="module")
-def tree():
+def build_tree() -> BettingTree:
+    """The tree the whole module shares — a function, not just a fixture.
+
+    ``test_a_killed_creator_still_has_its_segments_reclaimed`` runs out of
+    process and its child has to compute the SAME segment names, which are keyed
+    by the tree fingerprint. Both ends calling this is what makes that true by
+    construction instead of by two definitions agreeing.
+    """
     config = make_test_config(seed=42, small_blind=1, big_blind=2, starting_stack=20)
     rules = GameRules(small_blind=config.game.small_blind, big_blind=config.game.big_blind)
     return BettingTree(
@@ -33,6 +43,41 @@ def tree():
         starting_stack=config.game.starting_stack,
         buckets_per_street=BUCKETS,
     )
+
+
+KILLED_CREATOR_SESSION = "killed-creator-probe"
+
+
+def attach_and_exit() -> None:
+    """Child entry point for the out-of-process test: attach, then go away."""
+    StaticArrayStorage(build_tree(), session_id=KILLED_CREATOR_SESSION, attach=True).close()
+
+
+KILLED_CREATOR_PROGRAM = f"""\
+import os, sys
+sys.path.insert(0, {str(PROJECT_ROOT)!r})
+from multiprocessing import get_context
+from src.engine.solver.storage.static_array import StaticArrayStorage
+from tests.engine.solver.test_static_array_storage import (
+    KILLED_CREATOR_SESSION, attach_and_exit, build_tree,
+)
+
+if __name__ == "__main__":
+    owner = StaticArrayStorage(build_tree(), session_id=KILLED_CREATOR_SESSION)
+    child = get_context("spawn").Process(target=attach_and_exit)
+    child.start()
+    child.join()
+    print("\\n".join(owner._shm_name(a) for a in owner._spec()))
+    sys.stdout.flush()
+    # No close(), no atexit, no finally: the resource tracker is now the only
+    # thing that can reclaim these. That IS the SIGKILL case.
+    os._exit(0)
+"""
+
+
+@pytest.fixture(scope="module")
+def tree():
+    return build_tree()
 
 
 @pytest.fixture
@@ -256,45 +301,92 @@ class TestAttachingCannotDestroy:
     probe, a worker re-parented onto a fresh tracker — destroys the segments the
     coordinator is still training on. A 50M task died at 38,000,000 exactly this
     way, mid-run, with no error until the next chunk failed to attach.
+
+    The tracker holds ONE entry per name, not one per process, so "attach and
+    then unregister" is not a private correction — it deletes the creator's
+    entry. Both halves below therefore have to hold at once.
     """
 
-    def test_attach_leaves_no_segment_in_this_process_tracker(self, tree, monkeypatch):
-        """Every attached segment must be unregistered from the resource tracker.
+    def test_attaching_never_touches_the_resource_tracker(self, tree, monkeypatch):
+        """Not registered, and so not unregistered either.
 
         White-box on purpose. The BEHAVIOUR — a dying tracker-holding attacher
         unlinks the segment — is a property of CPython, reproduced separately;
-        what this repo has to keep true is that attaching hands ownership back.
-        Asserting on the unregister call is deterministic, where racing a real
+        what this repo has to keep true is that attaching claims no ownership.
+        Asserting on the tracker calls is deterministic, where racing a real
         tracker is not.
+
+        Both verbs are spied, because the failure this replaced made exactly the
+        pair: register on attach, unregister immediately after.
         """
         owner = StaticArrayStorage(tree, session_id="attach-untracked")
-        released: list[tuple] = []
-        real = resource_tracker.unregister
+        calls: list[tuple[str, str, str]] = []
+        for verb in ("register", "unregister"):
+            real = getattr(resource_tracker, verb)
 
-        def spy(name, rtype):
-            released.append((name, rtype))
-            return real(name, rtype)
+            def spy(name, rtype, _verb=verb, _real=real):
+                calls.append((_verb, name, rtype))
+                return _real(name, rtype)
 
-        monkeypatch.setattr(resource_tracker, "unregister", spy)
+            monkeypatch.setattr(resource_tracker, verb, spy)
         try:
             reader = StaticArrayStorage(tree, session_id="attach-untracked", attach=True)
-            expected = {f"/{reader._shm_name(a)}" for a in reader._spec()}
             reader.close()
-            # SNAPSHOT HERE, before the owner closes. The owner's close() unlinks,
-            # and unlink() unregisters the very same names — so letting it run
-            # first would satisfy the assertion whether or not attaching detached
-            # anything, which is exactly how an earlier version of this test
-            # passed against the unfixed code.
-            snapshot = set(released)
+            # SNAPSHOT HERE. The owner's close() unlinks, and unlink() legitimately
+            # unregisters — letting it into the list would drown the thing measured.
+            snapshot = list(calls)
         finally:
             owner.close()
 
-        assert {n for n, _ in snapshot} == expected, (
-            "an attached segment stayed registered with this process's resource "
-            "tracker; when the process dies the tracker unlinks the coordinator's "
-            "arrays mid-run"
+        assert snapshot == [], (
+            f"attaching touched the resource tracker ({snapshot}); registering claims "
+            "ownership the attacher must not have, and unregistering deletes the "
+            "CREATOR's entry, since the tracker holds one entry per name"
         )
-        assert all(rtype == "shared_memory" for _, rtype in snapshot)
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(60)
+    def test_a_killed_creator_still_has_its_segments_reclaimed(self, tmp_path):
+        """The half a spy cannot see: the tracker's own cache, in another process.
+
+        A creator that never reaches close() — SIGKILL, an OOM, the wall-clock
+        guard — is reclaimed by its resource tracker and by nothing else. When an
+        attaching worker unregistered, that entry was gone and the segments
+        survived the run that made them; the evidence arrived one task later, as
+        `Reclaiming shared segment left behind by an earlier task`.
+
+        Run out of process because the state under test IS a separate process's
+        cache. `os._exit` skips every interpreter shutdown hook, so the tracker
+        losing the pipe is the only thing left to do the cleanup — exactly the
+        SIGKILL case. Capturing stderr makes this deterministic rather than racy:
+        the tracker inherits that pipe, so the read ends only when IT exits.
+        """
+        path = tmp_path / "killed_creator.py"
+        path.write_text(KILLED_CREATOR_PROGRAM)
+        done = subprocess.run(
+            [sys.executable, str(path)], capture_output=True, text=True, timeout=50, check=True
+        )
+        names = done.stdout.split()
+
+        try:
+            assert "KeyError" not in done.stderr, (
+                "the resource tracker raised on a name it no longer held — an attacher "
+                f"unregistered the creator's entry:\n{done.stderr}"
+            )
+            assert names, f"the probe printed no segment names:\n{done.stderr}"
+            for name in names:
+                with pytest.raises(FileNotFoundError):
+                    shared_memory.SharedMemory(name=name, create=False, track=False).close()
+        finally:
+            # On failure the segments are exactly what the test says they are —
+            # still there — and leaving them would break the NEXT run of this test.
+            for name in names:
+                try:
+                    stale = shared_memory.SharedMemory(name=name, create=False, track=False)
+                    stale.close()
+                    stale.unlink()
+                except FileNotFoundError:
+                    pass
 
 
 class TestAbandonedSegmentsAreReclaimed:

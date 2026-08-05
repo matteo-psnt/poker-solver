@@ -12,6 +12,8 @@ single-worker smoke test.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -27,6 +29,25 @@ from src.pipeline.training.static_parallel import (
 from tests.test_helpers import make_test_config
 
 BUCKETS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 3}
+
+
+def session(name: str) -> str:
+    """A session id no other process on this machine can be using.
+
+    Shared-memory segment names are ``sha256(session_id | tree_fingerprint)``,
+    and every test here builds the SAME tree — so a bare constant like
+    "static-chunked" names one machine-global segment, not one per test run.
+    Two pytest processes at once (xdist workers, or simply two terminals) then
+    collide, and the collision is worse than an error: the second process reads
+    ``FileExistsError`` as an abandoned segment and RECLAIMS it, unlinking the
+    arrays the first one is training on. Its workers die on the next chunk with
+    ``FileNotFoundError``, in a test that passes alone every time.
+
+    That reclaim is correct where it was written — a cloud session id IS the run
+    id, so a name already taken means a dead predecessor. It is these constants
+    that break the premise. The pid restores it.
+    """
+    return f"{name}-{os.getpid()}"
 
 
 class Buckets:
@@ -76,7 +97,7 @@ class TestParallelTraining:
             _config(),
             num_iterations=400,
             num_workers=3,
-            session_id="static-par-drop",
+            session_id=session("static-par-drop"),
             abstraction=Buckets(),
         )
         assert result.iterations == 400
@@ -91,7 +112,7 @@ class TestParallelTraining:
             _config(),
             num_iterations=101,
             num_workers=4,
-            session_id="static-par-split",
+            session_id=session("static-par-split"),
             abstraction=Buckets(),
         )
         assert result.iterations == 101
@@ -102,14 +123,14 @@ class TestParallelTraining:
             _config(),
             num_iterations=300,
             num_workers=1,
-            session_id="static-par-one",
+            session_id=session("static-par-one"),
             abstraction=Buckets(),
         )
         many = train_static_parallel(
             _config(),
             num_iterations=300,
             num_workers=3,
-            session_id="static-par-many",
+            session_id=session("static-par-many"),
             abstraction=Buckets(),
         )
         assert one.touched_rows > 0
@@ -122,7 +143,7 @@ class TestParallelTraining:
             _config(),
             num_iterations=300,
             num_workers=3,
-            session_id="static-par-shared",
+            session_id=session("static-par-shared"),
             checkpoint_dir=tmp_path,
             abstraction=Buckets(),
         )
@@ -153,7 +174,7 @@ class TestParallelTraining:
                 _config(),
                 num_iterations=50,
                 num_workers=2,
-                session_id="static-par-fail",
+                session_id=session("static-par-fail"),
                 abstraction=ExplodingBuckets(),
             )
 
@@ -165,7 +186,7 @@ def test_single_worker_smoke(tmp_path):
         _config(),
         num_iterations=60,
         num_workers=1,
-        session_id="static-par-smoke",
+        session_id=session("static-par-smoke"),
         abstraction=Buckets(),
     )
     assert result.iterations == 60
@@ -219,7 +240,7 @@ class TestGlobalIterationNumbering:
             _config(),
             num_iterations=97,
             num_workers=4,
-            session_id="static-par-tiling",
+            session_id=session("static-par-tiling"),
             abstraction=Buckets(),
         )
         assert result.iterations == 97
