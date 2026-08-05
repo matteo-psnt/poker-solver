@@ -18,7 +18,8 @@ from src.interfaces.cloud import batch, share, spec
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.spec import TaskSpec
 from src.interfaces.errors import CommandError
-from src.shared import gitinfo, tasks
+from src.shared import gitinfo
+from src.shared.cloudtask import kinds
 
 NONCE_CEILING = 32768
 
@@ -76,8 +77,8 @@ def stage_and_queue(
         nonce = index * NONCE_CEILING + secrets.randbelow(NONCE_CEILING)
         identifier = spec.task_id(task.label, now, nonce)
         # The KIND decides: work cheap to repeat wants retries, work with no
-        # partial-progress marker does not. See `src.shared.tasks`.
-        batch.submit_task(client, job_id, identifier, task, retries=tasks.kind(task.op).retries)
+        # partial-progress marker does not. See `src.shared.cloudtask.kinds`.
+        batch.submit_task(client, job_id, identifier, task, retries=kinds.kind(task.op).retries)
         queued.append(Queued(task_id=identifier, job_id=job_id, label=task.label))
 
     return {

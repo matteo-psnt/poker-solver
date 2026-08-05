@@ -7,7 +7,7 @@ import pytest
 
 from src.pipeline.evaluation import ledger
 from src.pipeline.evaluation.lbr.hunl_local_best_response import LBRConfig
-from src.shared import task_log
+from src.shared.cloudtask import task_log
 from tests.test_helpers import seed_ledger
 
 

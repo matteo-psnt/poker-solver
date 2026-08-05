@@ -19,7 +19,7 @@ from typing import Any
 from src.interfaces.cloud import dispatch, spec
 from src.interfaces.commands._base import Command
 from src.interfaces.commands.evaluate import EVAL_METHODS
-from src.shared.tasks import TaskName
+from src.shared.cloudtask.kinds import TaskName
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import pytest
 
 from src.interfaces.cloud import spec
-from src.shared.tasks import BadTaskError, TaskName
+from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
@@ -206,7 +206,7 @@ class TestLabel:
 
 
 class TestValidate:
-    """The kind-specific half moved to the kind. See tests/shared/test_tasks.py."""
+    """The kind-specific half moved to the kind. See tests/shared/cloudtask/test_kinds.py."""
 
     def test_it_delegates_to_the_kind(self):
         with pytest.raises(BadTaskError, match="ABSOLUTE"):

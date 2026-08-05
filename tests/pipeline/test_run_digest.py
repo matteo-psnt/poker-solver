@@ -9,7 +9,8 @@ import pytest
 
 from src.pipeline.services import run_digest
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
-from src.shared import run_events, task_log
+from src.shared import run_events
+from src.shared.cloudtask import task_log
 from src.shared.config import Config
 
 

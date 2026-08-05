@@ -105,7 +105,22 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "timeout: test timeout in seconds",
 ]
-addopts = "-v"
+# `-n auto` because the suite is dominated by a handful of genuinely expensive
+# tests -- 86% of the wall clock is 50 of the ~1460 tests, and the other ~1260
+# are free. Serial, that is 2m53s full / 1m27s fast gate; across 12 workers it
+# is 41s / 26s. `--dist load` (the default) is what wins: `loadfile`/`loadscope`
+# would pin the 44s LBR file to one worker and set the floor there, and
+# `worksteal` measured no better. Do NOT add `--maxschedchunk=1` -- finer
+# scheduling measured SLOWER (2m17s), because these tests are CPU-bound and
+# oversubscribing them costs more than the packing saves.
+#
+# To debug one test, `-n0` turns it off: worker startup and interleaved output
+# are pure cost when there is nothing to parallelise.
+addopts = "-v -n auto"
+# 5s is a fast-test budget and every expensive test carries its own explicit
+# `@pytest.mark.timeout` (30-180s), so the ceiling is not near anything real.
+# That headroom is what makes `-n auto` safe: 12 workers contending cannot push
+# a 0.1s test to 5s, and the tests that take seconds are not measured by this.
 timeout = 5
 timeout_func_only = true
 
@@ -124,6 +139,7 @@ dev = [
     "deptry>=0.24.0",
     "vulture>=2.14",
     "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.6",
 ]
 
 [tool.coverage.run]

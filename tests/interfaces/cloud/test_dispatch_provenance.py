@@ -21,7 +21,7 @@ import pytest
 from src.interfaces.cloud import dispatch, spec
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo
-from src.shared.tasks import TaskName
+from src.shared.cloudtask.kinds import TaskName
 
 
 @pytest.fixture(autouse=True)
@@ -97,10 +97,10 @@ class TestStamping:
 
 
 class TestTheNodeEnd:
-    """`src.shared.node.plan` reads what `spec` writes."""
+    """`src.shared.cloudtask.node.plan` reads what `spec` writes."""
 
     def test_the_node_parses_what_the_submitter_stamped(self, monkeypatch):
-        from src.shared.node import plan as node_plan
+        from src.shared.cloudtask.node import plan as node_plan
 
         monkeypatch.setenv(gitinfo.COMMIT_ENV, "c" * 40)
         monkeypatch.setenv(gitinfo.DIRTY_ENV, "0")
@@ -118,7 +118,7 @@ class TestTheNodeEnd:
     def test_the_wrapper_can_say_what_code_it_runs(self, dirty, expected):
         """The task log is the only place the answer appears while the task is
         still alive."""
-        from src.shared.node import plan as node_plan
+        from src.shared.cloudtask.node import plan as node_plan
 
         task = node_plan.TaskPlan(
             op=TaskName.TRAIN, config="p", to=1, git_commit="c" * 40, git_dirty=dirty
@@ -127,7 +127,7 @@ class TestTheNodeEnd:
         assert task.provenance.startswith("cccccccccccc")
 
     def test_an_unstamped_task_says_so_rather_than_claiming_a_commit(self):
-        from src.shared.node import plan as node_plan
+        from src.shared.cloudtask.node import plan as node_plan
 
         task = node_plan.TaskPlan(op=TaskName.TRAIN, config="p", to=1)
         assert "unknown" in task.provenance

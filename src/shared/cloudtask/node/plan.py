@@ -22,8 +22,8 @@ import json
 import os
 from dataclasses import dataclass, field
 
-from src.shared import tasks
-from src.shared.tasks import BadTaskError, TaskName
+from src.shared.cloudtask import kinds
+from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
 DEFAULT_TIMEOUT_SECONDS = 6 * 3600
 DEFAULT_EVAL_METHOD = "exact_br"
@@ -87,7 +87,7 @@ class TaskPlan:
         A list: scoring a ladder is one command per rung, and the wrapper
         accounts for each separately.
         """
-        return tasks.kind(self.op).commands(self)
+        return kinds.kind(self.op).commands(self)
 
     @property
     def provenance(self) -> str:
@@ -148,7 +148,7 @@ def _validate(plan: TaskPlan) -> None:
     the wrapper's exit accounting knows how to report.
     """
     try:
-        tasks.kind(plan.op).validate(plan)
+        kinds.kind(plan.op).validate(plan)
     except BadTaskError as error:
         raise BadEnvironmentError(str(error)) from error
 

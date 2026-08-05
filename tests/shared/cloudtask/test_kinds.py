@@ -11,8 +11,8 @@ from typing import ClassVar
 
 import pytest
 
-from src.shared import tasks
-from src.shared.tasks import BadTaskError, Progress, Sample, TaskKind, TaskName
+from src.shared.cloudtask import kinds
+from src.shared.cloudtask.kinds import BadTaskError, Progress, Sample, TaskKind, TaskName
 
 
 def _spec(**kwargs):
@@ -43,6 +43,10 @@ def _plan(**kwargs):
         "eval_method": "exact_br",
         "eval_rungs": (),
         "eval_flags": (),
+        # Every field of `tasks.NodePlan`, including the ones a given kind does
+        # not read: a stand-in that is missing one only proves the kinds tolerate
+        # a shape the node never hands them.
+        "progress_path": "",
     }
     return SimpleNamespace(**(base | kwargs))
 
@@ -66,7 +70,7 @@ class TestTheRegistryStaysHonest:
             validate = commands = label = describe = sample = staticmethod(lambda *a: None)
 
         try:
-            assert tasks.kind_of("probe-only") is not None
+            assert kinds.kind_of("probe-only") is not None
         finally:
             TaskKind.KINDS.pop("probe-only", None)
 
@@ -83,16 +87,16 @@ class TestTheRegistryStaysHonest:
 class TestLookup:
     def test_the_submit_path_refuses_an_op_no_node_can_run(self):
         with pytest.raises(BadTaskError, match="Unknown task kind"):
-            tasks.kind("vector-sweep")
+            kinds.kind("vector-sweep")
 
     def test_the_read_path_tolerates_its_own_history(self):
         """`vector-sweep` and `train-vector` are in the task log from deleted
         work. Listing history must not raise on it."""
-        assert tasks.kind_of("vector-sweep") is None
-        assert tasks.describe({"op": "vector-sweep"}) == "vector-sweep"
+        assert kinds.kind_of("vector-sweep") is None
+        assert kinds.describe({"op": "vector-sweep"}) == "vector-sweep"
 
     def test_a_wire_string_and_its_enum_member_are_the_same_key(self):
-        assert tasks.kind("train") is tasks.kind(TaskName.TRAIN)
+        assert kinds.kind("train") is kinds.kind(TaskName.TRAIN)
 
 
 class TestValidation:
@@ -100,41 +104,41 @@ class TestValidation:
         """The checkpoint stores neither the tree nor the solver, so `--run x`
         alone died on the node after a snapshot upload and every retry."""
         with pytest.raises(BadTaskError, match="config"):
-            tasks.kind(TaskName.TRAIN).validate(_spec(config="", run_id="run-a", to=10))
+            kinds.kind(TaskName.TRAIN).validate(_spec(config="", run_id="run-a", to=10))
 
     def test_a_relative_target_is_refused(self):
         with pytest.raises(BadTaskError, match="ABSOLUTE"):
-            tasks.kind(TaskName.TRAIN).validate(_spec(to=0))
+            kinds.kind(TaskName.TRAIN).validate(_spec(to=0))
 
     def test_an_evaluation_needs_a_run(self):
         with pytest.raises(BadTaskError, match="run id"):
-            tasks.kind(TaskName.EVALUATE).validate(_spec(run_id=""))
+            kinds.kind(TaskName.EVALUATE).validate(_spec(run_id=""))
 
 
 class TestCommands:
     def test_training_never_omits_the_worker_count(self):
         """An omitted count trained SINGLE-THREADED on a 16-vCPU node."""
-        (argv,) = tasks.kind(TaskName.TRAIN).commands(_plan(to=1000, workers=16))
+        (argv,) = kinds.kind(TaskName.TRAIN).commands(_plan(to=1000, workers=16))
         assert "--workers" in argv
         assert argv[argv.index("--workers") + 1] == "16"
 
     def test_an_unset_arm_is_absent_rather_than_empty(self):
         """`--arm ""` records an arm literally named empty string."""
-        (argv,) = tasks.kind(TaskName.TRAIN).commands(_plan(to=1000, arm=""))
+        (argv,) = kinds.kind(TaskName.TRAIN).commands(_plan(to=1000, arm=""))
         assert "--arm" not in argv
 
     def test_scoring_a_ladder_is_one_command_per_rung(self):
-        commands = tasks.kind(TaskName.EVALUATE).commands(
+        commands = kinds.kind(TaskName.EVALUATE).commands(
             _plan(run_id="run-a", eval_rungs=("1000", "2000"))
         )
         assert [c[c.index("--at") + 1] for c in commands] == ["1000", "2000"]
 
     def test_scoring_the_latest_checkpoint_names_no_rung(self):
-        (argv,) = tasks.kind(TaskName.EVALUATE).commands(_plan(run_id="run-a", eval_rungs=()))
+        (argv,) = kinds.kind(TaskName.EVALUATE).commands(_plan(run_id="run-a", eval_rungs=()))
         assert "--at" not in argv
 
     def test_passthrough_flags_reach_the_node_intact(self):
-        (argv,) = tasks.kind(TaskName.EVALUATE).commands(
+        (argv,) = kinds.kind(TaskName.EVALUATE).commands(
             _plan(run_id="run-a", eval_flags=("--br-flops", "8"))
         )
         assert argv[-2:] == ["--br-flops", "8"]
@@ -146,7 +150,7 @@ class TestLabels:
         produced three ids differing only by a timestamp and a nonce."""
 
         def label(seed):
-            return tasks.kind(TaskName.EVALUATE).label(
+            return kinds.kind(TaskName.EVALUATE).label(
                 _spec(
                     run_id="run-production-025433-1095",
                     eval_at="150000000",
@@ -158,17 +162,17 @@ class TestLabels:
         assert len({label("7"), label("13"), label("29")}) == 3
 
     def test_training_names_its_target(self):
-        assert tasks.kind(TaskName.TRAIN).label(_spec(to=200_000_000)) == "train-production-to200M"
+        assert kinds.kind(TaskName.TRAIN).label(_spec(to=200_000_000)) == "train-production-to200M"
 
     def test_a_precompute_names_its_abstraction(self):
-        assert tasks.kind(TaskName.PRECOMPUTE).label(_spec(config="ochs")) == "precompute-ochs"
+        assert kinds.kind(TaskName.PRECOMPUTE).label(_spec(config="ochs")) == "precompute-ochs"
 
 
 class TestDescribe:
     def test_it_reads_the_kinds_own_fields(self):
-        assert tasks.describe({"op": "train", "target_iteration": "5000000"}) == "train ->5M"
+        assert kinds.describe({"op": "train", "target_iteration": "5000000"}) == "train ->5M"
         assert (
-            tasks.describe(
+            kinds.describe(
                 {"op": "evaluate", "eval_at": "150000000", "eval_flags": ["--br-board-seed", "7"]}
             )
             == "evaluate @150M seed7"
@@ -176,18 +180,18 @@ class TestDescribe:
 
     def test_a_record_from_before_these_fields_degrades_to_its_op(self):
         """Honest: those records genuinely hold nothing more to show."""
-        assert tasks.describe({"op": "evaluate", "target_iteration": "0"}) == "evaluate"
+        assert kinds.describe({"op": "evaluate", "target_iteration": "0"}) == "evaluate"
 
 
 class TestProgress:
     def test_training_reports_against_its_target(self):
-        got = tasks.kind(TaskName.TRAIN).sample(_plan(to=150_000_000), {"iteration": 30_000_000})
+        got = kinds.kind(TaskName.TRAIN).sample(_plan(to=150_000_000), {"iteration": 30_000_000})
         assert got == Progress(30_000_000, 150_000_000, "iterations")
         assert got is not None
         assert got.phrase == "30M / 150M iterations"
 
     def test_a_resumed_run_past_its_target_does_not_overflow_the_bar(self):
-        got = tasks.kind(TaskName.TRAIN).sample(_plan(to=1000), {"iteration": 5000})
+        got = kinds.kind(TaskName.TRAIN).sample(_plan(to=1000), {"iteration": 5000})
         assert got is not None
         assert got.fraction == 1.0
 
@@ -195,20 +199,20 @@ class TestProgress:
         """Coarse -- three streets means the bar moves twice -- but nothing
         reaches the output directory until the build succeeds, so a street
         boundary is the only observable moment there is."""
-        got = tasks.kind(TaskName.PRECOMPUTE).sample(_plan(), {"done": 2, "total": 3})
+        got = kinds.kind(TaskName.PRECOMPUTE).sample(_plan(), {"done": 2, "total": 3})
         assert got == Progress(2, 3, "streets")
 
     def test_a_kind_with_nothing_yet_to_report_says_nothing(self):
         """None renders as no bar; zero renders as a bar that looks stuck."""
-        assert tasks.kind(TaskName.TRAIN).sample(_plan(to=100), {}) is None
-        assert tasks.kind(TaskName.PRECOMPUTE).sample(_plan(), {}) is None
+        assert kinds.kind(TaskName.TRAIN).sample(_plan(to=100), {}) is None
+        assert kinds.kind(TaskName.PRECOMPUTE).sample(_plan(), {}) is None
 
     def test_a_build_names_where_it_should_write_its_progress(self):
         """Only the node knows its scratch dir, so the wrapper fills the path in
         and the kind puts it on the command line."""
-        (argv,) = tasks.kind(TaskName.PRECOMPUTE).commands(_plan(progress_path="/w/p.json"))
+        (argv,) = kinds.kind(TaskName.PRECOMPUTE).commands(_plan(progress_path="/w/p.json"))
         assert argv[-2:] == ["--progress-file", "/w/p.json"]
-        (bare,) = tasks.kind(TaskName.PRECOMPUTE).commands(_plan())
+        (bare,) = kinds.kind(TaskName.PRECOMPUTE).commands(_plan())
         assert "--progress-file" not in bare
 
     def test_it_survives_a_record_written_by_an_older_wrapper(self):
@@ -220,7 +224,7 @@ class TestProgress:
 class TestEstimate:
     """Four sources, best first, and the worker count decides which history counts."""
 
-    KIND = tasks.kind(TaskName.TRAIN)
+    KIND = kinds.kind(TaskName.TRAIN)
 
     def test_a_task_measuring_itself_beats_any_prior(self):
         """Halfway after 100s means about 100s left, whatever history claims --
@@ -254,7 +258,7 @@ class TestEstimateAndWorkers:
     nothing. These pin that the matching happens and that it is matching, not
     dividing."""
 
-    KIND = tasks.kind(TaskName.TRAIN)
+    KIND = kinds.kind(TaskName.TRAIN)
 
     HISTORY: ClassVar[list[Sample]] = [
         Sample(units=1_000_000, seconds=1000, workers=1),  # 1k/s
@@ -305,7 +309,7 @@ class TestEstimateAndWorkers:
 
 
 class TestEstimateDeclinesToGuess:
-    KIND = tasks.kind(TaskName.TRAIN)
+    KIND = kinds.kind(TaskName.TRAIN)
 
     def test_with_no_history_and_no_progress_it_says_nothing(self):
         assert self.KIND.estimate(None, elapsed=10, history=[], workers=16) is None
@@ -344,24 +348,24 @@ class TestSamplesFromHistory:
         return base | kwargs
 
     def test_a_completed_task_becomes_a_rate(self):
-        (sample,) = tasks.samples([self._row()], "train")
+        (sample,) = kinds.samples([self._row()], "train")
         assert sample.rate == pytest.approx(1000)
         assert sample.workers == 16
 
     def test_a_task_that_died_partway_is_not_a_rate(self):
         """It took the wall clock of a partial job, and counting it would drag
         every later estimate down."""
-        assert tasks.samples([self._row(cause="killed")], "train") == []
+        assert kinds.samples([self._row(cause="killed")], "train") == []
 
     def test_a_record_from_before_units_existed_is_skipped(self):
         """There is no way to reconstruct what those achieved."""
-        assert tasks.samples([self._row(units=0)], "train") == []
+        assert kinds.samples([self._row(units=0)], "train") == []
 
     def test_another_kinds_history_is_not_borrowed(self):
-        assert tasks.samples([self._row(op="evaluate")], "train") == []
+        assert kinds.samples([self._row(op="evaluate")], "train") == []
 
     def test_an_unreadable_timestamp_is_skipped_not_fatal(self):
-        assert tasks.samples([self._row(ended_at="nonsense")], "train") == []
+        assert kinds.samples([self._row(ended_at="nonsense")], "train") == []
 
 
 class TestRemaining:
@@ -390,21 +394,21 @@ class TestRemaining:
 
     def test_a_running_task_gets_an_estimate_from_its_own_rate(self):
         """Halfway after an hour means about an hour left."""
-        left = tasks.remaining(self._running(), self.HISTORY, "2026-08-05T13:00:00+00:00")
+        left = kinds.remaining(self._running(), self.HISTORY, "2026-08-05T13:00:00+00:00")
         assert left == pytest.approx(3600, rel=0.01)
 
     def test_a_task_with_no_progress_yet_falls_back_to_history(self):
-        left = tasks.remaining(
+        left = kinds.remaining(
             self._running(progress=None), self.HISTORY, "2026-08-05T12:00:00+00:00"
         )
         assert left == pytest.approx(3600)
 
     def test_a_finished_task_has_no_estimate_at_all(self):
         """Not zero -- nothing. It is not waiting on anything."""
-        assert tasks.remaining(self._running(cause="completed"), self.HISTORY, "x") is None
+        assert kinds.remaining(self._running(cause="completed"), self.HISTORY, "x") is None
 
     def test_a_kind_this_code_no_longer_has_is_not_a_crash(self):
-        assert tasks.remaining(self._running(op="vector-sweep"), self.HISTORY, "x") is None
+        assert kinds.remaining(self._running(op="vector-sweep"), self.HISTORY, "x") is None
 
 
 class TestAnEvaluationCanAlwaysBeEstimated:
@@ -415,7 +419,7 @@ class TestAnEvaluationCanAlwaysBeEstimated:
     how many rungs it was asked for, and that is enough to scale a known rate.
     """
 
-    KIND = tasks.kind(TaskName.EVALUATE)
+    KIND = kinds.kind(TaskName.EVALUATE)
 
     def test_it_reports_zero_of_its_rungs_before_the_first_one_lands(self):
         """Not None: the bar sits at 0 for a single-rung score, but the TOTAL is

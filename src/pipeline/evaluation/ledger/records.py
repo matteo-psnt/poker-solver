@@ -21,7 +21,7 @@ from typing import Any
 
 from src.pipeline.evaluation.ledger.tiers import _knob_hash
 from src.shared import records as record_store
-from src.shared import task_log
+from src.shared.cloudtask import task_log
 from src.shared.gitinfo import get_git_commit, is_git_dirty
 
 LEDGER_SCHEMA_VERSION = record_store.REGISTRY["eval_ledger.jsonl"].version

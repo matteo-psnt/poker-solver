@@ -26,14 +26,14 @@ import subprocess
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 ENTRY_POINT = REPO_ROOT / "infra" / "run_task.py"
 
 
 def _first_party_targets(source: pathlib.Path) -> set[str]:
     """Every ``src.*`` name this file imports, however it spells the import.
 
-    ``from src.shared import cache, task_log`` names two modules that the dotted
+    ``from src.shared.cloudtask import kinds, task_log`` names two modules that the dotted
     prefix alone does not, so each imported name is also offered as a candidate
     module; the ones that are attributes rather than modules simply resolve to
     nothing. Relative imports do not appear -- the node package has none, and a
@@ -100,18 +100,22 @@ def test_the_guarded_set_is_discovered_and_not_empty():
     closure would quietly collapse to the entry point alone and every check
     below would still pass, on nothing. So assert the walk actually reached
     past the first hop, and name the two files a hand-written list forgot: they
-    are reached only transitively (`runner` -> `task_log` -> `records` ->
+    are reached only transitively (`lifecycle` -> `task_log` -> `records` ->
     `jsonio`), which is precisely the depth a person stops tracing at.
     """
     found = {path.relative_to(REPO_ROOT).as_posix() for path in GUARDED_SOURCES}
     assert ENTRY_POINT in GUARDED_SOURCES
     assert {
-        "src/shared/node/runner.py",
-        "src/shared/node/archive.py",
-        "src/shared/node/plan.py",
-        "src/shared/task_log.py",
+        "src/shared/cloudtask/node/lifecycle.py",
+        "src/shared/cloudtask/node/handlers.py",
+        "src/shared/cloudtask/node/progress.py",
+        "src/shared/cloudtask/node/process.py",
+        "src/shared/cloudtask/node/paths.py",
+        "src/shared/cloudtask/node/archive.py",
+        "src/shared/cloudtask/node/plan.py",
+        "src/shared/cloudtask/task_log.py",
+        "src/shared/cloudtask/kinds.py",
         "src/shared/cache.py",
-        "src/shared/tasks.py",
         "src/shared/records.py",
         "src/shared/jsonio.py",
     } <= found, f"the node closure lost members; found {sorted(found)}"
@@ -143,7 +147,8 @@ def test_the_entry_point_adds_the_repo_to_the_path_before_importing():
     """It is executed as a file inside the extracted tarball, not as a module,
     so nothing puts the repo root on sys.path for it."""
     source = (REPO_ROOT / "infra" / "run_task.py").read_text()
-    assert source.index("sys.path.insert") < source.index("from src.shared.node.runner import")
+    marker = "from src.shared.cloudtask.node.lifecycle import"
+    assert source.index("sys.path.insert") < source.index(marker)
 
 
 @pytest.mark.timeout(300)
@@ -151,14 +156,14 @@ def test_the_entry_point_adds_the_repo_to_the_path_before_importing():
 def test_the_whole_package_imports_on_the_node_interpreter():
     """The check the substring scan cannot make.
 
-    Imports the entry point's whole chain -- runner, archive, plan, task_log,
-    records -- on the node's real interpreter, with `--no-project` so not one project
+    Imports the entry point's whole chain -- lifecycle, handlers, progress,
+    archive, plan, task_log, records -- on the node's real interpreter, with `--no-project` so not one project
     dependency is installed. That is the node, before `uv sync`.
     """
     script = (
         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-        "from src.shared.node.runner import main;"
-        "from src.shared.node.plan import parse_environment;"
+        "from src.shared.cloudtask.node.lifecycle import main;"
+        "from src.shared.cloudtask.node.plan import parse_environment;"
         "plan = parse_environment({'RUN_OP': 'train', 'RUN_CONFIG': 'c', 'RUN_TO': '5'});"
         "assert plan.commands[0][0] == 'train-static';"
         "print('ok')"
@@ -182,7 +187,7 @@ def test_a_task_record_can_be_written_on_the_node_interpreter(tmp_path):
     """The one thing that must work even when everything else has failed."""
     script = (
         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-        "from src.shared.task_log import write_node_record;"
+        "from src.shared.cloudtask.task_log import write_node_record;"
         f"write_node_record({str(tmp_path)!r}, task_id='t', event='started');"
         "print('ok')"
     )
