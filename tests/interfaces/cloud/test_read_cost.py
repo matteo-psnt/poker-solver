@@ -234,7 +234,7 @@ class TestAPageCostsOneMaterialisation:
     def _count_pulls(monkeypatch) -> list[str | None]:
         pulls: list[str | None] = []
 
-        def _fake(root, *, run):
+        def _fake(root, *, run, previous=None):
             pulls.append(run)
             (root / "run-a").mkdir(parents=True, exist_ok=True)
 

@@ -44,6 +44,11 @@ DEAD_SUFFIX = "_result.json"
 # 4.6s at 32, 3.5s at 64. Threads blocked on a socket cost almost nothing.
 _PARALLEL_DOWNLOADS = 64
 
+# The etag manifest an incremental refresh compares against, written at the ROOT
+# of a materialised tree. Every reader of that tree filters to directories, so a
+# file beside the run directories is invisible to them.
+_ETAGS_NAME = "records.etags"
+
 
 def _is_snapshot_dir(name: str) -> bool:
     """A checkpoint directory, never worth descending into to ask a question.
@@ -61,8 +66,14 @@ def pull_metadata(
     destination: Path,
     *,
     run: str | None = None,
+    previous: Path | None = None,
 ) -> int:
-    """Download every published JSON record into ``destination``. Returns the count."""
+    """Materialise the published JSON record into ``destination``.
+
+    Returns how many files were FETCHED, not how many the tree holds: with
+    ``previous`` -- a tree this function built earlier -- an unchanged etag is
+    hard-linked across instead of downloaded.
+    """
     published = [
         entry.name
         for entry in share.list_entries(service, share_name, share.ARCHIVE_DIR)
@@ -86,10 +97,10 @@ def pull_metadata(
     # directory listings, and a listing is a round trip like any other: 18 runs
     # walked one after another was 12.4s of the ~20s a `--source share` read
     # took, before a single file had been fetched.
-    def _walk(name: str) -> tuple[list[tuple[str, Path]], list[Path]]:
-        found: list[tuple[str, Path]] = []
+    def _walk(name: str) -> tuple[list[tuple[str, Path, str | None]], list[Path]]:
+        found: list[tuple[str, Path, str | None]] = []
         markers: list[Path] = []
-        for remote in share.walk_files(
+        for remote, etag in share.walk_files(
             service,
             share_name,
             f"{share.ARCHIVE_DIR}/{name}",
@@ -109,7 +120,7 @@ def pull_metadata(
                 continue
             if leaf.endswith(DEAD_SUFFIX):
                 continue
-            found.append((remote, destination / relative))
+            found.append((remote, destination / relative, etag))
         return found, markers
 
     with ThreadPoolExecutor(max_workers=min(_PARALLEL_DOWNLOADS, len(published) or 1)) as pool:
@@ -120,18 +131,42 @@ def pull_metadata(
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.touch()
 
+    # INCREMENTAL against `previous`, on the same argument `download_tasks` uses
+    # for legs/: a published record never changes once written, so an unchanged
+    # etag means the bytes are already on disk and a hard link is the whole
+    # refresh. Before this, a 45s console TTL re-fetched all 4,251 immutable
+    # documents every time -- 6.4s of the 24.4s rebuild, paid every 45 seconds.
+    known = _etags(previous)
+    fetch: list[tuple[str, Path]] = []
+    for remote, local, etag in wanted:
+        relative = remote[len(f"{share.ARCHIVE_DIR}/") :]
+        held = previous / relative if previous is not None else None
+        if held is not None and etag is not None and known.get(relative) == etag and held.is_file():
+            local.parent.mkdir(parents=True, exist_ok=True)
+            _link(held, local)
+        else:
+            fetch.append((remote, local))
+
     # One round trip per file, and a run's eval documents now carry their full
     # sample vectors -- so this is latency-bound on a link where latency is the
     # whole cost. The downloads are independent and `download_file` builds its
     # own file client, so they overlap.
-    with ThreadPoolExecutor(max_workers=_PARALLEL_DOWNLOADS) as pool:
-        futures = [
-            pool.submit(share.download_file, service, share_name, remote, local)
-            for remote, local in wanted
-        ]
-        for future in futures:
-            future.result()
-    return len(wanted)
+    if fetch:
+        with ThreadPoolExecutor(max_workers=_PARALLEL_DOWNLOADS) as pool:
+            futures = [
+                pool.submit(share.download_file, service, share_name, remote, local)
+                for remote, local in fetch
+            ]
+            for future in futures:
+                future.result()
+
+    (destination / _ETAGS_NAME).write_text(
+        "".join(
+            f"{etag or ''}\t{remote[len(f'{share.ARCHIVE_DIR}/') :]}\n"
+            for remote, _, etag in wanted
+        )
+    )
+    return len(fetch)
 
 
 def resolve_published_run(run: str) -> str:
@@ -361,11 +396,31 @@ def active_cache() -> SharedTrees | None:
     return _ACTIVE
 
 
-def _materialise(root: Path, *, run: str | None) -> None:
-    """Pull the published record into ``root``."""
+def _etags(tree: Path | None) -> dict[str, str]:
+    """The versions a tree was built from. Empty for a tree with no manifest."""
+    if tree is None or not (tree / _ETAGS_NAME).is_file():
+        return {}
+    found: dict[str, str] = {}
+    for line in (tree / _ETAGS_NAME).read_text().splitlines():
+        etag, sep, name = line.partition("\t")
+        if sep and etag:
+            found[name] = etag
+    return found
+
+
+def _link(source: Path, destination: Path) -> None:
+    """A hard link where the filesystem allows one, a copy where it does not."""
+    try:
+        destination.hardlink_to(source)
+    except OSError:
+        shutil.copyfile(source, destination)
+
+
+def _materialise(root: Path, *, run: str | None, previous: Path | None = None) -> None:
+    """Pull the published record into ``root``, reusing ``previous`` where it can."""
     config = CloudConfig.load()
     service = share.share_client(config)
-    pull_metadata(service, config.share_name, root, run=run)
+    pull_metadata(service, config.share_name, root, run=run, previous=previous)
 
 
 def _require_published(root: Path, run: str) -> None:
@@ -407,7 +462,11 @@ def share_records(*, run: str | None = None) -> Iterator[Path]:
             yield root
         return
 
-    with cache.acquire(RECORD_KEY, lambda root, _previous: _materialise(root, run=None)) as root:
+    def _refresh(root: Path, previous: Path | None) -> None:
+        """The count `pull_metadata` returns is not part of the cache protocol."""
+        _materialise(root, run=None, previous=previous)
+
+    with cache.acquire(RECORD_KEY, _refresh) as root:
         if run is not None:
             _require_published(root, run)
         yield root
