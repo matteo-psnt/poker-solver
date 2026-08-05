@@ -19,7 +19,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Include jobs whose tasks have all finished. The default hides them: a "
         "day of scoring leaves dozens of completed single-task jobs, and burying "
-        "the one running leg in that list is how a stalled run goes unnoticed.",
+        "the one running task in that list is how a stalled run goes unnoticed.",
     )
     parser.add_argument(
         "--limit", type=int, default=20, help="Show only the last N jobs (0 = all)."
@@ -58,7 +58,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     Tasks are fetched only for the jobs that can survive the filter. Listing
     them costs ~0.39s per job against ~1.1s for the whole job list, so fetching
     all 44 to render the 2 that were active was the entire cost of this command
-    -- measured at ~11s, and paid again by every caller, including `legs` and
+    -- measured at ~11s, and paid again by every caller, including `tasks` and
     the status screen.
     """
     client = batch.client(CloudConfig.load())

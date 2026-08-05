@@ -1,9 +1,9 @@
-import { useJobs, useLegs, usePool } from "@/api/queries";
+import { useJobs, usePool, useTasks } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, exitMeaning, taskOutcome, taskTone } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { clock, count, legLabel, since, span } from "@/lib/format";
+import { clock, count, since, span, taskLabel } from "@/lib/format";
 import { type PoolShape, type Task, elapsed, poolShape } from "@/lib/pool";
 import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
@@ -13,7 +13,7 @@ import { useMemo } from "react";
 export function Overview() {
   const pool = usePool();
   const jobs = useJobs(10);
-  const legs = useLegs(10);
+  const tasks = useTasks(10);
 
   // Recomputed each render rather than ticked: the panel already re-renders on
   // the 15s poll, and a second timer would redraw it between polls to move one
@@ -56,7 +56,7 @@ export function Overview() {
         )}
       </Panel>
 
-      {/* Batch and the leg log answer DIFFERENT questions; the panels sit
+      {/* Batch and the task log answer DIFFERENT questions; the panels sit
           together because neither is sufficient alone. */}
       <Panel
         title={`Batch — ${busy} of ${shape.slots.length} node${
@@ -79,16 +79,16 @@ export function Overview() {
       </Panel>
 
       <Panel
-        title="Legs"
-        updatedAt={legs.dataUpdatedAt}
+        title="Tasks"
+        updatedAt={tasks.dataUpdatedAt}
         staleAfterMs={120_000}
-        error={errorOf(legs.error)}
-        loading={legs.isLoading}
-        empty={legs.data && legs.data.rows.length === 0 ? "No leg records." : null}
-        onRefresh={() => legs.refetch()}
-        refreshing={legs.isFetching}
+        error={errorOf(tasks.error)}
+        loading={tasks.isLoading}
+        empty={tasks.data && tasks.data.rows.length === 0 ? "No task records." : null}
+        onRefresh={() => tasks.refetch()}
+        refreshing={tasks.isFetching}
       >
-        {legs.data && legs.data.rows.length > 0 && (
+        {tasks.data && tasks.data.rows.length > 0 && (
           <Table>
             <thead>
               <tr>
@@ -100,15 +100,15 @@ export function Overview() {
               </tr>
             </thead>
             <tbody>
-              {[...legs.data.rows].reverse().map((row) => (
+              {[...tasks.data.rows].reverse().map((row) => (
                 <tr key={`${row.task_id}-${row.attempt}`}>
                   <Td mono title={row.task_id}>
                     <Link
-                      to="/legs/$taskId"
+                      to="/tasks/$taskId"
                       params={{ taskId: row.task_id }}
                       className="hover:underline"
                     >
-                      {legLabel(row.task_id)}
+                      {taskLabel(row.task_id)}
                     </Link>
                   </Td>
                   <Td className="text-[var(--fg-muted)]">{row.what || row.op || "—"}</Td>
@@ -162,10 +162,10 @@ function Pipeline({ shape, busy, now }: { shape: PoolShape; busy: number; now: n
           {slot.task ? (
             <>
               <span className="truncate font-mono text-[12px]" title={slot.task.task}>
-                {legLabel(slot.task.task)}
+                {taskLabel(slot.task.task)}
               </span>
               {/* Elapsed answers "is this stuck"; the wall clock is what
-                  correlates a slot with a line in a log or a leg row. */}
+                  correlates a slot with a line in a log or a task row. */}
               <span className="tnum shrink-0 text-[11px] text-[var(--fg-faint)]">
                 {elapsed(slot.task.start_time, now) || "—"}
                 {slot.task.start_time && ` · since ${clock(slot.task.start_time)}`}
@@ -211,7 +211,7 @@ function Pipeline({ shape, busy, now }: { shape: PoolShape; busy: number; now: n
                 className="truncate font-mono text-[12px] text-[var(--fg-muted)]"
                 title={task.task}
               >
-                {legLabel(task.task)}
+                {taskLabel(task.task)}
               </span>
               <span className="tnum shrink-0 text-[11px] text-[var(--fg-faint)]">
                 waiting {elapsed(task.created, now) || "—"}
@@ -265,7 +265,7 @@ function History({ history }: { history: Task[] }) {
           {history.slice(0, 6).map((task) => (
             <tr key={`${task.job}/${task.task}`}>
               <Td mono title={task.task}>
-                {legLabel(task.task)}
+                {taskLabel(task.task)}
               </Td>
               <Td>
                 {/* Coloured on state AND exit code, and the code's MEANING is

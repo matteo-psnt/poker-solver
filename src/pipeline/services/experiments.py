@@ -18,7 +18,7 @@ from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
-from src.shared import leg_log, records, run_events
+from src.shared import records, run_events, task_log
 from src.shared.config import DEFAULT_RUNS_DIR
 
 
@@ -357,7 +357,7 @@ class RunDigest:
     A run's evidence is spread across five artifacts written by four subsystems
     -- identity in ``.run.json``, the curve in ``progress.jsonl``, scores in the
     eval ledger, the ladder in the checkpoint manifest, deaths in the share's
-    leg records. Answering "is this run trustworthy yet" meant opening all of
+    task records. Answering "is this run trustworthy yet" meant opening all of
     them and holding the joins in your head.
 
     ``gaps`` is the part that matters: what this run cannot yet support a
@@ -381,7 +381,7 @@ class RunDigest:
     progress: list[dict[str, Any]]
     coverage_flat_from: int | None
     curve: CurveOutput
-    legs: list[dict[str, Any]]
+    tasks: list[dict[str, Any]]
     gaps: list[str]
 
 
@@ -390,19 +390,19 @@ def run_digest(
     *,
     ledger_path: Path,
     tier_index: int = 0,
-    legs_dir: Path | None = None,
+    tasks_dir: Path | None = None,
 ) -> RunDigest:
     """Join every record this run left behind. Pure reader.
 
-    ``legs_dir`` points at a local copy of the share's ``legs/`` (``just fetch``
-    brings one down). Omitted for a purely local run, which has no legs.
+    ``tasks_dir`` points at a local copy of the share's ``legs/`` (``just fetch``
+    brings one down). Omitted for a purely local run, which has no tasks.
     """
     metadata = load_run_metadata(run_dir)
     progress = run_events.checkpoints(run_events.read(run_dir))
     curve = exploitability_curve(run_dir, ledger_path=ledger_path, tier_index=tier_index)
-    legs = (
-        [row for row in leg_log.read_legs(legs_dir) if row["run_id"] == run_dir.name]
-        if legs_dir
+    tasks = (
+        [row for row in task_log.read_tasks(tasks_dir) if row["run_id"] == run_dir.name]
+        if tasks_dir
         else []
     )
 
@@ -422,8 +422,8 @@ def run_digest(
         progress=progress,
         coverage_flat_from=run_events.plateau_iteration(progress),
         curve=curve,
-        legs=legs,
-        gaps=_digest_gaps(metadata, progress, curve, legs),
+        tasks=tasks,
+        gaps=_digest_gaps(metadata, progress, curve, tasks),
     )
 
 
@@ -431,7 +431,7 @@ def _digest_gaps(
     metadata: RunMetadata,
     progress: list[dict[str, Any]],
     curve: CurveOutput,
-    legs: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
 ) -> list[str]:
     """What this run cannot yet support a conclusion about.
 
@@ -465,9 +465,9 @@ def _digest_gaps(
         gaps.append("trained from a dirty working tree — the commit does not identify the code")
     if metadata.status != "completed":
         gaps.append(f"status is '{metadata.status}', not 'completed'")
-    unresolved = [row for row in legs if row["cause"] not in leg_log.TERMINAL_CAUSES]
+    unresolved = [row for row in tasks if row["cause"] not in task_log.TERMINAL_CAUSES]
     if unresolved:
         gaps.append(
-            f"{len(unresolved)} leg(s) with no terminal record — `poker-solver legs` to reconcile"
+            f"{len(unresolved)} task(s) with no terminal record — `poker-solver tasks` to reconcile"
         )
     return gaps

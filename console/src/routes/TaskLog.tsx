@@ -4,18 +4,18 @@ import { errorOf } from "@/lib/error";
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 
-const route = getRouteApi("/legs/$taskId");
+const route = getRouteApi("/tasks/$taskId");
 
 /**
- * Why a leg died, which is the question the Legs page raises and could not
+ * Why a task died, which is the question the Tasks page raises and could not
  * answer.
  *
  * Reads the copy published to the share, NOT the node's live files: the pool
  * scales to zero within minutes of a task ending, so for exactly the failed
- * legs worth reading the node is already gone. That is what the publish-on-exit
+ * tasks worth reading the node is already gone. That is what the publish-on-exit
  * trap exists for.
  */
-export function LegLog() {
+export function TaskLog() {
   const { taskId } = route.useParams();
   const log = useLog(taskId);
   const lines = log.data?.lines ?? [];
@@ -23,11 +23,11 @@ export function LegLog() {
   return (
     <div className="space-y-3">
       <Link
-        to="/legs"
+        to="/tasks"
         className="inline-flex items-center gap-1.5 text-[12px] text-[var(--fg-muted)] hover:text-[var(--fg)]"
       >
         <ArrowLeft className="size-3.5" />
-        Legs
+        Tasks
       </Link>
 
       <Panel
@@ -67,6 +67,6 @@ function lineTone(line: string): string {
   const lower = line.toLowerCase();
   if (/\b(error|fatal|traceback|failed|refus)/.test(lower)) return "text-red-400";
   if (/\b(warn|timeout|retry|killed)/.test(lower)) return "text-amber-400";
-  if (line.startsWith("[run_leg")) return "text-[var(--fg-faint)]";
+  if (line.startsWith("[run_task")) return "text-[var(--fg-faint)]";
   return "";
 }

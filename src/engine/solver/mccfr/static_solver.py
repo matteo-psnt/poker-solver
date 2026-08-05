@@ -79,7 +79,7 @@ class StaticTreeSolver(MCCFRSolver):
         self.storage = storage
         self.tree = tree if tree is not None else storage.tree
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
-        # Retention is a property of the RUN, not of an individual call: a leg
+        # Retention is a property of the RUN, not of an individual call: a task
         # that forgot to pass it would silently stop sparing measurement points.
         self.checkpoint_retain_every = checkpoint_retain_every
         # Identifies the bucket ASSIGNMENT, which the tree fingerprint cannot:

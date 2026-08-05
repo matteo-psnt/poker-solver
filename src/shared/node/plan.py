@@ -1,7 +1,7 @@
-"""The leg's environment, turned into the command line it will run.
+"""The task's environment, turned into the command line it will run.
 
 Pure: no filesystem, no subprocess, no clock. That is what lets a test look at
-the exact argv a leg would execute, which used to be knowable only by reading
+the exact argv a task would execute, which used to be knowable only by reading
 shell and hoping. The defect that motivated the check is small and expensive --
 a shared array carrying ``--workers`` splatted into a command that declares no
 such flag, three Batch retries each dead about four seconds in, after a code
@@ -34,7 +34,7 @@ DEFAULT_EVAL_METHOD = "exact_br"
 
 
 class BadEnvironmentError(Exception):
-    """The task's environment cannot be turned into a runnable leg.
+    """The task's environment cannot be turned into a runnable task.
 
     Fatal on purpose, and never a silent default. A malformed override payload
     that decoded to zero overrides would train an experiment arm with the BASE
@@ -45,8 +45,8 @@ class BadEnvironmentError(Exception):
 
 
 @dataclass(frozen=True)
-class LegPlan:
-    """One leg, as the node will execute it."""
+class TaskPlan:
+    """One task, as the node will execute it."""
 
     op: str
     config: str = ""
@@ -66,14 +66,14 @@ class LegPlan:
     # Not used to build an argv -- `gitinfo` reads these straight out of the
     # environment, which the `uv run` child inherits, so nothing has to thread
     # them through a command line. Carried here so the wrapper can SAY what code
-    # it is running: a leg log that names its commit is the only place the
-    # answer appears while the leg is alive.
+    # it is running: a task log that names its commit is the only place the
+    # answer appears while the task is alive.
     git_commit: str = ""
     git_dirty: str = ""
 
     @property
     def train_run_id(self) -> str:
-        """The run a training leg writes to.
+        """The run a training task writes to.
 
         Derived from the task when none was given, so a Batch RETRY -- which
         keeps the same task id -- continues this run rather than starting a
@@ -100,8 +100,8 @@ class LegPlan:
             # Never omitted. "Empty means all CPUs" was documented but never
             # implemented: `train-static` defaults --workers to 1, so an
             # omitted count trained SINGLE-THREADED on a 16-vCPU node -- a ~16x
-            # loss that reads as a slow leg rather than a misconfiguration, and
-            # that turns a 1.8h leg into one the wall-clock ceiling kills.
+            # loss that reads as a slow task rather than a misconfiguration, and
+            # that turns a 1.8h task into one the wall-clock ceiling kills.
             "--workers",
             str(self.workers),
         ]
@@ -137,7 +137,7 @@ class LegPlan:
 
     @property
     def provenance(self) -> str:
-        """What code this leg runs, for the log.
+        """What code this task runs, for the log.
 
         The node has no `.git` -- the code snapshot excludes it -- so this is
         the submitter's answer, passed down. Until it existed, every
@@ -145,18 +145,18 @@ class LegPlan:
         commit.
         """
         if not self.git_commit:
-            return "unknown (nothing stamped this leg)"
+            return "unknown (nothing stamped this task)"
         state = {"1": " (DIRTY tree)", "0": " (clean tree)"}.get(
             self.git_dirty, " (tree state unknown)"
         )
         return self.git_commit[:12] + state
 
 
-def parse_environment(environ: dict[str, str] | None = None) -> LegPlan:
+def parse_environment(environ: dict[str, str] | None = None) -> TaskPlan:
     """Read the ``RUN_*`` contract out of the task's environment.
 
     An absent variable and an empty one mean the same thing, which is why
-    ``spec.LegSpec.environment`` emits every key: the contract stays visible in
+    ``spec.TaskSpec.environment`` emits every key: the contract stays visible in
     one place rather than implied by which branch happened to set what.
     """
     env = dict(os.environ if environ is None else environ)
@@ -164,7 +164,7 @@ def parse_environment(environ: dict[str, str] | None = None) -> LegPlan:
     if op not in OPS:
         raise BadEnvironmentError(f"unknown RUN_OP '{op}'; expected one of {', '.join(OPS)}")
 
-    plan = LegPlan(
+    plan = TaskPlan(
         op=op,
         config=env.get("RUN_CONFIG", ""),
         to=_int(env.get("RUN_TO"), 0),
@@ -187,17 +187,17 @@ def parse_environment(environ: dict[str, str] | None = None) -> LegPlan:
     return plan
 
 
-def _validate(plan: LegPlan) -> None:
+def _validate(plan: TaskPlan) -> None:
     """Refuse here rather than let argparse exit 2 several minutes in."""
     if plan.op == TRAIN:
         if not plan.config:
-            raise BadEnvironmentError("a training leg needs RUN_CONFIG")
+            raise BadEnvironmentError("a training task needs RUN_CONFIG")
         if plan.to <= 0:
             raise BadEnvironmentError("RUN_TO must be a positive ABSOLUTE iteration target")
     if plan.op in (EVALUATE, REPAIR_LADDER) and not plan.run_id:
         raise BadEnvironmentError(f"op '{plan.op}' works on an existing run, so RUN_ID is required")
     if plan.op == PRECOMPUTE and not plan.config:
-        raise BadEnvironmentError("a precompute leg needs RUN_CONFIG")
+        raise BadEnvironmentError("a precompute task needs RUN_CONFIG")
     if plan.op == REPAIR_LADDER and not plan.config:
         raise BadEnvironmentError(
             "repair-ladder rebuilds the tree to load a rung, so RUN_CONFIG is required"
@@ -209,7 +209,7 @@ def _node_cpus() -> int:
 
     Filled in HERE rather than left to the CLI's local-friendly default of 1,
     and never allowed to fail: a missing core count must degrade, not kill the
-    leg.
+    task.
     """
     return os.cpu_count() or 1
 
@@ -252,8 +252,8 @@ def parse_duration(raw: str | None) -> int:
 
     The wall-clock ceiling for the training process itself. The task-level
     ``maxWallClockTime`` (P1D) is not a backstop for a hang -- it is longer than
-    any leg is meant to run, so a wedged process bills a full node-day before
-    Batch acts. One leg proved it: training died, the process could not exit,
+    any task is meant to run, so a wedged process bills a full node-day before
+    Batch acts. One task proved it: training died, the process could not exit,
     and the task stayed ``running`` indefinitely.
     """
     text = (raw or "").strip().lower()

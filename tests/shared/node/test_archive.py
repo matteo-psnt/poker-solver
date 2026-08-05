@@ -1,6 +1,6 @@
 """The publish/fetch rules, each of which cost a run to learn.
 
-This logic lived in ~250 lines of `cp -ru`/`find` inside run_leg.sh and had no
+This logic lived in ~250 lines of `cp -ru`/`find` inside run_task.sh and had no
 test at all: it ran only on a Batch node, and every regression in it was
 discovered as a corrupt checkpoint hours later. The cases below are the
 production failures its comments describe, reproduced on a tmp_path.
@@ -112,7 +112,7 @@ class TestPublish:
 
     def test_an_already_marked_snapshot_is_not_recopied(self, tmp_path):
         """Measured at 6.6 minutes re-uploading 809 MB already on the share: a
-        resumed leg's starting rung has a newer node mtime than the share copy,
+        resumed task's starting rung has a newer node mtime than the share copy,
         so the update rule alone would copy it every time."""
         run_dir = _run(tmp_path)
         _snapshot(run_dir, "static-1000.zarr")
@@ -270,7 +270,7 @@ class TestFetchCurrentRung:
             archive.fetch_current_rung(share, tmp_path / "runs" / "old-run")
 
     def test_a_run_with_no_manifest_starts_the_ladder(self, tmp_path):
-        """A leg that died before its first checkpoint published .run.json and
+        """A task that died before its first checkpoint published .run.json and
         nothing else. Refusing that would strand the run id forever."""
         share = tmp_path / "archive" / "run-a"
         share.mkdir(parents=True)
@@ -311,7 +311,7 @@ class TestFetchForEvaluation:
         assert not (node / "static-2000.zarr").exists()
 
     def test_an_unmarked_rung_is_skipped_not_fatal(self, tmp_path):
-        """A partial curve beats none; the gap is visible in the leg log and
+        """A partial curve beats none; the gap is visible in the task log and
         absent from the ledger."""
         share = self._published(tmp_path, unmarked=(2000,))
         node = tmp_path / "runs" / "run-a"

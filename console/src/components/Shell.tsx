@@ -6,7 +6,7 @@ import { Activity, DollarSign, FlaskConical, LayoutDashboard, ScrollText } from 
 
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
-  { to: "/legs", label: "Legs", icon: ScrollText },
+  { to: "/tasks", label: "Tasks", icon: ScrollText },
   { to: "/runs", label: "Runs", icon: Activity },
   { to: "/evals", label: "Evals", icon: FlaskConical },
   { to: "/cost", label: "Cost", icon: DollarSign },

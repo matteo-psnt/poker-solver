@@ -1,4 +1,4 @@
-"""The `submit` subcommand: queue a training leg on the pool.
+"""The `submit` subcommand: queue a training task on the pool.
 
 **One command covers both starting and continuing**, exactly as
 ``train-static`` does locally: ``--run`` continues an existing run, and
@@ -60,10 +60,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    """Stage the tree and queue one training leg."""
+    """Stage the tree and queue one training task."""
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
-            spec.LegSpec(
+            spec.TaskSpec(
                 code_snapshot=snapshot,
                 op=spec.TRAIN,
                 config=args.config,
@@ -89,7 +89,7 @@ def render(payload: dict[str, Any]) -> None:
 
 COMMAND = Command(
     name="submit",
-    help="Queue a training leg on the pool (--run continues an existing run).",
+    help="Queue a training task on the pool (--run continues an existing run).",
     add_arguments=add_arguments,
     run=run,
     render=render,

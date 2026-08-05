@@ -1,4 +1,4 @@
-"""The process lifecycle around one leg: guard it, watch it, account for it.
+"""The process lifecycle around one task: guard it, watch it, account for it.
 
 What a Batch task actually runs. The shape is::
 
@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 
-from src.shared import cache, leg_log
+from src.shared import cache, task_log
 from src.shared.node import archive
 from src.shared.node.plan import (
     EVALUATE,
@@ -35,11 +35,11 @@ from src.shared.node.plan import (
     REPAIR_LADDER,
     TRAIN,
     BadEnvironmentError,
-    LegPlan,
+    TaskPlan,
     parse_environment,
 )
 
-"""`timeout`'s convention, kept because `leg_log` maps it to a distinct cause
+"""`timeout`'s convention, kept because `task_log` maps it to a distinct cause
 and a wrong terminal cause is permanent -- it suppresses reconciliation."""
 EXIT_TIMEOUT = 124
 
@@ -50,10 +50,10 @@ GRACE_SECONDS = 120
 WATCH_INTERVAL_SECONDS = 120
 
 """Its own, much shorter ceiling. A wedged dependency install is not a long
-job running slowly -- it is a leg that will never start."""
+job running slowly -- it is a task that will never start."""
 SYNC_TIMEOUT_SECONDS = 30 * 60
 
-"""The interesting part of a leg log is always the end, and a multi-hour tqdm
+"""The interesting part of a task log is always the end, and a multi-hour tqdm
 stream is mostly progress-bar repaints that cost more to copy than they
 inform."""
 PUBLISHED_LOG_BYTES = 2_000_000
@@ -104,21 +104,21 @@ class NodePaths:
             work=work,
             share=Path(env.get("RUN_SHARE_DIR") or f"{mounts}/shared"),
             # Set by the task command line, which extracts there. Task-owned,
-            # and unique per task, so concurrent legs on one node cannot share
+            # and unique per task, so concurrent tasks on one node cannot share
             # a tree.
             code=Path(env.get("CODE_DIR") or str(work / "code")),
         )
 
 
-class LegLogger:
+class TaskLogger:
     """Tees everything to node-local disk, then to the share on demand.
 
     Batch keeps a task's stdout ON THE NODE and the pool drains within minutes
-    of a task ending, so anything only echoed is gone for exactly the legs
-    worth reading later -- which is what happened to a 30M leg that died at
+    of a task ending, so anything only echoed is gone for exactly the tasks
+    worth reading later -- which is what happened to a 30M task that died at
     ~720k iterations, leaving ``exit 1`` and nothing else. Node-local first
     because the training stream is chatty and writing every line straight to
-    SMB would put the leg's throughput at the mercy of the share.
+    SMB would put the task's throughput at the mercy of the share.
     """
 
     def __init__(self, path: Path, share: Path) -> None:
@@ -130,7 +130,7 @@ class LegLogger:
 
     def __call__(self, message: str) -> None:
         stamp = time.strftime("%H:%M:%S", time.gmtime())
-        self.write(f"[run_leg {stamp}] {message}\n".encode())
+        self.write(f"[run_task {stamp}] {message}\n".encode())
 
     def write(self, chunk: bytes) -> None:
         with self._lock:
@@ -140,9 +140,9 @@ class LegLogger:
             sys.stdout.buffer.flush()
 
     def publish(self) -> None:
-        """Copied on every publish, not only at exit, so a leg later killed
+        """Copied on every publish, not only at exit, so a task later killed
         outright still leaves its log behind."""
-        task = os.environ.get("AZ_BATCH_TASK_ID", "leg")
+        task = os.environ.get("AZ_BATCH_TASK_ID", "task")
         destination = self.share / "logs" / f"{task}.log"
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -159,10 +159,10 @@ class LegLogger:
 
 
 class LadderWatcher:
-    """Publishes mid-run, so a killed leg keeps everything up to its last rung.
+    """Publishes mid-run, so a killed task keeps everything up to its last rung.
 
     Polls the checkpoint manifest rather than hooking the trainer, for the same
-    reason a cloud leg is a subprocess of the headless CLI and not a
+    reason a cloud task is a subprocess of the headless CLI and not a
     provider-specific reimplementation: the training layer stays unaware it is
     running in the cloud.
     """
@@ -189,9 +189,9 @@ class LadderWatcher:
 
     def _loop(self) -> None:
         # Starts EMPTY, so the first tick publishes whatever is already there
-        # rather than treating it as seen. A resumed leg pays almost nothing for
+        # rather than treating it as seen. A resumed task pays almost nothing for
         # that -- the completion markers skip every rung already on the share --
-        # and it closes the window where a leg fetched a rung, died early, and
+        # and it closes the window where a task fetched a rung, died early, and
         # published nothing because nothing had changed since it started.
         seen = ""
         while not self._stop.wait(self._interval):
@@ -207,14 +207,14 @@ def run_guarded(
     *,
     cwd: Path,
     timeout: int,
-    log: LegLogger,
+    log: TaskLogger,
     stdout_to: Path | None = None,
 ) -> int:
     """Run a subprocess under a wall-clock ceiling, teeing its output.
 
     The task-level ``maxWallClockTime`` (P1D) is not a backstop for a hang: it
-    is longer than any leg is meant to run, so a wedged process bills a full
-    node-day before Batch acts. One leg proved this -- training died, the
+    is longer than any task is meant to run, so a wedged process bills a full
+    node-day before Batch acts. One task proved this -- training died, the
     process could not exit, and the task stayed ``running`` indefinitely.
 
     ``stdout_to`` captures stdout to a file instead of teeing it, for the one
@@ -232,7 +232,7 @@ def run_guarded(
             # `terminate()` reaches only `uv`; the trainer and its 16 workers
             # are grandchildren, and a deadline used to return 124 with them
             # still running, holding the /dev/shm segments that killed the NEXT
-            # leg. Batch cleans up by cgroup, so a new session does not escape.
+            # task. Batch cleans up by cgroup, so a new session does not escape.
             start_new_session=True,
         )
     except OSError as error:
@@ -269,12 +269,12 @@ def run_guarded(
     if timed_out:
         return EXIT_TIMEOUT
     # A child killed by a signal reports a negative code. Restore the shell's
-    # 128+n so 137 keeps meaning what `legs` reads it as: SIGKILL from outside,
+    # 128+n so 137 keeps meaning what `tasks` reads it as: SIGKILL from outside,
     # which on a training node is the OOM killer.
     return process.returncode if process.returncode >= 0 else 128 - process.returncode
 
 
-def _pump(stream, log: LegLogger) -> None:
+def _pump(stream, log: TaskLogger) -> None:
     """Chunked, never line-buffered: tqdm emits carriage returns, not newlines."""
     if stream is None:
         return
@@ -312,7 +312,7 @@ def _cli(argv: list[str]) -> list[str]:
     return ["uv", "run", "poker-solver", *argv]
 
 
-def _train(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, str | None]:
+def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
     run_id = plan.train_run_id
     published = paths.archive / run_id
     if published.is_dir():
@@ -339,7 +339,7 @@ def _train(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, str | 
     return code, None
 
 
-def _evaluate(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, str | None]:
+def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
     """Scoring belongs on the node, not on a laptop: the share is a local mount
     here and a WAN download away from anywhere else -- one checkpoint is
     ~540 MB of small zarr chunks, ~20 minutes to pull over SMB.
@@ -395,11 +395,11 @@ def _evaluate(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, str
     # retry. But exit 0 is not a claim of success -- 1 of 30 rungs would read
     # as `completed`, so the outcome carries what the code drops.
     if ok:
-        return 0, (leg_log.CAUSE_PARTIAL if bad else None)
+        return 0, (task_log.CAUSE_PARTIAL if bad else None)
     return 1, None
 
 
-def _precompute(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, str | None]:
+def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
     """Build a card abstraction on a node and publish it once.
 
     THE GUARD IS THE POINT. The invariant is "computed ONCE, never
@@ -453,7 +453,7 @@ def _precompute(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, s
     return 0, None
 
 
-def _repair_ladder(plan: LegPlan, paths: NodePaths, log: LegLogger) -> tuple[int, str | None]:
+def _repair_ladder(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
     """Prove each published rung by loading it, and mark the ones that survive.
 
     Reads the share IN PLACE and needs nothing on the node -- which is why this
@@ -490,7 +490,7 @@ HANDLERS = {
 }
 
 
-def _stage(paths: NodePaths, log: LegLogger) -> int:
+def _stage(paths: NodePaths, log: TaskLogger) -> int:
     """The code is ALREADY extracted -- the task command line untars it before
     invoking this, because this file lives inside that tarball.
 
@@ -511,18 +511,18 @@ def _stage(paths: NodePaths, log: LegLogger) -> int:
 
     # ON THE DATA DISK, not the task's HOME -- which is its working directory,
     # wiped with the task, so the `~/.cache` default would re-canonicalise the
-    # river's 2.6M boards (~1 min) on every leg. /mnt/work is node-scoped.
+    # river's 2.6M boards (~1 min) on every task. /mnt/work is node-scoped.
     shared_cache = paths.work / "cache"
     os.environ[cache.ENV_OVERRIDE] = str(shared_cache)
     # OPENED UP HERE, like the start task's `chmod -R a+rwX /mnt/work`:
-    # `submit_leg` sets no `user_identity`, so leg tasks run as Batch's default
+    # `submit_task` sets no `user_identity`, so leg tasks run as Batch's default
     # auto-user, and a directory left with the first task's ownership is one the
-    # next leg cannot write into -- which would undo the sharing entirely.
+    # next task cannot write into -- which would undo the sharing entirely.
     try:
         shared_cache.mkdir(parents=True, exist_ok=True)
         shared_cache.chmod(0o777)
     except OSError as error:
-        log(f"WARN could not prepare {shared_cache} ({error}); each leg will recompute")
+        log(f"WARN could not prepare {shared_cache} ({error}); each task will recompute")
     log(f"cache: {shared_cache}")
 
     # Through the guard, so an install failure explains ITSELF in the published
@@ -539,7 +539,7 @@ def _install_signal_handlers() -> None:
     """Raise, rather than set a flag.
 
     A flag would only be noticed between subprocesses; raising interrupts the
-    wait, so a cancelled leg publishes what it has and records `cancelled`
+    wait, so a cancelled task publishes what it has and records `cancelled`
     instead of a clean completion.
     """
 
@@ -554,20 +554,20 @@ def _cause(code: int, outcome: str | None) -> str:
     if outcome:
         return outcome
     return {
-        0: leg_log.CAUSE_COMPLETED,
-        EXIT_TIMEOUT: leg_log.CAUSE_TIMEOUT,
-        130: leg_log.CAUSE_CANCELLED,
-        143: leg_log.CAUSE_CANCELLED,
-        137: leg_log.CAUSE_KILLED,
-    }.get(code, leg_log.CAUSE_FAILED)
+        0: task_log.CAUSE_COMPLETED,
+        EXIT_TIMEOUT: task_log.CAUSE_TIMEOUT,
+        130: task_log.CAUSE_CANCELLED,
+        143: task_log.CAUSE_CANCELLED,
+        137: task_log.CAUSE_KILLED,
+    }.get(code, task_log.CAUSE_FAILED)
 
 
 def _eval_flags() -> tuple[str, ...]:
-    """The leg's eval flags, and NEVER an exception.
+    """The task's eval flags, and NEVER an exception.
 
     ``_record`` suppresses everything, so a raise in here would not surface --
     it would silently cost the whole exit account, which is the one thing the
-    leg log exists to preserve. A malformed value is worth losing; the record
+    task log exists to preserve. A malformed value is worth losing; the record
     around it is not.
     """
     try:
@@ -578,13 +578,13 @@ def _eval_flags() -> tuple[str, ...]:
 
 
 def _record(paths: NodePaths, event: str, *, code: int | None = None, cause: str | None = None):
-    """Never fatal, and never allowed to be the reason a leg fails.
+    """Never fatal, and never allowed to be the reason a task fails.
 
-    The whole point is that a leg dying anywhere -- including during dependency
+    The whole point is that a task dying anywhere -- including during dependency
     install -- still leaves an account on the share.
     """
     with contextlib.suppress(Exception):
-        leg_log.write_node_record(
+        task_log.write_node_record(
             paths.share,
             task_id=os.environ.get("AZ_BATCH_TASK_ID", "local"),
             job_id=os.environ.get("AZ_BATCH_JOB_ID", ""),
@@ -593,9 +593,9 @@ def _record(paths: NodePaths, event: str, *, code: int | None = None, cause: str
             op=os.environ.get("RUN_OP") or TRAIN,
             config=os.environ.get("RUN_CONFIG", ""),
             target_iteration=os.environ.get("RUN_TO", ""),
-            # `RUN_TO` is a TRAIN target and an evaluate leg leaves it 0, so
+            # `RUN_TO` is a TRAIN target and an evaluate task leaves it 0, so
             # without these two an evaluation records nothing about what it
-            # actually scored -- which is how 38 evaluate legs came to be
+            # actually scored -- which is how 38 evaluate tasks came to be
             # indistinguishable in the record.
             eval_at=os.environ.get("RUN_EVAL_AT", ""),
             eval_flags=_eval_flags(),
@@ -607,12 +607,12 @@ def _record(paths: NodePaths, event: str, *, code: int | None = None, cause: str
 
 def main() -> int:
     paths = NodePaths.from_environment()
-    # BEFORE the logger. Opening the leg log touches /mnt/work, which can fail,
-    # and the started record is the one guarantee this module exists for: a leg
+    # BEFORE the logger. Opening the task log touches /mnt/work, which can fail,
+    # and the started record is the one guarantee this module exists for: a task
     # that leaves nothing is indistinguishable from one that never ran.
-    _record(paths, leg_log.EVENT_STARTED)
+    _record(paths, task_log.EVENT_STARTED)
     task = os.environ.get("AZ_BATCH_TASK_ID", "local")
-    log = LegLogger(paths.work / f"leg-{task}.log", paths.share)
+    log = TaskLogger(paths.work / f"task-{task}.log", paths.share)
     _install_signal_handlers()
 
     code, outcome = 1, None
@@ -627,7 +627,7 @@ def main() -> int:
             code, outcome = HANDLERS[plan.op](plan, paths, log)
     except Killed as killed:
         code = 128 + killed.signum
-        log(f"signalled ({killed.signum}); publishing what this leg has")
+        log(f"signalled ({killed.signum}); publishing what this task has")
     except (BadEnvironmentError, archive.FetchRefusedError) as refusal:
         log(f"FATAL {refusal}")
         code = 1
@@ -636,6 +636,6 @@ def main() -> int:
         # operator-cancelled task still leaves its progress on the share.
         archive.publish_all(paths.runs, paths.archive, log)
         log.publish()
-        _record(paths, leg_log.EVENT_FINISHED, code=code, cause=_cause(code, outcome))
+        _record(paths, task_log.EVENT_FINISHED, code=code, cause=_cause(code, outcome))
         log.close()
     return code

@@ -485,7 +485,7 @@ class TestReapingSurvivesTheFold:
         RunTracker.load(tracker.run_dir).mark_resumed()
         assert len(RunTracker.load(tracker.run_dir).metadata.attempts) == 2
 
-    def test_a_leg_that_died_early_does_not_inherit_the_previous_runtime(self, tmp_path):
+    def test_a_task_that_died_early_does_not_inherit_the_previous_runtime(self, tmp_path):
         tracker = RunTracker(
             run_dir=tmp_path / "run-c",
             config_name="quick_test",
@@ -496,7 +496,7 @@ class TestReapingSurvivesTheFold:
         RunTracker.load(tracker.run_dir).mark_resumed()
 
         live = RunTracker.load(tracker.run_dir).metadata.attempts[-1]
-        assert live.runtime_seconds == 0.0, "this leg has checkpointed nothing yet"
+        assert live.runtime_seconds == 0.0, "this task has checkpointed nothing yet"
 
 
 class TestLegacyResumeWithoutMigration:

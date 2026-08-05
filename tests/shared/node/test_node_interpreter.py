@@ -1,11 +1,11 @@
 """The node runs OLDER Python than this project, and runs it before `uv sync`.
 
 `infra/main.tf` pins `batch.node.ubuntu 22.04`, whose system `python3` is 3.10,
-not the 3.12+ developed against here -- and `infra/run_leg.py` is executed by
+not the 3.12+ developed against here -- and `infra/run_task.py` is executed by
 that interpreter, with no third-party package installed. A 3.11+ construct or a
-non-stdlib import anywhere it REACHES does not fail visibly: the leg dies before
-it can say why, and `legs` reports "no leg records", indistinguishable from
-"no legs ran".
+non-stdlib import anywhere it REACHES does not fail visibly: the task dies before
+it can say why, and `tasks` reports "no task records", indistinguishable from
+"no tasks ran".
 
 **What carries the floor is derived, not listed.** It used to be a literal of
 four paths, and a literal is only correct on the day it is written: the entry
@@ -13,7 +13,7 @@ point's real closure is eleven files, so `jsonio` and `records` were reached on
 the node and checked by nothing. Neither happens to violate the floor today,
 which is exactly why a list drifts quietly -- the cost of an import added to
 `runner` is paid on the one machine that has no way to report it. `_closure`
-below walks first-party imports from `infra/run_leg.py`, so the guarded set is
+below walks first-party imports from `infra/run_task.py`, so the guarded set is
 whatever the node actually loads, and a new import extends it with no edit here.
 
 Two checks, deliberately at different costs:
@@ -22,7 +22,7 @@ Two checks, deliberately at different costs:
   to bite. It runs under THIS interpreter, so it can only look for names.
 * a real 3.10 import of the whole package, via `uv run --python 3.10
   --no-project`. This is the one that actually proves the contract --
-  `datetime.UTC` was added, passed every test, and silently disabled leg
+  `datetime.UTC` was added, passed every test, and silently disabled task
   records on the only machine that runs them. It is in the FAST gate despite
   spawning an interpreter: measured at ~85ms warm, which is less than the
   substring scan costs to justify. The generous timeout covers the one cold
@@ -44,13 +44,13 @@ import subprocess
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-ENTRY_POINT = REPO_ROOT / "infra" / "run_leg.py"
+ENTRY_POINT = REPO_ROOT / "infra" / "run_task.py"
 
 
 def _first_party_targets(source: pathlib.Path) -> set[str]:
     """Every ``src.*`` name this file imports, however it spells the import.
 
-    ``from src.shared import cache, leg_log`` names two modules that the dotted
+    ``from src.shared import cache, task_log`` names two modules that the dotted
     prefix alone does not, so each imported name is also offered as a candidate
     module; the ones that are attributes rather than modules simply resolve to
     nothing. Relative imports do not appear -- the node package has none, and a
@@ -80,7 +80,7 @@ def _closure(entry: pathlib.Path) -> list[pathlib.Path]:
 
     ``TYPE_CHECKING``-only imports are deliberately NOT excluded. Including one
     that the node never executes costs a redundant check; excluding one that a
-    future edit promotes to runtime costs a leg that dies without a record.
+    future edit promotes to runtime costs a task that dies without a record.
     """
     seen: set[pathlib.Path] = set()
     pending = [entry]
@@ -127,7 +127,7 @@ def test_the_guarded_set_is_discovered_and_not_empty():
     closure would quietly collapse to the entry point alone and every check
     below would still pass, on nothing. So assert the walk actually reached
     past the first hop, and name the two files a hand-written list forgot: they
-    are reached only transitively (`runner` -> `leg_log` -> `records` ->
+    are reached only transitively (`runner` -> `task_log` -> `records` ->
     `jsonio`), which is precisely the depth a person stops tracing at.
     """
     found = {path.relative_to(REPO_ROOT).as_posix() for path in GUARDED_SOURCES}
@@ -136,7 +136,7 @@ def test_the_guarded_set_is_discovered_and_not_empty():
         "src/shared/node/runner.py",
         "src/shared/node/archive.py",
         "src/shared/node/plan.py",
-        "src/shared/leg_log.py",
+        "src/shared/task_log.py",
         "src/shared/cache.py",
         "src/shared/describe.py",
         "src/shared/records.py",
@@ -146,7 +146,7 @@ def test_the_guarded_set_is_discovered_and_not_empty():
 
 @pytest.mark.parametrize("source", GUARDED_SOURCES, ids=lambda p: p.name)
 def test_no_third_party_import(source):
-    """A leg dying during dependency install must still leave a record."""
+    """A task dying during dependency install must still leave a record."""
     text = source.read_text()
     for name in THIRD_PARTY:
         assert f"import {name}" not in text, f"{source.name} must not import {name}"
@@ -170,7 +170,7 @@ def test_the_pinned_node_image_is_still_what_this_assumes():
 def test_the_entry_point_adds_the_repo_to_the_path_before_importing():
     """It is executed as a file inside the extracted tarball, not as a module,
     so nothing puts the repo root on sys.path for it."""
-    source = (REPO_ROOT / "infra" / "run_leg.py").read_text()
+    source = (REPO_ROOT / "infra" / "run_task.py").read_text()
     assert source.index("sys.path.insert") < source.index("from src.shared.node.runner import")
 
 
@@ -179,7 +179,7 @@ def test_the_entry_point_adds_the_repo_to_the_path_before_importing():
 def test_the_whole_package_imports_on_the_node_interpreter():
     """The check the substring scan cannot make.
 
-    Imports the entry point's whole chain -- runner, archive, plan, leg_log,
+    Imports the entry point's whole chain -- runner, archive, plan, task_log,
     records -- on a real 3.10, with `--no-project` so not one project
     dependency is installed. That is the node, before `uv sync`.
     """
@@ -206,11 +206,11 @@ def test_the_whole_package_imports_on_the_node_interpreter():
 
 @pytest.mark.timeout(300)
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to provide a 3.10 interpreter")
-def test_a_leg_record_can_be_written_on_the_node_interpreter(tmp_path):
+def test_a_task_record_can_be_written_on_the_node_interpreter(tmp_path):
     """The one thing that must work even when everything else has failed."""
     script = (
         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-        "from src.shared.leg_log import write_node_record;"
+        "from src.shared.task_log import write_node_record;"
         f"write_node_record({str(tmp_path)!r}, task_id='t', event='started');"
         "print('ok')"
     )

@@ -193,7 +193,7 @@ class TestRetentionLadder:
         on_disk = {p.name for p in tmp_path.glob("static-*.zarr")}
         assert on_disk == {"static-1000.zarr", "static-2000.zarr"}
 
-    def test_ladder_survives_a_leg_that_forgets_retain_every(self, tree, tmp_path):
+    def test_ladder_survives_a_task_that_forgets_retain_every(self, tree, tmp_path):
         """A resume that drops the knob must not delete earlier measurement points."""
         storage = StaticArrayStorage(tree)
         try:

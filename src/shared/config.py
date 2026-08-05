@@ -90,7 +90,7 @@ class StorageConfig(StrictFrozenModel):
     # unbounded, the historical behaviour). Unbounded, this cache converges on
     # the whole tree in every worker, so total memory scales O(N x workers)
     # rather than O(N) -- measured at 315 B/entry, that is 37 GB across 16
-    # workers at 7M infosets, and it killed three legs on a 32 GB node. A miss
+    # workers at 7M infosets, and it killed three tasks on a 32 GB node. A miss
     # costs one dropped update and an id request, so the cap trades memory for
     # sample efficiency, and the cliff is STEEP once it binds. Measured on
     # quick_test at 4 workers, forcing eviction:

@@ -1,7 +1,7 @@
-"""One wording of a leg, shared across a layering boundary.
+"""One wording of a task, shared across a layering boundary.
 
-``spec`` builds the task id a leg is submitted under and ``leg_log``
-describes the same leg when the record is read back. These live with the
+``spec`` builds the task id a task is submitted under and ``task_log``
+describes the same task when the record is read back. These live with the
 definition rather than with either caller, so neither can drift alone.
 """
 

@@ -149,7 +149,7 @@ PAYLOADS: dict[str, dict] = {
         "card_abstraction_hash": "ae5a7e6648d7cd02",
         "iterations": 30_000_000,
         "runtime_seconds": 9000.0,
-        "attempts": 4,
+        "training_tasks": 4,
         "total_progress_rows": 2,
         "progress": [
             {
@@ -180,7 +180,7 @@ PAYLOADS: dict[str, dict] = {
             ],
             "missing_iterations": [5_000_000, 20_000_000],
         },
-        "legs": [{"task_id": "prod-101010-1", "attempt": 1, "cause": "killed"}],
+        "tasks": [{"task_id": "prod-101010-1", "attempt": 1, "cause": "killed"}],
         "gaps": ["unscored ladder rungs: 5,000,000, 20,000,000"],
     },
     "serve": {
@@ -194,7 +194,7 @@ PAYLOADS: dict[str, dict] = {
         "op": "cost",
         "hours": 0.0,
         "task_hours": 68.87,
-        "legs": 47,
+        "tasks": 47,
         "peak_concurrency": 4,
         "first_at": "2026-08-02T22:06:18+00:00",
         "last_at": "2026-08-03T16:58:59+00:00",
@@ -237,8 +237,8 @@ PAYLOADS: dict[str, dict] = {
             },
         ],
     },
-    "legs": {
-        "op": "legs",
+    "tasks": {
+        "op": "tasks",
         "reconciled": 1,
         "rows": [
             {
@@ -403,7 +403,7 @@ class TestFixturesMatchTheRealPayloads:
 # it renders each panel with the renderer that owns it rather than formatting
 # anything itself. Built after the literal so it can reuse them by key.
 #
-# `legs` is deliberately the FAILED panel here. A status screen's whole value is
+# `tasks` is deliberately the FAILED panel here. A status screen's whole value is
 # that it still shows the other two when one is unavailable, and that path only
 # runs when something is already wrong -- so it is the one worth pinning.
 PAYLOADS["status"] = {
@@ -413,11 +413,11 @@ PAYLOADS["status"] = {
     "watch": 0,
     "requested_watch": 0,
     "limit": 10,
-    "with_legs": True,
+    "with_tasks": True,
     "panels": {
         "pool": {"payload": PAYLOADS["pool-status"], "error": None},
         "jobs": {"payload": PAYLOADS["jobs"], "error": None},
-        "legs": {"payload": None, "error": "Azure rejected the credential — try `az login`."},
+        "tasks": {"payload": None, "error": "Azure rejected the credential — try `az login`."},
     },
 }
 
@@ -451,7 +451,7 @@ class TestEveryOpRenders:
         assert "Evaluation complete" not in out
 
     def test_progress_blanks_fields_a_legacy_row_predates(self, capsys):
-        """A resumed run appends across legs, so one log spans code versions."""
+        """A resumed run appends across tasks, so one log spans code versions."""
         BY_NAME["progress"].render(PAYLOADS["progress"])
         out = capsys.readouterr().out
         assert "2,000,000" in out, "the legacy row must still be shown"

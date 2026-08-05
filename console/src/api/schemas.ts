@@ -42,12 +42,8 @@ const taskSchema = z
     task: z.string(),
     state: z.string().nullable(),
     exit_code: z.number().nullable(),
-    // What the pool looks like as a pool rather than a list. `node` is which
-    // machine a task OCCUPIES; `created` is the only thing that can order the
-    // waiting half, since a task that has not started has no start_time.
-    // Optional: legacy payloads predate them, and a missing one must not blank
-    // the panel.
     node: z.string().nullable().optional(),
+    /** Orders the queue: a task that has not started has no start_time. */
     created: z.string().nullable().optional(),
     start_time: z.string().nullable().optional(),
     end_time: z.string().nullable().optional(),
@@ -65,7 +61,7 @@ export const jobsSchema = z
   })
   .passthrough();
 
-export const legRowSchema = z
+export const taskRowSchema = z
   .object({
     task_id: z.string(),
     attempt: z.number().nullable(),
@@ -74,9 +70,6 @@ export const legRowSchema = z
     cause: z.string().nullable(),
     exit_code: z.number().nullable(),
     ended_at: z.string().nullable(),
-    // All carried by the payload already, and all previously undeclared — so
-    // the UI could show a leg's outcome but never when it ran, how long it
-    // took, or what it shared a job or a machine with.
     started_at: z.string().nullable().optional(),
     job_id: z.string().nullable().optional(),
     node_id: z.string().nullable().optional(),
@@ -85,10 +78,10 @@ export const legRowSchema = z
   })
   .passthrough();
 
-export const legsSchema = z
+export const tasksSchema = z
   .object({
-    op: z.literal("legs"),
-    rows: z.array(legRowSchema),
+    op: z.literal("tasks"),
+    rows: z.array(taskRowSchema),
     reconciled: z.number().nullable(),
     hidden_rows: z.number().optional(),
   })
@@ -120,7 +113,8 @@ export const runinfoSchema = z
     status: z.string().nullable(),
     iterations: z.number().nullable(),
     runtime_seconds: z.number().nullable(),
-    attempts: z.number().nullable(),
+    /** The run's own count, which legitimately differs from what the task log observed. */
+    training_tasks: z.number().nullable(),
     git_commit: z.string().nullable(),
     card_abstraction_hash: z.string().nullable(),
     progress: z
@@ -208,7 +202,7 @@ export const costSchema = z
     op: z.literal("cost"),
     hours: z.number(),
     task_hours: z.number(),
-    legs: z.number(),
+    tasks: z.number(),
     peak_concurrency: z.number(),
     first_at: z.string().nullable(),
     last_at: z.string().nullable(),
@@ -220,8 +214,8 @@ export const costSchema = z
 
 export type Pool = z.infer<typeof poolSchema>;
 export type Jobs = z.infer<typeof jobsSchema>;
-export type Legs = z.infer<typeof legsSchema>;
-export type LegRow = z.infer<typeof legRowSchema>;
+export type Tasks = z.infer<typeof tasksSchema>;
+export type TaskRow = z.infer<typeof taskRowSchema>;
 export type Runs = z.infer<typeof runsSchema>;
 export type RunSummary = z.infer<typeof runSummarySchema>;
 export type RunInfo = z.infer<typeof runinfoSchema>;

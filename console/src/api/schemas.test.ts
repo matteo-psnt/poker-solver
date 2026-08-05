@@ -5,10 +5,10 @@ import {
   curveSchema,
   jobsSchema,
   ledgerSchema,
-  legsSchema,
   poolSchema,
   runinfoSchema,
   runsSchema,
+  tasksSchema,
 } from "./schemas";
 
 /**
@@ -23,7 +23,7 @@ import {
 const CASES = [
   ["pool-status", poolSchema],
   ["jobs", jobsSchema],
-  ["legs", legsSchema],
+  ["tasks", tasksSchema],
   ["runs", runsSchema],
   ["runinfo", runinfoSchema],
   ["curve", curveSchema],

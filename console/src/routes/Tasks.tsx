@@ -1,51 +1,51 @@
-import { useLegs } from "@/api/queries";
+import { useTasks } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
-import { clock, legLabel, runLabel, since, span } from "@/lib/format";
+import { clock, runLabel, since, span, taskLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Link, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 
-const route = getRouteApi("/legs");
+const route = getRouteApi("/tasks");
 
 /**
  * The densest view in the console, and the one opened when something died.
  *
  * Filters live in the URL rather than component state: a filtered view is then
- * a link, which is what someone actually wants to share when asking why a leg
+ * a link, which is what someone actually wants to share when asking why a task
  * failed.
  */
-export function Legs() {
+export function Tasks() {
   const { cause } = route.useSearch();
-  const navigate = useNavigate({ from: "/legs" });
-  const legs = useLegs(0);
+  const navigate = useNavigate({ from: "/tasks" });
+  const tasks = useTasks(0);
   // One `now` for the whole table, so every open-ended duration in a render is
   // measured against the same instant rather than drifting down the rows.
   const now = Date.now();
 
   const causes = useMemo(() => {
     const seen = new Set<string>();
-    for (const row of legs.data?.rows ?? []) if (row.cause) seen.add(row.cause);
+    for (const row of tasks.data?.rows ?? []) if (row.cause) seen.add(row.cause);
     return [...seen].sort();
-  }, [legs.data]);
+  }, [tasks.data]);
 
   const rows = useMemo(() => {
-    const all = [...(legs.data?.rows ?? [])].reverse();
+    const all = [...(tasks.data?.rows ?? [])].reverse();
     return cause ? all.filter((r) => r.cause === cause) : all;
-  }, [legs.data, cause]);
+  }, [tasks.data, cause]);
 
   return (
     <Panel
-      title={`Legs${cause ? ` · ${cause}` : ""}`}
-      updatedAt={legs.dataUpdatedAt}
+      title={`Tasks${cause ? ` · ${cause}` : ""}`}
+      updatedAt={tasks.dataUpdatedAt}
       staleAfterMs={120_000}
-      error={errorOf(legs.error)}
-      loading={legs.isLoading}
-      empty={legs.data && rows.length === 0 ? "No legs match." : null}
-      onRefresh={() => legs.refetch()}
-      refreshing={legs.isFetching}
+      error={errorOf(tasks.error)}
+      loading={tasks.isLoading}
+      empty={tasks.data && rows.length === 0 ? "No tasks match." : null}
+      onRefresh={() => tasks.refetch()}
+      refreshing={tasks.isFetching}
     >
       <div className="flex flex-wrap gap-1.5 border-b border-[var(--border)] px-3 py-2">
         <Chip active={!cause} onClick={() => navigate({ search: {} })}>
@@ -86,19 +86,19 @@ export function Legs() {
                 >
                   <Td mono>
                     <Link
-                      to="/legs/$taskId"
+                      to="/tasks/$taskId"
                       params={{ taskId: row.task_id }}
                       title={row.task_id}
                       className="hover:underline"
                     >
-                      {legLabel(row.task_id)}
+                      {taskLabel(row.task_id)}
                     </Link>
                   </Td>
                   <Td right className="text-[var(--fg-faint)]">
                     {row.attempt ?? "—"}
                   </Td>
                   <Td className="text-[var(--fg-muted)]">{row.what || row.op || "—"}</Td>
-                  {/* Not every leg has a run: a `vector-sweep` is a measurement
+                  {/* Not every task has a run: a `vector-sweep` is a measurement
                       that produces none, so this is blank rather than broken. */}
                   <Td mono className="text-[var(--fg-muted)]">
                     {row.run_id ? (
@@ -116,7 +116,7 @@ export function Legs() {
                   </Td>
                   <Td>
                     {/* Tone from the WIRE value, label from the display name:
-                        `toneFor` keys off what the leg log recorded, so passing
+                        `toneFor` keys off what the task log recorded, so passing
                         it a renamed word would silently mute every badge. */}
                     {/* The exit code is IN the badge now, not beside it. The
                         number was only ever read through its meaning — 124 is
@@ -135,7 +135,7 @@ export function Legs() {
                   <Td right className="text-[var(--fg-faint)]" title={row.started_at ?? undefined}>
                     {clock(row.started_at)}
                   </Td>
-                  {/* Open-ended for a leg still running, so "running 2h" and
+                  {/* Open-ended for a task still running, so "running 2h" and
                       "took 2h" stay distinguishable from "unknown". */}
                   <Td right className="tnum text-[var(--fg-muted)]">
                     {span(row.started_at, row.ended_at, now)}

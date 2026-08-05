@@ -49,7 +49,7 @@ export function instant(iso: string | null | undefined): number | null {
 /**
  * How long something took, from its two ends.
  *
- * `now` closes an open interval, so a leg still running reports how long it has
+ * `now` closes an open interval, so a task still running reports how long it has
  * been going rather than a dash. That distinction is the point: "running 2h"
  * and "took 2h" are different facts and a blank cell conflates them with
  * "unknown".
@@ -66,7 +66,7 @@ export function span(
   return duration(Math.max(0, end - start) / 1000);
 }
 
-/** `09:27` in the viewer's zone — the wall-clock a leg started, for correlating. */
+/** `09:27` in the viewer's zone — the wall-clock a task started, for correlating. */
 export function clock(iso: string | null | undefined): string {
   const at = instant(iso);
   if (at == null) return "—";
@@ -115,12 +115,12 @@ export function runLabel(id: string): string {
  * `score-production-1095-150M-seed7-090456-18475` → `score-production-1095-150M-seed7`.
  *
  * A task id is `<label>-<HHMMSS>-<nonce>` (`task_id` in spec.py). The label
- * says what the leg does; the suffix exists only to keep two submissions in
+ * says what the task does; the suffix exists only to keep two submissions in
  * one second apart, and it is what made a column of ids look identical.
  *
- * Legs queued before labels carried the op strip down to a bare run id — which
+ * Tasks queued before labels carried the op strip down to a bare run id — which
  * is honest, because that is genuinely all those ids ever recorded.
  */
-export function legLabel(taskId: string): string {
+export function taskLabel(taskId: string): string {
   return taskId.replace(/-\d{6}-\d+$/, "");
 }

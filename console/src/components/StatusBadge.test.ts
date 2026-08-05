@@ -46,8 +46,8 @@ describe("a Batch task's colour needs its exit code, not just its state", () => 
   });
 });
 
-describe("the leg log's causes, where the word IS the outcome", () => {
-  it("separates the three ways a leg stops being alive", () => {
+describe("the task log's causes, where the word IS the outcome", () => {
+  it("separates the three ways a task stops being alive", () => {
     expect(toneFor("completed")).toBe("ok");
     expect(toneFor("failed")).toBe("bad");
     expect(toneFor("timeout")).toBe("warn");
@@ -59,9 +59,9 @@ describe("the leg log's causes, where the word IS the outcome", () => {
     expect(toneFor("partial")).toBe("warn");
   });
 
-  it("an unresolved leg is pending, not fine", () => {
+  it("an unresolved task is pending, not fine", () => {
     // `started` with no terminal record: the trap never ran. Showing it as
-    // success would hide exactly the deaths the leg log exists to catch.
+    // success would hide exactly the deaths the task log exists to catch.
     expect(toneFor("started")).toBe("pending");
   });
 
@@ -103,7 +103,7 @@ describe("displayed names are not always the names on the wire", () => {
     expect(taskOutcome("BatchTaskState.COMPLETED", 137)).toBe("failed");
   });
 
-  it("renames the leg causes that hid what they meant", () => {
+  it("renames the task causes that hid what they meant", () => {
     expect(displayName("started")).toBe("unresolved");
     expect(displayName("killed")).toBe("killed (oom)");
   });

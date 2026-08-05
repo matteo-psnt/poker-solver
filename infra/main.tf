@@ -111,7 +111,17 @@ locals {
     apt-get update -qq
     apt-get install -y -qq build-essential python3-dev libgomp1 git rsync
     curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+    # The wrapper's interpreter, installed to a SHARED location and linked onto
+    # PATH. Both parts are load-bearing: this start task runs as an elevated
+    # POOL-scoped auto-user, tasks run as a different non-elevated one whose
+    # HOME is its own working directory, so anything uv leaves under the start
+    # user's HOME is invisible to them. Without the explicit dirs the task died
+    # in 208ms having recorded nothing.
+    export UV_PYTHON_INSTALL_DIR=/opt/uv-python
+    export UV_PYTHON_BIN_DIR=/usr/local/bin
     /usr/local/bin/uv python install 3.13
+    chmod -R a+rX /opt/uv-python
     SHARE="$AZ_BATCH_NODE_MOUNTS_DIR/shared"
     mkdir -p /mnt/work/data/combo_abstraction /mnt/work/data/runs
     if [ -d "$SHARE/combo_abstraction" ]; then
@@ -292,8 +302,8 @@ resource "azurerm_batch_pool" "train" {
 
   # Scale to zero at rest. $PendingTasks counts active AND running tasks, so a
   # node is never counted idle while its task is still going; `taskcompletion`
-  # then guarantees a node is not deallocated out from under a running leg -- both
-  # matter here because a leg runs for hours.
+  # then guarantees a node is not deallocated out from under a running task -- both
+  # matter here because a task runs for hours.
   # MEASURED CONSTRAINTS, both found by running this against Azure:
   #
   #  * Comments are `//`. A `#` comment is rejected ("Invalid character"), and

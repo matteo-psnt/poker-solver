@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-from src.shared import cache, leg_log
+from src.shared import cache, task_log
 from src.shared.node import plan as node_plan
 from src.shared.node import runner
 
@@ -27,7 +27,7 @@ def paths(tmp_path):
 
 @pytest.fixture
 def log(paths):
-    logger = runner.LegLogger(paths.work / "leg.log", paths.share)
+    logger = runner.TaskLogger(paths.work / "task.log", paths.share)
     yield logger
     logger.close()
 
@@ -48,7 +48,7 @@ class TestNodePaths:
         assert str(resolved.share) == "/mnt/fs/shared"
 
     def test_the_code_tree_is_task_owned(self):
-        """Unique per task, so concurrent legs on one node cannot share a tree."""
+        """Unique per task, so concurrent tasks on one node cannot share a tree."""
         resolved = runner.NodePaths.from_environment({"CODE_DIR": "/mnt/work/code-task-7"})
         assert str(resolved.code) == "/mnt/work/code-task-7"
 
@@ -64,7 +64,7 @@ class TestRunGuarded:
     @pytest.mark.timeout(15)
     def test_the_deadline_reports_124_not_the_signal_it_sent(self, paths, log):
         """`timeout`'s convention. The guard sends TERM, so the child reports
-        143 -- but 143 means "cancelled" to the leg record, and this is a hang."""
+        143 -- but 143 means "cancelled" to the task record, and this is a hang."""
         argv = _python("import time", "time.sleep(30)")
         assert runner.run_guarded(argv, cwd=paths.work.parent, timeout=1, log=log) == (
             runner.EXIT_TIMEOUT
@@ -73,7 +73,7 @@ class TestRunGuarded:
     @pytest.mark.timeout(15)
     def test_a_child_killed_from_outside_reports_137(self, paths, log):
         """137 is the OOM killer on a training node. Reporting it as 124 would
-        call an OOM a hang AND, being terminal, stop `legs` asking Batch."""
+        call an OOM a hang AND, being terminal, stop `tasks` asking Batch."""
         argv = _python("import os, signal", "os.kill(os.getpid(), signal.SIGKILL)")
         assert runner.run_guarded(argv, cwd=paths.work.parent, timeout=5, log=log) == 137
 
@@ -84,7 +84,7 @@ class TestRunGuarded:
         assert code == 1
         assert "could not start" in log.path.read_text()
 
-    def test_output_is_tee_d_to_the_leg_log(self, paths, log):
+    def test_output_is_tee_d_to_the_task_log(self, paths, log):
         argv = _python("print('hello from the trainer')")
         runner.run_guarded(argv, cwd=paths.work.parent, timeout=5, log=log)
         assert "hello from the trainer" in log.path.read_text()
@@ -119,11 +119,11 @@ class TestRunGuarded:
         assert "output_dir" not in log.path.read_text()
 
 
-class TestLegLogger:
+class TestTaskLogger:
     def test_publishing_lands_the_log_on_the_share(self, paths, log):
         log("something worth reading later")
         log.publish()
-        published = paths.share / "logs" / "leg.log"
+        published = paths.share / "logs" / "task.log"
         assert "something worth reading later" in published.read_text()
 
     def test_only_the_tail_is_published(self, paths, log, monkeypatch):
@@ -133,11 +133,11 @@ class TestLegLogger:
         log("x" * 500)
         log("the end")
         log.publish()
-        published = (paths.share / "logs" / "leg.log").read_bytes()
+        published = (paths.share / "logs" / "task.log").read_bytes()
         assert len(published) == 64
         assert b"the end" in published
 
-    def test_an_unwritable_share_does_not_kill_the_leg(self, paths, log, monkeypatch):
+    def test_an_unwritable_share_does_not_kill_the_task(self, paths, log, monkeypatch):
         def refuse(*args, **kwargs):
             raise OSError("share went away")
 
@@ -187,13 +187,13 @@ class TestExitAccounting:
     @pytest.mark.parametrize(
         ("code", "cause"),
         [
-            (0, leg_log.CAUSE_COMPLETED),
-            (runner.EXIT_TIMEOUT, leg_log.CAUSE_TIMEOUT),
-            (143, leg_log.CAUSE_CANCELLED),
-            (130, leg_log.CAUSE_CANCELLED),
-            (137, leg_log.CAUSE_KILLED),
-            (1, leg_log.CAUSE_FAILED),
-            (2, leg_log.CAUSE_FAILED),
+            (0, task_log.CAUSE_COMPLETED),
+            (runner.EXIT_TIMEOUT, task_log.CAUSE_TIMEOUT),
+            (143, task_log.CAUSE_CANCELLED),
+            (130, task_log.CAUSE_CANCELLED),
+            (137, task_log.CAUSE_KILLED),
+            (1, task_log.CAUSE_FAILED),
+            (2, task_log.CAUSE_FAILED),
         ],
     )
     def test_each_death_maps_to_its_own_cause(self, code, cause):
@@ -202,18 +202,18 @@ class TestExitAccounting:
         assert runner._cause(code, None) == cause
 
     def test_an_explicit_outcome_wins_over_the_code(self):
-        """An evaluate leg exits 0 for Batch's retry economics, which is not a
+        """An evaluate task exits 0 for Batch's retry economics, which is not a
         claim that all 30 rungs scored."""
-        assert runner._cause(0, leg_log.CAUSE_PARTIAL) == leg_log.CAUSE_PARTIAL
+        assert runner._cause(0, task_log.CAUSE_PARTIAL) == task_log.CAUSE_PARTIAL
 
 
 class TestMain:
-    """The wiring `run_leg.sh`'s traps used to carry."""
+    """The wiring `run_task.sh`'s traps used to carry."""
 
     @pytest.fixture(autouse=True)
     def _node(self, paths, monkeypatch):
         monkeypatch.setattr(runner.NodePaths, "from_environment", classmethod(lambda cls: paths))
-        monkeypatch.setenv("AZ_BATCH_TASK_ID", "leg-1")
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "task-1")
         for key, value in {
             "RUN_OP": "train",
             "RUN_CONFIG": "quick_test",
@@ -223,35 +223,35 @@ class TestMain:
         }.items():
             monkeypatch.setenv(key, value)
 
-    def test_a_signalled_leg_records_cancelled_not_completed(self, paths, monkeypatch):
+    def test_a_signalled_task_records_cancelled_not_completed(self, paths, monkeypatch):
         """THE defect this port fixes. Bash's EXIT trap reads `$?` as zero when
         killed while blocked on a child -- measured: SIGTERM ran the trap with
-        `$? = 0` and exited 143, so a cancelled leg was recorded as clean and
+        `$? = 0` and exited 143, so a cancelled task was recorded as clean and
         never reconciled against Batch."""
         monkeypatch.setattr(runner, "_stage", lambda paths, log: 0)
         monkeypatch.setitem(runner.HANDLERS, node_plan.TRAIN, _signalled)
 
         assert runner.main() == 143
-        (row,) = leg_log.read_legs(paths.share)
-        assert row["cause"] == leg_log.CAUSE_CANCELLED
+        (row,) = task_log.read_tasks(paths.share)
+        assert row["cause"] == task_log.CAUSE_CANCELLED
         assert row["exit_code"] == 143
 
-    def test_a_leg_that_dies_before_the_sync_still_leaves_a_record(self, paths, monkeypatch):
-        """The whole reason the started record is written first: a leg dying
+    def test_a_task_that_dies_before_the_sync_still_leaves_a_record(self, paths, monkeypatch):
+        """The whole reason the started record is written first: a task dying
         during dependency install must not be indistinguishable from one that
         never ran."""
         monkeypatch.setattr(runner, "_stage", lambda paths, log: 1)
 
         assert runner.main() == 1
-        (row,) = leg_log.read_legs(paths.share)
-        assert row["cause"] == leg_log.CAUSE_FAILED
+        (row,) = task_log.read_tasks(paths.share)
+        assert row["cause"] == task_log.CAUSE_FAILED
 
     def test_a_bad_environment_is_a_message_not_a_traceback(self, paths, monkeypatch):
         monkeypatch.setenv("RUN_TO", "0")
         assert runner.main() == 1
-        (row,) = leg_log.read_legs(paths.share)
-        assert row["cause"] == leg_log.CAUSE_FAILED
-        assert "ABSOLUTE" in (paths.share / "logs" / "leg-1.log").read_text()
+        (row,) = task_log.read_tasks(paths.share)
+        assert row["cause"] == task_log.CAUSE_FAILED
+        assert "ABSOLUTE" in (paths.share / "logs" / "task-1.log").read_text()
 
     def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch):
         """An operator-cancelled task still leaves its progress on the share."""
@@ -275,7 +275,7 @@ class TestStage:
         tree; the symlink is what lands it on the data disk instead."""
         paths.code.mkdir(parents=True)
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        logger = runner.LegLogger(paths.work / "leg.log", paths.share)
+        logger = runner.TaskLogger(paths.work / "task.log", paths.share)
         try:
             assert runner._stage(paths, logger) == 0
         finally:
@@ -287,7 +287,7 @@ class TestStage:
         paths.code.mkdir(parents=True)
         (paths.code / "data").symlink_to(paths.work / "somewhere-else")
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        logger = runner.LegLogger(paths.work / "leg.log", paths.share)
+        logger = runner.TaskLogger(paths.work / "task.log", paths.share)
         try:
             runner._stage(paths, logger)
         finally:
@@ -314,15 +314,15 @@ class TestEvaluateFetch:
         the WHOLE published directory -- the entire ladder, to score one rung."""
         self._published(paths)
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        leg = node_plan.LegPlan(op=node_plan.EVALUATE, run_id="run-a")
+        task = node_plan.TaskPlan(op=node_plan.EVALUATE, run_id="run-a")
 
-        assert runner._evaluate(leg, paths, log) == (0, None)
+        assert runner._evaluate(task, paths, log) == (0, None)
         assert (paths.runs / "run-a" / "static-2000.zarr" / "chunk").exists()
 
     def test_a_run_with_nothing_published_is_refused(self, paths, log):
         (paths.archive / "run-a").mkdir(parents=True)
-        leg = node_plan.LegPlan(op=node_plan.EVALUATE, run_id="run-a")
-        assert runner._evaluate(leg, paths, log) == (1, None)
+        task = node_plan.TaskPlan(op=node_plan.EVALUATE, run_id="run-a")
+        assert runner._evaluate(task, paths, log) == (1, None)
         assert "no published checkpoint to score" in log.path.read_text()
 
     def test_a_partial_sweep_is_reported_as_partial(self, paths, log, monkeypatch):
@@ -334,23 +334,25 @@ class TestEvaluateFetch:
         (paths.archive / "run-a" / ".complete-static-1000.zarr").write_text("")
         codes = iter([0, 1])
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: next(codes))
-        leg = node_plan.LegPlan(op=node_plan.EVALUATE, run_id="run-a", eval_rungs=("1000", "2000"))
+        task = node_plan.TaskPlan(
+            op=node_plan.EVALUATE, run_id="run-a", eval_rungs=("1000", "2000")
+        )
 
-        assert runner._evaluate(leg, paths, log) == (0, leg_log.CAUSE_PARTIAL)
+        assert runner._evaluate(task, paths, log) == (0, task_log.CAUSE_PARTIAL)
 
     def test_a_clean_sweep_of_failures_is_worth_a_retry(self, paths, log, monkeypatch):
         """That is what a transient node fault looks like."""
         self._published(paths)
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 1)
-        leg = node_plan.LegPlan(op=node_plan.EVALUATE, run_id="run-a", eval_rungs=("2000",))
+        task = node_plan.TaskPlan(op=node_plan.EVALUATE, run_id="run-a", eval_rungs=("2000",))
 
-        assert runner._evaluate(leg, paths, log) == (1, None)
+        assert runner._evaluate(task, paths, log) == (1, None)
 
 
 class TestTheGuardReachesTheWholeTree:
     """`terminate()` reaches only `uv`; the trainer and its workers are
     grandchildren. A deadline that returned 124 while the workers kept running
-    is how stale /dev/shm segments outlived a killed leg and took down the
+    is how stale /dev/shm segments outlived a killed task and took down the
     NEXT one for that run."""
 
     @pytest.mark.timeout(30)
@@ -396,9 +398,9 @@ class TestPrecompute:
     def test_a_fresh_abstraction_is_published(self, paths, log, monkeypatch):
         self._wrote(paths)
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        leg = node_plan.LegPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
 
-        assert runner._precompute(leg, paths, log) == (0, None)
+        assert runner._precompute(task, paths, log) == (0, None)
         published = paths.share / "combo_abstraction" / "ochs_gate_ochs" / "buckets.npy"
         assert published.read_text() == "buckets"
 
@@ -413,9 +415,9 @@ class TestPrecompute:
         existing.mkdir(parents=True)
         (existing / "buckets.npy").write_text("THE ORIGINAL")
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        leg = node_plan.LegPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
 
-        assert runner._precompute(leg, paths, log) == (1, None)
+        assert runner._precompute(task, paths, log) == (1, None)
         assert (existing / "buckets.npy").read_text() == "THE ORIGINAL"
         assert "REFUSING to republish" in log.path.read_text()
 
@@ -425,18 +427,18 @@ class TestPrecompute:
         existing.mkdir(parents=True)
         (existing / "buckets.npy").write_text("THE ORIGINAL")
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        leg = node_plan.LegPlan(
+        task = node_plan.TaskPlan(
             op=node_plan.PRECOMPUTE, config="ochs_gate_ochs", force_publish=True
         )
 
-        assert runner._precompute(leg, paths, log) == (0, None)
+        assert runner._precompute(task, paths, log) == (0, None)
         assert (existing / "buckets.npy").read_text() == "buckets"
 
     def test_a_failed_build_publishes_nothing(self, paths, log, monkeypatch):
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 2)
-        leg = node_plan.LegPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
 
-        assert runner._precompute(leg, paths, log) == (2, None)
+        assert runner._precompute(task, paths, log) == (2, None)
         assert not (paths.share / "combo_abstraction").exists()
 
     def test_an_unreadable_payload_is_not_a_traceback(self, paths, log, monkeypatch):
@@ -446,9 +448,9 @@ class TestPrecompute:
         (paths.work).mkdir(parents=True, exist_ok=True)
         (paths.work / "precompute.json").write_text("not json")
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        leg = node_plan.LegPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
+        task = node_plan.TaskPlan(op=node_plan.PRECOMPUTE, config="ochs_gate_ochs")
 
-        assert runner._precompute(leg, paths, log) == (1, None)
+        assert runner._precompute(task, paths, log) == (1, None)
         assert "no usable output_dir" in log.path.read_text()
 
 
@@ -461,25 +463,25 @@ class TestRepairLadder:
         (share / "static-1000.zarr").mkdir(parents=True)
         (share / "static-1000.zarr" / "chunk").write_text("data")
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        leg = node_plan.LegPlan(op=node_plan.REPAIR_LADDER, run_id="run-a", config="quick_test")
+        task = node_plan.TaskPlan(op=node_plan.REPAIR_LADDER, run_id="run-a", config="quick_test")
 
-        assert runner._repair_ladder(leg, paths, log) == (0, None)
+        assert runner._repair_ladder(task, paths, log) == (0, None)
         assert not (paths.runs / "run-a").exists()
 
     def test_an_absent_run_is_a_message_not_a_traceback(self, paths, log):
-        leg = node_plan.LegPlan(op=node_plan.REPAIR_LADDER, run_id="ghost", config="quick_test")
-        assert runner._repair_ladder(leg, paths, log) == (1, None)
+        task = node_plan.TaskPlan(op=node_plan.REPAIR_LADDER, run_id="ghost", config="quick_test")
+        assert runner._repair_ladder(task, paths, log) == (1, None)
         assert "no such run on the share" in log.path.read_text()
 
 
-class TestTheCacheSurvivesBetweenLegs:
-    """Sharing the board cache across legs on a node is the whole reason it
+class TestTheCacheSurvivesBetweenTasks:
+    """Sharing the board cache across tasks on a node is the whole reason it
     lives on the data disk rather than in the task's HOME, which is wiped."""
 
     def _stage(self, paths, monkeypatch):
         paths.code.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(runner, "run_guarded", lambda *a, **k: 0)
-        logger = runner.LegLogger(paths.work / "leg.log", paths.share)
+        logger = runner.TaskLogger(paths.work / "task.log", paths.share)
         try:
             assert runner._stage(paths, logger) == 0
         finally:
@@ -488,7 +490,7 @@ class TestTheCacheSurvivesBetweenLegs:
     def test_the_cache_points_at_the_data_disk_not_the_task_home(self, paths, monkeypatch):
         """A Batch task's HOME is its own working directory, wiped with the
         task, so the ~/.cache default would rebuild the river's 2.6M-board
-        cache on every single leg."""
+        cache on every single task."""
         monkeypatch.delenv(cache.ENV_OVERRIDE, raising=False)
         self._stage(paths, monkeypatch)
         assert os.environ[cache.ENV_OVERRIDE] == str(paths.work / "cache")
@@ -499,7 +501,7 @@ class TestTheCacheSurvivesBetweenLegs:
         run_guarded, not the stub the other cases use."""
         monkeypatch.setenv(cache.ENV_OVERRIDE, "/mnt/work/cache")
         paths.work.mkdir(parents=True, exist_ok=True)
-        logger = runner.LegLogger(paths.work / "child.log", paths.share)
+        logger = runner.TaskLogger(paths.work / "child.log", paths.share)
         try:
             runner.run_guarded(
                 _python("import os", f"print(os.environ['{cache.ENV_OVERRIDE}'])"),
@@ -512,16 +514,16 @@ class TestTheCacheSurvivesBetweenLegs:
             logger.close()
 
     def test_it_is_writable_by_a_later_task(self, paths, monkeypatch):
-        """`submit_leg` sets no `user_identity`, so leg tasks run as Batch's
+        """`submit_task` sets no `user_identity`, so leg tasks run as Batch's
         default auto-user. A directory left with the first task's ownership and
-        umask is one the SECOND leg cannot write into -- which would silently
+        umask is one the SECOND task cannot write into -- which would silently
         undo the sharing this exists for."""
         monkeypatch.delenv(cache.ENV_OVERRIDE, raising=False)
         self._stage(paths, monkeypatch)
         mode = (paths.work / "cache").stat().st_mode & 0o777
         assert mode == 0o777, f"cache dir is {oct(mode)}, not shareable across task users"
 
-    def test_a_cache_that_cannot_be_prepared_does_not_kill_the_leg(self, paths, monkeypatch):
+    def test_a_cache_that_cannot_be_prepared_does_not_kill_the_task(self, paths, monkeypatch):
         monkeypatch.delenv(cache.ENV_OVERRIDE, raising=False)
 
         real = runner.Path.chmod

@@ -22,7 +22,7 @@ SNAPSHOT is current state: the whole document is rewritten and only the latest
 version matters (``.run.json``, the checkpoint manifest, the baseline).
 
 LOG is history: rows are appended and never rewritten, so one file legitimately
-spans code versions as a run is resumed across legs (``progress.jsonl``, the
+spans code versions as a run is resumed across tasks (``progress.jsonl``, the
 eval ledger).
 
 Atomicity is a property of the destination, not a preference. On local disk a
@@ -125,21 +125,21 @@ REGISTRY: dict[str, Artifact] = {
         kind="snapshot",
         scope="share",
         version=2,
-        what="a cloud leg's own account of starting, per task and attempt",
+        what="a cloud task's own account of starting, per task and attempt",
     ),
     "legs/*.exit.json": Artifact(
         name="legs/*.exit.json",
         kind="snapshot",
         scope="share",
         version=2,
-        what="a cloud leg's own account of how it ended",
+        what="a cloud task's own account of how it ended",
     ),
     "legs/*.observed.json": Artifact(
         name="legs/*.observed.json",
         kind="snapshot",
         scope="share",
         version=1,
-        what="what Batch says became of a leg whose own record never arrived",
+        what="what Batch says became of a task whose own record never arrived",
     ),
 }
 

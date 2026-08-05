@@ -68,7 +68,7 @@ def test_distinct_keys_do_not_share_a_value(clock, counted):
     cache = TtlCache(TTL)
 
     assert cache.get("jobs", counted("jobs")) == "jobs-1"
-    assert cache.get("legs", counted("legs")) == "legs-1"
+    assert cache.get("tasks", counted("tasks")) == "tasks-1"
 
 
 def test_clear_forgets_everything(clock, counted):

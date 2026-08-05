@@ -1,6 +1,6 @@
 """Service-layer APIs for training and evaluation orchestration.
 
-The one seam between transports (headless CLI, the Azure leg wrapper, the
+The one seam between transports (headless CLI, the Azure task wrapper, the
 interactive menu) and the pipeline internals. A transport composes calls
 from here; it never reaches past them, which is what keeps a cloud run and a
 local run doing the same thing.

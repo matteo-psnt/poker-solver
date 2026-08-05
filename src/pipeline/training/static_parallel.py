@@ -168,7 +168,7 @@ def _worker_entry(
 
 
 def _append_checkpoint_event(checkpoint_dir: Path, **fields: Any) -> None:
-    """Record the mid-flight row, but never at the cost of the leg.
+    """Record the mid-flight row, but never at the cost of the task.
 
     `records.append_log` propagates on purpose, so its callers can choose. Here
     the choice is clear: this runs immediately AFTER `save_checkpoint` succeeded,
@@ -222,7 +222,7 @@ def train_static_parallel(
                 start = 0  # nothing banked yet; a fresh run
         if start >= num_iterations:
             # Absolute target already met, so this call is a no-op:
-            # a retried leg past its target is a no-op, not a repeat.
+            # a retried task past its target is a no-op, not a repeat.
             logger.info(
                 f"[static] already at {start:,} >= target {num_iterations:,}; nothing to do"
             )
@@ -316,18 +316,18 @@ def train_static_parallel(
                 # The one place a run can record what it looked like mid-flight.
                 # After save_checkpoint, so a row never describes state the
                 # arrays did not reach.
-                leg_elapsed = time.time() - started
+                task_elapsed = time.time() - started
                 _append_checkpoint_event(
                     checkpoint_dir,
                     ts=datetime.now(UTC).isoformat(),
                     iteration=done,
-                    # Scoped to the LEG: a resumed leg restarts its clock while
+                    # Scoped to the LEG: a resumed task restarts its clock while
                     # `iteration` keeps counting, so an absolute iteration over a
-                    # leg's elapsed time reports a rate the run never achieved.
-                    leg_iterations=done - start,
-                    leg_elapsed_s=round(leg_elapsed, 3),
+                    # task's elapsed time reports a rate the run never achieved.
+                    task_iterations=done - start,
+                    task_elapsed_s=round(task_elapsed, 3),
                     iters_per_sec=(
-                        round((done - start) / leg_elapsed, 1) if leg_elapsed > 0 else 0.0
+                        round((done - start) / task_elapsed, 1) if task_elapsed > 0 else 0.0
                     ),
                     touched_rows=storage.num_touched_infosets(),
                     num_rows=tree.num_rows,

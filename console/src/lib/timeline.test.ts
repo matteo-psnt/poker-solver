@@ -3,7 +3,7 @@ import { timelineBars } from "./timeline";
 
 const NOW = Date.parse("2026-08-04T12:00:00Z");
 
-const leg = (over: Record<string, unknown>) =>
+const task = (over: Record<string, unknown>) =>
   ({
     task_id: "t",
     attempt: 1,
@@ -17,15 +17,15 @@ const leg = (over: Record<string, unknown>) =>
   }) as any;
 
 describe("timelineBars", () => {
-  it("lays legs out against one shared axis, in the order they ran", () => {
+  it("lays tasks out against one shared axis, in the order they ran", () => {
     const t = timelineBars(
       [
-        leg({
+        task({
           task_id: "second",
           started_at: "2026-08-04T11:00:00Z",
           ended_at: "2026-08-04T12:00:00Z",
         }),
-        leg({
+        task({
           task_id: "first",
           started_at: "2026-08-04T10:00:00Z",
           ended_at: "2026-08-04T11:00:00Z",
@@ -39,13 +39,17 @@ describe("timelineBars", () => {
     expect(t?.bars[1]?.leftPct).toBeCloseTo(50);
   });
 
-  it("makes a gap between legs visible as a gap", () => {
+  it("makes a gap between tasks visible as a gap", () => {
     /** Two days where nothing touched the run is the fact a column of
         timestamps hides best. */
     const t = timelineBars(
       [
-        leg({ started_at: "2026-08-01T00:00:00Z", ended_at: "2026-08-01T01:00:00Z" }),
-        leg({ task_id: "b", started_at: "2026-08-04T11:00:00Z", ended_at: "2026-08-04T12:00:00Z" }),
+        task({ started_at: "2026-08-01T00:00:00Z", ended_at: "2026-08-01T01:00:00Z" }),
+        task({
+          task_id: "b",
+          started_at: "2026-08-04T11:00:00Z",
+          ended_at: "2026-08-04T12:00:00Z",
+        }),
       ],
       NOW,
     );
@@ -54,12 +58,12 @@ describe("timelineBars", () => {
     expect(gap).toBeGreaterThan(90);
   });
 
-  it("keeps a leg that died instantly visible rather than zero-width", () => {
+  it("keeps a task that died instantly visible rather than zero-width", () => {
     /** The shortest bar is the most interesting one on the chart. */
     const t = timelineBars(
       [
-        leg({ started_at: "2026-08-01T00:00:00Z", ended_at: "2026-08-04T00:00:00Z" }),
-        leg({
+        task({ started_at: "2026-08-01T00:00:00Z", ended_at: "2026-08-04T00:00:00Z" }),
+        task({
           task_id: "died",
           cause: "failed",
           started_at: "2026-08-04T11:59:00Z",
@@ -73,9 +77,9 @@ describe("timelineBars", () => {
     expect(died?.tone).toBe("bad");
   });
 
-  it("runs an unfinished leg to now and says so", () => {
+  it("runs an unfinished task to now and says so", () => {
     const t = timelineBars(
-      [leg({ task_id: "live", cause: "running", started_at: "2026-08-04T11:00:00Z" })],
+      [task({ task_id: "live", cause: "running", started_at: "2026-08-04T11:00:00Z" })],
       NOW,
     );
     expect(t?.bars[0]?.running).toBe(true);
@@ -85,8 +89,8 @@ describe("timelineBars", () => {
   it("never lets a bar overflow the axis", () => {
     const t = timelineBars(
       [
-        leg({ started_at: "2026-08-04T10:00:00Z", ended_at: "2026-08-04T10:30:00Z" }),
-        leg({ task_id: "late", started_at: "2026-08-04T11:59:59Z", ended_at: null }),
+        task({ started_at: "2026-08-04T10:00:00Z", ended_at: "2026-08-04T10:30:00Z" }),
+        task({ task_id: "late", started_at: "2026-08-04T11:59:59Z", ended_at: null }),
       ],
       NOW,
     );
@@ -96,15 +100,15 @@ describe("timelineBars", () => {
   });
 
   it("is null rather than a broken chart when nothing carries a time", () => {
-    expect(timelineBars([leg({ started_at: null })], NOW)).toBeNull();
+    expect(timelineBars([task({ started_at: null })], NOW)).toBeNull();
     expect(timelineBars([], NOW)).toBeNull();
   });
 
-  it("labels a bar with what the leg did, falling back to its op", () => {
+  it("labels a bar with what the task did, falling back to its op", () => {
     const t = timelineBars(
       [
-        leg({ what: "evaluate @150M seed7", started_at: "2026-08-04T11:00:00Z" }),
-        leg({ task_id: "b", what: "", op: "train", started_at: "2026-08-04T11:30:00Z" }),
+        task({ what: "evaluate @150M seed7", started_at: "2026-08-04T11:00:00Z" }),
+        task({ task_id: "b", what: "", op: "train", started_at: "2026-08-04T11:30:00Z" }),
       ],
       NOW,
     );

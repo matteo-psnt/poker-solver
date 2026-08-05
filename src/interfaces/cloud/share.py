@@ -1,4 +1,4 @@
-"""The durable share: published runs, code snapshots, abstractions, leg logs.
+"""The durable share: published runs, code snapshots, abstractions, task logs.
 
 The share is the experiment record. It lives in its own Terraform state and its
 own resource group precisely so tearing down compute cannot reach it, and every
@@ -158,19 +158,19 @@ def walk_files(
             yield child
 
 
-def leg_log_names(service: ShareServiceClient, share: str) -> list[str]:
-    """Every published leg log, oldest first.
+def task_log_names(service: ShareServiceClient, share: str) -> list[str]:
+    """Every published task log, oldest first.
 
     Published logs matter more than node-side ``stdout.txt``: Batch keeps task
     output on the node, and the pool scales to zero within minutes of a task
-    ending, so the node copy is gone for exactly the failed legs most worth
+    ending, so the node copy is gone for exactly the failed tasks most worth
     reading.
     """
     return sorted(entry.name for entry in list_entries(service, share, LOGS_DIR))
 
 
-def read_leg_log(service: ShareServiceClient, share: str, task_id: str) -> str | None:
-    """Read one published leg log by task id."""
+def read_task_log(service: ShareServiceClient, share: str, task_id: str) -> str | None:
+    """Read one published task log by task id."""
     return read_text(service, share, f"{LOGS_DIR}/{task_id}.log")
 
 

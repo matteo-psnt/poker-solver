@@ -23,11 +23,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--tier", type=int, default=0, help="Which comparison tier's curve to show."
     )
     parser.add_argument(
-        "--legs-dir",
+        "--tasks-dir",
         default=None,
         help=(
-            "Directory CONTAINING a legs/ -- `--legs-dir data`, not `data/legs`. "
-            "Omit to read the legs published to the share, which is the normal case."
+            "Directory CONTAINING a legs/ -- `--tasks-dir data`, not `data/tasks`. "
+            "Omit to read the tasks published to the share, which is the normal case."
         ),
     )
     parser.add_argument("--last", type=int, default=8, help="Checkpoints to show (0 = all).")
@@ -44,7 +44,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             resolve_run_dir(args.run, str(root)),
             ledger_path=ledger_for(args, root),
             tier_index=args.tier,
-            legs_dir=Path(args.legs_dir) if args.legs_dir else None,
+            tasks_dir=Path(args.tasks_dir) if args.tasks_dir else None,
         )
     payload = dataclasses.asdict(digest)
     payload["op"] = "runinfo"
@@ -52,6 +52,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     # the shape, not the log.
     payload["progress"] = digest.progress[-args.last :] if args.last > 0 else digest.progress
     payload["total_progress_rows"] = len(digest.progress)
+    payload["training_tasks"] = payload.pop("attempts", None)
     return payload
 
 
@@ -66,7 +67,7 @@ def render(payload: dict[str, Any]) -> None:
     abstraction = (payload.get("card_abstraction_hash") or "none")[:16]
     print(f"  git {commit}{dirty}   abstraction {abstraction}   status {payload['status']}")
     print(
-        f"  {payload['iterations']:,} iterations over {payload['attempts']} attempt(s), "
+        f"  {payload['iterations']:,} iterations over {payload['training_tasks']} training task(s), "
         f"{payload['runtime_seconds']:.0f}s compute"
     )
 
@@ -96,12 +97,12 @@ def render(payload: dict[str, Any]) -> None:
                 f"  (± {point['std_error_mbb']:.1f})"
             )
 
-    legs = payload.get("legs") or []
-    if legs:
-        print(f"\n  legs  ({len(legs)})")
-        for leg in legs:
-            attempt = f"#{leg.get('attempt', 1)}"
-            print(f"    {leg['task_id']:<28} {attempt:<4} {leg['cause']}")
+    tasks = payload.get("tasks") or []
+    if tasks:
+        print(f"\n  tasks  ({len(tasks)})")
+        for task in tasks:
+            attempt = f"#{task.get('attempt', 1)}"
+            print(f"    {task['task_id']:<28} {attempt:<4} {task['cause']}")
 
     gaps = payload.get("gaps") or []
     print("\n  gaps" if gaps else "\n  no gaps: scored, complete, reproducible")
@@ -122,5 +123,5 @@ COMMAND = Command(
     add_arguments=add_arguments,
     run=run,
     render=render,
-    help="Everything recorded about a run: provenance, curve, scores, legs, gaps.",
+    help="Everything recorded about a run: provenance, curve, scores, tasks, gaps.",
 )
