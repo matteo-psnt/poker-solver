@@ -57,6 +57,20 @@ locals {
   start_script = <<-EOT
     set -euo pipefail
 
+    # Yama defaults to 1: a process may ptrace only its own DESCENDANTS. The
+    # sampling profiler is started BY the task wrapper, which makes it the
+    # trainer's SIBLING, so the attach is refused -- measured on a train-huge
+    # node, `py-spy` answering "Permission Denied" with ptrace_scope=1, the
+    # non-native fallback failing identically.
+    #
+    # Here rather than by elevating tasks: this grants ONE capability on a
+    # single-tenant compute node, where running every task as root would grant
+    # all of them forever to buy it.
+    #
+    # `|| echo` because a kernel without Yama has no such knob, and no profiler
+    # is a reason to log -- never to fail a start task, which bricks the node.
+    sysctl -w kernel.yama.ptrace_scope=0 || echo "WARN could not relax ptrace_scope"
+
     # Find the data disk by its PROPERTIES, not by a fixed path. The obvious
     # /dev/disk/azure/scsi1/lun0 symlink is created by the Azure Linux Agent's
     # udev rules and does NOT exist on the Batch node image -- assuming it fails
