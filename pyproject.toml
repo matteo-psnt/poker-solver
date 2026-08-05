@@ -3,7 +3,7 @@ name = "poker-solver"
 version = "0.1.0"
 description = "Heads-Up No-Limit Hold'em solver using Monte Carlo CFR"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 authors = [
     { name = "Matteo Pesenti" }
 ]
@@ -38,7 +38,7 @@ packages = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [
@@ -117,10 +117,17 @@ markers = [
 # To debug one test, `-n0` turns it off: worker startup and interleaved output
 # are pure cost when there is nothing to parallelise.
 addopts = "-v -n auto"
-# 5s is a fast-test budget and every expensive test carries its own explicit
-# `@pytest.mark.timeout` (30-180s), so the ceiling is not near anything real.
-# That headroom is what makes `-n auto` safe: 12 workers contending cannot push
-# a 0.1s test to 5s, and the tests that take seconds are not measured by this.
+# 5s is a WALL-CLOCK budget, and `-n auto` above made it partly a measure of how
+# busy the machine is rather than how slow the test is. Most of the suite has
+# enormous headroom (~1260 tests are under 0.2s) and the expensive ones carry
+# their own `@pytest.mark.timeout` of 30-180s, which the default never reaches.
+# The margin to watch is the middle: the thinnest measured is
+# `test_in_memory_bucketer_pickles_arrays` at 0.98s unloaded -- 5x, on a test
+# whose file is `slow`-marked but which carries no explicit timeout of its own.
+# Measured 0 failures in 10 `-n auto` runs, and 0 in 10 more with `--timeout=0`,
+# so nothing here is known to flake; if one ever does, the fix is an explicit
+# `@pytest.mark.timeout` on that test, NOT raising this floor -- the 5s budget
+# is what keeps a fast test from quietly becoming a slow one.
 timeout = 5
 timeout_func_only = true
 
