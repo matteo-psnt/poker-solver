@@ -46,6 +46,7 @@ from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
 from src.interfaces.commands.profile import ProfilePayload
 from src.interfaces.commands.progress import ProgressPayload, ProgressRow
+from src.interfaces.commands.prune_checkpoints import PrunePlan
 from src.interfaces.commands.push_code import PushedCodePayload
 from src.interfaces.commands.push_data import PushedDataPayload
 from src.interfaces.commands.runinfo import RunInfoPayload
@@ -640,6 +641,30 @@ PAYLOADS: dict[str, Any] = {
         verified=True,
         deleted=321,
         backup="/home/me/legs-backup",
+    ),
+    # The APPLIED shape, for the same reason `compact-legs` uses it: a dry run
+    # renders a subset. `protected` and `scored_kept` are populated because both
+    # are lines a reader has to see before trusting a delete.
+    "prune-checkpoints": PrunePlan(
+        applied=True,
+        runs_considered=272,
+        runs_affected=1,
+        rungs_dropped=55,
+        files_deleted=8_360,
+        freed_gib=77.0,
+        protected=["run-pcs-production-to1-2k-river-023543-3910: still running"],
+        plan=[
+            {
+                "run": "run-train-production-to100M-production_f4-081936-25408",
+                "held": 64,
+                "drop": [5_000_000],
+                "dropping": 55,
+                "keeping": [400_000_000],
+                "scored_kept": [400_000_000],
+                "gib_each": 1.4,
+                "gib_freed": 77.0,
+            }
+        ],
     ),
 }
 

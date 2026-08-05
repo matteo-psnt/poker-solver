@@ -134,6 +134,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "compact-legs",
                 "Bundle sealed task records into one file, so reading legs/ is one round trip.",
             ),
+            CommandRef(
+                "prune-checkpoints",
+                "Drop retained checkpoint rungs a settled run no longer needs (dry run by default).",
+            ),
         ),
     ),
     CommandGroup(

@@ -18,6 +18,11 @@ the point:
   executing a task. A console button here would train on the laptop, which is
   the one thing this project does not do. The scriptable path already covers it:
   `submit` queues the pool task that runs `train-static`.
+- ``DESTRUCTIVE`` -- it removes part of the experiment record and cannot be
+  undone. The console's job is to show the record; a button that deletes 292 GiB
+  of it on one click is not a screen this should grow. The gate is that someone
+  reads a dry run and types `--apply`, which a terminal does and a button does
+  not.
 
 Adding to either list is fine. Doing it without deciding is what this argues
 against, so the reason is stored beside the name and read back in the failure.
@@ -49,7 +54,12 @@ NODE_ONLY: dict[str, str] = {
     "abstraction-coupling": "compute, run BY the node wrapper — the fine abstraction is on the share",
 }
 
-EXCLUDED = NO_PAYLOAD | NODE_ONLY
+DESTRUCTIVE: dict[str, str] = {
+    "prune-checkpoints": "it deletes checkpoints irreversibly; a button is the wrong "
+    "shape for that, and its dry run is the thing worth reading anyway",
+}
+
+EXCLUDED = NO_PAYLOAD | NODE_ONLY | DESTRUCTIVE
 
 # NOT an exclusion: `status` composes three commands the console already renders
 # as panels, so every question it answers is on the Overview page. An
