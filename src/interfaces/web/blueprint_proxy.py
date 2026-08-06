@@ -13,6 +13,12 @@ Where the blueprint server is
 endpoint says so in a sentence rather than failing as a connection error -- "not
 configured" and "configured but unreachable" are different problems with
 different fixes, and a bare `ConnectionRefused` conflates them.
+
+There is deliberately no credential here. The host sits on a tailnet with no
+inbound rules at all, so reaching it is already proof of identity; an earlier
+version put it behind a public HTTPS endpoint and a bearer token, and moving to
+Tailscale deleted the token along with the certificate and the reverse proxy
+that checked it. A secret you do not have is a secret that cannot leak.
 """
 
 from __future__ import annotations
@@ -25,7 +31,6 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 BLUEPRINT_URL_ENV = "POKER_SOLVER_BLUEPRINT_URL"
-BLUEPRINT_TOKEN_ENV = "POKER_SOLVER_BLUEPRINT_TOKEN"
 
 # Generous: a node read crosses a tunnel, and the grid is a real computation on
 # the far side. Short enough that a dead server is reported rather than hung on.
@@ -36,17 +41,6 @@ def blueprint_url() -> str | None:
     """The configured server, or ``None`` when the feature is not turned on."""
     url = os.environ.get(BLUEPRINT_URL_ENV, "").strip()
     return url.rstrip("/") or None
-
-
-def _headers() -> dict[str, str]:
-    """The bearer token, when there is one.
-
-    Absent on a laptop pointing at a local server, which is why this is optional
-    rather than required: the token belongs to the hosted box, where Caddy checks
-    it, and demanding one everywhere would make the plain case unrunnable.
-    """
-    token = os.environ.get(BLUEPRINT_TOKEN_ENV, "").strip()
-    return {"authorization": f"Bearer {token}"} if token else {}
 
 
 def forward(
@@ -78,24 +72,14 @@ def forward(
             f"{base}{path}",
             params=params,
             json=json,
-            headers=_headers(),
             timeout=TIMEOUT_SECONDS,
         )
     except httpx.HTTPError as error:
         return JSONResponse(
-            {"error": f"The blueprint server at {base} did not answer: {error}"},
-            status_code=503,
-        )
-    if response.status_code == 404 and not response.headers.get("content-type", "").startswith(
-        "application/json"
-    ):
-        # Caddy answers an unauthorized request with a bare 404 rather than a
-        # 401, so a scanner learns nothing. That makes a wrong token look exactly
-        # like a wrong address from here -- say both, since the fix differs.
-        return JSONResponse(
             {
-                "error": f"{base} did not recognise this request. Check "
-                f"{BLUEPRINT_TOKEN_ENV} matches the box's token."
+                "error": f"The blueprint server at {base} did not answer: {error}. "
+                "If the host is running, check `tailscale status` — the console "
+                "reaches it over the tailnet, not the public internet."
             },
             status_code=503,
         )
