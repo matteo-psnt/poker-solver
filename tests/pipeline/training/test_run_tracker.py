@@ -545,3 +545,76 @@ class TestLegacyResumeWithoutMigration:
 
         ended = run_events.events_of(events, run_events.ATTEMPT_ENDED)
         assert [e["index"] for e in ended] == [0], "only the attempt that truly closed"
+
+
+class TestWhichWorktreeTrainedIt:
+    """A run has to say which line of work produced it, not only which commit.
+
+    Investigation here happens in several git worktrees at once, and a worktree
+    carries its change UNCOMMITTED for as long as it is being iterated on — so
+    two arms are routinely the same hash with the same dirty bit. Only the
+    branch separates them, and a resume can legitimately land on a different one.
+    """
+
+    def _metadata(self, monkeypatch, branch: str | None) -> RunMetadata:
+        from src.pipeline.training.run_tracker import metadata as metadata_module
+
+        monkeypatch.setattr(metadata_module, "get_git_branch", lambda: branch)
+        return RunMetadata.new(
+            run_id="run-x",
+            config_name="test",
+            action_config_hash=self._action_config_hash(),
+            config=Config.default(),
+        )
+
+    def _action_config_hash(self) -> str:
+        return ActionModel(Config.default()).get_config_hash()
+
+    def test_the_branch_is_recorded_on_the_run(self, monkeypatch):
+        assert self._metadata(monkeypatch, "worktree-hybrid-kernels").git_branch == (
+            "worktree-hybrid-kernels"
+        )
+
+    def test_the_first_attempt_carries_it_too(self, monkeypatch):
+        """Per attempt, because a resume can come from a different worktree."""
+        meta = self._metadata(monkeypatch, "worktree-vector-cfr")
+        assert meta.attempts[0].git_branch == "worktree-vector-cfr"
+
+    def test_it_survives_a_round_trip(self, monkeypatch):
+        meta = self._metadata(monkeypatch, "worktree-hybrid-kernels")
+        restored = RunMetadata.from_dict(json.loads(json.dumps(meta.to_dict())))
+        assert restored.git_branch == "worktree-hybrid-kernels"
+        assert restored.attempts[0].git_branch == "worktree-hybrid-kernels"
+
+    def test_it_survives_the_event_log(self, monkeypatch, tmp_path):
+        """The log is the source of truth; a field only in `to_dict` is lost."""
+        from src.pipeline.training.run_tracker import metadata as metadata_module
+
+        # BEFORE the tracker is built: it resolves its metadata eagerly, so a
+        # patch applied afterwards reads this checkout's real branch instead.
+        monkeypatch.setattr(metadata_module, "get_git_branch", lambda: "worktree-vector-cfr")
+        run_dir = tmp_path / "run-x"
+        RunTracker(
+            run_dir=run_dir,
+            config_name="test",
+            config=Config.default(),
+            action_config_hash=self._action_config_hash(),
+        ).initialize()
+
+        folded = RunMetadata.from_events(run_events.read(run_dir))
+
+        assert folded.git_branch == "worktree-vector-cfr"
+        assert folded.attempts[0].git_branch == "worktree-vector-cfr"
+
+    def test_a_run_from_before_this_existed_loads_with_none(self, monkeypatch):
+        """Legacy runs are unaffiliated, not unloadable."""
+        meta = self._metadata(monkeypatch, "main")
+        legacy = meta.to_dict()
+        del legacy["git_branch"]
+        for attempt in legacy["attempts"]:
+            del attempt["git_branch"]
+
+        restored = RunMetadata.from_dict(legacy)
+
+        assert restored.git_branch is None
+        assert restored.attempts[0].git_branch is None

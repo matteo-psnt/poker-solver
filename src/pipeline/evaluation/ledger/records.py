@@ -22,7 +22,7 @@ from typing import Any
 from src.pipeline.evaluation.ledger.tiers import _knob_hash
 from src.shared import records as record_store
 from src.shared.cloudtask import task_log
-from src.shared.gitinfo import get_git_commit, is_git_dirty
+from src.shared.gitinfo import get_git_branch, get_git_commit, is_git_dirty
 
 LEDGER_SCHEMA_VERSION = record_store.REGISTRY["eval_ledger.jsonl"].version
 
@@ -41,6 +41,11 @@ class RunProvenance:
     run_id: str
     git_commit: str | None
     git_dirty: bool | None
+    # The branch the RUN was trained from. A commit does not identify an arm
+    # here: experiments live in parallel worktrees that share one and differ
+    # only in what is uncommitted. Keyword-only-with-a-default is deliberate --
+    # the two positional fields above it predate this and every legacy row
+    # simply has none.
     config_name: str
     card_abstraction_hash: str | None
     action_config_hash: str | None
@@ -52,6 +57,7 @@ class RunProvenance:
     # `config_name` is not identity (it comes from system.config_name in the YAML),
     # so an override-variant is only distinguishable from its base by this.
     config_hash: str | None = None
+    git_branch: str | None = None
 
 
 def build_record(
@@ -88,8 +94,13 @@ def build_record(
         # commits). Both are recorded so neither has to be reconstructed later.
         "train_git_commit": provenance.git_commit,
         "train_git_dirty": provenance.git_dirty,
+        # And which BRANCH each was, because the two commits above are
+        # routinely identical across arms that differ entirely: a worktree
+        # carries its change uncommitted for as long as it is being iterated on.
+        "train_git_branch": provenance.git_branch,
         "eval_git_commit": get_git_commit(),
         "eval_git_dirty": is_git_dirty(),
+        "eval_git_branch": get_git_branch(),
         "config_name": provenance.config_name,
         "config_hash": provenance.config_hash,
         "card_abstraction_hash": provenance.card_abstraction_hash,

@@ -105,6 +105,7 @@ def evaluate_and_record(
                 run_id=metadata.run_id,
                 git_commit=metadata.git_commit,
                 git_dirty=metadata.git_dirty,
+                git_branch=metadata.git_branch,
                 config_name=metadata.config_name,
                 card_abstraction_hash=metadata.card_abstraction_hash,
                 action_config_hash=metadata.action_config_hash,

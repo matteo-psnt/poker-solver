@@ -82,7 +82,7 @@ REGISTRY: dict[str, Artifact] = {
         name="run.jsonl",
         kind="log",
         scope="local",
-        version=1,
+        version=2,
         what="everything that happened to a run: creation, attempts, checkpoints, status",
     ),
     "STATIC_CHECKPOINT.json": Artifact(
@@ -103,7 +103,7 @@ REGISTRY: dict[str, Artifact] = {
         name="evals/*.json",
         kind="snapshot",
         scope="local",
-        version=2,
+        version=3,
         what="one evaluation entire: provenance, knobs, and full results with samples",
     ),
     "metadata.json": Artifact(
