@@ -66,11 +66,11 @@ def evaluate_run_exact_br(
         config,
         starting_stack=metadata.config.game.starting_stack,
         blueprint_factory=factory,
-        # Serial walks only. The parallel path runs each walk in its own process
-        # against a rebuilt engine, so there is no shared counter to report and
-        # nothing here would be reached -- correct by construction rather than by
-        # a guard, and the reader treats a missing sample as "no bar".
-        on_branch=on_branch if factory is None else None,
+        # BOTH paths. Serial reports every flop branch; parallel reports each
+        # walk as it lands, in the same unit, because a walk returns what it
+        # cost. Coarser when parallel -- four steps, not hundreds -- and still
+        # the difference between a bar that moves and one that cannot.
+        on_branch=on_branch,
     )
     results: dict[str, Any] = {
         "exploitability_mbb": result.exploitability_mbb,

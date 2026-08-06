@@ -238,16 +238,28 @@ class PublicTreeBestResponse:
             # mutable state. Ordered results, so seat_results stays in the same
             # order the serial path produces.
             with ProcessPoolExecutor(max_workers=min(self._config.num_workers, len(walks))) as pool:
-                parts = list(
-                    pool.map(
-                        _walk_worker,
-                        repeat(self._factory),
-                        repeat(self._config),
-                        repeat(self._starting_stack),
-                        [s for s, _ in walks],
-                        [b for _, b in walks],
-                    )
-                )
+                # Iterated rather than list()-ed, so a walk landing is observable
+                # while the others are still running. `map` still yields IN ORDER,
+                # which is what keeps the aggregate identical to the serial path.
+                parts = []
+                for part in pool.map(
+                    _walk_worker,
+                    repeat(self._factory),
+                    repeat(self._config),
+                    repeat(self._starting_stack),
+                    [s for s, _ in walks],
+                    [b for _, b in walks],
+                ):
+                    parts.append(part)
+                    # Every walk traverses the same public tree, so the first one
+                    # to return has priced all four. Four steps rather than the
+                    # serial path's hundreds -- the walks are in other processes
+                    # and share no counter -- but in the SAME unit, so the two
+                    # paths' throughput samples stay one lineage.
+                    self._branches_per_walk = self._branches_per_walk or part[4]
+                    self._branches_done = len(parts) * self._branches_per_walk
+                    if self._on_branch is not None and self._branches_per_walk:
+                        self._on_branch(self._branches_done, self.branch_total)
         else:
             parts = []
             for br_seat, button in walks:
@@ -260,7 +272,9 @@ class PublicTreeBestResponse:
                     if self._on_branch is not None and self._branches_done:
                         self._on_branch(self._branches_done, self.branch_total)
 
-        for (br_seat, button), (chips, nodes, decision, missing) in zip(walks, parts, strict=True):
+        for (br_seat, button), (chips, nodes, decision, missing, _) in zip(
+            walks, parts, strict=True
+        ):
             fraction = missing / decision if decision else 0.0
             seat_results.append(
                 SeatResult(
@@ -306,15 +320,26 @@ class PublicTreeBestResponse:
         values = self.responder_values(br_seat, button, np.ones(NUM_COMBOS, dtype=np.float64))
         return float(values.sum()) / (NUM_COMBOS * _NUM_OPP_DEALS)
 
-    def run_walk(self, br_seat: int, button: int) -> tuple[float, int, float, float]:
+    def run_walk(self, br_seat: int, button: int) -> tuple[float, int, float, float, int]:
         """One walk's chips plus the telemetry the aggregate needs.
 
         Public because a worker process runs exactly this and nothing else, and
         because returning the raw parts keeps the value/mass arithmetic in ONE
         place -- the serial and parallel paths then cannot drift.
+
+        The trailing branch count is what lets the PARALLEL path report a bar at
+        all: a walk in another process shares no counter with this one, but it
+        can say what it cost on the way back, and every walk costs the same.
         """
+        before = self._branches_done
         chips = self._run(br_seat, button)
-        return chips, self._nodes, self._decision_mass, self._missing_mass
+        return (
+            chips,
+            self._nodes,
+            self._decision_mass,
+            self._missing_mass,
+            self._branches_done - before,
+        )
 
     def _walk(self, state: GameState, opp_reach: np.ndarray) -> np.ndarray:
         """Responder's per-combo counterfactual values under best play below ``state``."""
@@ -512,7 +537,7 @@ def _walk_worker(
     starting_stack: int,
     br_seat: int,
     button: int,
-) -> tuple[float, int, float, float]:
+) -> tuple[float, int, float, float, int]:
     """One (responder seat, button) walk, in its own process.
 
     Rebuilds the blueprint rather than receiving it: the solver holds a
