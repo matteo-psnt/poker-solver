@@ -23,7 +23,7 @@ import signal
 from types import FrameType
 
 from src.shared import cache
-from src.shared.cloudtask import task_log
+from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import archive, progress
 from src.shared.cloudtask.node.handlers import HANDLERS
@@ -134,6 +134,19 @@ def _workers() -> int:
     return 0
 
 
+def _units_unit() -> str:
+    """What `units` is counted IN, so a later reader can tell lineages apart.
+
+    A count is not a measurement without its unit, and one has already changed:
+    `evaluate` moved from rungs to flop branches. Averaging a rung-rate into a
+    branch-rate does not fail, it predicts ~30x wrong -- so the unit travels with
+    the number rather than being assumed from the op.
+    """
+    with contextlib.suppress(Exception):
+        return kinds.kind(os.environ.get("RUN_OP") or TaskName.TRAIN).unit
+    return ""
+
+
 def _record(
     paths: NodePaths, event: str, *, code: int | None = None, cause: str | None = None
 ) -> None:
@@ -169,6 +182,7 @@ def _record(
             git_branch=os.environ.get("RUN_GIT_BRANCH", ""),
             workers=_workers(),
             units=progress.units_done(paths) if event == task_log.EVENT_FINISHED else 0.0,
+            units_unit=_units_unit(),
             event=event,
             cause=cause,
             exit_code=code,

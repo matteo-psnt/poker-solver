@@ -143,3 +143,60 @@ def test_untrained_blueprint_is_all_fallback(uniform_solver):
     result = compute_public_tree_br(uniform_solver, CONFIG, starting_stack=STACK)
     assert result.missing_policy_mass == pytest.approx(1.0)
     assert result.exploitability_mbb >= -1e-6
+
+
+class TestBranchProgress:
+    """The bar an evaluation reports, and the one thing it may not cost.
+
+    Scoring one checkpoint is ~10 minutes in which nothing about the process is
+    observable from outside it. Flop branches are the outermost thing the walk
+    counts — four walks of `--br-flops` each — so counting them is free, where a
+    counter in the node recursion would not be.
+    """
+
+    def _engine(self, solver, on_branch=None):
+        return PublicTreeBestResponse(solver, CONFIG, starting_stack=STACK, on_branch=on_branch)
+
+    def test_progress_only_moves_forward(self, uniform_solver):
+        seen: list[tuple[int, int]] = []
+        engine = self._engine(uniform_solver, lambda done, total: seen.append((done, total)))
+        engine.evaluate()
+
+        assert seen, "nothing reported at all"
+        assert [d for d, _ in seen] == sorted(d for d, _ in seen), "done went backwards"
+        assert len({t for _, t in seen}) == 1, "the total must not move under the bar"
+
+    def test_nothing_is_published_before_the_total_is_known(self, uniform_solver):
+        """The first walk MEASURES the denominator. Publishing against a total of
+        zero is a bar with no meaning, and against a growing one is a bar that
+        slides backwards — so the first report is the honest 1-of-4."""
+        seen: list[tuple[int, int]] = []
+        engine = self._engine(uniform_solver, lambda done, total: seen.append((done, total)))
+        engine.evaluate()
+
+        first_done, first_total = seen[0]
+        assert first_total > 0
+        assert first_done == first_total // 4, "the first report IS one walk of four"
+
+    def test_it_finishes_on_its_own_total(self, uniform_solver):
+        """A branch skipped for having no reach is still a branch DONE — the
+        earlier `continue` would have left the bar permanently short."""
+        seen: list[tuple[int, int]] = []
+        engine = self._engine(uniform_solver, lambda done, total: seen.append((done, total)))
+        engine.evaluate()
+
+        done, total = seen[-1]
+        assert done == total == engine.branch_total
+
+    def test_the_denominator_is_far_bigger_than_the_rung_it_replaced(self, uniform_solver):
+        """The point of the change, stated as a number: this is a tiny 2-flop
+        config and it still beats `1 rung` by an order of magnitude."""
+        engine = self._engine(uniform_solver, lambda done, total: None)
+        engine.evaluate()
+        assert engine.branch_total >= 8
+
+    def test_the_value_is_identical_with_and_without_a_bar(self, uniform_solver):
+        """A progress hook that changes the number it measures is worthless."""
+        watched = self._engine(uniform_solver, lambda done, total: None).evaluate()
+        plain = self._engine(uniform_solver).evaluate()
+        assert watched.exploitability_mbb == plain.exploitability_mbb

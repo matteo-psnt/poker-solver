@@ -13,6 +13,7 @@ import pytest
 
 from src.shared.cloudtask import kinds
 from src.shared.cloudtask.kinds import BadTaskError, Progress, Sample, TaskKind, TaskName
+from src.shared.cloudtask.node import plan as node_plan
 
 
 def _spec(**kwargs):
@@ -441,3 +442,82 @@ class TestAnEvaluationCanAlwaysBeEstimated:
         tasks took -- close enough, and far better than nothing."""
         history = [Sample(units=1, seconds=600, workers=16)]
         assert self.KIND.estimate(None, elapsed=100, history=history) == pytest.approx(500)
+
+
+class TestAnEvaluationHasARealBar:
+    """Rungs were the wrong denominator, and the denominator was the whole bar.
+
+    `score` submits ONE TASK PER RUNG, so `len(eval_rungs)` is 1 — the bar read
+    0% from the first second to the last of a ~10-minute score, which makes a
+    long evaluation and a hung one look identical. Flop branches are the
+    outermost thing the walk counts: four walks of `--br-flops` each.
+    """
+
+    def _plan(self, **over):
+        return node_plan.TaskPlan(
+            op=kinds.TaskName.EVALUATE, run_id="run-x", eval_rungs=("150000000",), **over
+        )
+
+    def test_branches_are_the_unit_once_the_walk_reports(self):
+        progress = kinds.kind("evaluate").sample(self._plan(), {"done": 8, "total": 32})
+        assert progress is not None
+        assert (progress.done, progress.total) == (8.0, 32.0)
+        assert progress.fraction == pytest.approx(0.25)
+
+    def test_the_denominator_beats_the_rung_count_it_replaced(self):
+        """The point of the change, stated as a number."""
+        branches = kinds.kind("evaluate").sample(self._plan(), {"done": 0, "total": 32})
+        rungs = kinds.kind("evaluate").sample(self._plan(), {})
+        assert branches is not None
+        assert rungs is not None
+        assert branches.total == 32.0
+        assert rungs.total == 1.0, "what it was before: one rung, so 0% until the end"
+
+    def test_it_falls_back_to_rungs_before_the_first_branch_lands(self):
+        """Not nothing: the rung count is what this reported before, and the
+        handler still closes the bar with it at the end."""
+        progress = kinds.kind("evaluate").sample(self._plan(), {"scored": 1})
+        assert progress is not None
+        assert (progress.done, progress.total) == (1.0, 1.0)
+
+    def test_a_zero_total_does_not_divide(self):
+        """A torn or just-created progress file must not become a crash or a NaN."""
+        progress = kinds.kind("evaluate").sample(self._plan(), {"done": 0, "total": 0})
+        assert progress is not None
+        assert progress.total == 1.0, "fell through to the rung count"
+
+
+class TestUnitsCarryTheirUnit:
+    """A count is not a measurement without its unit.
+
+    `evaluate` moved from rungs to flop branches. A rung-rate averaged into a
+    branch-rate does not fail — it predicts ~30x wrong, silently, which is the
+    exact shape of the lineage bugs this project keeps paying for.
+    """
+
+    def _row(self, **over):
+        return {
+            "op": "evaluate",
+            "cause": "completed",
+            "started_at": "2026-08-06T00:00:00+00:00",
+            "ended_at": "2026-08-06T00:10:00+00:00",
+            "units": 32.0,
+            "workers": 1,
+            **over,
+        }
+
+    def test_a_row_in_the_current_unit_is_used(self):
+        assert len(kinds.samples([self._row(units_unit="board branches")], "evaluate")) == 1
+
+    def test_a_row_in_a_retired_unit_is_skipped(self):
+        assert kinds.samples([self._row(units_unit="rungs", units=1.0)], "evaluate") == []
+
+    def test_a_legacy_row_without_one_is_taken_at_face_value(self):
+        """Those rows predate the field, and no kind whose unit has changed has
+        any of them — measured on the share: zero evaluate rows carry units."""
+        assert len(kinds.samples([self._row()], "evaluate")) == 1
+
+    def test_an_unknown_kind_still_yields_its_samples(self):
+        """`vector-sweep` has no class here and its history must still count."""
+        row = self._row(op="vector-sweep", units_unit="checkpoints")
+        assert len(kinds.samples([row], "vector-sweep")) == 1

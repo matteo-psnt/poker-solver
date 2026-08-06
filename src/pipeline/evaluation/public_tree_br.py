@@ -202,7 +202,11 @@ class PublicTreeBestResponse:
         *,
         starting_stack: int,
         blueprint_factory: Callable[[], ScorableBlueprint] | None = None,
+        on_branch: Callable[[int, int], None] | None = None,
     ):
+        self._on_branch = on_branch
+        self._branches_done = 0
+        self._branches_per_walk = 0
         self._policy_source = blueprint.policy_source
         self._factory = blueprint_factory
         self._rules = blueprint.rules
@@ -245,7 +249,16 @@ class PublicTreeBestResponse:
                     )
                 )
         else:
-            parts = [self.run_walk(br_seat, button) for br_seat, button in walks]
+            parts = []
+            for br_seat, button in walks:
+                parts.append(self.run_walk(br_seat, button))
+                if self._branches_per_walk == 0:
+                    # The first walk has just told us what a walk costs. Publish
+                    # immediately at the 1-of-4 it has really reached, rather than
+                    # waiting for the next branch to carry the news.
+                    self._branches_per_walk = self._branches_done
+                    if self._on_branch is not None and self._branches_done:
+                        self._on_branch(self._branches_done, self.branch_total)
 
         for (br_seat, button), (chips, nodes, decision, missing) in zip(walks, parts, strict=True):
             fraction = missing / decision if decision else 0.0
@@ -348,22 +361,54 @@ class PublicTreeBestResponse:
     def _deal_values(self, state: GameState, opp_reach: np.ndarray) -> np.ndarray:
         first_to_act = 1 - state.button_position
         values = np.zeros(NUM_COMBOS, dtype=np.float64)
+        # The FLOP deal only -- an empty board. It is the outermost branching in
+        # the whole walk, so the counter fires `num_flops` times per walk rather
+        # than once per node, and costs nothing measurable. Turn and river deals
+        # reach this same method and are deliberately not counted: they are the
+        # inner loops, and a counter there WOULD be in the hot path.
+        top_level = self._on_branch is not None and not state.board
         for cards, weight in self._plan.deal_options(state.board):
             block = blocked_combos(cards)
             child_reach = np.where(block, 0.0, opp_reach) * weight
-            if not child_reach.any():
-                continue
-            child_state = state.replace(
-                board=(*state.board, *cards),
-                current_player=first_to_act,
-                is_terminal=False,
-                to_call=0,
-                last_aggressor=None,
-            )
-            child = self._walk(child_state, child_reach)
-            child[block] = 0.0
-            values += child
+            # An `if` rather than the `continue` this replaced: a branch with no
+            # reach is still a branch DONE, and skipping the count would leave the
+            # bar permanently short of its own total.
+            if child_reach.any():
+                child_state = state.replace(
+                    board=(*state.board, *cards),
+                    current_player=first_to_act,
+                    is_terminal=False,
+                    to_call=0,
+                    last_aggressor=None,
+                )
+                child = self._walk(child_state, child_reach)
+                child[block] = 0.0
+                values += child
+            if top_level and self._on_branch is not None:
+                self._branches_done += 1
+                # Silent through the first walk, which is what MEASURES the
+                # total: publishing against a total of zero would be a bar with
+                # no denominator, and publishing against a growing one would
+                # move it backwards.
+                if self._branches_per_walk:
+                    self._on_branch(self._branches_done, self.branch_total)
         return values
+
+    @property
+    def branch_total(self) -> int:
+        """Top-level flop branches across the whole evaluation, or 0 until known.
+
+        NOT `4 * num_flops`. The flop deal is reached once per preflop betting
+        line that survives to a flop, not once per walk, so the count per walk is
+        a property of the betting tree and is not known without walking it.
+
+        It IS identical across the four (responder seat, button) walks -- they
+        traverse the same public tree and differ only in whose values are being
+        maximised -- so the first walk measures it and the remaining three are
+        predicted exactly. Zero while the first walk is still running, which the
+        reader renders as no bar, exactly as it did before any of this existed.
+        """
+        return 4 * self._branches_per_walk
 
     def _opponent_values(
         self, state: GameState, legal: tuple[Action, ...], opp_reach: np.ndarray
@@ -489,14 +534,23 @@ def compute_public_tree_br(
     *,
     starting_stack: int,
     blueprint_factory: Callable[[], ScorableBlueprint] | None = None,
+    on_branch: Callable[[int, int], None] | None = None,
 ) -> PublicBRResult:
     """Exact best response against ``blueprint`` on the sampled public tree.
 
     ``blueprint_factory`` enables ``config.num_workers > 1``: workers rebuild the
     blueprint rather than receiving it, since the solver is not picklable.
+
+    ``on_branch`` is called with (done, total) as each top-level flop branch
+    finishes -- the only thing here that is both cheap to count and numerous. See
+    :meth:`PublicTreeBestResponse.evaluate`.
     """
     engine = PublicTreeBestResponse(
-        blueprint, config, starting_stack=starting_stack, blueprint_factory=blueprint_factory
+        blueprint,
+        config,
+        starting_stack=starting_stack,
+        blueprint_factory=blueprint_factory,
+        on_branch=on_branch,
     )
     result = engine.evaluate()
     logger.info(
