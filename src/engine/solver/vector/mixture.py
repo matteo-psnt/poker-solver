@@ -26,6 +26,22 @@ Two things have to be joint across boards rather than per board:
                 mixture, so the maximisation runs on values summed across
                 boards. Choosing per board would let it act on the board
                 identity, which its information set does not contain.
+
+That best response measures exploitability *inside* the abstraction: the
+opponent is only as sharp as our own bucketing, so the number falls as the
+solver improves and says nothing about what the bucketing costs.
+``best_response_value(unconstrained=True)`` measures the other one — the
+opponent is told its exact two cards, and the gap between the two figures is
+what the abstraction itself gives away. That gap does not shrink with more
+iterations; it is a property of the buckets, not of the solve.
+
+Being told your cards is not being told the future, and the difference is easy
+to get wrong in the flattering direction. A street's bucket is a function of the
+hand and the cards face up on that street (``vector_universe.POSTFLOP_PREFIX``:
+three on the flop, four on the turn, none preflop), so two runouts sharing that
+prefix are one observation and must be maximised jointly. Maximising per board
+instead prices in clairvoyance and reads as a larger abstraction cost than is
+real. ``_visible_partition`` is what keeps the two apart.
 """
 
 from __future__ import annotations
@@ -34,9 +50,23 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from src.core.game.state import Street
 from src.engine.solver.vector.compiled_tree import CompiledTree
 from src.engine.solver.vector.hand_context import HandContext
 from src.engine.solver.vector.kernel import DTYPE, VectorCFR
+
+# How many board cards are face up when a street's decisions are taken.
+VISIBLE_CARDS: dict[Street, int] = {
+    Street.PREFLOP: 0,
+    Street.FLOP: 3,
+    Street.TURN: 4,
+    Street.RIVER: 5,
+}
+
+# Width of the global two-card index, ``low * 52 + high``. Sparse — only 1,326
+# of the slots are reachable — but it lets boards with different live-hand sets
+# be summed on one axis without building a per-partition mapping.
+GLOBAL_HANDS = 52 * 52
 
 
 class BoardMixtureCFR:
@@ -54,13 +84,17 @@ class BoardMixtureCFR:
         contexts: Sequence[HandContext],
         *,
         cfr_plus: bool = True,
+        boards: Sequence[Sequence[int] | np.ndarray] | None = None,
     ):
         if not contexts:
             raise ValueError("A mixture needs at least one board.")
+        if boards is not None and len(boards) != len(contexts):
+            raise ValueError("One board per context, in the same order.")
 
         self.compiled = compiled
         self.cfr_plus = cfr_plus
         self.iteration = 0
+        self.boards_cards = None if boards is None else [tuple(int(c) for c in b) for b in boards]
 
         self.boards = [VectorCFR(compiled, context, cfr_plus=False) for context in contexts]
         self.regrets = self.boards[0].regrets
@@ -70,6 +104,10 @@ class BoardMixtureCFR:
             board.strategy_sum = self.strategy_sum
 
         self._delta = np.zeros(compiled.tree.num_slots, dtype=DTYPE)
+        self._global_hand_id = [
+            context.hand_cards[:, 0].astype(np.int64) * 52 + context.hand_cards[:, 1]
+            for context in contexts
+        ]
 
     @property
     def num_boards(self) -> int:
@@ -96,16 +134,39 @@ class BoardMixtureCFR:
         if self.cfr_plus:
             np.maximum(self.regrets, 0.0, out=self.regrets)
 
-    def best_response_value(self, br_player: int, initial_range: np.ndarray) -> float:
+    def best_response_value(
+        self, br_player: int, initial_range: np.ndarray, *, unconstrained: bool = False
+    ) -> float:
         """Root value of ``br_player``'s best response across the whole mixture.
 
         The backward pass is interleaved rather than run per board: at each of
         the responder's node groups, every board's child values are collapsed to
         buckets and summed *before* the argmax, so one action is chosen per
-        ``(node, bucket)`` for the mixture as a whole. Running each board to
-        completion separately and averaging would give a responder that sees the
-        board, which overstates exploitability.
+        ``(node, bucket)`` for the mixture as a whole.
+
+        ``unconstrained`` lifts the *card* abstraction and nothing else. The
+        constrained responder sees what the abstraction shows: one action per
+        bucket, chosen jointly across boards, because a bucket cannot tell you
+        which board you are on. The unconstrained one is told its exact holding
+        — but it is still not told the future, so the maximisation stays joint
+        across boards it cannot yet distinguish. See :meth:`_per_hand_max`.
+
+        So the constrained figure is what the solver is trying to minimise and
+        the unconstrained one is what an opponent could actually take. Their
+        difference is the abstraction's own cost, and it is the number that does
+        not go away no matter how long the solver runs.
+
+        Raises:
+            ValueError: if ``unconstrained`` and the mixture was built without
+                ``boards``, which is what says who may be distinguished when.
         """
+        if unconstrained and self.boards_cards is None:
+            raise ValueError(
+                "An unconstrained best response needs the board cards: without them "
+                "the mixture cannot tell which runouts a responder is allowed to "
+                "distinguish, and maximising per board would let it act on cards "
+                "that have not been dealt. Pass boards= to the constructor."
+            )
         for board in self.boards:
             board.forward(initial_range, use_average=True)
             board.evaluate_terminals()
@@ -119,7 +180,9 @@ class BoardMixtureCFR:
                     targets, is_terminal = board.child_targets(group, chunk)
                     children.append(board.gather_children(targets, is_terminal, br_player))
 
-                if group.actor == br_player:
+                if group.actor == br_player and unconstrained:
+                    self._per_hand_max(group, children, br_player, nodes)
+                elif group.actor == br_player:
                     chosen = self._joint_argmax(group, children)
                     for board, child, pick in zip(self.boards, children, chosen, strict=True):
                         board.value[br_player, nodes] = np.take_along_axis(
@@ -131,6 +194,54 @@ class BoardMixtureCFR:
 
         total = sum(float(board.value[br_player, 0].sum()) for board in self.boards)
         return total / self.num_boards
+
+    def _visible_partition(self, street: Street) -> list[list[int]]:
+        """Board indices grouped by what is face up when ``street`` is acted on.
+
+        Two runouts that agree on every visible card are the *same* observation
+        to a player standing on that street, however different their futures
+        are. Preflop nothing is face up, so every board falls in one group; by
+        the river the prefix is the whole board and each is alone.
+
+        This is the whole difference between measuring an abstraction's cost and
+        measuring clairvoyance. Maximising per board would let a responder pick
+        its preflop action already knowing the river — an opponent no strategy
+        can defend against, and not one that exists.
+        """
+        assert self.boards_cards is not None
+        visible = VISIBLE_CARDS[street]
+        groups: dict[tuple[int, ...], list[int]] = {}
+        for index, board in enumerate(self.boards_cards):
+            groups.setdefault(tuple(sorted(board[:visible])), []).append(index)
+        return list(groups.values())
+
+    def _per_hand_max(self, group, children: list[np.ndarray], br_player: int, nodes) -> None:
+        """Maximise per hand, jointly over boards sharing this street's prefix.
+
+        Hands are summed on a global two-card axis rather than each board's own,
+        because boards remove different cards and so index their live hands
+        differently. A hand blocked by one board simply contributes nothing to
+        that board's term, which is right: its value is the sum over exactly the
+        runouts it could still be held on.
+        """
+        for members in self._visible_partition(group.street):
+            if len(members) == 1:
+                only = members[0]
+                self.boards[only].value[br_player, nodes] = children[only].max(axis=-1)
+                continue
+
+            totals = np.zeros((children[0].shape[0], GLOBAL_HANDS, group.num_actions), dtype=DTYPE)
+            for index in members:
+                # A board lists each live hand once, so these indices are unique
+                # and ``+=`` needs no ``np.add.at``.
+                totals[:, self._global_hand_id[index], :] += children[index]
+
+            best = totals.argmax(axis=-1)
+            for index in members:
+                pick = best[:, self._global_hand_id[index]]
+                self.boards[index].value[br_player, nodes] = np.take_along_axis(
+                    children[index], pick[:, :, None], axis=2
+                )[:, :, 0]
 
     def _joint_argmax(self, group, children: list[np.ndarray]) -> list[np.ndarray]:
         """Per-board, per-hand action indices from one choice per bucket.
@@ -153,10 +264,14 @@ class BoardMixtureCFR:
         best = totals.argmax(axis=-1)
         return [best[:, board.context.buckets_for(group.street)] for board in self.boards]
 
-    def exploitability(self, initial_range: np.ndarray, compatible_pairs: float) -> float:
+    def exploitability(
+        self, initial_range: np.ndarray, compatible_pairs: float, *, unconstrained: bool = False
+    ) -> float:
         """Mean of both players' best-response gains, in chips per hand."""
         gains = [
-            self.best_response_value(player, initial_range) / compatible_pairs for player in (0, 1)
+            self.best_response_value(player, initial_range, unconstrained=unconstrained)
+            / compatible_pairs
+            for player in (0, 1)
         ]
         return (gains[0] + gains[1]) / 2.0
 

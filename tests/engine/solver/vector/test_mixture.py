@@ -20,7 +20,12 @@ from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.vector.compiled_tree import compile_tree
 from src.engine.solver.vector.kernel import VectorCFR
 from src.engine.solver.vector.mixture import BoardMixtureCFR
-from tests.engine.solver.vector.contexts import ordered_context
+from tests.engine.solver.vector.contexts import (
+    MIN_SHOWDOWN_SIGNAL,
+    ordered_context,
+    prefix_consistent_contexts,
+    showdown_signal,
+)
 from tests.test_helpers import make_test_config
 
 # A 36-card deck: 465 holdings instead of 1,081, which roughly halves the cost of
@@ -131,3 +136,86 @@ class TestMixtureConvergence:
         assert mixture.exploitability(initial, pairs) == pytest.approx(
             plain.exploitability(initial, pairs), rel=1e-3
         )
+
+
+class TestUnconstrainedBestResponse:
+    """Lifting the CARD abstraction must not also lift the deal.
+
+    The constrained responder picks one action per ``(node, bucket)``; the
+    unconstrained one is told its exact holding. The gap between them is what an
+    abstraction costs. But "told its holding" is not "told the runout" — a
+    responder standing on the turn cannot see the river, and a per-board
+    maximisation would hand it exactly that. The bug inflates the gap in the
+    direction that flatters the abstraction's critic, so it is pinned here.
+    """
+
+    @pytest.fixture(scope="class")
+    def shared_prefix(self, parts):
+        """Two runouts identical but for the river, and one unrelated board.
+
+        The first two are the same observation on every street up to the turn,
+        so nothing above the river may tell them apart.
+        """
+        compiled, _, _ = parts
+        prefix = [0, 1, 2, 3]
+        boards = [[*prefix, 4], [*prefix, 5], [10, 11, 12, 13, 14]]
+        made = prefix_consistent_contexts(boards, ALL_COUNTS, num_cards=DECK)
+        # Guard the power before anything asserts behaviour: an exploitability
+        # gap can only show up where showdowns actually favour someone.
+        assert showdown_signal(made, ALL_COUNTS) > MIN_SHOWDOWN_SIGNAL
+        pairs = float(np.mean([(~c.blocks).sum() for c in made]))
+        return compiled, made, boards, pairs
+
+    def test_boards_are_required(self, parts):
+        """Without the deal the mixture cannot say who may be distinguished."""
+        compiled, contexts, pairs = parts
+        mixture = BoardMixtureCFR(compiled, contexts)
+        initial = np.ones(contexts[0].num_hands, dtype=np.float32)
+        mixture.iterate(initial)
+
+        with pytest.raises(ValueError, match="board cards"):
+            mixture.exploitability(initial, pairs, unconstrained=True)
+
+    def test_partition_merges_boards_until_the_card_that_separates_them(self, shared_prefix):
+        """Two boards differing only on the river are one observation until it."""
+        compiled, contexts, boards, _ = shared_prefix
+        mixture = BoardMixtureCFR(compiled, contexts, boards=boards)
+
+        assert [sorted(g) for g in mixture._visible_partition(Street.PREFLOP)] == [[0, 1, 2]]
+        for street in (Street.FLOP, Street.TURN):
+            groups = sorted(sorted(g) for g in mixture._visible_partition(street))
+            assert groups == [[0, 1], [2]], f"{street} must not separate a shared prefix"
+        assert sorted(sorted(g) for g in mixture._visible_partition(Street.RIVER)) == [
+            [0],
+            [1],
+            [2],
+        ]
+
+    # Six full best-response passes over three boards. It sits ~3s against the
+    # 5s default, which is close enough to lose under 12-worker contention.
+    @pytest.mark.timeout(30)
+    def test_seeing_the_future_is_worth_more_than_seeing_your_cards(
+        self, shared_prefix, monkeypatch
+    ):
+        """The naive per-board max is strictly larger, so it is not the same number.
+
+        Monkeypatching the partition to singletons IS the old per-board
+        behaviour, so this compares the two directly on one trained strategy. If
+        they were equal the fix would be measuring nothing and this test would
+        be free to delete.
+        """
+        compiled, contexts, boards, pairs = shared_prefix
+        mixture = BoardMixtureCFR(compiled, contexts, boards=boards)
+        initial = np.ones(contexts[0].num_hands, dtype=np.float32)
+        for _ in range(12):
+            mixture.iterate(initial)
+
+        constrained = mixture.exploitability(initial, pairs)
+        honest = mixture.exploitability(initial, pairs, unconstrained=True)
+
+        singletons = [[i] for i in range(mixture.num_boards)]
+        monkeypatch.setattr(mixture, "_visible_partition", lambda street: singletons)
+        clairvoyant = mixture.exploitability(initial, pairs, unconstrained=True)
+
+        assert constrained <= honest, "knowing your own cards cannot hurt"
+        assert honest < clairvoyant, "seeing the runout early must be worth something"

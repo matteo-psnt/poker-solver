@@ -702,17 +702,20 @@
       {
         "exploitability": 0.5392,
         "iterations": 400,
-        "train_seconds": 53.1
+        "train_seconds": 53.1,
+        "unconstrained": 0.8811
       },
       {
         "exploitability": 0.693,
         "iterations": 1600,
-        "train_seconds": 210.1
+        "train_seconds": 210.1,
+        "unconstrained": 0.9902
       }
     ],
     "score_boards": 32,
     "stack": 20,
     "total": 9,
-    "uniform_baseline": 4.1869
+    "uniform_baseline": 4.1869,
+    "uniform_baseline_unconstrained": 4.4021
   }
 }
