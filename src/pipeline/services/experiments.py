@@ -197,6 +197,11 @@ class ArmResult:
     checkpoint_iteration: int | None
     exploitability_mbb: float
     std_error_mbb: float
+    # Which worktree trained it. Not decoration: arms are developed in parallel
+    # worktrees that share a commit and differ only in what is uncommitted, so
+    # this is the only field that says what an arm actually WAS. Empty on every
+    # arm recorded before it was captured.
+    git_branch: str = ""
     # Variant minus control, in mbb/g. NEGATIVE means the variant is less
     # exploitable, i.e. the idea helped. None when the pairing was refused.
     vs_control_mbb: float | None = None
@@ -332,6 +337,7 @@ def experiment_report(
             ArmResult(
                 arm=arm,
                 run_id=record.get("run_id", ""),
+                git_branch=record.get("train_git_branch") or "",
                 checkpoint_iteration=record.get("checkpoint_iteration"),
                 exploitability_mbb=results.get("exploitability_mbb", 0.0),
                 std_error_mbb=results.get("std_error_mbb", 0.0),

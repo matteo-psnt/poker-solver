@@ -44,7 +44,12 @@ def render(payload: dict[str, Any]) -> None:
     if not payload["arms"]:
         return
 
-    print(f"  {'arm':<24} {'mbb/g':>9} {'± se':>8} {'vs control':>12} {'p':>8}")
+    # `from` only when at least one arm has it. Arms recorded before the branch
+    # was captured would otherwise get a column of em-dashes wide enough to push
+    # the numbers off a terminal, to say nothing.
+    show_branch = any(arm["git_branch"] for arm in payload["arms"])
+    branch_head = f" {'from':<26}" if show_branch else ""
+    print(f"  {'arm':<24} {'mbb/g':>9} {'± se':>8} {'vs control':>12} {'p':>8}{branch_head}")
     for arm in payload["arms"]:
         delta = arm["vs_control_mbb"]
         p_value = arm["vs_control_p_value"]
@@ -53,9 +58,10 @@ def render(payload: dict[str, Any]) -> None:
         p_col = "—" if p_value is None else f"{p_value:.3f}"
         if arm["arm"] == services.CONTROL_ARM:
             delta_col, p_col = "(control)", ""
+        branch_col = f" {arm['git_branch'] or '—':<26}" if show_branch else ""
         print(
             f"  {arm['arm']:<24} {arm['exploitability_mbb']:>9.1f} "
-            f"{arm['std_error_mbb']:>8.1f} {delta_col:>12} {p_col:>8}"
+            f"{arm['std_error_mbb']:>8.1f} {delta_col:>12} {p_col:>8}{branch_col}"
         )
         for reason in arm["vs_control_blocked"]:
             print(f"      not attributable: {reason}")
