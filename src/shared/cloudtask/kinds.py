@@ -148,6 +148,8 @@ class NodePlan(TaskFields, Protocol):
     def warm_start_from(self) -> str: ...
     @property
     def warm_start_weight(self) -> int: ...
+    @property
+    def warm_start_at(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -366,6 +368,11 @@ class TrainTask(TaskKind):
             argv += ["--warm-start-from", plan.warm_start_from]
             if plan.warm_start_weight:
                 argv += ["--warm-start-weight", str(plan.warm_start_weight)]
+            # The rung is part of the prior's identity: board-free quality is not
+            # monotone, so seeding from the manifest's current rung silently uses
+            # a different strategy than the one that was measured.
+            if plan.warm_start_at:
+                argv += ["--warm-start-at", str(plan.warm_start_at)]
         # Appended only when set: `--arm ""` records an arm literally named
         # empty string rather than an unaffiliated run.
         for flag, value in (

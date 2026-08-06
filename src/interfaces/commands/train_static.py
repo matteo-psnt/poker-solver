@@ -66,6 +66,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "iterations it takes to overrule. The experiment's independent variable.",
     )
     parser.add_argument(
+        "--warm-start-at",
+        type=int,
+        default=None,
+        dest="warm_start_at",
+        help="Rung of the prior to seed from. Board-free quality is NOT monotone "
+        "in iterations, so the last rung is not generally the best -- score the "
+        "ladder and name the minimum. Omitted seeds from the manifest's current.",
+    )
+    parser.add_argument(
         "--run",
         default=None,
         help="Continue an EXISTING run instead of starting one. --iterations is an "
@@ -90,6 +99,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         run_id=args.run,
         warm_start_from=Path(args.warm_start_from) if args.warm_start_from else None,
         warm_start_weight=args.warm_start_weight,
+        warm_start_at=args.warm_start_at,
     )
     return {"op": "train-static", **dataclasses.asdict(out)}
 

@@ -70,3 +70,20 @@ class TestTheNodeFetchesThePrior:
         train = source.split("def _train(", 1)[1].split("\ndef ", 1)[0]
         assert "warm_start_from" in train, "the runner never looks at the prior"
         assert "fetch_current_rung" in train
+
+
+class TestTheRungIsCarried:
+    """Board-free quality is NOT monotone in iterations, so seeding from the
+    manifest's current rung is a different strategy than the one measured.
+
+    This was live: rung selection existed in ``warm_start_run`` but the one-leg
+    ``train-static`` path never passed it, so the pick was silently ignored and
+    the latest rung used instead.
+    """
+
+    def test_the_named_rung_reaches_the_command_line(self):
+        argv = _argv(RUN_WARM_START_AT="100")
+        assert argv[argv.index("--warm-start-at") + 1] == "100"
+
+    def test_an_unnamed_rung_is_omitted(self):
+        assert "--warm-start-at" not in _argv()

@@ -54,6 +54,7 @@ def _plan(**kwargs):
         "dtype": "",
         "warm_start_from": "",
         "warm_start_weight": 0,
+        "warm_start_at": 0,
     }
     return SimpleNamespace(**(base | kwargs))
 
