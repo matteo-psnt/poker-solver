@@ -168,6 +168,32 @@ def delete_file(service: ShareServiceClient, share: str, path: str) -> bool:
     return True
 
 
+def delete_directory(service: ShareServiceClient, share: str, path: str) -> bool:
+    """Remove one EMPTY directory. ``False`` if it was absent or still occupied.
+
+    Azure Files does not remove a directory when its files go, so deleting a
+    snapshot's contents leaves the directory behind -- and an empty directory is
+    not free: the parent listing still enumerates it, which is the cost a
+    metadata walk pays per run.
+
+    Emptiness is CHECKED rather than the service's refusal caught: the SDK's
+    general error type is classified once in `errors.attempt` and a guard fails
+    if anything under `interfaces/` names it again -- including, as it turns
+    out, a docstring explaining that it does not. The listing costs one round
+    trip against a delete that would have cost one anyway.
+
+    This never decides that a subtree should go -- only tidies up after that
+    decision was carried out one file at a time.
+    """
+    if list_entries(service, share, path):
+        return False
+    try:
+        directory(service, share, path).delete_directory()
+    except ResourceNotFoundError:
+        return False
+    return True
+
+
 def walk_files(
     service: ShareServiceClient,
     share: str,
