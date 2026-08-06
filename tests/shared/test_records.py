@@ -145,6 +145,17 @@ class TestTheRegistryIsAuthoritative:
             assert artifact.kind in ("snapshot", "log")
             assert artifact.scope in ("local", "share")
 
+    def test_every_artifact_says_where_it_lives_and_how_it_grows(self):
+        """Because "how is it written" was never the question being asked.
+
+        The registry answered atomicity and versioning, and left "where does a
+        leg record live" spread across three modules -- which is how two
+        artifacts came to accumulate without bound with nothing naming that.
+        """
+        for artifact in records.REGISTRY.values():
+            assert artifact.where, f"{artifact.name} does not say where it lives"
+            assert artifact.growth, f"{artifact.name} does not say how it grows"
+
     def test_keys_match_their_artifact_names(self):
         for key, artifact in records.REGISTRY.items():
             assert key == artifact.name
