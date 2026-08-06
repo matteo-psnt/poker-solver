@@ -17,6 +17,13 @@ from src.shared.cloudtask.node import process, profile
 from tests.shared.cloudtask.node.conftest import python
 
 
+class _Entry:
+    """What `Path.iterdir` yields, as `python_worker` reads it."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
 @pytest.fixture
 def profile_dir(tmp_path):
     directory = tmp_path / "profiles"
@@ -53,6 +60,60 @@ class TestItStaysOffUntilAsked:
         (profile_dir / f"task-1{profile.REQUEST_SUFFIX}").write_text("999999")
 
         assert profile.take_request(profile_dir, "task-1") == profile.MAX_SECONDS
+
+
+class TestItProfilesTheProcessDOINGTheWork:
+    """The pid walk, pinned against the process table that fooled it.
+
+    A 30s profile on a node came back 100% `multiprocessing.resource_tracker`:
+    a bookkeeping process that sits in `select()`, is spawned as deep as the
+    workers, and was picked because the rule was DEPTH. Nothing about that
+    profile looks wrong -- it is a valid document with plausible frames -- which
+    is why the rule is pinned here rather than left to the next reader.
+    """
+
+    def _table(self, monkeypatch, table: dict[int, profile.Proc]) -> None:
+        monkeypatch.setattr(
+            profile.Path, "iterdir", lambda _self: [_Entry(str(pid)) for pid in table]
+        )
+        monkeypatch.setattr(profile, "_proc_stat", table.get)
+
+    def test_a_busy_worker_beats_an_idle_helper_that_sits_deeper(self, monkeypatch):
+        self._table(
+            monkeypatch,
+            {
+                100: profile.Proc("uv", 1, 0),  # the wrapper's child, root
+                101: profile.Proc("python3.13", 100, 12),  # the CLI
+                102: profile.Proc("python3.13", 101, 4_000),  # a worker
+                103: profile.Proc("python3.13", 102, 0),  # resource_tracker
+            },
+        )
+
+        assert profile.python_worker(100) == 102
+
+    def test_nothing_running_yet_is_not_a_pick(self, monkeypatch):
+        """Zero ticks everywhere means the trainer has not started. Returning
+        whichever pid sorted first is how the wrong process gets chosen."""
+        self._table(
+            monkeypatch,
+            {100: profile.Proc("uv", 1, 0), 101: profile.Proc("python3.13", 100, 0)},
+        )
+
+        assert profile.python_worker(100) is None
+
+    def test_a_busy_interpreter_outside_this_task_is_not_ours(self, monkeypatch):
+        """Two arms share a pool but not a node -- and the wrapper itself, plus
+        anything the start task left, are interpreters this task must not read."""
+        self._table(
+            monkeypatch,
+            {
+                100: profile.Proc("uv", 1, 0),
+                101: profile.Proc("python3.13", 100, 50),
+                900: profile.Proc("python3.13", 1, 999_999),
+            },
+        )
+
+        assert profile.python_worker(100) == 101
 
 
 class TestItCannotCostATaskItsExitCode:
