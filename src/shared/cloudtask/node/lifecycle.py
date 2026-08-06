@@ -158,6 +158,15 @@ def _record(
             # indistinguishable in the record.
             eval_at=os.environ.get("RUN_EVAL_AT", ""),
             eval_flags=_eval_flags(),
+            # Straight from the environment rather than through the plan: this
+            # record is written BEFORE the plan is parsed, and its whole purpose
+            # is to survive a task that dies before anything else runs. A task
+            # that fails during dependency install still has to say what code it
+            # was going to run.
+            code_snapshot=os.environ.get("CODE_SNAPSHOT", ""),
+            git_commit=os.environ.get("RUN_GIT_COMMIT", ""),
+            git_dirty=os.environ.get("RUN_GIT_DIRTY", ""),
+            git_branch=os.environ.get("RUN_GIT_BRANCH", ""),
             workers=_workers(),
             units=progress.units_done(paths) if event == task_log.EVENT_FINISHED else 0.0,
             event=event,

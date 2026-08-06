@@ -14,6 +14,8 @@ step three callers have to remember.
 
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -30,9 +32,11 @@ def _cold_gitinfo():
     run; without clearing, these assert against a warmed value."""
     gitinfo.get_git_commit.cache_clear()
     gitinfo.is_git_dirty.cache_clear()
+    gitinfo.get_git_branch.cache_clear()
     yield
     gitinfo.get_git_commit.cache_clear()
     gitinfo.is_git_dirty.cache_clear()
+    gitinfo.get_git_branch.cache_clear()
 
 
 def _task(**kwargs) -> spec.TaskSpec:
@@ -131,6 +135,89 @@ class TestTheNodeEnd:
 
         task = node_plan.TaskPlan(op=TaskName.TRAIN, config="p", to=1)
         assert "unknown" in task.provenance
+
+
+class TestWhichWorktree:
+    """A commit does not identify an experiment here.
+
+    Investigation happens in several git worktrees at once, and a worktree
+    carries its change UNCOMMITTED while it is being iterated on -- so two arms
+    are routinely the same hash with the same dirty bit. The branch names the
+    line of work; the snapshot names the actual bytes.
+    """
+
+    def test_the_branch_is_stamped_alongside_the_commit(self, monkeypatch):
+        monkeypatch.setenv(gitinfo.COMMIT_ENV, "c" * 40)
+        monkeypatch.setenv(gitinfo.BRANCH_ENV, "worktree-hybrid-kernels")
+
+        assert dispatch._stamped(_task()).git_branch == "worktree-hybrid-kernels"
+
+    def test_it_reaches_the_node_environment(self, monkeypatch):
+        monkeypatch.setenv(gitinfo.BRANCH_ENV, "worktree-vector-cfr")
+
+        env = dispatch._stamped(_task()).environment()
+
+        assert env["RUN_GIT_BRANCH"] == "worktree-vector-cfr"
+
+    def test_a_detached_checkout_stamps_nothing_rather_than_the_word_head(self, monkeypatch):
+        """`rev-parse --abbrev-ref` answers the literal `HEAD` when detached, and
+        a record saying "branch HEAD" is worse than one saying nothing."""
+        monkeypatch.delenv(gitinfo.BRANCH_ENV, raising=False)
+        monkeypatch.setattr(gitinfo, "_run_git", lambda *args: "HEAD")
+
+        assert gitinfo.get_git_branch() is None
+
+    def test_the_node_carries_the_snapshot_it_extracted(self):
+        """It reached the node as a fetch instruction and was recorded nowhere."""
+        from src.shared.cloudtask.node import plan as node_plan
+
+        parsed = node_plan.parse_environment(
+            {**_task().environment(), "CODE_SNAPSHOT": "code-20260805_111229"}
+        )
+
+        assert parsed.code_snapshot == "code-20260805_111229"
+        assert "code-20260805_111229" in parsed.provenance
+
+    def test_provenance_names_the_branch_when_there_is_one(self):
+        from src.shared.cloudtask.node import plan as node_plan
+
+        task = node_plan.TaskPlan(
+            op=TaskName.TRAIN,
+            config="p",
+            to=1,
+            git_commit="c" * 40,
+            git_dirty="1",
+            git_branch="worktree-hybrid-kernels",
+            code_snapshot="code-20260805_111229",
+        )
+        assert "worktree-hybrid-kernels" in task.provenance
+        assert "code-20260805_111229" in task.provenance
+
+
+class TestTheTreeThatGetsSealed:
+    """The snapshot must be THIS checkout, never the working directory.
+
+    `stage_and_queue`'s root defaulted to `Path()` and no caller ever passed
+    anything else, so submitting from a subdirectory would have tarred that
+    subdirectory's children as the tree root -- and from a sibling worktree's
+    directory, shipped that worktree's code under this one's provenance stamp.
+    Silent either way: the failure lands on a node, minutes later.
+    """
+
+    def test_the_root_is_the_package_checkout_not_the_cwd(self):
+        assert (dispatch.CHECKOUT_ROOT / "pyproject.toml").is_file()
+        assert (dispatch.CHECKOUT_ROOT / "src" / "interfaces").is_dir()
+
+    def test_staging_defaults_to_it_rather_than_to_the_working_directory(self):
+        """The regression this guards is one character: `root: Path = Path()`.
+
+        Asserted on the SIGNATURE because no caller passes `root`, so nothing
+        that exercises the submit path would notice the default changing back --
+        the tarball is only opened on a node, minutes later and elsewhere.
+        """
+        default = inspect.signature(dispatch.stage_and_queue).parameters["root"].default
+        assert default == dispatch.CHECKOUT_ROOT
+        assert default != Path(), "the shell's cwd is not a description of what to ship"
 
 
 class TestQueueLoop:

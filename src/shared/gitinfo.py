@@ -45,6 +45,13 @@ clean, empty/absent unknown. Collapsing clean into unknown would throw away the
 exact distinction the module docstring calls load-bearing."""
 DIRTY_ENV = "RUN_GIT_DIRTY"
 
+"""The branch, which is how a HUMAN names an experiment. Work here happens in
+several git worktrees at once -- one per line of investigation -- and they share
+a commit far more often than not, because a worktree branches from main and then
+carries its change UNCOMMITTED for as long as it is being iterated on. A hash
+plus a dirty bit cannot tell two of those apart; the branch can."""
+BRANCH_ENV = "RUN_GIT_BRANCH"
+
 
 def _run_git(*args: str) -> str | None:
     """Run a git command in the repo root; return stripped stdout or None on failure."""
@@ -87,6 +94,21 @@ def is_git_dirty() -> bool | None:
     if status is None:
         return None
     return bool(status)
+
+
+@lru_cache(maxsize=1)
+def get_git_branch() -> str | None:
+    """The checked-out branch, or None when detached or unknowable.
+
+    ``--abbrev-ref`` answers ``HEAD`` for a detached checkout, which is not a
+    branch name and is reported as None rather than as the literal string: a
+    record saying "branch HEAD" is worse than one saying nothing.
+    """
+    stamped = os.environ.get(BRANCH_ENV)
+    if stamped:
+        return stamped
+    branch = _run_git("rev-parse", "--abbrev-ref", "HEAD")
+    return None if not branch or branch == "HEAD" else branch
 
 
 def encode_dirty(dirty: bool | None) -> str:
