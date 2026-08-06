@@ -63,52 +63,76 @@ class TestItStaysOffUntilAsked:
 
 
 class TestItProfilesTheProcessDOINGTheWork:
-    """The pid walk, pinned against the process table that fooled it.
+    """The pid walk, pinned against the two process tables that fooled it.
 
-    A 30s profile on a node came back 100% `multiprocessing.resource_tracker`:
-    a bookkeeping process that sits in `select()`, is spawned as deep as the
-    workers, and was picked because the rule was DEPTH. Nothing about that
-    profile looks wrong -- it is a valid document with plausible frames -- which
-    is why the rule is pinned here rather than left to the next reader.
+    Both wrong picks produced a VALID profile of the wrong process, which is
+    the failure a flamegraph cannot show you:
+
+    - deepest-first gave 30s of `multiprocessing.resource_tracker`, a
+      bookkeeping process that sits in `select()` and is spawned as deep as the
+      workers;
+    - cumulative CPU gave the COORDINATOR, 100% in `connection._recv`, because
+      it had built 45M rows of shared arrays before forking and so led on total
+      ticks while waiting on the workers it had started.
     """
 
-    def _table(self, monkeypatch, table: dict[int, profile.Proc]) -> None:
-        monkeypatch.setattr(
-            profile.Path, "iterdir", lambda _self: [_Entry(str(pid)) for pid in table]
-        )
-        monkeypatch.setattr(profile, "_proc_stat", table.get)
+    def _tables(self, monkeypatch, before, after) -> None:
+        """Two successive readings of /proc, with no real sleep between them."""
+        readings = iter([before, after])
+        monkeypatch.setattr(profile, "_process_table", lambda: next(readings))
+        monkeypatch.setattr(profile.time, "sleep", lambda _seconds: None)
 
-    def test_a_busy_worker_beats_an_idle_helper_that_sits_deeper(self, monkeypatch):
-        self._table(
+    def test_the_worker_burning_cpu_beats_the_parent_that_burnt_it_earlier(self, monkeypatch):
+        coordinator = profile.Proc("python3.13", 100, 90_000)
+        self._tables(
             monkeypatch,
             {
-                100: profile.Proc("uv", 1, 0),  # the wrapper's child, root
-                101: profile.Proc("python3.13", 100, 12),  # the CLI
-                102: profile.Proc("python3.13", 101, 4_000),  # a worker
-                103: profile.Proc("python3.13", 102, 0),  # resource_tracker
+                100: profile.Proc("uv", 1, 0),
+                101: coordinator,
+                102: profile.Proc("python3.13", 101, 10),
+                103: profile.Proc("python3.13", 101, 0),
+            },
+            {
+                100: profile.Proc("uv", 1, 0),
+                101: coordinator,  # blocked in _recv; not another tick
+                102: profile.Proc("python3.13", 101, 210),  # a worker, running
+                103: profile.Proc("python3.13", 101, 0),  # resource_tracker
             },
         )
 
         assert profile.python_worker(100) == 102
 
-    def test_nothing_running_yet_is_not_a_pick(self, monkeypatch):
-        """Zero ticks everywhere means the trainer has not started. Returning
-        whichever pid sorted first is how the wrong process gets chosen."""
-        self._table(
-            monkeypatch,
-            {100: profile.Proc("uv", 1, 0), 101: profile.Proc("python3.13", 100, 0)},
-        )
+    def test_a_stalled_run_still_gets_profiled(self, monkeypatch):
+        """Nothing moving is the best reason to ask for a profile. Refusing one
+        answers "why has it stopped" with "no interpreter"."""
+        table = {
+            100: profile.Proc("uv", 1, 0),
+            101: profile.Proc("python3.13", 100, 5_000),
+            102: profile.Proc("python3.13", 101, 900),
+        }
+        self._tables(monkeypatch, table, table)
+
+        assert profile.python_worker(100) == 101
+
+    def test_nothing_started_yet_is_not_a_pick(self, monkeypatch):
+        table = {100: profile.Proc("uv", 1, 0), 101: profile.Proc("python3.13", 100, 0)}
+        self._tables(monkeypatch, table, table)
 
         assert profile.python_worker(100) is None
 
     def test_a_busy_interpreter_outside_this_task_is_not_ours(self, monkeypatch):
-        """Two arms share a pool but not a node -- and the wrapper itself, plus
-        anything the start task left, are interpreters this task must not read."""
-        self._table(
+        """Anything the start task left behind is an interpreter on this box
+        that this task must not read."""
+        self._tables(
             monkeypatch,
             {
                 100: profile.Proc("uv", 1, 0),
-                101: profile.Proc("python3.13", 100, 50),
+                101: profile.Proc("python3.13", 100, 5),
+                900: profile.Proc("python3.13", 1, 10),
+            },
+            {
+                100: profile.Proc("uv", 1, 0),
+                101: profile.Proc("python3.13", 100, 60),
                 900: profile.Proc("python3.13", 1, 999_999),
             },
         )
