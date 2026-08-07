@@ -57,10 +57,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "it. Ignored by the other kernels, which derive nothing. Default: 6000.",
     )
     parser.add_argument(
+        "--train-boards",
+        type=int,
+        default=0,
+        help="Boards hand-space and scalar TRAIN on, drawn from a different "
+        "stream than the scoring boards. 0 trains on the scoring boards, which "
+        "grades those two on their own training set. Board-free is unaffected.",
+    )
+    parser.add_argument(
         "--score-boards",
         type=int,
         default=DEFAULT_SCORE_BOARDS,
-        help="Held-out boards the exact best response scores against.",
+        help="Boards the exact best response scores against. Genuinely held out "
+        "only when --train-boards is set.",
     )
     parser.add_argument(
         "--checkpoints",
@@ -116,6 +125,8 @@ def _flags(args: argparse.Namespace, kernel: str, derive: int) -> tuple[str, ...
         "--stack",
         str(args.stack),
     ]
+    if args.train_boards:
+        flags += ["--train-boards", str(args.train_boards)]
     if kernel == BOARD_FREE:
         flags += ["--derive-boards", str(derive)]
     if args.checkpoints:
