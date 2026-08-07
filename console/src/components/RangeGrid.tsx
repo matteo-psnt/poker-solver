@@ -1,3 +1,4 @@
+import type { ActionLabel } from "@/lib/actions";
 import { type Cell, GRID_SIZE, actionColour } from "@/lib/range";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +22,8 @@ export function RangeGrid({
   onHover,
 }: {
   cells: Cell[][];
-  actions: string[];
+  /** Display labels, in the same order as each cell's strategy. */
+  actions: ActionLabel[];
   onHover?: (cell: Cell | null) => void;
 }) {
   return (
@@ -69,15 +71,17 @@ export function RangeGrid({
   );
 }
 
-function Bar({ strategy, actions }: { strategy: number[]; actions: string[] }) {
+function Bar({ strategy, actions }: { strategy: number[]; actions: ActionLabel[] }) {
   return (
     <span className="absolute inset-0 flex">
       {strategy.map((weight, index) => (
         <span
-          key={actions[index] ?? index}
+          key={actions[index]?.token ?? index}
           style={{
             width: `${weight * 100}%`,
-            backgroundColor: actionColour(actions[index] ?? "", index, actions.length),
+            // Keyed on the TOKEN, not the label: colour encodes what kind of
+            // action it is, and the label is prose that may be translated.
+            backgroundColor: actionColour(actions[index]?.token ?? "", index, actions.length),
           }}
         />
       ))}
@@ -98,11 +102,11 @@ function Hatch() {
   );
 }
 
-function describe(cell: Cell, actions: string[]): string {
+function describe(cell: Cell, actions: ActionLabel[]): string {
   if (cell.combos === 0) return `${cell.label} — blocked by the board`;
   if (!cell.strategy) return `${cell.label} — ${cell.combos} combos, none trained`;
   const parts = cell.strategy
-    .map((weight, index) => `${actions[index]} ${(weight * 100).toFixed(0)}%`)
+    .map((weight, index) => `${actions[index]?.text ?? "?"} ${(weight * 100).toFixed(0)}%`)
     .join("  ");
   const caveat = cell.untrained > 0 ? `  (${cell.untrained}/${cell.combos} untrained)` : "";
   return `${cell.label}  ${parts}${caveat}`;
