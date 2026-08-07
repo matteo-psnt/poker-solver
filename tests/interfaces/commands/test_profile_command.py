@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from azure.core.exceptions import ResourceNotFoundError
 
 from src.interfaces.commands import profile
 from src.interfaces.errors import CommandError
@@ -70,15 +71,16 @@ class _Share:
 
 class TestTheRequest:
     def test_it_writes_the_seconds_the_node_reads(self, monkeypatch):
-        """The BODY is the duration. An empty one profiles for the default, so a
-        request written wrong is a shorter profile rather than an error."""
+        """The BODY is the duration, and the NEWLINE is what tells the node the
+        write finished. Without it an in-flight read looks empty and profiles
+        for the default -- measured, on a request that asked for 180."""
         remote = _Share()
         remote.install(monkeypatch)
 
         profile.run(_args(seconds=45))
 
         path = f"{node_profile.PROFILES_DIRNAME}/{TASK}{node_profile.REQUEST_SUFFIX}"
-        assert remote.written == {path: "45"}
+        assert remote.written == {path: "45\n"}
 
     def test_without_a_task_it_is_refused_before_any_azure_call(self, monkeypatch):
         """`CloudConfig.load()` shells out to Terraform, so validating after it
@@ -103,6 +105,31 @@ class TestTheWait:
 
         assert payload.landed == f"{TASK}.0.1{node_profile.PROFILE_SUFFIX}"
         assert payload.downloaded is not None
+
+    def test_a_profile_listed_before_it_is_readable_is_waited_for(self, monkeypatch):
+        """MEASURED: this came back as raw Azure XML on the terminal. The node
+        writes the profile over SMB and this lists it over REST, so the name
+        appears in a listing before the bytes can be fetched."""
+        remote = _Share()
+        landed = f"{TASK}.0.1{node_profile.PROFILE_SUFFIX}"
+        remote.appears = (2, landed)
+        remote.install(monkeypatch)
+        refusals = [1]
+
+        def _not_yet(_service, _share, path, destination):
+            if refusals:
+                refusals.pop()
+                raise ResourceNotFoundError(message="The specified resource does not exist.")
+            remote.downloaded.append(path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text("{}")
+
+        monkeypatch.setattr(profile.share, "download_file", _not_yet)
+
+        payload = profile.run(_args(no_wait=False, out="/tmp/profiles"))
+
+        assert payload.landed == landed
+        assert not refusals, "the first download was never attempted"
 
     def test_a_profile_from_an_earlier_attempt_is_not_claimed(self, monkeypatch):
         """A retry restarts the counter, so the name this request will produce

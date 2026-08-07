@@ -50,6 +50,26 @@ class TestItStaysOffUntilAsked:
 
         assert profile.take_request(profile_dir, "task-1") == profile.DEFAULT_SECONDS
 
+    def test_a_write_still_landing_is_re_read_not_defaulted(self, profile_dir, monkeypatch):
+        """MEASURED: a request asking for 180s profiled for 30. The laptop
+        writes over REST and the node reads over SMB, so a poll saw the file
+        before its bytes, read empty, and fell to the default."""
+        request = profile_dir / f"task-1{profile.REQUEST_SUFFIX}"
+        request.write_text("")
+        reads = iter(["", "180\n"])
+        monkeypatch.setattr(profile.Path, "read_text", lambda _self: next(reads))
+        monkeypatch.setattr(profile.time, "sleep", lambda _seconds: None)
+
+        assert profile.take_request(profile_dir, "task-1") == 180
+
+    def test_a_touch_still_means_the_default(self, profile_dir, monkeypatch):
+        """The re-read must not cost `touch` its meaning: an empty file that
+        STAYS empty is an operator asking for a profile, not a partial write."""
+        (profile_dir / f"task-1{profile.REQUEST_SUFFIX}").touch()
+        monkeypatch.setattr(profile.time, "sleep", lambda _seconds: None)
+
+        assert profile.take_request(profile_dir, "task-1") == profile.DEFAULT_SECONDS
+
     def test_a_request_for_another_task_is_not_this_one(self, profile_dir):
         (profile_dir / f"task-2{profile.REQUEST_SUFFIX}").write_text("30")
 

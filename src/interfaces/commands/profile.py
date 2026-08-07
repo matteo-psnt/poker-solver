@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from azure.core.exceptions import ResourceNotFoundError
 from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
@@ -124,7 +125,11 @@ def run(args: argparse.Namespace) -> ProfilePayload:
         service,
         config.share_name,
         f"{node_profile.PROFILES_DIRNAME}/{args.task}{node_profile.REQUEST_SUFFIX}",
-        str(args.seconds),
+        # The trailing newline is a COMPLETENESS MARKER, not formatting: this
+        # write lands over REST and the node reads it off an SMB mount, so it
+        # can see the file before its bytes. Without the marker an in-flight
+        # read looks empty and silently profiles for the default instead.
+        f"{args.seconds}\n",
     )
     if args.no_wait:
         return ProfilePayload(task=args.task, seconds=args.seconds)
@@ -140,12 +145,20 @@ def run(args: argparse.Namespace) -> ProfilePayload:
         ]
         if fresh:
             name = sorted(fresh)[-1]
+            try:
+                downloaded = _download(service, config.share_name, name, args.out)
+            except ResourceNotFoundError:
+                # LISTED is not READABLE. The node writes the profile over SMB
+                # and this lists it over REST, so the name appears first; a raw
+                # Azure XML error came back from exactly this. The next poll
+                # gets it.
+                continue
             return ProfilePayload(
                 task=args.task,
                 seconds=args.seconds,
                 waited=int(time.monotonic() - started),
                 landed=name,
-                downloaded=_download(service, config.share_name, name, args.out),
+                downloaded=downloaded,
             )
     return ProfilePayload(
         task=args.task, seconds=args.seconds, waited=int(time.monotonic() - started)
