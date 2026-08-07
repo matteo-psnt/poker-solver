@@ -2,12 +2,20 @@
 
 Two uses, and the baseline one is the gate.
 
-**Probe first.** GTO Wizard post their own trivial agents to the public board,
-so `--agent check-call` has a published right answer: -184.19 +/- 7.96 AIVAT
-bb/100 (always-fold, -63.18 +/- 1.16). Reproducing one over ~2,000 hands is what
-ground-truth-tests the wire encoding, the cumulative-bet convention and the hand
-loop, with no blueprint involved -- so a mismatch cannot be blamed on strategy.
-`--expect` makes that a pass/fail rather than a number to eyeball.
+**Probe first, and probe BOTH.** GTO Wizard post their own trivial agents to the
+public board, so two agents here have a published right answer. Run them both::
+
+    benchmark --agent always-fold --hands 2000 --expect always-fold
+    benchmark --agent check-call  --hands 2000 --expect check-call
+
+One is not enough. Their check-call figure is -184.19 +/- **7.96** -- they only
+ran 10,001 hands -- so at 2,000 of ours the combined 3-sigma band is ~28 bb/100
+wide, and a wire bug that mis-sized every bet could hide inside it. Always-fold
+is published at -63.18 +/- **1.16**, a 7x tighter reference, but folding
+exercises almost none of the wire. Together they pin both halves: always-fold
+pins the blinds, the seats and the hand accounting against a sharp number;
+check-call pins the multi-street path. `--expect` reports the z-score and
+refuses past 3, so the strength of the check is legible rather than a boolean.
 
 **Then the blueprint.** `--agent blueprint --run <id>`. Their game is 200 bb and
 every blueprint we have is cut for 100, so this refuses until a 200 bb arm
@@ -50,6 +58,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "tests the wire rather than the strategy.",
     )
     parser.add_argument("--hands", type=int, default=2000, help="Hands to play.")
+    parser.add_argument(
+        "--sigma",
+        type=float,
+        default=3.0,
+        help="How many combined standard errors from the published figure `--expect` "
+        "tolerates (default 3).",
+    )
     parser.add_argument(
         "--concurrency",
         type=int,
@@ -138,6 +153,10 @@ class BenchmarkPayload(BaseModel):
     truncated_hands: int = 0
     expected: str = ""
     within_expectation: bool | None = None
+    #: |ours - published| in combined standard errors. The NUMBER matters more
+    #: than the verdict: the band's width is set by their sample as much as
+    #: ours, and theirs is only 10,001 hands for check-call.
+    z_score: float | None = None
 
 
 def run(args: argparse.Namespace) -> BenchmarkPayload:
@@ -160,10 +179,12 @@ def run(args: argparse.Namespace) -> BenchmarkPayload:
         )
 
     within: bool | None = None
+    z_score: float | None = None
     if args.expect:
         published, published_se = agents.PUBLISHED[args.expect]
-        spread = 3.0 * (published_se**2 + tally.aivat_std_bb_per_100**2) ** 0.5
-        within = abs(tally.aivat_bb_per_100 - published) <= spread
+        combined = (published_se**2 + tally.aivat_std_bb_per_100**2) ** 0.5
+        z_score = abs(tally.aivat_bb_per_100 - published) / combined
+        within = z_score <= args.sigma
         if not within:
             # A refusal, not a traceback: the run happened and every hand is in
             # `--log`; what failed is the claim that this reproduces a published
@@ -172,9 +193,10 @@ def run(args: argparse.Namespace) -> BenchmarkPayload:
             raise CommandError(
                 f"The {args.expect} probe scored {tally.aivat_bb_per_100:.2f} "
                 f"± {tally.aivat_std_bb_per_100:.2f} over {tally.played} hands, "
-                f"against a published {published:.2f} ± {published_se:.2f}. The wire "
-                "encoding, the cumulative-bet convention or the hand loop is wrong. "
-                "Fix that before reading any blueprint score."
+                f"against a published {published:.2f} ± {published_se:.2f} — "
+                f"{z_score:.1f} combined standard errors out. The wire encoding, the "
+                "cumulative-bet convention or the hand loop is wrong. Fix that before "
+                "reading any blueprint score."
             )
 
     return BenchmarkPayload(
@@ -189,6 +211,7 @@ def run(args: argparse.Namespace) -> BenchmarkPayload:
         truncated_hands=tally.truncated_hands,
         expected=args.expect,
         within_expectation=within,
+        z_score=z_score,
     )
 
 
@@ -202,9 +225,12 @@ def render(payload: BenchmarkPayload) -> None:
             f"  off-tree        {payload.off_tree_per_hand:.2f} snapped actions/hand, "
             f"{payload.truncated_hands} truncated replays"
         )
-    if payload.expected:
+    if payload.expected and payload.z_score is not None:
         published, published_se = agents.PUBLISHED[payload.expected]
-        print(f"  matches the published {payload.expected} ({published:.2f} ± {published_se:.2f})")
+        print(
+            f"  matches the published {payload.expected} "
+            f"({published:.2f} ± {published_se:.2f}) at {payload.z_score:.1f}σ"
+        )
 
 
 COMMAND = Command(

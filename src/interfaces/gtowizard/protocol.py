@@ -199,10 +199,13 @@ class Turn:
     def allows(self, action: str) -> bool:
         """Whether the server will accept this base action now.
 
-        True when the frame carried no list at all, so a recorded fixture that
-        predates the field is answered rather than refused.
+        Strictly. An earlier version answered True for an EMPTY list, meaning a
+        frame that named no legal actions would have `k` sent into it -- a 4xx,
+        and a 4xx mid-hand abandons a hand that would otherwise have been
+        scored. An empty list on a live frame is a protocol misread, and
+        :func:`~src.interfaces.gtowizard.session.play_hand` says so.
         """
-        return not self.legal_actions or action in self.legal_actions
+        return action in self.legal_actions
 
     @property
     def rounds(self) -> tuple[tuple[str, ...], ...]:

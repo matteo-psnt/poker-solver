@@ -155,6 +155,15 @@ def play_hand(client: Server, agent: Agent, *, game_name: str = GAME_NAME) -> Ha
                 f"Hand {frame.hand_id} passed {MAX_DECISIONS_PER_HAND} decisions; "
                 "the loop is not reading the protocol."
             )
+        if not frame.turn.legal_actions:
+            # Not over, and nothing offered. `allows` is strict, so every agent
+            # would fall through to its last resort and send an action the
+            # server rejects; a 4xx mid-hand abandons a hand that would have
+            # been scored. Say what happened instead.
+            raise RuntimeError(
+                f"Hand {frame.hand_id} is not over but offers no legal action "
+                f"on the {frame.turn.street}; the protocol is being misread."
+            )
         move = agent.decide(frame)
         amount = int(move.amount) if move.action == BET and move.amount is not None else None
         frame = client.act(frame.hand_id, move.action, amount)
