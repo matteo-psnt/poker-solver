@@ -21,6 +21,7 @@ and nothing depends on a background thread staying alive.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +194,27 @@ def create_app() -> FastAPI:
     return app
 
 
+def _warn_if_stale(index: Path) -> None:
+    """Say so on stderr when the built console is older than its sources.
+
+    Compared against the newest file under `console/src`, which is what a build
+    consumes. Not fatal: an old build still serves every page it does have, and
+    refusing to start would be a worse trade than a line of warning.
+    """
+    if not index.is_file():
+        return
+    sources = CONSOLE_DIST.parent / "src"
+    if not sources.is_dir():
+        return
+    newest = max((f.stat().st_mtime for f in sources.rglob("*") if f.is_file()), default=0.0)
+    if newest > index.stat().st_mtime:
+        print(
+            "WARNING: console/dist is older than console/src — pages added since "
+            "the last build will be missing. Run `npm --prefix console run build`.",
+            file=sys.stderr,
+        )
+
+
 def _mount_console(app: FastAPI) -> None:
     """Serve the built console, with SPA fallback.
 
@@ -202,8 +224,15 @@ def _mount_console(app: FastAPI) -> None:
 
     A missing build is reported rather than served as a blank page -- the
     failure otherwise looks like a broken app instead of a skipped build step.
+
+    A STALE build is reported too, and that is the one that actually costs time.
+    A missing page announces itself; a page built before the route you are
+    looking for existed just silently lacks it, and the obvious conclusion is
+    that the feature is broken rather than unbuilt. `serve` does not build, so
+    this is reachable by simply forgetting.
     """
     index = CONSOLE_DIST / "index.html"
+    _warn_if_stale(index)
     if not index.is_file():
 
         @app.get("/{_path:path}")
