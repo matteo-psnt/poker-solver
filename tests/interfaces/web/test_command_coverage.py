@@ -23,6 +23,9 @@ the point:
   of it on one click is not a screen this should grow. The gate is that someone
   reads a dry run and types `--apply`, which a terminal does and a button does
   not.
+- ``EXTERNAL`` -- it talks to somebody else's service. Every panel here answers
+  from our own record, and putting a third party's HTTP endpoint on the
+  dashboard's critical path is what `test_read_cost` exists to prevent.
 
 Adding to either list is fine. Doing it without deciding is what this argues
 against, so the reason is stored beside the name and read back in the failure.
@@ -59,7 +62,15 @@ DESTRUCTIVE: dict[str, str] = {
     "shape for that, and its dry run is the thing worth reading anyway",
 }
 
-EXCLUDED = NO_PAYLOAD | NODE_ONLY | DESTRUCTIVE
+EXTERNAL: dict[str, str] = {
+    "benchmark": "it plays hours of hands against a third party under a credential "
+    "this server does not hold; it is a run, not a read",
+    "benchmark-board": "it reads a THIRD PARTY's HTTP endpoint. Every other panel "
+    "answers from our own record, and `test_read_cost` exists to keep that cost "
+    "bounded — an outside call on the dashboard's critical path is the opposite",
+}
+
+EXCLUDED = NO_PAYLOAD | NODE_ONLY | DESTRUCTIVE | EXTERNAL
 
 # NOT an exclusion: `status` composes three commands the console already renders
 # as panels, so every question it answers is on the Overview page. An

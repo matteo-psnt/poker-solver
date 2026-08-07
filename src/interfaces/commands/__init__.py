@@ -169,11 +169,19 @@ GROUPS: tuple[CommandGroup, ...] = (
             CommandRef(
                 "evaluate", "Evaluate a run's exploitability (Local Best Response by default)."
             ),
+            CommandRef(
+                "benchmark",
+                "Play hands against GTO Wizard AI and score them in AIVAT bb/100.",
+            ),
         ),
     ),
     CommandGroup(
         "read the record",
         (
+            CommandRef(
+                "benchmark-board",
+                "The public GTO Wizard leaderboard, ranked by AIVAT bb/100 (no API key needed).",
+            ),
             CommandRef("ledger", "List recorded evaluations from the eval ledger."),
             CommandRef(
                 "curve",
