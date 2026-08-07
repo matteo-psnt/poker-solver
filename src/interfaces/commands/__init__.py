@@ -113,6 +113,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "cancel", "Terminate a running task; its partial progress is published first."
             ),
             CommandRef(
+                "submit-net-probe",
+                "Run a reachability probe on a pool node: outbound ports, IMDS, and an AAD token.",
+            ),
+            CommandRef(
                 "pool-status", "Pool node counts, and the real cause behind any allocation failure."
             ),
             CommandRef(
@@ -172,6 +176,10 @@ GROUPS: tuple[CommandGroup, ...] = (
             CommandRef(
                 "benchmark",
                 "Play hands against GTO Wizard AI and score them in AIVAT bb/100.",
+            ),
+            CommandRef(
+                "net-probe",
+                "Report what a node can reach outbound: ports, IMDS, and an AAD token for Postgres.",
             ),
         ),
     ),

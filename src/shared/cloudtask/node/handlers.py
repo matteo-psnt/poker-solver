@@ -489,6 +489,19 @@ def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
         archive.publish_run(run_dir, paths.archive / run_dir.name, log)
 
 
+def _probe(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
+    """Run the reachability probe and publish NOTHING.
+
+    The answer is a few lines of stdout, and the task log is already durable and
+    already readable with `logs --task`. Writing it to the share as well would
+    add a document whose only reader is a person who has the log open.
+    """
+    code = run_guarded(
+        _cli(plan.commands[0]), cwd=paths.code, timeout=plan.timeout_seconds, log=log
+    )
+    return code, None
+
+
 HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN: _train,
     # Same executor: the board-free kernel writes ordinary checkpoints, so
@@ -500,4 +513,5 @@ HANDLERS: dict[str, Handler] = {
     TaskName.VECTOR_SWEEP: _measurement,
     # Same executor: an abstraction off the share, one command, one JSON result.
     TaskName.ABSTRACTION_COUPLING: _measurement,
+    TaskName.NET_PROBE: _probe,
 }

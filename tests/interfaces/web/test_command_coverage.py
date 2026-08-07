@@ -23,6 +23,9 @@ the point:
   of it on one click is not a screen this should grow. The gate is that someone
   reads a dry run and types `--apply`, which a terminal does and a button does
   not.
+- ``DIAGNOSTIC`` -- it asks about the INFRASTRUCTURE rather than the record, and
+  what it returns is a task log the console already renders. The trigger is a
+  migration-shaped question; the answer is already on a screen.
 - ``EXTERNAL`` -- it talks to somebody else's service. Every panel here answers
   from our own record, and putting a third party's HTTP endpoint on the
   dashboard's critical path is what `test_read_cost` exists to prevent.
@@ -55,6 +58,7 @@ NODE_ONLY: dict[str, str] = {
     "train-vector": "compute, run BY the node wrapper — `submit --kernel board-free` is the door",
     "train-pcs": "compute, run BY the node wrapper — `submit --kernel pcs` is the door",
     "abstraction-coupling": "compute, run BY the node wrapper — the fine abstraction is on the share",
+    "net-probe": "compute, run BY the node wrapper — `submit-net-probe` is the door",
 }
 
 DESTRUCTIVE: dict[str, str] = {
@@ -70,7 +74,12 @@ EXTERNAL: dict[str, str] = {
     "bounded — an outside call on the dashboard's critical path is the opposite",
 }
 
-EXCLUDED = NO_PAYLOAD | NODE_ONLY | DESTRUCTIVE | EXTERNAL
+DIAGNOSTIC: dict[str, str] = {
+    "submit-net-probe": "it answers a question about the POOL, not about the record, and its whole output is a task log the console already renders. A button would be a "
+    "permanent fixture for a question asked during a migration",
+}
+
+EXCLUDED = NO_PAYLOAD | NODE_ONLY | DESTRUCTIVE | EXTERNAL | DIAGNOSTIC
 
 # NOT an exclusion: `status` composes three commands the console already renders
 # as panels, so every question it answers is on the Overview page. An
