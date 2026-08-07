@@ -158,13 +158,19 @@ locals {
           RUNS_DIR=/mnt/work/runs
           IDLE_TIMEOUT=${var.idle_timeout_seconds}
 
-      # The unit, and the whole on-demand story in six lines.
+      # The unit, and the whole on-demand story.
       #
       # `ExecStopPost` is the hinge: the server exits when it has been idle, and
-      # THAT is what deallocates the box. Note the guard -- it fires only on a
-      # clean exit, so a crash restarts the service instead of billing you for a
-      # box that then sits there having failed. `Restart=on-failure` is the other
-      # half of that pair.
+      # THAT is what deallocates the box. The guard fires only on a CLEAN exit,
+      # so a crash restarts the service rather than switching off a box that
+      # might just have lost a race with its mounts.
+      #
+      # But a service that can never start -- an unset RUN, a run that is not on
+      # this disk, a broken deploy -- would then restart every 10s forever, and
+      # the box would bill all weekend having never served a request. That is the
+      # expensive failure, so the restart is BOUNDED: three tries in five
+      # minutes, after which systemd gives up, the unit enters `failed`, and
+      # `OnFailure` deallocates. A misconfigured box costs nothing.
       - path: /etc/systemd/system/blueprint.service
         permissions: "0644"
         content: |
@@ -172,6 +178,9 @@ locals {
           Description=Blueprint server
           After=network-online.target mnt-work.mount mnt-shared.mount
           Wants=network-online.target
+          OnFailure=blueprint-deallocate.service
+          StartLimitIntervalSec=300
+          StartLimitBurst=3
 
           [Service]
           Type=simple
@@ -188,6 +197,18 @@ locals {
           [Install]
           WantedBy=multi-user.target
 
+      # The other half of the bound above: reached when the service has given up
+      # restarting, so the box switches off instead of looping.
+      - path: /etc/systemd/system/blueprint-deallocate.service
+        permissions: "0644"
+        content: |
+          [Unit]
+          Description=Deallocate this box after the blueprint server gave up
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/deallocate-box
+
       # Only on a clean exit, and only via the VM's own managed identity -- there
       # are no credentials on this box to steal, and the identity's role is
       # scoped to this resource group and nothing else.
@@ -199,6 +220,12 @@ locals {
             echo "blueprint exited ${"$"}{EXIT_STATUS} -- not deallocating"
             exit 0
           fi
+          exec /usr/local/bin/deallocate-box
+
+      - path: /usr/local/bin/deallocate-box
+        permissions: "0755"
+        content: |
+          #!/bin/bash
           # The VM's own id from the instance metadata service, NOT from
           # Terraform: interpolating it here would make custom_data depend on
           # the machine custom_data configures, which is a cycle.
@@ -301,7 +328,7 @@ resource "azurerm_network_security_group" "serve" {
   # making impossible rather than merely discouraged.
   security_rule {
     name                       = "https"
-    priority                   = 90
+    priority                   = 100
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
@@ -313,7 +340,7 @@ resource "azurerm_network_security_group" "serve" {
 
   security_rule {
     name                       = "ssh"
-    priority                   = 100
+    priority                   = 110
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"

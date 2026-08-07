@@ -26,24 +26,29 @@ variable "resource_group" {
 
 variable "vm_size" {
   description = <<-EOT
-    This is a READER, not a trainer, and it is sized as one.
+    CONSTRAINED BY POLICY, not chosen on merit. The subscription carries an
+    `allowed_vm_skus` policy assignment (see infra/variables.tf), and anything
+    outside its list is refused at create time with a 403 that names the policy
+    rather than the size -- which is how this box first failed to build.
 
-    What has to fit in RAM: the run's flat arrays (regrets and strategy_sum over
-    ~84M slots, plus per-row reach and utility -- roughly 2 GB for a production
-    run) and the 773 MB card abstraction, which is mmapped rather than read.
-    One request buckets 1326 combos and reads a few hundred table rows; there is
-    no traversal and no solve, so CPU is close to idle between clicks.
+    On merit this wants ~2 vCPU and 8 GB: it is a READER. What has to fit in RAM
+    is the run's flat arrays (~2 GB for a production run) plus the 773 MB card
+    abstraction, which is mmapped. One request buckets 1326 combos and reads a
+    few hundred table rows -- no traversal, no solve, CPU near idle between
+    clicks.
 
-      Standard_D2as_v5   2 vCPU /  8 GB  ~$0.10/hr   tight once resolving lands
-      Standard_D4as_v5   4 vCPU / 16 GB  ~$0.19/hr   the default
-      Standard_D8as_v5   8 vCPU / 32 GB  ~$0.38/hr   if subgame solves get parallel
+    `Standard_D8als_v6` is the smallest thing the policy permits, so the box is
+    roughly 4x the machine it needs. That costs nothing at rest, because it
+    deallocates when idle; it costs ~$0.40/hr instead of ~$0.10/hr while
+    actually in use, which is the cheaper mistake than widening a policy that
+    exists to stop a stray apply from creating a 64-core node.
 
-    Deliberately NOT an als_v6 like the pool: that family exists there for
-    training throughput per krona and has no local temp disk. None of that
-    reasoning applies to a box that serves one table lookup at a time.
+    If a smaller box is ever worth it, add the SKU to `allowed_vm_skus` and
+    apply the ROOT infra state -- carefully: that state also owns the live
+    training pool, and `pool_vm_size` forces replacement.
   EOT
   type        = string
-  default     = "Standard_D4as_v5"
+  default     = "Standard_D8als_v6"
 }
 
 variable "data_disk_gb" {
