@@ -185,9 +185,29 @@ def train_static(
     # listing reads identity from that one line rather than folding.
     tracker.initialize()
 
-    # Only on a FRESH run. A retry finds the run dir populated, resumes, and
-    # must not lay the prior back over the progress it already made.
+    # Seeding is a FRESH-run act: a retry finds the run dir populated, resumes,
+    # and must not lay the prior back over the progress it already made.
+    #
+    # But "resuming" and "was seeded" are different questions, and conflating
+    # them cost two 30M sweeps. The first attempt died before seeding (the rung
+    # it wanted had not been fetched); the retry saw a populated directory,
+    # skipped the prior, and trained a perfectly good CONTROL under the arm's
+    # name. Every arm agreed to a tenth of a percent and nothing failed.
+    #
+    # So a resume records what it inherited. A run that asked for a prior and is
+    # resuming one that never got seeded is not a smaller version of the
+    # experiment -- it is a different arm wearing its label.
     seeded = False
+    if (
+        warm_start_from is not None
+        and resuming
+        and not (run_dir / warm_start.SEEDED_MARKER).exists()
+    ):
+        raise ValueError(
+            f"Run '{run_id}' asked to seed from '{warm_start_from}' but is resuming a "
+            "directory that was never seeded. Continuing would train an unseeded arm "
+            "under a warm-start label. Delete the run directory to start it cleanly."
+        )
     if warm_start_from is not None and not resuming:
         # A bare run id resolves under runs_dir, exactly as --run does; an
         # explicit path is taken as given. A node passes the id, because the
@@ -202,6 +222,9 @@ def train_static(
             effective_iterations=warm_start_weight,
             abstraction_hash=tracker.metadata.card_abstraction_hash,
             at_iteration=warm_start_at,
+        )
+        (run_dir / warm_start.SEEDED_MARKER).write_text(
+            f"{warm_start_from}@{warm_start_at or 'current'} weight={warm_start_weight}\n"
         )
         seeded = True
 
