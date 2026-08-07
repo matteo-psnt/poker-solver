@@ -101,6 +101,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "Ignored by the hand-space kernel, which needs no derivation.",
     )
     parser.add_argument(
+        "--train-boards",
+        type=int,
+        default=0,
+        help="Boards the hand-space and scalar kernels TRAIN on. 0 means train on "
+        "the scoring boards, which grades those two kernels on their own training "
+        "set -- in-sample, and not what 'how exploitable is this' asks. Board-free "
+        "is unaffected: it always derives from --derive-boards.",
+    )
+    parser.add_argument(
         "--score-boards",
         type=int,
         default=DEFAULT_SCORE_BOARDS,
@@ -172,6 +181,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     pairs = float(np.mean([(~c.blocks).sum() for c in held_out]))
     initial = np.ones(held_out[0].num_hands, dtype=np.float32)
     scorer = BoardMixtureCFR(compiled, held_out, cfr_plus=True, boards=boards)
+
+    # Where hand-space and scalar TRAIN. Drawn from --seed, the same stream
+    # board-free derives from, so no kernel sees a scoring board while training.
+    # The strategy table is indexed by (node, bucket) and carries no board axis,
+    # which is what lets one trained here be scored over there at all.
+    if args.train_boards:
+        train_boards = sample_boards(np.random.default_rng(args.seed), args.train_boards)
+        train_contexts = [build_hand_context(board, abstraction) for board in train_boards]
+        train_initial = np.ones(train_contexts[0].num_hands, dtype=np.float32)
+    else:
+        train_boards, train_contexts, train_initial = boards, held_out, initial
     baseline = (
         float(scorer.exploitability(initial, pairs)),
         float(scorer.exploitability(initial, pairs, unconstrained=True)),
@@ -207,7 +227,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 storage,
                 config,
                 tree=compiled.tree,
-                runouts=[tuple(FULL_DECK[int(c)] for c in board) for board in boards],
+                runouts=[tuple(FULL_DECK[int(c)] for c in board) for board in train_boards],
             )
             done = 0
             for target in checkpoints:
@@ -229,22 +249,26 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         finally:
             storage.close()
     elif args.kernel == HAND_SPACE:
-        solver = BoardMixtureCFR(compiled, held_out, cfr_plus=True, boards=boards)
+        solver = BoardMixtureCFR(compiled, train_contexts, cfr_plus=True, boards=train_boards)
         done = 0
         for target in checkpoints:
             while done < target:
-                solver.iterate(initial)
+                solver.iterate(train_initial)
                 done += 1
+            scorer.strategy_sum[:] = solver.strategy_sum
             points.append(
                 {
                     "iterations": done,
                     "train_seconds": round(time.perf_counter() - started, 1),
-                    "exploitability": round(float(solver.exploitability(initial, pairs)), 6),
+                    # Scored through `scorer`, never `solver`: one carries the
+                    # scoring boards and the other the training boards, and with
+                    # --train-boards those are disjoint. Scoring on `solver`
+                    # grades the kernel on its own training set.
+                    "exploitability": round(float(scorer.exploitability(initial, pairs)), 6),
                     # Against an opponent who sees its own cards rather than only
-                    # its bucket. Always the larger of the two; the gap is the
-                    # abstraction's own cost, which no amount of solving removes.
+                    # its bucket -- always the larger of the two.
                     "unconstrained": round(
-                        float(solver.exploitability(initial, pairs, unconstrained=True)), 6
+                        float(scorer.exploitability(initial, pairs, unconstrained=True)), 6
                     ),
                 }
             )
@@ -305,7 +329,9 @@ def _payload(
         "buckets": {street.name.lower(): count for street, count in counts.items()},
         "kernel": args.kernel,
         "derive_boards": args.derive_boards if args.kernel == BOARD_FREE else 0,
+        "train_boards": args.train_boards or args.score_boards,
         "score_boards": args.score_boards,
+        "in_sample": not args.train_boards,
         "stack": args.stack,
         "nodes": compiled.num_nodes,
         "infoset_rows": compiled.tree.num_rows,
