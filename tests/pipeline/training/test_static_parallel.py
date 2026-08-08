@@ -275,6 +275,10 @@ class _FakeProcess:
     def __init__(self, exitcode: int | None, pid: int = 1) -> None:
         self.exitcode = exitcode
         self.pid = pid
+        self.terminated = False
+
+    def terminate(self) -> None:
+        self.terminated = True
 
 
 def test_collect_raises_on_a_worker_that_died_without_a_result(monkeypatch):
@@ -288,8 +292,14 @@ def test_collect_raises_on_a_worker_that_died_without_a_result(monkeypatch):
     monkeypatch.setattr(static_parallel, "REAP_POLL_SECONDS", 0.01)
     empty: queue.Queue = queue.Queue()
 
+    killed, survivor = _FakeProcess(-9, pid=1), _FakeProcess(None, pid=2)
+
     with pytest.raises(RuntimeError, match=r"died without a result"):
-        static_parallel._collect(empty, [_FakeProcess(-9)])
+        static_parallel._collect(empty, [killed, survivor])
+
+    # The survivors are not daemons: left running, one holds the task for the
+    # rest of its chunk and keeps the shared segments mapped.
+    assert survivor.terminated
 
 
 def test_collect_tolerates_a_worker_that_exited_cleanly_before_its_result_is_read(monkeypatch):
