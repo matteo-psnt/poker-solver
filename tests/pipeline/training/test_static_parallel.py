@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import threading
+import time
 
 import numpy as np
 import pytest
@@ -22,6 +25,7 @@ from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
+from src.pipeline.training import static_parallel
 from src.pipeline.training.static_parallel import (
     train_static_parallel,
     worker_iteration_indices,
@@ -265,3 +269,43 @@ class TestCheckpointsRecordTheBucketAssignment:
         )
         raw = json.loads((tmp_path / "STATIC_CHECKPOINT.json").read_text())
         assert raw["abstraction_id"] == "abs-under-test"
+
+
+class _FakeProcess:
+    def __init__(self, exitcode: int | None, pid: int = 1) -> None:
+        self.exitcode = exitcode
+        self.pid = pid
+
+
+def test_collect_raises_on_a_worker_that_died_without_a_result(monkeypatch):
+    """A killed worker must fail the chunk, not hang the coordinator on `get()`.
+
+    Measured on a 200 bb D64 probe: the RAM clamp allowed 11 workers, one was
+    killed, and the coordinator blocked in `get()` until the task's external
+    2400s timeout -- throwing away 200 rungs that were already complete in
+    shared memory. The run recorded 0 iterations.
+    """
+    monkeypatch.setattr(static_parallel, "REAP_POLL_SECONDS", 0.01)
+    empty: queue.Queue = queue.Queue()
+
+    with pytest.raises(RuntimeError, match=r"died without a result"):
+        static_parallel._collect(empty, [_FakeProcess(-9)])
+
+
+def test_collect_tolerates_a_worker_that_exited_cleanly_before_its_result_is_read(monkeypatch):
+    """Exit 0 is not proof of a missing result -- the queue is read after the exit."""
+    monkeypatch.setattr(static_parallel, "REAP_POLL_SECONDS", 0.01)
+    late: queue.Queue = queue.Queue()
+
+    def deliver() -> None:
+        time.sleep(0.05)
+        late.put({"iterations": 1, "dropped": 0})
+
+    thread = threading.Thread(target=deliver)
+    thread.start()
+    try:
+        assert static_parallel._collect(late, [_FakeProcess(0)]) == [
+            {"iterations": 1, "dropped": 0}
+        ]
+    finally:
+        thread.join()
