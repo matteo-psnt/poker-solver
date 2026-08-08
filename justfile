@@ -34,20 +34,31 @@ plan:
     {{tf}} init -input=false
     {{tf}} plan
 
+# The `create` recipes below are `-auto-approve`. That MOVES the review step
+# rather than removing it: `just plan` and `serve-plan` are where a change gets
+# read, and they are read properly because reading is all they do. The prompt was
+# not buying that -- an apply driven through a non-TTY dies on `error asking for
+# approval: EOF` having already printed the plan, and a prompt on a plan just
+# read is the step people paste past.
+#
+# The `destroy` recipes are deliberately NOT auto-approved. A create is
+# re-runnable; a teardown of the Batch account is not.
+
 # Create the durable share. Separate state, `prevent_destroy` -- run once, ever.
 store-create:
     {{tfs}} init -input=false
-    {{tfs}} apply
+    {{tfs}} apply -input=false -auto-approve
 
 # Create/update the Batch account, pool and guardrails. Safe to re-run.
 # Requires store-create first: the pool mounts the share by name.
 create:
     {{tf}} init -input=false
-    {{tf}} apply
+    {{tf}} apply -input=false -auto-approve
     @echo ""
     @echo "  next:  just cli push-data && just submit quick_test 3000"
 
 # Delete the Batch account and pool. The share and every published run survive.
+# Prompts, on purpose -- see the note above `store-create`.
 destroy:
     {{tf}} destroy
 
@@ -56,7 +67,7 @@ destroy:
 # pool is for work that finishes and a server never does.
 serve-create:
     {{tfv}} init -input=false
-    {{tfv}} apply
+    {{tfv}} apply -input=false -auto-approve
     @echo ""
     @echo "  next:  just serve-ssh to point it at a run, then eval \"$(just serve-env)\""
 
@@ -92,6 +103,7 @@ serve-stop:
     uv run poker-solver serve-box --action stop
 
 # Delete the serving box. Nothing on it is a source of truth; it holds copies.
+# Prompts, on purpose -- see the note above `store-create`.
 serve-destroy:
     {{tfv}} destroy
 
