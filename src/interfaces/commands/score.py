@@ -49,7 +49,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--pool",
-        choices=("train", "big", "huge"),
+        choices=("train", "big", "huge", "mem"),
         default="train",
         help="Which pool runs it. `exact_br`'s fork-join is sized by FREE RAM, "
         "so a bigger box buys workers, not just cores: a 91M-row checkpoint got "
