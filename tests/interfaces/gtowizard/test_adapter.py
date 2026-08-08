@@ -184,3 +184,54 @@ class TestWireAmount:
         spot = reconstruct(blueprint, this, scale)
         with pytest.raises(AdapterError, match="not offered"):
             wire_amount(Action(ActionType.RAISE, 200), this.turn, this.game, spot)
+
+
+# GTO Wizard AI's own table, verbatim from their /game payload.
+THEIRS = {
+    "game_id": 1,
+    "game_name": "HUNL 200BB",
+    "game_format": "heads-up",
+    "starting_stack": 20_000,
+    "blinds": [50, 100],
+    "stack_reset_per_hand": True,
+}
+
+
+class TestTheirRealTable:
+    """Their published numbers, against the depth a 200 bb arm is cut for.
+
+    The scale guard is the one thing between a trained arm and a scored run, and
+    it reads config arithmetic rather than the tree -- so it can be pinned at
+    their REAL table (50/100, 20,000 behind) without building a 200 bb tree.
+    A probe measured that tree at 162,430 nodes; no test is paying for it.
+    """
+
+    @staticmethod
+    def _blueprint(starting_stack: int):
+        """Only `.config` is read here, so a stub is the whole blueprint.
+
+        Building a real one at 200 bb costs the tree this test exists to avoid.
+        """
+        from tests.test_helpers import make_test_config
+
+        class _Stub:
+            config = make_test_config(small_blind=1, big_blind=2, starting_stack=starting_stack)
+
+        return _Stub()
+
+    def test_a_200bb_arm_matches_their_table_to_the_chip(self) -> None:
+        theirs = frame(game=THEIRS, raise_min=200, raise_max=20_000)
+        scale = table_scale(theirs.game, self._blueprint(400))
+        assert scale.factor == 50
+        assert scale.their_depth == 200
+        assert scale.our_depth == 200
+        assert scale.depth_matches
+        # 200 bb in their chips and back, exactly -- `factor` is integral.
+        assert scale.to_theirs(400) == 20_000
+        assert scale.to_ours(20_000) == 400
+
+    def test_the_100bb_arms_we_already_have_are_still_refused(self) -> None:
+        theirs = frame(game=THEIRS, raise_min=200, raise_max=20_000)
+        scale = table_scale(theirs.game, self._blueprint(200))
+        assert scale.our_depth == 100
+        assert not scale.depth_matches
