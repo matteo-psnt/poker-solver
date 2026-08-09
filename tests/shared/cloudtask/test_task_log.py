@@ -223,6 +223,49 @@ class TestReconcile:
         assert row["cause"] == task_log.CAUSE_FAILED
 
 
+class TestAnObservationIsOnlyWrittenWhenItSaysSomethingNew:
+    """`observed_at` is stamped on every read, so an unchanged observation was
+    always a fresh document -- and a task that can never resolve (one Batch
+    still calls `running`) was re-written and re-uploaded on every single read.
+    Measured on the console: six such records, 14.1s of serial share writes,
+    per poll, forever, carrying no information.
+    """
+
+    def test_repeating_an_observation_reports_nothing_to_publish(self, tmp_path):
+        _node(tmp_path, "running-forever", "started")
+        observation = [{"task": "running-forever", "job": "poker-1", "state": "running"}]
+
+        assert task_log.reconcile(tmp_path, observation) == ["running-forever"]
+        assert task_log.reconcile(tmp_path, observation) == []
+        assert task_log.reconcile(tmp_path, observation) == []
+
+    def test_the_stored_record_is_left_alone(self, tmp_path):
+        _node(tmp_path, "running-forever", "started")
+        observation = [{"task": "running-forever", "job": "poker-1", "state": "running"}]
+        task_log.reconcile(tmp_path, observation)
+        path = task_log.tasks_dir(tmp_path) / "running-forever.observed.json"
+        before = path.read_text()
+
+        task_log.reconcile(tmp_path, observation)
+
+        assert path.read_text() == before
+
+    def test_news_is_still_written(self, tmp_path):
+        """The property this must not cost: a task that has since FINISHED is a
+        different observation, and losing it would leave a death unexplained."""
+        _node(tmp_path, "vanished", "started")
+        task_log.reconcile(tmp_path, [{"task": "vanished", "job": "j", "state": "running"}])
+
+        explained = task_log.reconcile(
+            tmp_path,
+            [{"task": "vanished", "job": "j", "state": "completed", "result": "failure"}],
+        )
+
+        assert explained == ["vanished"]
+        row = next(r for r in task_log.read_tasks(tmp_path) if r["task_id"] == "vanished")
+        assert row["cause"] == task_log.CAUSE_FAILED
+
+
 class TestRobustness:
     def test_a_half_written_record_does_not_break_the_listing(self, tmp_path):
         """Truncated files are the expected residue of the kills this explains."""

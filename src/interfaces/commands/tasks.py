@@ -17,15 +17,24 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from src.interfaces.cloud import batch, share
+from src.interfaces.cloud import batch, share, workspace
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.commands import jobs
 from src.interfaces.commands._base import Command
 from src.shared.cloudtask import task_log
+
+# Round trips, not bytes: see `workspace._PARALLEL_DOWNLOADS`, measured there.
+_PARALLEL_SHARE_IO = 64
+
+# The shared-cache key for legs/. Its own, not the record's: they are different
+# subtrees of the share, pulled by different readers.
+_LEGS_KEY = "legs"
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -68,10 +77,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     config = CloudConfig.load()
     service = share.share_client(config)
-    with tempfile.TemporaryDirectory() as tmp:
-        local = Path(tmp)
-        _download_tasks(service, config.share_name, local)
-
+    with _task_records(service, config.share_name) as local:
         reconciled = None
         # Only the tasks with no terminal record are worth asking about; the module
         # decides which those are, so the criterion lives in one place rather than
@@ -124,19 +130,41 @@ def _ask_batch(config: CloudConfig, open_tasks: list[dict[str, Any]]) -> list[di
     return [_translate(task) for task in fetched if task]
 
 
+@contextmanager
+def _task_records(service: Any, share_name: str) -> Iterator[Path]:
+    """The legs/ directory, materialised locally for the duration.
+
+    Shared with other readers when a :func:`workspace.shared_record_cache` is in
+    force. `cost` is `tasks` plus arithmetic -- it invokes this very command --
+    so a console showing both used to pull all 365 records twice, 22s each. The
+    reconciled observations land in the shared tree too, which is what makes the
+    second reader's write-back free rather than merely cheap.
+    """
+    cache = workspace.active_cache()
+    if cache is None:
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp)
+            _download_tasks(service, share_name, local)
+            yield local
+        return
+    with cache.acquire(_LEGS_KEY, lambda root: _download_tasks(service, share_name, root)) as local:
+        yield local
+
+
 def _download_tasks(service: Any, share_name: str, local: Path) -> None:
     """Pull the whole legs/ directory: the join needs every record.
 
-    Concurrently -- these are ~47 tiny JSON files at ~0.195s of round trip
-    each, so serially they were 9.1s of almost pure latency against 1.1s
-    parallel.
+    Concurrently -- these are tiny JSON files at ~0.195s of round trip each, so
+    serially they were 9.1s of almost pure latency against 1.1s parallel. The
+    directory has since grown to 365 files and the width with it: latency is the
+    entire cost, so the pool is sized against round trips, not bytes.
     """
     target = task_log.tasks_dir(local)
     target.mkdir(parents=True, exist_ok=True)
     paths = list(share.walk_files(service, share_name, task_log.RECORDS_DIRNAME))
     if not paths:
         return
-    with ThreadPoolExecutor(max_workers=min(16, len(paths))) as pool:
+    with ThreadPoolExecutor(max_workers=min(_PARALLEL_SHARE_IO, len(paths))) as pool:
         list(
             pool.map(
                 lambda path: share.download_file(
@@ -152,11 +180,21 @@ def _upload_observed(service: Any, share_name: str, local: Path, explained: list
 
     The node owns the other half and must never be overwritten from here -- one
     writer per file is what makes this safe on a share with no atomic rename.
+
+    Concurrently, and only for what `reconcile` found NEW. A write is ~2.4s of
+    round trip; six of them, serially, on every read, was 14.1s spent restating
+    what the share already said.
     """
-    for task_id in explained:
+    if not explained:
+        return
+
+    def publish(task_id: str) -> None:
         name = f"{task_id}{task_log.OBSERVED_SUFFIX}"
         body = (task_log.tasks_dir(local) / name).read_text()
         share.write_text(service, share_name, f"{task_log.RECORDS_DIRNAME}/{name}", body)
+
+    with ThreadPoolExecutor(max_workers=min(_PARALLEL_SHARE_IO, len(explained))) as pool:
+        list(pool.map(publish, explained))
 
 
 def render(payload: dict[str, Any]) -> None:

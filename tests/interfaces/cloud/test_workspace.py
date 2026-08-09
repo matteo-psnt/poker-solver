@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -154,3 +155,98 @@ class TestTheWalkIsPruned:
         workspace.pull_metadata(fake, "s", tmp_path)
 
         assert not [p for p in listed if ".zarr" in p], f"descended into a snapshot: {listed}"
+
+
+class TestSharedTrees:
+    """One materialised record, shared -- and deleted only when nobody holds it.
+
+    The measured defect: five endpoints answering questions about the same
+    record each pulled their own copy. `/api/runs` and `/api/evals` pulled the
+    whole thing at 12.4s each, and a run's three detail panels pulled that run
+    three times over. It is ~120 round trips for 0.23 MB, so paying it once is
+    nearly the whole fix.
+    """
+
+    def test_a_second_reader_inside_the_ttl_does_not_rebuild(self):
+        builds = []
+
+        def build(root):
+            builds.append(root)
+            (root / "marker").write_text("x")
+
+        trees = workspace.SharedTrees(ttl=60.0)
+        with trees.acquire("record", build) as first, trees.acquire("record", build) as second:
+            assert first == second
+        assert len(builds) == 1
+        trees.close()
+
+    def test_concurrent_misses_build_once(self):
+        """Not "a duplicated read": eight panels mounting together is eight
+        simultaneous sweeps of the share, which is how throttling is met."""
+        started, release = threading.Event(), threading.Event()
+        builds = []
+
+        def build(root):
+            builds.append(root)
+            started.set()
+            release.wait(timeout=2)
+
+        trees = workspace.SharedTrees(ttl=60.0)
+        seen: list = []
+
+        def read():
+            with trees.acquire("record", build) as root:
+                seen.append(root)
+
+        threads = [threading.Thread(target=read) for _ in range(6)]
+        threads[0].start()
+        assert started.wait(timeout=2)
+        for thread in threads[1:]:
+            thread.start()
+        release.set()
+        for thread in threads:
+            thread.join(timeout=2)
+
+        assert len(builds) == 1
+        assert len(set(seen)) == 1
+        trees.close()
+
+    def test_expiry_does_not_delete_a_tree_still_being_read(self):
+        """The hazard refcounting exists for: expiry alone pulls the directory
+        out from under a reader mid-answer."""
+        trees = workspace.SharedTrees(ttl=0.0)  # every lookup is a miss
+        with trees.acquire("record", lambda root: (root / "marker").write_text("x")) as held:
+            with trees.acquire("record", lambda root: (root / "marker").write_text("x")) as fresh:
+                assert fresh != held
+            assert (held / "marker").is_file(), "the first reader's tree was deleted under it"
+        assert not held.exists(), "a released tree was never cleaned up"
+        trees.close()
+
+    def test_close_removes_what_nobody_holds(self):
+        trees = workspace.SharedTrees(ttl=60.0)
+        with trees.acquire("record", lambda root: (root / "marker").write_text("x")) as root:
+            pass
+        assert root.is_dir()
+        trees.close()
+        assert not root.exists()
+
+    def test_a_failed_build_leaves_nothing_and_frees_the_key(self):
+        trees = workspace.SharedTrees(ttl=60.0)
+
+        def explode(root):
+            raise RuntimeError("Azure said no")
+
+        with pytest.raises(RuntimeError), trees.acquire("record", explode):
+            pass
+        with trees.acquire("record", lambda root: (root / "marker").write_text("x")) as root:
+            assert (root / "marker").is_file()
+        trees.close()
+
+    def test_sharing_is_off_unless_asked_for(self):
+        """The command line must keep answering against the record as it is NOW
+        -- a run published thirty seconds ago must not be invisible to
+        `promote`."""
+        assert workspace.active_cache() is None
+        with workspace.shared_record_cache(ttl=60.0) as cache:
+            assert workspace.active_cache() is cache
+        assert workspace.active_cache() is None

@@ -255,8 +255,7 @@ def _escape(task_id: str) -> str:
     return glob.escape(task_id)
 
 
-def write_observed_record(
-    share: str | os.PathLike[str],
+def observed_record(
     *,
     task_id: str,
     job_id: str,
@@ -267,15 +266,13 @@ def write_observed_record(
     start_time: str | None = None,
     end_time: str | None = None,
     node_id: str = "",
-) -> Path:
-    """Record what Batch says happened, from the client.
+) -> dict[str, Any]:
+    """What Batch says happened, as a document, without writing it.
 
-    Its own filename, so the two sides never contend. Joins to the task's LATEST
-    attempt -- Batch describes no other.
+    Split from the write so :func:`reconcile` can ask whether the observation
+    it just made says anything the share does not already hold.
     """
-    directory = tasks_dir(share)
-    directory.mkdir(parents=True, exist_ok=True)
-    record = {
+    return {
         "source": "batch",
         "task_id": task_id,
         "job_id": job_id,
@@ -288,9 +285,44 @@ def write_observed_record(
         "node_id": node_id,
         "observed_at": _utcnow(),
     }
+
+
+def write_observed_record(share: str | os.PathLike[str], **fields: Any) -> Path:
+    """Record what Batch says happened, from the client.
+
+    Its own filename, so the two sides never contend. Joins to the task's LATEST
+    attempt -- Batch describes no other.
+    """
+    directory = tasks_dir(share)
+    directory.mkdir(parents=True, exist_ok=True)
+    task_id = fields["task_id"]
     path = directory / f"{task_id}{OBSERVED_SUFFIX}"
+    record = observed_record(**fields)
     records.write_snapshot(path, record, records.REGISTRY[f"legs/*{OBSERVED_SUFFIX}"])
     return path
+
+
+"""When an observation is worth writing down
+------------------------------------------
+``observed_at`` is stamped on every read, so byte-comparing two observations of
+the same finished task always differs -- which made every reconcile re-write and
+re-upload records that said nothing new. Measured: six unchanged observations
+re-uploaded on EVERY console poll, 14.1s of serial share writes for no
+information. A task that is still running is legitimately re-observed; one that
+finished last week is not.
+"""
+_VOLATILE_OBSERVED_FIELDS = frozenset({"observed_at", "schema_version"})
+
+
+def _says_the_same(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> bool:
+    """Whether a stored observation already carries this one's information."""
+    if existing is None:
+        return False
+
+    def substance(record: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in record.items() if k not in _VOLATILE_OBSERVED_FIELDS}
+
+    return substance(existing) == substance(fresh)
 
 
 def observed_cause(record: dict[str, Any]) -> str:
@@ -547,16 +579,23 @@ def reconcile(share: str | os.PathLike[str], tasks: Iterable[dict[str, Any]]) ->
 
     ``tasks`` is `batch.list_jobs_with_tasks` output, flattened so each task
     carries its `job`. Only unresolved tasks: otherwise the cost scales with
-    history rather than with open questions. Returns the ids newly explained.
+    history rather than with open questions.
+
+    Returns the ids whose observation is NEW -- which the caller then publishes,
+    so an observation that repeats what the share already holds costs no write.
+    A task Batch cannot explain any better than last time (one still running,
+    most of all) stays unresolved forever, and re-uploading its unchanged record
+    on every read is the difference between a poll costing nothing and costing
+    14 seconds.
     """
+    directory = tasks_dir(share)
     open_questions = set(unresolved_task_ids(share))
     explained = []
     for task in tasks:
         task_id = task.get("task")
         if not task_id or task_id not in open_questions:
             continue
-        write_observed_record(
-            share,
+        fresh = observed_record(
             task_id=task_id,
             job_id=task.get("job", ""),
             state=task.get("state") or "",
@@ -566,6 +605,14 @@ def reconcile(share: str | os.PathLike[str], tasks: Iterable[dict[str, Any]]) ->
             start_time=task.get("start_time"),
             end_time=task.get("end_time"),
             node_id=task.get("node") or "",
+        )
+        if _says_the_same(_load(directory / f"{task_id}{OBSERVED_SUFFIX}"), fresh):
+            continue
+        directory.mkdir(parents=True, exist_ok=True)
+        records.write_snapshot(
+            directory / f"{task_id}{OBSERVED_SUFFIX}",
+            fresh,
+            records.REGISTRY[f"legs/*{OBSERVED_SUFFIX}"],
         )
         explained.append(task_id)
     return explained

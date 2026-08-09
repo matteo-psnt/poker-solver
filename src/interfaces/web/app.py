@@ -22,6 +22,8 @@ and nothing depends on a background thread staying alive.
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +32,10 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.interfaces.cloud import workspace
 from src.interfaces.commands import (
     Command,
+    cancel,
     cost,
     curve,
     jobs,
@@ -51,6 +55,21 @@ from src.interfaces.web.cache import TtlCache
 # Long enough that several open tabs (or a remount) share one cloud sweep,
 # short enough that a manual refresh feels live. A sweep is 2-4s per panel.
 CACHE_TTL_SECONDS = 15.0
+
+"""Why the server materialises the record once, and this file knows about it
+--------------------------------------------------------------------------
+The memo above is per (command, arguments), so five endpoints asking five
+different questions about the SAME record each paid for their own copy of it:
+`/api/runs` and `/api/evals` pulled the whole thing (12.4s each) and a run's
+three detail panels pulled that run three times over. The work is ~120 network
+round trips for 0.23 MB -- latency, not bytes, and duplicated per endpoint.
+
+Held for longer than `CACHE_TTL_SECONDS` because it is a different thing being
+cached: the payloads are what a panel shows and should look live, the tree is
+the substrate they are all derived from. The honest bound is that a panel's age
+badge -- client fetch time -- can understate the data's age by up to this.
+"""
+RECORD_TREE_TTL_SECONDS = 45.0
 
 
 # Anchored to the repo, not to the working directory: `serve` is run from
@@ -89,6 +108,20 @@ def answer(cache: TtlCache, command: Command, **kwargs: Any) -> JSONResponse:
         return JSONResponse({"error": f"Azure did not answer: {error}"}, status_code=503)
 
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Share one materialised record between every reader, while serving.
+
+    Scoped to the server rather than switched on globally, because the command
+    line wants the opposite: it is one-shot, so it would gain nothing and would
+    lose the guarantee its readers are built on -- that an answer is against the
+    record as it is NOW. A run published thirty seconds ago must not be
+    invisible to `promote`.
+    """
+    with workspace.shared_record_cache(RECORD_TREE_TTL_SECONDS):
+        yield
+
+
 def create_app() -> FastAPI:
     """Build the application, with a memo of its own.
 
@@ -96,7 +129,7 @@ def create_app() -> FastAPI:
     one: the cache is built here and closed over, so nothing survives between
     two applications in the same process.
     """
-    app = FastAPI(title="poker-solver console", docs_url="/api/docs")
+    app = FastAPI(title="poker-solver console", docs_url="/api/docs", lifespan=_lifespan)
     cache = TtlCache(CACHE_TTL_SECONDS)
 
     @app.get("/api/pool")
@@ -142,6 +175,18 @@ def create_app() -> FastAPI:
     @app.get("/api/logs/{task_id}")
     def _log(task_id: str, lines: int = 200) -> JSONResponse:
         return answer(cache, logs.COMMAND, task=task_id, lines=lines)
+
+    # THE FIRST WRITE THAT IS NOT ABOUT THE CONSOLE'S OWN BOX.
+    #
+    # Still one `Command.invoke`, and that rule matters MORE for a write than a
+    # read: the moment a button does something `poker-solver` cannot, the console
+    # has behaviour that is neither scriptable nor reproducible, which is exactly
+    # what the previous browser UI died of. So there is no "cancel all", no
+    # retry-then-cancel -- if a composite is wanted, it becomes a command first
+    # and a button second.
+    @app.post("/api/tasks/{job_id}/{task_id}/cancel")
+    def _cancel(job_id: str, task_id: str) -> JSONResponse:
+        return answer(TtlCache(0.0), cancel.COMMAND, job=job_id, task=task_id)
 
     # These three ARE commands, so they go through `answer` like the rest -- the
     # button and `poker-solver serve-box` are then the same code path, which is
