@@ -269,18 +269,24 @@ RECORD_KEY = "record"
 
 @contextmanager
 def shared_record_cache(ttl: float) -> Iterator[SharedTrees]:
-    """For the duration, materialising the record is memoised across readers."""
+    """For the duration, materialising the record is memoised across readers.
+
+    NESTS rather than refusing. Two applications in one process is something
+    `create_app` explicitly promises -- a test and its subject, most of all --
+    and each brings its own lifespan; refusing the second would raise a
+    RuntimeError from inside a lifespan, which is a confusing place to meet one.
+    The inner cache shadows the outer for its duration and takes its own trees
+    with it, so neither can serve the other's answers.
+    """
     global _ACTIVE
     cache = SharedTrees(ttl=ttl)
     with _ACTIVE_LOCK:
-        if _ACTIVE is not None:
-            raise RuntimeError("a shared record cache is already active")
-        _ACTIVE = cache
+        previous, _ACTIVE = _ACTIVE, cache
     try:
         yield cache
     finally:
         with _ACTIVE_LOCK:
-            _ACTIVE = None
+            _ACTIVE = previous
         cache.close()
 
 

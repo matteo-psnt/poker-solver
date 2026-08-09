@@ -250,6 +250,20 @@ class TestAnObservationIsOnlyWrittenWhenItSaysSomethingNew:
 
         assert path.read_text() == before
 
+    def test_two_readers_of_one_shared_tree_publish_it_once(self, tmp_path):
+        """`/api/tasks` and `/api/cost` are separate cache keys answering the
+        same page, so they run at once and are handed ONE legs tree. Two of them
+        writing `<task>.observed.json` to a share with no atomic rename breaks
+        the one-writer-per-file rule that makes writing there safe at all.
+        """
+        _node(tmp_path, "vanished", "started")
+        observation = [{"task": "vanished", "job": "j", "state": "completed", "result": "failure"}]
+
+        first = task_log.reconcile(tmp_path, observation)
+        second = task_log.reconcile(tmp_path, observation)
+
+        assert (first, second) == (["vanished"], []), "both readers published the same record"
+
     def test_news_is_still_written(self, tmp_path):
         """The property this must not cost: a task that has since FINISHED is a
         different observation, and losing it would leave a death unexplained."""

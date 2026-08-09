@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -35,6 +36,11 @@ _PARALLEL_SHARE_IO = 64
 # The shared-cache key for legs/. Its own, not the record's: they are different
 # subtrees of the share, pulled by different readers.
 _LEGS_KEY = "legs"
+
+# Held across deciding what is new AND publishing it -- see `run`. Module-level
+# because the tree it protects is too: readers sharing one legs directory are
+# exactly the callers that must not both write to it.
+_RECONCILE_LOCK = threading.Lock()
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -84,8 +90,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         # being re-derived from a rendered table.
         open_tasks = task_log.unresolved_tasks(local)
         if not args.skip_reconcile and open_tasks:
-            explained = task_log.reconcile(local, _ask_batch(config, open_tasks))
-            _upload_observed(service, config.share_name, local, explained)
+            observed = _ask_batch(config, open_tasks)
+            # Asking Batch is the slow half and overlaps freely; deciding what is
+            # NEW and publishing it does not. `/api/tasks` and `/api/cost` are
+            # separate cache keys answering the same page, so they run at once
+            # and are handed ONE legs tree -- and two of them writing
+            # `<task>.observed.json` to a share with no atomic rename breaks the
+            # one-writer-per-file rule that makes writing there safe at all.
+            # Serialised, the second sees the first's record and has nothing to
+            # say, which is also why this is not a bottleneck.
+            with _RECONCILE_LOCK:
+                explained = task_log.reconcile(local, observed)
+                _upload_observed(service, config.share_name, local, explained)
             reconciled = len(explained)
 
         return _result(task_log.read_tasks(local), reconciled, args.limit)

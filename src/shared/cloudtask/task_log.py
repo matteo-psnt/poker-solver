@@ -91,6 +91,29 @@ TERMINAL_CAUSES = frozenset(
     }
 )
 
+"""Causes that mean a node is committed RIGHT NOW
+-------------------------------------------------
+Batch's own state strings, lowercased by ``observed_cause``. Not-terminal is
+NOT the same as live: ``unresolved`` is what a task gets when the node wrote a
+start, never wrote an end, and Batch has nothing to say about it either -- which
+covers a task that is running and a task that died without stamping an end, and
+the record genuinely cannot tell them apart.
+
+That distinction has to be drawn somewhere, because anything reading an open
+interval has to decide whether to run it to ``now``. Doing that on
+not-terminal credited four attempts abandoned on 2026-08-04 with 455 of the
+718 node-hours the cost screen reported, growing by four hours per elapsed
+hour. Only a live cause is positive evidence the clock is still running.
+
+``active`` is deliberately absent: a task waiting for a node has no
+``started_at`` yet, so it contributes nothing either way, and including it would
+invite crediting queue time as node time.
+"""
+CAUSE_RUNNING = "running"
+CAUSE_PREPARING = "preparing"
+
+LIVE_CAUSES = frozenset({CAUSE_RUNNING, CAUSE_PREPARING})
+
 
 def _utcnow() -> str:
     return datetime.now(UTC).isoformat()
@@ -287,17 +310,46 @@ def observed_record(
     }
 
 
-def write_observed_record(share: str | os.PathLike[str], **fields: Any) -> Path:
+def write_observed_record(
+    share: str | os.PathLike[str],
+    *,
+    task_id: str,
+    job_id: str,
+    state: str,
+    result: str | None = None,
+    exit_code: int | None = None,
+    failure: dict[str, Any] | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    node_id: str = "",
+    only_if_new: bool = False,
+) -> Path | None:
     """Record what Batch says happened, from the client.
 
     Its own filename, so the two sides never contend. Joins to the task's LATEST
     attempt -- Batch describes no other.
+
+    ``only_if_new`` answers None when the stored record already says this, so a
+    caller that publishes what changed has nothing to publish. See
+    :data:`_VOLATILE_OBSERVED_FIELDS` for why "already says this" cannot be a
+    byte comparison.
     """
     directory = tasks_dir(share)
-    directory.mkdir(parents=True, exist_ok=True)
-    task_id = fields["task_id"]
     path = directory / f"{task_id}{OBSERVED_SUFFIX}"
-    record = observed_record(**fields)
+    record = observed_record(
+        task_id=task_id,
+        job_id=job_id,
+        state=state,
+        result=result,
+        exit_code=exit_code,
+        failure=failure,
+        start_time=start_time,
+        end_time=end_time,
+        node_id=node_id,
+    )
+    if only_if_new and _says_the_same(_load(path), record):
+        return None
+    directory.mkdir(parents=True, exist_ok=True)
     records.write_snapshot(path, record, records.REGISTRY[f"legs/*{OBSERVED_SUFFIX}"])
     return path
 
@@ -588,14 +640,14 @@ def reconcile(share: str | os.PathLike[str], tasks: Iterable[dict[str, Any]]) ->
     on every read is the difference between a poll costing nothing and costing
     14 seconds.
     """
-    directory = tasks_dir(share)
     open_questions = set(unresolved_task_ids(share))
     explained = []
     for task in tasks:
         task_id = task.get("task")
         if not task_id or task_id not in open_questions:
             continue
-        fresh = observed_record(
+        written = write_observed_record(
+            share,
             task_id=task_id,
             job_id=task.get("job", ""),
             state=task.get("state") or "",
@@ -605,14 +657,8 @@ def reconcile(share: str | os.PathLike[str], tasks: Iterable[dict[str, Any]]) ->
             start_time=task.get("start_time"),
             end_time=task.get("end_time"),
             node_id=task.get("node") or "",
+            only_if_new=True,
         )
-        if _says_the_same(_load(directory / f"{task_id}{OBSERVED_SUFFIX}"), fresh):
-            continue
-        directory.mkdir(parents=True, exist_ok=True)
-        records.write_snapshot(
-            directory / f"{task_id}{OBSERVED_SUFFIX}",
-            fresh,
-            records.REGISTRY[f"legs/*{OBSERVED_SUFFIX}"],
-        )
-        explained.append(task_id)
+        if written is not None:
+            explained.append(task_id)
     return explained
