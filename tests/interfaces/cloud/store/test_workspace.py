@@ -218,6 +218,71 @@ class TestSharedTrees:
         assert len(set(seen)) == 1
         trees.close()
 
+    def test_a_reader_during_a_rebuild_is_served_stale_rather_than_blocked(self):
+        """The measured defect this exists for.
+
+        Discovery alone is ~5.4s against the share, so a reader that WAITS for
+        an in-flight rebuild pays a multi-second sweep for freshness it did not
+        ask for. The builder already holds the expired tree, so handing it out
+        costs one refcount and no round trips.
+        """
+        started, release = threading.Event(), threading.Event()
+
+        def slow_build(root, _previous):
+            (root / "marker").write_text("x")
+            started.set()
+            release.wait(timeout=2)
+
+        trees = workspace.SharedTrees(ttl=0.0, stale_grace=60.0)
+        with trees.acquire("record", _mark) as first:
+            pass
+
+        builder = threading.Thread(target=lambda: _read(trees, slow_build))
+        builder.start()
+        assert started.wait(timeout=2), "the rebuild never began"
+
+        # The rebuild is in flight and will not finish until `release`. A reader
+        # arriving now must come back with the OLD tree, not hang on the new one.
+        with trees.acquire("record", _never_called) as during:
+            assert during == first, "served a different tree than the expired one"
+        release.set()
+        builder.join(timeout=2)
+        trees.close()
+
+    def test_a_stale_tree_past_the_grace_blocks_instead_of_answering(self):
+        """A build that keeps failing must be REPORTED, not answered from an
+        ever-older tree. Same bound as the payload cache one layer up."""
+        started, release = threading.Event(), threading.Event()
+
+        def slow_build(root, _previous):
+            (root / "marker").write_text("x")
+            started.set()
+            release.wait(timeout=2)
+
+        # ttl and grace both zero: the previous tree is already past its welcome.
+        trees = workspace.SharedTrees(ttl=0.0, stale_grace=0.0)
+        with trees.acquire("record", _mark):
+            pass
+
+        builder = threading.Thread(target=lambda: _read(trees, slow_build))
+        builder.start()
+        assert started.wait(timeout=2)
+
+        waited = threading.Event()
+
+        def late_reader():
+            with trees.acquire("record", _mark):
+                waited.set()
+
+        thread = threading.Thread(target=late_reader)
+        thread.start()
+        assert not waited.wait(timeout=0.3), "answered from a tree past its grace"
+        release.set()
+        thread.join(timeout=2)
+        builder.join(timeout=2)
+        assert waited.is_set()
+        trees.close()
+
     def test_expiry_does_not_delete_a_tree_still_being_read(self):
         """The hazard refcounting exists for: expiry alone pulls the directory
         out from under a reader mid-answer."""
@@ -367,3 +432,12 @@ class TestIncrementalRefresh:
         workspace.pull_metadata(fake, "s", fresh, previous=stale)
 
         assert (fresh / "run-a" / "evals" / "slug1.json").read_text() != "STALE"
+
+
+def _read(trees, build):
+    with trees.acquire("record", build):
+        pass
+
+
+def _never_called(root, _previous):
+    raise AssertionError("a reader served from the stale tree must not build")

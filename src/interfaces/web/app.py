@@ -94,6 +94,14 @@ VIEW_STALE_GRACE_SECONDS = 120.0
 # cached: the payloads are what a panel shows, the tree is what they derive from.
 RECORD_TREE_TTL_SECONDS = 45.0
 
+# How long past that TTL an expired tree still answers, while its replacement is
+# being built. Discovery alone is ~5.4s against the share (measured 08-31: 1.3s
+# to list 300 runs, 4.0s to walk them), and the etag fix did nothing about it --
+# it removed re-DOWNLOADING, not re-walking. So without this every reader that
+# arrives during a rebuild blocks on a sweep it did not need. Generous because
+# the record is runs that take hours: a minute-old answer is not a wrong one.
+RECORD_TREE_STALE_GRACE_SECONDS = 90.0
+
 
 # Anchored to the repo, not to the working directory: `serve` is run from
 # wherever the operator happens to be, and a CWD-relative path would report a
@@ -291,7 +299,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     record as it is NOW. A run published thirty seconds ago must not be
     invisible to the next reader.
     """
-    with workspace.shared_record_cache(RECORD_TREE_TTL_SECONDS):
+    with workspace.shared_record_cache(RECORD_TREE_TTL_SECONDS, RECORD_TREE_STALE_GRACE_SECONDS):
         yield
 
 

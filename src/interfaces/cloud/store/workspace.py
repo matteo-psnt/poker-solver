@@ -269,9 +269,19 @@ class SharedTrees:
         A tree is deleted when it expires AND nobody holds it. Expiry alone
         would pull the directory out from under a reader mid-answer; never
         deleting would leak one tree per refresh for the life of the server.
+    stale-while-revalidate
+        A reader arriving during a rebuild is handed the EXPIRED tree rather
+        than blocked on the new one, for ``stale_grace`` past the TTL. Discovery
+        alone is ~5.4s against the share (measured: 1.3s to list 300 runs, 4.0s
+        to walk them), so blocking made roughly one page load in six pay a
+        multi-second wait for data it did not need to be that fresh.
     """
 
     ttl: float
+    # Mirrors `TtlCache`'s `serve_stale_for` one layer up, and for the same
+    # reason: a refresh that keeps failing must reach the caller as a failure at
+    # a bounded age rather than ageing silently behind a badge.
+    stale_grace: float = 0.0
     _lock: threading.Condition = field(default_factory=threading.Condition, repr=False)
     _trees: dict[str, _Tree] = field(default_factory=dict, repr=False)
     _building: set[str] = field(default_factory=set, repr=False)
@@ -300,8 +310,16 @@ class SharedTrees:
                     previous.holders += 1
                     return previous
                 if key in self._building:
-                    # Someone else is already paying for this. Waiting costs the
-                    # remainder of ONE sweep; racing costs a whole extra one.
+                    # Someone else is already paying for this. Racing them costs
+                    # a whole extra sweep, so never build here -- but do not WAIT
+                    # for them either while a readable tree is in hand: the
+                    # builder already holds `previous`, so serving it costs one
+                    # more refcount and no round trips. Bounded, because a build
+                    # that keeps failing must eventually be reported rather than
+                    # answered from an ever-older tree.
+                    if previous is not None and self._within_grace(previous):
+                        previous.holders += 1
+                        return previous
                     self._lock.wait()
                     continue
                 if previous is not None:
@@ -333,6 +351,10 @@ class SharedTrees:
             self._building.discard(key)
             self._lock.notify_all()
             return fresh
+
+    def _within_grace(self, tree: _Tree) -> bool:
+        """Whether an EXPIRED tree is still young enough to answer from."""
+        return time.monotonic() - tree.born < self.ttl + self.stale_grace
 
     def _release(self, tree: _Tree | None) -> None:
         """Let go of the hold a build took on its predecessor. Caller holds the lock."""
@@ -369,7 +391,7 @@ RECORD_KEY = "record"
 
 
 @contextmanager
-def shared_record_cache(ttl: float) -> Iterator[SharedTrees]:
+def shared_record_cache(ttl: float, stale_grace: float = 0.0) -> Iterator[SharedTrees]:
     """For the duration, materialising the record is memoised across readers.
 
     NESTS rather than refusing. Two applications in one process is something
@@ -380,7 +402,7 @@ def shared_record_cache(ttl: float) -> Iterator[SharedTrees]:
     with it, so neither can serve the other's answers.
     """
     global _ACTIVE
-    cache = SharedTrees(ttl=ttl)
+    cache = SharedTrees(ttl=ttl, stale_grace=stale_grace)
     with _ACTIVE_LOCK:
         previous, _ACTIVE = _ACTIVE, cache
     try:
