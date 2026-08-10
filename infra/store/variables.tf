@@ -44,3 +44,29 @@ variable "share_quota_gb" {
   type        = number
   default     = 4096
 }
+
+variable "postgres_server_name" {
+  description = "Globally unique across Azure; change it if creation fails with a name-taken error."
+  type        = string
+  default     = "poker-solver-record"
+}
+
+variable "postgres_admin_user" {
+  type    = string
+  default = "solver"
+}
+
+variable "postgres_database" {
+  type    = string
+  default = "record"
+}
+
+variable "operator_ip" {
+  description = <<-EOT
+    The laptop's public address, allowed through the server firewall so the
+    console and the CLI can read. A home ISP rotates it; when psql starts
+    TIMING OUT rather than refusing, this is stale. `null` omits the rule.
+  EOT
+  type        = string
+  default     = "189.217.93.232"
+}
