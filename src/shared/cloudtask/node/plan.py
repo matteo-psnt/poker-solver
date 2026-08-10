@@ -12,7 +12,7 @@ Deliberately does NOT import the command layer. ``.importlinter`` forbids
 when this runs anyway. The argv is emitted as data; the *test* imports
 ``COMMANDS`` and checks every flag against the real parser.
 
-``src/interfaces/cloud/spec.py`` writes this environment. The two files are the
+``src/interfaces/cloud/tasks/spec.py`` writes this environment. The two files are the
 same contract from opposite ends, and ``test_plan.py`` pins them together.
 """
 

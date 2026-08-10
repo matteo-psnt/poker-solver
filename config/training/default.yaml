@@ -2,7 +2,7 @@
 # Heads-Up No-Limit Hold'em Monte Carlo CFR Solver
 #
 # This file shows ALL configurable options with explanations.
-# All values are COMMENTED OUT to use Python defaults from src/shared/config.py
+# All values are COMMENTED OUT to use Python defaults from src/shared/config/schema.py
 # Uncomment and modify only what you need to change.
 
 # ===== Game Configuration =====

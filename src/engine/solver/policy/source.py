@@ -6,7 +6,7 @@ the storage layout meant editing every scorer. This seam is why it didn't.
 
 The seam is deliberately ``(state, bucket) -> InfoSet`` rather than
 ``-> distribution``: consumers already own the filtering and fallback policy via
-``policy_lookup.blueprint_action_distribution``, and duplicating that decision
+``policy.lookup.blueprint_action_distribution``, and duplicating that decision
 per backend is exactly how the "every consumer picks its own restriction"
 problem that module was written to end would come back.
 """

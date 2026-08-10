@@ -106,7 +106,7 @@ export function shortId(id: string, head = 18, tail = 8): string {
  * discriminator are the two parts that identify a run; the timestamp between
  * them is the part nobody reads.
  *
- * Mirrors `run_token` in `src/interfaces/cloud/spec.py` — the SAME rule that
+ * Mirrors `run_token` in `src/interfaces/cloud/tasks/spec.py` — the SAME rule that
  * now builds task ids — so what the console shows and what Batch shows are the
  * same words. Always pair it with the full id in a `title`: this is a display
  * form, never an identifier to copy.
