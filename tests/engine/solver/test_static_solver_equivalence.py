@@ -23,7 +23,7 @@ import pytest
 from src.core.actions.action_model import ActionModel
 from src.core.game.state import Street
 from src.engine.solver.betting_tree import build_betting_tree
-from src.engine.solver.infoset import InfoSet
+from src.engine.solver.infoset.model import InfoSet
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import (
     REGRET_DTYPE,

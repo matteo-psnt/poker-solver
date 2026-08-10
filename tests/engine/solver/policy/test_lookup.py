@@ -13,8 +13,8 @@ import numpy as np
 from src.core.game.actions import bet, call, fold
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState, Street
-from src.engine.solver.infoset import InfoSet, InfoSetKey
-from src.engine.solver.policy_lookup import blueprint_action_distribution, filter_stored_actions
+from src.engine.solver.infoset.model import InfoSet, InfoSetKey
+from src.engine.solver.policy.lookup import blueprint_action_distribution, filter_stored_actions
 
 
 class _StubRules:

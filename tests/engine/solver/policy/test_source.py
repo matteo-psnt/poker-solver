@@ -19,14 +19,14 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import build_betting_tree
-from src.engine.solver.infoset_index import (
+from src.engine.solver.infoset.index import (
     NUM_PREFLOP_HANDS,
     bucket_of,
     preflop_hand_index,
     preflop_hand_string_at,
 )
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
-from src.engine.solver.policy_source import TreePolicySource
+from src.engine.solver.policy.source import TreePolicySource
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from tests.test_helpers import make_test_config
 

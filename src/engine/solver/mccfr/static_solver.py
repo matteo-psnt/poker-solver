@@ -35,10 +35,10 @@ from src.core.game.actions import Action
 from src.core.game.rules import GameRules
 from src.core.game.state import GameState
 from src.engine.solver.betting_tree import BettingTree, build_betting_tree
-from src.engine.solver.infoset import InfoSet
-from src.engine.solver.infoset_index import bucket_of
+from src.engine.solver.infoset.index import bucket_of
+from src.engine.solver.infoset.model import InfoSet
 from src.engine.solver.mccfr import policy
-from src.engine.solver.policy_source import PolicySource, TreePolicySource
+from src.engine.solver.policy.source import PolicySource, TreePolicySource
 from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.static_array import StaticArrayStorage

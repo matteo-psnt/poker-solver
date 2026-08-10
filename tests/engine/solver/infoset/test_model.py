@@ -5,7 +5,7 @@ import pytest
 
 from src.core.game.actions import bet, call, fold
 from src.core.game.state import Street
-from src.engine.solver.infoset import InfoSet, InfoSetKey
+from src.engine.solver.infoset.model import InfoSet, InfoSetKey
 
 
 class TestInfoSetKey:

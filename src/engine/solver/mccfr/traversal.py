@@ -9,13 +9,13 @@ import numpy as np
 
 from src.core.game.actions import Action
 from src.core.game.state import GameState
-from src.engine.solver.infoset import InfoSet
+from src.engine.solver.infoset.model import InfoSet
 from src.engine.solver.numba_ops import (
     WEIGHTING_CODES,
     apply_regret_updates,
     compute_dcfr_strategy_weight,
 )
-from src.engine.solver.policy_lookup import filter_stored_actions
+from src.engine.solver.policy.lookup import filter_stored_actions
 
 if TYPE_CHECKING:
     from .solver import MCCFRSolver

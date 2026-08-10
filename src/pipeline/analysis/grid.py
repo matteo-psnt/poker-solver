@@ -40,8 +40,8 @@ from src.engine.search.range_inference import (
     NUM_COMBOS,
     replace_actor_hole_cards,
 )
-from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.lookup import blueprint_action_distribution
+from src.engine.solver.policy.source import ScorableBlueprint
 from src.pipeline.analysis.paths import PathError, ReplayedNode, encode_action
 
 

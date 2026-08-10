@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 
 from src.core.game.actions import Action
-from src.engine.solver.infoset import InfoSet, InfoSetKey
+from src.engine.solver.infoset.model import InfoSet, InfoSetKey
 from src.engine.solver.storage.base import Storage
 
 

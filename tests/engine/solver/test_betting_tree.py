@@ -20,7 +20,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import NUM_PREFLOP_HANDS, BettingTree
-from src.engine.solver.infoset_index import (
+from src.engine.solver.infoset.index import (
     infoset_row,
     preflop_hand_index,
 )

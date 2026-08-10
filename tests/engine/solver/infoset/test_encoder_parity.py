@@ -5,8 +5,8 @@ from dataclasses import replace
 from src.core.game.actions import bet, call
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, Street
-from src.engine.solver.infoset import InfoSetKey
-from src.engine.solver.infoset_encoder import encode_infoset_key
+from src.engine.solver.infoset.encoder import encode_infoset_key
+from src.engine.solver.infoset.model import InfoSetKey
 from tests.test_helpers import DummyCardAbstraction
 
 _RANKS = "AKQJT98765432"

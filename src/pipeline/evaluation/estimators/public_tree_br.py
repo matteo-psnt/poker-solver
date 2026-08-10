@@ -50,10 +50,10 @@ from src.core.game.actions import Action
 from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS, blocked_combos
 from src.engine.search.subgame_cfr import RunoutEvaluator, nonblocking_mass
-from src.engine.solver.infoset_encoder import get_spr_bucket
-from src.engine.solver.infoset_index import preflop_hand_index
-from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.infoset.encoder import get_spr_bucket
+from src.engine.solver.infoset.index import preflop_hand_index
+from src.engine.solver.policy.lookup import blueprint_action_distribution
+from src.engine.solver.policy.source import ScorableBlueprint
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.shared.log import configure_logging
 

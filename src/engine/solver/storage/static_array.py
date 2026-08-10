@@ -40,7 +40,7 @@ from multiprocessing import shared_memory
 import numpy as np
 
 from src.engine.solver.betting_tree import BettingTree
-from src.engine.solver.infoset import InfoSet
+from src.engine.solver.infoset.model import InfoSet
 
 logger = logging.getLogger(__name__)
 

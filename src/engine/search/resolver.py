@@ -23,8 +23,8 @@ from src.engine.search.range_inference import (
 )
 from src.engine.search.subgame_cfr import solve_subgame
 from src.engine.search.tree_builder import build_local_tree
-from src.engine.solver.policy_lookup import blueprint_action_distribution
-from src.engine.solver.policy_source import ScorableBlueprint
+from src.engine.solver.policy.lookup import blueprint_action_distribution
+from src.engine.solver.policy.source import ScorableBlueprint
 from src.shared.config import ResolverConfig
 from src.shared.numeric import NORMALIZE_EPS
 
