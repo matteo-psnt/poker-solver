@@ -88,8 +88,18 @@ LOOSE_BESIDE_PACKAGES: dict[str, tuple[str, ...]] = {
         "public_tree_br.py",
         "resolver_match.py",
     ),
-    # Same rule: `scoring/` is five modules, these are one each.
-    "pipeline.services": ("bucketing.py", "experiments.py", "runs.py", "static_training.py"),
+    # Same rule: `scoring/` is five modules, these are one each. `warm_start`
+    # and `vector_blueprint` are two more of the same: each is one training
+    # service, peers of `static_training` rather than of anything inside
+    # `scoring/`, which measures a finished blueprint rather than building one.
+    "pipeline.services": (
+        "bucketing.py",
+        "experiments.py",
+        "runs.py",
+        "static_training.py",
+        "vector_blueprint.py",
+        "warm_start.py",
+    ),
     "pipeline.training": ("static_parallel.py",),
     # `shared/` IS the flat one -- a module per concern, deliberately small, so
     # that anything may import exactly what it needs, and each of these has 3-6
@@ -153,6 +163,7 @@ DUPLICATE_BASENAMES: dict[str, tuple[str, ...]] = {
     "resolver.py": ("engine/search/resolver.py", "pipeline/abstraction/resolver.py"),
     "runs.py": ("interfaces/commands/runs.py", "pipeline/services/runs.py"),
     "serve_box.py": ("interfaces/cloud/serve_box.py", "interfaces/commands/serve_box.py"),
+    "warm_start.py": ("interfaces/commands/warm_start.py", "pipeline/services/warm_start.py"),
 }
 
 

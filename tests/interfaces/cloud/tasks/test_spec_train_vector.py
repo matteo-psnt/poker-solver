@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.interfaces.cloud import spec
+from src.interfaces.cloud.tasks import spec
 from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
 
