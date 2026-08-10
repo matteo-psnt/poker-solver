@@ -12,27 +12,15 @@ group by concern only:
     Readers over the run directory — what exists, what state it is in.
 ``static_training``
     Start a run over the static tree, or continue one to an absolute target.
-``abstraction``
+``bucketing``
     Produce a card abstraction, or measure one at several bucket counts.
-``evaluation``
+``scoring``
     Score a run; one entrypoint per estimator, plus the record orchestrator.
 ``experiments``
     Read the experiment record — curves, baselines, arm-vs-control attribution.
 """
 
-from src.pipeline.services.abstraction import precompute_abstraction, sweep_bucket_counts
-from src.pipeline.services.evaluation import (
-    BLUEPRINT_MATCH_ESTIMATOR_LABEL,
-    EXACT_BR_ESTIMATOR_LABEL,
-    LBR_ESTIMATOR_LABEL,
-    EvaluationOutput,
-    evaluate_and_record,
-    evaluate_blueprint_match,
-    evaluate_run_exact_br,
-    evaluate_run_lbr,
-    evaluate_run_resolver_gate,
-    record_blueprint_match,
-)
+from src.pipeline.services.bucketing import precompute_abstraction, sweep_bucket_counts
 from src.pipeline.services.experiments import (
     CONTROL_ARM,
     DEFAULT_BASELINE_PATH,
@@ -54,6 +42,18 @@ from src.pipeline.services.runs import (
     describe_runs,
     list_runs,
     load_run_metadata,
+)
+from src.pipeline.services.scoring import (
+    BLUEPRINT_MATCH_ESTIMATOR_LABEL,
+    EXACT_BR_ESTIMATOR_LABEL,
+    LBR_ESTIMATOR_LABEL,
+    EvaluationOutput,
+    evaluate_and_record,
+    evaluate_blueprint_match,
+    evaluate_run_exact_br,
+    evaluate_run_lbr,
+    evaluate_run_resolver_gate,
+    record_blueprint_match,
 )
 from src.pipeline.services.static_training import StaticTrainingOutput, train_static
 from src.pipeline.training.run_tracker import ExperimentTag

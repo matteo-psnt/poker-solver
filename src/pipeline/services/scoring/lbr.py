@@ -14,13 +14,13 @@ from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
 )
 from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.evaluation.units import pair_mean_mbb
-from src.pipeline.services.evaluation._shared import (
+from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
+from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
     _effective_abstraction_hash,
     _load_blueprint,
     build_blueprint_for,
 )
-from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
 
 logger = logging.getLogger(__name__)
 

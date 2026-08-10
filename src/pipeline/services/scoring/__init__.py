@@ -19,25 +19,25 @@ from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
     LBRConfig,
 )
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
-from src.pipeline.services.evaluation._shared import (
+from src.pipeline.services.runs import load_run_metadata
+from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
     build_blueprint_for,
 )
-from src.pipeline.services.evaluation.exact_br import (
+from src.pipeline.services.scoring.exact_br import (
     EXACT_BR_ESTIMATOR_LABEL,
     evaluate_run_exact_br,
 )
-from src.pipeline.services.evaluation.lbr import (
+from src.pipeline.services.scoring.lbr import (
     LBR_ESTIMATOR_LABEL,
     evaluate_run_lbr,
 )
-from src.pipeline.services.evaluation.matches import (
+from src.pipeline.services.scoring.matches import (
     BLUEPRINT_MATCH_ESTIMATOR_LABEL,
     evaluate_blueprint_match,
     evaluate_run_resolver_gate,
     record_blueprint_match,
 )
-from src.pipeline.services.runs import load_run_metadata
 from src.shared import records
 
 PROGRESS_ARTIFACT = "evaluate-progress.json"
