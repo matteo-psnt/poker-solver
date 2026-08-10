@@ -11,6 +11,12 @@
 # kill every running task, including other sessions'. A probe on a live node
 # (`net-probe-192720-14202`) measured outbound TCP to 5432 as OPEN, so the
 # public path is proven to work from exactly where it needs to.
+#
+# AND IT IS A ONE-WAY DOOR, which the first draft of this file got wrong by
+# suggesting VNet could be revisited later. Azure: "We currently don't support
+# moving in and out of a virtual network." Changing our mind means a NEW server
+# and a dump/restore, not a reconfiguration. Choosing public access here is
+# therefore a decision about the life of this server.
 
 resource "random_password" "postgres" {
   length  = 32
@@ -34,6 +40,14 @@ resource "azurerm_postgresql_flexible_server" "record" {
   # locally at 3,000 runs / 2M events / 759 MB). General Purpose would be paying
   # for headroom nothing has asked for; this SKU is one `terraform apply` away
   # from B2ms or a GP tier if that stops being true.
+  #
+  # Its connection ceiling is the SKU's own: B2s defaults to max_connections=429,
+  # of which 414 are user connections. That is ten times the 40-node pool cap, so
+  # nothing here sets the parameter -- an override could only LOWER it, and an
+  # earlier draft of this file did exactly that by assuming the default was small.
+  #
+  # Note also that BURSTABLE SKUs have no built-in PgBouncer. If pooling is ever
+  # needed it means moving to General Purpose, not enabling a feature.
   sku_name   = "B_Standard_B2s"
   storage_mb = 32768
   # Grows rather than failing writes at the ceiling. The record is 26 MB today,
@@ -69,16 +83,6 @@ resource "azurerm_postgresql_flexible_server_configuration" "require_tls" {
   value     = "ON"
 }
 
-# A node opens one connection per task and holds it for the task's lifetime, so
-# the ceiling that matters is concurrent TASKS, not workers. B2s defaults to a
-# low max_connections; this lifts it well clear of the 40-node pool cap plus the
-# console plus headroom for a fan-out.
-resource "azurerm_postgresql_flexible_server_configuration" "max_connections" {
-  name      = "max_connections"
-  server_id = azurerm_postgresql_flexible_server.record.id
-  value     = "200"
-}
-
 # Batch nodes leave through a SHARED SNAT address and have NO public IP of their
 # own (measured by the same probe), so there is no node address to allow. This
 # is the only rule that can admit them.
@@ -86,8 +90,8 @@ resource "azurerm_postgresql_flexible_server_configuration" "max_connections" {
 # It is broader than an IP allowlist and worth being honest about: it admits
 # connections from any Azure resource, not only ours. What stands between that
 # and the data is TLS plus a 32-character generated password. The tighter
-# version is VNet integration, which costs a full pool recreation -- revisit it
-# the next time the pools are being replaced for another reason anyway.
+# version is VNet integration, which costs a full pool recreation AND a new
+# server (see the one-way door above) -- so it is a migration, not a tweak.
 resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services" {
   name             = "allow-azure-services"
   server_id        = azurerm_postgresql_flexible_server.record.id
