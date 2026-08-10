@@ -30,9 +30,10 @@ from __future__ import annotations
 import os
 import subprocess
 from functools import lru_cache
-from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+from src.shared import repo
+
+_REPO_ROOT = repo.ROOT
 
 """Set by ``TaskSpec.environment()`` on the submitting machine, and inherited all
 the way down: Batch sets it on the task, ``infra/run_task.py`` inherits it, and

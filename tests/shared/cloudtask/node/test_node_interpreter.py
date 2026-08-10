@@ -26,7 +26,9 @@ import subprocess
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
+from src.shared import repo
+
+REPO_ROOT = repo.ROOT
 ENTRY_POINT = REPO_ROOT / "infra" / "run_task.py"
 
 

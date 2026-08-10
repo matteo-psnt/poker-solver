@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from src.shared import repo
 from src.shared.config import Config, GameConfig, SolverConfig, SystemConfig
 from src.shared.config_loader import load_config
 
@@ -202,7 +203,7 @@ training:
 
     def test_all_training_profiles_load(self):
         """All repository training YAML profiles should parse with strict schema."""
-        config_dir = Path(__file__).resolve().parents[3] / "config" / "training"
+        config_dir = repo.ROOT / "config" / "training"
         profile_paths = sorted(config_dir.glob("*.yaml"))
 
         assert profile_paths, "No training config files found"

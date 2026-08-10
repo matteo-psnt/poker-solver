@@ -19,7 +19,9 @@ import pathlib
 
 import pytest
 
-PACKAGE = pathlib.Path(__file__).resolve().parents[3] / "src" / "shared" / "cloudtask"
+from src.shared import repo
+
+PACKAGE = repo.SRC / "shared" / "cloudtask"
 
 """The only first-party modules the node may reach outside this package.
 

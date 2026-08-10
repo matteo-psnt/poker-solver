@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from src.shared import cache
+from src.shared import cache, repo
 
-WORKING_TREE = Path(__file__).resolve().parents[2]
+WORKING_TREE = repo.ROOT
 
 
 class TestResolution:

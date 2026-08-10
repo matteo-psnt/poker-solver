@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import pathlib
 import subprocess
 import sys
 
 import pytest
 
-from src.shared import records
+from src.shared import records, repo
 from src.shared.cloudtask import task_log
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+REPO_ROOT = repo.ROOT
 
 
 def _node(share, task_id, event, cause=None, **kw):

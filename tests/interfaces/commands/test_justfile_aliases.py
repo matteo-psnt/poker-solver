@@ -12,14 +12,14 @@ the moment someone reaches for the alias.
 
 from __future__ import annotations
 
-import pathlib
 import re
 
 import pytest
 
 from src.interfaces.commands import COMMANDS
+from src.shared import repo
 
-JUSTFILE = pathlib.Path(__file__).resolve().parents[3] / "justfile"
+JUSTFILE = repo.ROOT / "justfile"
 
 # The passthrough form: `uv run poker-solver <cmd>`. `{{args}}` is the
 # `cli` escape hatch, whose subcommand comes from the caller and cannot be

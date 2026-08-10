@@ -51,6 +51,7 @@ from src.interfaces.commands import (
 from src.interfaces.errors import CommandError
 from src.interfaces.web import blueprint_proxy
 from src.interfaces.web.cache import TtlCache
+from src.shared import repo
 
 # Long enough that several open tabs (or a remount) share one cloud sweep,
 # short enough that a manual refresh feels live. A sweep is 2-4s per panel.
@@ -75,7 +76,7 @@ RECORD_TREE_TTL_SECONDS = 45.0
 # Anchored to the repo, not to the working directory: `serve` is run from
 # wherever the operator happens to be, and a CWD-relative path would report a
 # perfectly good build as missing -- indistinguishable from not having built it.
-CONSOLE_DIST = Path(__file__).resolve().parents[3] / "console" / "dist"
+CONSOLE_DIST = repo.ROOT / "console" / "dist"
 
 
 def answer(cache: TtlCache, command: Command, **kwargs: Any) -> JSONResponse:

@@ -84,6 +84,7 @@ LOOSE_BESIDE_PACKAGES: dict[str, tuple[str, ...]] = {
         "log.py",
         "numeric.py",
         "records.py",
+        "repo.py",
         "run_events.py",
     ),
     # Read from BOTH ends of the wire, so above `node/` rather than inside it.

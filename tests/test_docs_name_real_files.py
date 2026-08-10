@@ -32,7 +32,9 @@ import subprocess
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+from src.shared import repo
+
+REPO_ROOT = repo.ROOT
 REFERENCE = re.compile(r"`([^`\n]+?\.(?:py|md))`")
 
 
