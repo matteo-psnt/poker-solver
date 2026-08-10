@@ -56,6 +56,25 @@
       "base_seed differs"
     ]
   },
+  "configs": {
+    "kinds": [
+      {
+        "flag": "submit --config",
+        "kind": "training",
+        "names": [
+          "production",
+          "quick_test"
+        ]
+      },
+      {
+        "flag": "submit-precompute --config",
+        "kind": "abstraction",
+        "names": []
+      }
+    ],
+    "op": "configs",
+    "root": "/repo/config"
+  },
   "cost": {
     "billed": {
       "as_of": "2026-08-08",
@@ -391,9 +410,11 @@
     "op": "runs",
     "runs": [
       {
+        "arm": "control",
         "blocker": null,
         "commits_ago": null,
         "config_name": "production",
+        "experiment_id": "exp-7",
         "git_dirty": false,
         "has_checkpoint": true,
         "iterations": 76000000,
@@ -403,9 +424,11 @@
         "status": "completed"
       },
       {
+        "arm": null,
         "blocker": "never checkpointed",
         "commits_ago": 3,
         "config_name": "quick_test",
+        "experiment_id": null,
         "git_dirty": true,
         "has_checkpoint": false,
         "iterations": null,

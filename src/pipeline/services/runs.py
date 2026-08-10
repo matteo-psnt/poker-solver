@@ -44,6 +44,15 @@ class RunSummary:
     commit (0 == trained on the current HEAD, None == commit unknown to this
     checkout). ``loadable`` is False when the run never checkpointed, with
     ``blocker`` naming the reason for the UI.
+
+    Experiment lineage
+    ------------------
+    ``experiment_id``/``arm`` are on every summary because a LISTING is the only
+    place the set of experiments exists. `report --experiment` takes an id and
+    `runinfo` reports one run's, so a caller who does not already know an id had
+    nowhere to learn one -- which made the report unreachable from any surface
+    that cannot be told the answer in advance. It costs nothing: both fields are
+    already loaded with the metadata each summary reads.
     """
 
     name: str
@@ -57,6 +66,8 @@ class RunSummary:
     num_infosets: int | None
     config_name: str | None
     status: str | None
+    experiment_id: str | None = None
+    arm: str | None = None
 
 
 def _has_checkpoint(run_dir: Path) -> bool:
@@ -96,6 +107,8 @@ def _summarize_run(runs_dir: Path, name: str) -> RunSummary:
         num_infosets=metadata.num_infosets,
         config_name=metadata.config_name,
         status=metadata.status,
+        experiment_id=metadata.experiment_id,
+        arm=metadata.arm,
     )
 
 

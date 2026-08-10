@@ -112,6 +112,7 @@ COMMANDS: tuple[CommandRef, ...] = (
     CommandRef("cost", "Billed spend from Azure, and node time derived from the task log."),
     CommandRef("progress", "Per-checkpoint coverage, visits and throughput for a run."),
     CommandRef("runs", "Every published run, newest first."),
+    CommandRef("configs", "List the config stems `submit` and `submit-precompute` accept."),
     CommandRef(
         "runinfo", "Everything recorded about a run: provenance, curve, scores, tasks, gaps."
     ),

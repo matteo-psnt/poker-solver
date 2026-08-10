@@ -77,6 +77,97 @@ class TestItAnswersThroughTheCommand:
         assert invoked[0][0] == "curve"
 
 
+class TestTheDispatchingWrites:
+    """The seven writes that queue work or move the record.
+
+    Every one is still a single `Command.invoke` -- pinned structurally by
+    `test_no_second_read_path` -- so what is left to check is the body contract:
+    that a field the caller omitted does not arrive as a value the command line
+    would never have produced.
+    """
+
+    def test_a_body_reaches_the_command_as_arguments(self, client, invoked):
+        client.post("/api/submit", json={"to": 25_000_000, "config": "production"})
+        assert invoked[0] == ("submit", {"to": 25_000_000, "config": "production"})
+
+    def test_an_omitted_field_is_not_sent_at_all(self, client, invoked):
+        """The property the whole body design rests on.
+
+        Sending `config: ""` would be harmless; sending `workers: 0` instead of
+        omitting it would pin a 32-core node to one worker. Neither is decided
+        here -- the command's own parser holds every default, and it only gets
+        to apply them if the key is absent.
+        """
+        client.post("/api/submit", json={"to": 1})
+        (_, kwargs) = invoked[0]
+        assert kwargs == {"to": 1}
+
+    def test_a_falsy_value_that_was_given_is_still_sent(self, client, invoked):
+        """Omitted and `false` are different answers, and `given` drops only the
+        first. Collapsing them would make `--force` unreachable in reverse: a
+        caller could never explicitly say no."""
+        client.post("/api/precompute", json={"config": "ochs_gate_ochs", "force": False})
+        (_, kwargs) = invoked[0]
+        assert kwargs == {"config": "ochs_gate_ochs", "force": False}
+
+    def test_a_missing_required_field_is_refused_before_the_command(self, client, invoked):
+        """422 from the model, and nothing dispatched."""
+        assert client.post("/api/promote", json={"run": "run-a"}).status_code == 422
+        assert not invoked
+
+    def test_compacting_defaults_to_the_dry_run(self, client, invoked):
+        """`--delete` is the irreversible half. An empty body must not reach it.
+
+        Not by writing `False` here -- by sending nothing, so argparse's
+        `store_true` default is what answers.
+        """
+        client.post("/api/compact-legs", json={})
+        (_, kwargs) = invoked[0]
+        assert "delete" not in kwargs
+        assert "apply" not in kwargs
+
+    def test_a_dispatch_is_never_answered_from_the_memo(self, client, invoked):
+        """Two identical submissions are two runs someone wants.
+
+        The read memo keys on (command, arguments), so an unqualified `answer`
+        would report the first job's id for a task that was never queued.
+        """
+        for _ in range(3):
+            client.post("/api/submit", json={"to": 1})
+        assert len(invoked) == 3
+
+    def test_a_write_is_unreachable_by_get(self, client, invoked):
+        """A GET that queues a cloud task is reachable from a link preview.
+
+        The status is 404 rather than 405 because the SPA fallback matches every
+        GET: an `/api` path that got that far named no endpoint, which is what
+        it should say. What matters is the second assertion — nothing dispatched.
+        """
+        for path in (
+            "/api/submit",
+            "/api/score",
+            "/api/precompute",
+            "/api/push-code",
+            "/api/push-data",
+            "/api/compact-legs",
+            "/api/promote",
+        ):
+            assert client.get(path).status_code == 404, path
+        assert not invoked
+
+
+class TestTheReadsAddedForCoverage:
+    def test_an_experiment_id_becomes_the_report_argument(self, client, invoked):
+        client.get("/api/experiments/exp-7")
+        assert invoked[0] == ("report", {"experiment": "exp-7"})
+
+    def test_an_unspecified_rung_reaches_compare_as_none(self, client, invoked):
+        """`--a-at`'s own default. `0` would be read as a rung and match nothing."""
+        client.get("/api/compare?a=run-a&b=run-b")
+        (_, kwargs) = invoked[0]
+        assert kwargs == {"a": "run-a", "b": "run-b", "a_at": None, "b_at": None, "force": False}
+
+
 class TestFailuresBecomeStatusCodes:
     """A panel must be able to fail alone, and say why."""
 
@@ -166,6 +257,25 @@ class TestServingTheConsole:
             response = client.get(path)
             assert response.status_code == 200, path
             assert "id=root" in response.text
+
+    def test_an_unmatched_api_path_is_a_404_not_the_shell(self, tmp_path, monkeypatch):
+        """Both branches of the fallback, because both can swallow one.
+
+        Serving the console for `/api/typo` reports 200 and HTML for a request
+        that found nothing, which reads as a broken endpoint rather than a
+        wrong URL — and is what a `curl` against a write endpoint would see.
+        """
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<!doctype html><div id=root></div>")
+
+        for client in (
+            self._app_with_dist(monkeypatch, dist),
+            self._app_with_dist(monkeypatch, tmp_path / "absent"),
+        ):
+            response = client.get("/api/no-such-thing")
+            assert response.status_code == 404
+            assert "No such endpoint" in response.json()["error"]
 
     def test_the_fallback_does_not_swallow_the_api(self, client, invoked):
         """The catch-all route is registered last and matches `/{path:path}`;

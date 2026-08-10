@@ -64,6 +64,19 @@ definition: never a source of truth, never worth backing up.
   every endpoint is a single `Command.invoke`, so the two cannot drift. The
   console is expected to GROW toward what the commands can do; the commands stay
   the complete surface, and anything the console gains it gains by calling one.
+  **Coverage is complete and enforced.**
+  `tests/interfaces/web/test_command_coverage.py` fails until a command has an
+  endpoint or a declared reason: `NO_PAYLOAD` (`serve`, `blueprint-serve` never
+  return one) or `NODE_ONLY` (`train-static`, `precompute`, `evaluate` are
+  node compute). `status` is covered by the three panels it composes — do not
+  add `/api/status`.
+- **The console writes.** Seven dispatching endpoints (`submit`, `score`,
+  `submit-precompute`, `push-code`, `push-data`, `compact-legs`, `promote`).
+  One rule: an optional body field means *omitted*, and `web.app.given()` drops
+  it so the command's own parser supplies the default — never re-declare a
+  default in the request model. That is also what makes `compact-legs` default
+  to the dry run. Guard flags (`--force`, `--delete`) are opt-in, never
+  pre-checked. Writes use `TtlCache(0.0)`; a dispatch must not be memoised.
 - **There is no interactive CLI.** `uv run poker-solver` — a questionary menu —
   was deleted (`src/interfaces/cli/{app,flows,ui}`, plus the `questionary`
   dependency). It had been hollowed out over time until every item was a wizard
@@ -102,7 +115,10 @@ definition: never a source of truth, never worth backing up.
     local-compute door, and they keep `--runs-dir` because a node writes to
     `/mnt/work` before publishing.
   - **read the record** — `ledger`, `curve`, `cost`, `progress`, `runs`,
-    `runinfo`, `report`, `compare`, `promote`. **There is no `--source` and no `--runs-dir`: every
+    `configs`, `runinfo`, `report`, `compare`, `promote`. `configs` lists the
+    stems `submit`/`submit-precompute` accept; `runs` carries
+    `experiment_id`/`arm`, since the listing is the only place the set of
+    experiments exists. **There is no `--source` and no `--runs-dir`: every
     reader answers against the published record**, materialised into a temp
     tree and discarded. Nothing on a laptop is a source of truth about a run,
     so a local copy could only be a stale second answer. The eval index is

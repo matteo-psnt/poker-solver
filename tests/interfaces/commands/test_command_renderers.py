@@ -269,6 +269,8 @@ PAYLOADS: dict[str, dict] = {
                 "num_infosets": 32_240_608,
                 "config_name": "production",
                 "status": "completed",
+                "experiment_id": "exp-7",
+                "arm": "control",
             },
             # A run that never checkpointed: still listed, with the reason, because
             # it is exactly the one someone is looking for when asking what happened.
@@ -283,6 +285,8 @@ PAYLOADS: dict[str, dict] = {
                 "num_infosets": None,
                 "config_name": "quick_test",
                 "status": "failed",
+                "experiment_id": None,
+                "arm": None,
             },
         ],
     },
@@ -400,6 +404,20 @@ PAYLOADS: dict[str, dict] = {
                 "message": "Desired number of dedicated nodes could not be allocated",
                 "values": {"ErrorJson": '{"code":"AllocationFailed"}', "Plain": "not json"},
             }
+        ],
+    },
+    "configs": {
+        "op": "configs",
+        "root": "/repo/config",
+        "kinds": [
+            {
+                "kind": "training",
+                "flag": "submit --config",
+                "names": ["production", "quick_test"],
+            },
+            # An empty group is a real state (a checkout without the directory)
+            # and must render as one rather than as a missing section.
+            {"kind": "abstraction", "flag": "submit-precompute --config", "names": []},
         ],
     },
     "autoscale-check": {

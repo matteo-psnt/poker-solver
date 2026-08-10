@@ -1,4 +1,4 @@
-import { useJobs, usePool, useTasks } from "@/api/queries";
+import { useAutoscale, useJobs, usePool, useTasks } from "@/api/queries";
 import type { TaskRow } from "@/api/schemas";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -15,6 +15,7 @@ export function Overview() {
   const pool = usePool();
   const jobs = useJobs(10);
   const tasks = useTasks(10);
+  const autoscale = useAutoscale();
 
   // Recomputed each render rather than ticked: the panel already re-renders on
   // the 15s poll, and a second timer would redraw it between polls to move one
@@ -65,6 +66,39 @@ export function Overview() {
                 {e.code}: {e.message}
               </p>
             ))}
+          </div>
+        )}
+      </Panel>
+
+      {/* Directly under the pool because it answers the pool's own follow-up
+          question: the panel above says how many nodes there are, and this says
+          what the deployed formula thinks there should be. A pool that will not
+          grow is diagnosed by reading the two together — and `error` here is a
+          FIELD, not a failed request: Batch evaluated the formula and reported
+          that it did not compute, which is the answer rather than the absence
+          of one. */}
+      <Panel
+        title="Autoscale"
+        updatedAt={autoscale.dataUpdatedAt}
+        staleAfterMs={60_000}
+        error={errorOf(autoscale.error)}
+        loading={autoscale.isLoading}
+        onRefresh={() => autoscale.refetch()}
+        refreshing={autoscale.isFetching}
+      >
+        {autoscale.data && (
+          <div className="p-3">
+            {autoscale.data.error && (
+              <p className="mb-2 font-mono text-[12px] text-[#E0655C]">{autoscale.data.error}</p>
+            )}
+            <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] text-[var(--fg-muted)]">
+              {autoscale.data.variables.map((variable) => (
+                <span key={variable}>{variable}</span>
+              ))}
+            </div>
+            {autoscale.data.variables.length === 0 && !autoscale.data.error && (
+              <p className="text-[var(--fg-faint)]">The formula evaluated to no variables.</p>
+            )}
           </div>
         )}
       </Panel>
