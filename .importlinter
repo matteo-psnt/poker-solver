@@ -86,20 +86,6 @@ forbidden_modules =
     src.pipeline.evaluation.ledger
     src.pipeline.services
 
-; `analysis/` turns a trained blueprint into something readable -- a preflop
-; grid, an action path. It is a pure reader of a built blueprint, which is what
-; makes it safe for the play server to call while serving; if it could reach
-; training or evaluation it would drag their weight onto that path.
-[importlinter:contract:analysis_only_reads]
-name = Blueprint analysis must not import training, evaluation or services
-type = forbidden
-source_modules =
-    src.pipeline.analysis
-forbidden_modules =
-    src.pipeline.training
-    src.pipeline.evaluation
-    src.pipeline.services
-
 ; The play server loads a finished blueprint and answers questions about it.
 ; Training is the one thing it must never do -- it runs on a box sized to serve,
 ; deallocates itself when idle, and a training import there is either dead
@@ -119,7 +105,8 @@ modules =
     src.pipeline.training
     src.pipeline.evaluation
 
-; Building a blueprint is what training, evaluation and anything serving a run
+; Building a blueprint AND READING ONE -- `grid`/`paths` merged in from the
+; former `analysis/` -- are what training, evaluation and anything serving a run
 ; for reading all start from, so it must depend on none of them. It lived under
 ; `training` while training was the only builder, and the cost was that every
 ; other consumer reached across the independence contract above to get at it.

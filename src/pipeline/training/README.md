@@ -39,7 +39,7 @@ Storage lives one layer down in `src/engine/solver/storage/`:
 `static_array.py` (the arrays) and `static_checkpoint.py` (their snapshots).
 
 Two modules that used to live here now sit beside this package, because
-training stopped being their only consumer: `src/pipeline/blueprint.py`
+training stopped being their only consumer: `src/pipeline/blueprint/construction.py`
 (builders for abstraction, tree, storage and solver) and
 `src/pipeline/abstraction/resolver.py` (find and load a precomputed combo
 abstraction).

@@ -13,8 +13,8 @@ import pytest
 from src.core.game.actions import Action, ActionType
 from src.core.game.state import Card
 from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS
-from src.pipeline.analysis.grid import strategy_grid
-from src.pipeline.analysis.paths import PathError, encode_path, replay
+from src.pipeline.blueprint.grid import strategy_grid
+from src.pipeline.blueprint.paths import PathError, encode_path, replay
 from tests.test_helpers import build_trained_test_solver
 
 FLOP = (Card.new("2c"), Card.new("7d"), Card.new("9h"))

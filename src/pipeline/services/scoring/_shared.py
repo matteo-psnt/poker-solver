@@ -8,7 +8,7 @@ from typing import Any
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.policy.source import ScorableBlueprint
 from src.engine.solver.storage.static_array import StaticArrayStorage
-from src.pipeline.blueprint import build_static_evaluation_solver
+from src.pipeline.blueprint.construction import build_static_evaluation_solver
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.config import Config
 

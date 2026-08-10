@@ -12,7 +12,7 @@ import pytest
 
 from src.core.game.actions import Action, ActionType
 from src.core.game.state import Card
-from src.pipeline.analysis.paths import (
+from src.pipeline.blueprint.paths import (
     PathError,
     encode_action,
     encode_path,
