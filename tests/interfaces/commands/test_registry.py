@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from typing import cast
 
 import pytest
 
@@ -32,7 +33,8 @@ def _options(parser: argparse.ArgumentParser) -> dict[str, set[str]]:
     actions = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
     found = {}
     for action in actions:
-        for name, sub in action.choices.items():
+        for name, choice in action.choices.items():
+            sub = cast("argparse.ArgumentParser", choice)
             found[name] = {
                 option for sub_action in sub._actions for option in sub_action.option_strings
             }

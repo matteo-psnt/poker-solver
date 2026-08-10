@@ -481,7 +481,7 @@ class TestBundlesAreJustAnotherContainer:
         _node(tmp_path, "b", "finished", cause=task_log.CAUSE_KILLED, exit_code=137)
         before = task_log.read_tasks(tmp_path)
 
-        movable, names = task_log.compactable(task_log.tasks_dir(tmp_path))
+        _, names = task_log.compactable(task_log.tasks_dir(tmp_path))
         assert names, "nothing was judged compactable"
         self._bundle(tmp_path, names)
 

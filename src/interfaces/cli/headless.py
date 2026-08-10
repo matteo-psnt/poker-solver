@@ -76,11 +76,10 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     # thing: NO argv means "build everything" (a caller introspecting the CLI),
     # while argv that names no subcommand -- `--help`, or nothing at all --
     # needs no command's flags built at all. It only needs the listing.
-    everything = argv is None
-    wanted = None if everything else _named_command(argv)
+    wanted = None if argv is None else _named_command(argv)
     for ref in COMMANDS:
         subparser = sub.add_parser(ref.name, parents=[common], help=ref.help)
-        if not everything and ref.name != wanted:
+        if argv is not None and ref.name != wanted:
             continue
         command = ref.load()
         command.add_arguments(subparser)
