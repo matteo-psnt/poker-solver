@@ -139,7 +139,7 @@ definition: never a source of truth, never worth backing up.
 - **`Command.execute` is the seam both surfaces share, and it is observed.**
   Not `invoke` — the command line parses argv and calls the handler, so anything
   wrapped around `invoke` sees the console and misses the CLI. `execute` writes
-  one row per invocation via `interfaces/telemetry.py`: command, surface,
+  one row per invocation via `src/interfaces/telemetry.py`: command, surface,
   duration, outcome (`ok`/`refusal`/`error`), the exception's type name, and the
   arguments that differ from their defaults. `poker-solver activity` reads it
   (p50/p95/total, refusals apart from errors). It is **laptop-local and
