@@ -24,6 +24,11 @@ Determinism:
     (samples, seed) always yields the same clusters — a moving opponent
     partition would silently change every OCHS feature and therefore every
     bucket.
+
+sklearn is imported at its call site rather than here: ~0.5s that every
+``poker-solver`` invocation was paying for a clusterer it never calls. Same
+reason as :mod:`src.pipeline.abstraction.postflop.precompute`; the guard is
+``tests/interfaces/test_import_weight.py``.
 """
 
 from __future__ import annotations
@@ -33,7 +38,6 @@ from pathlib import Path
 
 import eval7
 import numpy as np
-from sklearn.cluster import KMeans
 
 from src.core.game.state import Card
 from src.pipeline.abstraction.preflop.hand_classes import PreflopHandClasses
@@ -143,6 +147,8 @@ def opponent_cluster_assignment(
     vectors meaningless.
     """
     equities = preflop_class_equities(samples=samples, seed=seed, cache_dir=cache_dir)
+
+    from sklearn.cluster import KMeans
 
     kmeans = KMeans(n_clusters=num_clusters, n_init=10, random_state=seed)
     labels = kmeans.fit_predict(equities.reshape(-1, 1))

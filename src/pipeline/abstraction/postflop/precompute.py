@@ -13,6 +13,18 @@ For every canonical board on every street:
 
 Every legal postflop state resolves to a bucket computed on its own board —
 there is no board clustering, no representative sampling, and no fallback.
+
+Why sklearn is imported at its two call sites and not at module scope
+---------------------------------------------------------------------
+Against this project's own rule, and for a measured reason. ``sklearn.cluster``
+costs ~0.5s to import and pulls scipy behind it, and this module is reachable
+from ``src.pipeline.services`` -- the facade every reader command imports. So
+``poker-solver jobs``, and ``--help``, paid half a second to import a clusterer
+they will never call.
+
+The two methods below that actually cluster import it themselves; nothing else
+here needs it. ``tests/interfaces/test_import_weight.py`` fails if it comes back
+to module scope.
 """
 
 import logging
@@ -22,7 +34,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
-from sklearn.cluster import KMeans
 from tqdm import tqdm
 
 from src.core.game.state import Card, Street
@@ -320,6 +331,8 @@ class PostflopPrecomputer:
         occupied_bins = np.nonzero(histogram)[0]
         points = (occupied_bins / (_KMEANS_EQUITY_BINS - 1)).reshape(-1, 1)
 
+        from sklearn.cluster import KMeans
+
         kmeans = KMeans(
             n_clusters=min(num_buckets, len(occupied_bins)),
             max_iter=self.config.kmeans_max_iter,
@@ -369,6 +382,8 @@ class PostflopPrecomputer:
             fit_idx = rng.choice(n, size=_KMEANS_FIT_SAMPLE, replace=False)
         else:
             fit_idx = np.arange(n)
+
+        from sklearn.cluster import KMeans
 
         kmeans = KMeans(
             n_clusters=min(num_buckets, len(fit_idx)),
