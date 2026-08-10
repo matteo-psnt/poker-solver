@@ -58,7 +58,7 @@ import os, sys
 sys.path.insert(0, {str(PROJECT_ROOT)!r})
 from multiprocessing import get_context
 from src.engine.solver.storage.static_array import StaticArrayStorage
-from tests.engine.solver.test_static_array_storage import (
+from tests.engine.solver.storage.test_static_array_storage import (
     KILLED_CREATOR_SESSION, attach_and_exit, build_tree,
 )
 

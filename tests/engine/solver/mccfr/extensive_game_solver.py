@@ -16,7 +16,7 @@ What this exercises: ``apply_regret_updates`` (CFR+/DCFR weighting), the
 regret-matching strategy, the average-strategy accumulation point, external and
 outcome sampling, and the shared-array storage the traversal writes through.
 
-What it deliberately does NOT exercise: ``infoset_encoder`` (169 preflop classes,
+What it deliberately does NOT exercise: ``infoset.encoder`` (169 preflop classes,
 equity buckets, SPR), the action abstraction, and HUNL chance -- all three are
 replaced here, so a passing test says nothing about them.
 
