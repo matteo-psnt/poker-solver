@@ -15,7 +15,7 @@ import argparse
 
 import pytest
 
-from src.interfaces.commands import COMMANDS
+from src.interfaces.commands import load_all
 
 # The ones that run ON a box holding a run, rather than answering from the
 # published record. Three are pool tasks that write to /mnt/work before
@@ -36,19 +36,19 @@ def _flags(command) -> set[str]:
 
 def test_the_introspection_finds_flags():
     """A `_flags` that silently returned nothing would pass every test below."""
-    seen = {flag for command in COMMANDS for flag in _flags(command)}
+    seen = {flag for command in load_all() for flag in _flags(command)}
     assert len(seen) > 20, f"found almost no flags -- the introspection is broken: {seen}"
 
 
 def test_the_node_side_commands_are_registered_under_these_names():
     """If a rename left NODE_SIDE naming nothing, the rule below would still
     pass while enforcing nothing at all."""
-    registered = {command.name for command in COMMANDS}
+    registered = {command.name for command in load_all()}
     missing = NODE_SIDE - registered
     assert not missing, f"NODE_SIDE names commands that do not exist: {sorted(missing)}"
 
 
-@pytest.mark.parametrize("command", COMMANDS, ids=lambda c: c.name)
+@pytest.mark.parametrize("command", load_all(), ids=lambda c: c.name)
 def test_only_node_side_commands_take_a_local_runs_dir(command):
     if command.name in NODE_SIDE:
         return

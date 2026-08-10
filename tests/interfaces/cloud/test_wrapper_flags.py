@@ -33,7 +33,7 @@ import tomllib
 
 import pytest
 
-from src.interfaces.commands import COMMANDS
+from src.interfaces.commands import load_all
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import handlers as node_handlers
 from src.shared.cloudtask.node import plan as node_plan
@@ -44,7 +44,7 @@ COMMON_FLAGS = {"--json", "--log-level"}
 
 
 def _declared(command_name: str) -> set[str]:
-    command = next((c for c in COMMANDS if c.name == command_name), None)
+    command = next((c for c in load_all() if c.name == command_name), None)
     if command is None:
         return set()
     parser = argparse.ArgumentParser(prog=command_name, add_help=False)

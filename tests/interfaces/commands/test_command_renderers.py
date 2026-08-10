@@ -13,7 +13,7 @@ check.
 import copy
 import dataclasses
 
-from src.interfaces.commands import COMMANDS
+from src.interfaces.commands import load_all
 from src.pipeline import services
 
 PAYLOADS: dict[str, dict] = {
@@ -218,15 +218,35 @@ PAYLOADS: dict[str, dict] = {
         "task_hours": 68.87,
         "tasks": 47,
         "peak_concurrency": 4,
+        "unended": 4,
         "first_at": "2026-08-02T22:06:18+00:00",
         "last_at": "2026-08-03T16:58:59+00:00",
-        "rate_per_node_hour": 0.8,
-        "dollars": 55.1,
+        "rate_per_node_hour": 0.688,
+        "dollars": 47.38,
         "series": [
             {"at": "2026-08-02T22:06:18+00:00", "running": 1},
             {"at": "2026-08-02T22:08:22+00:00", "running": 3},
             {"at": "2026-08-03T16:58:59+00:00", "running": 0},
         ],
+        "billed_reason": None,
+        # Present here rather than null, because the null case is the easy one:
+        # the renderer that has to be pinned is the one with an invoice to show.
+        "billed": {
+            "total": 316.71,
+            "compute": 228.00,
+            "other": 88.71,
+            "node_hours": 351.34,
+            "currency": "USD",
+            "since": "2025-08-10",
+            "first_at": "2026-07-27",
+            "as_of": "2026-08-08",
+            "by_service": [
+                {"service": "Virtual Machines", "cost": 228.00},
+                {"service": "Storage", "cost": 84.43},
+                {"service": "Load Balancer", "cost": 3.41},
+                {"service": "Virtual Network", "cost": 0.87},
+            ],
+        },
     },
     "runs": {
         "op": "runs",
@@ -454,7 +474,7 @@ PAYLOADS["status"] = {
     },
 }
 
-BY_NAME = {command.name: command for command in COMMANDS}
+BY_NAME = {command.name: command for command in load_all()}
 
 
 # These two renderers ARE the server: calling one blocks on uvicorn. They are the
