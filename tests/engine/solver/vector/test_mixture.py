@@ -116,6 +116,10 @@ class TestMixtureConvergence:
 
         assert 0 < later < early / 4
 
+    # Cheap on an idle box (~0.7s), but it builds the same kernels as its
+    # sibling above and so scales with whatever else holds the CPU. Bounded for
+    # the same reason that one is, and tight enough to still catch a stall.
+    @pytest.mark.timeout(30)
     def test_a_single_board_mixture_matches_the_plain_kernel(self, parts):
         """With one board the mixture must be the single-board kernel exactly.
 

@@ -59,6 +59,7 @@ from src.interfaces.commands import (
     serve_box,
     submit,
     submit_precompute,
+    submit_vector,
     tasks,
 )
 from src.interfaces.errors import attempt
@@ -166,6 +167,21 @@ class ScoreBody(BaseModel):
     # business -- so it has no meaning here and `_passthrough` tolerates its
     # absence.
     flags: list[str] | None = None
+
+
+class SubmitVectorBody(BaseModel):
+    # `abstractions` is required and repeatable: one arm per abstraction per
+    # kernel, and the command has no default for it because which abstractions
+    # to compare IS the experiment.
+    abstractions: list[str]
+    kernels: list[str] | None = None
+    derive_boards: list[int] | None = None
+    train_boards: int | None = None
+    score_boards: int | None = None
+    checkpoints: str | None = None
+    config: str | None = None
+    stack: int | None = None
+    timeout: str | None = None
 
 
 class PrecomputeBody(BaseModel):
@@ -373,6 +389,10 @@ def create_app() -> FastAPI:
     @app.post("/api/precompute")
     def _precompute(body: PrecomputeBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_precompute.COMMAND, **given(body))
+
+    @app.post("/api/submit-vector")
+    def _submit_vector(body: SubmitVectorBody) -> JSONResponse:
+        return answer(TtlCache(0.0), submit_vector.COMMAND, **given(body))
 
     # `push-code` and `push-data` read a tree on the machine RUNNING THIS
     # SERVER, which is the one fact about them a browser hides. `--root` and

@@ -65,7 +65,19 @@ LOOSE_BESIDE_PACKAGES: dict[str, tuple[str, ...]] = {
     # its own job, sharing nothing with dispatching work or reading the bill.
     "interfaces.cloud": ("config.py", "serve_box.py"),
     # Shared across postflop/ and preflop/, which is why they are not in either.
-    "pipeline.abstraction": ("base.py", "config.py", "paths.py", "resolver.py"),
+    # `vector_universe` is the odd one: it CONSUMES a finished abstraction
+    # rather than building one, bridging the artifact to the vector kernels'
+    # `HandContext`. It is in `pipeline/` only because import-linter forbids
+    # `engine/` from reaching an abstraction directly, so it is a peer of
+    # `resolver.py` — also a consumer — and of nothing inside postflop/ or
+    # preflop/.
+    "pipeline.abstraction": (
+        "base.py",
+        "config.py",
+        "paths.py",
+        "resolver.py",
+        "vector_universe.py",
+    ),
     # Measurement helpers used BY the estimators, not estimators themselves.
     "pipeline.evaluation": ("statistics.py", "units.py"),
     # Peers of `lbr/`; each is one module and `lbr/` is six, so the difference
