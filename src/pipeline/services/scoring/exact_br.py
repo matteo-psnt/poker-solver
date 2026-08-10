@@ -1,19 +1,13 @@
 """Exact best response on a sampled public tree: zero evaluation variance."""
 
-import functools
 import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig, compute_public_tree_br
-from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
-from src.pipeline.services.scoring._shared import (
-    EvaluationOutput,
-    _effective_abstraction_hash,
-    _load_blueprint,
-    build_blueprint_for,
-)
+from src.pipeline.services.runs import checkpoint_iteration_of
+from src.pipeline.services.scoring._shared import EvaluationOutput, prepare_blueprint
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +43,10 @@ def evaluate_run_exact_br(
             is not a retained rung (the error lists the available ones).
     """
     config = config or PublicBRConfig()
-    metadata = load_run_metadata(run_dir)
-    effective_hash = _effective_abstraction_hash(run_dir, metadata, abstraction_hash)
-    solver, storage = build_blueprint_for(run_dir, metadata, effective_hash, at_iteration)
-    # The four (seat, button) walks are independent; workers rebuild the
-    # blueprint because the solver is not picklable. Same factory shape parallel
-    # LBR uses, so only picklable args are captured.
-    loader = _load_blueprint
-    factory = (
-        functools.partial(loader, metadata.config, run_dir, effective_hash, at_iteration)
-        if config.num_workers > 1
-        else None
+    # The four (seat, button) walks are independent, and workers rebuild the
+    # blueprint because the solver is not picklable.
+    metadata, solver, storage, factory = prepare_blueprint(
+        run_dir, abstraction_hash, at_iteration, config.num_workers
     )
     result = compute_public_tree_br(
         solver,

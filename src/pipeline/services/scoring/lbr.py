@@ -1,6 +1,5 @@
 """Local Best Response -- the trustworthy default metric."""
 
-import functools
 import logging
 from dataclasses import replace
 from pathlib import Path
@@ -14,13 +13,8 @@ from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
 )
 from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.evaluation.units import pair_mean_mbb
-from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
-from src.pipeline.services.scoring._shared import (
-    EvaluationOutput,
-    _effective_abstraction_hash,
-    _load_blueprint,
-    build_blueprint_for,
-)
+from src.pipeline.services.runs import checkpoint_iteration_of
+from src.pipeline.services.scoring._shared import EvaluationOutput, prepare_blueprint
 
 logger = logging.getLogger(__name__)
 
@@ -99,19 +93,10 @@ def evaluate_run_lbr(
         ValueError: Invalid configuration or checkpoint state.
     """
     config = config or LBRConfig()
-    metadata = load_run_metadata(run_dir)
-    effective_hash = _effective_abstraction_hash(run_dir, metadata, abstraction_hash)
-    solver, storage = build_blueprint_for(run_dir, metadata, effective_hash, at_iteration)
-    # For parallel LBR each worker rebuilds its own solver from the checkpoint (the
-    # solver is not picklable across processes); the factory captures only picklable
-    # args (config + checkpoint dir). Loader chosen per backend, matching the
-    # blueprint above -- a static run loaded by the key-addressed loader dies on a
-    # missing checkpoint.zarr, which is what LBR-on-static did before this.
-    loader = _load_blueprint
-    factory = (
-        functools.partial(loader, metadata.config, run_dir, effective_hash, at_iteration)
-        if config.num_workers > 1
-        else None
+    # Each parallel LBR worker rebuilds its own solver from the checkpoint --
+    # the solver is not picklable across processes.
+    metadata, solver, storage, factory = prepare_blueprint(
+        run_dir, abstraction_hash, at_iteration, config.num_workers
     )
     if config.opponent == "deployed":
         config = replace(

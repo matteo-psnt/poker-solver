@@ -36,7 +36,7 @@ from typing import Any
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
 from src.interfaces.commands._base import Command
-from src.interfaces.commands.tasks import _download_tasks
+from src.interfaces.commands.tasks import download_tasks
 from src.interfaces.errors import CommandError
 from src.shared import records
 from src.shared.cloudtask import task_log
@@ -86,7 +86,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     with tempfile.TemporaryDirectory() as tmp:
         local = Path(tmp)
-        _download_tasks(service, config.share_name, local)
+        download_tasks(service, config.share_name, local)
         directory = task_log.tasks_dir(local)
 
         before = task_log.read_tasks(local)
@@ -125,7 +125,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         # can be asked that.
         with tempfile.TemporaryDirectory() as check_tmp:
             check = Path(check_tmp)
-            _download_tasks(service, config.share_name, check)
+            download_tasks(service, config.share_name, check)
             after = task_log.read_tasks(check)
         if after != before:
             raise CommandError(

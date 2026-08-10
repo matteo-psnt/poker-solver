@@ -50,6 +50,7 @@ person deciding what to compact, not by code -- the alternative, a machine
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from collections.abc import Callable
@@ -268,6 +269,31 @@ def write_snapshot(
     tmp = destination.with_name(destination.name + ".tmp")
     tmp.write_text(body, encoding="utf-8")
     tmp.replace(destination)
+
+
+def progress_writer(
+    path: str | os.PathLike[str] | None, artifact: Artifact
+) -> Callable[[int, int], None] | None:
+    """A ``(done, total)`` callback that publishes completion, or None.
+
+    Long unobservable jobs are the case: a precompute writes nothing until
+    ``save()``, and scoring one checkpoint is ~10 minutes of silence -- so
+    without this a multi-hour build and a hung one look identical from outside.
+    ``None`` in, ``None`` out, so a caller with nowhere to publish passes the
+    result straight through to whatever takes an optional callback.
+
+    NEVER FATAL. The work must not die because the thing describing it could not
+    be written, which is why every failure here is suppressed rather than
+    reported: this is the observer, not the job.
+    """
+    if path is None:
+        return None
+
+    def write(done: int, total: int) -> None:
+        with contextlib.suppress(OSError):
+            write_snapshot(path, {"done": done, "total": total}, artifact)
+
+    return write
 
 
 def read_snapshot(path: str | os.PathLike[str]) -> dict[str, Any] | None:

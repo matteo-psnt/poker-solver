@@ -1,6 +1,14 @@
-"""Pieces every estimator needs: loading a scoreable blueprint, and the payload type."""
+"""Pieces every estimator needs: loading a scoreable blueprint, and the payload type.
 
+Private to this package -- the leading underscore is on the MODULE, so nothing
+inside it needs one too. When the members carried it as well, two siblings
+imported four underscore-prefixed names across a module boundary, which reads as
+reaching into another file's privates rather than using the package's own seam.
+"""
+
+import functools
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,6 +17,7 @@ from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.policy.source import ScorableBlueprint
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.pipeline.blueprint.construction import build_static_evaluation_solver
+from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.config import Config
 
@@ -44,7 +53,7 @@ class EvaluationOutput:
     checkpoint_iteration: int | None = None
 
 
-def _effective_abstraction_hash(
+def effective_abstraction_hash(
     run_dir: Path, metadata: RunMetadata, abstraction_hash: str | None
 ) -> str:
     """The abstraction hash an eval must pin to, refusing unpinnable runs."""
@@ -61,7 +70,7 @@ def _effective_abstraction_hash(
     return effective
 
 
-def _load_blueprint(
+def load_blueprint(
     config: Config,
     checkpoint_dir: Path,
     abstraction_hash: str | None = None,
@@ -80,3 +89,34 @@ def _load_blueprint(
         at_iteration=at_iteration,
     )
     return solver
+
+
+def prepare_blueprint(
+    run_dir: Path,
+    abstraction_hash: str | None,
+    at_iteration: int | None,
+    num_workers: int,
+) -> tuple[
+    RunMetadata, StaticTreeSolver, StaticArrayStorage, Callable[[], ScorableBlueprint] | None
+]:
+    """Everything an estimator needs before it can score: metadata, blueprint, factory.
+
+    Both estimators opened with the same five statements, and both carried a
+    comment apologising for it ("Same factory shape parallel LBR uses" /
+    "matching the blueprint above"). They have to agree: a factory built from a
+    different ``effective_hash`` than the in-process solver would have workers
+    scoring a differently-bucketed blueprint from the coordinator, and the
+    result would look like an ordinary number.
+
+    The factory is None below two workers -- there is no subprocess to rebuild
+    anything -- and otherwise captures only picklable arguments.
+    """
+    metadata = load_run_metadata(run_dir)
+    effective_hash = effective_abstraction_hash(run_dir, metadata, abstraction_hash)
+    solver, storage = build_blueprint_for(run_dir, metadata, effective_hash, at_iteration)
+    factory = (
+        functools.partial(load_blueprint, metadata.config, run_dir, effective_hash, at_iteration)
+        if num_workers > 1
+        else None
+    )
+    return metadata, solver, storage, factory
