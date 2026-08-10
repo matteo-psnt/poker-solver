@@ -231,9 +231,25 @@ work. Read them that way — most of them do not stop anything by themselves.
    `$CPUPercent` is a 0-1 fraction; if it is not, the threshold never fires and
    the backstop is silently absent.
 
+**Bounded by NONE of the above — and it is the only thing here that is not:**
+
+6. **The record database** (`infra/store/postgres.tf`, `B_Standard_B2s`,
+   ~$30-35/month). Every control above bounds either a rate of spend or the
+   duration of work that finishes; a database is neither. It does not scale to
+   zero, `just panic` cannot reach it, and `just destroy` cannot either — it
+   lives in the store state on purpose, for the same reason the share does.
+
+   Stopping it is not a durable answer: **a stopped Flexible Server restarts
+   itself after seven days.** The only way to stop paying for it is to destroy
+   it from `infra/store`, which is deliberately awkward.
+
+   It is a small, flat, predictable cost rather than a runaway risk — the point
+   of listing it is that this section otherwise reads as a complete account of
+   what is bounded, and it would be the one thing quietly outside that.
+
 **Alerts only — these stop nothing:**
 
-6. **Budget alerts** at 50/75/90/100% actual plus 100% forecast. Forecast is the
+7. **Budget alerts** at 50/75/90/100% actual plus 100% forecast. Forecast is the
    one that warns you while there is still time to act. At ~$19/day the default
    $250 budget is about two weeks of a total runaway.
 
