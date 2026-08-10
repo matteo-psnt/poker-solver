@@ -5,11 +5,11 @@
 read through them) → `pipeline/` (training, evaluation,
 abstraction) → `engine/` (solver, search) → `core/` (game, actions), with
 `shared/` importable by all layers. The layering is hard-enforced by
-import-linter (`.importlinter`, run via pre-commit) — **ten contracts, and they
+import-linter (`.importlinter`, run via pre-commit) — **nine contracts, and they
 are the documentation**: read them before moving anything, because four state a
 rule the directory alone does not. `reference/` may not import the estimators it
 validates (or the 1e-9 agreement is circular); Azure dispatch may not reach into
-the solver; `analysis/` only reads; the play server never trains.
+the solver; an estimator never imports the ledger; the play server never trains.
 
 **Structure that import-linter cannot see is pinned in `tests/test_layout.py`.**
 Direction is an edge and is enforced; "are these peers filed the same way" and
@@ -17,7 +17,12 @@ Direction is an edge and is enforced; "are these peers filed the same way" and
 registries in the `records.REGISTRY` idiom — a new loose module beside
 sub-packages, or a new duplicated basename, fails until someone declares it
 *with the reason*. Adding to the list is fine; doing it without deciding is
-what the failure message argues against. Peers are grouped: the four estimators
+what the failure message argues against. The same file holds two more guards:
+`tests/` must mirror the src layout (a test whose src-imports all land in one
+sub-package belongs in it), and every `src.`/`tests.` dotted path spelled
+inside a STRING — monkeypatch targets, subprocess programs, docstring
+citations — must resolve against the tree, because an import fails loudly
+when a module moves and a string just goes stale. Peers are grouped: the four estimators
 in `evaluation/estimators/`, infoset identity in `solver/infoset/`, strategy
 lookup in `solver/policy/`. A service is named for what it DOES
 (`services.scoring`, `services.bucketing`), so no one word names both a service

@@ -1,11 +1,13 @@
 """Where files sit, asserted rather than intended.
 
-`.importlinter` enforces the DIRECTION of every import and does it well -- ten
-contracts, and the layer graph is clean. It cannot see either of the two things
-below, because neither is an edge:
+`.importlinter` enforces the DIRECTION of every import and does it well -- nine
+contracts, and the layer graph is clean. It cannot see any of the things
+below, because none of them is an edge:
 
-- whether a set of PEERS is filed consistently, and
-- whether two files share a name.
+- whether a set of PEERS is filed consistently,
+- whether two files share a name,
+- whether `tests/` mirrors the src layout it claims to, and
+- whether a module path spelled inside a STRING still names a real module.
 
 Both drifted. `lbr/` was a package while `public_tree_br.py` -- the primary
 estimator, and the largest module in that package -- sat loose beside the
@@ -26,12 +28,17 @@ accident -- which is exactly how the third `paths.py` would otherwise arrive.
 
 from __future__ import annotations
 
+import ast
 import collections
+import importlib
 import pathlib
+import re
 
 import pytest
 
 SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
+TESTS = pathlib.Path(__file__).resolve().parent
+ROOT = SRC.parent
 
 
 """Loose modules that sit beside sub-packages, and why each set is allowed.
@@ -212,4 +219,148 @@ class TestANameMeansOneThing:
             "invokes sharing a name is informative; two unrelated files sharing one "
             "means every sentence about either has to name the directory too.\n"
             "If it is deliberate, add it to DUPLICATE_BASENAMES with the reason."
+        )
+
+
+"""Test directories that deliberately mirror no src directory."""
+TEST_ONLY_DIRS: dict[str, str] = {
+    "integration": "cross-layer smoke tests; their subject is the seams, not one package",
+}
+
+
+"""Loose test modules whose subject imports all land in ONE sub-package of the
+mirrored src package, but which stay loose anyway. Empty on purpose: when the
+src regroup happened, twenty-seven test files were left filed the old way, and
+nothing said so until a manual sweep. A test that trips the rule either moves
+into the sub-package it tests, or gets declared here with the reason it is
+genuinely about the parent."""
+CROSS_CUTTING_TESTS: dict[str, str] = {}
+
+
+"""Strings that look like module paths but are not, and why each is allowed.
+
+A dotted path in an import statement fails loudly the moment the module moves.
+The same path inside a STRING -- a monkeypatch target, a subprocess program, a
+logger name -- fails silently or late: after the cloud split, seven files still
+cited pre-move paths and nothing complained. The test below resolves every
+`src.`/`tests.` dotted string against the tree, so a move breaks in CI instead
+of in a docstring nobody rereads."""
+NOT_MODULE_PATHS: dict[str, str] = {
+    "src.pipeline.demo": "a fake logger name in test_log.py, module-shaped on purpose",
+}
+
+
+def _test_dirs() -> list[pathlib.Path]:
+    return [d for d in sorted(TESTS.rglob("*")) if d.is_dir() and "__pycache__" not in str(d)]
+
+
+def _src_imports(path: pathlib.Path) -> set[str]:
+    """Dotted module names a test imports from src, with `from pkg import mod`
+    resolved to the module when the name IS a module rather than an attribute."""
+    mods = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            mods.update(a.name for a in node.names if a.name.startswith("src."))
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("src"):
+            for alias in node.names:
+                full = f"{node.module}.{alias.name}"
+                mods.add(full if _is_module(full) else node.module)
+    return mods
+
+
+def _is_module(dotted: str) -> bool:
+    path = ROOT / dotted.replace(".", "/")
+    return path.with_suffix(".py").is_file() or (path / "__init__.py").is_file()
+
+
+class TestTestsMirrorSrc:
+    def test_every_test_directory_mirrors_a_src_directory(self):
+        strays = [
+            str(d.relative_to(TESTS))
+            for d in _test_dirs()
+            if not (SRC / d.relative_to(TESTS)).is_dir()
+            and str(d.relative_to(TESTS)) not in TEST_ONLY_DIRS
+        ]
+        assert not strays, (
+            f"test director(ies) mirroring no src directory: {strays}\n"
+            "Either the src package moved and the tests did not follow, or the "
+            "directory is deliberately test-only -- declare it in TEST_ONLY_DIRS."
+        )
+
+    def test_a_test_of_subpackage_code_is_filed_in_that_subpackage(self):
+        misfiled = {}
+        for directory in _test_dirs():
+            rel = directory.relative_to(TESTS)
+            srcdir = SRC / rel
+            if not srcdir.is_dir():
+                continue
+            subpackages = {
+                child.name
+                for child in srcdir.iterdir()
+                if child.is_dir() and (child / "__init__.py").is_file()
+            }
+            if not subpackages:
+                continue
+            mirrored = "src." + str(rel).replace("/", ".")
+            for test in sorted(directory.glob("test_*.py")):
+                key = str(test.relative_to(TESTS))
+                if key in CROSS_CUTTING_TESTS:
+                    continue
+                subjects = {m for m in _src_imports(test) if m.startswith(mirrored + ".")}
+                if not subjects:
+                    continue
+                hits = {m[len(mirrored) + 1 :].split(".")[0] for m in subjects}
+                inside = hits & subpackages
+                if hits == inside and len(inside) == 1:
+                    misfiled[key] = f"{rel}/{inside.pop()}/"
+        assert not misfiled, (
+            f"test(s) filed loose but importing from exactly one sub-package: {misfiled}\n"
+            "Move each into the sub-package it tests -- that is how the src regroup "
+            "left twenty-seven tests behind. If one genuinely tests the parent "
+            "package, declare it in CROSS_CUTTING_TESTS with the reason."
+        )
+
+
+MODULE_PATH_IN_STRING = re.compile(r"(?<![\w.])(?:src|tests)(?:\.[A-Za-z_][A-Za-z0-9_]*)+")
+
+
+def _resolves(dotted: str) -> bool:
+    """True if `dotted` names a module, or an attribute chain on one."""
+    if _is_module(dotted):
+        return True
+    parts = dotted.split(".")
+    for cut in range(len(parts) - 1, 0, -1):
+        prefix = ".".join(parts[:cut])
+        if _is_module(prefix):
+            try:
+                obj = importlib.import_module(prefix)
+                for attr in parts[cut:]:
+                    obj = getattr(obj, attr)
+                return True
+            except (ImportError, AttributeError):
+                return False
+    return False
+
+
+class TestModulePathsInStringsResolve:
+    @pytest.mark.timeout(20)
+    def test_every_dotted_path_in_a_string_names_something_real(self):
+        stale = collections.defaultdict(set)
+        for base in (SRC, TESTS, ROOT / "infra"):
+            for path in sorted(base.rglob("*.py")):
+                if "__pycache__" in str(path):
+                    continue
+                for node in ast.walk(ast.parse(path.read_text())):
+                    if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                        continue
+                    for match in MODULE_PATH_IN_STRING.findall(node.value):
+                        if match in NOT_MODULE_PATHS or _resolves(match):
+                            continue
+                        stale[str(path.relative_to(ROOT))].add(match)
+        stale = {file: sorted(paths) for file, paths in stale.items()}
+        assert not stale, (
+            f"dotted module path(s) in strings that resolve to nothing: {stale}\n"
+            "The module moved and the string did not follow -- an import would have "
+            "failed loudly; the string just went stale. Update it, or if it is "
+            "deliberately not a module path, declare it in NOT_MODULE_PATHS."
         )

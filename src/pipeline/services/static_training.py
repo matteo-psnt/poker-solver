@@ -54,10 +54,10 @@ logger = logging.getLogger(__name__)
 class StaticTrainingOutput:
     """Machine-readable summary of a static-storage training run.
 
-    Mirrors :class:`~src.pipeline.services.training.TrainingOutput` where the
-    fields mean the same thing, and adds what only the static path can report:
-    ``coverage`` -- the fraction of the infoset space training reached -- is
-    meaningful only because the table's size is known up front.
+    Its namesake ``TrainingOutput`` was deleted with the dynamic backend; the
+    field distinctive to the static path is ``coverage`` -- the fraction of
+    the infoset space training reached -- which is meaningful only because the
+    table's size is known up front.
     """
 
     run_id: str
