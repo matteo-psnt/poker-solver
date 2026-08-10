@@ -11,14 +11,21 @@ they are not interchangeable:
 
 ## Layout
 
+    estimators/      the four things that put a number on a blueprint
+      lbr/               Local Best Response against the HUNL blueprint
+      public_tree_br.py  deterministic exact BR (the default checkpoint gate)
+      blueprint_match.py duplicate-deal head-to-head
+      resolver_match.py  resolver-in-eval machinery
     reference/       exact answers for SMALL games -- the harness, not a scorer
-    lbr/             Local Best Response against the HUNL blueprint
     ledger/          eval records: tiers, queries, the derived index
-    public_tree_br.py    deterministic exact BR (the default checkpoint gate)
-    blueprint_match.py   duplicate-deal head-to-head
-    resolver_match.py    resolver-in-eval machinery
-    statistics.py        paired-sample comparison
-    units.py             chips -> bb/mbb, defined once
+    statistics.py    paired-sample comparison
+    units.py         chips -> bb/mbb, defined once
+
+The estimators are peers: a caller picks exactly one, and which one is the
+evaluation's identity, recorded on every row. They used to be filed two
+different ways -- `lbr/` a package, `public_tree_br.py` loose beside the ledger
+and the oracles -- so "which of these is a scorer" was not answerable from the
+directory.
 
 **`reference/` is the one that gets misread.** It holds `best_response.py`,
 `game_tree.py`, `tabular_cfr.py` and `local_best_response.py` — engine-agnostic,
@@ -27,7 +34,8 @@ expensive evaluators right, not to score a blueprint:
 `tests/pipeline/evaluation/restricted_hunl.py` validates the vectorised
 public-tree engine against `reference/best_response.py` to 1e-9. Flat alongside
 `public_tree_br.py`, a file called `best_response.py` reads like a third
-production scorer, which is why it no longer sits there.
+production scorer, which is why it no longer sits there -- and why `reference/`
+stayed OUT of `estimators/` when the scorers were gathered into it.
 
 ## What exploitability is
 
@@ -165,8 +173,8 @@ poker-solver curve --run <id>
 uv run pytest tests/pipeline/evaluation/
 ```
 
-Mirrors the source layout: `reference/` and `lbr/` have their own test
-packages; the toy-game fixtures (`kuhn_poker.py`, `leduc_poker.py`) stay at the
+Mirrors the source layout: `estimators/` (with `lbr/` inside it) and
+`reference/` have their own test packages; the toy-game fixtures (`kuhn_poker.py`, `leduc_poker.py`) stay at the
 top level because `tests/engine/` uses them too.
 
 ## References

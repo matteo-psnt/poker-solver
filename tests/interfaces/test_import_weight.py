@@ -87,7 +87,7 @@ class TestNothingReachesLBRConfigThroughTheEvaluator:
     """
 
     def test_the_config_is_importable_from_its_own_module(self):
-        from src.pipeline.evaluation.lbr.config import LBRConfig
+        from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 
         assert LBRConfig().num_hands > 0
 
@@ -103,5 +103,5 @@ class TestNothingReachesLBRConfigThroughTheEvaluator:
         assert not offenders, (
             "these import LBRConfig from the evaluator, paying ~1.7s of scientific "
             "stack for a stdlib dataclass — import it from "
-            "src.pipeline.evaluation.lbr.config instead: " + ", ".join(offenders)
+            "src.pipeline.evaluation.estimators.lbr.config instead: " + ", ".join(offenders)
         )

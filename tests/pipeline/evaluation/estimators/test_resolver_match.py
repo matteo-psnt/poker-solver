@@ -8,7 +8,7 @@ import pytest
 from src.core.game.actions import call
 from src.core.game.state import Card, Street
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
-from src.pipeline.evaluation.resolver_match import (
+from src.pipeline.evaluation.estimators.resolver_match import (
     _deal_from_stack,
     play_resolver_match,
 )

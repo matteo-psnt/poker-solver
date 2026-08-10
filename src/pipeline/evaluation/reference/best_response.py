@@ -7,8 +7,8 @@ to serve as ground truth for abstracted subgames.
 
 It is NOT a blueprint scorer, despite the name: full-HUNL exact BR is
 intractable, and the evaluators that do score a blueprint live one level up
-(:mod:`~src.pipeline.evaluation.public_tree_br` exactly on a board-restricted
-game, :mod:`~src.pipeline.evaluation.lbr` from below). What this proves is that
+(:mod:`~src.pipeline.evaluation.estimators.public_tree_br` exactly on a board-restricted
+game, :mod:`~src.pipeline.evaluation.estimators.lbr` from below). What this proves is that
 those are right -- ``tests/pipeline/evaluation/restricted_hunl.py`` checks the
 vectorised public-tree engine against this traversal to 1e-9.
 

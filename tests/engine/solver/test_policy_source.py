@@ -69,7 +69,7 @@ class TestPreflopOrderingIsShared:
     """The hazard: two independently-derived orderings of the 169 classes."""
 
     def test_br_combo_map_matches_the_solver_ordering(self):
-        from src.pipeline.evaluation.public_tree_br import (
+        from src.pipeline.evaluation.estimators.public_tree_br import (
             _PREFLOP_CLASS_OF_COMBO,
             ALL_COMBOS,
         )
@@ -181,7 +181,7 @@ class TestExactBROverStaticStorage:
 
     @pytest.mark.timeout(120)
     def test_exact_br_runs_and_resolves_every_lookup(self):
-        from src.pipeline.evaluation.public_tree_br import (
+        from src.pipeline.evaluation.estimators.public_tree_br import (
             PublicBRConfig,
             compute_public_tree_br,
         )

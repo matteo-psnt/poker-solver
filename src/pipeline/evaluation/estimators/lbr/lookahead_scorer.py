@@ -55,7 +55,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState
-from src.pipeline.evaluation.lbr.shadow_state import MenuCandidate
+from src.pipeline.evaluation.estimators.lbr.shadow_state import MenuCandidate
 from src.shared.numeric import NORMALIZE_EPS
 
 # The blueprint response distribution at one public opponent node. Keyed

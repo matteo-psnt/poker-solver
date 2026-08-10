@@ -11,8 +11,8 @@ from src.interfaces.commands._base import (
     resolve_run_dir,
 )
 from src.pipeline import services
-from src.pipeline.evaluation.lbr.config import LBRConfig
-from src.pipeline.evaluation.public_tree_br import PublicBRConfig
+from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
+from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
 from src.shared.config import DEFAULT_RUNS_DIR
 
 # The estimators a node can actually run. `score` imports this rather than

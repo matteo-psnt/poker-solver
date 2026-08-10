@@ -1,7 +1,7 @@
 """Scalar reference game for validating the public-tree BR engine.
 
 Implements, through the generic :class:`ExtensiveGame` protocol, exactly the
-restricted game that :mod:`src.pipeline.evaluation.public_tree_br` evaluates:
+restricted game that :mod:`src.pipeline.evaluation.estimators.public_tree_br` evaluates:
 the blueprint's betting tree, a fixed sampled board plan with public branch
 weights, and annulment of deals incompatible with a sampled branch. The hero
 holds one fixed combo and the opponent is dealt uniformly from a restricted

@@ -12,7 +12,7 @@ import numpy as np
 from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.range_inference import ALL_COMBOS, COMBO_MASKS
-from src.pipeline.evaluation.lbr.opponent_model import known_mask
+from src.pipeline.evaluation.estimators.lbr.opponent_model import known_mask
 from src.shared.numeric import NORMALIZE_EPS
 
 _DECK_MASKS: np.ndarray = np.array([card.mask for card in FULL_DECK], dtype=np.int64)

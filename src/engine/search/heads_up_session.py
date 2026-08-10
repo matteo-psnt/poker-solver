@@ -1,6 +1,6 @@
 """Interactive heads-up hand: a human seat versus the trained blueprint.
 
-A resumable analogue of :func:`~src.pipeline.evaluation.resolver_match._play_game`.
+A resumable analogue of :func:`~src.pipeline.evaluation.estimators.resolver_match._play_game`.
 That driver plays a *concrete* blueprint-vs-blueprint hand straight to a true
 terminal; here one seat is a human, so the hand must **pause** whenever it is the
 human's turn and resume when their action arrives. Everything else -- chance

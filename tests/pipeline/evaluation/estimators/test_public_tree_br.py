@@ -16,7 +16,7 @@ import pytest
 
 from src.core.game.state import Card
 from src.engine.search.range_inference import NUM_COMBOS, combo_index_for
-from src.pipeline.evaluation.public_tree_br import (
+from src.pipeline.evaluation.estimators.public_tree_br import (
     PublicBRConfig,
     PublicTreeBestResponse,
     compute_public_tree_br,

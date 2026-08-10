@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.pipeline.evaluation import ledger
-from src.pipeline.evaluation.lbr.config import LBRConfig
+from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.ledger import records as eval_records
 from src.pipeline.evaluation.ledger import records as ledger_records
 from src.shared import gitinfo
