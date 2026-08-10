@@ -24,7 +24,7 @@ it imports NO handler. That distinction is the whole point: listing what this
 tool can do, and doing one of them, are different questions, and only the second
 needs `evaluate`'s evaluator or `precompute`'s clusterer.
 
-Eagerly importing all 27 modules cost 1.2s on every invocation, `--help`
+Eagerly importing every one of these modules cost 1.2s on every invocation, `--help`
 included, because the union of what they need is the union of everything: the
 engine, the abstraction pipeline, numba and scipy. Nothing about listing
 subcommand names requires any of it. `cli.headless` builds flags only for the
@@ -68,8 +68,9 @@ class CommandRef:
         return module.COMMAND
 
 
-"""Order is the order they appear in `--help`, in three groups: dispatch work to
-the pool, run it here (these are what a node invokes), then read the record."""
+"""Order is the order they appear in `--help`, in four groups: open a surface
+(one screen, or a server on localhost), dispatch work to the pool and account
+for it, run it here (these are what a node invokes), then read the record."""
 COMMANDS: tuple[CommandRef, ...] = (
     CommandRef("status", "Pool, Batch and task history on one screen (--watch to follow)."),
     CommandRef("serve", "Serve the console on localhost."),
