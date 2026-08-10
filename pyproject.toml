@@ -32,6 +32,9 @@ dependencies = [
     "fastapi>=0.129.0",
     "uvicorn>=0.41.0",
     "httpx>=0.28.1",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary,pool]>=3.2",
 ]
 
 [project.scripts]
@@ -110,7 +113,11 @@ ignore = [
 # appears in a moved import: a FastAPI route signature (request parsing is
 # derived from it) and any dataclass reached by `get_type_hints`.
 [tool.ruff.lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+# Both resolve their annotations at RUNTIME, so TC would move an import
+# these classes need. SQLAlchemy is not theoretical: deferring `datetime`
+# raises `MappedAnnotationError: Could not resolve all types within mapped
+# annotation` at import, not at first use.
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "sqlalchemy.orm.DeclarativeBase"]
 
 [tool.ruff.lint.per-file-ignores]
 "*.py" = ["E501"]
@@ -188,6 +195,12 @@ dev = [
     "pytest-xdist>=3.6",
     "hypothesis>=6.140",
 ]
+
+[tool.deptry.per_rule_ignores]
+# `psycopg` is never imported: SQLAlchemy selects it from the URL scheme
+# (`postgresql+psycopg://`), so it is a runtime driver rather than an API. That
+# is precisely the dependency shape a static scan cannot see.
+DEP002 = ["psycopg"]
 
 [tool.coverage.run]
 source = ["src"]
