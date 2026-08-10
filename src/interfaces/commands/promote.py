@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.share import share_client
-from src.interfaces.cloud.workspace import write_baseline
+from src.interfaces.cloud.store.share import share_client
+from src.interfaces.cloud.store.workspace import write_baseline
 from src.interfaces.commands._base import (
     Command,
     records_root,

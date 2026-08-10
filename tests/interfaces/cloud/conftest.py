@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.interfaces.cloud import billing
+from src.interfaces.cloud.cost import billing
 
 
 @pytest.fixture(autouse=True)

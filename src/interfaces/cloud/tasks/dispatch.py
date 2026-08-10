@@ -14,9 +14,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from src.interfaces.cloud import batch, share, spec
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.spec import TaskSpec
+from src.interfaces.cloud.store import share
+from src.interfaces.cloud.tasks import batch, spec
+from src.interfaces.cloud.tasks.spec import TaskSpec
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo
 from src.shared.cloudtask import kinds
@@ -31,8 +32,16 @@ caller has ever passed anything else. Submitting from `src/` would have tarred
 `src/`'s children as the tree root, and from a sibling worktree's directory it
 would have shipped that worktree's code under this one's provenance stamp. The
 package's own location is the one answer that cannot be wrong, and it is the
-same one `gitinfo` already resolves its git questions against."""
-CHECKOUT_ROOT = Path(__file__).resolve().parents[3]
+same one `gitinfo` already resolves its git questions against.
+
+Derived by finding the `src` package root and taking its parent, NOT by counting
+parents. It was `parents[3]`, correct for a module sitting directly in
+`src/interfaces/cloud/` and silently wrong the moment this file moved one
+directory deeper -- it then resolved to `src/interfaces` and would have sealed
+that as the checkout. A count encodes this file's depth, which is not a fact
+about the checkout and is not stable under a refactor."""
+_SRC = next(p for p in Path(__file__).resolve().parents if p.name == "src")
+CHECKOUT_ROOT = _SRC.parent
 
 
 @dataclass(frozen=True)

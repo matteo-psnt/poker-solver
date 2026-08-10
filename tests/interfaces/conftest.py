@@ -25,7 +25,7 @@ def published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     Returns the directory, so a test seeds it exactly as it used to seed a
     `--runs-dir`.
     """
-    import src.interfaces.cloud.workspace as workspace
+    import src.interfaces.cloud.store.workspace as workspace
 
     @contextmanager
     def _materialise(run: str | None = None) -> Iterator[Path]:

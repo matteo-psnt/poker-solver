@@ -163,7 +163,7 @@ def records_root(args: argparse.Namespace) -> Iterator[Path]:
     # Imported here rather than at module scope: this is the one place the
     # command layer needs the Azure SDK, and hoisting it would make every
     # `--help` pay for importing it.
-    from src.interfaces.cloud.workspace import share_records
+    from src.interfaces.cloud.store.workspace import share_records
 
     with share_records(run=getattr(args, "run", None) or None) as root:
         yield root

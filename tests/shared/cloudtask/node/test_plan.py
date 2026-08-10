@@ -188,7 +188,7 @@ class TestTheSubmitterContract:
     """`spec.TaskSpec.environment` writes exactly what this reads."""
 
     def test_every_key_the_submitter_emits_is_consumed(self):
-        from src.interfaces.cloud import spec
+        from src.interfaces.cloud.tasks import spec
 
         emitted = set(spec.TaskSpec(code_snapshot="s", config="p", to=1).environment())
         source = pathlib.Path(str(node_plan.__file__)).read_text()
@@ -196,7 +196,7 @@ class TestTheSubmitterContract:
         assert not unread, f"the submitter sets {sorted(unread)} and the node never reads it"
 
     def test_a_full_submission_round_trips(self):
-        from src.interfaces.cloud import spec
+        from src.interfaces.cloud.tasks import spec
 
         task = spec.TaskSpec(
             code_snapshot="snap",

@@ -12,10 +12,13 @@ from datetime import UTC, datetime
 
 import pytest
 
-from src.interfaces.cloud import spec
+from src.interfaces.cloud.tasks import spec
 from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+# Found by walking to the `tests` root, not by counting parents: a count
+# encodes THIS file's depth, and moving it one directory deeper silently
+# resolved the "repo root" to `tests/` instead of failing.
+REPO_ROOT = next(p for p in pathlib.Path(__file__).resolve().parents if p.name == "tests").parent
 
 NOW = datetime(2026, 8, 2, 21, 38, 5, tzinfo=UTC)
 

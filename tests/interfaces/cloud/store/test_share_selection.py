@@ -10,7 +10,7 @@ found them anyway.
 import json
 from unittest.mock import MagicMock
 
-from src.interfaces.cloud import share
+from src.interfaces.cloud.store import share
 from src.shared.records import STATIC_CHECKPOINT
 
 
@@ -105,7 +105,7 @@ class TestTaskReconcileSeam:
     """
 
     def test_batch_task_records_carry_every_field_reconcile_reads(self):
-        from src.interfaces.cloud import batch
+        from src.interfaces.cloud.tasks import batch
 
         class _Info:
             code, message, category = "TaskEnded", "boom", None

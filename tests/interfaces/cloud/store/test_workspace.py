@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from src.interfaces.cloud import share, workspace
+from src.interfaces.cloud.store import share, workspace
 from src.interfaces.errors import CommandError
 
 

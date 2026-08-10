@@ -31,8 +31,8 @@ import datetime as dt
 import re
 from typing import Any
 
-from src.interfaces.cloud import billing, node_time
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.cost import billing, node_time
 from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.commands._base import Command
 

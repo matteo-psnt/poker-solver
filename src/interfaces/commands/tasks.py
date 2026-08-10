@@ -24,8 +24,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from src.interfaces.cloud import batch, share, workspace
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.store import share, workspace
+from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands import jobs
 from src.interfaces.commands._base import Command
 from src.shared.cloudtask import task_log

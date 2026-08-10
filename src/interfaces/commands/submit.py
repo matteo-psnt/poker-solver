@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from src.interfaces.cloud import dispatch, spec
+from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command
 from src.shared import gitinfo
 from src.shared.cloudtask.kinds import TaskName

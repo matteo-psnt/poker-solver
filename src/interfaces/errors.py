@@ -18,7 +18,7 @@ impossible. The core reports; the surface decides what a report means.
 
 Deliberately NOT covered here: the Azure SDK's ``ClientAuthenticationError`` and
 ``HttpResponseError``. They are raised from a dozen call sites in
-:mod:`src.interfaces.cloud.batch` with no single chokepoint to wrap, so a
+:mod:`src.interfaces.cloud.tasks.batch` with no single chokepoint to wrap, so a
 surface that talks to Batch still catches them by name. Worth closing, but it
 is a separate change from this one.
 """

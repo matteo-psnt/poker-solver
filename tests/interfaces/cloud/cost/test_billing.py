@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from src.interfaces.cloud import billing
+from src.interfaces.cloud.cost import billing
 
 SINCE = dt.date(2026, 7, 26)
 UNTIL = dt.date(2026, 8, 9)

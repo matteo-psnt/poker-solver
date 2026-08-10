@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from src.interfaces.cloud import batch
 from src.interfaces.cloud.config import CloudConfig
+from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
 
 LIVE_TASK_STATES = {"active", "preparing", "running"}

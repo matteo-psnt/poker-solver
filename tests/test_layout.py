@@ -51,6 +51,10 @@ LOOSE_BESIDE_PACKAGES: dict[str, tuple[str, ...]] = {
     # Leaf helpers with no owner among the surfaces; `errors` is imported by all
     # of them and belongs above each.
     "interfaces": ("errors.py", "run_names.py"),
+    # `config` is the credentials and resource ids all three sub-packages need,
+    # so it sits above them; `serve_box` provisions the play-server VM and is
+    # its own job, sharing nothing with dispatching work or reading the bill.
+    "interfaces.cloud": ("config.py", "serve_box.py"),
     # Deliberate, and load-bearing: `blueprint.py` is what training, evaluation
     # and the play server all START from, so it sits above all three rather than
     # inside the one that used to own it. Pinned by its own import-linter
