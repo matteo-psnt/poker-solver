@@ -23,6 +23,7 @@ import contextlib
 import sys
 from collections.abc import Sequence
 
+from src.interfaces import telemetry
 from src.interfaces.commands import BY_NAME, COMMANDS
 from src.interfaces.errors import CommandError
 from src.shared import jsonio
@@ -100,17 +101,22 @@ def main(argv: list[str] | None = None) -> int:
         # their level from the run config, and the flag must outrank it there.
         pin_level_for_children(args.log_level)
         configure_logging(args.log_level)
+    # `execute` rather than `run`: it is the seam both surfaces share, and the
+    # only place a command's duration and outcome are observed. Calling the
+    # handler directly here would make the command line -- the surface that runs
+    # the expensive things -- the one absent from its own activity log.
     try:
-        if args.json:
-            # Library layers log to stderr, but third-party writers (numba, zarr)
-            # can still print to stdout; redirect so the JSON blob is the ONLY
-            # thing on stdout and machine consumers can parse it directly.
-            with contextlib.redirect_stdout(sys.stderr):
-                payload = command.run(args)
-            print(jsonio.dumps(payload, indent=2))
-        else:
-            payload = command.run(args)
-            command.render(payload)
+        with telemetry.surface("cli"):
+            if args.json:
+                # Library layers log to stderr, but third-party writers (numba,
+                # zarr) can still print to stdout; redirect so the JSON blob is
+                # the ONLY thing on stdout and machine consumers can parse it.
+                with contextlib.redirect_stdout(sys.stderr):
+                    payload = command.execute(args)
+                print(jsonio.dumps(payload, indent=2))
+            else:
+                payload = command.execute(args)
+                command.render(payload)
     except CommandError as error:
         # This is where the command line puts back what the core no longer
         # assumes. A bad request used to `raise SystemExit(msg)` from wherever

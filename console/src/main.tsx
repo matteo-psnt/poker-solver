@@ -1,5 +1,6 @@
 import { isTransient } from "@/api/client";
 import { Shell } from "@/components/Shell";
+import { Activity as ActivityPage } from "@/routes/Activity";
 import { Cost } from "@/routes/Cost";
 import { Dispatch } from "@/routes/Dispatch";
 import { Evals } from "@/routes/Evals";
@@ -87,6 +88,11 @@ const routes = [
     getParentRoute: () => rootRoute,
     path: "/experiments",
     component: Experiments,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/activity",
+    component: ActivityPage,
   }),
 ];
 

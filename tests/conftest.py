@@ -1,6 +1,8 @@
 """Suite-wide fixtures.
 
-The one thing here is the card-abstraction guard. A test that trains for real
+The card-abstraction guard, and the telemetry kill switch.
+
+The abstraction guard is the older of the two. A test that trains for real
 needs a precomputed combo abstraction on this machine, and that artifact is
 **gitignored, unversioned, and ~194 MB** -- so whether it is present is a
 property of the laptop, not of the code. A test whose result depends on that
@@ -10,6 +12,34 @@ must say "not run", never "broken".
 from __future__ import annotations
 
 import pytest
+
+from src.interfaces import telemetry
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_telemetry_from_the_suite():
+    """The suite records nothing, and this must be autouse.
+
+    `Command.execute` writes one row per invocation into the developer's real
+    cache -- `cache_root()` reads the environment, and nothing here redirects
+    it. A full run calls commands hundreds of times, so without this every
+    `pytest` would append hundreds of rows describing commands that ran against
+    fakes and measured nothing. `activity` would then report a p95 for `tasks`
+    derived mostly from a stub returning a dict.
+
+    Session-scoped and set in the environment rather than monkeypatched,
+    because `-n auto` runs 12 worker PROCESSES and a patched module attribute
+    would only silence the one that applied it.
+    """
+    import os
+
+    previous = os.environ.get(telemetry.ENV_VAR)
+    os.environ[telemetry.ENV_VAR] = "0"
+    yield
+    if previous is None:
+        del os.environ[telemetry.ENV_VAR]
+    else:
+        os.environ[telemetry.ENV_VAR] = previous
 
 
 @pytest.fixture

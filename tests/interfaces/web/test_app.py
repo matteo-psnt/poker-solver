@@ -157,6 +157,22 @@ class TestTheDispatchingWrites:
 
 
 class TestTheReadsAddedForCoverage:
+    def test_a_flag_named_like_answers_own_parameter_still_reaches_the_command(
+        self, client, invoked
+    ):
+        """`activity --command tasks` is the case, and it is not a one-off.
+
+        `answer(cache, command, /, **kwargs)` — the slash is what keeps a
+        command's own flags from binding to this function's parameters. Without
+        it the failure is a type error several frames from anything the reader
+        was thinking about, and the same trap waits for a future `--cache`.
+        """
+        client.get("/api/activity?days=1")
+        (name, kwargs) = invoked[0]
+        assert name == "activity"
+        assert kwargs["command"] == ""
+        assert kwargs["days"] == 1
+
     def test_an_experiment_id_becomes_the_report_argument(self, client, invoked):
         client.get("/api/experiments/exp-7")
         assert invoked[0] == ("report", {"experiment": "exp-7"})
