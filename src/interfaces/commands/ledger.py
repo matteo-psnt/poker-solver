@@ -43,7 +43,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _list(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    ledger_path = ledger_for(args, root)
+    ledger_path = ledger_for(root)
     records = eval_ledger.read_records(ledger_path)
     if args.run:
         records = [r for r in records if r.get("run_id") == args.run]

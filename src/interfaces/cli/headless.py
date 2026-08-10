@@ -20,13 +20,12 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import json
 import sys
 from collections.abc import Sequence
 
 from src.interfaces.commands import BY_NAME, COMMANDS
 from src.interfaces.errors import CommandError
-from src.shared.jsonio import json_default
+from src.shared import jsonio
 from src.shared.log import configure_logging, pin_level_for_children
 
 
@@ -108,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             # thing on stdout and machine consumers can parse it directly.
             with contextlib.redirect_stdout(sys.stderr):
                 payload = command.run(args)
-            print(json.dumps(payload, indent=2, default=json_default))
+            print(jsonio.dumps(payload, indent=2))
         else:
             payload = command.run(args)
             command.render(payload)

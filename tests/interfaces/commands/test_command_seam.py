@@ -15,6 +15,7 @@ in the old idiom would pass every other test in the suite.
 from __future__ import annotations
 
 import argparse
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ from src.interfaces.cloud.config import CloudConfigError
 from src.interfaces.commands import load_all, progress
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
+from src.shared import repo
 
 
 def _add(parser: argparse.ArgumentParser) -> None:
@@ -138,6 +140,44 @@ class TestTheCommandLinePutsTheExitBack:
             headless.main(["progress", "--run", "r"])
 
 
+"""Where ending the process IS the answer, declared with the reason.
+
+Two sites raise ``SystemExit`` and should. Naming them here rather than widening
+the guard keeps the next one a decision: adding a line is fine, adding it
+without a reason is what the failure message argues against.
+"""
+EXITS_ON_PURPOSE: dict[str, str] = {
+    "interfaces/cli/headless.py": (
+        "The `__main__` guard. This is the one place a refusal becomes an exit "
+        "code, which is the whole point of the seam -- everything above it "
+        "returns an int."
+    ),
+    "interfaces/commands/blueprint_serve.py": (
+        "Not a refusal: the exit CODE is how the server tells its systemd unit "
+        "why it stopped. Idle expiry must switch the box off and every other "
+        "stop must not, and they are indistinguishable by then. Cost 62 hours "
+        "of a box restarting itself -- see `idle.IDLE_EXIT_CODE`."
+    ),
+}
+
+
+def _system_exit_lines(path: Path) -> list[int]:
+    """Lines that actually raise ``SystemExit``, parsed rather than grepped.
+
+    The substring form counted this package's own ``__init__`` docstring, which
+    names the idiom in order to say it was removed. A guard that fires on prose
+    about itself trains people to widen it.
+    """
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Raise)
+        and isinstance(exc := node.exc, ast.Call)
+        and isinstance(exc.func, ast.Name)
+        and exc.func.id == "SystemExit"
+    ]
+
+
 def test_no_command_signals_a_refusal_by_exiting_the_process():
     """The regression guard.
 
@@ -147,17 +187,65 @@ def test_no_command_signals_a_refusal_by_exiting_the_process():
     """
     # `rglob`, not `glob`: `commands/` is flat today, but a guard that silently
     # stops covering a package the moment someone adds a subdirectory is worse
-    # than no guard, because it still reads as coverage. `flows/` is included
-    # for the same reason -- it is the surface that had to catch the SystemExit.
+    # than no guard, because it still reads as coverage.
+    #
+    # Which is what happened to this one. It named `cli/commands` and
+    # `cli/flows`, and both moved out from under it -- the commands to
+    # `interfaces/commands` when the console became a second caller, the flows
+    # to deletion with the interactive menu. Two of its three roots had not
+    # existed for weeks, `rglob` on a missing directory yields nothing rather
+    # than raising, and the test went on passing over `cloud/` alone while
+    # reading as cover for every command module. Anchored to the repo now, so a
+    # move relocates the code out of a root that still exists.
     roots = [
-        Path("src/interfaces/cli/commands"),
-        Path("src/interfaces/cli/flows"),
-        Path("src/interfaces/cloud"),
+        repo.SRC / "interfaces" / "commands",
+        repo.SRC / "interfaces" / "cli",
+        repo.SRC / "interfaces" / "web",
+        repo.SRC / "interfaces" / "cloud",
     ]
+    missing = [str(root) for root in roots if not root.is_dir()]
+    assert missing == [], f"this guard names directories that do not exist: {missing}"
+
     offenders = [
-        str(path)
+        f"{path.relative_to(repo.ROOT)}:{line}"
         for root in roots
         for path in root.rglob("*.py")
-        if "raise SystemExit" in path.read_text()
+        for line in _system_exit_lines(path)
+        if path.relative_to(repo.SRC).as_posix() not in EXITS_ON_PURPOSE
     ]
-    assert offenders == [], f"raise CommandError instead: {offenders}"
+    assert offenders == [], (
+        "raise CommandError instead — a refusal must be a value, or every "
+        f"surface that is not a command line inherits the exit: {offenders}"
+    )
+
+
+def test_only_the_errors_module_names_the_azure_sdks_exceptions():
+    """The ladder is written once, or it is written once per surface.
+
+    ``status`` and the console both have to survive an expired ``az login``, and
+    both carried the same three-arm ``except`` -- differing only in whether the
+    result became an HTTP status or a dict field. Nothing failed when they
+    agreed; the cost was that a third surface would write it a third time, and
+    the cost of getting one arm wrong is a whole screen blanking where two
+    panels should have.
+
+    ``errors.attempt`` is that ladder. This is the guard that keeps it the only
+    one: a new surface copying the old idiom would pass every other test here.
+    """
+    # BOTH names. An earlier draft checked only `ClientAuthenticationError`,
+    # which leaves a surface catching `HttpResponseError` alone -- an
+    # unreachable endpoint, the other half of the pair -- passing a guard whose
+    # docstring claims to cover the ladder.
+    names = ("ClientAuthenticationError", "HttpResponseError")
+    allowed = {repo.SRC / "interfaces" / "errors.py"}
+    offenders = [
+        f"{path.relative_to(repo.ROOT)} ({name})"
+        for path in (repo.SRC / "interfaces").rglob("*.py")
+        if path not in allowed
+        for name in names
+        if name in path.read_text()
+    ]
+    assert offenders == [], (
+        "these catch the Azure SDK's exceptions directly — go through "
+        "`errors.attempt`, which classifies them once: " + ", ".join(offenders)
+    )

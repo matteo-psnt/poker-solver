@@ -28,7 +28,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         baseline = root / "baseline.json"
         out = services.experiment_report(
             args.experiment,
-            ledger_path=ledger_for(args, root),
+            ledger_path=ledger_for(root),
             runs_dir=root,
             baseline_path=baseline,
         )

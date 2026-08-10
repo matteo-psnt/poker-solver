@@ -27,7 +27,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -48,10 +47,10 @@ from src.interfaces.commands import (
     serve_box,
     tasks,
 )
-from src.interfaces.errors import CommandError
+from src.interfaces.errors import attempt
 from src.interfaces.web import blueprint_proxy
 from src.interfaces.web.cache import TtlCache
-from src.shared import repo
+from src.shared import jsonio, repo
 
 # Long enough that several open tabs (or a remount) share one cloud sweep,
 # short enough that a manual refresh feels live. A sweep is 2-4s per panel.
@@ -79,6 +78,31 @@ RECORD_TREE_TTL_SECONDS = 45.0
 CONSOLE_DIST = repo.ROOT / "console" / "dist"
 
 
+class PayloadResponse(JSONResponse):
+    """A command payload, encoded exactly as ``--json`` would encode it.
+
+    Starlette's ``JSONResponse.render`` calls ``json.dumps`` with no ``default``
+    hook, so a payload carrying a numpy scalar or a ``Path`` -- which the CLI
+    prints without complaint -- raised a ``TypeError`` from inside the response,
+    past :func:`answer`'s ladder, and reached the browser as a 500. Sharing the
+    encoder with :mod:`headless` is what makes "the payload is the interface"
+    true of the bytes and not just the dict.
+
+    ``allow_nan=False`` is kept from Starlette's default: ``NaN`` is not valid
+    JSON and ``JSON.parse`` rejects it, so a payload containing one should fail
+    here rather than reach a panel as a parse error with no origin.
+    """
+
+    def render(self, content: Any) -> bytes:
+        return jsonio.dumps(content, allow_nan=False).encode()
+
+
+# A refusal is understood-and-the-answer-is-no (an unpublished run, a run with
+# no checkpoint history), so it is the client's business, not a server fault;
+# unavailable means Azure did not answer, which is transient and worth retrying.
+_STATUS = {"refusal": 422, "unavailable": 503}
+
+
 def answer(cache: TtlCache, command: Command, **kwargs: Any) -> JSONResponse:
     """Run one command, memoised, and map its failures onto status codes.
 
@@ -87,26 +111,20 @@ def answer(cache: TtlCache, command: Command, **kwargs: Any) -> JSONResponse:
     of all) cannot serve each other's answers.
 
     A refusal is data, not a crash: the client renders one panel as unavailable
-    and keeps the rest. That is the same contract `status` relies on, so the
-    translation lives here rather than in every endpoint.
+    and keeps the rest. That is the same contract `status` relies on -- which is
+    why *which* failures are survivable is decided once, in
+    :func:`~src.interfaces.errors.attempt`, and only the rendering of them is
+    decided here.
 
     Failures are deliberately not cached. A repeated 503 costs a repeated cloud
     read, which is the right trade: the alternative keeps serving "Azure is
     down" for the whole TTL after `az login` has already fixed it.
     """
     key = (command.name, tuple(sorted(kwargs.items())))
-    try:
-        return JSONResponse(cache.get(key, lambda: command.invoke(**kwargs)))
-    except CommandError as error:
-        # 422: the request was understood and the answer is "no" -- an
-        # unpublished run, a run with no checkpoint history. Not a server fault.
-        return JSONResponse({"error": str(error)}, status_code=422)
-    except ClientAuthenticationError:
-        return JSONResponse(
-            {"error": "Azure rejected the credential — try `az login`."}, status_code=503
-        )
-    except HttpResponseError as error:
-        return JSONResponse({"error": f"Azure did not answer: {error}"}, status_code=503)
+    payload, failure = attempt(lambda: cache.get(key, lambda: command.invoke(**kwargs)))
+    if failure is not None:
+        return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
+    return PayloadResponse(payload)
 
 
 @asynccontextmanager

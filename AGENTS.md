@@ -125,9 +125,22 @@ definition: never a source of truth, never worth backing up.
   dying, which `raise SystemExit` at 16 sites made impossible. A guard test
   fails if a command module reintroduces it. `render()` is deliberately NOT
   abstracted — it is the terminal's renderer, and for any other surface the
-  payload is the interface. Still unwrapped: the Azure SDK's
-  `ClientAuthenticationError`/`HttpResponseError`, which have no chokepoint in
-  `batch.py`, so a surface talking to Batch catches those by name too.
+  payload is the interface. **Which failures a surface may survive is decided
+  once**, in `errors.attempt`: it runs a call and returns either the payload or
+  a `Failure` classified `refusal` (understood, and the answer is no → 422) or
+  `unavailable` (Azure did not answer → 503). The Azure SDK's
+  `ClientAuthenticationError`/`HttpResponseError` have no chokepoint in
+  `batch.py`, so they are caught THERE and nowhere else — `status` and the
+  console carried the same three-arm ladder, and a third surface would have
+  written it a third time. A guard test fails if anything under `interfaces/`
+  names either exception again. The SDK imports lazily inside `attempt`,
+  because `errors` is imported by every command and `azure.core.exceptions`
+  costs 76ms against a 0.18s `--help`.
+- **Both doors serialise through `shared.jsonio.dumps`** — `--json` and the
+  console's `PayloadResponse` — so a payload carrying a numpy scalar or a
+  `Path` cannot print fine on one surface and 500 the other, past the refusal
+  ladder. They differ in one declared respect: the console keeps
+  `allow_nan=False`, because `JSON.parse` rejects `NaN`.
 - **Azure dispatch is Python, in `src/interfaces/cloud/`** — `spec.py` (pure,
   the testable core: what a task IS), `batch.py`, `share.py`, `dispatch.py`,
   `config.py`, `workspace.py` (what `--source share` materialises). It lives

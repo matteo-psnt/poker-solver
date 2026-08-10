@@ -38,11 +38,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
-from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
-
 from src.interfaces.commands import jobs, pool_status, tasks
 from src.interfaces.commands._base import Command
-from src.interfaces.errors import CommandError
+from src.interfaces.errors import attempt
 
 PANELS: tuple[tuple[str, Command], ...] = (
     ("pool", pool_status.COMMAND),
@@ -81,21 +79,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def _panel(command: Command, **kwargs: Any) -> dict[str, Any]:
     """Answer one panel, or record why it could not be answered.
 
-    The Azure exceptions are named here rather than left to a bare ``except``:
-    an expired ``az login`` and an unreachable endpoint are the two failures a
-    status screen exists to survive, and they should read as themselves rather
-    than as an anonymous error. Anything else propagates -- a bug in a panel is
-    still a bug, and swallowing it would turn this screen into the place
-    exceptions go to be silently rendered as "unavailable".
+    Which failures are survivable is :func:`attempt`'s decision, not this
+    module's -- an expired ``az login`` and an unreachable endpoint are the two
+    a status screen exists to outlive, and the console needs the same list.
+    Anything else propagates: a bug in a panel is still a bug, and swallowing it
+    would turn this screen into the place exceptions go to be silently rendered
+    as "unavailable".
+
+    The screen shows a reason, not a kind -- a greyed-out panel says why in
+    words either way -- so the classification is dropped here and used by the
+    console, which has to pick a status code from it.
     """
-    try:
-        return {"payload": command.invoke(**kwargs), "error": None}
-    except CommandError as error:
-        return {"payload": None, "error": str(error)}
-    except ClientAuthenticationError:
-        return {"payload": None, "error": "Azure rejected the credential — try `az login`."}
-    except HttpResponseError as error:
-        return {"payload": None, "error": f"Azure did not answer: {error}"}
+    payload, failure = attempt(lambda: command.invoke(**kwargs))
+    return {"payload": payload, "error": failure.message if failure else None}
 
 
 def gather(*, limit: int = 10, with_tasks: bool = True) -> dict[str, Any]:
