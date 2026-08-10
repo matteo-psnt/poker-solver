@@ -8,7 +8,9 @@ import pytest
 
 from src.pipeline.evaluation import ledger
 from src.pipeline.evaluation.lbr.config import LBRConfig
+from src.pipeline.evaluation.ledger import records as eval_records
 from src.pipeline.evaluation.ledger import records as ledger_records
+from src.shared import gitinfo
 from src.shared.cloudtask import task_log
 from tests.test_helpers import seed_ledger
 
@@ -364,3 +366,49 @@ class TestWhichWorktreeProducedTheNumber:
             timestamp="2026-08-06T00:00:00+00:00",
         )
         assert record["train_git_branch"] is None
+
+
+class TestTheRecordNamesTheCodeItRan:
+    """A commit plus a dirty bit is not a complete answer; the snapshot is.
+
+    Measured 2026-08-10: of 56 code snapshots published to the share, SEVEN were
+    named by any record at all, and all seven by task records written after
+    2026-08-02. The other 49 were indistinguishable from garbage while being the
+    only copy of code states that included uncommitted work — because the run
+    that used one never wrote down which one. Deleting them was considered and
+    refused on exactly that ground.
+    """
+
+    def test_an_eval_document_carries_both_snapshots(self, monkeypatch):
+        monkeypatch.setenv(gitinfo.SNAPSHOT_ENV, "code-20260810_120000")
+        record = eval_records.build_record(
+            provenance=eval_records.RunProvenance(
+                run_id="run-a",
+                git_commit="abc1234",
+                git_dirty=False,
+                config_name="production",
+                card_abstraction_hash="h",
+                action_config_hash="a",
+                code_snapshot="code-20260801_090000",
+            ),
+            method="exact_br",
+            estimator="exact_br",
+            infosets=10,
+            knobs={"scorer": "exact_br"},
+            results={"exploitability_mbb": 1.0},
+            result_path=Path("x.json"),
+            timestamp="2026-08-10T00:00:00",
+        )
+
+        assert record["train_code_snapshot"] == "code-20260801_090000", (
+            "the code that produced the CHECKPOINT"
+        )
+        assert record["eval_code_snapshot"] == "code-20260810_120000", (
+            "the code that MEASURED it — a different tarball, and the reason both exist"
+        )
+
+    def test_absent_off_a_node_rather_than_invented(self, monkeypatch):
+        """Run anywhere else there is no snapshot: the working tree is the code,
+        and the commit already describes it as well as anything can."""
+        monkeypatch.delenv(gitinfo.SNAPSHOT_ENV, raising=False)
+        assert gitinfo.get_code_snapshot() is None

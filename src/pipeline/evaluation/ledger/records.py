@@ -22,7 +22,12 @@ from typing import Any
 from src.pipeline.evaluation.ledger.tiers import _knob_hash
 from src.shared import records as record_store
 from src.shared.cloudtask import task_log
-from src.shared.gitinfo import get_git_branch, get_git_commit, is_git_dirty
+from src.shared.gitinfo import (
+    get_code_snapshot,
+    get_git_branch,
+    get_git_commit,
+    is_git_dirty,
+)
 
 LEDGER_SCHEMA_VERSION = record_store.REGISTRY["eval_ledger.jsonl"].version
 
@@ -58,6 +63,10 @@ class RunProvenance:
     # so an override-variant is only distinguishable from its base by this.
     config_hash: str | None = None
     git_branch: str | None = None
+    # The tarball the RUN's code came from. Defaulted for the same reason as
+    # `git_branch`: every row written before it existed simply has none, and a
+    # run trained outside a cloud task never had one to record.
+    code_snapshot: str | None = None
 
 
 def build_record(
@@ -98,9 +107,15 @@ def build_record(
         # routinely identical across arms that differ entirely: a worktree
         # carries its change uncommitted for as long as it is being iterated on.
         "train_git_branch": provenance.git_branch,
+        # And the SNAPSHOT of each, which is the only complete answer: a commit
+        # plus a dirty bit names some unrecorded changes, the tarball is them.
+        # Without it a published snapshot has nothing pointing at it and cannot
+        # be told apart from garbage -- 49 of 56 were in that state.
+        "train_code_snapshot": provenance.code_snapshot,
         "eval_git_commit": get_git_commit(),
         "eval_git_dirty": is_git_dirty(),
         "eval_git_branch": get_git_branch(),
+        "eval_code_snapshot": get_code_snapshot(),
         "config_name": provenance.config_name,
         "config_hash": provenance.config_hash,
         "card_abstraction_hash": provenance.card_abstraction_hash,

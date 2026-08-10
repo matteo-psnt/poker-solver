@@ -52,6 +52,25 @@ carries its change UNCOMMITTED for as long as it is being iterated on. A hash
 plus a dirty bit cannot tell two of those apart; the branch can."""
 BRANCH_ENV = "RUN_GIT_BRANCH"
 
+"""The code snapshot: not a git fact at all, and the only one that is COMPLETE.
+
+A commit plus a dirty bit says "these bytes, and some unrecorded changes". The
+snapshot IS the bytes -- the tarball a task actually extracted and ran. It lives
+here because this module answers one question, "which code is this", and the
+answer has three parts of increasing strength.
+
+Recorded on the run and eval documents because it was recorded ONLY on task
+records, and only from 2026-08-02. Measured 08-10: of 56 snapshots on the share,
+7 were named by anything at all. The other 49 read as garbage collectable while
+being the sole copy of code states that included uncommitted work -- and nothing
+could prove otherwise, because the run they belonged to never wrote down which
+one it used. Deleting them was considered and refused for exactly that reason.
+
+Empty off a node. There is no snapshot then: the code is the working tree, which
+the commit and dirty bit already describe as well as anything can.
+"""
+SNAPSHOT_ENV = "CODE_SNAPSHOT"
+
 
 def _run_git(*args: str) -> str | None:
     """Run a git command in the repo root; return stripped stdout or None on failure."""
@@ -109,6 +128,15 @@ def get_git_branch() -> str | None:
         return stamped
     branch = _run_git("rev-parse", "--abbrev-ref", "HEAD")
     return None if not branch or branch == "HEAD" else branch
+
+
+def get_code_snapshot() -> str | None:
+    """The snapshot this process is running from, or None when it is not one.
+
+    Read from the environment and nowhere else: only the submitting machine
+    knows the id, the node receives it, and nothing on disk can reconstruct it.
+    """
+    return os.environ.get(SNAPSHOT_ENV) or None
 
 
 def encode_dirty(dirty: bool | None) -> str:
