@@ -31,8 +31,8 @@ from pathlib import Path
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.fileshare import ShareDirectoryClient, ShareServiceClient
 
-from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE
 from src.interfaces.cloud.config import CloudConfig
+from src.shared import records
 
 ARCHIVE_DIR = "archive"
 CODE_DIR = "code"
@@ -217,12 +217,12 @@ def manifest_members(service: ShareServiceClient, share: str, run_path: str) -> 
     trade over-fetching orphans for silently dropping every rung but the last,
     leaving ``curve`` with a single point.
 
-    ``MANIFEST_FILE`` is imported rather than spelled out here. The static tree
+    The manifest NAME is imported rather than spelled out here. The static tree
     is the only backend, its manifest is ``STATIC_CHECKPOINT.json``, and a
     hardcoded ``CHECKPOINT.json`` fails *open*: the guard silently degrades to
     "fetch everything" instead of raising.
     """
-    raw = read_text(service, share, f"{run_path}/{MANIFEST_FILE}")
+    raw = read_text(service, share, f"{run_path}/{records.STATIC_CHECKPOINT}")
     if raw is None:
         return None
     manifest = json.loads(raw)

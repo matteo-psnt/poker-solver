@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE
 from src.pipeline.services import runs as services_runs
+from src.shared.records import STATIC_CHECKPOINT
 
 
 def _patch_metadata(monkeypatch, *, commit="abc123", dirty=False):
@@ -36,7 +36,7 @@ def test_missing_checkpoint_is_not_loadable(tmp_path, monkeypatch):
 def test_current_run_is_loadable(tmp_path, monkeypatch):
     run = tmp_path / "run-cur"
     run.mkdir()
-    (run / MANIFEST_FILE).write_text("{}")
+    (run / STATIC_CHECKPOINT).write_text("{}")
     _patch_metadata(monkeypatch, dirty=True)
 
     summary = services_runs._summarize_run(tmp_path, "run-cur")

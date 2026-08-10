@@ -7,8 +7,9 @@ scores one — so this holds the readers and nothing that mutates.
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE, StaticCheckpointManifest
+from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
+from src.shared import records
 from src.shared.gitinfo import commits_ahead_of
 
 
@@ -60,7 +61,7 @@ class RunSummary:
 
 def _has_checkpoint(run_dir: Path) -> bool:
     """Whether ``run_dir`` holds a checkpoint the loader can open."""
-    return (run_dir / MANIFEST_FILE).exists()
+    return (run_dir / records.STATIC_CHECKPOINT).exists()
 
 
 def _summarize_run(runs_dir: Path, name: str) -> RunSummary:

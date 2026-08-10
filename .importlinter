@@ -38,6 +38,24 @@ forbidden_modules =
     src.core
 allow_indirect_imports = True
 
+; Dispatching work and doing it are different jobs, and the layers contract
+; above cannot say so -- `interfaces -> engine` is legal, so Azure code reaching
+; into the solver reads as ordinary layering. It had: `share.py` imported the
+; checkpoint manifest's FILENAME from `engine.solver.storage`, which is a string
+; the node wrapper also needs and cannot get that way (stdlib-only, and
+; `shared -> engine` is forbidden) -- so the same literal was spelled four
+; times. The name now lives in `shared.records`, which already declares the
+; artifact, and this keeps the edge from coming back the next time cloud code
+; needs to know something about a run's contents.
+[importlinter:contract:cloud_dispatches_work_it_does_not_do]
+name = Azure dispatch must not reach into the solver
+type = forbidden
+source_modules =
+    src.interfaces.cloud
+forbidden_modules =
+    src.engine
+    src.core
+
 [importlinter:contract:training_and_evaluation_are_independent]
 name = Training and evaluation must not import each other
 type = independence

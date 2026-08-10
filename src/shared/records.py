@@ -62,6 +62,20 @@ from src.shared.jsonio import json_default
 SCHEMA_VERSION_KEY = "schema_version"
 UNVERSIONED = 0
 
+"""The filename that identifies a run as loadable at HEAD.
+
+Named here rather than beside the code that parses it because four unrelated
+places need the string and only one of them can import the parser. The node
+wrapper is stdlib-only and cannot reach `engine`; `interfaces.cloud` reaching it
+put Azure code one import away from the solver. So each had spelled the literal
+again -- and a manifest rename would have been found by whichever copy was
+missed, at the point where a run silently reads as unpublished.
+
+This module already declares the artifact; the name is part of that
+declaration.
+"""
+STATIC_CHECKPOINT = "STATIC_CHECKPOINT.json"
+
 Kind = Literal["snapshot", "log"]
 Scope = Literal["local", "share"]
 
@@ -99,13 +113,13 @@ REGISTRY: dict[str, Artifact] = {
         where="<run_dir>/run.jsonl",
         growth="one row per event; one file per run, read whole",
     ),
-    "STATIC_CHECKPOINT.json": Artifact(
-        name="STATIC_CHECKPOINT.json",
+    STATIC_CHECKPOINT: Artifact(
+        name=STATIC_CHECKPOINT,
         kind="snapshot",
         scope="local",
         version=1,
         what="current snapshot plus the retained ladder",
-        where="<run_dir>/STATIC_CHECKPOINT.json",
+        where=f"<run_dir>/{STATIC_CHECKPOINT}",
         growth="rewritten in place; the ladder it names is what actually grows",
     ),
     "eval_ledger.jsonl": Artifact(

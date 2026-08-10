@@ -10,8 +10,8 @@ found them anyway.
 import json
 from unittest.mock import MagicMock
 
-from src.engine.solver.storage.static_checkpoint import MANIFEST_FILE
 from src.interfaces.cloud import share
+from src.shared.records import STATIC_CHECKPOINT
 
 
 class TestSnapshotClassification:
@@ -36,7 +36,7 @@ class TestSnapshotClassification:
         assert share.is_snapshot_path("run-a/static-3000.zarr/regrets/0.0")
 
     def test_top_level_manifest_is_not_snapshot_data(self):
-        assert not share.is_snapshot_path(f"run-a/{MANIFEST_FILE}")
+        assert not share.is_snapshot_path(f"run-a/{STATIC_CHECKPOINT}")
 
     def test_eval_records_survive_a_metadata_fetch(self):
         """The two predicates together are what a metadata fetch applies."""
@@ -68,7 +68,7 @@ class TestManifestMembers:
 
         share.manifest_members(MagicMock(), "share", "archive/run-a")
 
-        assert captured["path"] == f"archive/run-a/{MANIFEST_FILE}"
+        assert captured["path"] == f"archive/run-a/{STATIC_CHECKPOINT}"
 
     def test_every_retained_rung_is_a_member(self, monkeypatch):
         """Naming only the current snapshot trades over-fetching orphans for

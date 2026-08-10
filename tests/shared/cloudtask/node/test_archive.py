@@ -13,6 +13,7 @@ import os
 
 import pytest
 
+from src.shared import records
 from src.shared.cloudtask.node import archive
 
 
@@ -25,7 +26,7 @@ def _snapshot(run_dir, name: str, *files: str) -> None:
 
 
 def _manifest(run_dir, current: str, retained=(), iteration: int = 0) -> None:
-    (run_dir / archive.MANIFEST).write_text(
+    (run_dir / records.STATIC_CHECKPOINT).write_text(
         json.dumps(
             {
                 "zarr": current,
@@ -74,7 +75,7 @@ class TestPublish:
             patch.setattr(archive, "copy_file", record)
             assert archive.publish_run(run_dir, destination)
 
-        assert order[-1] == archive.MANIFEST, order
+        assert order[-1] == records.STATIC_CHECKPOINT, order
 
     def test_a_failed_snapshot_suppresses_the_manifest(self, tmp_path):
         """The whole point of the ordering: the share keeps describing the last
@@ -91,7 +92,7 @@ class TestPublish:
             patch.setattr(archive, "copy_tree", explode)
             assert not archive.publish_run(run_dir, destination)
 
-        assert not (destination / archive.MANIFEST).exists()
+        assert not (destination / records.STATIC_CHECKPOINT).exists()
         assert not (destination / archive.marker_for("static-1000.zarr")).exists()
 
     def test_a_failed_snapshot_also_suppresses_the_static_manifest(self, tmp_path):
@@ -108,7 +109,7 @@ class TestPublish:
             archive.publish_run(run_dir, destination)
 
         assert (destination / "metrics.jsonl").exists(), "loose files still publish"
-        assert not (destination / archive.MANIFEST).exists()
+        assert not (destination / records.STATIC_CHECKPOINT).exists()
 
     def test_an_already_marked_snapshot_is_not_recopied(self, tmp_path):
         """Measured at 6.6 minutes re-uploading 809 MB already on the share: a
@@ -224,7 +225,7 @@ class TestFetchCurrentRung:
             (share / name / "regrets" / "0").write_text(name)
             if marked:
                 (share / archive.marker_for(name)).write_text("")
-        (share / archive.MANIFEST).write_text(
+        (share / records.STATIC_CHECKPOINT).write_text(
             json.dumps({"zarr": current, "iteration": 2000, "retained": []})
         )
         return share
@@ -239,7 +240,7 @@ class TestFetchCurrentRung:
 
         assert (node / "static-2000.zarr" / "regrets" / "0").exists()
         assert not (node / "static-1000.zarr").exists()
-        assert (node / archive.MANIFEST).exists()
+        assert (node / records.STATIC_CHECKPOINT).exists()
         assert (node / ".run.json").exists()
 
     def test_an_unmarked_current_rung_is_refused(self, tmp_path):
@@ -370,7 +371,7 @@ class TestLadderState:
         runs = tmp_path / "runs"
         run_dir = runs / "run-a"
         run_dir.mkdir(parents=True)
-        (run_dir / archive.MANIFEST).write_text('{"zarr": ')
+        (run_dir / records.STATIC_CHECKPOINT).write_text('{"zarr": ')
         assert archive.ladder_state(runs) == ""
 
     def test_a_missing_runs_directory_reads_as_empty(self, tmp_path):
