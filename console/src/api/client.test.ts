@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ApiError, get, send } from "./client";
+import { ApiError, get, isTransient, send } from "./client";
 
 /**
  * Which failure a message BLAMES.
@@ -59,6 +59,45 @@ describe("a real schema mismatch", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).message).toContain("Expected object");
     expect((error as ApiError).message).not.toContain(": — ");
+  });
+});
+
+describe("which failures are worth retrying", () => {
+  it("retries the server not being there yet", async () => {
+    // The state `console-dev` is in for its first few seconds, every time. It
+    // healed itself on any panel with a poll interval and stayed broken forever
+    // on `configs`, which has `staleTime: Infinity` and no interval.
+    answers("<!DOCTYPE html>");
+    const error = await get("/api/configs", schema).catch((e) => e);
+    expect(isTransient(error)).toBe(true);
+  });
+
+  it("retries a connection that never opened", async () => {
+    // Production has no proxy to dress this up: `fetch` rejects with TypeError.
+    expect(isTransient(new TypeError("Failed to fetch"))).toBe(true);
+  });
+
+  it("does NOT retry a refusal", async () => {
+    // 422 is the server saying no, and it will say no again.
+    answers(JSON.stringify({ error: "'run-x' is not published" }), 422, "Unprocessable");
+    const error = await get("/api/runs/run-x", schema).catch((e) => e);
+    expect(isTransient(error)).toBe(false);
+  });
+
+  it("does NOT retry an expired credential", async () => {
+    // 503 needs `az login`, not patience. Retrying delays the message that
+    // names the fix.
+    answers(JSON.stringify({ error: "try `az login`" }), 503, "Service Unavailable");
+    const error = await get("/api/pool", schema).catch((e) => e);
+    expect(isTransient(error)).toBe(false);
+  });
+
+  it("does NOT retry a payload that broke the contract", async () => {
+    // A schema mismatch is deterministic; asking four more times changes
+    // nothing and delays a message someone has to act on.
+    answers(JSON.stringify({ op: "pool-status", pool_id: 7 }));
+    const error = await get("/api/pool", schema).catch((e) => e);
+    expect(isTransient(error)).toBe(false);
   });
 });
 
