@@ -202,10 +202,14 @@ REGISTRY: dict[str, Artifact] = {
         kind="snapshot",
         scope="share",
         version=1,
-        what="many SEALED leg documents in one file, so reading them is one round trip",
+        what="many SEALED leg documents in one file, so reading them is one round trip, "
+        "plus a `compactions` list recording each act that produced it -- the only "
+        "record anywhere that a compaction happened",
         where="<share>/legs/<label>.bundle.json",
-        growth="one per compaction, and it REPLACES the loose files it holds -- the only "
-        "entry here that makes the directory smaller. Bundling an unsealed attempt "
+        growth="one per LABEL, not one per compaction: a second round at the same label "
+        "ABSORBS the bundle already there rather than replacing it, because the "
+        "documents it holds are no longer loose and exist nowhere else. It shrinks "
+        "the directory -- the only entry here that does. Bundling an unsealed attempt "
         "would strand its `.observed.json` reconciliation, so only attempts with a "
         "terminal `.exit.json` go in",
     ),

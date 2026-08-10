@@ -463,6 +463,7 @@ PAYLOADS: dict[str, dict] = {
         "files_before": 375,
         "files_after": 55,
         "movable": 321,
+        "carried": 54,
         "attempts": 141,
         "applied": True,
         "verified": True,

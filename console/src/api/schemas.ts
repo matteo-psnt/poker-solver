@@ -581,6 +581,11 @@ export const compactSchema = z
     files_before: z.number(),
     files_after: z.number(),
     movable: z.number(),
+    /** What an existing bundle at this label already held, and this round
+        carries forward rather than replaces. Reporting only `movable` would
+        read as though the earlier documents had been dropped — which is what
+        used to happen before a second round absorbed the first. */
+    carried: z.number().default(0),
     attempts: z.number().optional(),
     applied: z.boolean(),
     verified: z.boolean(),

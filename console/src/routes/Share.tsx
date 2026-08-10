@@ -192,6 +192,7 @@ function CompactLegs() {
               {compact.data.files_before} files → {compact.data.files_after}
               <span className="ml-2 text-[var(--fg-faint)]">
                 {count(compact.data.movable)} movable
+                {compact.data.carried > 0 && ` · ${count(compact.data.carried)} already bundled`}
               </span>
             </div>
             {compact.data.bundle && (

@@ -430,14 +430,21 @@ class TestBundlesAreJustAnotherContainer:
     """
 
     def _bundle(self, tmp_path, names):
+        """What `compact-legs` does, minus the share.
+
+        Including reading back the bundle already at this name and passing it
+        as `previous` — which is the whole of what stops a second round from
+        overwriting the first. A helper that skipped it would make the
+        regression below pass for the wrong reason.
+        """
         directory = task_log.tasks_dir(tmp_path)
         documents = task_log.read_documents(directory)
-        payload = task_history.bundle_document({n: documents[n] for n in names})
-        records.write_snapshot(
-            directory / f"test{task_log.BUNDLE_SUFFIX}",
-            payload,
-            records.REGISTRY[f"legs/*{task_log.BUNDLE_SUFFIX}"],
+        path = directory / f"test{task_log.BUNDLE_SUFFIX}"
+        payload = task_history.bundle_document(
+            {n: documents[n] for n in names},
+            previous=records.read_snapshot(path) if path.exists() else None,
         )
+        records.write_snapshot(path, payload, records.REGISTRY[f"legs/*{task_log.BUNDLE_SUFFIX}"])
         for name in names:
             (directory / name).unlink()
 
@@ -476,6 +483,81 @@ class TestBundlesAreJustAnotherContainer:
         _, names = task_history.compactable(task_log.tasks_dir(tmp_path))
 
         assert names == []
+
+    def test_a_second_compaction_does_not_drop_the_first_ones_records(self, tmp_path):
+        """The data-loss path, and it was the ORDINARY one.
+
+        `--label` defaults to `sealed`, so a second compaction targets the same
+        filename as the first, and wanting a second one is simply what happens
+        as tasks accumulate. `compactable` offers only LOOSE documents -- right,
+        since it is answering which files may be deleted -- so a bundle built
+        from its answer alone holds round two and not round one, and writing it
+        at the same name drops every task round one absorbed.
+
+        Measured before the fix: task `a` vanished from the join entirely.
+        """
+        _node(tmp_path, "a", "started")
+        _node(tmp_path, "a", "finished", cause="completed", exit_code=0)
+        _, first = task_history.compactable(task_log.tasks_dir(tmp_path))
+        self._bundle(tmp_path, first)
+
+        _node(tmp_path, "b", "started")
+        _node(tmp_path, "b", "finished", cause="completed", exit_code=0)
+        _, second = task_history.compactable(task_log.tasks_dir(tmp_path))
+        assert second, "round two found nothing to bundle — the test proves nothing"
+        self._bundle(tmp_path, second)
+
+        assert {row["task_id"] for row in task_history.read_tasks(tmp_path)} == {"a", "b"}
+
+    def test_the_bundle_records_that_a_compaction_happened(self, tmp_path):
+        """Nothing else does.
+
+        It can remove hundreds of files from the share — the only copy of the
+        task record — and the sole trace used to be a backup directory on
+        whichever laptop ran it.
+        """
+        _node(tmp_path, "a", "started")
+        _node(tmp_path, "a", "finished", cause="completed", exit_code=0)
+        documents = task_log.read_documents(task_log.tasks_dir(tmp_path))
+
+        bundle = task_history.bundle_document(
+            documents, compaction={"at": "2026-08-11T00:00:00+00:00", "backup": "/b"}
+        )
+
+        assert bundle["compactions"] == [{"at": "2026-08-11T00:00:00+00:00", "backup": "/b"}]
+
+    def test_each_round_appends_its_own_entry(self, tmp_path):
+        """A bundle carries its history, not just its most recent rewrite."""
+        first = task_history.bundle_document({}, compaction={"at": "one"})
+        second = task_history.bundle_document({}, previous=first, compaction={"at": "two"})
+
+        assert [entry["at"] for entry in second["compactions"]] == ["one", "two"]
+
+    def test_provenance_never_reaches_the_join(self, tmp_path):
+        """It sits beside `records`, not inside it.
+
+        `read_documents` reads only that key, and a compaction entry is not a
+        leg document — one that leaked in would be a row with no task id.
+        """
+        _node(tmp_path, "a", "started")
+        _node(tmp_path, "a", "finished", cause="completed", exit_code=0)
+        before = task_history.read_tasks(tmp_path)
+
+        directory = task_log.tasks_dir(tmp_path)
+        _, names = task_history.compactable(directory)
+        documents = task_log.read_documents(directory)
+        records.write_snapshot(
+            directory / f"test{task_log.BUNDLE_SUFFIX}",
+            task_history.bundle_document(
+                {name: documents[name] for name in names},
+                compaction={"at": "now", "host": "laptop", "bundled": len(names)},
+            ),
+            records.REGISTRY[f"legs/*{task_log.BUNDLE_SUFFIX}"],
+        )
+        for name in names:
+            (directory / name).unlink()
+
+        assert task_history.read_tasks(tmp_path) == before
 
     def test_a_loose_file_wins_over_a_bundled_copy(self, tmp_path):
         """A bundle is a snapshot of the past; a loose file is what a node most

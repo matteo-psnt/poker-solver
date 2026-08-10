@@ -285,7 +285,12 @@ def compactable(directory: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
     return movable, sorted(movable)
 
 
-def bundle_document(records_by_name: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def bundle_document(
+    records_by_name: dict[str, dict[str, Any]],
+    *,
+    previous: dict[str, Any] | None = None,
+    compaction: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """The bundle payload: the documents VERBATIM, keyed by their filename.
 
     No reshaping at all, deliberately. The join in :func:`read_tasks` is subtle
@@ -293,8 +298,46 @@ def bundle_document(records_by_name: dict[str, dict[str, Any]]) -> dict[str, Any
     a bundle that stored a digested form would be a second implementation of it
     that could drift. Stored this way, bundling is a change of container and
     provably nothing else.
+
+    A second compaction ABSORBS the first
+    -------------------------------------
+    ``previous`` is the bundle already written at this name, and it is not
+    optional in practice. :func:`compactable` offers only documents that are
+    still LOOSE -- correctly, since it is answering which files may be deleted
+    -- so a bundle built from its answer alone holds the second round's records
+    and not the first's. Written over the existing file at the same name, that
+    silently drops every task the earlier compaction absorbed. Measured on two
+    rounds: only the second round's task survived the join.
+
+    It is the ordinary path rather than a corner. ``--label`` defaults to
+    ``sealed``, so a second compaction targets the same filename as the first,
+    and wanting a second one is simply what happens as tasks accumulate.
+    `compact-legs` verifies the joined log afterwards and would refuse to delete
+    anything -- but by then the share has already been overwritten, and its
+    advice ("delete the bundle to undo") would finish the job.
+
+    Provenance
+    ----------
+    ``compaction`` describes the act, and the entries ACCUMULATE: each round
+    appends one, so a bundle carries its own history rather than only its most
+    recent rewrite. Nothing else records that a compaction happened at all. It
+    can remove hundreds of files from the share -- the only copy of the task
+    record -- and until this existed the sole trace was a backup directory on
+    whichever laptop ran it.
+
+    It sits beside ``records`` rather than inside it because
+    :func:`~src.shared.cloudtask.task_log.read_documents` reads only that key:
+    the provenance is deliberately not a leg document and must never reach the
+    join.
     """
-    return {"records": dict(sorted(records_by_name.items()))}
+    carried = (previous or {}).get("records", {})
+    history = list((previous or {}).get("compactions", []))
+    if compaction is not None:
+        history.append(compaction)
+    return {
+        "records": dict(sorted({**carried, **records_by_name}.items())),
+        "compactions": history,
+    }
 
 
 def _with_suffix(documents: dict[str, dict[str, Any]], suffix: str) -> list[dict[str, Any]]:
