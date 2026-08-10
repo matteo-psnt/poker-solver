@@ -17,6 +17,7 @@ source_modules =
     src.shared
 forbidden_modules =
     src.interfaces
+    src.adapters
     src.pipeline
     src.engine
     src.core
@@ -53,6 +54,42 @@ type = forbidden
 source_modules =
     src.interfaces.cloud
 forbidden_modules =
+    src.engine
+    src.core
+
+; The dependency INVERSION, and the reason `src/adapters/` exists as a name.
+; The work declares what it needs as a Protocol under `src.shared.ports` and
+; never learns which adapter satisfies it; the composition root is the only
+; place that knows. Without this contract `adapters/` is just a folder, and
+; `pipeline` importing psycopg would pass.
+[importlinter:contract:the_work_does_not_know_its_adapters]
+name = The work must not import what it talks to
+type = forbidden
+source_modules =
+    src.pipeline
+    src.engine
+    src.core
+forbidden_modules =
+    src.adapters
+
+; The other half, and they are a PAIR -- changing one without the other leaves a
+; one-way door open. Generalises `cloud_dispatches_work_it_does_not_do` below,
+; which can say this for `interfaces.cloud` alone and CANNOT say it for
+; `interfaces.gtowizard`, whose HTTP client and engine-reaching player are one
+; package. Splitting that is what makes this statable for every adapter.
+;
+; Why not `type = independence`: listing pipeline/engine/core and adapters as
+; independent would also sever `pipeline -> engine`, which IS the layering.
+; Why not the layers contract's `|` sibling delimiter: it would make adapters and
+; pipeline mutually unreachable but still permit `adapters -> engine`, since
+; engine sits in a layer BELOW. Only a forbidden pair says both things.
+[importlinter:contract:an_adapter_does_not_do_the_work]
+name = Adapters must not reach into the pipeline or the solver
+type = forbidden
+source_modules =
+    src.adapters
+forbidden_modules =
+    src.pipeline
     src.engine
     src.core
 
