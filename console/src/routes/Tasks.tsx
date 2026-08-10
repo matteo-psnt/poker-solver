@@ -1,5 +1,6 @@
-import { useTasks } from "@/api/queries";
+import { useCancelTask, useTasks } from "@/api/queries";
 import type { TaskRow } from "@/api/schemas";
+import { Confirm } from "@/components/Confirm";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
@@ -32,6 +33,7 @@ export function Tasks() {
     return [...seen].sort();
   }, [tasks.data]);
 
+  const cancel = useCancelTask();
   const rows = useMemo(() => {
     const all = [...(tasks.data?.rows ?? [])].reverse();
     return cause ? all.filter((r) => r.cause === cause) : all;
@@ -71,6 +73,9 @@ export function Tasks() {
               <Th right>started</Th>
               <Th right>took</Th>
               <Th right>ended</Th>
+              {/* The cancel column. Unlabelled on purpose: a header saying
+                  "cancel" over a mostly-empty column reads like a bulk action. */}
+              <Th right>{""}</Th>
             </tr>
           </thead>
           <tbody>
@@ -151,6 +156,22 @@ export function Tasks() {
                   <Td right className="text-[var(--fg-faint)]" title={row.ended_at ?? undefined}>
                     {row.ended_at ? since(row.ended_at) : "—"}
                   </Td>
+                  {/* Only where it means something. A finished task has nothing
+                      to cancel, and a button that is present-but-useless on
+                      every historical row makes the live ones harder to find. */}
+                  <Td right>
+                    {isLive(row) && (
+                      <Confirm
+                        label="cancel"
+                        confirmLabel="really?"
+                        title={`terminate ${row.task_id}`}
+                        pending={cancel.isPending && cancel.variables?.task === row.task_id}
+                        onConfirm={() =>
+                          cancel.mutate({ job: row.job_id ?? "", task: row.task_id })
+                        }
+                      />
+                    )}
+                  </Td>
                 </tr>
               );
             })}
@@ -159,6 +180,15 @@ export function Tasks() {
       )}
     </Panel>
   );
+}
+
+/**
+ * Worth cancelling only while it is still going. `ended_at` is the honest
+ * signal: a row reconciled from Batch may carry a cause without having stopped,
+ * and one still running has neither.
+ */
+function isLive(row: TaskRow): boolean {
+  return !row.ended_at;
 }
 
 function Chip({

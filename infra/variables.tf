@@ -129,7 +129,16 @@ variable "alert_email" {
 variable "budget_amount" {
   description = "Monthly budget in USD. An ALERT threshold — Azure budgets never cap spending."
   type        = number
-  default     = 250
+  # Raised from 250 to match what was already deployed: the budget had been
+  # raised in the portal and this default never followed, so every plan carried
+  # a stray 1000 -> 250 revert waiting to be applied by an unrelated change.
+  #
+  # 250 is also simply too low to be an alert now. The first full month billed
+  # ~$290, so a 250 budget fires all four thresholds every month on ordinary
+  # work -- and an alert that always fires is not one. Money is not the
+  # constraint on this project; the alert exists to catch a RUNAWAY, and 1000 is
+  # roughly two weeks of the pool pinned at max_nodes.
+  default = 1000
 }
 
 variable "budget_start_date" {

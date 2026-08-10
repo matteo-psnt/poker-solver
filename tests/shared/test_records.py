@@ -165,11 +165,20 @@ class TestTheRegistryIsAuthoritative:
 
         A new `write_text(json.dumps(...))` is a seventh convention, and the
         whole point is that there are two.
+
+        `cache.py` is the SECOND, and is exempt for the same reason `records.py`
+        is: it is a sanctioned writer, not a module that went its own way. The
+        two split by what the JSON IS. `records` owns artifacts -- the durable
+        account of what happened, on the share, versioned, worth being careful
+        about. `cache` owns the opposite: regenerable, expiring, of no value if
+        lost, and deletable at any moment. Routing a throwaway memo through the
+        artifact substrate would claim a permanence it does not have; that is
+        why the exemption is here rather than the cache being registered.
         """
         offenders = []
         pattern = re.compile(r"write_text\(\s*json\.dumps|json\.dump\(")
         for path in SRC.rglob("*.py"):
-            if path.name == "records.py":
+            if path.name in {"records.py", "cache.py"}:
                 continue
             for number, line in enumerate(path.read_text().splitlines(), 1):
                 if pattern.search(line):

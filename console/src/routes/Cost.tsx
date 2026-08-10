@@ -1,4 +1,5 @@
 import { useCost } from "@/api/queries";
+import type { Billed } from "@/api/schemas";
 import { Panel } from "@/components/Panel";
 import { StepChart } from "@/components/StepChart";
 import { errorOf } from "@/lib/error";
@@ -6,14 +7,23 @@ import { count, since } from "@/lib/format";
 import { useMemo } from "react";
 
 /**
- * Node time, DERIVED from the task log rather than recorded.
+ * Two numbers, from two sources, because neither one answers both questions.
  *
- * The first version sampled the pool from inside this server, which meant it
- * only recorded while the server ran — 3% of a 24h window in practice, so the
- * totals were worthless however honestly they were labelled. Every task already
- * writes its own start and end to the share, whether or not anything is
- * watching, so the history is complete back to the first task and there is no
- * coverage caveat to make.
+ * **Billed** is Azure Cost Management — the actual invoice, the same source
+ * `just credit-check` reads. It is the answer to "what has this cost", and it
+ * is the headline for that reason.
+ *
+ * **Node time** is derived from the task log. It is the only one of the two
+ * that can be attributed to a run, an op, or an exit cause, and it is complete
+ * back to the first task because the node wrapper writes a record whether or
+ * not anything is watching.
+ *
+ * This page used to show only the second, multiplied by a rate, presented as
+ * "estimated spend". It read as authority and was wrong three ways at once: it
+ * counted 455 phantom node-hours from four attempts whose end was never
+ * recorded, it multiplied by a rate the biller has never charged, and it could
+ * not see the 28% of the bill that is not compute. It showed $574.61 against an
+ * actual $316.71, and rose every hour while the pool sat at zero nodes.
  */
 export function Cost() {
   const cost = useCost(0);
@@ -32,7 +42,25 @@ export function Cost() {
   return (
     <div className="space-y-3">
       <Panel
-        title="Node time · all recorded history"
+        title="Billed · Azure Cost Management"
+        updatedAt={cost.dataUpdatedAt}
+        staleAfterMs={1_800_000}
+        error={errorOf(cost.error)}
+        loading={cost.isLoading}
+        /* The reason comes from the server, because the two that matter are not
+           the same problem: Cost Management throttling means wait and the
+           figures are fine, everything else means something is broken. Guessing
+           "check az login" locally would send someone to fix an identity that
+           was never wrong -- and throttling is the one that actually happens. */
+        empty={data && !data.billed ? (data.billed_reason ?? "Billing unavailable.") : null}
+        onRefresh={() => cost.refetch()}
+        refreshing={cost.isFetching}
+      >
+        {data?.billed && <BilledPanel billed={data.billed} />}
+      </Panel>
+
+      <Panel
+        title="Node time · derived from the task log"
         updatedAt={cost.dataUpdatedAt}
         staleAfterMs={180_000}
         error={errorOf(cost.error)}
@@ -50,12 +78,12 @@ export function Cost() {
                 note="time tasks spent executing"
               />
               <Stat
-                label="estimated spend"
+                label="at the pool rate"
                 value={data.dollars == null ? "—" : `$${data.dollars.toFixed(2)}`}
                 note={
                   data.rate_per_node_hour == null
                     ? "rate unreadable"
-                    : `$${data.rate_per_node_hour.toFixed(2)}/node-hr`
+                    : `$${data.rate_per_node_hour.toFixed(3)}/node-hr · execution only`
                 }
               />
               <Stat
@@ -65,6 +93,16 @@ export function Cost() {
               />
               <Stat label="first task" value={since(data.first_at)} note="start of the record" />
             </div>
+
+            {/* Unknown, not zero. Silently dropping these is what the previous
+                version got wrong in the other direction by silently keeping
+                them, so the count is stated either way. */}
+            {data.unended > 0 && (
+              <p className="px-3 pb-2 text-[11px] text-[var(--fg-muted)]">
+                {data.unended} attempt{data.unended === 1 ? "" : "s"} started and never recorded an
+                end — excluded, because their node time is unknown rather than zero.
+              </p>
+            )}
 
             <div className="px-2 pb-1">
               <StepChart times={times} values={values} label="tasks running" />
@@ -77,16 +115,75 @@ export function Cost() {
       </Panel>
 
       <p className="max-w-[70ch] px-1 text-[12px] leading-relaxed text-[var(--fg-muted)]">
-        A <strong className="font-medium text-[var(--fg)]">lower bound</strong>, not billed cost. It
-        counts the time tasks were executing, taken from the task log — so it is complete, but a
-        node is allocated a little before its task starts and released after it ends, and pool
-        spin-up is not free. The real allocation is somewhat higher, and{" "}
-        <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono text-[var(--fg)]">
-          just credit-check
-        </code>{" "}
-        remains the authority on spend.
+        Node time counts only the interval a task was{" "}
+        <strong className="font-medium text-[var(--fg)]">executing</strong>, so compare it against{" "}
+        <strong className="font-medium text-[var(--fg)]">pool</strong> and nothing else: a node is
+        allocated before its task starts and released after it ends, and the task log begins after
+        the first charges. <strong className="font-medium text-[var(--fg)]">Left running</strong> is
+        a separate machine outside the pool — it bills whether or not anything trains, and no task
+        log will ever account for it. Billed is the authority on spend; node time is the only half
+        that can be attributed to a run.
       </p>
     </div>
+  );
+}
+
+function BilledPanel({ billed }: { billed: Billed }) {
+  const unit = billed.currency === "USD" ? "$" : `${billed.currency} `;
+  const money = (value: number) =>
+    `${unit}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-3 p-3 sm:grid-cols-4">
+        <Stat
+          label="total billed"
+          value={money(billed.total)}
+          note={billed.first_at ? `since ${billed.first_at}` : undefined}
+        />
+        <Stat
+          label="pool"
+          value={money(billed.pool_cost)}
+          note={`${billed.pool_node_hours.toLocaleString(undefined, { maximumFractionDigits: 0 })} billed node-hours`}
+        />
+        {/* Its own stat, never folded into pool compute. A machine left ON bills
+            24h a day and no task log will ever mention it — folded in, it made
+            node time look like 1.45x of allocation overhead when the pool's real
+            figure is 1.19x. */}
+        <Stat
+          label="left running"
+          value={money(billed.standing_cost)}
+          note={
+            // The biggest one names it; the rest are in the CLI breakdown.
+            billed.standing[0]
+              ? `${billed.standing_hours.toFixed(0)} h — ${billed.standing[0].resource_group}`
+              : "nothing outside the pool"
+          }
+        />
+        <Stat
+          label="everything else"
+          value={money(billed.other)}
+          note={`${Math.round((billed.other / (billed.total || 1)) * 100)}% — storage, disks, network`}
+        />
+        {/* The freshness caveat is a headline number, not a footnote: cost data
+            lags hours and the most recent day always reads low, which invites
+            exactly the wrong conclusion about a pool that is running now. */}
+        <Stat
+          label="complete to"
+          value={billed.as_of ?? "—"}
+          note="cost data lags and is restated"
+        />
+      </div>
+
+      <div className="border-t border-[var(--border)] px-3 py-2">
+        {billed.by_service.slice(0, 5).map((line) => (
+          <div key={line.service} className="flex justify-between py-0.5 text-[12px]">
+            <span className="text-[var(--fg-muted)]">{line.service}</span>
+            <span className="tnum">{money(line.cost)}</span>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 

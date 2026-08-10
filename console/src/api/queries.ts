@@ -6,11 +6,12 @@
  * own age badge for free. A failing query keeps its last good data while
  * exposing `error`, which IS the per-panel isolation the design calls for.
  */
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, send } from "./client";
 import {
   type BlueprintRun,
   type Box,
+  type Cancelled,
   type Combos,
   type Cost,
   type Curve,
@@ -26,6 +27,7 @@ import {
   type Tasks,
   blueprintRunSchema,
   boxSchema,
+  cancelSchema,
   combosSchema,
   costSchema,
   curveSchema,
@@ -91,7 +93,10 @@ export const useCost = (hours = 0) =>
   useQuery<Cost>({
     queryKey: ["cost", hours],
     queryFn: () => get(`/api/cost?hours=${hours}`, costSchema),
-    // Derived from the task log, so it costs what `tasks` costs.
+    // Derived from the task log, so it costs what `tasks` costs. The billing
+    // half rides along free: Cost Management is rate-limited hard and its data
+    // lags hours, so `cloud/billing.py` memoises it for 15 minutes server-side
+    // and a poll at this interval mostly re-serves that.
     refetchInterval: SLOW,
   });
 
@@ -190,3 +195,19 @@ export const useBoxAction = () =>
   useMutation<Box, Error, "start" | "stop">({
     mutationFn: (action) => send(`/api/box/${action}`, boxSchema),
   });
+
+/**
+ * Cancel one task. Invalidates the task list rather than patching it: the
+ * authority on whether a task is still running is Batch, not this click.
+ */
+export const useCancelTask = () => {
+  const queryClient = useQueryClient();
+  return useMutation<Cancelled, Error, { job: string; task: string }>({
+    mutationFn: ({ job, task }) =>
+      send(
+        `/api/tasks/${encodeURIComponent(job)}/${encodeURIComponent(task)}/cancel`,
+        cancelSchema,
+      ),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+  });
+};

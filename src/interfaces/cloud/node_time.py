@@ -20,6 +20,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from src.shared.cloudtask import task_log
+
 
 def instant(value: Any) -> datetime | None:
     """Parse a task-record timestamp, tolerating a missing or malformed one."""
@@ -32,22 +34,44 @@ def instant(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def intervals(tasks: list[dict[str, Any]], *, now: datetime) -> list[tuple[datetime, datetime]]:
-    """One (start, end) per task that ran.
+def intervals(
+    tasks: list[dict[str, Any]], *, now: datetime
+) -> tuple[list[tuple[datetime, datetime]], int]:
+    """One (start, end) per task that ran, plus a count of the ones dropped.
 
-    A task with no ``ended_at`` is still going, so it is credited up to ``now``
-    rather than dropped -- excluding in-flight work would make the number dip
-    exactly when the pool is busiest.
+    A task with no ``ended_at`` is credited up to ``now`` ONLY when its cause
+    says a node is committed right now (:data:`task_log.LIVE_CAUSES`).
+    Excluding genuinely in-flight work would make the number dip exactly when
+    the pool is busiest, which is the case the original code was written for and
+    which still holds.
+
+    Crediting every open record to ``now``, though, does not follow from it. An
+    open record with a non-live cause is one whose end was never written -- the
+    node died before its trap ran and Batch could not explain it either -- and
+    running that to ``now`` invents time that nothing observed. Four such
+    attempts, abandoned on 2026-08-04, were contributing 455 of the 718
+    node-hours this reported, and growing by four hours per elapsed hour: the
+    screen's total rose while the pool sat at zero nodes.
+
+    They are dropped rather than estimated, and counted so the drop is visible.
+    A module that calls itself a lower bound cannot model the unobserved half;
+    saying "4 attempts have no recorded end" is the checkable statement.
     """
     spans: list[tuple[datetime, datetime]] = []
+    unended = 0
     for task in tasks:
         start = instant(task.get("started_at"))
         if start is None:
             continue
-        end = instant(task.get("ended_at")) or now
+        end = instant(task.get("ended_at"))
+        if end is None:
+            if task.get("cause") not in task_log.LIVE_CAUSES:
+                unended += 1
+                continue
+            end = now
         if end > start:
             spans.append((start, end))
-    return spans
+    return spans, unended
 
 
 def timeline(spans: list[tuple[datetime, datetime]]) -> list[tuple[datetime, int]]:
@@ -86,7 +110,7 @@ def summarise(
     of a box. Where it does not, this over-counts nodes and under-counts nothing,
     so it stays an upper bound on *nodes* and a lower bound on *allocated time*.
     """
-    spans = intervals(tasks, now=now)
+    spans, unended = intervals(tasks, now=now)
     if since is not None:
         spans = [(max(start, since), end) for start, end in spans if end > since]
 
@@ -97,6 +121,7 @@ def summarise(
     return {
         "task_hours": task_seconds / 3600.0,
         "tasks": len(spans),
+        "unended": unended,
         "peak_concurrency": peak,
         "first_at": series[0][0].isoformat() if series else None,
         "last_at": series[-1][0].isoformat() if series else None,

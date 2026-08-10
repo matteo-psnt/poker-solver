@@ -232,17 +232,24 @@ PAYLOADS: dict[str, dict] = {
         # Present here rather than null, because the null case is the easy one:
         # the renderer that has to be pinned is the one with an invoice to show.
         "billed": {
-            "total": 316.71,
-            "compute": 228.00,
-            "other": 88.71,
-            "node_hours": 351.34,
+            "total": 328.94,
+            "other": 90.62,
             "currency": "USD",
+            "pool_cost": 214.90,
+            "pool_node_hours": 313.50,
+            # A standing VM in the fixture on purpose: folding one into pool
+            # compute is the bug this shape exists to prevent.
+            "standing_cost": 23.42,
+            "standing_hours": 68.03,
+            "standing": [
+                {"resource_group": "poker-solver-serve-rg", "hours": 67.83, "cost": 23.33},
+            ],
             "since": "2025-08-10",
             "first_at": "2026-07-27",
             "as_of": "2026-08-08",
             "by_service": [
-                {"service": "Virtual Machines", "cost": 228.00},
-                {"service": "Storage", "cost": 84.43},
+                {"service": "Virtual Machines", "cost": 238.32},
+                {"service": "Storage", "cost": 86.19},
                 {"service": "Load Balancer", "cost": 3.41},
                 {"service": "Virtual Network", "cost": 0.87},
             ],

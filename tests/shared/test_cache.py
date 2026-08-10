@@ -72,3 +72,59 @@ class TestNothingCachesIntoTheWorkingTree:
             if 'Path("data/cache' in path.read_text()
         ]
         assert not offenders, f"still caching into the working tree: {offenders}"
+
+
+class TestExpiringJsonCache:
+    """The counterpart to the records substrate: throwaway, expiring, and safe
+    to lose. It exists because an in-process memo does nothing for a CLI, which
+    is a fresh process every time -- `poker-solver cost` run three times made
+    three Cost Management queries and earned a 429.
+    """
+
+    def test_a_stored_value_comes_back(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(cache.ENV_OVERRIDE, str(tmp_path))
+        cache.store_json("billing", "k", {"total": 316.71})
+        assert cache.cached_json("billing", "k", ttl=60.0) == {"total": 316.71}
+
+    def test_keys_do_not_collide(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(cache.ENV_OVERRIDE, str(tmp_path))
+        cache.store_json("billing", "a", {"v": 1})
+        cache.store_json("billing", "b", {"v": 2})
+        assert cache.cached_json("billing", "a", ttl=60.0) == {"v": 1}
+        assert cache.cached_json("billing", "b", ttl=60.0) == {"v": 2}
+
+    def test_an_expired_value_is_a_miss(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(cache.ENV_OVERRIDE, str(tmp_path))
+        cache.store_json("billing", "k", {"v": 1})
+        assert cache.cached_json("billing", "k", ttl=-1.0) is None
+
+    def test_an_absent_value_is_a_miss_not_an_error(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(cache.ENV_OVERRIDE, str(tmp_path))
+        assert cache.cached_json("billing", "never-stored", ttl=60.0) is None
+
+    def test_a_corrupt_file_is_a_miss_not_a_crash(self, tmp_path, monkeypatch):
+        """A cache that can break the thing it accelerates is worse than none."""
+        monkeypatch.setenv(cache.ENV_OVERRIDE, str(tmp_path))
+        cache.store_json("billing", "k", {"v": 1})
+        for path in (tmp_path / "billing").glob("*.json"):
+            path.write_text("{ not json")
+        assert cache.cached_json("billing", "k", ttl=60.0) is None
+
+    def test_an_unwritable_root_does_not_raise(self, monkeypatch):
+        """Best-effort in both directions: the caller already has its answer."""
+        monkeypatch.setenv(cache.ENV_OVERRIDE, "/nonexistent-root/x")
+        cache.store_json("billing", "k", {"v": 1})
+
+    def test_no_scratch_files_are_left_behind(self, tmp_path, monkeypatch):
+        """Written beside and renamed, so a concurrent reader never sees half a
+        file. The rename must also not leave the scratch copy on disk."""
+        monkeypatch.setenv(cache.ENV_OVERRIDE, str(tmp_path))
+        cache.store_json("billing", "k", {"v": 1})
+        assert not list((tmp_path / "billing").glob("*.tmp"))
+        assert len(list((tmp_path / "billing").glob("*.json"))) == 1
+
+    def test_importing_does_not_create_a_directory(self, tmp_path, monkeypatch):
+        """The behaviour that made `data/` reappear after each deletion."""
+        monkeypatch.setenv(cache.ENV_OVERRIDE, str(tmp_path / "unborn"))
+        cache.cached_json("billing", "k", ttl=60.0)
+        assert not (tmp_path / "unborn").exists()
