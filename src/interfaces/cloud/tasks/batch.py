@@ -62,7 +62,7 @@ def client(config: CloudConfig) -> BatchClient:
 def _task_record(task: Any) -> dict[str, Any]:
     """One task, in this project's vocabulary rather than Batch's.
 
-    Everything `task_log.reconcile` needs to explain a task the node never got to
+    Everything `task_history.reconcile` needs to explain a task the node never got to
     account for: `result` separates a task that finished from one that merely
     stopped, and the timestamps bound a death the EXIT trap could not report.
     """

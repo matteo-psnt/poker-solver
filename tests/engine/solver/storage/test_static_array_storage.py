@@ -53,14 +53,16 @@ def attach_and_exit() -> None:
     StaticArrayStorage(build_tree(), session_id=KILLED_CREATOR_SESSION, attach=True).close()
 
 
+# The import path is `__name__`, not a literal: this program imports the module
+# that generates it, and a literal is only correct until the file moves -- which
+# it has. Spelled out, the breakage is a subprocess exiting 1 with an ImportError
+# buried in captured stderr, which reads as the shared-memory case failing.
 KILLED_CREATOR_PROGRAM = f"""\
 import os, sys
 sys.path.insert(0, {str(PROJECT_ROOT)!r})
 from multiprocessing import get_context
 from src.engine.solver.storage.static_array import StaticArrayStorage
-from tests.engine.solver.storage.test_static_array_storage import (
-    KILLED_CREATOR_SESSION, attach_and_exit, build_tree,
-)
+from {__name__} import KILLED_CREATOR_SESSION, attach_and_exit, build_tree
 
 if __name__ == "__main__":
     owner = StaticArrayStorage(build_tree(), session_id=KILLED_CREATOR_SESSION)

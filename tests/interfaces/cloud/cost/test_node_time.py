@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from src.interfaces.cloud.cost import node_time
+from src.shared import task_history
 from src.shared.cloudtask import task_log
 
 NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
@@ -35,7 +36,7 @@ def _task(
 
 def _live(start_min: float) -> dict[str, object]:
     """A task Batch says is running right now."""
-    return _task(start_min, None, cause=task_log.CAUSE_RUNNING)
+    return _task(start_min, None, cause=task_history.CAUSE_RUNNING)
 
 
 class TestNodeTime:
@@ -65,7 +66,9 @@ class TestNodeTime:
 
     def test_preparing_counts_too(self):
         """The node is committed and billing before the task is running on it."""
-        result = node_time.summarise([_task(300, None, cause=task_log.CAUSE_PREPARING)], now=NOW)
+        result = node_time.summarise(
+            [_task(300, None, cause=task_history.CAUSE_PREPARING)], now=NOW
+        )
         assert result["task_hours"] == pytest.approx(1.0)
 
     def test_an_open_task_with_no_live_cause_is_excluded_and_counted(self):

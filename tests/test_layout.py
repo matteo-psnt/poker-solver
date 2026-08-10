@@ -93,6 +93,12 @@ LOOSE_BESIDE_PACKAGES: dict[str, tuple[str, ...]] = {
         "records.py",
         "repo.py",
         "run_events.py",
+        # The READING half of the task record, out here rather than beside the
+        # writer in `cloudtask/` precisely because it is not node code: a
+        # fail-closed guard walks every file in that package and would hold a
+        # laptop-only join to the node's stdlib-only floor. Seven importers
+        # across `interfaces` and `pipeline`, which is the fan-out test above.
+        "task_history.py",
     ),
     # Read from BOTH ends of the wire, so above `node/` rather than inside it.
     "shared.cloudtask": ("kinds.py", "task_log.py"),

@@ -95,7 +95,7 @@ class TestManifestMembers:
 
 
 class TestTaskReconcileSeam:
-    """`tasks` feeds Batch's task records straight into `task_log.reconcile`.
+    """`tasks` feeds Batch's task records straight into `task_history.reconcile`.
 
     The two were written against different shapes -- reconcile against the old
     `az batch task list` JSON, batch.py against its own vocabulary -- so the
