@@ -203,9 +203,7 @@ class TestThrottlingIsNotAnAuthProblem:
         429 falls into the generic `raise_for_status` path."""
         request = httpx.Request("POST", "https://management.azure.com/")
 
-        monkeypatch.setattr(
-            billing, "AzureCliCredential", lambda: _FakeCredential()
-        )
+        monkeypatch.setattr(billing, "AzureCliCredential", lambda: _FakeCredential())
         monkeypatch.setattr(
             billing.httpx,
             "post",
