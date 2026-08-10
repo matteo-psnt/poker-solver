@@ -96,6 +96,10 @@ COMMANDS: tuple[CommandRef, ...] = (
         "push-data", "Publish card abstractions to the share (copied, never recomputed on a node)."
     ),
     CommandRef(
+        "compact-legs",
+        "Bundle sealed task records into one file, so reading legs/ is one round trip.",
+    ),
+    CommandRef(
         "train-static", "Train over the statically-enumerated tree (fixed memory, no key maps)."
     ),
     CommandRef("precompute", "Precompute a combo abstraction into data/combo_abstraction/."),

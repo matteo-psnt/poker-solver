@@ -260,8 +260,22 @@ def write_progress_record(
 
 
 def _next_attempt(directory: Path, task_id: str) -> int:
-    """1 for a first run, 2 for Batch's first retry, and so on."""
-    return len(list(directory.glob(f"{_escape(task_id)}.*{START_SUFFIX}"))) + 1
+    """1 for a first run, 2 for Batch's first retry, and so on.
+
+    Counted across bundles as well as loose files, and that is load-bearing
+    rather than tidy: this number NAMES the file the next attempt writes. If
+    compaction swept an earlier attempt's ``.start.json`` into a bundle and this
+    counted only what is loose, a retry would compute an attempt number that has
+    already been used and overwrite the record of the failure that caused it --
+    silently, and on the durable copy.
+    """
+    prefix = f"{task_id}."
+    starts = [
+        name
+        for name in read_documents(directory)
+        if name.startswith(prefix) and name.endswith(START_SUFFIX)
+    ]
+    return len(starts) + 1
 
 
 def _latest_attempt(directory: Path, task_id: str) -> int:
@@ -392,6 +406,121 @@ def observed_cause(record: dict[str, Any]) -> str:
     return "unknown"
 
 
+"""One directory, two ways of holding the same documents
+--------------------------------------------------------
+A leg document is normally its own file -- one writer per file, which is what
+makes writing to an SMB share with no atomic rename safe at all. That property
+belongs to the WRITER. A reader joining the whole directory pays a round trip
+per file for it, and at 375 files that was the slowest thing the console did.
+
+So sealed documents may also live inside a bundle, and the reader treats the two
+identically: :func:`read_documents` returns filename -> document from bundles and
+loose files alike, and everything downstream joins that mapping without knowing
+which it came from. A loose file WINS over a bundled copy of the same name --
+the loose one is what a node most recently wrote, and a bundle is a snapshot of
+the past.
+
+Only the reader gained this. The node still writes one loose file per event, and
+nothing bundles an attempt that has not reached a terminal exit.
+"""
+BUNDLE_SUFFIX = ".bundle.json"
+
+
+def read_documents(directory: Path) -> dict[str, dict[str, Any]]:
+    """Every leg document in ``directory``, by filename, bundles included."""
+    found: dict[str, dict[str, Any]] = {}
+    for path in sorted(directory.glob(f"*{BUNDLE_SUFFIX}")):
+        bundle = _load(path)
+        found.update(
+            {
+                name: document
+                for name, document in (bundle or {}).get("records", {}).items()
+                if isinstance(document, dict)
+            }
+        )
+    for path in sorted(directory.glob("*.json")):
+        if path.name.endswith(BUNDLE_SUFFIX):
+            continue
+        document = _load(path)
+        if document:
+            found[path.name] = document
+    return found
+
+
+def compactable(directory: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Which loose documents may be bundled, and which files they came from.
+
+    ONLY attempts whose node record reached a terminal cause. Two things make
+    that the boundary rather than age:
+
+    * an attempt with no terminal record is one `tasks` still asks Batch about,
+      and `reconcile` writes its answer to ``<task>.observed.json`` -- a
+      filename, not a bundle entry. Bundling the unsealed half would strand that.
+    * a task that is still RUNNING has a `.progress.json` being overwritten
+      under it.
+
+    A task's documents move together or not at all, so a bundled attempt is
+    never split across the two representations. Returns the documents to bundle
+    and the loose filenames they replace -- the caller decides whether to delete
+    them, because that is the irreversible half.
+    """
+    documents = read_documents(directory)
+    loose = {
+        path.name for path in directory.glob("*.json") if not path.name.endswith(BUNDLE_SUFFIX)
+    }
+
+    sealed: set[str] = set()
+    unsealed: set[str] = set()
+    for name, document in documents.items():
+        task_id = document.get("task_id")
+        if not task_id:
+            continue
+        if name.endswith(EXIT_SUFFIX) and document.get("cause") in TERMINAL_CAUSES:
+            sealed.add(task_id)
+        elif name.endswith((START_SUFFIX, PROGRESS_SUFFIX)):
+            unsealed.add(task_id)
+    # A task is sealed only if EVERY attempt of it is: a retry in flight shares
+    # the id with the failed attempt before it.
+    for name, document in documents.items():
+        if not name.endswith(START_SUFFIX):
+            continue
+        task_id, attempt = document.get("task_id"), int(document.get("attempt", 1))
+        exit_name = f"{task_id}.{attempt}{EXIT_SUFFIX}"
+        exit_record = documents.get(exit_name, {})
+        if exit_record.get("cause") not in TERMINAL_CAUSES:
+            sealed.discard(str(task_id))
+    unsealed -= sealed
+
+    movable = {
+        name: document
+        for name, document in documents.items()
+        if name in loose and document.get("task_id") in sealed
+    }
+    return movable, sorted(movable)
+
+
+def bundle_document(records_by_name: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """The bundle payload: the documents VERBATIM, keyed by their filename.
+
+    No reshaping at all, deliberately. The join in :func:`read_tasks` is subtle
+    -- attempt numbering, which record explains a death, whose view wins -- and
+    a bundle that stored a digested form would be a second implementation of it
+    that could drift. Stored this way, bundling is a change of container and
+    provably nothing else.
+    """
+    return {"records": dict(sorted(records_by_name.items()))}
+
+
+def _with_suffix(documents: dict[str, dict[str, Any]], suffix: str) -> list[dict[str, Any]]:
+    """The documents whose filename ends in ``suffix``, in filename order.
+
+    Order is preserved because it decided ties: two records claiming the same
+    slot resolved to whichever sorted last, and a bundle must not quietly
+    reshuffle that.
+    """
+    return [document for name, document in sorted(documents.items()) if name.endswith(suffix)]
+
+
 def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
     """Join the node and observer records into one row per attempt, newest last.
 
@@ -403,13 +532,14 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
     if not directory.is_dir():
         return []
 
+    documents = read_documents(directory)
+
     # Keyed by (task_id, attempt): a Batch retry reuses the task id, and the
     # failed attempt is the one worth keeping.
     attempts: dict[tuple[str, int], dict[str, Any]] = {}
     for suffix, slot in ((START_SUFFIX, "start"), (EXIT_SUFFIX, "exit")):
-        for path in sorted(directory.glob(f"*{suffix}")):
-            record = _load(path)
-            if record and record.get("task_id"):
+        for record in _with_suffix(documents, suffix):
+            if record.get("task_id"):
                 key = (record["task_id"], int(record.get("attempt", 1)))
                 attempts.setdefault(key, {})[slot] = record
 
@@ -417,16 +547,14 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
     # there and nowhere else -- attaching it to an earlier attempt would explain
     # the wrong death.
     observed: dict[str, dict[str, Any]] = {}
-    for path in sorted(directory.glob(f"*{OBSERVED_SUFFIX}")):
-        record = _load(path)
-        if record and record.get("task_id"):
+    for record in _with_suffix(documents, OBSERVED_SUFFIX):
+        if record.get("task_id"):
             observed[record["task_id"]] = record
     # Progress is per TASK, not per attempt: a retry starts over and overwrites
     # it, and a stale sample from a dead attempt would show a bar that cannot move.
     running: dict[str, dict[str, Any]] = {}
-    for path in sorted(directory.glob(f"*{PROGRESS_SUFFIX}")):
-        record = _load(path)
-        if record and record.get("task_id"):
+    for record in _with_suffix(documents, PROGRESS_SUFFIX):
+        if record.get("task_id"):
             running[record["task_id"]] = record
 
     latest = {task: max(a for t, a in attempts if t == task) for task, _ in attempts}

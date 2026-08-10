@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+from src.shared import records
 from src.shared.cloudtask import task_log
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -450,3 +451,86 @@ class TestWhichCodeRan:
         (row,) = task_log.read_tasks(tmp_path)
         assert row["cause"] == "unresolved", "died before its exit record — the case under test"
         assert row["code_snapshot"] == "code-20260805_111229"
+
+
+class TestBundlesAreJustAnotherContainer:
+    """A bundled document must join EXACTLY as the loose file it replaced.
+
+    The whole compaction rests on this: `legs/` is 375 tiny files and reading it
+    costs a round trip each, but the join over them (attempt numbering, which
+    record explains a death, whose view wins) is subtle enough that the bundle
+    stores documents verbatim rather than digested.
+    """
+
+    def _bundle(self, tmp_path, names):
+        directory = task_log.tasks_dir(tmp_path)
+        documents = task_log.read_documents(directory)
+        payload = task_log.bundle_document({n: documents[n] for n in names})
+        records.write_snapshot(
+            directory / f"test{task_log.BUNDLE_SUFFIX}",
+            payload,
+            records.REGISTRY[f"legs/*{task_log.BUNDLE_SUFFIX}"],
+        )
+        for name in names:
+            (directory / name).unlink()
+
+    def test_bundling_every_sealed_document_changes_no_row(self, tmp_path):
+        _node(tmp_path, "a", "started")
+        _node(tmp_path, "a", "finished", cause="completed", exit_code=0)
+        _node(tmp_path, "b", "started")
+        _node(tmp_path, "b", "finished", cause=task_log.CAUSE_KILLED, exit_code=137)
+        before = task_log.read_tasks(tmp_path)
+
+        movable, names = task_log.compactable(task_log.tasks_dir(tmp_path))
+        assert names, "nothing was judged compactable"
+        self._bundle(tmp_path, names)
+
+        assert task_log.read_tasks(tmp_path) == before
+
+    def test_an_unsealed_attempt_is_never_bundled(self, tmp_path):
+        """Its `.observed.json` reconciliation writes to a FILENAME, so bundling
+        the other half would strand it."""
+        _node(tmp_path, "sealed", "started")
+        _node(tmp_path, "sealed", "finished", cause="completed", exit_code=0)
+        _node(tmp_path, "still-open", "started")
+
+        _, names = task_log.compactable(task_log.tasks_dir(tmp_path))
+
+        assert all("still-open" not in name for name in names)
+        assert any("sealed" in name for name in names)
+
+    def test_a_retry_in_flight_keeps_its_earlier_attempt_loose(self, tmp_path):
+        """Attempt 1 died and attempt 2 is running. They share a task id, and
+        moving only the sealed half would split one task across two containers."""
+        _node(tmp_path, "retried", "started")
+        _node(tmp_path, "retried", "finished", cause=task_log.CAUSE_KILLED, exit_code=137)
+        _node(tmp_path, "retried", "started")  # Batch retries with the SAME id
+
+        _, names = task_log.compactable(task_log.tasks_dir(tmp_path))
+
+        assert names == []
+
+    def test_a_loose_file_wins_over_a_bundled_copy(self, tmp_path):
+        """A bundle is a snapshot of the past; a loose file is what a node most
+        recently wrote."""
+        _node(tmp_path, "a", "started")
+        _node(tmp_path, "a", "finished", cause="completed", exit_code=0)
+        _, names = task_log.compactable(task_log.tasks_dir(tmp_path))
+        self._bundle(tmp_path, names)
+        # The node writes again, in the shape it always does.
+        _node(tmp_path, "a", "finished", cause=task_log.CAUSE_TIMEOUT, exit_code=124)
+
+        causes = {row["cause"] for row in task_log.read_tasks(tmp_path)}
+        assert task_log.CAUSE_TIMEOUT in causes
+
+    def test_attempt_numbering_counts_bundled_starts(self, tmp_path):
+        """The hazard that would corrupt the record silently: this number NAMES
+        the file the next attempt writes, so missing a bundled start makes a
+        retry overwrite the failure that caused it."""
+        directory = task_log.tasks_dir(tmp_path)
+        _node(tmp_path, "t", "started")
+        _node(tmp_path, "t", "finished", cause=task_log.CAUSE_KILLED, exit_code=137)
+        _, names = task_log.compactable(directory)
+        self._bundle(tmp_path, names)
+
+        assert task_log._next_attempt(directory, "t") == 2
