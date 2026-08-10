@@ -2,7 +2,7 @@
 
 This project has two configuration families:
 
-- **Training/runtime config** (`Config`) in `src/shared/config.py`
+- **Training/runtime config** (`Config`) in `src/shared/config/schema.py`
 - **Combo abstraction precompute config** (`PrecomputeConfig`) in
   `src/pipeline/abstraction/config.py`
 
@@ -13,8 +13,8 @@ fail validation — typos in YAML are caught at load time.
 
 ### Training/runtime (`Config`)
 
-Defaults live in Python (`src/shared/config.py`); YAML files provide
-**overrides only**. Loaders in `src/shared/config_loader.py`:
+Defaults live in Python (`src/shared/config/schema.py`); YAML files provide
+**overrides only**. Loaders in `src/shared/config/loader.py`:
 
 ```python
 load_config("config/training/production.yaml", training__num_iterations=500)
@@ -104,7 +104,7 @@ else.
 ## Add a new training config field (schema change)
 
 1. Add the field, with default and validation, to the right model in
-   `src/shared/config.py` — constraints live there, nowhere else.
+   `src/shared/config/schema.py` — constraints live there, nowhere else.
 2. Wire usage where relevant, typically
    `src/pipeline/blueprint/construction.py`,
    `src/pipeline/training/static_parallel.py`, or `src/engine/solver|search/`.

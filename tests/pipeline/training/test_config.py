@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from src.shared import repo
 from src.shared.config import Config, GameConfig, SolverConfig, SystemConfig
-from src.shared.config_loader import load_config
+from src.shared.config.loader import load_config
 
 
 class TestDefaultBehavior:
@@ -131,7 +131,7 @@ game:
         assert cfg.training.num_iterations == 75_000
         assert cfg.game.big_blind == 5
 
-    def test_load_yaml_plus_programmatic(self):
+    def testload_yaml_plus_programmatic(self):
         """Verify YAML + programmatic overrides compose correctly."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(

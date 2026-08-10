@@ -8,7 +8,7 @@ from src.pipeline.abstraction.config import PrecomputeConfig
 from src.shared import repo
 
 
-def _load_yaml_config(name: str) -> dict:
+def load_yaml_config(name: str) -> dict:
     config_dir = repo.ROOT / "config" / "abstraction"
     with (config_dir / f"{name}.yaml").open() as f:
         return yaml.safe_load(f)
@@ -20,7 +20,7 @@ class TestPrecomputeConfig:
     def test_load_quick_test(self):
         """Test loading quick_test config."""
         config = PrecomputeConfig.from_yaml("quick_test")
-        data = _load_yaml_config("quick_test")
+        data = load_yaml_config("quick_test")
 
         assert config.num_buckets[Street.FLOP] == data["buckets"]["flop"]
         assert config.num_buckets[Street.TURN] == data["buckets"]["turn"]
@@ -32,7 +32,7 @@ class TestPrecomputeConfig:
     def test_load_default(self):
         """Test loading default config."""
         config = PrecomputeConfig.from_yaml("default")
-        data = _load_yaml_config("default")
+        data = load_yaml_config("default")
 
         assert config.num_buckets[Street.FLOP] == data["buckets"]["flop"]
         assert config.num_buckets[Street.TURN] == data["buckets"]["turn"]
@@ -41,7 +41,7 @@ class TestPrecomputeConfig:
     def test_load_production(self):
         """Test loading production config."""
         config = PrecomputeConfig.from_yaml("production")
-        data = _load_yaml_config("production")
+        data = load_yaml_config("production")
 
         assert config.num_buckets[Street.FLOP] == data["buckets"]["flop"]
         assert config.num_buckets[Street.TURN] == data["buckets"]["turn"]

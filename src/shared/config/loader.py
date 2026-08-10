@@ -12,8 +12,8 @@ from typing import Any
 import yaml
 
 from src.shared import repo
-from src.shared.config import Config
-from src.shared.dicts import deep_merge_dicts
+from src.shared.config.merge import deep_merge_dicts
+from src.shared.config.schema import Config
 
 
 def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
@@ -43,7 +43,7 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
 
     # Apply YAML overrides (with extends resolution)
     if path is not None:
-        yaml_data = _load_yaml(Path(path))
+        yaml_data = load_yaml(Path(path))
         config = config.merge(yaml_data)
 
     # Apply programmatic overrides (take precedence over everything)
@@ -77,7 +77,7 @@ def load_training_config(config_name: str, **overrides: Any) -> Config:
     return load_config(config_path, **overrides)
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
+def load_yaml(path: Path) -> dict[str, Any]:
     """
     Load a YAML file and recursively resolve any ``extends`` chain.
 
@@ -96,7 +96,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
     if "extends" in data:
         base_path = path.parent / data.pop("extends")
-        base_data = _load_yaml(base_path)  # recursive — supports chains
+        base_data = load_yaml(base_path)  # recursive — supports chains
         data = deep_merge_dicts(base_data, data)  # current file wins
 
     return data

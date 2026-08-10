@@ -129,7 +129,7 @@ Experiment bookkeeping goes through `--experiment` / `--arm` / `--parent`, with
 ## Configuration
 
 `config/training/production.yaml` is the source of truth; unset fields fall
-back to defaults in `src/shared/config.py`. Knobs worth knowing:
+back to defaults in `src/shared/config/schema.py`. Knobs worth knowing:
 
 ```yaml
 solver:

@@ -243,7 +243,7 @@ class TestProductionScale:
 
     @pytest.fixture(scope="class")
     def production_tree(self):
-        from src.shared.config_loader import load_config
+        from src.shared.config.loader import load_config
 
         config = load_config("config/training/production.yaml")
         rules = GameRules(small_blind=config.game.small_blind, big_blind=config.game.big_blind)

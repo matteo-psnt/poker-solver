@@ -15,7 +15,7 @@ from src.pipeline.services import runs as services_runs
 from src.pipeline.services import static_training as services_training
 from src.pipeline.services.scoring import _shared as services_shared
 from src.pipeline.services.scoring import lbr as services_lbr
-from src.shared.config_loader import load_training_config
+from src.shared.config.loader import load_training_config
 
 
 def _fake_config(runs_dir: str = "data/runs", abstraction: str = "quick_test") -> SimpleNamespace:

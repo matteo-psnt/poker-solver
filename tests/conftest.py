@@ -29,7 +29,7 @@ def requires_card_abstraction():
     so the skip names how to get it back rather than quietly passing.
     """
     from src.pipeline import blueprint
-    from src.shared.config_loader import load_training_config
+    from src.shared.config.loader import load_training_config
 
     # `load_training_config`, NOT `load_config` -- the latter takes a PATH and
     # raises FileNotFoundError on a bare stem, which this guard would have
