@@ -53,6 +53,13 @@ if TYPE_CHECKING:
 # It is terminal either way, which is what `prune-checkpoints` needs to know.
 _STATUS_BY_CAUSE = {"cancelled": "cancelled", "completed": "abandoned"}
 
+# Only a TRAINING task speaks for a run's status. A `score` task carries the
+# run_id of the run it scores, so a finished evaluation would otherwise be read
+# as evidence about the training -- and its `cause` would then pick the run's
+# status. Scoring a run does say the training has stopped, but it says nothing
+# about WHY, and `abandoned` versus `failed` is exactly that question.
+_TRAINING_OPS = frozenset({"train", "train-vector", "train-pcs"})
+
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver reconcile-runs`."""
@@ -98,15 +105,25 @@ class ReconcilePlan(BaseModel):
 
 
 def _status_of(run_dir: Path) -> str:
-    """The run's own last word, defaulting to `running` when unreadable.
+    """The run's own last word, or `unknown` when the log cannot speak for it.
 
     `kind=STATUS` rather than a bare scan: an attempt that ended `died` under a
     run still training would otherwise read as the run's status, which is the
     direction that closes a live run.
+
+    THE EMPTY CASE IS NOT `running`, and it read as `running` once. A zeroed
+    `run.jsonl` -- publish truncation does produce them, and two exist on the
+    share right now that nothing here has ever touched -- makes `read` return
+    `[]` without raising, and `tail_value` then hands back its default. So nine
+    broken records looked like nine live runs, and seven got a plausible status
+    appended to a file with nothing else in it. A log with no `created` event is
+    not a run that is training; it is a run with no record.
     """
     try:
         events = run_events.read(run_dir)
     except (OSError, ValueError):
+        return "unknown"
+    if not run_events.head(events):
         return "unknown"
     return run_events.tail_value(events, "status", "running", kind=run_events.STATUS)
 
@@ -154,7 +171,13 @@ def run(args: argparse.Namespace) -> ReconcilePlan:
             if not all(task.cause in task_history.TERMINAL_CAUSES for task in tasks):
                 plan.unsettled.append(run_dir.name)
                 continue
-            last = max(tasks, key=lambda t: (t.ended_at or "", t.task_id))
+            training = [t for t in tasks if t.op in _TRAINING_OPS]
+            if not training:
+                # Scored but with no training task on record: something stopped
+                # it, and nothing here knows what.
+                plan.no_evidence.append(run_dir.name)
+                continue
+            last = max(training, key=lambda t: (t.ended_at or "", t.task_id))
             plan.closures.append(
                 Closure(
                     run=run_dir.name,

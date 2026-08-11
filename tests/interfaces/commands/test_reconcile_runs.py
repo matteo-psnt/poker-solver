@@ -20,7 +20,15 @@ from src.shared import run_events
 class _Task:
     """The fields of `task_history.TaskRow` this command reads."""
 
-    def __init__(self, run_id: str, cause: str, task_id: str = "t1", ended_at: str = "2026-01-01"):
+    def __init__(
+        self,
+        run_id: str,
+        cause: str,
+        task_id: str = "t1",
+        ended_at: str = "2026-01-01",
+        op: str = "train",
+    ):
+        self.op = op
         self.run_id = run_id
         self.cause = cause
         self.task_id = task_id
@@ -112,6 +120,28 @@ class TestAbsenceOfEvidenceProtects:
         assert plan.no_evidence == ["run-a"]
 
 
+class TestAZeroedLogIsNotARunningRun:
+    """The measured failure: publish truncation zeroes a `run.jsonl`, and an
+    empty log made `tail_value` return its `running` default. Seven records got
+    a status event appended to a file that held nothing else."""
+
+    def test_an_empty_log_is_not_closable(self, monkeypatch, tmp_path):
+        directory = tmp_path / "run-a"
+        directory.mkdir()
+        (directory / "run.jsonl").write_text("")
+        plan = _plan(monkeypatch, tmp_path, [_Task("run-a", "killed")])
+        assert plan.open_runs == 0, "an empty log must not count as an open run"
+        assert plan.closures == []
+
+    def test_a_log_with_no_created_event_is_not_closable(self, monkeypatch, tmp_path):
+        """Half-written is the same problem: without `created` there is no run
+        identity, so there is nothing a terminal status would be about."""
+        directory = tmp_path / "run-a"
+        directory.mkdir()
+        run_events.append(directory, run_events.PROGRESS, iteration=10)
+        assert _plan(monkeypatch, tmp_path, [_Task("run-a", "killed")]).closures == []
+
+
 class TestItReadsTheCauseRatherThanAssuming:
     def test_a_cancelled_task_makes_a_cancelled_run(self, monkeypatch, tmp_path):
         _run_dir(tmp_path, "run-a", "running")
@@ -144,6 +174,28 @@ class TestItReadsTheCauseRatherThanAssuming:
         (closure,) = _plan(monkeypatch, tmp_path, tasks).closures
         assert closure.status == "cancelled"
         assert closure.task_id == "t2"
+
+
+class TestOnlyATrainingTaskSpeaksForARun:
+    def test_a_score_task_alone_is_not_evidence(self, monkeypatch, tmp_path):
+        """A `score` task carries the run_id of the run it SCORES. Read as
+        evidence it would pick the run's status from an evaluation's cause,
+        and `abandoned` versus `failed` is precisely the question it cannot
+        answer."""
+        _run_dir(tmp_path, "run-a", "running")
+        plan = _plan(monkeypatch, tmp_path, [_Task("run-a", "completed", op="evaluate")])
+        assert plan.closures == []
+        assert plan.no_evidence == ["run-a"]
+
+    def test_a_training_task_decides_even_when_a_later_score_exists(self, monkeypatch, tmp_path):
+        _run_dir(tmp_path, "run-a", "running")
+        tasks = [
+            _Task("run-a", "killed", "t1", "2026-01-01", op="train"),
+            _Task("run-a", "completed", "t2", "2026-01-09", op="evaluate"),
+        ]
+        (closure,) = _plan(monkeypatch, tmp_path, tasks).closures
+        assert closure.status == "failed", "the TRAINING task's cause, not the score's"
+        assert closure.task_id == "t1"
 
 
 class TestItOnlyLooksAtOpenRuns:
