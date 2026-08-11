@@ -73,9 +73,28 @@ class Command:
         a test can call. What is added here is observation and nothing else --
         the timing, the outcome and which surface asked. A guard test fails if a
         surface calls `run` directly and slips past it.
+
+        Preparing the observation is itself guarded, and that is not belt and
+        braces. `telemetry.observe`'s own write is best-effort, but the two
+        calls that build its argument ran BEFORE it and unprotected: `declared`
+        builds a parser, and `asked_for` evaluates ``value != default`` on
+        caller-supplied values. A value whose ``__ne__`` returns something other
+        than a bool -- a numpy array is the obvious one, and `invoke` accepts
+        anything -- raised out of here and failed a command that would otherwise
+        have worked. A bystander that can do that is not a bystander.
+
+        Skipped entirely when recording is off, so a disabled log costs nothing
+        rather than two parser builds per invocation.
         """
-        defaults, _ = self.declared()
-        with telemetry.observe(self.name, telemetry.asked_for(self.add_arguments, args, defaults)):
+        return self._observed(args) if telemetry.enabled() else self.run(args)
+
+    def _observed(self, args: argparse.Namespace) -> dict[str, Any]:
+        """:meth:`execute`, with the observation attached."""
+        try:
+            asked = telemetry.asked_for(self.add_arguments, args, self.declared()[0])
+        except Exception:  # noqa: BLE001 — never the reason a command fails
+            asked = {}
+        with telemetry.observe(self.name, asked):
             return self.run(args)
 
     def arguments(self, **overrides: Any) -> argparse.Namespace:

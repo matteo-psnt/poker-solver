@@ -30,13 +30,22 @@ Never the reason a command fails
 Every write is best-effort. A full disk, a read-only cache directory, a value
 that will not serialise: none of them may turn a working command into a failing
 one, because this is a bystander to the work and the work is what the user
-asked for. The cost of that is silent loss of a row, which is the correct trade
-for a file that is explicitly disposable.
+asked for.
+
+Best-effort is not the same as silent, though, and the difference matters here
+more than usual: a cache directory that cannot be written stops the log
+FOREVER, and `activity` then reports "no commands recorded yet" while commands
+are plainly running -- a wrong answer with a plausible explanation, which is the
+worst kind. So the first failure is logged once at WARNING and the rest at
+DEBUG. Once, because the alternative is a warning on every invocation of every
+command, which would make the tool unusable to protect a file that is
+disposable by definition.
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import time
 from collections.abc import Iterator
@@ -63,9 +72,19 @@ arguments, a `pool-status` carries none -- so a row cap bounds the wrong thing.
 An age cap would need the file read and rewritten on some schedule, which is a
 lot of machinery for a file nobody is obliged to keep.
 
-One previous generation is kept. Two would double the disk for a marginal gain
-in history; zero would make a rotation lose everything at once, including the
-minute before whatever someone is currently investigating.
+One previous generation is kept, and :func:`logs` is what makes that true --
+`activity` reads BOTH, or the rotation would silently do the thing this policy
+claims to prevent: the moment the log crossed the cap, every window would report
+on a near-empty file. Two generations would double the disk for a marginal gain
+in history; zero would lose everything at once, including the minute before
+whatever someone is currently investigating.
+
+Rotation is racy between processes -- two commands can both see the file over
+the cap and both rename, and the second clobbers what the first saved. Left
+that way ON PURPOSE: a lock file shared across every invocation of every command
+is real machinery, and what it would protect is a bounded number of rows in a
+file that is disposable by definition. It is a cost worth naming rather than
+paying for.
 """
 MAX_BYTES = 8 * 1024 * 1024
 
@@ -80,10 +99,30 @@ quietly filed as the command line.
 """
 _SURFACE: ContextVar[str] = ContextVar("surface", default="unknown")
 
+logger = logging.getLogger(__name__)
+
+"""Whether the "this is not working" line has already been said.
+
+Process-global rather than per-path: the point is to say it ONCE, and a
+per-path map would repeat it for a rotation."""
+_complained = False
+
 
 def log_path() -> Path:
     """Where the rows go. Not created here; the writer creates its parent."""
     return cache.cache_dir("telemetry") / "invocations.jsonl"
+
+
+def logs() -> list[Path]:
+    """Every generation a reader should fold in, OLDEST first.
+
+    The rotated file is not an archive to be dug out by hand: keeping it is only
+    worth anything if the reader reads it, and without this `activity` answered
+    from the live file alone -- so crossing the 8 MB cap would have emptied
+    every window it reports, which is exactly the loss rotation exists to avoid.
+    """
+    current = log_path()
+    return [path for path in (current.with_suffix(".jsonl.1"), current) if path.is_file()]
 
 
 def enabled() -> bool:
@@ -191,8 +230,24 @@ def _write(row: dict[str, Any]) -> None:
         path = log_path()
         _rotate(path)
         records.append_log(path, row, records.REGISTRY[ARTIFACT])
-    except Exception:  # noqa: BLE001 — a bystander must not fail the work
+    except Exception as error:  # noqa: BLE001 — a bystander must not fail the work
+        _complain(error)
+
+
+def _complain(error: BaseException) -> None:
+    """Say once that recording is not working, then stop saying it."""
+    global _complained
+    if _complained:
+        logger.debug("telemetry write failed: %s", error)
         return
+    _complained = True
+    logger.warning(
+        "Command telemetry is not being recorded (%s: %s). `poker-solver activity` "
+        "will look empty. This does not affect any command; set %s=0 to silence it.",
+        type(error).__name__,
+        error,
+        ENV_VAR,
+    )
 
 
 def _rotate(path: Path) -> None:

@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import argparse
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import UTC, datetime
 from typing import Any
 
@@ -94,6 +96,21 @@ def _panel(command: Command, **kwargs: Any) -> dict[str, Any]:
     return {"payload": payload, "error": failure.message if failure else None}
 
 
+def _bound(command: Command, **kwargs: Any) -> Callable[[], dict[str, Any]]:
+    """:func:`_panel`, bound to a COPY of the CALLING thread's context.
+
+    The copy has to be taken here, on the caller. Taking it inside the worker
+    would copy the worker's own context, which is the fresh one that lost
+    everything -- so it would look like a fix and change nothing.
+
+    A zero-argument closure rather than `pool.submit(context.run, _panel, ...)`
+    because `Context.run` is typed with a ParamSpec that does not compose
+    through `submit`, and the checker is right to say so.
+    """
+    context = copy_context()
+    return lambda: context.run(_panel, command, **kwargs)
+
+
 def gather(*, limit: int = 10, with_tasks: bool = True) -> dict[str, Any]:
     """Fetch every panel concurrently and return them keyed by name.
 
@@ -108,8 +125,17 @@ def gather(*, limit: int = 10, with_tasks: bool = True) -> dict[str, Any]:
     arguments: dict[str, dict[str, Any]] = {"jobs": {"limit": limit}, "tasks": {"limit": limit}}
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
+        # Each panel runs in a COPY of the calling context, because a raw
+        # `pool.submit` starts its task with a fresh one and every ContextVar
+        # reverts to its default. `telemetry._SURFACE` is such a var, so the
+        # three panels that carry the real Azure round-trip cost -- the whole
+        # reason this screen is measured at all -- were filed `unknown` while
+        # the thin wrapper around them was filed `cli`.
+        #
+        # A copy PER SUBMIT, not one shared copy: `Context.run` is not
+        # re-entrant, so handing the same context to concurrent threads raises.
         futures = {
-            name: pool.submit(_panel, command, **arguments.get(name, {}))
+            name: pool.submit(_bound(command, **arguments.get(name, {})))
             for name, command in wanted
         }
         panels = {name: future.result() for name, future in futures.items()}

@@ -21,6 +21,10 @@ import { useState } from "react";
  */
 const WINDOWS = [1, 7, 30, 0] as const;
 
+/** Below this, a wide p95/p50 ratio is measurement noise on a local file read
+    rather than a tail worth looking at. */
+const SLOW_TAIL_SECONDS = 0.5;
+
 export function Activity() {
   const [days, setDays] = useState<number>(7);
   const activity = useActivity(days);
@@ -93,10 +97,19 @@ export function Activity() {
                     </Td>
                     <Td right>{entry.p50_seconds.toFixed(2)}s</Td>
                     {/* The tail is the half someone is complaining about, so it
-                        is the one that gets marked when it separates from p50. */}
+                        is the one that gets marked when it separates from p50.
+                        The absolute floor is not cosmetic: the backend rounds
+                        to 3dp, so every fast local command has a p50 of 0.000
+                        and satisfies `x > 4 * 0` for any nonzero p95 — which
+                        flagged `configs`, `runs` and this page itself as
+                        pathological, permanently. */}
                     <Td
                       right
-                      className={cn(entry.p95_seconds > 4 * entry.p50_seconds && "text-amber-400")}
+                      className={cn(
+                        entry.p95_seconds > SLOW_TAIL_SECONDS &&
+                          entry.p95_seconds > 4 * entry.p50_seconds &&
+                          "text-amber-400",
+                      )}
                     >
                       {entry.p95_seconds.toFixed(2)}s
                     </Td>
@@ -120,7 +133,13 @@ export function Activity() {
       </Panel>
 
       {data && data.failures.length > 0 && (
-        <Panel title={`Failures — ${data.failures.length}`}>
+        <Panel
+          title={
+            data.total_failures > data.failures.length
+              ? `Failures — ${data.failures.length} of ${data.total_failures}`
+              : `Failures — ${data.total_failures}`
+          }
+        >
           <Table>
             <thead>
               <tr>

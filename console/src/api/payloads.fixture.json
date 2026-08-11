@@ -48,6 +48,7 @@
     "log": "/home/me/.cache/poker-solver/telemetry/invocations.jsonl",
     "op": "activity",
     "rows": 412,
+    "total_failures": 41,
     "total_rows": 5031
   },
   "autoscale-check": {

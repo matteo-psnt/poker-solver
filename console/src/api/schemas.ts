@@ -487,6 +487,10 @@ export const activitySchema = z
         })
         .passthrough(),
     ),
+    /** Before `--limit` truncates `failures`. The list is a display cap and
+        the count is the fact; reporting the capped length said "20 failures"
+        when there were 100. */
+    total_failures: z.number().default(0),
     by_surface: z.record(z.number()).default({}),
   })
   .passthrough();

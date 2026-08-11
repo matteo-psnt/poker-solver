@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -37,9 +38,9 @@ def recording(tmp_path, monkeypatch):
     return tmp_path / "telemetry" / "invocations.jsonl"
 
 
-def _command(handler, add_arguments=None) -> Command:
+def _command(handler, add_arguments=None, name="probe") -> Command:
     return Command(
-        name="probe",
+        name=name,
         add_arguments=add_arguments or (lambda parser: parser.add_argument("--limit", default=0)),
         run=handler,
         render=lambda payload: None,
@@ -149,6 +150,52 @@ class TestItIsABystander:
 
         assert _command(lambda args: {"op": "probe"}).invoke() == {"op": "probe"}
 
+    def test_a_value_whose_comparison_is_not_a_bool_does_not_fail_the_command(self, recording):
+        """`asked_for` evaluates `value != default`, and it ran UNGUARDED —
+        before `observe`, whose write is the part that was best-effort.
+
+        A numpy array is the obvious case (`!=` returns an array, and `bool()`
+        of it raises), and `invoke` accepts anything. The command worked; the
+        observation of it did not, and it took the command down with it.
+        """
+
+        class Unbooleanable:
+            def __ne__(self, other):
+                return self
+
+            def __bool__(self):
+                raise ValueError("truth value is ambiguous")
+
+        def add(parser):
+            parser.add_argument("--thing", default=None)
+
+        assert _command(lambda args: {"ok": True}, add).invoke(thing=Unbooleanable()) == {
+            "ok": True
+        }
+        # The row is still written -- losing the arguments is the right trade,
+        # losing the timing is not.
+        assert _rows(recording)[0]["outcome"] == "ok"
+
+    def test_a_broken_log_says_so_once_rather_than_never(self, recording, monkeypatch, caplog):
+        """Best-effort must not mean invisible.
+
+        An unwritable cache stops recording FOREVER, and `activity` then reports
+        'no commands recorded yet' while commands are plainly running -- a wrong
+        answer with a plausible explanation.
+        """
+        monkeypatch.setattr(telemetry, "_complained", False)
+        monkeypatch.setattr(telemetry, "log_path", lambda: recording.parent / "x" / "y")
+        recording.parent.mkdir(parents=True, exist_ok=True)
+        (recording.parent / "x").write_text("not a directory")
+
+        with caplog.at_level("WARNING"):
+            for _ in range(3):
+                _command(lambda args: {}).invoke()
+
+        # Once. A warning per invocation of every command would be worse than
+        # the problem it reports.
+        assert sum("not being recorded" in record.message for record in caplog.records) == 1
+
     def test_a_value_that_will_not_serialise_does_not_fail_the_command(self, recording):
         """`asked` carries whatever a flag was set to, and a caller using
         `invoke` can set it to anything at all."""
@@ -170,6 +217,71 @@ class TestItIsABystander:
         for value in ("1", "on", "", "yes"):
             monkeypatch.setenv(telemetry.ENV_VAR, value)
             assert telemetry.enabled(), value
+
+
+class TestTheSurfaceSurvivesAThreadPool:
+    """`status` fans its three panels out, and they are the expensive ones.
+
+    A ContextVar does not cross `pool.submit`: the task starts with a fresh
+    context and every var reverts to its default. So the three panels carrying
+    the real Azure round-trip cost were filed `unknown` while the thin wrapper
+    around them was filed `cli` — and `activity --surface cli` under-reported
+    exactly the commands this feature exists to measure.
+
+    Invisible without this test, because "never set" and "set then dropped"
+    produce the same `unknown`.
+    """
+
+    def test_a_raw_submit_loses_it(self):
+        """The behaviour being defended against, asserted so the fix has a
+        reason a reader can check rather than take on trust."""
+        with telemetry.surface("cli"), ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(telemetry._SURFACE.get).result() == "unknown"
+
+    def test_status_files_every_panel_under_the_calling_surface(self, recording, monkeypatch):
+        from src.interfaces.commands import status
+
+        panels = [
+            ("pool", _command(lambda args: {}, name="pool-status")),
+            ("jobs", _command(lambda args: {}, name="jobs")),
+        ]
+        monkeypatch.setattr(status, "PANELS", tuple(panels))
+
+        with telemetry.surface("cli"):
+            status.gather(limit=1, with_tasks=False)
+
+        recorded = {row["command"]: row["surface"] for row in _rows(recording)}
+        assert recorded == {"pool-status": "cli", "jobs": "cli"}
+
+
+class TestTheLogIsReadableAfterRotation:
+    def test_both_generations_are_offered_to_a_reader(self, recording, monkeypatch):
+        """Keeping a generation is only worth something if something reads it.
+
+        `activity` read the live file alone, so crossing the cap emptied every
+        window it reports — the exact loss the rotation policy claims to avoid.
+        """
+        monkeypatch.setattr(telemetry, "MAX_BYTES", 200)
+        for _ in range(20):
+            _command(lambda args: {}).invoke()
+
+        assert [path.name for path in telemetry.logs()] == [
+            "invocations.jsonl.1",
+            "invocations.jsonl",
+        ]
+
+    def test_activity_still_sees_the_rotated_rows(self, recording, monkeypatch):
+        from src.interfaces.commands import activity
+
+        monkeypatch.setattr(telemetry, "MAX_BYTES", 200)
+        for _ in range(20):
+            _command(lambda args: {}).invoke()
+        rotated = len(records.read_log(recording.with_suffix(".jsonl.1")))
+        assert rotated, "nothing rotated — the test proves nothing"
+
+        payload = activity.COMMAND.run(activity.COMMAND.arguments(days=0))
+
+        assert payload["total_rows"] > rotated
 
 
 class TestRotation:
