@@ -105,27 +105,25 @@ class ReconcilePlan(BaseModel):
 
 
 def _status_of(run_dir: Path) -> str:
-    """The run's own last word, or `unknown` when the log cannot speak for it.
+    """The run's own last word, through the fold that reads BOTH layouts.
 
-    `kind=STATUS` rather than a bare scan: an attempt that ended `died` under a
-    run still training would otherwise read as the run's status, which is the
-    direction that closes a live run.
+    Not a raw scan of `run.jsonl`. A run written before the event log has a
+    `.run.json` and no log, and reading only the log makes every one of those
+    report `running` -- `tail_value` hands back its default on an empty list.
+    That is how nine records with a perfectly good `.run.json` came to look like
+    nine zombies. `RunMetadata.load` is the one place that knows both layouts,
+    and the run-vs-attempt `status` scoping inside it is what stops a dead
+    attempt's `died` reading as the run's own.
 
-    THE EMPTY CASE IS NOT `running`, and it read as `running` once. A zeroed
-    `run.jsonl` -- publish truncation does produce them, and two exist on the
-    share right now that nothing here has ever touched -- makes `read` return
-    `[]` without raising, and `tail_value` then hands back its default. So nine
-    broken records looked like nine live runs, and seven got a plausible status
-    appended to a file with nothing else in it. A log with no `created` event is
-    not a run that is training; it is a run with no record.
+    `unknown` when nothing can be read, which is not a status any caller acts
+    on: absence of evidence protects.
     """
+    from src.pipeline.training.run_tracker.metadata import RunMetadata  # noqa: PLC0415
+
     try:
-        events = run_events.read(run_dir)
-    except (OSError, ValueError):
+        return RunMetadata.load(run_dir).status or "unknown"
+    except (OSError, ValueError, KeyError):
         return "unknown"
-    if not run_events.head(events):
-        return "unknown"
-    return run_events.tail_value(events, "status", "running", kind=run_events.STATUS)
 
 
 def run(args: argparse.Namespace) -> ReconcilePlan:

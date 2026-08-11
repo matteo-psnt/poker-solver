@@ -9,12 +9,15 @@ death as a failure when the last task was cancelled.
 from __future__ import annotations
 
 import argparse
+import json
 from typing import Any
 
 import pytest
 
 from src.interfaces.commands import reconcile_runs
+from src.pipeline.training.run_tracker.tracker import RunTracker
 from src.shared import run_events
+from src.shared.config import Config
 
 
 class _Task:
@@ -37,10 +40,25 @@ class _Task:
 
 
 def _run_dir(tmp_path, name: str, status: str | None):
+    """A run built by the REAL writer, then given a status.
+
+    `_status_of` goes through `RunMetadata.load`, so a hand-rolled `created`
+    event makes the run unreadable rather than merely sparse -- the fold refuses
+    a missing config. Using `RunTracker` means the fixture cannot drift from
+    what a run actually looks like, which is the whole point here.
+    """
     directory = tmp_path / name
-    directory.mkdir()
-    run_events.append(directory, run_events.CREATED, config_name="quick_test")
-    if status is not None:
+    directory.mkdir(parents=True, exist_ok=True)
+    tracker = RunTracker(
+        run_dir=directory,
+        config_name="quick_test",
+        config=Config.default(),
+        action_config_hash="abc123",
+    )
+    # Construction alone writes nothing; the record exists once something is
+    # recorded into it.
+    tracker.update(iterations=10, runtime_seconds=1.0, num_infosets=5, storage_capacity=100)
+    if status is not None and status != "running":
         run_events.append(directory, run_events.STATUS, status=status)
     return directory
 
@@ -131,6 +149,29 @@ class TestAZeroedLogIsNotARunningRun:
         (directory / "run.jsonl").write_text("")
         plan = _plan(monkeypatch, tmp_path, [_Task("run-a", "killed")])
         assert plan.open_runs == 0, "an empty log must not count as an open run"
+        assert plan.closures == []
+
+    def test_a_legacy_run_json_run_is_read_from_it_not_defaulted(self, monkeypatch, tmp_path):
+        """The real miss: runs written before the event log carry `.run.json`
+        and no log. Reading only the log made nine of them report `running`
+        when their snapshot said `completed`."""
+        directory = tmp_path / "run-a"
+        directory.mkdir()
+        (directory / "run.jsonl").write_text("")
+        (directory / ".run.json").write_text(
+            json.dumps(
+                {
+                    "run_id": "run-a",
+                    "config_name": "production",
+                    "status": "completed",
+                    "started_at": "2026-01-01T00:00:00+00:00",
+                    "iterations": 30_000_000,
+                    "config": {},
+                }
+            )
+        )
+        plan = _plan(monkeypatch, tmp_path, [_Task("run-a", "killed")])
+        assert plan.open_runs == 0, "it is completed, and the snapshot says so"
         assert plan.closures == []
 
     def test_a_log_with_no_created_event_is_not_closable(self, monkeypatch, tmp_path):
