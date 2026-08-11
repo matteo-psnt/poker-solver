@@ -64,6 +64,9 @@ NODE_ONLY: dict[str, str] = {
 DESTRUCTIVE: dict[str, str] = {
     "prune-checkpoints": "it deletes checkpoints irreversibly; a button is the wrong "
     "shape for that, and its dry run is the thing worth reading anyway",
+    "reconcile-runs": "it writes an INFERRED status into the record, which is the one "
+    "thing a reader must be able to trust; the gate is a person reading the evidence "
+    "column of the dry run, which a button does not have",
 }
 
 EXTERNAL: dict[str, str] = {
