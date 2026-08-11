@@ -143,6 +143,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Drop retained checkpoint rungs a settled run no longer needs (dry run by default).",
             ),
             CommandRef(
+                "backfill-record",
+                "Mirror the published record into Postgres (dry run by default; idempotent).",
+            ),
+            CommandRef(
                 "reconcile-runs",
                 "Close runs whose task died without recording a terminal status (dry run by default).",
             ),
