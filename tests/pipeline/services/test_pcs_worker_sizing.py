@@ -6,15 +6,22 @@ sized for one kernel while ``runout_mode='turn'`` holds one per runout.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.vector import compile_tree
+from src.engine.solver.vector.kernel import DTYPE
 from src.pipeline.services import pcs_training
 from src.pipeline.services.pcs_training import worker_footprint
-from src.pipeline.training.pcs_parallel import ram_safe_workers, worker_bytes
+from src.pipeline.training.pcs_parallel import (
+    LIVE_HANDS,
+    NODE_HEADROOM_FRACTION,
+    ram_safe_workers,
+    worker_bytes,
+)
 from tests.pipeline.training.test_static_parallel import Buckets
 from tests.test_helpers import make_test_config
 
@@ -106,3 +113,43 @@ def test_train_pcs_hands_the_kernel_count_to_the_clamp(monkeypatch, tmp_path):
     )
     assert seen["runouts"] == 4
     assert seen["br_streets"] == "turn_river"
+
+
+def test_evaluate_terminals_transients_are_counted():
+    """The defect this pins: the clamp read 10.85 GB against a worker's measured
+    12.17 GB at 200 bb, sized 11 onto a box that held 10, and the OOM killer
+    took one — the coordinator then blocked on a chunk that had already run.
+
+    `evaluate_terminals` peaks above the arrays it reads: `walk` holds the copy
+    of one seat's showdown reaches while the rank walk builds its output. Half
+    of any tree's terminals are showdowns, so that is `num_terminals * hands`.
+    """
+    rules = GameRules(1, 2)
+    tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
+    terminals = compile_tree(tree, rules).num_terminals
+
+    walk = worker_bytes(tree, terminals, br_streets="river", showdown="walk")
+    counted = 2 * (terminals // 2) * LIVE_HANDS * np.dtype(DTYPE).itemsize
+    assert walk - worker_bytes(tree, 0, br_streets="river", showdown="walk") > counted
+
+    # `matmul` stacks BOTH seats before the product, so each array is twice as
+    # wide and the clamp must not size a matmul run off the walk figure.
+    assert worker_bytes(tree, terminals, br_streets="river", showdown="matmul") > walk
+
+
+def test_headroom_is_a_fraction_so_a_big_node_keeps_real_margin():
+    """A flat 3 GB was 2.2% of a 128 GiB box and 0.5% of a 512 GB one: the
+    bigger the node, the thinner the margin, which is backwards.
+    """
+    rules = GameRules(1, 2)
+    tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
+    terminals = compile_tree(tree, rules).num_terminals
+    fp = worker_footprint(_config(**FLOP))
+
+    small = ram_safe_workers(tree, terminals, shared_bytes=0, memory=128 * 1024**3, **fp)
+    big = ram_safe_workers(tree, terminals, shared_bytes=0, memory=512 * 1024**3, **fp)
+    per = worker_bytes(tree, terminals, **fp)
+
+    # Both leave at least the fraction free, so neither runs at 99%.
+    for workers, box in ((small, 128 * 1024**3), (big, 512 * 1024**3)):
+        assert box - workers * per >= NODE_HEADROOM_FRACTION * box

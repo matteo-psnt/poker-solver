@@ -77,6 +77,7 @@ class WorkerFootprint(TypedDict):
     br_streets: str
     runouts: int
     kernels: int
+    showdown: str
 
 
 def worker_footprint(config: Config) -> WorkerFootprint:
@@ -84,12 +85,14 @@ def worker_footprint(config: Config) -> WorkerFootprint:
 
     ``runout_mode='turn'`` holds one kernel per runout, because the joint
     maximisation needs their values at the same time; sizing the clamp for a
-    single kernel oversubscribes the node by that factor.
+    single kernel oversubscribes the node by that factor. ``showdown`` is here
+    because `matmul` stacks both seats before its product and `walk` does not.
     """
     return {
         "br_streets": config.pcs.cfr_br,
         "runouts": config.pcs.runouts_per_flop,
         "kernels": config.pcs.runouts_per_flop if config.pcs.runout_mode == "turn" else 1,
+        "showdown": config.pcs.showdown,
     }
 
 
