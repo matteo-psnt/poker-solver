@@ -3278,6 +3278,15 @@
             },
             "title": "Runs",
             "type": "array"
+          },
+          "source": {
+            "default": "share",
+            "enum": [
+              "database",
+              "share"
+            ],
+            "title": "Source",
+            "type": "string"
           }
         },
         "title": "RunsPayload",

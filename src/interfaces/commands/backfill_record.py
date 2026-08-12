@@ -124,24 +124,35 @@ def _rows_for_run(run_dir: Path, models: Any) -> tuple[Any, list[Any], list[Any]
     except (OSError, ValueError, KeyError):
         return None
 
+    # Through `metadata`, NOT the `created` event. A run written before the
+    # event log has a `.run.json` and no log at all, so every field read off
+    # `created` came back None for nine of them -- their arm, experiment and
+    # provenance silently absent from the database while the share had them.
+    # `RunMetadata` is the one thing that reads both layouts, and this is the
+    # fourth defect in this migration caused by going round it.
     created = run_events.head(events) or {}
+
+    def field(name: str) -> Any:
+        value = getattr(metadata, name, None)
+        return created.get(name) if value is None else value
+
     run = models.Run(
         run_id=run_dir.name,
         config_name=metadata.config_name or created.get("config_name") or "",
-        kernel=created.get("kernel"),
-        arm=created.get("arm"),
-        experiment_id=created.get("experiment_id"),
-        parent_run_id=created.get("parent_run_id"),
-        action_config_hash=created.get("action_config_hash"),
-        card_abstraction_hash=created.get("card_abstraction_hash"),
-        config_hash=created.get("config_hash"),
+        kernel=field("kernel"),
+        arm=field("arm"),
+        experiment_id=field("experiment_id"),
+        parent_run_id=field("parent_run_id"),
+        action_config_hash=field("action_config_hash"),
+        card_abstraction_hash=field("card_abstraction_hash"),
+        config_hash=field("config_hash"),
         # Lossless: `verify_trainer_knobs` compares whole config blocks.
-        config=created.get("config") or {},
-        git_commit=created.get("git_commit"),
-        git_dirty=created.get("git_dirty"),
-        git_branch=created.get("git_branch"),
-        code_snapshot=created.get("code_snapshot"),
-        storage_capacity=created.get("storage_capacity"),
+        config=_as_dict(field("config")),
+        git_commit=field("git_commit"),
+        git_dirty=field("git_dirty"),
+        git_branch=field("git_branch"),
+        code_snapshot=field("code_snapshot"),
+        storage_capacity=field("storage_capacity"),
         started_at=metadata.started_at,
         completed_at=getattr(metadata, "completed_at", None),
         status=metadata.status or "running",
@@ -205,6 +216,16 @@ def _rows_for_run(run_dir: Path, models: Any) -> tuple[Any, list[Any], list[Any]
             )
         )
     return run, event_rows, checkpoint_rows
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """A config as JSON, whichever shape the fold handed back."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    to_dict = getattr(value, "to_dict", None)
+    return to_dict() if callable(to_dict) else {}
 
 
 def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
