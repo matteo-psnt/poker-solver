@@ -32,6 +32,16 @@ class RecordSink(Protocol):
         its own existence must fail here rather than proceed quietly.
         """
 
+    def closed(self, run_id: str, status: str, body: Mapping[str, Any]) -> None:
+        """Record that a run REACHED a terminal state.
+
+        Blocks, and pairs with `opened`. It could ride the lossy path -- the
+        event itself is already in the log -- but the folded `runs` row is what
+        every listing reads and what decides whether a ladder may be pruned, so
+        a dropped status leaves a finished run advertising itself as training.
+        That is the zombie this migration exists partly to stop creating.
+        """
+
     def emit(self, run_id: str, event: str, body: Mapping[str, Any]) -> None:
         """Record one ordinary event -- progress, an attempt boundary, a status.
 

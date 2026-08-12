@@ -33,6 +33,7 @@ from src.interfaces.commands.abstraction_coupling import (
 )
 from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
+from src.interfaces.commands.backfill_record import BackfillPayload, Counts
 from src.interfaces.commands.benchmark import BenchmarkPayload
 from src.interfaces.commands.benchmark_board import BoardPayload, BoardRow
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
@@ -173,6 +174,11 @@ PAYLOADS: dict[str, Any] = {
         ],
         unsettled=["run-pcs-production-to4k-turn-river-072201-7245"],
         no_evidence=["run-production-025433-1095"],
+    ),
+    "backfill-record": BackfillPayload(
+        share=Counts(runs=302, events=3480, checkpoints=1026, evals=2139, legs=13444),
+        database=Counts(runs=302, events=3480, checkpoints=1026, evals=2139, legs=13444),
+        skipped=["run-train-production-to30M-eqreg-s101-053830-13187"],
     ),
     "net-probe": ProbePayload(
         hostname="a1b2c3d4e5",

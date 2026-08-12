@@ -50,6 +50,9 @@ class TaskPlan:
 
     op: str
     config: str = ""
+    # Empty when the dispatching machine had none, which is how a task runs
+    # exactly as it did before the database existed.
+    record_dsn: str = ""
     to: int = 0
     run_id: str = ""
     experiment: str = ""

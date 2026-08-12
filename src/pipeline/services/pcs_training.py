@@ -33,6 +33,7 @@ from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
     from src.shared.config import Config
+    from src.shared.ports.record import RecordSink
 
 PROGRESS_ARTIFACT = "train-progress.json"
 KERNEL = "pcs"
@@ -109,6 +110,11 @@ def train_pcs(
     retain_every: int = 0,
     run_id: str | None = None,
     progress_file: Path | None = None,
+    # Dual write. `None` writes files only, which is what every task did
+    # before the database existed and what one dispatched without a DSN
+    # still does. Constructed by the COMMAND, never here: the composition
+    # root is the only layer allowed to know which adapter this is.
+    sink: RecordSink | None = None,
 ) -> PcsTrainingOutput:
     """Train to an ABSOLUTE iteration target; continuing past it is a no-op.
 
@@ -145,6 +151,7 @@ def train_pcs(
     else:
         tag = experiment or ExperimentTag()
         tracker = RunTracker(
+            sink=sink,
             run_dir=run_dir,
             config_name=config.system.config_name,
             config=config,

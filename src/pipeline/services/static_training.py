@@ -34,6 +34,7 @@ from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
     from src.shared.config import Config
+    from src.shared.ports.record import RecordSink
 
 PROGRESS_ARTIFACT = "train-progress.json"
 
@@ -81,6 +82,11 @@ def train_static(
     warm_start_weight: int = warm_start.DEFAULT_EFFECTIVE_ITERATIONS,
     warm_start_at: int | None = None,
     progress_file: Path | None = None,
+    # Dual write. `None` writes files only, which is what every task did
+    # before the database existed and what one dispatched without a DSN
+    # still does. Constructed by the COMMAND, never here: the composition
+    # root is the only layer allowed to know which adapter this is.
+    sink: RecordSink | None = None,
     warm_start_shape: str = "flat",
     equity_prior_weight: int = 0,
     equity_prior_temperature: float = equity_prior.DEFAULT_TEMPERATURE,
@@ -171,6 +177,7 @@ def train_static(
                 f"'{config_name}' is stale (config hash mismatch). Recompute it. ({e})"
             ) from e
         tracker = RunTracker(
+            sink=sink,
             run_dir=run_dir,
             config_name=config.system.config_name,
             config=config,

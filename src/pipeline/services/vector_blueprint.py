@@ -55,6 +55,7 @@ PROGRESS_ARTIFACT = "train-progress.json"
 
 if TYPE_CHECKING:
     from src.shared.config import Config
+    from src.shared.ports.record import RecordSink
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,11 @@ def train_vector_blueprint(
     run_id: str | None = None,
     experiment: ExperimentTag | None = None,
     progress_file: Path | None = None,
+    # Dual write. `None` writes files only, which is what every task did
+    # before the database existed and what one dispatched without a DSN
+    # still does. Constructed by the COMMAND, never here: the composition
+    # root is the only layer allowed to know which adapter this is.
+    sink: RecordSink | None = None,
 ) -> VectorBlueprintOutput:
     """Train the board-free kernel to an ABSOLUTE iteration target.
 
@@ -160,6 +166,7 @@ def train_vector_blueprint(
     else:
         tag = experiment or ExperimentTag()
         tracker = RunTracker(
+            sink=sink,
             run_dir=run_dir,
             config_name=config.system.config_name,
             config=config,

@@ -139,3 +139,25 @@ class TestBatching:
         assert len(engine.batches) < 20, (
             f"{len(engine.batches)} round trips for 500 events against a 20ms writer"
         )
+
+
+class TestTheRunRowIsFoldedNotJustLogged:
+    """A status event in `run_events` is not enough: every listing reads the
+    folded `runs.status`, and `prune-checkpoints` decides from it whether a
+    ladder may be deleted. A finished run whose row still says `running` is the
+    zombie this migration exists partly to stop creating -- and the first
+    version of this sink produced exactly that."""
+
+    def test_closed_writes_before_it_queues(self):
+        engine = _Engine()
+        sink = PostgresSink(engine)
+        sink.closed("run-a", "completed", {"completed_at": "2026-01-01"})
+        assert engine.batches, "the run row was never updated"
+        sink.close(timeout=2)
+
+    def test_a_failed_close_reaches_the_caller(self):
+        """It takes the blocking path for the same reason `opened` does."""
+        sink = PostgresSink(_Engine(fail=True))
+        with pytest.raises(RuntimeError):
+            sink.closed("run-a", "completed", {})
+        sink.close(timeout=2)

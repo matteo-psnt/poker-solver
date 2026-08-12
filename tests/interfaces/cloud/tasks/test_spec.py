@@ -148,6 +148,7 @@ class TestEnvironment:
         env = spec.TaskSpec(code_snapshot="s", config="p", to=1).environment()
         assert set(env) == {
             "CODE_SNAPSHOT",
+            "POKER_SOLVER_RECORD_DSN",
             "RUN_OP",
             "RUN_CONFIG",
             "RUN_TO",
