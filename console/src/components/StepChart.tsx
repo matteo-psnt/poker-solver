@@ -42,12 +42,23 @@ export function StepChart({
   values,
   label,
 }: {
-  /** Epoch milliseconds, matching what `Cost` already computes. */
+  /**
+   * Epoch MILLISECONDS. Checked against `Cost`, not assumed: it used to divide
+   * by 1000 for uPlot, whose `time: true` scale reads Unix seconds unless told
+   * `ms: 1`. Recharts and `Date` both want milliseconds, so the division is
+   * gone — and a mismatch here is not subtle, it puts every tick in 1970.
+   */
   times: number[];
-  values: (number | null)[];
+  /**
+   * Concurrency, which is a count and never unknown: `timeline()` emits an
+   * integer at every event. Typed as such rather than nullable, because this
+   * page is emphatic elsewhere that unknown is not zero (`unended` says so
+   * directly), and a `?? 0` here would quietly render a gap as an idle pool.
+   */
+  values: number[];
   label: string;
 }) {
-  const data = times.map((at, index) => ({ at, running: values[index] ?? 0 }));
+  const data = times.map((at, index) => ({ at, running: values[index] }));
 
   return (
     <div className="h-[200px] w-full">

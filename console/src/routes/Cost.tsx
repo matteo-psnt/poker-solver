@@ -28,11 +28,15 @@ import { useMemo } from "react";
 export function Cost() {
   const cost = useCost(0);
 
+  // MILLISECONDS, which is what `Date` and Recharts both speak. The `/ 1000`
+  // that used to be here existed for uPlot alone: its `time: true` scale reads
+  // Unix SECONDS unless told `ms: 1`. Nothing downstream wants seconds now, and
+  // leaving the division in would have put every tick in January 1970.
   const [times, values] = useMemo(() => {
     const rows = cost.data?.series ?? [];
-    return [rows.map((row) => Date.parse(row.at) / 1000), rows.map((row) => row.running)] as [
+    return [rows.map((row) => Date.parse(row.at)), rows.map((row) => row.running)] as [
       number[],
-      (number | null)[],
+      number[],
     ];
   }, [cost.data]);
 
