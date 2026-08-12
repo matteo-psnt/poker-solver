@@ -1,23 +1,23 @@
 @import "tailwindcss";
 
-/* Dark by default, light supported. The rest of this project is read in a
-   terminal; the console should feel like the same instrument. */
-@custom-variant dark (&:where(.dark, .dark *));
+/* Dark, and only dark. The rest of this project is read in a terminal; the
+   console should feel like the same instrument.
 
+   There WAS a light palette here, under a `.dark` variant — and it was dead
+   code claiming to be a feature. `index.html` hardcoded `class="dark"`, nothing
+   ever toggled it, no rule used the `dark:` variant, and 71 sites across the
+   components hardcode dark-only colours (`bg-white/[0.07]` hovers, `text-*-400`
+   states) that a light background would render illegible.
+
+   So light mode was never one line from working; it is a project, and pretending
+   otherwise cost a palette everyone had to keep in step with a theme nobody
+   could see. Deleted rather than half-kept. If light mode is wanted, it starts
+   from those 71 sites, not from here. */
 @theme {
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 :root {
-  --bg: #ffffff;
-  --panel: #ffffff;
-  --border: #e4e4e7;
-  --fg: #18181b;
-  --fg-muted: #52525b;
-  --fg-faint: #a1a1aa;
-}
-
-.dark {
   --bg: #09090b;
   --panel: #0e0e11;
   --border: #232329;
@@ -51,29 +51,4 @@ body {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-/* uPlot ships a light-ish, content-sized default. Three overrides:
-   `width: min-content` collapses the chart instead of filling its panel; the
-   drag-select overlay is a black wash that is invisible on a dark panel; and
-   the cursor guides are a hardcoded blue-grey. Everything the CANVAS draws is
-   themed in `lib/theme.ts` instead, because a canvas cannot read a CSS
-   variable. */
-.uplot {
-  width: 100%;
-  font-family: inherit;
-}
-
-.u-select {
-  background: rgb(255 255 255 / 0.08);
-}
-
-.u-hz .u-cursor-x,
-.u-vt .u-cursor-y {
-  border-right-color: var(--fg-faint);
-}
-
-.u-hz .u-cursor-y,
-.u-vt .u-cursor-x {
-  border-bottom-color: var(--fg-faint);
 }

@@ -1,5 +1,7 @@
 import { routeTree } from "@/routes/tree";
-import { createMemoryHistory, createRouter } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -104,5 +106,68 @@ describe("the search params that had to survive", () => {
 
   it("keeps the task cause filter", async () => {
     expect((await at("/tasks?cause=oom")).search).toMatchObject({ cause: "oom" });
+  });
+});
+
+/**
+ * The two container pages, actually MOUNTED.
+ *
+ * `router.load()` above resolves matching and loaders; it does not render, so
+ * nothing in this file was executing `Blueprint` or `Operate` — the two files
+ * the re-cut created, one of which received a component moved by a script that
+ * spliced line ranges. tsc caught a missing import; it would not have caught a
+ * dropped line or a null deref inside a branch.
+ *
+ * These render each container and check that the tab strip is there and that
+ * switching tabs swaps the content. Shallow on purpose: what is under test is
+ * the container, and each tab's own page has its own tests.
+ */
+describe("the container pages render", () => {
+  function mountAt(path: string) {
+    const router = createRouter({
+      routeTree,
+      history: createMemoryHistory({ initialEntries: [path] }),
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("draws the blueprint page with both of its tabs", async () => {
+    mountAt("/blueprint");
+    await waitFor(() => expect(screen.getByRole("tablist")).toBeTruthy());
+    const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(tabs).toEqual(["Chart", "Play"]);
+    // `Loaded` came from Charts by a scripted move; this is what proves it
+    // survived the splice and still renders above the tabs.
+    expect(screen.getByText(/loaded on the blueprint box/i)).toBeTruthy();
+  });
+
+  it("opens the blueprint page on the tab the URL names", async () => {
+    mountAt("/blueprint?tab=play");
+    await waitFor(() => expect(screen.getByRole("tablist")).toBeTruthy());
+    const play = screen.getAllByRole("tab").find((t) => t.textContent === "Play");
+    expect(play?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("draws the operate page with its four tabs", async () => {
+    mountAt("/operate");
+    await waitFor(() => expect(screen.getByRole("tablist")).toBeTruthy());
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Dispatch",
+      "Share",
+      "Cost",
+      "Activity",
+    ]);
+  });
+
+  it("shows the tab the URL names rather than always the first", async () => {
+    mountAt("/operate?tab=cost");
+    await waitFor(() => expect(screen.getByRole("tablist")).toBeTruthy());
+    const cost = screen.getAllByRole("tab").find((t) => t.textContent === "Cost");
+    expect(cost?.getAttribute("aria-selected")).toBe("true");
   });
 });
