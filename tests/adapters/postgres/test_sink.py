@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from src.adapters.postgres.sink import PostgresSink
+from src.adapters.postgres.sink import PostgresSink, _folded
 
 
 class _Engine:
@@ -161,3 +161,38 @@ class TestTheRunRowIsFoldedNotJustLogged:
         with pytest.raises(RuntimeError):
             sink.closed("run-a", "completed", {})
         sink.close(timeout=2)
+
+
+class TestTheCountersAreFoldedToo:
+    """`runs` is a cache of the fold, and a cache nothing maintains is a stale
+    number. A completed 200,000-iteration run read as 0 iterations in 0 seconds
+    on a real node while its own events said otherwise."""
+
+    def test_a_progress_batch_moves_the_run_row(self):
+        rows = [
+            {"run_id": "run-a", "body": {"iterations": 1000, "attempt_runtime_seconds": 10.0}},
+            {"run_id": "run-a", "body": {"iterations": 5000, "attempt_runtime_seconds": 50.0}},
+        ]
+        assert _folded(rows) == {"run-a": {"iterations": 5000, "runtime_seconds": 50.0}}
+
+    def test_it_takes_the_max_so_a_late_batch_cannot_walk_it_back(self):
+        """Batches are not ordered against each other; last-wins would let a
+        straggler report a finished run as less far along than it is."""
+        rows = [
+            {"run_id": "run-a", "body": {"iterations": 9000}},
+            {"run_id": "run-a", "body": {"iterations": 200}},
+        ]
+        assert _folded(rows)["run-a"]["iterations"] == 9000
+
+    def test_events_with_no_counter_move_nothing(self):
+        assert _folded([{"run_id": "run-a", "body": {"kind": "fresh"}}]) == {}
+
+    def test_two_runs_in_one_batch_stay_apart(self):
+        rows = [
+            {"run_id": "run-a", "body": {"iterations": 10}},
+            {"run_id": "run-b", "body": {"iterations": 20}},
+        ]
+        assert _folded(rows) == {
+            "run-a": {"iterations": 10},
+            "run-b": {"iterations": 20},
+        }

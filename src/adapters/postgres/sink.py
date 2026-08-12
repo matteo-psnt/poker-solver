@@ -190,10 +190,46 @@ class PostgresSink:
         try:
             with self._engine.begin() as connection:
                 connection.execute(insert(models.RunEvent).values(batch).on_conflict_do_nothing())
+                for run_id, values in _folded(batch).items():
+                    connection.execute(
+                        sa_update(models.Run).where(models.Run.run_id == run_id).values(**values)
+                    )
         except Exception:
             with self._lock:
                 self._dropped += len(batch)
             log.warning("record sink lost %d events", len(batch), exc_info=True)
+
+
+def _folded(batch: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The counters a batch of progress events moves, per run.
+
+    Folded HERE, in the same transaction as the events, because `runs` is a
+    cache of the fold and a cache nothing maintains is just a stale number: a
+    completed 200,000-iteration run read as 0 iterations in 0 seconds while its
+    own events said otherwise.
+
+    Best-effort on purpose, unlike `status`. These ride the lossy path, so a
+    dropped batch leaves the counter behind until the next one -- which is the
+    right trade for a progress reading and the wrong one for a terminal state.
+    MAX rather than last-wins, so an out-of-order batch cannot walk it back.
+    """
+    folded: dict[str, dict[str, Any]] = {}
+    for row in batch:
+        body = row.get("body") or {}
+        iterations = body.get("iterations")
+        if iterations is None:
+            continue
+        current = folded.setdefault(row["run_id"], {})
+        current["iterations"] = max(int(iterations), int(current.get("iterations", 0)))
+        runtime = body.get("attempt_runtime_seconds") or body.get("runtime_seconds")
+        if runtime is not None:
+            current["runtime_seconds"] = max(
+                float(runtime), float(current.get("runtime_seconds", 0.0))
+            )
+        infosets = body.get("num_infosets")
+        if infosets is not None:
+            current["num_infosets"] = int(infosets)
+    return folded
 
 
 def _run_values(run_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
