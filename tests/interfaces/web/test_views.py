@@ -148,6 +148,27 @@ class TestTheJoins:
         composed = views.run("run-a")
         assert composed["parts"]["tasks"]["error"] == "tasks is unavailable"
 
+    def test_the_run_list_projects_which_run_each_task_was_for(self, answers):
+        """`task_runs`, not the rows: the run list is a table of run names and
+        was downloading the whole task log to cross-check their claimed status."""
+        composed = views.runs()
+        assert composed["task_runs"] == {"t1": "run-a", "t2": "run-b", "t3": "run-a"}
+        assert composed["parts"]["tasks"]["payload"]["rows"] == []
+
+    def test_a_task_with_no_run_is_left_out_of_the_projection(self, answers):
+        """Mapped to null it would look like a run named `null` that has tasks."""
+        composed = views.runs()
+        assert "t4" not in composed["task_runs"]
+
+    def test_the_run_list_asks_for_more_jobs_than_the_live_screen(self, answers):
+        """A run outlives the daily job its tasks land in, so a live task can sit
+        well down the list. Reusing `LIVE_LIMIT` here would make a run whose task
+        is in the eleventh-most-recent job read as ABANDONED — a false alarm on
+        the one screen this check exists to make trustworthy."""
+        views.runs()
+        assert dict(answers)["jobs"]["limit"] == views.RUN_LIST_JOB_LIMIT
+        assert views.RUN_LIST_JOB_LIMIT > views.LIVE_LIMIT
+
     def test_the_arms_of_one_experiment_are_pinned_to_their_run_records(self, answers):
         composed = views.experiment("exp-1")
         assert [row["name"] for row in composed["arm_runs"]] == ["run-a", "run-b"]

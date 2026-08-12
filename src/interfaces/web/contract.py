@@ -743,6 +743,34 @@ class NowView(View):
     parts: NowParts
 
 
+class RunsParts(Payload):
+    runs: Part[Runs]
+    """Fetched with a LARGER job limit than the live screen uses, because a run
+    outlives the daily job its tasks land in -- see `views.RUN_LIST_JOB_LIMIT`."""
+    jobs: Part[Jobs]
+    """Answered, then trimmed to `source_rows`: what the client needs from it is
+    the `task_runs` projection below, not the rows."""
+    tasks: Part[Tasks]
+
+
+class RunsView(View):
+    """Every published run, plus what is needed to check its claimed status."""
+
+    parts: RunsParts
+    """`task_id -> run_id`, projected from the task log.
+
+    A run's `status` is a claim written by a living process, so it cannot record
+    how an attempt died -- a run whose task was OOM-killed claims `running`
+    forever. Cross-checking needs Batch (which TASKS are live) joined to the task
+    log (which RUN each task was for).
+
+    Only the join is here. Which Batch states count as live, and whether a run
+    with no live task reads as "abandoned" or "abandoned?", is the client's --
+    that is wording and semantics, not data, and it is unit-tested there.
+    """
+    task_runs: dict[str, str] = {}
+
+
 class RunParts(Payload):
     run: Part[RunInfo]
     progress: Part[Progress]

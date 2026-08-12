@@ -56,14 +56,27 @@ from src.interfaces.commands import (
     progress,
     report,
     runinfo,
-    runs,
     tasks,
 )
+from src.interfaces.commands import runs as runs_command
 from src.interfaces.commands._compose import Part, compose, payloads
 
 # A glanceable screen cannot carry two hundred rows, and the cost of fetching
 # them is the point: `tasks` is the slowest read in the console.
 LIVE_LIMIT = 10
+
+"""Why the run list asks for FIFTY jobs and the live screen asks for ten
+----------------------------------------------------------------------
+They are asking different questions. `now` shows what is happening, so ten is
+generous. The run list uses jobs to decide whether a run that CLAIMS to be
+running actually has a task executing -- and a run's live task can sit in a job
+well down the list, because a run outlives the daily job its tasks land in.
+
+Reusing `LIVE_LIMIT` here would make a run whose task is in the eleventh-most-
+recent job read as abandoned: a false alarm on the exact screen the check exists
+to make trustworthy. Pinned by a test, since nothing else would notice.
+"""
+RUN_LIST_JOB_LIMIT = 50
 
 
 def now() -> dict[str, Any]:
@@ -138,6 +151,42 @@ def run(run_id: str) -> dict[str, Any]:
     return composed
 
 
+def runs() -> dict[str, Any]:
+    """Every published run, with what is needed to check its claimed status.
+
+    A run's `status` is a CLAIM, not an observation: it lives in the run's own
+    event log, written by the training process, so it records what a LIVING
+    process did and cannot record how an attempt died. A task killed by OOM,
+    `maxWallClockTime`, SIGKILL or node loss is gone before it can write
+    `finished`, and the run then claims `running` forever -- four runs on this
+    share have.
+
+    Checking that needs three sources and two joins: Batch knows which TASKS are
+    live, the task log knows which RUN each task belonged to, and neither can
+    answer alone. The console did this itself, which cost it the whole task log
+    on a page that shows a table of run names.
+
+    **What this ships is the projection, not the verdict.** `task_runs` is
+    `task_id -> run_id` and nothing more. Deciding which Batch states count as
+    live -- and whether a run with no live task is "abandoned" or merely
+    "abandoned?" because it predates the task log -- stays in the client, for the
+    same reason :func:`now` does not draw the progress bar here: that is this
+    module deciding what "running" means, which is the line. The client already
+    holds the `jobs` part, so it can intersect the two without another request.
+    """
+    composed = compose(
+        "view-runs",
+        [
+            Part("runs", runs_command.COMMAND, {"limit": 0, "loadable_only": False}),
+            Part("jobs", jobs.COMMAND, {"limit": RUN_LIST_JOB_LIMIT}),
+            Part("tasks", tasks.COMMAND, {"limit": 0, "skip_reconcile": False, "tasks_dir": None}),
+        ],
+        join=lambda parts: {"task_runs": _task_runs(parts)},
+    )
+    composed["parts"]["tasks"] = _summarised(composed["parts"]["tasks"])
+    return composed
+
+
 def experiment(experiment_id: str) -> dict[str, Any]:
     """One experiment's arms, each pinned to the run record behind it.
 
@@ -151,7 +200,7 @@ def experiment(experiment_id: str) -> dict[str, Any]:
         "view-experiment",
         [
             Part("report", report.COMMAND, {"experiment": experiment_id}),
-            Part("runs", runs.COMMAND, {"limit": 0, "loadable_only": False}),
+            Part("runs", runs_command.COMMAND, {"limit": 0, "loadable_only": False}),
         ],
         join=lambda parts: {"arm_runs": _runs_in(experiment_id, parts)},
     )
@@ -202,6 +251,27 @@ def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[dict[str, 
     if available is None:
         return []
     return [row for row in available.get("rows", []) if row.get("run_id") == run_id]
+
+
+def _task_runs(parts: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Which run each task belonged to: `task_id -> run_id`.
+
+    A projection of the task log, and the reason the run list no longer
+    downloads it. Hundreds of short pairs instead of hundreds of full rows, and
+    it carries everything the two client-side joins need -- which runs have
+    tasks at all, and which of those tasks Batch currently has live.
+
+    Tasks with no `run_id` are dropped rather than mapped to null: they belong to
+    no run, so they cannot answer a question about one.
+    """
+    available = payloads(parts).get("tasks")
+    if available is None:
+        return {}
+    return {
+        row["task_id"]: row["run_id"]
+        for row in available.get("rows", [])
+        if row.get("task_id") and row.get("run_id")
+    }
 
 
 def _runs_in(experiment_id: str, parts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:

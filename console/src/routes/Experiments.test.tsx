@@ -92,11 +92,28 @@ const REPORT = {
   ],
 };
 
+/**
+ * The composed view the page now reads: the report, plus each arm's run record.
+ *
+ * `arm_runs` is the join — `report` says how an arm SCORED, the run listing says
+ * what it WAS (its config), and the two used to be on different pages.
+ */
+const EXPERIMENT_VIEW = {
+  op: "view-experiment",
+  at: "2026-08-12T09:00:00+02:00",
+  elapsed_seconds: 1.2,
+  parts: {
+    report: { payload: REPORT, error: null },
+    runs: { payload: RUNS, error: null },
+  },
+  arm_runs: RUNS.runs.filter((run) => run.experiment_id === "exp-7"),
+};
+
 beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string) => {
-      const body = String(path).startsWith("/api/experiments") ? REPORT : RUNS;
+      const body = String(path).startsWith("/api/view/experiment") ? EXPERIMENT_VIEW : RUNS;
       return new Response(JSON.stringify(body), { status: 200 });
     }),
   );

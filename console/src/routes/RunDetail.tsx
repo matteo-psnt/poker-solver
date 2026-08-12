@@ -1,8 +1,7 @@
-import { useCurve, useProgress, useRun, useTasks } from "@/api/queries";
+import { useRunView } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
-import { errorOf } from "@/lib/error";
 import {
   clock,
   count,
@@ -32,6 +31,9 @@ import {
 
 const route = getRouteApi("/runs/$runId");
 
+/** What `useRunView` returns, so the child panels can be handed it. */
+type RunViewQuery = ReturnType<typeof useRunView>;
+
 const AXIS = { stroke: "var(--fg-faint)", fontSize: 10 };
 const GRID = "var(--border)";
 const TOOLTIP = {
@@ -48,62 +50,77 @@ const EXPLOIT = "#f59e0b";
 const iterTick = (v: number) =>
   v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : `${(v / 1e3).toFixed(0)}k`;
 
+/**
+ * One run, as ONE request.
+ *
+ * It used to be four — `runinfo`, `progress`, `curve`, and the ENTIRE task log,
+ * which the browser then filtered down to this run's handful of rows. The
+ * filtering is now a server-side join (`run_tasks`) and the log itself never
+ * crosses the wire, so the page costs what it shows.
+ *
+ * The parts still fail one at a time: a run with no scored rungs greys the
+ * exploitability panel and leaves the rest of the page intact.
+ */
 export function RunDetail() {
   const { runId } = route.useParams();
-  const run = useRun(runId);
-  const curve = useCurve(runId);
+  const view = useRunView(runId);
+  const parts = view.data?.parts;
+  const run = parts?.run;
+  const runData = run?.payload;
+  const curve = parts?.curve;
+  const curveData = curve?.payload;
 
   return (
     <div className="space-y-3">
       <Panel
         title={runLabel(runId)}
-        updatedAt={run.dataUpdatedAt}
+        updatedAt={view.dataUpdatedAt}
         staleAfterMs={120_000}
-        error={errorOf(run.error)}
-        loading={run.isLoading}
-        onRefresh={() => run.refetch()}
-        refreshing={run.isFetching}
+        error={run?.error ?? null}
+        loading={view.isLoading}
+        onRefresh={() => view.refetch()}
+        refreshing={view.isFetching}
       >
-        {run.data && (
+        {runData && (
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 p-3 sm:grid-cols-3 lg:grid-cols-5">
-            <Stat label="config" value={run.data.config_name ?? "—"} />
-            <Stat label="iterations" value={count(run.data.iterations)} />
-            <Stat label="training tasks" value={count(run.data.training_tasks)} />
-            <Stat label="compute time" value={duration(run.data.runtime_seconds)} />
+            <Stat label="config" value={runData.config_name ?? "—"} />
+            <Stat label="iterations" value={count(runData.iterations)} />
+            <Stat label="training tasks" value={count(runData.training_tasks)} />
+            <Stat label="compute time" value={duration(runData.runtime_seconds)} />
             <div>
               <Label>status</Label>
-              <StatusBadge state={run.data.status} />
+              <StatusBadge state={runData.status} />
             </div>
-            <Stat label="abstraction" value={run.data.card_abstraction_hash ?? "—"} mono />
-            <Stat label="commit" value={run.data.git_commit?.slice(0, 10) ?? "—"} mono />
+            <Stat label="abstraction" value={runData.card_abstraction_hash ?? "—"} mono />
+            <Stat label="commit" value={runData.git_commit?.slice(0, 10) ?? "—"} mono />
           </div>
         )}
       </Panel>
 
       <div className="grid gap-3 xl:grid-cols-2">
-        <ProgressPanel runId={runId} />
+        <ProgressPanel view={view} />
         <Panel
           title="Exploitability"
-          updatedAt={curve.dataUpdatedAt}
+          updatedAt={view.dataUpdatedAt}
           staleAfterMs={120_000}
-          error={errorOf(curve.error)}
-          loading={curve.isLoading}
-          empty={curve.data && curve.data.points.length === 0 ? "No scored rungs." : null}
+          error={curve?.error ?? null}
+          loading={view.isLoading}
+          empty={curveData && curveData.points.length === 0 ? "No scored rungs." : null}
         >
-          {curve.data && curve.data.points.length > 0 && (
+          {curveData && curveData.points.length > 0 && (
             <Chart
               caption={
                 <>
-                  mbb/g · tier {curve.data.tier ?? "—"} ·{" "}
+                  mbb/g · tier {curveData.tier ?? "—"} ·{" "}
                   <Coverage
-                    have={curve.data.points.length}
-                    missing={curve.data.missing_iterations.length}
+                    have={curveData.points.length}
+                    missing={curveData.missing_iterations.length}
                     noun="rung"
                   />
                 </>
               }
             >
-              <LineChart data={curve.data.points}>
+              <LineChart data={curveData.points}>
                 <CartesianGrid stroke={GRID} strokeDasharray="2 4" />
                 <XAxis dataKey="iteration" tick={AXIS} tickFormatter={iterTick} />
                 <YAxis tick={AXIS} width={52} />
@@ -125,7 +142,8 @@ export function RunDetail() {
         </Panel>
       </div>
 
-      <RunTasks runId={runId} />
+      <RunEvals view={view} />
+      <RunTasks view={view} />
     </div>
   );
 }
@@ -183,22 +201,22 @@ function Coverage({ have, missing, noun }: { have: number; missing: number; noun
  * `mean_visits_per_touched` is the convergence diagnostic — it is the quantity
  * to compare against the 1e3-1e4 regret updates per infoset CFR needs.
  */
-function ProgressPanel({ runId }: { runId: string }) {
-  const progress = useProgress(runId);
-  const rows = progress.data?.rows ?? [];
+function ProgressPanel({ view }: { view: RunViewQuery }) {
+  const progress = view.data?.parts?.progress;
+  const rows = progress?.payload?.rows ?? [];
   const last = rows[rows.length - 1];
-  const plateau = progress.data?.coverage_plateau_iteration ?? null;
+  const plateau = progress?.payload?.coverage_plateau_iteration ?? null;
 
   return (
     <Panel
       title="Progress"
-      updatedAt={progress.dataUpdatedAt}
+      updatedAt={view.dataUpdatedAt}
       staleAfterMs={120_000}
-      error={errorOf(progress.error)}
-      loading={progress.isLoading}
-      empty={progress.data && rows.length === 0 ? "No checkpoint history." : null}
-      onRefresh={() => progress.refetch()}
-      refreshing={progress.isFetching}
+      error={progress?.error ?? null}
+      loading={view.isLoading}
+      empty={progress?.payload && rows.length === 0 ? "No checkpoint history." : null}
+      onRefresh={() => view.refetch()}
+      refreshing={view.isFetching}
     >
       {rows.length > 0 && (
         <Chart
@@ -267,6 +285,80 @@ function ProgressPanel({ runId }: { runId: string }) {
   );
 }
 
+const str = (value: unknown) => (value == null ? "—" : String(value));
+const num = (value: unknown) => (typeof value === "number" ? value : null);
+
+/**
+ * What this run scored, against the run that scored it.
+ *
+ * These used to live on a global `/evals` page: every evaluation in the record,
+ * one flat list, so answering "is THIS run any good" meant scanning a table
+ * mixed with every other run's rows and matching ids by eye. The scores belong
+ * to the run — the question is never "what evaluations exist".
+ *
+ * Filtered by `ledger --run`, which is the command's OWN flag, so this is not a
+ * join at all: the server asks the narrower question rather than asking a wide
+ * one and discarding most of the answer.
+ *
+ * The run column is gone because the page IS the run. The knobs stay: an
+ * exploitability figure is meaningless without the tier it was measured at, and
+ * comparing across tiers is the mistake `compare` refuses by design.
+ */
+function RunEvals({ view }: { view: RunViewQuery }) {
+  const evals = view.data?.parts?.evals;
+  const rows = evals?.payload?.rows ?? [];
+
+  return (
+    <Panel
+      title="Evaluations"
+      updatedAt={view.dataUpdatedAt}
+      staleAfterMs={120_000}
+      error={evals?.error ?? null}
+      loading={view.isLoading}
+      empty={
+        evals?.payload && rows.length === 0
+          ? "Never scored. Older evaluations may be legacy files on the share that the rebuild skips."
+          : null
+      }
+      onRefresh={() => view.refetch()}
+      refreshing={view.isFetching}
+    >
+      {rows.length > 0 && (
+        <Table>
+          <thead>
+            <tr>
+              <Th>scorer</Th>
+              <Th>opponent</Th>
+              <Th right>seed</Th>
+              <Th right>hands</Th>
+              <Th right>mbb/g</Th>
+              <Th>commit</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={`${row.run_id}-${index}`}>
+                <Td>{str(row.knobs.scorer)}</Td>
+                <Td>{str(row.knobs.opponent)}</Td>
+                <Td right className="text-[var(--fg-muted)]">
+                  {str(row.knobs.base_seed)}
+                </Td>
+                <Td right>{str(row.results.num_hands)}</Td>
+                <Td right>
+                  {mbb(num(row.results.exploitability_mbb), num(row.results.std_error_mbb))}
+                </Td>
+                <Td mono className="text-[var(--fg-faint)]">
+                  {row.eval_git_commit?.slice(0, 7) ?? "—"}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Panel>
+  );
+}
+
 const BAR_TONE: Record<string, string> = {
   ok: "bg-emerald-500/60",
   live: "bg-emerald-400/70",
@@ -328,23 +420,32 @@ function TaskTimeline({ timeline }: { timeline: ReturnType<typeof timelineBars> 
  * its tasks happen to land in, so grouping by job here would split one lineage
  * across three headings for a reason that is purely about scheduling.
  */
-function RunTasks({ runId }: { runId: string }) {
-  const tasks = useTasks(0);
+function RunTasks({ view }: { view: RunViewQuery }) {
+  const tasks = view.data?.parts?.tasks;
   const now = Date.now();
-  const mine = (tasks.data?.rows ?? []).filter((row) => row.run_id === runId).reverse();
+  // Already filtered to this run, server-side. The page used to download the
+  // whole task log and do this itself — over the wire, into the browser, to
+  // discard ~95% of it — because `runinfo.tasks` is empty for runs whose records
+  // predate that field, the production run among them. The join is the same one;
+  // it just happens where the data already is.
+  const mine = useMemo(() => [...(view.data?.run_tasks ?? [])].reverse(), [view.data?.run_tasks]);
   const ops = [...new Set(mine.map((row) => row.op).filter(Boolean))];
   const timeline = useMemo(() => timelineBars(mine, now), [mine, now]);
 
   return (
     <Panel
       title="Tasks"
-      updatedAt={tasks.dataUpdatedAt}
+      updatedAt={view.dataUpdatedAt}
       staleAfterMs={180_000}
-      error={errorOf(tasks.error)}
-      loading={tasks.isLoading}
-      empty={tasks.data && mine.length === 0 ? "No tasks recorded for this run." : null}
-      onRefresh={() => tasks.refetch()}
-      refreshing={tasks.isFetching}
+      error={tasks?.error ?? null}
+      loading={view.isLoading}
+      // `tasks.payload` present with an empty join means the log was read and
+      // holds nothing for this run. A FAILED part must not render as that — it
+      // renders as the error above, because "no tasks" is a claim and "I could
+      // not look" is not.
+      empty={tasks?.payload && mine.length === 0 ? "No tasks recorded for this run." : null}
+      onRefresh={() => view.refetch()}
+      refreshing={view.isFetching}
     >
       {mine.length > 0 && (
         <>

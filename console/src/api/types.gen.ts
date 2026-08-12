@@ -634,6 +634,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/view/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** View Runs */
+        get: operations["_view_runs_api_view_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1891,6 +1908,36 @@ export interface components {
              * @default []
              */
             runs: components["schemas"]["RunSummary"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /** RunsParts */
+        RunsParts: {
+            jobs: components["schemas"]["Part_Jobs_"];
+            runs: components["schemas"]["Part_Runs_"];
+            tasks: components["schemas"]["Part_Tasks_"];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * RunsView
+         * @description Every published run, plus what is needed to check its claimed status.
+         */
+        RunsView: {
+            /** At */
+            at: string;
+            /** Elapsed Seconds */
+            elapsed_seconds: number;
+            /** Op */
+            op: string;
+            parts: components["schemas"]["RunsParts"];
+            /**
+             * Task Runs
+             * @default {}
+             */
+            task_runs: {
+                [key: string]: string;
+            };
         } & {
             [key: string]: unknown;
         };
@@ -3532,6 +3579,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Understood, and the answer is no. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Azure did not answer. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    _view_runs_api_view_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunsView"];
                 };
             };
             /** @description Understood, and the answer is no. */
