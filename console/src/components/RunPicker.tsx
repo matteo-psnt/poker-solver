@@ -1,5 +1,5 @@
 import { useRuns } from "@/api/queries";
-import type { RunSummary } from "@/api/schemas";
+import type { RunSummary } from "@/api/types";
 import { count, runLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Check, ChevronDown, Search } from "lucide-react";

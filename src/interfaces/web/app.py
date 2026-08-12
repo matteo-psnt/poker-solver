@@ -1,11 +1,12 @@
-"""The console's HTTP layer: one endpoint per command, and nothing else.
+"""The console's HTTP layer: commands, and composed views of commands.
 
-**No new read path.** Every endpoint body is a single ``Command.invoke`` and a
-memo. That is the whole design, and it is the property the previous browser UI
-lacked: `fbcf9a8` carried `api/chart_service.py`, `api/play_service.py` and
-`chart/data.py` -- a second way to ask questions the CLI already answered, which
-drifted from it and then rotted. `tests/interfaces/web/` fails if anything here
-grows one.
+**No new read path.** Every endpoint body reaches a ``Command.invoke`` and a
+memo -- directly through :func:`answer`, or through :func:`view` for a screen
+that is several commands at once. That is the whole design, and it is the
+property the previous browser UI lacked: `fbcf9a8` carried
+`api/chart_service.py`, `api/play_service.py` and `chart/data.py` -- a second way
+to ask questions the CLI already answered, which drifted from it and then
+rotted. `tests/interfaces/web/` fails if anything here grows one.
 
 **Endpoints are ``def``, not ``async def``.** Every Azure client in
 :mod:`src.interfaces.cloud` is synchronous, so a coroutine here would block the
@@ -13,10 +14,18 @@ event loop for the whole 2-4s of a cloud read and serialise every other request
 behind it. FastAPI runs sync handlers in a threadpool, which is exactly right --
 and is the single detail about this file most likely to be "tidied" into a bug.
 
-One endpoint per command rather than one aggregate: a page fetches only what it
-shows, `/tasks` does not pay for `ledger`, and each panel fails alone. The client
-owns cadence (TanStack Query's ``refetchInterval``), so there is no poller here
-and nothing depends on a background thread staying alive.
+**Two shapes of endpoint, and the reason both exist.** One per command is the
+right grain for an ad-hoc question: a page fetches only what it shows, `/tasks`
+does not pay for `ledger`, and each panel fails alone. It is the wrong grain for
+a SCREEN -- four panels became four requests, each with its own cache slot and
+its own poll cadence, so nothing on the Overview was ever the same age as
+anything else, and `RunDetail` downloaded the entire task log to find one run's
+rows. So `/api/view/*` composes: several commands fanned out concurrently,
+joined once, served as one answer. See :mod:`src.interfaces.web.views` for the
+rule that keeps composing from becoming computing.
+
+The client still owns cadence (TanStack Query's ``refetchInterval``), so there
+is no poller here and nothing depends on a background thread staying alive.
 """
 
 from __future__ import annotations
@@ -63,7 +72,7 @@ from src.interfaces.commands import (
     tasks,
 )
 from src.interfaces.errors import attempt
-from src.interfaces.web import blueprint_proxy
+from src.interfaces.web import blueprint_proxy, contract, views
 from src.interfaces.web.cache import TtlCache
 from src.shared import jsonio, repo
 
@@ -116,6 +125,30 @@ class PayloadResponse(JSONResponse):
 # no checkpoint history), so it is the client's business, not a server fault;
 # unavailable means Azure did not answer, which is transient and worth retrying.
 _STATUS = {"refusal": 422, "unavailable": 503}
+
+"""What `response_model` is for here, and what it is NOT
+------------------------------------------------------
+It is the OpenAPI schema, which `console/src/api/types.gen.ts` is generated
+from. It is NOT request-time validation, and cannot be: FastAPI skips both
+validation and serialization for a handler that returns a `Response`, and every
+handler here returns :class:`PayloadResponse` -- which exists because
+`jsonio.dumps` handles the numpy scalars and `Path` objects these payloads carry
+and plain `json.dumps` turns into a 500 the CLI never sees. Measured: a handler
+declaring a model and returning a wrong-shaped `JSONResponse` answers 200 with
+the wrong shape, while `/openapi.json` still carries the right `$ref`.
+
+So the models are enforced by `tests/interfaces/web/test_contract.py`, which
+round-trips each against the payload examples the renderer tests already pin.
+Validation at test time rather than request time -- the same guarantee, without
+giving up the encoder.
+
+`ERRORS` puts the two failure bodies in the schema too, so a generated client
+knows a 422 and a 503 carry `{error}` rather than the payload.
+"""
+ERRORS: dict[int | str, dict[str, Any]] = {
+    422: {"model": contract.ApiError, "description": "Understood, and the answer is no."},
+    503: {"model": contract.ApiError, "description": "Azure did not answer."},
+}
 
 
 """Request bodies, and why the writes take one at all
@@ -271,47 +304,47 @@ def create_app() -> FastAPI:
     app = FastAPI(title="poker-solver console", docs_url="/api/docs", lifespan=_lifespan)
     cache = TtlCache(CACHE_TTL_SECONDS)
 
-    @app.get("/api/pool")
+    @app.get("/api/pool", response_model=contract.Pool, responses=ERRORS)
     def _pool() -> JSONResponse:
         return answer(cache, pool_status.COMMAND)
 
-    @app.get("/api/jobs")
+    @app.get("/api/jobs", response_model=contract.Jobs, responses=ERRORS)
     def _jobs(limit: int = 20, all: bool = False) -> JSONResponse:  # noqa: A002
         return answer(cache, jobs.COMMAND, limit=limit, all=all)
 
-    @app.get("/api/tasks")
+    @app.get("/api/tasks", response_model=contract.Tasks, responses=ERRORS)
     def _tasks(limit: int = 0, skip_reconcile: bool = False) -> JSONResponse:
         return answer(
             cache, tasks.COMMAND, limit=limit, skip_reconcile=skip_reconcile, tasks_dir=None
         )
 
-    @app.get("/api/runs")
+    @app.get("/api/runs", response_model=contract.Runs, responses=ERRORS)
     def _runs(limit: int = 0) -> JSONResponse:
         return answer(cache, runs.COMMAND, limit=limit, loadable_only=False)
 
-    @app.get("/api/runs/{run_id}")
+    @app.get("/api/runs/{run_id}", response_model=contract.RunInfo, responses=ERRORS)
     def _run(run_id: str) -> JSONResponse:
         return answer(cache, runinfo.COMMAND, run=run_id)
 
-    @app.get("/api/runs/{run_id}/progress")
+    @app.get("/api/runs/{run_id}/progress", response_model=contract.Progress, responses=ERRORS)
     def _progress(run_id: str, last: int = 0) -> JSONResponse:
         return answer(cache, progress.COMMAND, run=run_id, last=last)
 
-    @app.get("/api/runs/{run_id}/curve")
+    @app.get("/api/runs/{run_id}/curve", response_model=contract.Curve, responses=ERRORS)
     def _curve(run_id: str) -> JSONResponse:
         return answer(cache, curve.COMMAND, run=run_id)
 
-    @app.get("/api/cost")
+    @app.get("/api/cost", response_model=contract.Cost, responses=ERRORS)
     def _cost(hours: float = 0.0) -> JSONResponse:
         return answer(cache, cost.COMMAND, hours=hours, rate="")
 
-    @app.get("/api/evals")
+    @app.get("/api/evals", response_model=contract.Ledger, responses=ERRORS)
     def _evals(limit: int = 50) -> JSONResponse:
         return answer(
             cache, ledger.COMMAND, limit=limit, run=None, experiment=None, method=None, since=None
         )
 
-    @app.get("/api/logs/{task_id}")
+    @app.get("/api/logs/{task_id}", response_model=contract.LogLines, responses=ERRORS)
     def _log(task_id: str, lines: int = 200) -> JSONResponse:
         return answer(cache, logs.COMMAND, task=task_id, lines=lines)
 
@@ -319,28 +352,28 @@ def create_app() -> FastAPI:
     # Azure nor the share. It is what makes the dispatch form offerable at all:
     # `submit --config` names a stem, and a surface that cannot enumerate them
     # has to make the operator type one from memory.
-    @app.get("/api/configs")
+    @app.get("/api/configs", response_model=contract.Configs, responses=ERRORS)
     def _configs() -> JSONResponse:
         return answer(cache, configs.COMMAND, kind="")
 
     # Local, so it costs nothing and is memoised only to keep a shared tab from
     # re-reading the log every poll. It is also the one endpoint whose answer
     # this server's own requests keep changing.
-    @app.get("/api/activity")
+    @app.get("/api/activity", response_model=contract.Activity, responses=ERRORS)
     def _activity(days: float = 7.0, limit: int = 20) -> JSONResponse:
         return answer(
             cache, activity.COMMAND, days=days, limit=limit, command="", surface="", failures=False
         )
 
-    @app.get("/api/autoscale")
+    @app.get("/api/autoscale", response_model=contract.Autoscale, responses=ERRORS)
     def _autoscale() -> JSONResponse:
         return answer(cache, autoscale_check.COMMAND)
 
-    @app.get("/api/experiments/{experiment_id}")
+    @app.get("/api/experiments/{experiment_id}", response_model=contract.Report, responses=ERRORS)
     def _report(experiment_id: str) -> JSONResponse:
         return answer(cache, report.COMMAND, experiment=experiment_id)
 
-    @app.get("/api/compare")
+    @app.get("/api/compare", response_model=contract.Comparison, responses=ERRORS)
     def _compare(
         a: str, b: str, a_at: int | None = None, b_at: int | None = None, force: bool = False
     ) -> JSONResponse:
@@ -358,7 +391,9 @@ def create_app() -> FastAPI:
     # what the previous browser UI died of. So there is no "cancel all", no
     # retry-then-cancel -- if a composite is wanted, it becomes a command first
     # and a button second.
-    @app.post("/api/tasks/{job_id}/{task_id}/cancel")
+    @app.post(
+        "/api/tasks/{job_id}/{task_id}/cancel", response_model=contract.Cancelled, responses=ERRORS
+    )
     def _cancel(job_id: str, task_id: str) -> JSONResponse:
         return answer(TtlCache(0.0), cancel.COMMAND, job=job_id, task=task_id)
 
@@ -378,19 +413,19 @@ def create_app() -> FastAPI:
     not try.
     """
 
-    @app.post("/api/submit")
+    @app.post("/api/submit", response_model=contract.Dispatched, responses=ERRORS)
     def _submit(body: SubmitBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit.COMMAND, **given(body))
 
-    @app.post("/api/score")
+    @app.post("/api/score", response_model=contract.Dispatched, responses=ERRORS)
     def _score(body: ScoreBody) -> JSONResponse:
         return answer(TtlCache(0.0), score.COMMAND, **given(body))
 
-    @app.post("/api/precompute")
+    @app.post("/api/precompute", response_model=contract.Dispatched, responses=ERRORS)
     def _precompute(body: PrecomputeBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_precompute.COMMAND, **given(body))
 
-    @app.post("/api/submit-vector")
+    @app.post("/api/submit-vector", response_model=contract.DispatchedVector, responses=ERRORS)
     def _submit_vector(body: SubmitVectorBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_vector.COMMAND, **given(body))
 
@@ -399,19 +434,19 @@ def create_app() -> FastAPI:
     # `--source` default to this checkout, so a console served from a different
     # worktree publishes that worktree -- and the payload names what it sealed,
     # which is what the page shows back.
-    @app.post("/api/push-code")
+    @app.post("/api/push-code", response_model=contract.PushedCode, responses=ERRORS)
     def _push_code(body: PushCodeBody) -> JSONResponse:
         return answer(TtlCache(0.0), push_code.COMMAND, **given(body))
 
-    @app.post("/api/push-data")
+    @app.post("/api/push-data", response_model=contract.PushedData, responses=ERRORS)
     def _push_data(body: PushDataBody) -> JSONResponse:
         return answer(TtlCache(0.0), push_data.COMMAND, **given(body))
 
-    @app.post("/api/compact-legs")
+    @app.post("/api/compact-legs", response_model=contract.Compacted, responses=ERRORS)
     def _compact_legs(body: CompactBody) -> JSONResponse:
         return answer(TtlCache(0.0), compact_legs.COMMAND, **given(body))
 
-    @app.post("/api/promote")
+    @app.post("/api/promote", response_model=contract.Promoted, responses=ERRORS)
     def _promote(body: PromoteBody) -> JSONResponse:
         return answer(TtlCache(0.0), promote.COMMAND, **given(body))
 
@@ -420,7 +455,7 @@ def create_app() -> FastAPI:
     # the property that stops a second control surface existing. Not cached:
     # asking whether the box is up must not be answered from 15 seconds ago while
     # someone watches it boot.
-    @app.get("/api/box")
+    @app.get("/api/box", response_model=contract.Box, responses=ERRORS)
     def _box() -> JSONResponse:
         return answer(
             TtlCache(0.0),
@@ -432,7 +467,7 @@ def create_app() -> FastAPI:
             subscription=serve_box.DEFAULT_SUBSCRIPTION,
         )
 
-    @app.post("/api/box/start")
+    @app.post("/api/box/start", response_model=contract.Box, responses=ERRORS)
     def _box_start() -> JSONResponse:
         return answer(
             TtlCache(0.0),
@@ -444,7 +479,7 @@ def create_app() -> FastAPI:
             subscription=serve_box.DEFAULT_SUBSCRIPTION,
         )
 
-    @app.post("/api/box/stop")
+    @app.post("/api/box/stop", response_model=contract.Box, responses=ERRORS)
     def _box_stop() -> JSONResponse:
         return answer(
             TtlCache(0.0),
@@ -455,6 +490,49 @@ def create_app() -> FastAPI:
             vm=serve_box.DEFAULT_VM,
             subscription=serve_box.DEFAULT_SUBSCRIPTION,
         )
+
+    """The composed views: one screen, one request
+    ---------------------------------------------
+    Each is several commands fanned out CONCURRENTLY and joined, which is the
+    same thing the client was doing across several requests -- minus the round
+    trips, and with every number on the page the same age as every other.
+
+    They go through `answer` like everything else, so they are memoised, they
+    classify failures the same way, and they are recorded by telemetry under one
+    invocation rather than five. `view.__name__` stands in for a command name in
+    the cache key: a view is not a command and has none, but the key must still
+    separate `/api/view/run/a` from `/api/view/run/b`.
+
+    Concurrency is safe against both caches in front of these reads, and that is
+    checked rather than hoped for -- `TtlCache.get` is single-flight per key and
+    `workspace.SharedTrees.acquire` is single-flight and refcounted, so five
+    parts asking for the same record still pay for one materialisation.
+    """
+
+    def view(build: Any, *key: str) -> JSONResponse:
+        payload, failure = attempt(lambda: cache.get((build.__name__, key), lambda: build(*key)))
+        if failure is not None:
+            return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
+        return PayloadResponse(payload)
+
+    @app.get("/api/view/now", response_model=contract.NowView, responses=ERRORS)
+    def _view_now() -> JSONResponse:
+        with telemetry.surface("console"):
+            return view(views.now)
+
+    @app.get("/api/view/run/{run_id}", response_model=contract.RunView, responses=ERRORS)
+    def _view_run(run_id: str) -> JSONResponse:
+        with telemetry.surface("console"):
+            return view(views.run, run_id)
+
+    @app.get(
+        "/api/view/experiment/{experiment_id}",
+        response_model=contract.ExperimentView,
+        responses=ERRORS,
+    )
+    def _view_experiment(experiment_id: str) -> JSONResponse:
+        with telemetry.surface("console"):
+            return view(views.experiment, experiment_id)
 
     # Not `answer(...)`: these are not commands and there is nothing to memoise
     # here. The blueprint server owns one loaded run and answers in

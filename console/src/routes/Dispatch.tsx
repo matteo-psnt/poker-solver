@@ -1,5 +1,5 @@
 import { useConfigs, usePrecompute, useRuns, useScore, useSubmit } from "@/api/queries";
-import type { Dispatched } from "@/api/schemas";
+import type { Dispatched } from "@/api/types";
 import { Actions, Field, Guard, Num, Outcome, Queued, Run, Select, Text } from "@/components/Form";
 import { Panel } from "@/components/Panel";
 import { given, int, overrides, rungs } from "@/lib/body";

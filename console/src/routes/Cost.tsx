@@ -1,5 +1,5 @@
 import { useCost } from "@/api/queries";
-import type { Billed } from "@/api/schemas";
+import type { Billed } from "@/api/types";
 import { Panel } from "@/components/Panel";
 import { StepChart } from "@/components/StepChart";
 import { errorOf } from "@/lib/error";

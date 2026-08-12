@@ -24,6 +24,8 @@ import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from src.interfaces.web import contract
+
 BLUEPRINT_URL_ENV = "POKER_SOLVER_BLUEPRINT_URL"
 BLUEPRINT_TOKEN_ENV = "POKER_SOLVER_BLUEPRINT_TOKEN"
 
@@ -116,11 +118,11 @@ def mount(app: FastAPI) -> None:
     it.
     """
 
-    @app.get("/api/blueprint/run")
+    @app.get("/api/blueprint/run", response_model=contract.BlueprintRun)
     def _run() -> JSONResponse:
         return forward("/api/run", {})
 
-    @app.get("/api/blueprint/combos")
+    @app.get("/api/blueprint/combos", response_model=contract.Combos)
     def _combos() -> JSONResponse:
         return forward("/api/combos", {})
 
@@ -128,29 +130,29 @@ def mount(app: FastAPI) -> None:
     # charting at all. It returns immediately with a 202 and the far side loads
     # on its own thread, so nothing here needs a longer timeout than any other
     # call: the client watches `/api/blueprint/run` for the swap to land.
-    @app.post("/api/blueprint/load")
+    @app.post("/api/blueprint/load", response_model=contract.BlueprintLoad)
     def _load(body: dict[str, Any]) -> JSONResponse:
         return forward("/api/load", method="POST", json=body)
 
-    @app.get("/api/blueprint/node")
+    @app.get("/api/blueprint/node", response_model=contract.SolverNode)
     def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:
         return forward("/api/node", {"path": path, "board": board, "average": average})
 
     # Play is stateful, so these carry a body and a session id. The proxy still
     # holds no state of its own: the session lives where the blueprint does, and
     # a console restart therefore does not lose a hand in progress.
-    @app.post("/api/blueprint/play")
+    @app.post("/api/blueprint/play", response_model=contract.Hand)
     def _start(body: dict[str, Any]) -> JSONResponse:
         return forward("/api/play", method="POST", json=body)
 
-    @app.get("/api/blueprint/play/{session_id}")
+    @app.get("/api/blueprint/play/{session_id}", response_model=contract.Hand)
     def _hand(session_id: str) -> JSONResponse:
         return forward(f"/api/play/{session_id}")
 
-    @app.post("/api/blueprint/play/{session_id}/action")
+    @app.post("/api/blueprint/play/{session_id}/action", response_model=contract.Hand)
     def _act(session_id: str, body: dict[str, Any]) -> JSONResponse:
         return forward(f"/api/play/{session_id}/action", method="POST", json=body)
 
-    @app.delete("/api/blueprint/play/{session_id}")
+    @app.delete("/api/blueprint/play/{session_id}", response_model=contract.LeftSession)
     def _leave(session_id: str) -> JSONResponse:
         return forward(f"/api/play/{session_id}", method="DELETE")

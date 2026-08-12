@@ -35,7 +35,8 @@
   ],
   "files": {
     "ignore": [
-      "src/api/payloads.fixture.json"
+      "src/api/types.gen.ts",
+      "src/api/openapi.json"
     ]
   }
 }

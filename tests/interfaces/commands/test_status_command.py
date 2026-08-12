@@ -16,13 +16,11 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-import pytest
-from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
+from azure.core.exceptions import ClientAuthenticationError
 
 from src.interfaces.cli import headless
 from src.interfaces.commands import status, tasks
 from src.interfaces.commands._base import Command
-from src.interfaces.errors import CommandError
 
 
 def _command(name: str, run: Any) -> Command:
@@ -44,26 +42,14 @@ def _raising(name: str, error: BaseException) -> Command:
 
 
 class TestOnePanelCannotTakeOutTheOthers:
-    def test_a_command_error_becomes_an_unavailable_panel(self):
-        panel = status._panel(_raising("tasks", CommandError("share unreachable")))
-        assert panel == {"payload": None, "error": "share unreachable"}
+    """What ISOLATION means for this screen specifically.
 
-    def test_an_expired_login_reads_as_itself(self):
-        """The single most likely failure. It must name the fix, not just fail."""
-        panel = status._panel(_raising("jobs", ClientAuthenticationError("nope")))
-        assert panel["payload"] is None
-        assert "az login" in panel["error"]
-
-    def test_an_unreachable_endpoint_is_reported_not_raised(self):
-        panel = status._panel(_raising("pool", HttpResponseError("gone")))
-        assert panel["payload"] is None
-        assert "did not answer" in panel["error"]
-
-    def test_a_bug_in_a_panel_still_propagates(self):
-        """Otherwise this screen becomes where exceptions go to be quietly
-        rendered as 'unavailable' -- a dashboard that lies rather than breaks."""
-        with pytest.raises(ValueError, match="kaboom"):
-            status._panel(_raising("jobs", ValueError("kaboom")))
+    The per-part half of it -- which exceptions become an unavailable panel and
+    which still propagate -- moved to `test_compose.py` with the fan-out it
+    tests. What stays here is the property that belongs to `status` rather than
+    to the machinery: that THESE three panels are gathered such that one of them
+    failing leaves the other two answered.
+    """
 
     def test_the_other_panels_still_answer(self, monkeypatch):
         monkeypatch.setattr(

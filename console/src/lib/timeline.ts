@@ -1,4 +1,4 @@
-import type { TaskRow } from "@/api/schemas";
+import type { TaskRow } from "@/api/types";
 import type { Tone } from "@/components/StatusBadge";
 import { toneFor } from "@/components/StatusBadge";
 import { instant } from "@/lib/format";

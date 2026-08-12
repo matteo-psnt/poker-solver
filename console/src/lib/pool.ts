@@ -1,4 +1,4 @@
-import type { Jobs } from "@/api/schemas";
+import type { Jobs } from "@/api/types";
 import { shortState } from "@/components/StatusBadge";
 
 /**

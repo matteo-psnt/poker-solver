@@ -34,15 +34,11 @@ from __future__ import annotations
 
 import argparse
 import time
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context
-from datetime import UTC, datetime
 from typing import Any
 
 from src.interfaces.commands import jobs, pool_status, tasks
 from src.interfaces.commands._base import Command
-from src.interfaces.errors import attempt
+from src.interfaces.commands._compose import Part, compose
 
 PANELS: tuple[tuple[str, Command], ...] = (
     ("pool", pool_status.COMMAND),
@@ -78,73 +74,30 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _panel(command: Command, **kwargs: Any) -> dict[str, Any]:
-    """Answer one panel, or record why it could not be answered.
-
-    Which failures are survivable is :func:`attempt`'s decision, not this
-    module's -- an expired ``az login`` and an unreachable endpoint are the two
-    a status screen exists to outlive, and the console needs the same list.
-    Anything else propagates: a bug in a panel is still a bug, and swallowing it
-    would turn this screen into the place exceptions go to be silently rendered
-    as "unavailable".
-
-    The screen shows a reason, not a kind -- a greyed-out panel says why in
-    words either way -- so the classification is dropped here and used by the
-    console, which has to pick a status code from it.
-    """
-    payload, failure = attempt(lambda: command.invoke(**kwargs))
-    return {"payload": payload, "error": failure.message if failure else None}
-
-
-def _bound(command: Command, **kwargs: Any) -> Callable[[], dict[str, Any]]:
-    """:func:`_panel`, bound to a COPY of the CALLING thread's context.
-
-    The copy has to be taken here, on the caller. Taking it inside the worker
-    would copy the worker's own context, which is the fresh one that lost
-    everything -- so it would look like a fix and change nothing.
-
-    A zero-argument closure rather than `pool.submit(context.run, _panel, ...)`
-    because `Context.run` is typed with a ParamSpec that does not compose
-    through `submit`, and the checker is right to say so.
-    """
-    context = copy_context()
-    return lambda: context.run(_panel, command, **kwargs)
-
-
 def gather(*, limit: int = 10, with_tasks: bool = True) -> dict[str, Any]:
     """Fetch every panel concurrently and return them keyed by name.
 
-    The entry point for any surface that is not this command. Each panel builds
-    its own Batch client, so there is no shared mutable state between the
-    threads; the concurrency is here rather than inside the panels because it
-    is a property of showing them together, not of any one of them.
+    The entry point for any surface that is not this command. The fan-out lives
+    in :mod:`_compose` rather than here: this screen had the only copy of it
+    until the console needed the same three properties -- independent failure,
+    concurrency, and a context copy per submit -- and a second copy is how the
+    telemetry-surface bug fixed in `d67411f` would have come back.
+
+    ``panels`` rather than `compose`'s ``parts``, because that is the word this
+    command's renderer and its `--json` consumers already use, and renaming a
+    published key to match an internal one is a break with nothing behind it.
     """
-    wanted = [(name, command) for name, command in PANELS if with_tasks or name != "tasks"]
     # `tasks` defaults to the whole history on purpose (a death is the row worth
     # finding), but a screen meant to be glanced at cannot carry 200 rows.
     arguments: dict[str, dict[str, Any]] = {"jobs": {"limit": limit}, "tasks": {"limit": limit}}
-    started = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
-        # Each panel runs in a COPY of the calling context, because a raw
-        # `pool.submit` starts its task with a fresh one and every ContextVar
-        # reverts to its default. `telemetry._SURFACE` is such a var, so the
-        # three panels that carry the real Azure round-trip cost -- the whole
-        # reason this screen is measured at all -- were filed `unknown` while
-        # the thin wrapper around them was filed `cli`.
-        #
-        # A copy PER SUBMIT, not one shared copy: `Context.run` is not
-        # re-entrant, so handing the same context to concurrent threads raises.
-        futures = {
-            name: pool.submit(_bound(command, **arguments.get(name, {})))
-            for name, command in wanted
-        }
-        panels = {name: future.result() for name, future in futures.items()}
-    return {
-        "op": "status",
-        "at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
-        "elapsed_seconds": round(time.perf_counter() - started, 2),
-        "panels": panels,
-    }
+    parts = [
+        Part(key=name, command=command, arguments=arguments.get(name, {}))
+        for name, command in PANELS
+        if with_tasks or name != "tasks"
+    ]
+    composed = compose("status", parts)
+    composed["panels"] = composed.pop("parts")
+    return composed
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:

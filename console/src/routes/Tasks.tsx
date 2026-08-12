@@ -1,5 +1,5 @@
 import { useCancelTask, useTasks } from "@/api/queries";
-import type { TaskRow } from "@/api/schemas";
+import type { TaskRow } from "@/api/types";
 import { Confirm } from "@/components/Confirm";
 import { Panel } from "@/components/Panel";
 import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";

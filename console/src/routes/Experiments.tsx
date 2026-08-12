@@ -1,5 +1,5 @@
 import { useCompare, usePromote, useReport, useRuns } from "@/api/queries";
-import type { Report, RunSummary } from "@/api/schemas";
+import type { Report, RunSummary } from "@/api/types";
 import { Actions, Field, Guard, Outcome, Run, Select, Text } from "@/components/Form";
 import { Panel } from "@/components/Panel";
 import { Table, Td, Th } from "@/components/Table";
