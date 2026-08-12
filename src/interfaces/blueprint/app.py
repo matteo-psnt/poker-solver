@@ -127,10 +127,13 @@ class LoadRun(BaseModel):
     at: int | None = None
 
 
-_LOADING = (
-    "The server is loading a run. Everything here answers again once it is in — "
-    "watch /api/health, which stays up throughout."
-)
+"""Nothing refuses during a load.
+
+There was a `_LOADING` 503 here for every reader, which went with dropping the
+old blueprint before building the new one. Building first removed the reason:
+the run already loaded stays answerable for the whole minute, and a reader that
+does not care about the swap never notices it happened.
+"""
 
 
 _GONE = (
@@ -290,7 +293,15 @@ def create_app(
 
     @app.get("/api/run")
     def _run() -> JSONResponse:
-        """What is loaded here, so a client can label what it is looking at."""
+        """What is loaded here, so a client can label what it is looking at.
+
+        Answers throughout a swap, describing the run STILL loaded and naming
+        the one coming. It needs no guard now that the new blueprint is built
+        before the old is released -- but it is worth saying why it once did:
+        this is the endpoint a client polls to watch a load, so a null blueprint
+        during one turned every switch into a stream of 500s on the page
+        watching it.
+        """
         config = held.blueprint.config
         return JSONResponse(
             {
@@ -307,28 +318,33 @@ def create_app(
     def _swap(run: str, at_iteration: int | None) -> None:
         """Do the load. Runs on its own thread; never raises to the caller.
 
-        The old blueprint is dropped BEFORE the new one is built, which is the
-        decision here worth arguing about. Building first and swapping at the end
-        would keep the server answering throughout -- but it would hold two full
-        tables at once, and this box is sized for one. An OOM kill takes the whole
-        server down and deallocates the VM; a minute of `loading` does not.
+        The new blueprint is BUILT before the old one is let go, so this server
+        keeps answering from the run it already has for the whole minute-plus a
+        load takes -- including the staging copy, which is thousands of small
+        files off an SMB share and by far the longest part.
 
-        The cost is that a failed build leaves nothing loaded. That is reported
-        rather than hidden, and the fix is to load something again.
+        The first version dropped the old one first, to avoid holding two tables
+        at once. That was reasoning from a memory limit that does not exist here:
+        the static table is allocated at full size and is FLAT IN ITERATION
+        COUNT, so a 150M-iteration run costs exactly what a 30M one does, and the
+        box idles at 14 of 15 GB free with one loaded. What it bought instead was
+        a window where `held.blueprint` was None while `/api/run` -- the endpoint
+        a client polls to WATCH the swap -- read straight through it.
         """
         try:
+            blueprint, resolved = load_run(run, at_iteration)  # type: ignore[misc]
             # Sessions die with the blueprint they were dealt from. Carrying one
             # across would leave a half-played hand whose next bot action comes
             # from a different run -- silently, and mid-hand.
             held.sessions.clear()
-            held.blueprint = None  # type: ignore[assignment]
-            blueprint, resolved = load_run(run, at_iteration)  # type: ignore[misc]
             held.blueprint = blueprint
             held.run_id = resolved
             held.sessions = Sessions(blueprint)
         except Exception as error:  # noqa: BLE001 -- reported, not swallowed
             held.error = f"{type(error).__name__}: {error}"
         finally:
+            # Released only once the swap is fully installed, so a second caller
+            # can never interleave with a half-applied one.
             held.loading = None
             swapping.release()
 
@@ -372,8 +388,6 @@ def create_app(
     @app.get("/api/node")
     def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:
         """The strategy at one spot, for every combo the board allows."""
-        if held.loading is not None:
-            return JSONResponse({"error": _LOADING}, status_code=503)
         try:
             cards = parse_board(board)
             node = replay(held.blueprint, path, cards)
@@ -413,8 +427,6 @@ def create_app(
     @app.post("/api/play")
     def _start(request: StartPlay) -> JSONResponse:
         """Deal a hand. The button alternates unless the caller pins it."""
-        if held.loading is not None:
-            return JSONResponse({"error": _LOADING}, status_code=503)
         try:
             session_id, hand = held.sessions.start(
                 human_seat=request.human_seat, button=request.button, seed=request.seed
