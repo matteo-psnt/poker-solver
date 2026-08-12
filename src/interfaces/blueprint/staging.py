@@ -60,9 +60,7 @@ def stage_run(run: str, *, runs_dir: Path, share: Path = DEFAULT_SHARE) -> Path:
 
     local.mkdir(parents=True, exist_ok=True)
     try:
-        # `dirs_exist_ok` so a partial earlier copy is completed rather than
-        # refused, which is what makes a retry after a timeout do the right thing.
-        shutil.copytree(published, local, dirs_exist_ok=True)
+        _copy_missing(published, local)
     except OSError as error:
         raise StagingError(f"Could not copy '{run}' from the share: {error}") from error
 
@@ -73,3 +71,30 @@ def stage_run(run: str, *, runs_dir: Path, share: Path = DEFAULT_SHARE) -> Path:
             "backend are unreadable at HEAD by design."
         )
     return local
+
+
+def _copy_missing(source: Path, target: Path) -> None:
+    """`cp -ru`, which is what `deploy.sh` has always used, and for good reason.
+
+    A blind `copytree(dirs_exist_ok=True)` re-reads every file on every attempt.
+    That is the difference between a resumed copy finishing in seconds and one
+    starting over: a production run is ~6 GB of thousands of small files, and
+    the source is SMB, where per-file overhead dominates the transfer. An
+    interrupted stage is the NORMAL case worth optimising for -- it is what a
+    caller who gave up and clicked again produces.
+
+    Size-and-mtime rather than content: a published run is immutable once
+    archived, so a file that matches on both is the file.
+    """
+    for entry in source.rglob("*"):
+        destination = target / entry.relative_to(source)
+        if entry.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        if destination.is_file():
+            already = destination.stat()
+            theirs = entry.stat()
+            if already.st_size == theirs.st_size and already.st_mtime >= theirs.st_mtime:
+                continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(entry, destination)
