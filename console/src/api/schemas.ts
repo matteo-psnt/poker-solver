@@ -303,7 +303,16 @@ export const blueprintRunSchema = z
     small_blind: z.number(),
     big_blind: z.number(),
     combos: z.number(),
+    /** The run being swapped in, while one is. Null when nothing is loading. */
+    loading: z.string().nullable().default(null),
+    /** False on a server handed a blueprint directly — a laptop, a test. */
+    can_switch: z.boolean().default(false),
   })
+  .passthrough();
+
+/** The 202 from asking for a swap. The work outlives the request. */
+export const blueprintLoadSchema = z
+  .object({ run: z.string(), loading: z.boolean() })
   .passthrough();
 
 export const combosSchema = z.object({ combos: z.array(z.string()) }).passthrough();
@@ -348,6 +357,7 @@ export const nodeSchema = z
   .passthrough();
 
 export type BlueprintRun = z.infer<typeof blueprintRunSchema>;
+export type BlueprintLoad = z.infer<typeof blueprintLoadSchema>;
 export type Combos = z.infer<typeof combosSchema>;
 export type SolverNode = z.infer<typeof nodeSchema>;
 export type NodeGrid = NonNullable<SolverNode["grid"]>;

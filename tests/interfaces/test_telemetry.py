@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -28,6 +29,23 @@ from src.interfaces import telemetry
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.shared import records, repo
+
+
+@pytest.fixture
+def capturable(monkeypatch):
+    """Let ``caplog`` see records from the ``src`` package logger.
+
+    `configure_logging` attaches a handler to the `src` logger and cuts
+    propagation so nothing double-prints. That is right in production and fatal
+    to `caplog`, which listens at the ROOT: once ANY test in this xdist worker
+    has configured logging, every later assertion about a `src.*` record in that
+    worker sees nothing. The process is shared, the flag is sticky, and which
+    tests share a worker changes whenever a test file is added anywhere in the
+    suite -- so without this the failure is invisible until an unrelated commit
+    reshuffles the distribution, which is exactly how it surfaced.
+    """
+    logger = logging.getLogger("src")
+    monkeypatch.setattr(logger, "propagate", True)
 
 
 @pytest.fixture(autouse=True)
@@ -176,7 +194,9 @@ class TestItIsABystander:
         # losing the timing is not.
         assert _rows(recording)[0]["outcome"] == "ok"
 
-    def test_a_broken_log_says_so_once_rather_than_never(self, recording, monkeypatch, caplog):
+    def test_a_broken_log_says_so_once_rather_than_never(
+        self, recording, monkeypatch, caplog, capturable
+    ):
         """Best-effort must not mean invisible.
 
         An unwritable cache stops recording FOREVER, and `activity` then reports

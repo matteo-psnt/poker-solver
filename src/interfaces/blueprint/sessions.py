@@ -107,6 +107,18 @@ class Sessions:
         with self._lock:
             self._hands.pop(session_id, None)
 
+    def clear(self) -> None:
+        """Forget every hand, because the blueprint they were dealt from is going.
+
+        Called when the server swaps runs. A hand holds the blueprint it started
+        against, so keeping one across a swap would let a half-played hand take
+        its next bot action from a DIFFERENT run -- mid-hand, and with nothing on
+        screen to say so. Ending them is the honest failure: the client gets the
+        same "that hand is no longer on the server" it already handles.
+        """
+        with self._lock:
+            self._hands.clear()
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._hands)
