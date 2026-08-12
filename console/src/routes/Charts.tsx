@@ -1,16 +1,13 @@
-import { useBlueprintRun, useCombos, useLoadBlueprintRun, useSolverNode } from "@/api/queries";
-import { BoxControl } from "@/components/BoxControl";
+import { useBlueprintRun, useCombos, useSolverNode } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { RangeGrid } from "@/components/RangeGrid";
-import { RunPicker } from "@/components/RunPicker";
 import { type ActionLabel, describeAction, describeActions } from "@/lib/actions";
-import { runLabel } from "@/lib/format";
 import { type Cell, actionColours, aggregate } from "@/lib/range";
 import { cn } from "@/lib/utils";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
-const route = getRouteApi("/charts");
+const route = getRouteApi("/blueprint");
 
 /**
  * The chart, as the thing the page is FOR.
@@ -29,7 +26,7 @@ const route = getRouteApi("/charts");
  */
 export function Charts() {
   const { path, board, average } = route.useSearch();
-  const navigate = useNavigate({ from: "/charts" });
+  const navigate = useNavigate({ from: "/blueprint" });
   const [pinned, setPinned] = useState<Cell | null>(null);
   const [hovered, setHovered] = useState<Cell | null>(null);
 
@@ -65,13 +62,6 @@ export function Charts() {
 
   return (
     <div className="space-y-3">
-      <Loaded
-        loaded={run.data?.run ?? null}
-        loading={run.data?.loading ?? null}
-        canSwitch={run.data?.can_switch ?? false}
-        error={run.error}
-      />
-
       <Panel
         title={grid ? `${grid.street} · seat ${grid.actor} to act` : "chart"}
         aside={<Line steps={steps} bigBlind={bigBlind} onJump={(p) => set({ path: p })} />}
@@ -114,97 +104,6 @@ export function Charts() {
         ) : undefined}
       </Panel>
     </div>
-  );
-}
-
-/**
- * WHICH run you are looking at, and the control that changes it.
- *
- * Switching used to be an SSH script — `just serve-deploy <run>` — that re-synced
- * the code, re-ran `uv sync`, rewrote the unit's environment and restarted it,
- * about three minutes. None of that has to do with which run is loaded, and the
- * console could not do any of it, so this panel used to hand you the command to
- * paste elsewhere. The box swaps in process now, so it is a button.
- *
- * The load is watched rather than awaited: the server answers 202 immediately
- * and does the work on its own thread, so what is rendered here is the polled
- * state of the box, not the state of a request.
- */
-function Loaded({
-  loaded,
-  loading,
-  canSwitch,
-  error,
-}: {
-  loaded: string | null;
-  loading: string | null;
-  canSwitch: boolean;
-  error: unknown;
-}) {
-  const [wanted, setWanted] = useState<string | null>(null);
-  const load = useLoadBlueprintRun();
-  const target = wanted ?? loaded;
-  const mismatch = wanted !== null && wanted !== loaded;
-
-  return (
-    <Panel title="loaded on the blueprint box">
-      <div className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-        {loading ? (
-          <span className="flex items-center gap-2 font-mono text-[13px] text-[var(--fg-muted)]">
-            <span className="size-1.5 rounded-full bg-amber-400 motion-safe:animate-pulse" />
-            loading {runLabel(loading)}…
-          </span>
-        ) : loaded ? (
-          <span className="font-mono text-[13px] text-[var(--fg)]">{runLabel(loaded)}</span>
-        ) : (
-          <span className="text-[12px] text-[var(--fg-muted)]">
-            {error
-              ? "No blueprint server is reachable."
-              : "Nothing loaded — start a blueprint server."}
-          </span>
-        )}
-
-        <RunPicker value={target} onChange={setWanted} label="switch to" loadableOnly />
-
-        {mismatch && !loading && (
-          <button
-            type="button"
-            disabled={load.isPending}
-            onClick={() => wanted && load.mutate({ run: wanted })}
-            className="rounded border border-[var(--fg-faint)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--fg)] hover:bg-white/[0.06] disabled:opacity-40"
-          >
-            {load.isPending ? "asking…" : "load it"}
-          </button>
-        )}
-
-        <div className="ml-auto">
-          <BoxControl />
-        </div>
-      </div>
-
-      {/* The duration is stated because it is a minute of nothing happening on
-          screen, and an unlabelled spinner reads as a hang at about thirty
-          seconds — which is when someone reloads and asks for it twice. */}
-      {loading && (
-        <p className="border-t border-[var(--border)] px-3 py-2 text-[12px] text-[var(--fg-muted)]">
-          Staging from the share and rebuilding — about a minute. Hands in progress ended: a session
-          belongs to the run it was dealt from.
-        </p>
-      )}
-
-      {load.error && (
-        <p className="border-t border-red-500/30 bg-red-500/5 px-3 py-2 font-mono text-[12px] text-red-400">
-          {String(load.error.message)}
-        </p>
-      )}
-
-      {mismatch && !canSwitch && !loading && (
-        <p className="border-t border-[var(--border)] px-3 py-2 text-[12px] text-[var(--fg-muted)]">
-          This server cannot switch runs — it was started with a blueprint handed to it directly
-          rather than a runs directory to resolve one from.
-        </p>
-      )}
-    </Panel>
   );
 }
 
