@@ -119,7 +119,10 @@ def render(payload: dict[str, Any]) -> None:
         is transport, and resolving a run id against a share is this command's
         job -- the same job it already does once for `--run`.
         """
-        directory = stage_run(run, runs_dir=runs_dir)
+        # `at_iteration` reaches staging as well as the build: it decides WHICH
+        # rung is copied, and copying the whole ladder to read one of them is
+        # the difference between five minutes and six hours.
+        directory = stage_run(run, runs_dir=runs_dir, at_iteration=at_iteration)
         return _build(directory, at_iteration), directory.name
 
     print(f"Loading {payload['run']} …")
