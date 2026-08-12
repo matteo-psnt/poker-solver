@@ -74,24 +74,10 @@ class TestTheRegistryStaysHonest:
         An enum member with no class is an op that validates and then has no
         argv; a class with no member is a kind the environment read rejects.
         """
-        assert set(TaskKind.KINDS) == {str(name) for name in TaskName}
-
-    def test_defining_a_subclass_is_the_whole_registration(self):
-        """`__init_subclass__`, so there is no list to forget."""
-
-        class Probe(TaskKind):
-            name = "probe-only"
-            unit = "things"
-
-            validate = commands = label = describe = sample = staticmethod(lambda *a: None)
-
-        try:
-            assert kinds.kind_of("probe-only") is not None
-        finally:
-            TaskKind.KINDS.pop("probe-only", None)
+        assert set(kinds.KINDS) == {str(name) for name in TaskName}
 
     def test_no_registered_kind_left_a_method_abstract(self):
-        for name, instance in TaskKind.KINDS.items():
+        for name, instance in kinds.KINDS.items():
             missing = getattr(type(instance), "__abstractmethods__", frozenset())
             assert not missing, f"{name} never implemented {sorted(missing)}"
 

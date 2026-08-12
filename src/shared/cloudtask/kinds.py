@@ -7,9 +7,9 @@ in ``task_log``. Adding a kind meant finding all four, and nothing failed if you
 found three -- the missing branch was a task that ran with the wrong argv, or a
 retry that billed three full runs to fail three times.
 
-A kind is one class here instead. ``__init_subclass__`` registers it, so there
-is no list to keep in step, and ``tests/shared/test_tasks.py`` fails if the
-registry and :class:`TaskName` disagree.
+A kind is one class here instead, and :data:`KINDS` at the bottom of this module
+is the list of them. ``tests/shared/cloudtask/test_kinds.py`` fails if that list
+and :class:`TaskName` disagree.
 
 Nothing here touches the filesystem or a service. ``sample`` is handed the state
 the node has already gathered rather than reading it, which is what keeps this
@@ -244,8 +244,6 @@ def comparable(history: Sequence[Sample], workers: int) -> list[Sample]:
 class TaskKind(abc.ABC):
     """One kind of work, and every way it differs from the others."""
 
-    KINDS: ClassVar[dict[str, TaskKind]] = {}
-
     name: ClassVar[TaskName]
     unit: ClassVar[str]
     """A file this kind writes its own progress into, relative to the node's
@@ -257,11 +255,6 @@ class TaskKind(abc.ABC):
     its last published rung, scoring is idempotent. Work with no
     partial-progress marker does not."""
     retries: ClassVar[int] = 3
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        if getattr(cls, "name", None) is not None:
-            TaskKind.KINDS[str(cls.name)] = cls()
 
     @abc.abstractmethod
     def validate(self, task: TaskFields) -> None:
@@ -763,27 +756,38 @@ def remaining(
     )
 
 
+"""Every kind, by its wire name. Spelled out rather than auto-registered: the
+set is closed by :class:`TaskName` anyway, so a hook that discovered subclasses
+saved nothing and hid where the list was."""
+KINDS: dict[str, TaskKind] = {
+    str(instance.name): instance
+    for instance in (
+        TrainTask(),
+        TrainVectorTask(),
+        EvaluateTask(),
+        PrecomputeTask(),
+        VectorSweepTask(),
+    )
+}
+
+
 def kind(name: object) -> TaskKind:
     """The kind by name, refusing anything the submit path cannot run."""
-    found = TaskKind.KINDS.get(str(name or ""))
+    found = KINDS.get(str(name or ""))
     if found is None:
-        known = ", ".join(sorted(TaskKind.KINDS))
-        raise BadTaskError(f"Unknown task kind {name!r}. Known: {known}.")
+        raise BadTaskError(f"Unknown task kind {name!r}. Known: {', '.join(sorted(KINDS))}.")
     return found
 
 
 def kind_of(name: object) -> TaskKind | None:
     """The kind, or ``None`` for one this code no longer defines.
 
-    The READ path: listing history must not raise on its own past. As it
-    happens every op string ever defined here is live again today -- both
-    `vector-sweep` and `train-vector` were retired and came back -- so this
-    currently has no real example to point at. That is exactly why the
-    tolerance stays: the set of live kinds has shrunk before and will again,
-    and a reader that raised on a name it had dropped would make the task log
-    unreadable retroactively.
+    The READ path: listing history must not raise on its own past. The set of
+    live kinds has shrunk before -- `vector-sweep` and `train-vector` were both
+    retired and both came back -- and a reader that raised on a name it had
+    dropped would make the task log unreadable retroactively.
     """
-    return TaskKind.KINDS.get(str(name or ""))
+    return KINDS.get(str(name or ""))
 
 
 def describe(record: Mapping[str, Any]) -> str:

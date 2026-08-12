@@ -250,7 +250,7 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
 
 Keyed by the kind's own name -- so a kind with no executor is a KeyError naming
 it rather than a task that silently does nothing. Declared ``str`` rather than
-``TaskName`` for the same reason ``TaskKind.KINDS`` is: what arrives from the
+``TaskName`` for the same reason ``kinds.KINDS`` is: what arrives from the
 environment is the wire string, and a member of a ``StrEnum`` IS that string.
 """
 

@@ -7,17 +7,9 @@ so a serial screen costs the SUM of its panels while a concurrent one costs its
 slowest. Measured against the live pool for `status`: 0.9s + 11s + 23s serially,
 against 23s together.
 
-This module is the fan-out, extracted from `status`, which had the only copy.
-The console needed the same three properties and would otherwise have written
-them a second time -- and one of them is a trap that has already been paid for
-once (see :func:`_bound`).
-
 **It composes; it does not read.** Every part is a :meth:`Command.invoke`, so
 there is exactly one implementation of each question and a composed view cannot
-drift from the command that owns it. That is the rule the console is
-subordinate to, and the reason the previous browser UI was deleted: it grew
-services that answered questions the CLI already answered, they drifted, and
-nothing failed until someone looked.
+drift from the command that owns it.
 """
 
 from __future__ import annotations
@@ -73,13 +65,9 @@ def _bound(part: Part) -> Callable[[], dict[str, Any]]:
     **The copy has to be taken here, on the caller.** Taking it inside the
     worker would copy the worker's own context -- the fresh one that already
     lost everything -- so it would look like a fix and change nothing.
-
-    This is not hypothetical. `telemetry._SURFACE` is a ContextVar, and a raw
-    ``pool.submit`` starts its task with a fresh context in which it reverts to
-    its default: the three panels carrying the real Azure round-trip cost, which
-    is the whole reason the screen is measured, were filed `unknown` while the
-    thin wrapper around them was filed `cli`. Fixed in `d67411f`, and it would
-    have come straight back in any second copy of this fan-out.
+    `telemetry._SURFACE` is a ContextVar, and a raw ``pool.submit`` starts its
+    task with a fresh context in which it reverts to its default, filing every
+    panel's cost under the wrong surface.
 
     A copy PER SUBMIT, not one shared copy: :meth:`Context.run` is not
     re-entrant, so handing the same context to concurrent threads raises.
