@@ -24,44 +24,39 @@ quantity that was starving.
 from __future__ import annotations
 
 import functools
-from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING
 
-import numpy as np
-
-from src.core.actions.action_model import ActionModel
-from src.core.game.actions import Action
 from src.core.game.rules import GameRules
-from src.core.game.state import GameState
 from src.engine.solver.betting_tree import BettingTree, build_betting_tree
 from src.engine.solver.infoset.index import bucket_of
-from src.engine.solver.infoset.model import InfoSet
-from src.engine.solver.mccfr import policy
+from src.engine.solver.mccfr import policy, tree_traversal
 from src.engine.solver.policy.source import PolicySource, TreePolicySource
-from src.engine.solver.protocols import BucketingStrategy
-from src.engine.solver.storage.base import Storage
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
-from src.shared.config import Config
 
 from .solver import MCCFRSolver
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
-class StaticTreeSolver(MCCFRSolver):
+    import numpy as np
+
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.actions import Action
+    from src.core.game.state import GameState
+    from src.engine.solver.infoset.model import InfoSet
+    from src.engine.solver.protocols import BucketingStrategy
+    from src.shared.config import Config
+
+
+class StaticTreeSolver(MCCFRSolver[StaticArrayStorage]):
     """MCCFR whose infosets are preallocated rows of a static betting tree.
 
     ``dropped_unknown_id_updates`` stays at zero: every row exists in every
     process from the start. It is still reported because a nonzero value means
     allocation-at-runtime came back.
     """
-
-    # ``StaticArrayStorage`` deliberately does not implement the key-addressed
-    # ``Storage`` ABC — reintroducing ``InfoSetKey`` here would restore the string
-    # hashing this design removes. The base class only touches ``self.storage``
-    # in ``checkpoint`` and ``num_infosets``, both overridden below, so nothing
-    # reaches the ABC surface through this attribute.
-    storage: StaticArrayStorage
 
     def __init__(
         self,
@@ -75,7 +70,7 @@ class StaticTreeSolver(MCCFRSolver):
         checkpoint_retain_every: int = 0,
         abstraction_id: str | None = None,
     ):
-        super().__init__(action_model, card_abstraction, cast("Storage", storage), config)
+        super().__init__(action_model, card_abstraction, storage, config)
         self.storage = storage
         self.tree = tree if tree is not None else storage.tree
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
@@ -86,6 +81,21 @@ class StaticTreeSolver(MCCFRSolver):
         # two abstractions with the same per-street counts produce an identical
         # fingerprint while mapping hands to different buckets.
         self.abstraction_id = abstraction_id
+        # Pruning is the one mode `tree_traversal` does not implement, so it
+        # falls back to the state-based traversal rather than silently ignoring
+        # the flag. Decided once here, not tested per node.
+        self._walk_tree = not config.solver.enable_pruning
+
+    def _cfr_external_sampling(self, state: GameState, traversing_player: int) -> float:
+        """Walk node ids, falling back to the state-based traversal for pruning.
+
+        Both produce bit-identical arrays from the same seed
+        (``test_tree_traversal_equivalence``); the tree walk builds one
+        ``GameState`` per iteration where the other builds one per edge.
+        """
+        if self._walk_tree:
+            return tree_traversal.cfr_external_sampling(self, state, traversing_player)
+        return super()._cfr_external_sampling(state, traversing_player)
 
     @classmethod
     def build(

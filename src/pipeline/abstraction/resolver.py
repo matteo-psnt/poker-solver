@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from src.pipeline.abstraction.base import BucketingStrategy
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.engine.solver.protocols import BucketingStrategy
 
 logger = logging.getLogger(__name__)
 

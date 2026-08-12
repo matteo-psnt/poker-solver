@@ -3,22 +3,25 @@
 from __future__ import annotations
 
 import random
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
-from src.core.game.state import GameState
 from src.engine.solver.infoset import encoder
-from src.engine.solver.infoset.model import InfoSetKey
-from src.engine.solver.protocols import BucketingStrategy
-from src.engine.solver.storage.base import Storage
-from src.shared.config import Config
 
 from . import chance, traversal
 
+if TYPE_CHECKING:
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.state import GameState
+    from src.engine.solver.infoset.model import InfoSetKey
+    from src.engine.solver.protocols import BucketingStrategy
+    from src.engine.solver.storage.base import CountsInfosets
+    from src.shared.config import Config
 
-class MCCFRSolver:
+
+class MCCFRSolver[StorageT: CountsInfosets]:
     """
     Monte Carlo CFR with external sampling.
 
@@ -37,7 +40,7 @@ class MCCFRSolver:
         self,
         action_model: ActionModel,
         card_abstraction: BucketingStrategy,
-        storage: Storage,
+        storage: StorageT,
         config: Config,
     ):
         self.action_model = action_model
@@ -59,10 +62,6 @@ class MCCFRSolver:
         if self.config.system.seed is not None:
             random.seed(self.config.system.seed)
             np.random.seed(self.config.system.seed)
-
-    def checkpoint(self) -> None:
-        """Save a checkpoint of the current solver state."""
-        self.storage.checkpoint(self.iteration)
 
     def num_infosets(self) -> int:
         """Get total number of infosets discovered."""

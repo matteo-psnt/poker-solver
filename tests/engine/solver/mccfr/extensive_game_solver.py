@@ -26,18 +26,21 @@ This module is a test helper (not named ``test_*``) so pytest does not collect i
 from __future__ import annotations
 
 import random
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from src.core.actions.action_model import ActionModel
-from src.core.game.actions import Action
 from src.core.game.state import GameState, Street
 from src.engine.solver.infoset.model import InfoSetKey
 from src.engine.solver.mccfr import MCCFRSolver
-from src.engine.solver.storage.base import Storage
 from src.pipeline.evaluation.reference.game_tree import CHANCE, ExtensiveGame, InfoKey
-from src.shared.config import Config
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.actions import Action
+    from src.engine.solver.storage.base import KeyedStorage
+    from src.shared.config import Config
 
 # InfoSetKey demands a preflop hand string on PREFLOP; the adapted games carry
 # their whole information state in ``betting_sequence`` instead, so this is an
@@ -162,33 +165,33 @@ class ExtensiveGameSolver(MCCFRSolver):
         self,
         game: ExtensiveGame,
         action_mapping: dict[Any, Action],
-        storage: Storage,
+        storage: KeyedStorage,
         config: Config,
     ):
         super().__init__(
-            action_model=cast(ActionModel, None),
-            card_abstraction=cast(Any, None),
+            action_model=cast("ActionModel", None),
+            card_abstraction=cast("Any", None),
             storage=storage,
             config=config,
         )
         self.game = game
         self.actions = ActionCodec(action_mapping)
-        self.rules = cast(Any, AdaptedRules(self.actions))
+        self.rules = cast("Any", AdaptedRules(self.actions))
 
     def _wrap(self, inner: Any) -> GameState:
         # Cast, not inheritance: AdaptedState satisfies the traversal's state
         # contract structurally but shares no ancestry with GameState.
-        return cast(GameState, AdaptedState(self.game, inner, self.actions))
+        return cast("GameState", AdaptedState(self.game, inner, self.actions))
 
     def deal_initial_state(self) -> GameState:
         return self._wrap(self.game.initial_state())
 
     def is_chance_node(self, state: GameState) -> bool:
-        adapted = cast(AdaptedState, state)
+        adapted = cast("AdaptedState", state)
         return adapted.game.current_player(adapted.inner) == CHANCE
 
     def sample_chance_outcome(self, state: GameState) -> GameState:
-        adapted = cast(AdaptedState, state)
+        adapted = cast("AdaptedState", state)
         outcomes = adapted.game.chance_outcomes(adapted.inner)
         threshold = random.random()
         cumulative = 0.0
@@ -207,7 +210,7 @@ class ExtensiveGameSolver(MCCFRSolver):
         return state
 
     def encode_infoset_key(self, state: GameState, player: int) -> InfoSetKey:
-        adapted = cast(AdaptedState, state)
+        adapted = cast("AdaptedState", state)
         return adapted_infoset_key(adapted.game.information_state_key(adapted.inner, player))
 
 

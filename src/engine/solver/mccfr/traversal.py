@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.game.actions import Action
-from src.core.game.state import GameState
-from src.engine.solver.infoset.model import InfoSet
 from src.engine.solver.numba_ops import (
     WEIGHTING_CODES,
     apply_regret_updates,
@@ -18,6 +14,12 @@ from src.engine.solver.numba_ops import (
 from src.engine.solver.policy.lookup import filter_stored_actions
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from src.core.game.actions import Action
+    from src.core.game.state import GameState
+    from src.engine.solver.infoset.model import InfoSet
+
     from .solver import MCCFRSolver
 
 # Identity index rows for the full-row kernel call, cached per action count so
@@ -26,7 +28,7 @@ if TYPE_CHECKING:
 _IDENTITY_INDICES: dict[int, np.ndarray] = {}
 
 
-def _identity_indices(num_actions: int) -> np.ndarray:
+def identity_indices(num_actions: int) -> np.ndarray:
     indices = _IDENTITY_INDICES.get(num_actions)
     if indices is None:
         indices = _IDENTITY_INDICES.setdefault(num_actions, np.arange(num_actions, dtype=np.int64))
@@ -91,7 +93,7 @@ def keyed_infoset_context(
     return infoset, valid_actions, valid_indices, strategy
 
 
-def _sample_action_index(strategy: np.ndarray) -> int:
+def sample_action_index(strategy: np.ndarray) -> int:
     """Sample an index from a probability vector.
 
     Equivalent in distribution to ``np.random.choice(len(strategy), p=strategy)``
@@ -225,7 +227,7 @@ def cfr_external_sampling(
             # allocation-free), partial-legal subset, or unpruned subset.
             if prune is None:
                 if len(valid_indices) == infoset.num_actions:
-                    target_indices = _identity_indices(infoset.num_actions)
+                    target_indices = identity_indices(infoset.num_actions)
                 else:
                     target_indices = np.asarray(valid_indices, dtype=np.int64)
                 utilities = action_utilities
@@ -276,7 +278,7 @@ def cfr_external_sampling(
     else:
         self.dropped_unknown_id_updates += 1
 
-    action_idx = _sample_action_index(strategy)
+    action_idx = sample_action_index(strategy)
     action = legal_actions[action_idx]
 
     next_state = state.apply_action(action, self.rules)
