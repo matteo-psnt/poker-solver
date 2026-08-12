@@ -36,7 +36,7 @@ const NAV = [
     group: "surface",
     items: [
       { to: "/", label: "Overview", icon: LayoutDashboard },
-      { to: "/solver", label: "Solver", icon: Grid3x3 },
+      { to: "/charts", label: "Charts", icon: Grid3x3 },
       { to: "/play", label: "Play", icon: Spade },
     ],
   },

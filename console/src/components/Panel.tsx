@@ -13,6 +13,7 @@ import { Age } from "./Age";
  */
 export function Panel({
   title,
+  aside,
   updatedAt,
   staleAfterMs,
   error,
@@ -23,6 +24,8 @@ export function Panel({
   children,
 }: {
   title: string;
+  /** Controls or context belonging to the panel as a whole, beside its name. */
+  aside?: ReactNode;
   updatedAt?: number | null;
   staleAfterMs?: number;
   error?: string | null;
@@ -46,10 +49,11 @@ export function Panel({
           error ? "border-red-500/40" : "border-[var(--border)]",
         )}
       >
-        <h2 className="font-mono text-[11px] tracking-widest text-[var(--fg-muted)] uppercase">
+        <h2 className="shrink-0 font-mono text-[11px] tracking-widest text-[var(--fg-muted)] uppercase">
           {title}
         </h2>
-        <div className="ml-auto flex items-center gap-2">
+        {aside && <div className="min-w-0">{aside}</div>}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <Age at={updatedAt ?? null} staleAfterMs={staleAfterMs ?? 60_000} />
           {onRefresh && (
             <button

@@ -136,21 +136,39 @@ export function aggregate({
 }
 
 /**
- * Colour per action, keyed on the token's leading letter.
+ * The colour of every action in a menu, computed together.
  *
  * The fold-blue / call-green / raise-red convention is what every solver uses,
  * so a poker player reads the grid without consulting a legend. Multiple raise
- * sizes shade from light to dark by their position in the menu — bigger is
- * darker, which is the only ordering the eye reads for free.
+ * sizes shade from light to dark by size — bigger is darker, which is the only
+ * ordering the eye reads for free.
+ *
+ * Computed over the WHOLE menu rather than one token at a time, because the
+ * shade of a raise depends on how many OTHER raises there are. The previous
+ * version spread `0.35 → 0.85` across every action's index, so in the ordinary
+ * `f c r6 r9 A` menu the two raise sizes landed at 0.60 and 0.725 — a 12% step
+ * between two mixes of the same two reds, which on the grid is no difference at
+ * all. Ranking raises among raises gives them the full range.
  */
-export function actionColour(token: string, index: number, total: number): string {
-  const kind = token[0];
-  if (kind === "f") return "#3D6FC4";
-  if (kind === "x" || kind === "c") return "#2F7F58";
-  if (kind === "A") return "#6E1F1A";
-  // Bets and raises: darken with size. `total - 1` guards the single-size case
-  // against a divide by zero that would render every raise the same shade.
-  const steps = Math.max(total - 1, 1);
-  const depth = 0.35 + 0.5 * (index / steps);
-  return `color-mix(in srgb, #B23A32 ${Math.round(depth * 100)}%, #E8837C)`;
+export function actionColours(tokens: readonly string[]): string[] {
+  const isRaise = (token: string) => {
+    const kind = token[0];
+    return kind === "b" || kind === "r";
+  };
+  const raises = tokens.filter(isRaise);
+  // `- 1` guards the single-size case against a divide by zero that would
+  // render the only raise at the lightest end of the ramp.
+  const steps = Math.max(raises.length - 1, 1);
+
+  return tokens.map((token) => {
+    const kind = token[0];
+    if (kind === "f") return "#3D6FC4";
+    if (kind === "x" || kind === "c") return "#2F7F58";
+    // The jam is the darkest red there is: it is the top of the size ladder,
+    // not a member of it.
+    if (kind === "A") return "#6E1F1A";
+    if (!isRaise(token)) return "#7A7A85";
+    const depth = 0.15 + 0.7 * (raises.indexOf(token) / steps);
+    return `color-mix(in srgb, #B23A32 ${Math.round(depth * 100)}%, #E8837C)`;
+  });
 }
