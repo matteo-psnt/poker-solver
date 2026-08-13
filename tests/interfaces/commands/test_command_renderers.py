@@ -573,13 +573,13 @@ PAYLOADS: dict[str, dict] = {
     "push-code": {"op": "push-code", "code_snapshot": "code-20260802_000000"},
     "submit-precompute": {
         "op": "submit-precompute",
-        "abstraction_config": "ochs_gate_ochs",
+        "abstraction_config": "production",
         "target_name": "buckets-F20T20R20-rexact-deadbeef",
         "already_published": ["buckets-F50T100R200-rexact-b59ef7b2"],
         "force": False,
         "code_snapshot": "code-20260802_000000",
         "job_id": "poker-20260802",
-        "tasks": ["ochs_gate_ochs-000000-1"],
+        "tasks": ["production-000000-1"],
     },
     "push-data": {"op": "push-data", "uploaded": {"buckets-F50T100R200": 9}},
     # The applied-and-deleted shape, because it is the one with something to

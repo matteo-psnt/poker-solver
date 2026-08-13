@@ -24,6 +24,7 @@ import dataclasses
 import random
 
 import numpy as np
+import pytest
 
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
@@ -31,6 +32,12 @@ from tests.engine.solver.mccfr.test_tree_traversal_equivalence import ARRAYS, bu
 from tests.test_helpers import make_test_config
 
 ITERATIONS = 120
+
+# These train real solvers (three per test, 120 iterations each), so the 5s
+# default is not a hang detector here -- it is a contention detector: they pass
+# alone and time out under twelve xdist workers. Tight enough to still catch a
+# genuine hang.
+pytestmark = pytest.mark.timeout(30)
 
 
 def _train(config, built, *, walk_tree: bool):

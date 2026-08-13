@@ -106,9 +106,9 @@ class TestTheDispatchingWrites:
         """Omitted and `false` are different answers, and `given` drops only the
         first. Collapsing them would make `--force` unreachable in reverse: a
         caller could never explicitly say no."""
-        client.post("/api/precompute", json={"config": "ochs_gate_ochs", "force": False})
+        client.post("/api/precompute", json={"config": "production", "force": False})
         (_, kwargs) = invoked[0]
-        assert kwargs == {"config": "ochs_gate_ochs", "force": False}
+        assert kwargs == {"config": "production", "force": False}
 
     def test_a_missing_required_field_is_refused_before_the_command(self, client, invoked):
         """422 from the model, and nothing dispatched."""
