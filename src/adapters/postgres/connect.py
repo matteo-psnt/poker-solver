@@ -13,7 +13,7 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from src.shared.ports.record import RecordSink
+    from src.shared.ports.record import EvalSink, RecordSink
 
 log = logging.getLogger(__name__)
 
@@ -87,3 +87,18 @@ def sink_from_environment() -> RecordSink | None:
 
     log.info("record sink attached")
     return PostgresSink(engine)
+
+
+def eval_sink_from_environment() -> EvalSink | None:
+    """An eval sink when a DSN is set, `None` when it is not.
+
+    Reuses the SINK engine, not the reader's: one connection with a pre-ping,
+    which is what a process that scores for hours and then writes once needs.
+    """
+    engine = engine_from_environment(pre_ping=True)
+    if engine is None:
+        return None
+
+    from src.adapters.postgres.evals import PostgresEvalSink  # noqa: PLC0415
+
+    return PostgresEvalSink(engine)

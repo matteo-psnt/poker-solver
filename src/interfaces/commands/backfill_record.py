@@ -13,7 +13,6 @@ is what makes that not a matter of taste.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -26,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from src.interfaces.commands._base import Command, records_root
 from src.interfaces.errors import CommandError
+from src.pipeline.evaluation.ledger import tiers
 from src.shared import run_events, task_history
 from src.shared.cloudtask.node import archive
 
@@ -87,21 +87,6 @@ class BackfillPayload(BaseModel):
     skipped: list[str] = Field(default_factory=list)
     # Empty is the answer this command exists to produce during dual write.
     divergences: list[Divergence] = Field(default_factory=list)
-
-
-def _digest(record: dict[str, Any]) -> str:
-    """The pairing tier, hashed.
-
-    Delegates to `tier_key` and never re-derives it. That function is the one
-    implementation of which knobs make two evals comparable -- ~30 of them,
-    including `policy_threshold` and `avg_gamma` -- and a second implementation
-    here would drift into pairing rows that must not be compared.
-    """
-    from src.pipeline.evaluation.ledger import tiers  # noqa: PLC0415
-
-    return hashlib.sha256(
-        json.dumps(list(tiers.tier_key(record)), sort_keys=True, default=str).encode()
-    ).hexdigest()[:32]
 
 
 def _event_uuid(run_id: str, index: int, body: dict[str, Any]) -> uuid.UUID:
@@ -247,6 +232,10 @@ def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
     The last one is also why `recorded_at` is NOT NULL and this does not paper
     over it: an untimestamped eval has no place in a comparison index.
     """
+    # Lazily, like `models` above it: this pulls SQLAlchemy in, and a reader
+    # that never touches a database must not pay for importing one.
+    from src.adapters.postgres import evals as eval_rows  # noqa: PLC0415
+
     rows = []
     evals = run_dir / "evals"
     if not evals.is_dir():
@@ -260,25 +249,11 @@ def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
             continue
         if not doc.get("run_id") or not doc.get("knobs") or not doc.get("timestamp"):
             continue
-        results = doc.get("results") or {}
-        knobs = doc.get("knobs") or {}
-        rows.append(
-            models.Eval(
-                eval_id=path.stem,
-                run_id=run_dir.name,
-                checkpoint_iteration=doc.get("checkpoint_iteration"),
-                method=str(doc.get("method") or doc.get("estimator") or ""),
-                # `base_seed`, which is where the seed actually lives.
-                base_seed=knobs.get("base_seed"),
-                knobs=knobs,
-                tier_digest=_digest(doc),
-                exploitability_mbb=results.get("exploitability_mbb"),
-                std_error_mbb=results.get("std_error_mbb"),
-                num_hands=results.get("num_hands"),
-                recorded_at=doc.get("timestamp"),
-                payload=doc,
-            )
-        )
+        # The same builder the LIVE writer uses, so an eval that arrived
+        # through the sink and the same eval re-imported here are one row --
+        # which is exactly what `--verify` compares.
+        values = eval_rows.eval_values(path.stem, doc, tiers.tier_digest(doc))
+        rows.append(models.Eval(**{**values, "run_id": run_dir.name}))
     return rows
 
 

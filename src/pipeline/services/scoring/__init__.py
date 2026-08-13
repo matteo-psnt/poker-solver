@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
+from src.pipeline.evaluation.ledger import tiers
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
@@ -38,6 +39,10 @@ from src.pipeline.services.scoring.matches import (
     record_blueprint_match,
 )
 from src.shared import records
+
+# At runtime, not under TYPE_CHECKING: this module has no postponed
+# annotations, and `ports` is Protocols with no imports of its own.
+from src.shared.ports.record import EvalSink
 
 PROGRESS_ARTIFACT = "evaluate-progress.json"
 
@@ -83,6 +88,7 @@ def evaluate_and_record(
     at_iteration: int | None = None,
     progress_file: Path | None = None,
     policy_profile: bool = False,
+    sink: EvalSink | None = None,
 ) -> EvaluationPayload:
     """Evaluate a run and persist the result to the eval ledger (best-effort).
 
@@ -171,7 +177,7 @@ def evaluate_and_record(
     )
     try:
         metadata = load_run_metadata(run_dir)
-        result_path, _ = eval_ledger.record_evaluation(
+        result_path, document = eval_ledger.record_evaluation(
             run_dir=run_dir,
             payload=payload.model_dump(),
             provenance=eval_ledger.RunProvenance(
@@ -195,6 +201,12 @@ def evaluate_and_record(
         )
         payload.ledger_result_path = str(result_path)
         logger.info(f"  Recorded:      {result_path}")
+        if sink is not None:
+            # The share FIRST, then the sink -- `record_evaluation` has already
+            # returned, so a database that is unreachable costs this eval
+            # nothing. The digest is derived HERE because `tiers` owns the rule
+            # and a sink may not import it.
+            sink.scored(result_path.stem, document, tiers.tier_digest(document))
     except Exception as exc:  # recording must never break the eval  # noqa: BLE001 -- recording must never break the eval it records
         logger.warning(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
     return payload
