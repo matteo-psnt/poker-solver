@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+
+  // `src/api/` is the payload CONTRACT, not console code. `types.gen.ts` is
+  // generated from `openapi.json`, and `types.ts` deliberately does nothing but
+  // NAME what the contract declares -- so a type no screen has needed yet is
+  // that file working as intended, not dead code. biome ignores the same paths,
+  // for the same reason.
+  "ignore": ["src/api/**"],
+
+  // Keeps knip off the types that exist only to give an exported function's
+  // signature a name -- `Timeline`, `Bar`, `AggregateInput`. Imported nowhere,
+  // load-bearing where they are declared.
+  "ignoreExportsUsedInFile": true
+}

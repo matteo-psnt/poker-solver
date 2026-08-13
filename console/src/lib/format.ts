@@ -92,12 +92,6 @@ export function since(iso: string | null | undefined, now = Date.now()): string 
   return RELATIVE.format(Math.round(seconds / 86400), "day");
 }
 
-/** Keeps both the config and the discriminator visible. */
-export function shortId(id: string, head = 18, tail = 8): string {
-  if (id.length <= head + tail + 1) return id;
-  return `${id.slice(0, head)}…${id.slice(-tail)}`;
-}
-
 /**
  * `run-production-025433-1095` → `production-1095`.
  *
