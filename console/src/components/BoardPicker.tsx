@@ -23,8 +23,10 @@ import { useState } from "react";
  *   you hold one runout fixed while walking back up the line. Left undrawn, that
  *   silently answers a turn question with a river card on screen.
  *
- *   The paste field stays, secondary. A board someone sends you arrives as text,
- *   and `parse_board` takes it with or without spaces.
+ * There is no text field. One was kept at first, on the reasoning that a board
+ * someone sends you arrives as text — but the thing they send you is a LINK,
+ * and `board` is a search param, so the URL already is the paste target. A
+ * second way in bought nothing and put the spelling back on screen.
  *
  * Clicking a filled slot clears IT AND EVERYTHING AFTER, rather than leaving a
  * hole. A board is an ordered deal, so there is no such thing as a river with no
@@ -118,14 +120,6 @@ export function BoardPicker({
               clear
             </button>
           )}
-          <input
-            value={board}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder="or paste"
-            spellCheck={false}
-            aria-label="board"
-            className="w-24 rounded border border-[var(--border)] bg-transparent px-2 py-1 font-mono text-[11px] text-[var(--fg)] placeholder:text-[var(--fg-faint)]"
-          />
         </div>
       </div>
 

@@ -219,9 +219,17 @@ function Table({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
           bigBlind={bigBlind}
           cards={hand.bot_hole_cards}
           active={hand.to_act === villain}
+          did={lastAction(hand, "bot")}
+          street={hand.street}
         />
 
         <div className="flex flex-col items-center gap-2">
+          {/* The street, named. The board implies it, but only if you count
+              cards — and preflop it implies nothing at all, because there is
+              no board to count. */}
+          <span className="font-mono text-[10px] tracking-[0.2em] text-[var(--fg-faint)] uppercase">
+            {hand.street}
+          </span>
           <CardRow cards={board} size="md" live={hand.board.length} />
           <div className="flex items-baseline gap-2 font-mono text-[12px]">
             <span className="tracking-widest text-[var(--fg-faint)] uppercase">pot</span>
@@ -238,6 +246,8 @@ function Table({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
           bigBlind={bigBlind}
           cards={hand.hole_cards}
           active={hand.to_act === hand.human_seat}
+          did={lastAction(hand, "human")}
+          street={hand.street}
         />
       </div>
     </div>
@@ -245,7 +255,32 @@ function Table({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
 }
 
 /**
- * One player: who they are, what they hold, and what is left behind it.
+ * The last thing a player did, whatever street they did it on.
+ *
+ * The bot's move is the thing you most need and the thing the table was worst
+ * at: `POST /action` auto-plays it and returns, so the only record of it was a
+ * line in the log two panels down. You could see the pot had grown and not what
+ * had grown it.
+ *
+ * This was scoped to the CURRENT street at first, on the reasoning that a move
+ * from a closed street is history and the board gaining a card announces it.
+ * That reasoning fails in the most common case there is: you raise, the bot
+ * calls, and the flop comes — so the street has advanced, nobody has acted on
+ * it, and the answer to "what did the bot do" is blank at exactly the moment
+ * you are asking. The street is drawn on the chip when it is not the current
+ * one, which is what makes showing it honest rather than merely reassuring.
+ */
+function lastAction(hand: Hand, actor: "bot" | "human"): HandEvent | null {
+  for (let index = hand.log.length - 1; index >= 0; index--) {
+    const event = hand.log[index];
+    if (event?.actor === actor) return event;
+  }
+  return null;
+}
+
+/**
+ * One player: who they are, what they hold, what they just did, and what is
+ * left behind it.
  *
  * `cards` is null while the server is withholding the bot's, which is not the
  * same as holding none — see `hand_payload`. Backs are drawn for it, so the
@@ -259,6 +294,8 @@ function Seat({
   bigBlind,
   cards,
   active,
+  did,
+  street,
 }: {
   name: string;
   seat: number;
@@ -267,6 +304,10 @@ function Seat({
   bigBlind: number;
   cards: string[] | null;
   active: boolean;
+  /** The last thing they did, drawn in front of them. */
+  did: HandEvent | null;
+  /** The street the hand is on now — see `Did`. */
+  street: string;
 }) {
   return (
     <div
@@ -302,10 +343,65 @@ function Seat({
         <span className="text-[var(--fg-muted)]">{inBlinds(stack, bigBlind)}</span>
       </div>
 
+      {/* In FRONT of the player, between their stack and their cards, which is
+          where the chips would be. Coloured by the same rule as the buttons and
+          the chart, so a bet is the same red in all three. */}
+      {did && <Did event={did} street={street} bigBlind={bigBlind} />}
+
       <div className="ml-auto">
         <CardRow cards={cards ?? [null, null]} size="lg" faceDown={cards === null} />
       </div>
     </div>
+  );
+}
+
+/**
+ * What a player just did, as a chip in front of them.
+ *
+ * Loud on purpose. The complaint it answers is that you could not tell the bot
+ * had bet without reading the log — the pot number moved and nothing else did,
+ * so a page whose value is how many hands you get through made you stop and
+ * read on every one of them.
+ */
+function Did({
+  event,
+  street,
+  bigBlind,
+}: {
+  event: HandEvent;
+  /** The street the hand is on NOW, to tell a fresh move from a carried one. */
+  street: string;
+  bigBlind: number;
+}) {
+  const colour = actionColours([TOKEN_FOR[event.action] ?? event.action])[0];
+  const stale = event.street !== street;
+  return (
+    <span
+      // The one test hook on this page. The chip says the same words as the
+      // action button above it and the log below it — by design, they must —
+      // so a test cannot tell the three apart by their text.
+      data-testid="did"
+      className={cn(
+        "rounded border px-2 py-1 font-mono text-[12px] text-[var(--fg)]",
+        stale && "opacity-55",
+      )}
+      style={{
+        borderColor: colour,
+        backgroundColor: `color-mix(in srgb, ${colour} ${stale ? 12 : 26}%, transparent)`,
+      }}
+    >
+      {label(event.action, event.amount, bigBlind)}
+      {stale && (
+        // Named, and dimmed, so a move that is still the last one taken cannot
+        // be misread as a move taken on the street now showing.
+        <span className="ml-2 text-[10px] text-[var(--fg-faint)] lowercase">{event.street}</span>
+      )}
+      {event.untrained && (
+        // The caveat has to travel with the move, not sit in a total below:
+        // an untrained decision is uniform-random, so this chip is not a read.
+        <span className="ml-2 text-[10px] text-[#D9A44E]">untrained</span>
+      )}
+    </span>
   );
 }
 
