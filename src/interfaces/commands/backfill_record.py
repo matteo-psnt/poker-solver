@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from src.interfaces.commands._base import Command, records_root
 from src.interfaces.errors import CommandError
-from src.shared import run_events
+from src.shared import run_events, task_history
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
@@ -282,14 +282,6 @@ def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
     return rows
 
 
-# `progress` and `observed` are written per TASK, not per attempt, so their
-# filenames carry no attempt number. They are not attempt-scoped facts: the join
-# attaches them to the LATEST attempt. Stored under this sentinel so the primary
-# key still holds and the difference stays visible, rather than being flattened
-# onto attempt 0 where it would collide with a real first attempt.
-TASK_SCOPED = -1
-
-
 def _leg_instant(document: dict[str, Any]) -> Any:
     """When a leg happened, from whichever field its writer used.
 
@@ -333,7 +325,7 @@ def _leg_rows(legs_dir: Path, models: Any) -> list[Any]:
         if len(parts) == 3 and parts[1].isdigit():
             task_id, attempt, leg = parts[0], int(parts[1]), parts[2]
         elif len(parts) >= 2:
-            task_id, attempt, leg = stem.rsplit(".", 1)[0], TASK_SCOPED, parts[-1]
+            task_id, attempt, leg = stem.rsplit(".", 1)[0], task_history.TASK_SCOPED, parts[-1]
         else:
             continue
         key = (task_id, attempt, leg)

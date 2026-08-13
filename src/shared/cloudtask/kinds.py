@@ -971,6 +971,41 @@ class VectorSweepTask(TaskKind):
         return Progress(float(done), float(total), self.unit)
 
 
+def samples_by_op(rows: Sequence[Mapping[str, Any]]) -> dict[str, list[Sample]]:
+    """:func:`samples` for every kind at once, from ONE pass over the history.
+
+    The population is the same for every row being estimated, so computing it
+    per row is the same answer over and over: 1,292 unresolved tasks against a
+    5,145-row log re-sorted and re-scanned it 1,292 times -- 4.8s of a 6.6s
+    read, and 32.5M dict lookups. Bucketing preserves the per-kind order the
+    single-kind form produced, because the sort happens before the split.
+    """
+    buckets: dict[str, list[Sample]] = {}
+    # By end time HERE, not by whatever order the caller joined its rows in: the
+    # cut in `Sample` order is the whole point and must not depend on that.
+    for row in sorted(rows, key=lambda r: str(r.get("ended_at") or "")):
+        name = str(row.get("op") or "")
+        if row.get("cause") != "completed":
+            continue
+        # A row counted in a unit this kind no longer uses is a DIFFERENT
+        # measurement, not an old one. `evaluate` moved from rungs to flop
+        # branches; averaging a rung-rate into a branch-rate predicts ~30x wrong
+        # and never fails. An absent unit is legacy and taken at face value --
+        # those rows predate the field, and no kind whose unit has changed has
+        # any of them.
+        known = kind_of(name)
+        recorded = row.get("units_unit") or ""
+        if known is not None and recorded and recorded != known.unit:
+            continue
+        seconds = _seconds_between(row.get("started_at"), row.get("ended_at"))
+        units = row.get("units") or 0
+        if seconds > 0 and units > 0:
+            buckets.setdefault(name, []).append(
+                Sample(float(units), seconds, int(row.get("workers") or 0))
+            )
+    return buckets
+
+
 def samples(rows: Sequence[Mapping[str, Any]], name: str) -> list[Sample]:
     """Finished tasks of one kind, oldest first, as throughput observations.
 
@@ -979,27 +1014,7 @@ def samples(rows: Sequence[Mapping[str, Any]], name: str) -> list[Sample]:
     recorded units, which excludes everything written before the record carried
     them -- there is no way to reconstruct what those achieved.
     """
-    known = kind_of(name)
-    found = []
-    # By end time HERE, not by whatever order the caller joined its rows in: the
-    # cut below is the whole point of this function and must not depend on that.
-    for row in sorted(rows, key=lambda r: str(r.get("ended_at") or "")):
-        if row.get("op") != name or row.get("cause") != "completed":
-            continue
-        # A row counted in a unit this kind no longer uses is a DIFFERENT
-        # measurement, not an old one. `evaluate` moved from rungs to flop
-        # branches; averaging a rung-rate into a branch-rate predicts ~30x wrong
-        # and never fails. An absent unit is legacy and taken at face value --
-        # those rows predate the field, and no kind whose unit has changed has
-        # any of them.
-        recorded = row.get("units_unit") or ""
-        if known is not None and recorded and recorded != known.unit:
-            continue
-        seconds = _seconds_between(row.get("started_at"), row.get("ended_at"))
-        units = row.get("units") or 0
-        if seconds > 0 and units > 0:
-            found.append(Sample(float(units), seconds, int(row.get("workers") or 0)))
-    return found
+    return samples_by_op(rows).get(name, [])
 
 
 def _seconds_between(start: object, end: object) -> float:
@@ -1020,6 +1035,21 @@ def remaining(
     The one place a caller needs: it finds the kind, reads the task's own
     progress, builds the history that kind ran at this width, and asks.
     """
+    return _remaining(row, samples_by_op(history), now)
+
+
+def etas(rows: Sequence[Mapping[str, Any]], now: str) -> list[float | None]:
+    """Seconds left on every row, sharing the history each estimate reads.
+
+    The whole log is the history for every row in it, so the population is built
+    once here rather than once per row -- which is the same answer recomputed,
+    at a cost quadratic in the log.
+    """
+    by_op = samples_by_op(rows)
+    return [_remaining(row, by_op, now) for row in rows]
+
+
+def _remaining(row: Mapping[str, Any], by_op: dict[str, list[Sample]], now: str) -> float | None:
     found = kind_of(row.get("op"))
     if found is None or row.get("cause") in {
         "completed",
@@ -1033,7 +1063,7 @@ def remaining(
     return found.estimate(
         Progress.from_record(row.get("progress")),
         elapsed,
-        samples(history, str(row.get("op") or "")),
+        by_op.get(str(row.get("op") or ""), []),
         int(row.get("workers") or 0),
     )
 

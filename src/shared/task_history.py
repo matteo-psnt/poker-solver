@@ -58,6 +58,13 @@ if TYPE_CHECKING:
 # contend on a share with no atomic append; joins to the task's LATEST attempt.
 OBSERVED_SUFFIX = ".observed.json"
 
+# `progress` and `observed` are written per TASK, not per attempt, so their
+# filenames carry no attempt number. They are not attempt-scoped facts: the join
+# attaches them to the LATEST attempt. Stored under this sentinel so the record's
+# primary key still holds and the difference stays visible, rather than being
+# flattened onto attempt 0 where it would collide with a real first attempt.
+TASK_SCOPED = -1
+
 # Batch ``executionInfo.result`` / task state -> coarse exit cause. The dead
 # process cannot report these; Batch can. FAILURE conflates an in-container
 # error with an OOM-kill -- the node is gone either way, and only the published
@@ -97,6 +104,41 @@ def _first_not_none(*values: Any) -> Any:
     return next((v for v in values if v is not None), None)
 
 
+def observed_record(
+    *,
+    task_id: str,
+    job_id: str,
+    state: str,
+    result: str | None = None,
+    exit_code: int | None = None,
+    failure: dict[str, Any] | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    node_id: str = "",
+) -> dict[str, Any]:
+    """What Batch says happened, as the document both stores hold.
+
+    Building it is separate from writing it because there are now two places it
+    goes, and a second construction is a second answer: the share's copy and the
+    database's would disagree about a field the day one of them was edited.
+    """
+    return {
+        "source": "batch",
+        "task_id": task_id,
+        "job_id": job_id,
+        # Stored SHORT -- ``completed``, never ``BatchTaskState.COMPLETED`` --
+        # so Azure's spelling is not the thing that lands in a durable record.
+        "state": (state or "").rsplit(".", 1)[-1].lower(),
+        "result": result,
+        "exit_code": exit_code,
+        "failure": failure,
+        "start_time": start_time,
+        "end_time": end_time,
+        "node_id": node_id,
+        "observed_at": utcnow(),
+    }
+
+
 def write_observed_record(
     share: str | os.PathLike[str],
     *,
@@ -118,26 +160,33 @@ def write_observed_record(
     :data:`_VOLATILE_OBSERVED_FIELDS` for why "already says this" cannot be a
     byte comparison.
     """
-    directory = tasks_dir(share)
-    path = directory / f"{task_id}{OBSERVED_SUFFIX}"
-    record = {
-        "source": "batch",
-        "task_id": task_id,
-        "job_id": job_id,
-        # Stored SHORT -- ``completed``, never ``BatchTaskState.COMPLETED`` --
-        # so Azure's spelling is not the thing that lands in a durable record.
-        "state": (state or "").rsplit(".", 1)[-1].lower(),
-        "result": result,
-        "exit_code": exit_code,
-        "failure": failure,
-        "start_time": start_time,
-        "end_time": end_time,
-        "node_id": node_id,
-        "observed_at": utcnow(),
-    }
-    if only_if_new and _says_the_same(records.read_snapshot(path), record):
+    path = tasks_dir(share) / f"{task_id}{OBSERVED_SUFFIX}"
+    record = observed_record(
+        task_id=task_id,
+        job_id=job_id,
+        state=state,
+        result=result,
+        exit_code=exit_code,
+        failure=failure,
+        start_time=start_time,
+        end_time=end_time,
+        node_id=node_id,
+    )
+    if only_if_new and says_the_same(records.read_snapshot(path), record):
         return None
+    return write_observed_document(share, record)
+
+
+def write_observed_document(share: str | os.PathLike[str], record: dict[str, Any]) -> Path:
+    """Write an already-built observation, stamped like every other record.
+
+    The stamping is why this is not `json.dumps` at the call site: a document
+    that reached the share unstamped would be one the reader's schema check
+    rejects, and it would be rejected long after whoever wrote it had gone.
+    """
+    directory = tasks_dir(share)
     directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{record['task_id']}{OBSERVED_SUFFIX}"
     records.write_snapshot(path, record, records.REGISTRY[f"legs/*{OBSERVED_SUFFIX}"])
     return path
 
@@ -148,7 +197,7 @@ def write_observed_record(
 _VOLATILE_OBSERVED_FIELDS = frozenset({"observed_at", "schema_version"})
 
 
-def _says_the_same(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> bool:
+def says_the_same(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> bool:
     """Whether a stored observation already carries this one's information."""
     if existing is None:
         return False
@@ -469,9 +518,35 @@ def read_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
     directory = tasks_dir(share)
     if not directory.is_dir():
         return []
+    return join_documents(read_documents(directory))
 
-    documents = read_documents(directory)
 
+def documents_from_rows(
+    rows: Iterable[tuple[str, int, str, dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """`(task_id, attempt, leg, body)` rows as the filename-keyed dict the join reads.
+
+    The names are REBUILT rather than stored, from the same suffix constants the
+    node writes with -- so the two stores present the join with the same keys and
+    `_with_suffix`'s filename ordering, which decides ties, still decides them
+    the same way. `start` and `exit` are per attempt; `progress` and `observed`
+    are per task, and carry `TASK_SCOPED` where an attempt would go.
+    """
+    named: dict[str, dict[str, Any]] = {}
+    for task_id, attempt, leg, body in rows:
+        suffix = f".{leg}.json"
+        stem = task_id if attempt == TASK_SCOPED else f"{task_id}.{attempt}"
+        named[f"{stem}{suffix}"] = body
+    return named
+
+
+def join_documents(documents: dict[str, dict[str, Any]]) -> list[TaskRow]:
+    """The join itself, over documents from wherever they were read.
+
+    Split from :func:`read_tasks` so the share and the database answer `tasks`
+    through ONE implementation. Everything that decides a row -- which attempt is
+    latest, how `cause` resolves, what an ETA is -- is here and nowhere else.
+    """
     # Keyed by (task_id, attempt): a Batch retry reuses the task id, and the
     # failed attempt is the one worth keeping.
     attempts: dict[tuple[str, int], dict[str, dict[str, Any]]] = {}
@@ -507,9 +582,8 @@ def read_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
     # ended_at then started_at, so a still-running task sorts beside the one it
     # followed rather than at the front.
     joined.sort(key=lambda r: (r.get("ended_at") or r.get("started_at") or "", r["task_id"]))
-    now = utcnow()
-    for row in joined:
-        row["eta_seconds"] = kinds.remaining(row, joined, now)
+    for row, eta in zip(joined, kinds.etas(joined, utcnow()), strict=True):
+        row["eta_seconds"] = eta
     return [TaskRow(**row) for row in joined]
 
 
