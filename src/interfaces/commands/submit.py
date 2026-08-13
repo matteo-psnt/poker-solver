@@ -45,7 +45,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="Config override, repeatable (e.g. --set solver__pruning=true).",
+        help="Config override, repeatable (e.g. --set solver__cfr_plus=true).",
     )
     parser.add_argument(
         "--workers",

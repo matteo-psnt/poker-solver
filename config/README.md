@@ -78,10 +78,6 @@ Sections and fields, with defaults:
 | | `cfr_plus` | false | |
 | | `iteration_weighting` | `linear` | `none` \| `linear` \| `dcfr`; production uses `dcfr` |
 | | `dcfr_alpha/beta/gamma` | 1.5 / 0.0 / 2.0 | used only with `dcfr`; `beta=0` halves negative regrets per update |
-| | `enable_pruning` | false | requires external sampling |
-| | `pruning_threshold` | 300.0 | |
-| | `prune_start_iteration` | 100 | |
-| | `prune_reactivate_frequency` | 100 | |
 | `card_abstraction` | `config` | `default` | name of a `config/abstraction/` preset |
 
 Template tokens are validated: preflop accepts `fold`/`call`/`check`/jam

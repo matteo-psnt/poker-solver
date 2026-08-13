@@ -260,7 +260,7 @@ class TestInfoSet:
         assert "CALL" in s
         assert "Strategy" in s
 
-    # DCFR and pruning tests
+    # DCFR tests
 
     def test_update_regret_with_dcfr(self):
         """Test that DCFR applies discount to cumulative regrets (Brown & Sandholm 2019)."""
@@ -369,57 +369,3 @@ class TestInfoSet:
         assert infoset_dcfr.regrets[0] < infoset_vanilla.regrets[0]
         # Vanilla: 100 + 20 = 120
         assert abs(infoset_vanilla.regrets[0] - 120.0) < 1e-6
-
-    @staticmethod
-    def _pruning_infoset(regrets):
-        key = InfoSetKey(0, Street.FLOP, "b0.75", None, 25, 1)
-        infoset = InfoSet(key, [fold(), call(), bet(50)])
-        infoset.regrets = np.array(regrets)
-        return infoset
-
-    def test_pruned_mask_disabled_before_start(self):
-        """No action is pruned before prune_start_iteration (still exploring)."""
-        infoset = self._pruning_infoset([-500.0, -400.0, -600.0])
-        mask = infoset.pruned_mask(
-            iteration=50,
-            pruning_threshold=300.0,
-            prune_start_iteration=100,
-            prune_reactivate_frequency=100,
-        )
-        assert not mask.any()
-
-    def test_pruned_mask_periodic_reactivation(self):
-        """At a reactivation iteration every action is explored again."""
-        infoset = self._pruning_infoset([-500.0, -400.0, -600.0])
-        mask = infoset.pruned_mask(
-            iteration=200,
-            pruning_threshold=300.0,
-            prune_start_iteration=100,
-            prune_reactivate_frequency=100,
-        )
-        assert not mask.any()
-
-    def test_pruned_mask_prunes_deeply_negative(self):
-        """Only actions with regret below -threshold are pruned."""
-        infoset = self._pruning_infoset([-500.0, 10.0, 20.0])
-        mask = infoset.pruned_mask(
-            iteration=201,
-            pruning_threshold=300.0,
-            prune_start_iteration=100,
-            prune_reactivate_frequency=100,
-        )
-        assert mask.tolist() == [True, False, False]
-
-    def test_pruned_mask_recovers_when_regret_refreshed(self):
-        """Derived live each call: a refreshed (>-threshold) regret is explored again."""
-        infoset = self._pruning_infoset([-500.0, 10.0, 20.0])
-        assert infoset.pruned_mask(201, 300.0, 100, 100)[0]
-        infoset.regrets[0] = 5.0  # e.g. refreshed at a reactivation window
-        assert not infoset.pruned_mask(202, 300.0, 100, 100)[0]
-
-    def test_pruned_mask_never_prunes_all(self):
-        """When every action is below -threshold, nothing is pruned — there must be
-        an action left to sample and to renormalise the node value over."""
-        infoset = self._pruning_infoset([-500.0, -600.0, -400.0])
-        mask = infoset.pruned_mask(201, 300.0, 100, 100)
-        assert not mask.any()
