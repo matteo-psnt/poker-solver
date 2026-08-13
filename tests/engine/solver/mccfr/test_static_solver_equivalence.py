@@ -82,7 +82,7 @@ COUNTS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 4}
 ITERATIONS = 120
 
 
-def _build_solver(storage_factory, *, seed=42, weighting="dcfr"):
+def _build_solver(storage_factory, *, seed=42, weighting="dcfr", walk_tree=True):
     config = make_test_config(
         seed=seed,
         small_blind=1,
@@ -100,6 +100,11 @@ def _build_solver(storage_factory, *, seed=42, weighting="dcfr"):
     )
     storage = storage_factory(tree)
     solver = StaticTreeSolver(action_model, abstraction, storage, config, tree=tree)
+    # The oracle has no flat arrays to index, so it can only be driven through
+    # the state-based traversal. The flat side keeps the node-id walk, which
+    # makes the comparison below stronger than it was: one run now checks the
+    # layout arithmetic AND the traversal against a backend with neither.
+    solver._walk_tree = walk_tree
     return solver, tree, storage
 
 
@@ -116,7 +121,7 @@ def trained_pair():
     flat_solver, tree, flat = _build_solver(lambda t: StaticArrayStorage(t))
     _run(flat_solver)
 
-    oracle_solver, _, oracle = _build_solver(lambda t: DictOracleStorage(t))
+    oracle_solver, _, oracle = _build_solver(lambda t: DictOracleStorage(t), walk_tree=False)
     _run(oracle_solver)
 
     yield tree, flat, oracle, flat_solver, oracle_solver
@@ -206,7 +211,7 @@ class TestNoDroppedUpdates:
         """Each scheme drives a different write pattern through the kernel."""
         flat_solver, _, flat = _build_solver(lambda t: StaticArrayStorage(t), weighting=weighting)
         oracle_solver, _, oracle = _build_solver(
-            lambda t: DictOracleStorage(t), weighting=weighting
+            lambda t: DictOracleStorage(t), weighting=weighting, walk_tree=False
         )
         try:
             _run(flat_solver, iterations=60)
