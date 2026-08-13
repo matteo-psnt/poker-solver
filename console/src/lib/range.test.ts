@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, cellFor, classLabel } from "./range";
+import { aggregate, cellFor, classLabel, summarise } from "./range";
 
 /**
  * The aggregation is the only real logic on the client, and its job is to keep
@@ -111,5 +111,46 @@ describe("aggregating combos into cells", () => {
 
     expect(cells).toHaveLength(13);
     expect(cells.every((row) => row.length === 13)).toBe(true);
+  });
+});
+
+/**
+ * The rail's headline number, and the one the grid is worst at: a class gets
+ * one square whether it holds 4 combos or 12, so the eye reads an offsuit-heavy
+ * fold as smaller than it is. Weighting is the whole point, so it is asserted
+ * against a case where weighted and unweighted disagree.
+ */
+describe("summarising the whole range", () => {
+  const cell = (label: string, strategy: number[] | null, combos: number, untrained = 0) => ({
+    label,
+    strategy,
+    combos,
+    untrained,
+  });
+  const gridOf = (...cells: ReturnType<typeof cell>[]) => [cells];
+
+  it("weights a class by how many combos it holds", () => {
+    // Unweighted this would be 50/50; AKo holds three times what AKs does.
+    const summary = summarise(gridOf(cell("AKs", [1, 0], 4), cell("AKo", [0, 1], 12)), 2);
+    expect(summary?.strategy).toEqual([0.25, 0.75]);
+    expect(summary?.trained).toBe(16);
+  });
+
+  it("leaves untrained combos out of the mean and reports them beside it", () => {
+    const summary = summarise(gridOf(cell("AA", [1, 0], 6, 2), cell("KK", null, 6, 6)), 2);
+    expect(summary?.strategy).toEqual([1, 0]);
+    expect(summary?.trained).toBe(4);
+    expect(summary?.untrained).toBe(8);
+  });
+
+  it("ignores combos the board blocks entirely", () => {
+    const summary = summarise(gridOf(cell("AA", [1, 0], 6), cell("KK", null, 0)), 2);
+    expect(summary?.trained).toBe(6);
+    expect(summary?.untrained).toBe(0);
+  });
+
+  it("is null rather than zero when nothing here was trained", () => {
+    expect(summarise(gridOf(cell("AA", null, 6, 6)), 2)).toBeNull();
+    expect(summarise([], 2)).toBeNull();
   });
 });

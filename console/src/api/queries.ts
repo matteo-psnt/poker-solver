@@ -23,6 +23,7 @@ import type {
   ExperimentView,
   Hand,
   Jobs,
+  LeftSession,
   LogLines,
   NowView,
   Pool,
@@ -304,6 +305,26 @@ export const useDealHand = () =>
 export const useSubmitAction = () =>
   useMutation<Hand, Error, { session: string; token: string }>({
     mutationFn: ({ session, token }) => send(`/api/blueprint/play/${session}/action`, { token }),
+  });
+
+/**
+ * Give a hand back when you walk away from it.
+ *
+ * `Blueprint.tsx` already claimed this happened — it mounts the two tabs one at
+ * a time so that "unmounting ends it where it lives" — and nothing called the
+ * endpoint, which has existed all along. A session lives on the BLUEPRINT
+ * SERVER, in a store of 64 that drops the oldest to make room, so an abandoned
+ * one is not free: it evicts someone's hand in progress. The store is bounded
+ * precisely because a browser tab never says goodbye; this is the goodbye.
+ *
+ * No `onSettled` invalidation, and no error handling at the call site: leaving
+ * is idempotent on the far side, and a failure to do it costs one slot in a
+ * cache that already evicts.
+ */
+export const useLeaveHand = () =>
+  useMutation<LeftSession, Error, { session: string }>({
+    mutationFn: ({ session }) =>
+      send(`/api/blueprint/play/${encodeURIComponent(session)}`, undefined, "DELETE"),
   });
 
 /**

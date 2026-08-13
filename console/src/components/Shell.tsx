@@ -47,8 +47,11 @@ export function Shell() {
   const jobs = useJobs(10);
 
   const nodes = pool.data?.current_dedicated_nodes ?? null;
+  // `?.` past `jobs` as well as past `data`: this is the app SHELL, so a 200
+  // whose body lacks the field takes down every page at once rather than one
+  // panel. Same one-character gap as `RunPicker`'s `current` had.
   const live =
-    jobs.data?.jobs.reduce(
+    jobs.data?.jobs?.reduce(
       (total, job) =>
         total +
         job.tasks.filter((t) => ["running", "active", "preparing"].includes(state(t.state))).length,

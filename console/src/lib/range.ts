@@ -134,6 +134,55 @@ export function aggregate({
   return grid;
 }
 
+export interface RangeSummary {
+  /** Mean frequency of each action over the whole range, in `actions` order. */
+  strategy: number[];
+  /** Combos that contributed — the denominator, and the caveat. */
+  trained: number;
+  /** Combos the board allows but training never reached. */
+  untrained: number;
+}
+
+/**
+ * What this range DOES, in one line, before you read any single hand.
+ *
+ * The grid answers "what do I do with AKs" and answers it well; it is poor at
+ * "does this spot fold a lot", which is the first thing anyone actually asks of
+ * a strategy and previously had to be estimated by looking at how red the
+ * squares were. That estimate is wrong in a specific way — the grid gives a
+ * class one square whether it holds 4 combos or 12 — so the eye reads an
+ * offsuit-heavy fold as smaller than it is.
+ *
+ * Weighted by combos for that reason, where a CELL is unweighted across its own
+ * combos. Both follow the same rule: every combo is equally likely a priori, so
+ * a class holding three times as many of them counts three times.
+ *
+ * Untrained combos are excluded from the mean and reported separately rather
+ * than folded in as a uniform. A spot that is 80% untrained has no aggregate
+ * worth reading, and the number that says so has to travel with the number it
+ * disqualifies.
+ */
+export function summarise(cells: Cell[][], actionCount: number): RangeSummary | null {
+  const totals = Array.from({ length: actionCount }, () => 0);
+  let trained = 0;
+  let untrained = 0;
+
+  for (const row of cells) {
+    for (const cell of row) {
+      untrained += cell.untrained;
+      const contributing = cell.combos - cell.untrained;
+      if (!cell.strategy || contributing <= 0) continue;
+      trained += contributing;
+      for (let action = 0; action < actionCount; action++) {
+        totals[action] = (totals[action] ?? 0) + (cell.strategy[action] ?? 0) * contributing;
+      }
+    }
+  }
+
+  if (trained === 0) return null;
+  return { strategy: totals.map((total) => total / trained), trained, untrained };
+}
+
 /**
  * The colour of every action in a menu, computed together.
  *
