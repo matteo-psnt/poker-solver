@@ -2651,6 +2651,15 @@
             "title": "Schema Version Min",
             "type": "integer"
           },
+          "source": {
+            "default": "share",
+            "enum": [
+              "database",
+              "share"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
           "total_rows": {
             "title": "Total Rows",
             "type": "integer"

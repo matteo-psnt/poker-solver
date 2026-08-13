@@ -75,3 +75,41 @@ def describe_runs(engine: Any, *, limit: int = 1000) -> Sequence[Any]:
     """
     with _read(engine) as connection:
         return connection.execute(_RUNS, {"limit": limit}).all()
+
+
+def run_ids(engine: Any) -> list[str]:
+    """Every published run id.
+
+    Whole rather than filtered in SQL: what a fragment identifies is decided by
+    `interfaces.run_names.matching`, and a `LIKE` here would be a second
+    implementation of that rule -- one that also has to think about `%` and `_`
+    in what the user typed. 303 ids is one round trip and a few kilobytes; the
+    rule stays where both surfaces already read it.
+    """
+    with _read(engine) as connection:
+        return [row[0] for row in connection.execute(sa.text("SELECT run_id FROM runs"))]
+
+
+# ORDER BY iteration, not `gseq`. `gseq` is arrival order and two processes
+# write one run's events -- the node wrapper and the trainer -- while iteration
+# is what the series MEANS. They agree across all 276 runs today and there is no
+# duplicate (run, iteration) in the record, so this orders the same rows; it
+# just does not depend on that staying true.
+_CHECKPOINTS = sa.text("""
+    SELECT body
+      FROM run_events
+     WHERE run_id = :run_id AND event = 'checkpoint'
+     ORDER BY (body->>'iteration')::bigint, gseq
+""")
+
+
+def checkpoint_series(engine: Any, run_id: str) -> list[dict[str, Any]]:
+    """One run's per-checkpoint events, oldest first.
+
+    The stored body IS the event the share appends to `run.jsonl`, so what comes
+    back here is what the file path parses -- same keys, same absences. A row
+    written by an older version genuinely lacks fields a newer one carries, and
+    that survives the crossing rather than being filled in.
+    """
+    with _read(engine) as connection:
+        return [row[0] for row in connection.execute(_CHECKPOINTS, {"run_id": run_id})]

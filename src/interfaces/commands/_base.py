@@ -209,6 +209,33 @@ def resolve_run_dir(run: str, runs_dir: str) -> Path:
     raise CommandError(f"Run not found: '{run}' (looked at {as_path} and {exact})")
 
 
+def resolve_run_id(run: str, engine: Any) -> str:
+    """The same question as :func:`resolve_run_dir`, asked of the database.
+
+    Same rule, because it is the same rule: both hand the fragment to
+    `run_names.matching` and both refuse ambiguity by NAMING the candidates. The
+    difference is only what they are matching against -- directory names in a
+    materialised tree, or the ids the record holds -- and what they return.
+
+    A path is not accepted here. On the share a run IS a directory and pointing
+    at one is meaningful; in the database there is nothing for a path to name,
+    and quietly resolving its basename would answer about whichever published
+    run happened to share the name.
+    """
+    if not run.strip():
+        raise CommandError("No run given: --run needs a run id or a fragment of one.")
+    # Lazily: `_base` is imported by every command, and `queries` pulls in
+    # SQLAlchemy -- 1.2s onto an invocation that may never touch a database.
+    from src.adapters.postgres import queries  # noqa: PLC0415
+
+    matches = run_names.matching(run, queries.run_ids(engine))
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        raise CommandError(run_names.ambiguous_message(run, matches))
+    raise CommandError(f"Run not found: '{run}' is not a published run id or a fragment of one.")
+
+
 def parse_overrides(pairs: list[str]) -> dict[str, Any]:
     """Parse ``--set key__path=value`` into the config loader's override kwargs.
 

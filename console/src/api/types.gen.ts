@@ -1802,6 +1802,12 @@ export interface components {
             schema_version_max: number;
             /** Schema Version Min */
             schema_version_min: number;
+            /**
+             * Source
+             * @default share
+             * @enum {string}
+             */
+            source: "database" | "share";
             /** Total Rows */
             total_rows: number;
         };
