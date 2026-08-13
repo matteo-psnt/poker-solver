@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.actions.action_model import ActionModel
-from src.core.game.actions import Action
-from src.core.game.rules import GameRules
-from src.core.game.state import GameState
 from src.engine.search.range_inference import (
     ALL_COMBOS,
     NUM_COMBOS,
@@ -24,9 +21,15 @@ from src.engine.search.range_inference import (
 from src.engine.search.subgame_cfr import solve_subgame
 from src.engine.search.tree_builder import build_local_tree
 from src.engine.solver.policy.lookup import blueprint_action_distribution
-from src.engine.solver.policy.source import ScorableBlueprint
-from src.shared.config import ResolverConfig
 from src.shared.numeric import NORMALIZE_EPS
+
+if TYPE_CHECKING:
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.actions import Action
+    from src.core.game.rules import GameRules
+    from src.core.game.state import GameState
+    from src.engine.solver.policy.source import ScorableBlueprint
+    from src.shared.config import ResolverConfig
 
 
 @dataclass

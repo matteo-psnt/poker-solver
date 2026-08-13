@@ -28,6 +28,7 @@ import eval7
 import numpy as np
 
 from src.core.game.state import Card
+from src.pipeline.abstraction.preflop.hand_classes import PreflopHandClasses
 
 # Opponent combos on a completed board once 5 board + 2 hero cards are removed: C(45, 2).
 OPPONENTS_PER_FULL_BOARD = 990
@@ -42,8 +43,6 @@ def _build_class_index_table() -> np.ndarray:
     array index instead of 1,081 Python calls -- at 134,459 river boards that
     difference is the whole cost of the feature.
     """
-    from src.pipeline.abstraction.preflop.hand_classes import PreflopHandClasses
-
     classes = PreflopHandClasses()
     deck = eval7.Deck().cards
     by_index: dict[int, Card] = {}

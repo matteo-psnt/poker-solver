@@ -39,13 +39,12 @@ reversible, because nothing else on this machine holds a copy of the record.
 
 from __future__ import annotations
 
-import argparse
 import socket
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
@@ -54,6 +53,9 @@ from src.interfaces.commands.tasks import download_tasks
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo, records, task_history
 from src.shared.cloudtask import task_log
+
+if TYPE_CHECKING:
+    import argparse
 
 _PARALLEL_SHARE_IO = 64
 

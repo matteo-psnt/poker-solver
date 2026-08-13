@@ -8,14 +8,17 @@ templates (preflop node type, postflop raise depth, and SPR-gated all-in nodes).
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 import xxhash
 
 from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
-from src.core.game.state import GameState
 from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, parse_multiplier_token
 from src.shared.config import Config
+
+if TYPE_CHECKING:
+    from src.core.game.state import GameState
 
 
 def _postflop_candidate_size(

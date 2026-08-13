@@ -21,15 +21,17 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces import run_names, telemetry
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation.ledger import rebuild_ledger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 
 @dataclass(frozen=True)
@@ -200,7 +202,9 @@ def records_root(args: argparse.Namespace) -> Iterator[Path]:
     # Imported here rather than at module scope: this is the one place the
     # command layer needs the Azure SDK, and hoisting it would make every
     # `--help` pay for importing it.
-    from src.interfaces.cloud.store.workspace import share_records
+    from src.interfaces.cloud.store.workspace import (  # noqa: PLC0415 -- see above
+        share_records,
+    )
 
     with share_records(run=getattr(args, "run", None) or None) as root:
         yield root

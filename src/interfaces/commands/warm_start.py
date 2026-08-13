@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import Command
 from src.pipeline import services
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

@@ -12,12 +12,14 @@ same rule the rest of the command layer follows: one implementation per question
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import Command, records_root
 from src.pipeline import services
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

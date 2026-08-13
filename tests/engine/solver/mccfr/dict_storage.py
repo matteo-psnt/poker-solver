@@ -38,4 +38,3 @@ class DictStorage:
 
     def iter_infosets(self) -> Iterable[InfoSet]:
         return list(self._infosets.values())
-

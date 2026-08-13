@@ -21,13 +21,16 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from src.interfaces import telemetry
 from src.interfaces.commands import BY_NAME, COMMANDS
 from src.interfaces.errors import CommandError
 from src.shared import jsonio
 from src.shared.log import configure_logging, pin_level_for_children
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _named_command(argv: Sequence[str]) -> str | None:

@@ -15,15 +15,18 @@ drift from the command that owns it.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.interfaces.commands._base import Command
 from src.interfaces.errors import attempt
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from src.interfaces.commands._base import Command
 
 
 @dataclass(frozen=True)

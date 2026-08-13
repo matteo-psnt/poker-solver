@@ -19,12 +19,15 @@ cache) aggregate by summation rather than silently dropping mass.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
-from src.core.game.actions import Action
-from src.core.game.rules import GameRules
-from src.core.game.state import GameState
-from src.engine.solver.infoset.model import InfoSet
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from src.core.game.actions import Action
+    from src.core.game.rules import GameRules
+    from src.core.game.state import GameState
+    from src.engine.solver.infoset.model import InfoSet
 
 
 def filter_stored_actions(

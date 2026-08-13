@@ -20,12 +20,10 @@ eval cost roughly tenfold for no change in the bound's validity.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
-from src.core.game.actions import Action
-from src.core.game.state import GameState
 from src.engine.search.range_inference import (
     ALL_COMBOS,
     COMBO_MASKS,
@@ -37,8 +35,12 @@ from src.engine.search.range_inference import (
 )
 from src.engine.search.resolver import HUResolver
 from src.engine.solver.policy.lookup import blueprint_action_distribution
-from src.engine.solver.policy.source import ScorableBlueprint
-from src.shared.config import ResolverConfig
+
+if TYPE_CHECKING:
+    from src.core.game.actions import Action
+    from src.core.game.state import GameState
+    from src.engine.solver.policy.source import ScorableBlueprint
+    from src.shared.config import ResolverConfig
 
 
 def known_mask(state: GameState, actor: int) -> int:

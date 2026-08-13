@@ -19,12 +19,10 @@ configs (blinds, stacks) agree, which is validated by the caller.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.game.rules import GameRules
-from src.core.game.state import Card
-from src.engine.solver.policy.source import ScorableBlueprint
 from src.pipeline.evaluation.estimators.resolver_match import (
     _complete_board,
     _deal_from_stack,
@@ -32,6 +30,11 @@ from src.pipeline.evaluation.estimators.resolver_match import (
 )
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.pipeline.evaluation.units import pair_mean_mbb
+
+if TYPE_CHECKING:
+    from src.core.game.rules import GameRules
+    from src.core.game.state import Card
+    from src.engine.solver.policy.source import ScorableBlueprint
 
 
 @dataclass(frozen=True)

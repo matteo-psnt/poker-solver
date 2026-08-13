@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import (
     Command,
@@ -12,6 +11,9 @@ from src.interfaces.commands._base import (
 )
 from src.interfaces.errors import CommandError
 from src.shared import records, run_events
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

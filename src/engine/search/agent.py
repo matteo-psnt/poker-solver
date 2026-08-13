@@ -10,13 +10,17 @@ importing) the training machinery.
 
 from __future__ import annotations
 
-import numpy as np
+from typing import TYPE_CHECKING
 
-from src.core.game.actions import Action
-from src.core.game.state import GameState
 from src.engine.search.resolver import HUResolver
-from src.engine.solver.policy.source import ScorableBlueprint
-from src.shared.config import ResolverConfig
+
+if TYPE_CHECKING:
+    import numpy as np
+
+    from src.core.game.actions import Action
+    from src.core.game.state import GameState
+    from src.engine.solver.policy.source import ScorableBlueprint
+    from src.shared.config import ResolverConfig
 
 
 class BlueprintAgent:

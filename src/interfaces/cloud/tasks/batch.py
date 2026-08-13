@@ -13,10 +13,9 @@ Entra ID is the only way in), so there is no fallback to configure.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from azure.batch import BatchClient
 from azure.batch.models import (
@@ -31,8 +30,12 @@ from azure.batch.models import (
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.identity import AzureCliCredential
 
-from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.tasks.spec import TaskSpec, daily_job_id, suffixed_job_id, task_command
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.interfaces.cloud.config import CloudConfig
 
 # Batch calls are latency-bound round trips, not work, so independent ones are
 # worth issuing together. 16 matches the share downloader.

@@ -8,9 +8,12 @@ looking identical, at the one moment the lineage is being moved.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.interfaces.commands import promote
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestPublishReportsWhyItFailed:

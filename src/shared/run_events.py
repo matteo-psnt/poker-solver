@@ -29,11 +29,13 @@ reading the middle.
 from __future__ import annotations
 
 import itertools
-import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.shared import records
+
+if TYPE_CHECKING:
+    import os
 
 RUN_LOG_FILENAME = "run.jsonl"
 ARTIFACT = records.REGISTRY[RUN_LOG_FILENAME]

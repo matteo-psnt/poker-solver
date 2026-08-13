@@ -12,12 +12,16 @@ The invariant: the seed the opponent receives is a pure function of
 """
 
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
 from src.pipeline.evaluation.estimators.lbr import hunl_local_best_response as lbr
-from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import _HUNLLocalBestResponse
+
+if TYPE_CHECKING:
+    from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
+        _HUNLLocalBestResponse,
+    )
 
 
 class _RecordingOpponent:
@@ -42,7 +46,7 @@ def _play(hand: int, base_seed: int, monkeypatch) -> list[int]:
     # the double has to offer the same seam or it is testing a different object.
     engine.reseed = lambda rng: setattr(engine, "rng", rng)
     monkeypatch.setattr(lbr, "_deal_initial_state", lambda *_a, **_k: object())
-    lbr._play_hand_pair(cast(_HUNLLocalBestResponse, engine), hand, base_seed, starting_stack=200)
+    lbr._play_hand_pair(cast("_HUNLLocalBestResponse", engine), hand, base_seed, starting_stack=200)
     return opponent.seeds
 
 

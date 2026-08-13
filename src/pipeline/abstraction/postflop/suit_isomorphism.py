@@ -23,8 +23,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import permutations
+from typing import TYPE_CHECKING
 
-from src.core.game.state import Card
+if TYPE_CHECKING:
+    from src.core.game.state import Card
 
 # Suit constants
 SUITS = ["s", "h", "d", "c"]  # spades, hearts, diamonds, clubs

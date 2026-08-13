@@ -15,9 +15,8 @@ dashboard.
 
 from __future__ import annotations
 
-import argparse
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
@@ -26,6 +25,9 @@ from src.interfaces import telemetry
 from src.interfaces.commands._base import Command
 from src.interfaces.commands._compose import Part, compose, fan_out, payloads
 from src.interfaces.errors import CommandError
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def _command(name: str, run: Any) -> Command:

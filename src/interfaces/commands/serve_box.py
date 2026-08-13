@@ -11,12 +11,14 @@ command line are the same code and cannot drift.
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud import serve_box
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
+
+if TYPE_CHECKING:
+    import argparse
 
 DEFAULT_RESOURCE_GROUP = "poker-solver-serve-rg"
 DEFAULT_VM = "blueprint-server"

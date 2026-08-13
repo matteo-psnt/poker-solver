@@ -21,8 +21,10 @@ being prevented -- and `tests/interfaces/test_import_weight.py` fails if it does
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from src.shared.config import ResolverConfig
+if TYPE_CHECKING:
+    from src.shared.config import ResolverConfig
 
 """Off-tree bet sizes the LBR player may bet when first to put money in on a
 street. Deliberately NOT the blueprint's trained sizes; overbets in particular

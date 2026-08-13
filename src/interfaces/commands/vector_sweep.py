@@ -21,11 +21,10 @@ the fine-abstraction arm possible at all.
 
 from __future__ import annotations
 
-import argparse
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -54,6 +53,9 @@ from src.pipeline.abstraction.vector_universe import (
     sample_boards,
 )
 from src.shared.config.loader import load_config
+
+if TYPE_CHECKING:
+    import argparse
 
 # Per kernel, because they differ by ~70x in cost per iteration: board-free is
 # ~0.14 s and hand-space ~10 s on a 32-board scoring set. One shared list is how

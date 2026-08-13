@@ -40,13 +40,16 @@ cannot catch because both players lose mass symmetrically.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.core.game.state import Street
 from src.engine.solver.vector.hand_context import HandContext, showdown_matrix
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 # float64 throughout: these matrices are tiny (a few hundred squared) and they
 # are the constants every value in the kernel is built from, so rounding them is

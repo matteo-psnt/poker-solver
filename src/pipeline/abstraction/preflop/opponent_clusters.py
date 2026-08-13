@@ -148,7 +148,11 @@ def opponent_cluster_assignment(
     """
     equities = preflop_class_equities(samples=samples, seed=seed, cache_dir=cache_dir)
 
-    from sklearn.cluster import KMeans
+    # Measured 0.85s to import `sklearn.cluster`, and only the FITTING paths
+    # need it -- reading a built abstraction does not. Hoisting it would put
+    # that second on `poker-solver --help` and on every node task, to serve the
+    # one call below.
+    from sklearn.cluster import KMeans  # noqa: PLC0415 -- 0.85s import, fit-only
 
     kmeans = KMeans(n_clusters=num_clusters, n_init=10, random_state=seed)
     labels = kmeans.fit_predict(equities.reshape(-1, 1))

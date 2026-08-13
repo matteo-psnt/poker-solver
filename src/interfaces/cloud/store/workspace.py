@@ -27,18 +27,21 @@ import shutil
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from azure.storage.fileshare import ShareServiceClient
+from typing import TYPE_CHECKING
 
 from src.interfaces import run_names
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
 from src.interfaces.errors import CommandError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
+    from azure.storage.fileshare import ShareServiceClient
 
 BASELINE_NAME = "baseline.json"
 

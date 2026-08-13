@@ -15,8 +15,7 @@ one thing a caller actually has to think about:
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from azure.core.exceptions import ResourceNotFoundError
 
@@ -25,6 +24,9 @@ from src.interfaces.cloud.store import share
 from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
+
+if TYPE_CHECKING:
+    import argparse
 
 PROGRESS_PREFIX = "Training batches:"
 

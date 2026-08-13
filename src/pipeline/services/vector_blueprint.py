@@ -38,6 +38,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -53,9 +54,11 @@ from src.pipeline.abstraction.vector_universe import build_universe
 from src.pipeline.blueprint import construction
 from src.pipeline.training.run_tracker import RunTracker
 from src.pipeline.training.run_tracker.attempts import ExperimentTag
-from src.shared.config import Config
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
+
+if TYPE_CHECKING:
+    from src.shared.config import Config
 
 logger = logging.getLogger(__name__)
 

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import eval7
 import numpy as np
 
-from src.core.game.actions import Action
 from src.core.game.state import Card, GameState
 from src.engine.search.action_translation import translate_action_distribution
 from src.engine.solver.policy.lookup import blueprint_action_distribution
-from src.engine.solver.policy.source import ScorableBlueprint
 from src.shared.numeric import NORMALIZE_EPS
+
+if TYPE_CHECKING:
+    from src.core.game.actions import Action
+    from src.engine.solver.policy.source import ScorableBlueprint
 
 
 @dataclass

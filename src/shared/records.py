@@ -52,13 +52,15 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.shared.jsonio import json_default
+
+if TYPE_CHECKING:
+    import os
+    from collections.abc import Callable
 
 SCHEMA_VERSION_KEY = "schema_version"
 UNVERSIONED = 0

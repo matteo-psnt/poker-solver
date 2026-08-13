@@ -33,10 +33,12 @@ in a panel must look like a bug, not like an unavailable panel.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class CommandError(Exception):
@@ -74,7 +76,10 @@ def _azure_failures() -> tuple[type[BaseException], type[BaseException]]:
     invocation, ``--help`` included, to serve the two that talk to Batch. By the
     time :func:`attempt` runs, the caller has already imported the SDK.
     """
-    from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
+    from azure.core.exceptions import (  # noqa: PLC0415 -- 76ms, see docstring
+        ClientAuthenticationError,
+        HttpResponseError,
+    )
 
     return (ClientAuthenticationError, HttpResponseError)
 

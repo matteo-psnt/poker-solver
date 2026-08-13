@@ -30,19 +30,23 @@ identity. ``terminal_value`` is what the *button* wins:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.core.game.rules import GameRules
-from src.core.game.state import GameState, Street
 from src.engine.solver.betting_tree import (
     _PLACEHOLDER_BOARD,
     _PLACEHOLDER_HOLE,
     BettingTree,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from src.core.game.state import GameState, Street
 
 # A terminal's ``child_id`` entries index the terminal table; decision-node
 # entries index the node table. One array holds both, so the kind is carried

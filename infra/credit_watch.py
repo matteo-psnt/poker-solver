@@ -71,10 +71,13 @@ import json
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 SUBSCRIPTION_ID = "f9c31345-15ac-413f-8841-5d0151baca66"
 

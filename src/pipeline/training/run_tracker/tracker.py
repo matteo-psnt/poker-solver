@@ -5,11 +5,14 @@ from __future__ import annotations
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from src.pipeline.training.run_tracker.attempts import AttemptRecord
 from src.pipeline.training.run_tracker.metadata import RunMetadata
 from src.shared import records, run_events
-from src.shared.config import Config
+
+if TYPE_CHECKING:
+    from src.pipeline.training.run_tracker.attempts import AttemptRecord
+    from src.shared.config import Config
 
 
 class RunTracker:

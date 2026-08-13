@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
-from src.core.game.rules import GameRules
-from src.core.game.state import GameState
+
+if TYPE_CHECKING:
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.rules import GameRules
+    from src.core.game.state import GameState
 
 
 def translate_action_distribution(

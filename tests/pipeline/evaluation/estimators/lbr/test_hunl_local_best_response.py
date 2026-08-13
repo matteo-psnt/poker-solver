@@ -9,6 +9,8 @@ mapping, determinism, and the end-to-end lower bound on a weak blueprint.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 
@@ -20,7 +22,6 @@ from src.engine.search.range_inference import (
     combo_index_for,
     replace_actor_hole_cards,
 )
-from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
     LBRConfig,
     _deal_initial_state,
@@ -32,6 +33,9 @@ from src.pipeline.evaluation.estimators.lbr.opponent_model import ResolvedOppone
 from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.shared.config import ResolverConfig
 from tests.test_helpers import build_trained_test_solver, skew_preflop_infoset
+
+if TYPE_CHECKING:
+    from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 
 
 def _build_solver(iterations: int, *, starting_stack: int = 2000) -> StaticTreeSolver:

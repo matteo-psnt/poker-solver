@@ -9,18 +9,21 @@ one of them silently stops being exercised.
 from __future__ import annotations
 
 import secrets
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
 from src.interfaces.cloud.tasks import batch, spec
-from src.interfaces.cloud.tasks.spec import TaskSpec
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo
 from src.shared.cloudtask import kinds
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.interfaces.cloud.tasks.spec import TaskSpec
 
 NONCE_CEILING = 32768
 

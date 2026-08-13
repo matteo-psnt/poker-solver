@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import argparse
 import ast
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -27,6 +26,9 @@ from src.interfaces.commands import load_all, progress
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.shared import repo
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _add(parser: argparse.ArgumentParser) -> None:

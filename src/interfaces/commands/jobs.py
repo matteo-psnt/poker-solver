@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
+
+if TYPE_CHECKING:
+    import argparse
 
 LIVE_TASK_STATES = {"active", "preparing", "running"}
 

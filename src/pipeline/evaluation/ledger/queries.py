@@ -6,13 +6,15 @@ import json
 import logging
 import os
 import threading
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.pipeline.evaluation.ledger.records import ledger_row, record_instant
 from src.pipeline.evaluation.ledger.tiers import tier_key, tier_label
 from src.shared import records as record_store
 from src.shared.jsonio import json_default
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

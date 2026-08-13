@@ -18,14 +18,16 @@ is exploring, not that anything is broken.
 
 from __future__ import annotations
 
-import argparse
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces import telemetry
 from src.interfaces.commands._base import Command
 from src.shared import records
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

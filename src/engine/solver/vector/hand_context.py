@@ -17,12 +17,15 @@ Why hand space and not bucket space:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.core.game.state import Street
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Street ordinals, matching ``Street.value``, used to index per-street arrays.
 STREET_ORDER: tuple[Street, ...] = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)

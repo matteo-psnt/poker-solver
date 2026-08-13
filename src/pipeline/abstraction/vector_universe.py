@@ -21,18 +21,22 @@ cell is sampled, which is the whole reason
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from typing import TYPE_CHECKING
 
 import eval7
 import numpy as np
 
 from src.core.game.state import FULL_DECK, Card, Street
-from src.engine.solver.protocols import BucketingStrategy
 from src.engine.solver.vector.hand_context import (
     HandContext,
     blocking_matrix,
     enumerate_live_hands,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+
+    from src.engine.solver.protocols import BucketingStrategy
 
 # eval7 handles for the canonical deck, built once. Rank lookups are the only
 # per-hand cost here that is not a matrix read.

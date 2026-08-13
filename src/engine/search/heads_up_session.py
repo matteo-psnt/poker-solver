@@ -42,15 +42,18 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.game.actions import Action, ActionType
-from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, GameState, Street
 from src.engine.solver.mccfr.chance import draw_cards, is_chance_node, sample_chance_outcome
 from src.engine.solver.policy.lookup import blueprint_action_distribution
-from src.engine.solver.policy.source import ScorableBlueprint
+
+if TYPE_CHECKING:
+    from src.core.game.actions import Action, ActionType
+    from src.core.game.rules import GameRules
+    from src.engine.solver.policy.source import ScorableBlueprint
 
 
 @dataclass(frozen=True)

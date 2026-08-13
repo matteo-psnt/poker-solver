@@ -9,14 +9,16 @@ snapshot would contain.
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
 from src.interfaces.cloud.tasks import spec
 from src.interfaces.commands._base import Command
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

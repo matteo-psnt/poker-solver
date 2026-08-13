@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import (
     Command,
@@ -13,6 +12,9 @@ from src.interfaces.commands._base import (
     resolve_run_dir,
 )
 from src.pipeline import services
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

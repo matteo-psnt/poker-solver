@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import xxhash
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, parse_multiplier_token
 from src.shared.config.merge import deep_merge_dicts
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 

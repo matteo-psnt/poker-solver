@@ -19,11 +19,15 @@ information set).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from src.core.game.state import Card
 from src.engine.solver.policy.lookup import blueprint_action_distribution
 from src.pipeline.evaluation.reference.game_tree import CHANCE, Policy
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from src.core.game.state import Card
 
 DEAL = "DEAL"
 ANNULLED = "ANNULLED"

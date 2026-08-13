@@ -36,6 +36,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.core.actions.action_model import ActionModel
 from src.pipeline import blueprint
@@ -44,9 +45,11 @@ from src.pipeline.services import warm_start
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import run_events
-from src.shared.config import Config
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
+
+if TYPE_CHECKING:
+    from src.shared.config import Config
 
 logger = logging.getLogger(__name__)
 

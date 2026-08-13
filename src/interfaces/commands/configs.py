@@ -19,12 +19,14 @@ whose answer has to be exact.
 
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import Command
 from src.shared import repo
+
+if TYPE_CHECKING:
+    import argparse
+    from pathlib import Path
 
 CONFIG_ROOT = repo.ROOT / "config"
 

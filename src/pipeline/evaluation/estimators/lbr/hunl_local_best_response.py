@@ -69,20 +69,17 @@ from __future__ import annotations
 import multiprocessing
 import random
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import stats
 from tqdm import tqdm
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action, ActionType
 from src.core.game.evaluator import get_evaluator
-from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Card, GameState
 from src.engine.search.range_inference import COMBO_MASKS, NUM_COMBOS
-from src.engine.solver.policy.source import ScorableBlueprint
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.lbr.lbr_showdown import ShowdownValuer
 from src.pipeline.evaluation.estimators.lbr.lookahead_scorer import (
@@ -99,6 +96,13 @@ from src.pipeline.evaluation.estimators.lbr.shadow_state import MenuCandidate, S
 from src.pipeline.evaluation.units import chips_to_bb, chips_to_mbb
 from src.shared.log import configure_logging, progress_bars_enabled
 from src.shared.numeric import NORMALIZE_EPS
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.rules import GameRules
+    from src.engine.solver.policy.source import ScorableBlueprint
 
 _DECK_MASKS: np.ndarray = np.array([card.mask for card in FULL_DECK], dtype=np.int64)
 

@@ -331,7 +331,9 @@ class PostflopPrecomputer:
         occupied_bins = np.nonzero(histogram)[0]
         points = (occupied_bins / (_KMEANS_EQUITY_BINS - 1)).reshape(-1, 1)
 
-        from sklearn.cluster import KMeans
+        # See the sibling fit below: 0.85s to import, and only precompute needs
+        # it. Every reader of a built abstraction imports this module.
+        from sklearn.cluster import KMeans  # noqa: PLC0415 -- 0.85s import, fit-only
 
         kmeans = KMeans(
             n_clusters=min(num_buckets, len(occupied_bins)),
@@ -383,7 +385,11 @@ class PostflopPrecomputer:
         else:
             fit_idx = np.arange(n)
 
-        from sklearn.cluster import KMeans
+        # Measured 0.85s to import `sklearn.cluster`. This module is imported by
+        # everything that READS a card abstraction -- training, evaluation, the
+        # play server -- and only `precompute` ever fits one. That asymmetry is
+        # the whole reason the import is here.
+        from sklearn.cluster import KMeans  # noqa: PLC0415 -- 0.85s import, fit-only
 
         kmeans = KMeans(
             n_clusters=min(num_buckets, len(fit_idx)),

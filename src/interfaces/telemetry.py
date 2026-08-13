@@ -26,15 +26,17 @@ import argparse
 import logging
 import os
 import time
-from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.errors import CommandError
 from src.shared import cache, records
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 """``POKER_SOLVER_TELEMETRY``. Named for the subject rather than for the switch:
 the value that turns it OFF is `0`/`off`/`false`/`no`, so an `ENV_DISABLE=0`

@@ -14,14 +14,16 @@ wall-clock figure beside them meaningless.
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.engine.solver.vector import BOARD_FREE, HAND_SPACE, KERNELS, SCALAR
 from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command
 from src.interfaces.commands.vector_sweep import DEFAULT_SCORE_BOARDS
 from src.shared.cloudtask.kinds import TaskName
+
+if TYPE_CHECKING:
+    import argparse
 
 # Longer than a training task's default: the hand-space arm is one full tree
 # pass per board per iteration, and it is the arm worth waiting for.

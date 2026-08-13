@@ -23,14 +23,17 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from src.core.game.evaluator import get_evaluator
 from src.core.game.state import FULL_DECK, Card, GameState
 from src.engine.search.range_inference import ALL_COMBOS, COMBO_CARDS, NUM_COMBOS, blocked_combos
-from src.engine.search.tree_builder import LocalTree, LocalTreeNode
 from src.shared.numeric import NORMALIZE_EPS
+
+if TYPE_CHECKING:
+    from src.engine.search.tree_builder import LocalTree, LocalTreeNode
 
 _MIN_ITERATIONS = 8
 _CARD_A = COMBO_CARDS[:, 0]

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces.commands._base import (
     Command,
@@ -14,6 +12,10 @@ from src.interfaces.commands._base import (
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.statistics import compare_paired_samples
+
+if TYPE_CHECKING:
+    import argparse
+    from pathlib import Path
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

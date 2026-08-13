@@ -39,23 +39,27 @@ from __future__ import annotations
 import logging
 import math
 import time
-from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from itertools import repeat
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.game.actions import Action
 from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS, blocked_combos
 from src.engine.search.subgame_cfr import RunoutEvaluator, nonblocking_mass
 from src.engine.solver.infoset.encoder import get_spr_bucket
 from src.engine.solver.infoset.index import preflop_hand_index
 from src.engine.solver.policy.lookup import blueprint_action_distribution
-from src.engine.solver.policy.source import ScorableBlueprint
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.shared.log import configure_logging
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.core.game.actions import Action
+    from src.engine.solver.policy.source import ScorableBlueprint
 
 logger = logging.getLogger(__name__)
 

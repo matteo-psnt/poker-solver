@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import contextlib
 import threading
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
 
 from src.interfaces.web.cache import TtlCache
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 TTL = 10.0
 

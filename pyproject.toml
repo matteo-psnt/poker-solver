@@ -63,6 +63,7 @@ select = [
     "PERF", # obvious perf smells
     "PGH",  # blanket noqa / type: ignore with no code
     "PIE",
+    "PLC0415", # import inside a function -- deliberate ones carry `# noqa: PLC0415 -- <why>`
     "PT",   # pytest style
     "PTH",  # os.path -> pathlib
     "Q",    # quote style
@@ -72,6 +73,7 @@ select = [
     "SIM",
     "SLF",
     "SLOT", # __slots__ misuse
+    "TC",   # annotation-only import -> `if TYPE_CHECKING:` (see flake8-type-checking)
     "TID",  # tidy imports
     "UP",
     "W",
@@ -92,11 +94,26 @@ ignore = [
     "ERA001",
 ]
 
+# TC assumes an annotation is never evaluated at runtime, and pydantic breaks
+# that: it resolves field annotations to build the model, so a name hidden
+# behind TYPE_CHECKING is a startup crash rather than a lint. Declared rather
+# than left to inference -- the payload contract and the config schemas should
+# not depend on a ruff version continuing to guess right. Two other runtime
+# readers of annotations are NOT covered and must be added here if one ever
+# appears in a moved import: a FastAPI route signature (request parsing is
+# derived from it) and any dataclass reached by `get_type_hints`.
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 [tool.ruff.lint.per-file-ignores]
 "*.py" = ["E501"]
 # Tests are full of deliberately-unused arguments: monkeypatch stand-ins that
 # must match a real signature, and fixtures requested for their side effect.
-"tests/**/*.py" = ["SLF001", "ARG001", "ARG002", "ARG005"]
+# PLC0415 is off here because a test module ships nothing, and importing inside
+# a test is how you import the module under test AFTER monkeypatching what it
+# reads at import time, or keep a heavy optional dependency off the collection
+# path (`conftest.py::requires_card_abstraction`).
+"tests/**/*.py" = ["SLF001", "ARG001", "ARG002", "ARG005", "PLC0415"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

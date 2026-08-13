@@ -31,10 +31,8 @@ is no poller here and nothing depends on a background thread staying alive.
 from __future__ import annotations
 
 import sys
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -75,6 +73,10 @@ from src.interfaces.errors import attempt
 from src.interfaces.web import blueprint_proxy, contract, views
 from src.interfaces.web.cache import TtlCache
 from src.shared import jsonio, repo
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
 
 # Long enough that several open tabs (or a remount) share one cloud sweep,
 # short enough that a manual refresh feels live. A sweep is 2-4s per panel.
