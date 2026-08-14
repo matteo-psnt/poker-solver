@@ -5,48 +5,21 @@
 written by anyone, and never should be.
 
 **Every command payload here is IMPORTED.** The shape is declared once, in the
-command that constructs it, and this file gives it the name the API uses. That
-is the whole design, and it is new: these models used to be a second, parallel
-declaration of every payload, hand-written and hand-maintained. Measured on
-2026-08-13 -- renaming a REQUIRED field in `jobs.py` passed 1061 tests, because
-the model here and the `PAYLOADS` fixture were both hand-written and drifted
-together, away from what `run()` actually returned. `ty` makes that a
-pre-commit failure now.
+command that constructs it, and this file gives it the name the API uses. What
+is still DECLARED below is neither a command's payload nor meant to stay: the
+composed views, which are the console's own shapes and belong to no command, and
+the blueprint server's, which is a separate process reached over HTTP precisely
+so the console never imports the engine. If those start to drift, declare them
+in `src/interfaces/blueprint/app.py` and import them here.
 
-What is still DECLARED in this file, and why
---------------------------------------------
-Two kinds, and neither is a command's payload:
+``extra="allow"`` on :class:`Payload` covers only the classes below. An imported
+command payload IS the payload, so there is nothing extra to tolerate.
 
-- **The composed views** (`Part`, `View`, `NowView` and friends). These are the
-  console's own shapes -- `web/views.py` builds them and no command owns one --
-  so this is where they belong.
-- **The blueprint server's shapes.** That is a SEPARATE PROCESS holding a loaded
-  run, reached over HTTP through `/api/blueprint/*` precisely so the console
-  never imports the engine. They are declared here as a client describing a
-  server it cannot import from, which is the one place a second declaration is
-  the honest answer rather than a smell. They remain hand-maintained; if they
-  start to drift, the fix is the same move -- declare them in
-  `src/interfaces/blueprint/app.py` and import them here.
-
-Why the view models stay lenient
---------------------------------
-``extra="allow"`` on :class:`Payload`, which only the classes below inherit. An
-imported command payload does not need it: the model IS the payload, so there is
-nothing extra to tolerate.
-
-Why this does not validate at request time
-------------------------------------------
-It cannot. FastAPI skips validation and serialization for a handler that returns
-a ``Response``, and every endpoint here returns :class:`PayloadResponse` -- which
-exists because `jsonio.dumps` handles the numpy scalars and ``Path`` objects
-these payloads carry, and that plain ``json.dumps`` turns into a 500 the CLI
-never sees. Measured: a handler declaring ``response_model`` and returning a
-wrong-shaped ``JSONResponse`` answers 200 with the wrong shape, while
-`/openapi.json` still carries the right ``$ref``.
-
-So the request-time guarantee is the CONSTRUCTOR, checked statically, plus
-`tests/interfaces/web/test_contract.py` round-tripping each model against the
-`PAYLOADS` examples -- which are constructor calls now, not literals.
+This does not validate at request time and cannot: FastAPI skips validation and
+serialization for a handler returning a ``Response``, and every endpoint returns
+:class:`PayloadResponse` to keep `jsonio.dumps`, which handles the numpy scalars
+and ``Path`` objects these payloads carry. The guarantee is the CONSTRUCTOR,
+checked statically, plus `tests/interfaces/web/test_contract.py`.
 """
 
 from __future__ import annotations

@@ -1,40 +1,28 @@
 """The `compact-legs` subcommand: many sealed task records into one file.
 
-``legs/`` is the durable per-task account, and `tasks` answers by joining ALL of
-it. Measured on 2026-08-10: 375 files totalling 0.18 MB. The bytes are nothing;
-the round trips are the whole cost, and they are paid by `tasks`, by `cost`
-(which invokes it), and so by the console's landing page.
+``legs/`` is the durable per-task account and `tasks` answers by joining ALL of
+it. The bytes are nothing; the round trips are the whole cost, and they are paid
+by `tasks`, by `cost`, and so by the console's landing page.
 
-What makes this safe rather than clever
----------------------------------------
 The bundle stores documents VERBATIM, keyed by the filename they had. Reading is
 already indifferent to which container a document is in
 (:func:`task_log.read_documents`), so bundling is a change of container and
-provably nothing else -- which is what lets this command verify itself by
-comparing the joined rows before and after, rather than by trusting an argument.
+provably nothing else -- which lets this command verify itself by comparing the
+joined rows before and after rather than by trusting an argument.
 
-Only SEALED attempts move. An attempt with no terminal record is one that
-reconciliation still writes a ``<task>.observed.json`` for, and that is a
-filename rather than a bundle entry.
+Only SEALED attempts move: an attempt with no terminal record is one that
+reconciliation still writes a ``<task>.observed.json`` for.
 
-A bundle is per LABEL, not per compaction
------------------------------------------
-The second round at a given label ABSORBS the bundle already there. It has to:
-the documents that bundle holds are no longer loose, so ``compactable`` does not
-offer them, and a payload built from its answer alone would replace them. The
-default label is ``sealed``, so this is the ordinary path -- the verification
-below caught the resulting loss, but only after the share had been overwritten.
+A bundle is per LABEL, and a second round at that label ABSORBS the one already
+there. It has to -- those documents are no longer loose, so ``compactable`` does
+not offer them, and a payload built from its answer alone would replace them.
+The default label is ``sealed``, so this is the ordinary path. The bundle also
+records the act, because nothing else does.
 
-And the bundle records the act. Nothing else does: this command can remove
-hundreds of files from the share, which is the only copy of the task record, and
-the sole trace used to be a backup directory on whichever laptop ran it.
-
-Deleting is a separate decision from bundling
----------------------------------------------
-The default is a dry run: it says what WOULD move. ``--apply`` writes the bundle
-and verifies it. Only then, and only with ``--delete``, are the loose files
-removed -- and the local backup written first is the thing that makes that
-reversible, because nothing else on this machine holds a copy of the record.
+Deleting is a separate decision from bundling. The default is a dry run;
+``--apply`` writes the bundle and verifies it; only then, and only with
+``--delete``, are the loose files removed -- and the local backup written first
+is what makes that reversible.
 """
 
 from __future__ import annotations

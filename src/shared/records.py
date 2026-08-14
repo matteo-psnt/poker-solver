@@ -1,22 +1,8 @@
 """How this project writes and reads everything it records.
 
-Six artifacts grew six hand-rolled conventions. Each writer decided
-independently whether to stamp a schema version, whether to survive a torn
-file, and whether to write atomically, and no two agreed:
-
-    .run.json               versioned, NOT tolerant, NOT atomic
-    progress.jsonl          versioned, tolerant,     NOT atomic
-    STATIC_CHECKPOINT.json  NOT versioned, NOT tolerant, atomic
-    eval_ledger.jsonl       versioned, tolerant,     atomic
-    legs/*.json             versioned, tolerant,     NOT atomic
-    baseline.json           NOT versioned, tolerant, atomic
-
-That is not a style problem. ``.run.json`` -- the most-read artifact here --
-was written with ``open("w")`` then ``json.dump``, so a kill inside that window
-left it truncated, and a truncated ``.run.json`` made a resume die with
-JSONDecodeError while intact checkpoints sat beside it.
-
-There are exactly two storage shapes, and this module owns both.
+Six artifacts had grown six hand-rolled conventions, disagreeing on all three
+axes -- schema version, tolerance of a torn file, atomicity. There are exactly
+two storage shapes, and this module owns both.
 
 SNAPSHOT is current state: the whole document is rewritten and only the latest
 version matters (``.run.json``, the checkpoint manifest, the baseline).
@@ -25,27 +11,18 @@ LOG is history: rows are appended and never rewritten, so one file legitimately
 spans code versions as a run is resumed across tasks (``progress.jsonl``, the
 eval ledger).
 
-Atomicity is a property of the destination, not a preference. On local disk a
-snapshot is written to a temporary file and renamed, which is atomic. The Azure
-share is SMB and has **no atomic rename**, so a share-scoped snapshot is written
-directly and safety comes from the layout instead: one writer per file, and
-separate files per event so a torn write cannot destroy an earlier record. The
-registry records which kind of destination an artifact lives on, so a caller
-cannot get this wrong by accident. That is the only axis: ``local`` or
-``share``.
+Atomicity is a property of the DESTINATION, not a preference. On local disk a
+snapshot is written to a temporary file and renamed. The Azure share is SMB and
+has **no atomic rename**, so a share-scoped snapshot is written directly and
+safety comes from the layout instead: one writer per file, separate files per
+event. The registry records which kind of destination an artifact lives on, so
+a caller cannot get this wrong by accident.
 
-Every artifact is declared in :data:`REGISTRY`. A test asserts nothing writes
-outside it, so "what does this project store" is answerable by reading one list.
-
-WHERE it lives and HOW IT GROWS are declared there too, and for the same
-reason: otherwise answering "where does a leg record live" means reading
-``task_log`` and ``share`` and ``archive`` and hoping they agree, and no single
-place says which of these accumulate forever. Two do: ``legs/*`` gains four
-files per task-attempt and is
-read by joining ALL of them, and code snapshots gain a tarball per submit.
-Neither is pruned by anything. ``growth`` is prose because it is read by a
-person deciding what to compact, not by code -- the alternative, a machine
--checkable bound, would be a number nobody could honestly supply.
+Every artifact is declared in :data:`REGISTRY`, with where it lives and how it
+grows; a test asserts nothing writes outside it. ``growth`` is prose because it
+is read by a person deciding what to compact -- two artifacts accumulate
+forever and nothing prunes either: ``legs/*`` gains four files per task-attempt,
+and code snapshots gain a tarball per submit.
 """
 
 from __future__ import annotations

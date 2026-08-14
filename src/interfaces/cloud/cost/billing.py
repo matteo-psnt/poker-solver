@@ -1,70 +1,26 @@
 """What Azure actually charged, as opposed to what node time implies.
 
-:mod:`~src.interfaces.cloud.cost.node_time` derives an estimate from the task log:
-complete, granular, attributable to a run -- and structurally unable to be the
-bill. Three reasons, all measured over 2026-07-26..2026-08-09:
+:mod:`~src.interfaces.cloud.cost.node_time` derives an estimate from the task
+log -- complete, granular, attributable to a run, and structurally unable to be
+the bill. A node is not only a task (allocation and release bill too, measured
+at 1.34x), compute is not the whole invoice (28% was storage, disks and IPs),
+and one ``hourly_cost`` scalar cannot span a history of three SKUs. So this
+asks the biller: Cost Management, the same source ``just credit-check`` reads.
 
-* **A node is not only a task.** 351.3 VM-hours were billed against 263.0 hours
-  of task execution -- allocation before a task starts and release after it
-  ends, at 1.34x.
-* **Compute is not the whole invoice.** $88.71 of $316.71 (28%) was storage,
-  disks, load balancer and public IPs. The largest single non-compute line was
-  $54.00 of LRS write operations -- 3.6M of them, the share being written a
-  record at a time. No multiple of node-hours finds that.
-* **One rate cannot span the history.** Billing shows three SKUs (D16als_v6,
-  D8als_v6, and 0.2h of D8alds_v6), while ``hourly_cost`` is a single scalar
-  for whatever ``vm_size`` is deployed *now*. The task log carries ``node_id``
-  but no SKU, so the estimator cannot fix this even in principle.
+Every entry point returns ``None`` rather than raising when Azure cannot be
+reached. Node time is a property of the task log and stays reportable on a
+machine with no cloud credentials -- that promise outranks this module.
 
-So this asks the biller. Cost Management is the same source ``just
-credit-check`` reads, which is what makes the two agree.
+Cost data LAGS by hours and is restated, so the most recent day always reads
+low. ``as_of`` is reported and every surface is expected to show it.
 
-Additive, and independently failing
------------------------------------
-Every entry point here returns ``None`` rather than raising when Azure cannot be
-reached. Node time is a property of the task log and must stay reportable on a
-machine with no cloud credentials configured -- that promise predates this
-module and outranks it. A cost screen that dies because the billing API is slow
-is worse than one that says "billed spend unavailable" above numbers it still
-has.
-
-Freshness
----------
-Cost data LAGS, by hours, and is restated. The most recent day is always
-partial: 2026-08-08 read $7.22 against 21.00 VM-hours ($0.34/hr) while the
-deployed SKU bills $0.688 -- not a cheap day, an incomplete one. ``as_of`` is
-therefore reported and every surface is expected to show it, because a number
-that silently means "up to some point yesterday" invites exactly the wrong
-conclusion about a pool that is running right now.
-
-Rate limits, and why the cache lives here
------------------------------------------
-Cost Management is metered far more tightly than the rest of ARM and answers
-429 to a handful of queries in quick succession -- observed repeatedly while
-developing this, and the penalty outlasts the burst by many minutes. The
-console's own cache is 15s, which for this endpoint is both a way to get
-throttled and pointless: the underlying data does not move for hours.
-
-So the cache is here rather than at a caller. The constraint belongs to the API,
-and putting it at the seam means every surface inherits it -- the CLI, the web
-server, and any future poller -- instead of each rediscovering the 429.
-
-It is TWO layers, because they solve different halves:
-
-in-process
-    A dict, for the long-lived server. Several endpoints and several open tabs
-    share one sweep.
-on disk
-    Under the shared cache root, for the CLI -- which is a fresh process every
-    time, so the memo above never hits and `poker-solver cost` run three times
-    was three queries. That is exactly how the 429s above were earned. Cost data
-    lags hours, so serving a 15-minute-old figure to a new process is not a
-    compromise; re-asking would be.
-
-Failures are cached too, briefly -- a throttled miss that immediately retries is
-what turns one 429 into a sustained one -- but only in memory. A cross-process
-failure cache would make one bad minute persist into the next command, and the
-CLI is where someone is actively trying to fix things.
+The cache lives here, at the seam, because the constraint belongs to the API:
+Cost Management is metered far more tightly than the rest of ARM and answers 429
+to a handful of queries in quick succession, for minutes. Two layers, for the
+two callers -- a dict for the long-lived server, and a disk cache under the
+shared cache root for the CLI, which is a fresh process every time. Failures are
+cached briefly and IN MEMORY ONLY: a cross-process failure cache would make one
+bad minute persist into the next command.
 """
 
 from __future__ import annotations

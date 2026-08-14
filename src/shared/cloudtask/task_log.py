@@ -20,21 +20,13 @@ window this exists for. Numbered by attempt because a Batch retry reuses the
 task id and Batch describes only the latest, so one file would let the retry
 erase the OOM that caused it.
 
-SNAPSHOTs in :mod:`src.shared.records` terms, share-scoped -- which is why they
-are written directly rather than through a temporary file: SMB has no atomic
-rename, so the per-file layout carries the safety instead.
+SNAPSHOTs in :mod:`src.shared.records` terms, share-scoped, written directly
+rather than through a temporary file: the per-file layout carries the safety
+that an atomic rename would.
 
-WHY THIS FILE IS ONLY THE WRITER. Stdlib-only -- the wrapper imports it before
-`uv sync`. Enforced twice: by
-``tests/shared/cloudtask/node/test_node_interpreter.py``, which imports the
-node's whole closure with the NODE's system ``python3`` (3.10 on the pinned
-Ubuntu 22.04 image, not the 3.13 this project is developed against --
-``datetime.UTC`` is 3.11+, and importing it here once raised inside a call whose
-errors are swallowed, so the whole feature was silently dead on the only machine
-that runs it); and by ``tests/shared/cloudtask/test_imports.py``, which is
-fail-closed over every file in this package. That second guard is why reading
-lives elsewhere: it would otherwise hold 260 lines of laptop-only code to a
-floor they have no reason to meet.
+The WRITER only, and stdlib-only with it -- see `.claude/rules/cloud.md`. The
+reading half lives outside this package so the fail-closed import guard does not
+hold 260 lines of laptop-only code to the node's 3.10 floor.
 """
 
 from __future__ import annotations
