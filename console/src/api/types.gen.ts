@@ -1362,10 +1362,7 @@ export interface components {
             payoff: number | null;
             /** Pot */
             pot: number;
-            /**
-             * Session
-             * @default
-             */
+            /** Session */
             session: string;
             /** Showdown */
             showdown: boolean;

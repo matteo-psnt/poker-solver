@@ -1508,7 +1508,6 @@
             "type": "number"
           },
           "session": {
-            "default": "",
             "title": "Session",
             "type": "string"
           },
@@ -1540,6 +1539,7 @@
           }
         },
         "required": [
+          "session",
           "over",
           "street",
           "board",

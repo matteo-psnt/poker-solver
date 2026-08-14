@@ -21,10 +21,9 @@ the fine-abstraction arm possible at all.
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -53,6 +52,7 @@ from src.pipeline.abstraction.vector_universe import (
     iter_universe,
     sample_boards,
 )
+from src.shared import jsonio
 from src.shared.config.loader import load_config
 
 if TYPE_CHECKING:
@@ -245,15 +245,19 @@ def run(args: argparse.Namespace) -> VectorSweepPayload:
 
     requested = args.checkpoints or DEFAULT_CHECKPOINTS[args.kernel]
     checkpoints = [int(part) for part in requested.split(",") if part.strip()]
-    points: list[dict[str, Any]] = []
+    points: list[SweepPoint] = []
     started = time.perf_counter()
 
     def checkpoint_reached(derive_seconds: float | None) -> None:
         """Persist what is known so far, so a kill is not a total loss."""
         if not args.progress_file:
             return
+        # `jsonio.dumps`, not `json.dumps`: the payload is a model now, and the
+        # stdlib encoder raises on one. This path only runs on a node with
+        # --progress-file set, so a plain dumps would have failed there and
+        # nowhere else -- a pool spin-up to find out.
         Path(args.progress_file).write_text(
-            json.dumps(
+            jsonio.dumps(
                 _payload(
                     args, counts, compiled, baseline, points, derive_seconds, len(checkpoints)
                 ),
@@ -282,14 +286,14 @@ def run(args: argparse.Namespace) -> VectorSweepPayload:
                     done += 1
                 scorer.strategy_sum[:] = storage.strategy_sum
                 points.append(
-                    {
-                        "iterations": done,
-                        "train_seconds": round(time.perf_counter() - started, 1),
-                        "exploitability": round(float(scorer.exploitability(initial, pairs)), 6),
-                        "unconstrained": round(
+                    SweepPoint(
+                        iterations=done,
+                        train_seconds=round(time.perf_counter() - started, 1),
+                        exploitability=round(float(scorer.exploitability(initial, pairs)), 6),
+                        unconstrained=round(
                             float(scorer.exploitability(initial, pairs, unconstrained=True)), 6
                         ),
-                    }
+                    )
                 )
                 checkpoint_reached(None)
         finally:
@@ -303,20 +307,20 @@ def run(args: argparse.Namespace) -> VectorSweepPayload:
                 done += 1
             scorer.strategy_sum[:] = solver.strategy_sum
             points.append(
-                {
-                    "iterations": done,
-                    "train_seconds": round(time.perf_counter() - started, 1),
+                SweepPoint(
+                    iterations=done,
+                    train_seconds=round(time.perf_counter() - started, 1),
                     # Scored through `scorer`, never `solver`: one carries the
                     # scoring boards and the other the training boards, and with
                     # --train-boards those are disjoint. Scoring on `solver`
                     # grades the kernel on its own training set.
-                    "exploitability": round(float(scorer.exploitability(initial, pairs)), 6),
+                    exploitability=round(float(scorer.exploitability(initial, pairs)), 6),
                     # Against an opponent who sees its own cards rather than only
                     # its bucket -- always the larger of the two.
-                    "unconstrained": round(
+                    unconstrained=round(
                         float(scorer.exploitability(initial, pairs, unconstrained=True)), 6
                     ),
-                }
+                )
             )
             checkpoint_reached(None)
     else:
@@ -346,14 +350,14 @@ def run(args: argparse.Namespace) -> VectorSweepPayload:
             spent += time.perf_counter() - block
             scorer.strategy_sum[:] = solver.strategy_sum
             points.append(
-                {
-                    "iterations": trained,
-                    "train_seconds": round(spent, 1),
-                    "exploitability": round(float(scorer.exploitability(initial, pairs)), 6),
-                    "unconstrained": round(
+                SweepPoint(
+                    iterations=trained,
+                    train_seconds=round(spent, 1),
+                    exploitability=round(float(scorer.exploitability(initial, pairs)), 6),
+                    unconstrained=round(
                         float(scorer.exploitability(initial, pairs, unconstrained=True)), 6
                     ),
-                }
+                )
             )
             checkpoint_reached(derive_seconds)
         return _payload(args, counts, compiled, baseline, points, derive_seconds, len(checkpoints))
@@ -381,7 +385,7 @@ def _payload(
         derive_seconds=derive_seconds,
         uniform_baseline=round(baseline[0], 6),
         uniform_baseline_unconstrained=round(baseline[1], 6),
-        points=[SweepPoint.model_validate(point) for point in points],
+        points=list(points),
         best_exploitability=best["exploitability"] if best else None,
         best_at_iterations=best["iterations"] if best else None,
     )
