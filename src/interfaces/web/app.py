@@ -210,26 +210,18 @@ class PromoteBody(BaseModel):
 def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
     """Run one command, memoised, and map its failures onto status codes.
 
-    ``cache`` and ``command`` are POSITIONAL-ONLY, and the ``/`` is load-bearing.
-    Everything after it is a command's own flags, and a command is free to have
-    a flag called `command` -- `activity --command tasks` does. Without the
-    slash that argument binds to this function's parameter instead, and the
-    error is a type mismatch several frames from anything the reader was
-    thinking about. The same trap waits for any future `--cache`.
+    ``cache`` and ``command`` are POSITIONAL-ONLY and the ``/`` is load-bearing:
+    everything after it is a command's own flags, and a command is free to have one
+    called `command` -- `activity --command tasks` does. Without the slash that
+    argument binds here instead, several frames from anything the reader was
+    thinking about.
 
-    The cache is passed in rather than reached for: :func:`create_app` owns one
-    per application, so two apps in one process (a test and its subject, most
-    of all) cannot serve each other's answers.
+    The cache is passed in rather than reached for, so two apps in one process (a
+    test and its subject) cannot serve each other's answers.
 
-    A refusal is data, not a crash: the client renders one panel as unavailable
-    and keeps the rest. That is the same contract `status` relies on -- which is
-    why *which* failures are survivable is decided once, in
-    :func:`~src.interfaces.errors.attempt`, and only the rendering of them is
-    decided here.
-
-    Failures are deliberately not cached. A repeated 503 costs a repeated cloud
-    read, which is the right trade: the alternative keeps serving "Azure is
-    down" for the whole TTL after `az login` has already fixed it.
+    Failures are deliberately NOT cached: a repeated 503 costs a repeated cloud
+    read, and the alternative keeps serving "Azure is down" for the whole TTL after
+    `az login` has fixed it.
     """
     key = (command.name, tuple(sorted(kwargs.items())))
     # Around the memo, not inside it: a request served from the cache did not

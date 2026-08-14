@@ -120,29 +120,17 @@ def compose(
 ) -> dict[str, Any]:
     """A composed payload: the parts, plus when they were answered and how long.
 
-    ``elapsed_seconds`` is the wall clock of the whole fan-out, which is the
-    number that says whether concurrency is working. A composed screen whose
-    elapsed time equals the sum of its parts has silently become serial, and
-    nothing else about the payload would show it.
+    ``elapsed_seconds`` is the wall clock of the whole fan-out, and a composed
+    screen whose elapsed time equals the sum of its parts has silently become
+    serial.
 
-    ``join`` is where a view draws cross-references BETWEEN parts that have now
-    been answered -- it takes them and returns the extra top-level fields. It is
-    a callback rather than keyword arguments because the joins depend on the
-    answers, which do not exist until the fan-out has returned.
+    ``join`` draws cross-references BETWEEN parts once they are answered, returning
+    extra top-level fields. A callback rather than keyword arguments because the
+    joins depend on answers that do not exist until the fan-out returns.
 
-    Joining is not computing, and that distinction is the whole licence this
-    module operates under. `task.run_id == run` is the same join the console
-    currently does client-side after downloading the entire task log to discard
-    ~95% of it; moving it here is a question of where the data already is, not
-    of this layer learning what a task means. A join may filter, group and
-    cross-reference payloads. It may not derive a quantity -- the moment it
-    computes something no command can answer, the console has a second read
-    path again, and `tests/interfaces/web/test_no_second_read_path.py` is what
-    says so.
-
-    A join runs only over parts that SUCCEEDED. It must tolerate a missing key:
-    parts fail independently by design, and a view whose join raises because one
-    panel was unavailable has given up the property the fan-out exists for.
+    A join runs only over parts that SUCCEEDED, and must tolerate a missing key:
+    parts fail independently by design, and a join that raises because one panel was
+    unavailable gives up the property the fan-out exists for.
     """
     started = time.perf_counter()
     answered = fan_out(parts)

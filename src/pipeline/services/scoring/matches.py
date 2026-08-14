@@ -139,7 +139,7 @@ def record_blueprint_match(
     abstractions were compared. The payload (not any ledger row) is the durable record,
     so a client guillotine after the match commits loses nothing.
 
-    Returns the payload; the caller (Modal) commits the Volume so it survives the
+    Returns the payload; the node publishes it to the share so it outlives the
     container.
     """
     metadata_a = load_run_metadata(run_dir_a)

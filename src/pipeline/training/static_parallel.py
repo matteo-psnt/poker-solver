@@ -75,21 +75,17 @@ def worker_iteration_indices(
 ) -> range:
     """Global iteration indices for one worker: ``worker_id, +N, +2N, ...``
 
-    INTERLEAVED, not contiguous blocks, and the difference is not cosmetic.
-    ``solver.iteration`` is not a progress counter — it is read as *t* by the
-    DCFR discount ``t^a/(t^a+1)``, by the strategy weight ``t^gamma``, and by the
-    traversing-player and button alternation. Contiguous blocks would give the
-    first worker only small *t* and the last only large *t*, so each would apply
-    a different slice of the discount schedule to the shared arrays.
+    INTERLEAVED, not contiguous blocks. ``solver.iteration`` is not a progress
+    counter -- it is read as *t* by the DCFR discount ``t^a/(t^a+1)``, by the
+    strategy weight ``t^gamma``, and by the traversing-player and button
+    alternation. Contiguous blocks would give the first worker only small *t* and
+    the last only large *t*, each applying a different slice of the discount
+    schedule to the shared arrays. Interleaved, every worker sees the full range and
+    the union is exactly ``range(num_iterations)``.
 
-    Interleaving gives every worker the full range of *t*, and the union across
-    workers is exactly ``range(num_iterations)`` — the same absolute numbering a
-    single-worker run would see.
-
-    ``start`` is the absolute iteration this chunk begins at, so a resumed or
-    mid-run chunk keeps numbering from where the checkpoint left off rather than
-    replaying *t* from zero -- which would re-apply the early, barely-discounted
-    part of the DCFR schedule to an already-trained table.
+    ``start`` is the absolute iteration this chunk begins at, so a resumed chunk
+    keeps numbering from the checkpoint rather than replaying *t* from zero -- which
+    would re-apply the barely-discounted early schedule to a trained table.
     """
     return range(start + worker_id, num_iterations, num_workers)
 

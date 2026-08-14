@@ -63,21 +63,17 @@ class BadTaskError(ValueError):
 class TaskFields(Protocol):
     """What a kind's :meth:`TaskKind.validate` reads, from EITHER end of the wire.
 
-    Structural on purpose. The submit end passes
-    ``interfaces.cloud.spec.TaskSpec`` and the node end passes
-    ``shared.node.plan.TaskPlan``, and ``.importlinter`` forbids
-    ``src.shared -> src.interfaces`` -- so this module cannot name either class,
-    not even under ``TYPE_CHECKING``. A Protocol is how the seam gets a type
-    without the import that would invert the layering.
+    Structural on purpose: the submit end passes ``interfaces.cloud.spec.TaskSpec``,
+    the node end passes ``shared.node.plan.TaskPlan``, and ``.importlinter`` forbids
+    ``src.shared -> src.interfaces``, so this module cannot name either class even
+    under ``TYPE_CHECKING``.
 
-    The INTERSECTION of the two shapes, deliberately. Both ends validate through
-    the same kind -- that is what stops the node accepting what the submitter
-    would have refused -- so a field only one of them carries cannot be part of
-    the check.
+    The INTERSECTION of the two shapes, deliberately. Both ends validate through the
+    same kind -- that is what stops the node accepting what the submitter would have
+    refused -- so a field only one of them carries cannot be part of the check.
 
-    Read-only properties rather than plain attributes, because both
-    implementations are frozen dataclasses and a mutable protocol member would
-    refuse them.
+    Read-only properties, because both implementations are frozen dataclasses and a
+    mutable protocol member would refuse them.
     """
 
     @property

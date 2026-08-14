@@ -209,22 +209,17 @@ def manifest_members(service: ShareServiceClient, share: str, run_path: str) -> 
     """Every snapshot directory the manifest names, or ``None`` if it is absent.
 
     THE MANIFEST IS THE DEFINITION OF COMPLETE. A killed task leaves
-    partially-copied snapshot directories on the share, and the publish writes
-    the manifest LAST precisely so it never names one of them. Fetching the
-    directory listing instead of the manifest is what pulls an orphan down --
-    which then reads as ``mmap length is greater than file size``, and which a
-    later incremental copy skips as already-present, making it permanent.
+    partially-copied snapshot directories, and the publish writes the manifest LAST
+    so it never names one. Listing the directory instead pulls an orphan down, which
+    reads as ``mmap length is greater than file size`` and which a later incremental
+    copy skips as already-present, making it permanent.
 
-    The whole LADDER is returned, not just the current snapshot. Every retained
-    rung is a legitimate evaluation target -- it is what makes a within-run
-    exploitability curve computable at all -- so naming only ``zarr`` would
-    trade over-fetching orphans for silently dropping every rung but the last,
-    leaving ``curve`` with a single point.
+    The whole LADDER, not just the current snapshot: every retained rung is a
+    legitimate evaluation target, which is what makes a within-run exploitability
+    curve computable at all.
 
-    The manifest NAME is imported rather than spelled out here. The static tree
-    is the only backend, its manifest is ``STATIC_CHECKPOINT.json``, and a
-    hardcoded ``CHECKPOINT.json`` fails *open*: the guard silently degrades to
-    "fetch everything" instead of raising.
+    The manifest NAME is imported rather than spelled here, because a hardcoded one
+    fails OPEN -- the guard would silently degrade to "fetch everything".
     """
     raw = read_text(service, share, f"{run_path}/{records.STATIC_CHECKPOINT}")
     if raw is None:

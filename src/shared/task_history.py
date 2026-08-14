@@ -59,9 +59,9 @@ if TYPE_CHECKING:
 OBSERVED_SUFFIX = ".observed.json"
 
 # Batch ``executionInfo.result`` / task state -> coarse exit cause. The dead
-# process cannot report these; Batch can. Note that FAILURE conflates an
-# in-container error with an OOM-kill, exactly as Modal's does -- the node is
-# gone either way, and only the published task log can tell them apart.
+# process cannot report these; Batch can. FAILURE conflates an in-container
+# error with an OOM-kill -- the node is gone either way, and only the published
+# task log can tell them apart.
 _OBSERVED_CAUSE_BY_RESULT: dict[str, str] = {
     "success": "completed",
     "failure": "failed",
