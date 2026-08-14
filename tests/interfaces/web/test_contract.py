@@ -31,13 +31,8 @@ from src.interfaces.web import contract
 from tests.interfaces.commands.test_command_renderers import PAYLOADS
 from tests.interfaces.web.test_command_coverage import _commands_the_console_invokes
 
-"""Which model describes which command's payload.
-
-Only the commands the console READS. `evaluate`, `train-static` and `precompute`
-are node compute and have no endpoint; `serve` and `blueprint-serve` return no
-payload at all. `test_command_coverage.py` is what holds that list -- this one
-would be the wrong place to re-declare it.
-"""
+# Only the commands the console READS; `test_command_coverage.py` holds the list
+# of what is excluded and why, and this would be the wrong place to re-declare it.
 MODELS: dict[str, type[BaseModel]] = {
     "pool-status": contract.Pool,
     "jobs": contract.Jobs,

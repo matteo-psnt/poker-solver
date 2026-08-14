@@ -37,14 +37,9 @@ from src.shared import repo
 
 WEB = repo.SRC / "interfaces" / "web"
 
-"""What `views.py` is allowed to know about
------------------------------------------
-The command registry, the fan-out, and the standard library. Not `cloud`, not
-`pipeline`, not `shared.records` -- a view that imports a reader is a view that
-can answer a question itself, which is the whole failure being guarded against.
-`_compose` is on the list because it is the fan-out; it invokes commands and
-does nothing else, which is pinned by `tests/interfaces/commands/test_compose.py`.
-"""
+# The command registry, the fan-out, and the stdlib. Not `cloud`, not `pipeline`,
+# not `shared.records`: a view that imports a reader can answer a question
+# itself, which is the failure being guarded against. `_compose` is the fan-out.
 VIEW_IMPORTS = {
     "src.interfaces.commands",
     "src.interfaces.commands._compose",

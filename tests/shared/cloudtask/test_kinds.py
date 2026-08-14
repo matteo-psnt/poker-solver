@@ -15,12 +15,9 @@ from src.shared.cloudtask import kinds
 from src.shared.cloudtask.kinds import BadTaskError, Progress, Sample, TaskKind, TaskName
 from src.shared.cloudtask.node import plan as node_plan
 
-"""An op string this project has never defined and never will.
-
-Deliberately not a real retired op: see
-``TestLookup.test_the_read_path_tolerates_its_own_history`` for why naming one
-has broken this test twice.
-"""
+# Deliberately not a real retired op -- see
+# `TestLookup.test_the_read_path_tolerates_its_own_history` for why naming one
+# has broken this test twice.
 RETIRED_OP = "train-dynamic"
 
 

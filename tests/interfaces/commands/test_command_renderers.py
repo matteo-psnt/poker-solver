@@ -50,24 +50,11 @@ from src.pipeline.services.experiments import CurveOutput, CurvePoint
 from src.shared.task_history import TaskProgress, TaskRow
 from src.shared.task_states import Phase
 
-"""The pinned payloads, as CONSTRUCTOR CALLS.
-
-A dict literal here was a second declaration of a payload's shape, and it is the
-one that made renaming a REQUIRED field pass 1061 tests: the fixture and
-`contract.py` were both hand-written, so they drifted together away from what
-`run()` actually returns. A model instance cannot -- `ty` checks it against the
-same class the command constructs, at pre-commit time.
-
-Converting them found four fixtures that had been wrong for as long as they
-existed: `curve` omitted `eval_git_commit`, `ledger` carried a `rebuilt` key the
-command had stopped returning and lacked the `matched` it does return, `compare`
-was missing `n` and `t_statistic`, and `runinfo` had neither `attempts` nor two
-of the curve's fields.
-
-The remaining dicts are the commands whose payload is not typed yet --
-`vector-sweep`, `evaluate`, `status` and the two that never return one. `Any` is
-the type for exactly as long as that is true.
-"""
+# CONSTRUCTOR CALLS, not dict literals. A literal here is a second declaration
+# of a payload's shape and drifts with `contract.py` rather than against it --
+# which is how renaming a REQUIRED field passed 1061 tests. A model instance is
+# checked by `ty` against the same class the command constructs.
+# The remaining dicts are the commands whose payload is not typed yet.
 PAYLOADS: dict[str, Any] = {
     "train-static": StaticTrainingPayload(
         run_id="run-a",

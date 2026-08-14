@@ -52,13 +52,9 @@ NODE_ONLY: dict[str, str] = {
 
 EXCLUDED = NO_PAYLOAD | NODE_ONLY
 
-"""`status` composes three commands the console already renders as panels.
-
-Not an exclusion: every question it answers is on the Overview page, through
-`pool-status`, `jobs` and `tasks` individually. An `/api/status` endpoint would
-be a second path to the same three answers -- the thing `test_no_second_read_path`
-exists to prevent -- so it is covered BY those three rather than by itself.
-"""
+# NOT an exclusion: `status` composes three commands the console already renders
+# as panels, so every question it answers is on the Overview page. An
+# `/api/status` would be the second read path `test_no_second_read_path` forbids.
 COMPOSED: dict[str, tuple[str, ...]] = {"status": ("pool-status", "jobs", "tasks")}
 
 

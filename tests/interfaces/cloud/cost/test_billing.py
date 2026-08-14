@@ -40,8 +40,8 @@ def _response(rows: list[list[object]]) -> dict[str, object]:
     }
 
 
-"""Two days of the real bill, reduced. Numbers taken from the 2026-08 audit so
-the arithmetic below is checkable against something that happened."""
+# Two days of the real bill, reduced. Numbers from the 2026-08 audit, so the
+# arithmetic below is checkable against something that happened.
 REAL_ROWS: list[list[object]] = [
     [100.00, 145.35, 20260803, "Virtual Machines", "azurebatch-abc-c", "USD"],
     [114.12, 165.87, 20260806, "Virtual Machines", "azurebatch-def-c", "USD"],
