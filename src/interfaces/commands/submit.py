@@ -115,6 +115,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "generally the best one.",
     )
     parser.add_argument(
+        "--warm-start-shape",
+        default="",
+        dest="warm_start_shape",
+        choices=("", "flat", "confidence"),
+        help="[scalar] How the prior's weight is spread across rows. flat gives "
+        "every row the full weight; confidence damps rows the prior is "
+        "indifferent about, so they stop braking the solver.",
+    )
+    parser.add_argument(
         "--timeout",
         default=spec.DEFAULT_TIMEOUT,
         help="Wall-clock ceiling on the TRAINING process. It fires before the task-level "
@@ -185,6 +194,7 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 warm_start_from=args.warm_start_from,
                 warm_start_weight=args.warm_start_weight,
                 warm_start_at=args.warm_start_at,
+                warm_start_shape=args.warm_start_shape,
             )
         ]
     )
