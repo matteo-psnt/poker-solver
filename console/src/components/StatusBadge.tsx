@@ -16,7 +16,6 @@
  *   `cancelled` is NOT `failed` -- exit -9 there reads as a crash and is not one;
  *   Batch reports it as `TaskEnded` / UserError.
  */
-import type { Phase } from "@/api/types";
 import { cn } from "@/lib/utils";
 
 export type Tone = "live" | "ok" | "bad" | "warn" | "muted" | "pending";
@@ -73,27 +72,6 @@ const DISPLAY: Record<string, string> = {
 export function displayName(word: string | null | undefined): string {
   const cause = (word ?? "").toLowerCase();
   return DISPLAY[cause] ?? cause;
-}
-
-/** A Batch task's PHASE as a colour. The server already decided the word. */
-const BY_PHASE: Record<Phase, Tone> = {
-  running: "live",
-  starting: "live",
-  queued: "pending",
-  finished: "muted",
-  unknown: "muted",
-};
-
-/**
- * A Batch task's tone.
- *
- * `finished` is deliberately neutral rather than green: it says the task
- * STOPPED, and whether that was clean lives in `outcome`. Painting it green
- * made a cancelled task and a clean one carry the same badge.
- */
-export function phaseTone(phase: Phase, outcome: string | null | undefined): Tone {
-  if (phase !== "finished") return BY_PHASE[phase] ?? "muted";
-  return toneFor(outcome);
 }
 
 export function StatusBadge({

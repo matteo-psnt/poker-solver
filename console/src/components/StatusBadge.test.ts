@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayName, phaseTone, toneFor } from "./StatusBadge";
+import { displayName, toneFor } from "./StatusBadge";
 
 /**
  * What this console still decides about a task's appearance.
@@ -15,35 +15,6 @@ import { displayName, phaseTone, toneFor } from "./StatusBadge";
  * What is left is presentation: which phase pulses, which word is shown, and
  * the trap that separates the two.
  */
-describe("a finished task's colour comes from its OUTCOME, not the phase", () => {
-  it("finished says stopped, so it is never green on its own", () => {
-    // The original bug: Batch's `completed` means finished, not succeeded, so a
-    // badge coloured on the phase alone painted a crashed task green.
-    expect(phaseTone("finished", "done")).toBe("ok");
-    expect(phaseTone("finished", "failed")).toBe("bad");
-  });
-
-  it("a cancelled task is muted and a timed-out one is a warning", () => {
-    expect(phaseTone("finished", "cancelled")).toBe("muted");
-    expect(phaseTone("finished", "timed out")).toBe("warn");
-  });
-
-  it("queued does not pulse like live work", () => {
-    // A task waiting for a node is not working, and a frozen one never will be.
-    expect(phaseTone("queued", null)).toBe("pending");
-  });
-
-  it("running and starting are live", () => {
-    expect(phaseTone("running", null)).toBe("live");
-    expect(phaseTone("starting", null)).toBe("live");
-  });
-
-  it("an outcome the server has not sent yet is muted, not a guess", () => {
-    expect(phaseTone("finished", null)).toBe("muted");
-    expect(phaseTone("unknown", null)).toBe("muted");
-  });
-});
-
 describe("the task log's causes, where the word IS the outcome", () => {
   it("separates the three ways a task stops being alive", () => {
     expect(toneFor("completed")).toBe("ok");
