@@ -36,6 +36,24 @@ export function Play() {
 
   const bigBlind = run.data?.big_blind ?? 0;
   const error = deal.error ?? act.error;
+
+  /**
+   * Drop the hand when the loaded run changes underneath it.
+   *
+   * The run-swap control lives in `Loaded`, ABOVE the tabs, so it is clickable
+   * while this tab is mounted. `hand` is local state and used not to notice:
+   * `bigBlind` tracked the new run while the chips stayed the old run's, so
+   * `inBlinds()` and `label()` divided one run's chips by another's blind and
+   * every figure on the table -- pot, both stacks, every action, the payoff --
+   * silently restated itself in the wrong denomination. The session belongs to
+   * the run that dealt it, so there is nothing to carry across.
+   */
+  const loadedRun = run.data?.run ?? null;
+  const dealtUnder = useRef<string | null>(null);
+  useEffect(() => {
+    if (hand && dealtUnder.current !== loadedRun) setHand(null);
+    if (!hand) dealtUnder.current = loadedRun;
+  }, [hand, loadedRun]);
   const busy = deal.isPending || act.isPending;
   const canAct = Boolean(hand && !hand.over) && !busy;
 
@@ -51,6 +69,8 @@ export function Play() {
   const sessionRef = useRef<string | null>(null);
   sessionRef.current = hand?.session ?? null;
   const release = leave.mutate;
+  // Hoisted like `release` above, so the callbacks below can depend on it.
+  const clearActionError = act.reset;
   useEffect(
     () => () => {
       const session = sessionRef.current;
@@ -67,13 +87,18 @@ export function Play() {
       {
         onSuccess: (next) => {
           setHand(next);
+          // `act` keeps its own error state, and a successful deal does not
+          // touch it. Without this the banner from a failed action -- an
+          // evicted session, most often -- stayed on screen over a hand it had
+          // nothing to do with.
+          clearActionError();
           // Abandoning the old one explicitly rather than leaving it to be
           // evicted: the store is shared with anyone else at a keyboard.
           if (previous && previous !== next.session) release({ session: previous });
         },
       },
     );
-  }, [busy, deal.mutate, release, run.data, seat]);
+  }, [busy, clearActionError, deal.mutate, release, run.data, seat]);
 
   const onAct = useCallback(
     (token: string) => {
@@ -595,8 +620,16 @@ const TOKEN_FOR: Record<string, string> = {
   call: "c",
   bet: "b",
   raise: "r",
-  "all-in": "A",
+  // `all_in`, with an underscore: the wire carries `str(ActionType.ALL_IN)`,
+  // which is `name.lower()`. Three lookups in this file were keyed on the
+  // DISPLAY spelling `all-in` and so never matched -- the `a` hotkey did
+  // nothing facing a shove, and the log lost its colour. `f`/`k`/`c` worked
+  // only because those words are identical in both spellings.
+  all_in: "A",
 };
+
+/** What a shove is CALLED on screen. The wire word is `all_in`. */
+const ALL_IN_LABEL = "all-in";
 
 /** Consecutive events sharing a street, keeping each event's original index. */
 function groupByStreet(
@@ -629,11 +662,19 @@ function useKeyboard(
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) return;
+      // BUTTON is in the list because space ACTIVATES a focused button natively.
+      // Without it, tabbing onto "fold" and pressing space did nothing at all:
+      // this handler ran `preventDefault()` unconditionally, cancelling the
+      // native activation, and then declined to deal because a hand was live.
+      if (target && /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(target.tagName)) return;
 
       if (event.key === " ") {
-        event.preventDefault();
-        if (!hand || hand.over) onDeal();
+        // Only when it will be used. Swallowing space mid-hand takes it from
+        // whatever else the page might do with it and gives nothing back.
+        if (!hand || hand.over) {
+          event.preventDefault();
+          onDeal();
+        }
         return;
       }
       if (!canAct || !hand) return;
@@ -659,7 +700,8 @@ const INITIALS: Record<string, string> = {
   f: "fold",
   k: "check",
   c: "call",
-  a: "all-in",
+  // Matched against `action.type`, which is the WIRE word.
+  a: "all_in",
 };
 
 function Key({ label }: { label: string }) {
@@ -689,7 +731,7 @@ function inBlinds(chips: number, bigBlind: number): string {
 function label(type: string, amount: number, bigBlind: number): string {
   if (type === "fold" || type === "check") return type;
   if (type === "call") return "call";
-  if (type === "all-in" || type === "all_in") return "all-in";
+  if (type === "all_in") return ALL_IN_LABEL;
   const size =
     bigBlind && Number.isInteger(amount / bigBlind)
       ? String(amount / bigBlind)

@@ -143,13 +143,13 @@ describe("the training form", () => {
     const overrides = panel(/Train/).getByLabelText(/^overrides$/i);
     expect(overrides.tagName).toBe("TEXTAREA");
 
-    fireEvent.change(overrides, { target: { value: "solver__pruning=true\nnonsense" } });
+    fireEvent.change(overrides, { target: { value: "solver__cfr_plus=true\nnonsense" } });
     fireEvent.change(panel(/Train/).getByLabelText(/^target$/i), { target: { value: "1000" } });
     await choose(panel(/Train/), /^config$/i, "production");
     fireEvent.click(panel(/Train/).getByRole("button", { name: /Queue training/ }));
 
     await waitFor(() => expect(posted).toHaveLength(1));
-    expect(posted[0]?.body.sets).toEqual(["solver__pruning=true"]);
+    expect(posted[0]?.body.sets).toEqual(["solver__cfr_plus=true"]);
   });
 
   it("offers the training configs the server listed, not the abstraction ones", async () => {

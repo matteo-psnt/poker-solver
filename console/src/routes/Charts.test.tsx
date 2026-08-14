@@ -211,4 +211,20 @@ describe("the chart, drawn", () => {
     await waitFor(() => expect(screen.getByText("pinned")).toBeTruthy());
     expect(screen.queryByText(/Hover a hand, or click to pin it/)).toBeNull();
   });
+
+  it("drops the pin when the spot changes, rather than contradicting the grid", async () => {
+    // A pin is a snapshot of one cell in one spot. Carried into another line it
+    // kept describing the old strategy and combo count beside a grid drawn from
+    // the new one -- and a board containing an ace draws AA as BLOCKED while the
+    // rail still called it pinned.
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
+    fireEvent.click(screen.getByText("AA").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByText("pinned")).toBeTruthy());
+
+    // Step into a different line: same page, different spot.
+    fireEvent.click(screen.getByText("preflop"));
+    await waitFor(() => expect(screen.getByText(/Hover a hand, or click to pin it/)).toBeTruthy());
+    expect(screen.queryByText("pinned")).toBeNull();
+  });
 });

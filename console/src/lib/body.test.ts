@@ -45,15 +45,15 @@ describe("int", () => {
 
 describe("overrides", () => {
   it("takes one KEY=VALUE per line", () => {
-    expect(overrides("solver__pruning=true\ntraining__batch=64")).toEqual([
-      "solver__pruning=true",
+    expect(overrides("solver__cfr_plus=true\ntraining__batch=64")).toEqual([
+      "solver__cfr_plus=true",
       "training__batch=64",
     ]);
   });
 
   it("ignores a line that is not an override", () => {
     // Losing a nine-field form to a stray blank line is the worse trade.
-    expect(overrides("solver__pruning=true\n\n  \nnonsense")).toEqual(["solver__pruning=true"]);
+    expect(overrides("solver__cfr_plus=true\n\n  \nnonsense")).toEqual(["solver__cfr_plus=true"]);
   });
 });
 

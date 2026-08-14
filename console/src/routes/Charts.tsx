@@ -26,7 +26,23 @@ const route = getRouteApi("/blueprint");
 export function Charts() {
   const { path, board, average } = route.useSearch();
   const navigate = useNavigate({ from: "/blueprint" });
-  const [pinned, setPinned] = useState<Cell | null>(null);
+  /**
+   * A pin belongs to the SPOT it was taken in, so it is STORED with one.
+   *
+   * `cells` recomputes when the node changes, but the pin was a bare snapshot
+   * of one cell and nothing dropped it — so pinning AA preflop and stepping
+   * into a line whose board contains an ace left the grid drawing AA as blocked
+   * while the rail beside it still showed the preflop strategy and combo count,
+   * under a label saying "pinned". Two contradictory answers to one question,
+   * on screen together.
+   *
+   * Carrying the spot and comparing beats resetting in an effect: there is no
+   * frame where the stale pin is still rendered, and nothing to keep in step
+   * with the list of things that make a spot.
+   */
+  const spot = `${path}|${board}|${average}`;
+  const [held, setHeld] = useState<{ spot: string; cell: Cell } | null>(null);
+  const pinned = held?.spot === spot ? held.cell : null;
   const [hovered, setHovered] = useState<Cell | null>(null);
 
   // What the box is actually holding, which `Loaded` can also change. Polled
@@ -100,7 +116,11 @@ export function Charts() {
                 pinned={pinned?.label ?? null}
                 onHover={setHovered}
                 onPick={(cell) =>
-                  setPinned((was) => (was && cell && was.label === cell.label ? null : cell))
+                  setHeld((was) =>
+                    was?.spot === spot && cell && was.cell.label === cell.label
+                      ? null
+                      : cell && { spot, cell },
+                  )
                 }
               />
             </div>
