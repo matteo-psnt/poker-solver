@@ -92,18 +92,9 @@ from src.interfaces.commands.tasks import TasksPayload as Tasks
 from src.interfaces.commands.tasks import TasksSummary
 from src.shared.task_history import TaskProgress, TaskRow
 
-"""What is IMPORTED here, and why that is the whole point
--------------------------------------------------------
-A payload model that a command CONSTRUCTS is imported, never restated. Below,
-the shapes still declared in this file are the ones whose command has not been
-typed yet -- each is a second declaration of something, and the list is meant to
-shrink to nothing.
-
-The re-exports are not ceremony: `Jobs`, `Job` and `BatchTask` are the names the
-generated TypeScript uses, `response_model` needs the class, and a console
-importing `JobsPayload` would be reaching into the command layer for a name it
-has no business knowing. Aliasing here keeps the API's vocabulary the API's.
-"""
+# Aliased so the API's vocabulary stays the API's: these are the names the
+# generated TypeScript uses. What is still DECLARED below is a command not yet
+# typed, and that list is meant to shrink to nothing.
 __all__ = [
     "Activity",
     "Arm",
@@ -158,69 +149,19 @@ class Payload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-"""The pool, and what Batch is running
-------------------------------------"""
-
-
-"""The durable task account -- the only thing that can say why a task DIED
-------------------------------------------------------------------------
-The run log cannot record a death: the container is gone first. The wrapper
-writes its own account to the share, and `tasks` reconciles the ones whose exit
-record never landed against Batch's view.
-"""
-
-
-"""`TaskRow`, `TaskProgress`, `Tasks` and `TasksSummary` are all IMPORTED.
-
-`TaskRow` comes from `task_history`, which assembles it, rather than from the
-command that ships it: the shape is the reader's, and `report` joins the same
-rows into a run digest without going near an endpoint.
-
-`Tasks` and `TasksSummary` are two models on purpose -- see `TasksSummary` for
-what one model describing both cost.
-"""
-
-
-"""The record: runs, their training history, and what they scored
----------------------------------------------------------------"""
-
-
-"""What it all cost
------------------"""
-
-
-"""Experiments, and the comparisons that decide them
---------------------------------------------------"""
-
-
-"""This tool's own behaviour, and the local reads
------------------------------------------------"""
-
-
-"""The writes
------------"""
-
-
-"""The blueprint server's shapes, proxied through `/api/blueprint/*`
-------------------------------------------------------------------
-Unlike everything above, these do NOT correspond to a command: the blueprint
-server is a separate process holding a loaded run, and the console reaches it
-over HTTP precisely so it never imports the engine. They are declared here
-anyway, because a generated client should describe every endpoint the console
-calls -- and its refusals arrive as the same `{error}` body either way.
-"""
-
-
+# The blueprint server is a separate process, reached over HTTP so the console
+# never imports the engine. Its shapes are declared here rather than imported
+# because they belong to no command.
 class BlueprintRun(Payload):
     run: str
     starting_stack: int
     small_blind: int
     big_blind: int
     combos: int
-    """The run being swapped in, while one is. Null when nothing is loading."""
     loading: str | None = None
-    """False on a server handed a blueprint directly -- a laptop, a test."""
+    """The run being swapped in, while one is. Null when nothing is loading."""
     can_switch: bool = False
+    """False on a server handed a blueprint directly -- a laptop, a test."""
 
 
 class BlueprintLoad(Payload):
@@ -267,9 +208,8 @@ class NodeGrid(Payload):
     board: list[str] = []
     actor: int
     actions: list[str] = []
-    """-1 where the board blocks the combo. Kept in place rather than filtered,
-    so index i is always ALL_COMBOS[i]."""
     combo_buckets: list[int] = []
+    """-1 where the board blocks the combo, so index i is always ALL_COMBOS[i]."""
     blocked: int
     trained_buckets: int
     buckets: dict[str, Bucket] = {}
@@ -290,8 +230,8 @@ class HandEvent(Payload):
     amount: float
     street: str
     untrained: bool
-    """Null until the hand is over -- see :class:`Hand`."""
     mix: list[tuple[str, float]] | None
+    """Null until the hand is over -- see :class:`Hand`."""
 
 
 class Hand(Payload):
@@ -321,18 +261,8 @@ class Hand(Payload):
     log: list[HandEvent] = []
 
 
-"""The composed views
--------------------
-A view is several commands answered at once. Its envelope is the same for all
-three; what differs is which parts it carries and what it joined.
-
-`payload` is typed per view rather than as a bare dict, so the generated
-TypeScript knows that `parts.pool.payload` is a Pool -- which is the whole
-reason to declare an envelope rather than return `dict[str, Any]` and lose the
-type at the boundary.
-"""
-
-
+# A view is several commands answered at once. `payload` is typed per view
+# rather than a bare dict, so the generated TypeScript keeps the part's type.
 class Part[T](Payload):
     """One command's contribution: its payload, or why there is not one.
 
@@ -351,10 +281,9 @@ class View(Payload):
 
     op: str
     at: str
-    """The wall clock of the whole fan-out. The number that says whether the
-    concurrency is working: a composed screen whose elapsed time equals the sum
-    of its parts has silently become serial, and nothing else would show it."""
     elapsed_seconds: float
+    """Wall clock of the whole fan-out. Equal to the sum of its parts means the
+    concurrency has silently become serial."""
 
 
 class NowParts(Payload):
@@ -373,30 +302,19 @@ class NowView(View):
 
 class RunsParts(Payload):
     runs: Part[Runs]
-    """Fetched with a LARGER job limit than the live screen uses, because a run
-    outlives the daily job its tasks land in -- see `views.RUN_LIST_JOB_LIMIT`."""
     jobs: Part[Jobs]
-    """Answered, then trimmed: what the client needs from it is the `task_runs`
-    projection below, not the rows -- so the type has none."""
+    """A larger job limit than the live screen -- see `views.RUN_LIST_JOB_LIMIT`."""
     tasks: Part[TasksSummary]
+    """Answered, then trimmed to the `task_runs` projection -- so the type has no rows."""
 
 
 class RunsView(View):
     """Every published run, plus what is needed to check its claimed status."""
 
     parts: RunsParts
-    """`task_id -> run_id`, projected from the task log.
-
-    A run's `status` is a claim written by a living process, so it cannot record
-    how an attempt died -- a run whose task was OOM-killed claims `running`
-    forever. Cross-checking needs Batch (which TASKS are live) joined to the task
-    log (which RUN each task was for).
-
-    Only the join is here. Which Batch states count as live, and whether a run
-    with no live task reads as "abandoned" or "abandoned?", is the client's --
-    that is wording and semantics, not data, and it is unit-tested there.
-    """
     task_runs: dict[str, str] = {}
+    """`task_id -> run_id`. Only the join; which Batch states count as live is
+    the client's call."""
 
 
 class RunParts(Payload):
@@ -404,22 +322,17 @@ class RunParts(Payload):
     progress: Part[Progress]
     curve: Part[Curve]
     evals: Part[Ledger]
-    """Answered, then trimmed: the rows themselves reach the client as
-    `run_tasks` below, filtered to this run -- so the type has none."""
     tasks: Part[TasksSummary]
+    """Answered, then trimmed: the rows reach the client as `run_tasks`."""
 
 
 class RunView(View):
     """Everything about one run, and the tasks that built it."""
 
     parts: RunParts
-    """The task log filtered to this run, joined server-side.
-
-    Empty when the `tasks` part FAILED, which is not the same as this run having
-    no tasks -- the part carries its own error, and that is what the UI must
-    render. A join cannot signal failure and must not try.
-    """
     run_tasks: list[TaskRow] = []
+    """Empty when the `tasks` part FAILED, which is not the same as no tasks --
+    the part carries its own error, and that is what the UI renders."""
 
 
 class ExperimentParts(Payload):

@@ -106,10 +106,8 @@ class CompactedPayload(BaseModel):
     files_before: int
     files_after: int | None = None
     movable: int
-    """What an existing bundle at this label already held, and this round carries
-    forward rather than replaces. Reporting only `movable` would read as though
-    the earlier documents had been dropped -- which is what used to happen before
-    a second round absorbed the first."""
+    """What a bundle at this label already held and this round carries forward.
+    Reporting only `movable` would read as though those documents were dropped."""
     carried: int = 0
     attempts: int | None = None
     applied: bool = False

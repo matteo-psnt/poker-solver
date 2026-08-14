@@ -35,26 +35,13 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-"""Why pydantic is named but not imported
----------------------------------------
-`commands/__init__` imports this module to get :class:`Command`, and the point
-of the lazy registry is that naming a command imports no handler -- ``--help``
-went 3.15s to 0.18s on it. A runtime import here is paid by every invocation
-including that one, measured at 0.10s to 0.13s, for a name used in annotations
-and nowhere else. Under ``from __future__ import annotations`` the checker sees
-the type and the interpreter never loads the module.
-"""
+# pydantic is named in annotations only. A runtime import costs 0.10-0.13s on
+# EVERY invocation, including the `--help` the lazy registry took from 3.15s to
+# 0.18s; `from __future__ import annotations` keeps it out of the interpreter.
 
-"""What a handler may return, DURING the migration to typed payloads.
-
-A model is the destination: it is the single declaration of the shape, and `ty`
-turns a renamed field into a pre-commit failure rather than something 1061 tests
-sail past. The ``dict`` arm is the commands not converted yet, and it is the
-only reason this is a union -- when the last one lands this becomes
-``BaseModel``, and every remaining dict is a type error. That is how it ends.
-
-PEP 695 aliases evaluate lazily, so naming ``BaseModel`` costs no import.
-"""
+# The ``dict`` arm is the commands not yet converted, and is the only reason this
+# is a union: when the last one lands it becomes ``BaseModel`` and every
+# remaining dict is a type error.
 type Payload = BaseModel | dict[str, Any]
 
 
@@ -207,15 +194,9 @@ def resolve_run_dir(run: str, runs_dir: str) -> Path:
     match would answer a question about a different run than the one asked
     about, and every reader here is used to make a decision.
     """
-    """Empty is not a run
-    -------------------
-    ``Path("")`` is ``PosixPath(".")`` and ``.is_dir()`` is True, so an empty
-    identifier would resolve to the CURRENT DIRECTORY and be returned as a run,
-    indistinguishable downstream from a real answer. It is reachable: the
-    blueprint host's systemd unit interpolates ``--run ${RUN}`` from an env file
-    that ships with ``RUN=`` empty, which would offer up the code checkout as a
-    trained run.
-    """
+    # ``Path("")`` is ``PosixPath(".")`` and ``.is_dir()`` is True, so an empty
+    # identifier would return the CURRENT DIRECTORY as a run. Reachable: the
+    # blueprint host's systemd unit ships ``RUN=`` empty.
     if not run.strip():
         raise CommandError("No run given: --run needs a run id, a fragment of one, or a path.")
 

@@ -59,9 +59,7 @@ class LedgerPayload(BaseModel):
     """The path read, always a derived file in a temporary tree -- reported
     rather than hidden, so an empty listing names something to go and look at."""
     ledger: str
-    """How many rows the FILTERS matched, before `--limit` paged them. The header
-    read "25 row(s)" off a 37-row ledger, so a migration that recovered 18
-    evaluations looked like it had recovered 6."""
+    """How many rows the FILTERS matched, before `--limit` paged them."""
     matched: int
     rows: list[LedgerRow] = Field(default_factory=list)
 

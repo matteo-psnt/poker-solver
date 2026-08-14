@@ -130,15 +130,6 @@ class LoadRun(BaseModel):
     at: int | None = None
 
 
-"""Nothing refuses during a load.
-
-There was a `_LOADING` 503 here for every reader, which went with dropping the
-old blueprint before building the new one. Building first removed the reason:
-the run already loaded stays answerable for the whole minute, and a reader that
-does not care about the swap never notices it happened.
-"""
-
-
 _GONE = (
     "That hand is no longer on the server — it ended, or was dropped to make room. Deal a new one."
 )

@@ -58,20 +58,14 @@ START_SUFFIX = ".start.json"
 EXIT_SUFFIX = ".exit.json"
 PROGRESS_SUFFIX = ".progress.json"
 
-"""The vocabulary a node stamps on an attempt
--------------------------------------------
-Finer than Batch's success/failure, because a terminal cause suppresses
-reconciliation: a WRONG one loses the observer half of the join permanently.
-  timeout    the RUN_TIMEOUT guard expired (124) -- a hang, not a crash
-  killed     SIGKILL from outside (137) -- the OOM killer. `timeout` returns
-             124 even when its own --kill-after fires, so 137 is never it
-  cancelled  the wrapper took SIGTERM -- `cancel`, or maxWallClockTime
-  partial    an evaluate task scored some rungs and failed others; it exits 0
-             for Batch's retry economics, which is not a claim of success
-
-Which of these are FINAL is a reader's question, and only readers ask it --
-see ``task_history.TERMINAL_CAUSES``.
-"""
+# Finer than Batch's success/failure, because a terminal cause suppresses
+# reconciliation and a WRONG one loses the observer half of the join for good:
+#   timeout    the RUN_TIMEOUT guard expired (124) -- a hang, not a crash
+#   killed     SIGKILL from outside (137). `timeout` returns 124 even when its
+#              own --kill-after fires, so 137 is never it
+#   cancelled  the wrapper took SIGTERM -- `cancel`, or maxWallClockTime
+#   partial    an evaluate task scored some rungs and failed others
+# Which of these are FINAL is a reader's question -- see `task_history`.
 CAUSE_COMPLETED = "completed"
 CAUSE_FAILED = "failed"
 CAUSE_TIMEOUT = "timeout"
@@ -79,25 +73,11 @@ CAUSE_KILLED = "killed"
 CAUSE_CANCELLED = "cancelled"
 CAUSE_PARTIAL = "partial"
 
-"""One directory, two ways of holding the same documents
---------------------------------------------------------
-A leg document is normally its own file -- one writer per file, which is what
-makes writing to an SMB share with no atomic rename safe at all. That property
-belongs to the WRITER. A reader joining the whole directory pays a round trip
-per file for it, and at 375 files that was the slowest thing the console did.
-
-So sealed documents may also live inside a bundle, and the reader treats the two
-identically: :func:`read_documents` returns filename -> document from bundles and
-loose files alike, and everything downstream joins that mapping without knowing
-which it came from. A loose file WINS over a bundled copy of the same name --
-the loose one is what a node most recently wrote, and a bundle is a snapshot of
-the past.
-
-Only the reader gained this. The node still writes one loose file per event, and
-nothing bundles an attempt that has not reached a terminal exit. It is defined
-HERE, rather than with the rest of the reading, because :func:`_next_attempt`
-needs it -- see there for why counting across bundles is load-bearing.
-"""
+# A leg document is normally its own file -- one writer per file, which is what
+# makes writing to a share with no atomic rename safe. A reader pays a round trip
+# per file for that, so sealed documents may also live in a bundle and
+# :func:`read_documents` returns both alike. A loose file WINS over a bundled
+# copy of the same name. Defined here because :func:`_next_attempt` needs it.
 BUNDLE_SUFFIX = ".bundle.json"
 
 TASK_ID_ENV = "AZ_BATCH_TASK_ID"

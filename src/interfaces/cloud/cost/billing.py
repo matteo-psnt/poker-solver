@@ -85,40 +85,20 @@ COST_MANAGEMENT_API = "2023-03-01"
 ARM = "https://management.azure.com"
 SCOPE = "https://management.azure.com/.default"
 
-"""Which service lines are the pool doing its job.
-
-Grouped rather than itemised because the question a cost screen answers is
-"where did the money go", and 25 meters is not an answer. Everything not named
-here is 'other', which is the bucket that was invisible entirely before.
-"""
+# Grouped, not itemised: 25 meters is not an answer to "where did the money go".
+# Everything unnamed falls to 'other'.
 COMPUTE_SERVICES = frozenset({"Virtual Machines"})
 
-"""How a pool node is told apart from a machine that is simply switched on.
-
-Batch in UserSubscription mode creates one `azurebatch-<guid>-c` resource group
-per pool and puts its nodes there, so the prefix identifies compute that a task
-log can account for. Everything else billing VM hours is a STANDING machine --
-here, `blueprint-server` in `poker-solver-serve-rg`.
-
-The distinction is not cosmetic. Lumping them together produced a genuinely
-wrong screen: 381.5 "billed node-hours" against 263.0 hours of task execution
-looked like 1.45x of allocation overhead, and the caveat said so. 68 of those
-hours were the serve box, which is not a pool node, is not allocated for a task,
-and will never appear in the task log however long it runs. Against pool nodes
-alone the ratio is 1.19x -- which is what allocation overhead actually costs.
-"""
+# Batch in UserSubscription mode puts each pool's nodes in their own
+# `azurebatch-<guid>-c` resource group, so the prefix identifies compute a task
+# log can account for. Everything else is a STANDING machine (the serve box) and
+# must not be compared against node time.
 BATCH_RESOURCE_GROUP_PREFIX = "azurebatch"
 
 _TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 
-"""How long an answer -- or the absence of one -- is reused.
-
-The success TTL is generous because the data genuinely does not move faster
-than that; a cost screen refreshed every 15s would show the same figures for
-hours while spending a query each time. The failure TTL is short enough that
-`az login` fixes the screen on the next refresh rather than at the end of a long
-TTL, and long enough that a 429 is not answered with more traffic.
-"""
+# The failure TTL is short so `az login` fixes the screen on the next refresh,
+# and long enough that a 429 is not answered with more traffic.
 CACHE_TTL_SECONDS = 900.0
 FAILURE_TTL_SECONDS = 60.0
 
@@ -185,11 +165,9 @@ class Billed:
     as_of: dt.date | None
     by_service: list[tuple[str, float]]
 
-    """``since`` is what was ASKED for; ``first_at`` is the earliest day that
-    actually carried a charge. For the all-history window the two differ by
-    almost a year -- the query floor is a 364-day cap, while the subscription
-    only started spending in 2026-07 -- and printing the floor would date the
-    record to a period nothing happened in."""
+    """The earliest day that actually carried a charge, which is not ``since``:
+    the query floor is a 364-day cap and this subscription only began spending
+    in 2026-07."""
     first_at: dt.date | None
 
     def as_payload(self) -> BilledPayload:
@@ -296,13 +274,8 @@ def _usage_date(raw: Any) -> dt.date | None:
         return None
 
 
-"""Why there is no figure, in the words a surface should show.
-
-A single "unavailable" covers two situations that call for opposite responses:
-throttling means wait and the numbers are fine, everything else means something
-is actually broken. Telling someone to check `az login` when Cost Management is
-merely busy sends them to fix an identity that was never wrong.
-"""
+# Throttling and everything else call for opposite responses, so they are worded
+# apart: "check az login" sends someone to fix an identity that was never wrong.
 UNAVAILABLE = "Billing unavailable — check `az login` and that Terraform state is readable."
 
 _LOCK = threading.Lock()

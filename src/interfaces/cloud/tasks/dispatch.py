@@ -29,22 +29,10 @@ if TYPE_CHECKING:
 
 NONCE_CEILING = 32768
 
-"""The tree that gets sealed into a snapshot: THIS checkout, not the working
-directory.
-
-`Path()` -- the previous default -- is wherever the shell happened to be, and no
-caller has ever passed anything else. Submitting from `src/` would have tarred
-`src/`'s children as the tree root, and from a sibling worktree's directory it
-would have shipped that worktree's code under this one's provenance stamp. The
-package's own location is the one answer that cannot be wrong, and it is the
-same one `gitinfo` already resolves its git questions against.
-
-Derived by finding the `src` package root and taking its parent, NOT by counting
-parents. It was `parents[3]`, correct for a module sitting directly in
-`src/interfaces/cloud/` and silently wrong the moment this file moved one
-directory deeper -- it then resolved to `src/interfaces` and would have sealed
-that as the checkout. A count encodes this file's depth, which is not a fact
-about the checkout and is not stable under a refactor."""
+# THIS checkout, not the working directory: submitting from a sibling worktree
+# would ship its code under this one's provenance stamp. Derived by finding the
+# `src` package root, NOT by counting parents -- a count encodes this file's
+# depth, which is not a fact about the checkout.
 _SRC = next(p for p in Path(__file__).resolve().parents if p.name == "src")
 CHECKOUT_ROOT = _SRC.parent
 

@@ -45,46 +45,22 @@ ENV_VAR = "POKER_SOLVER_TELEMETRY"
 
 ARTIFACT = "telemetry/invocations.jsonl"
 
-"""Rotate at a size rather than a row count or an age.
-
-Rows differ by an order of magnitude in width -- a `submit` carries nine
-arguments, a `pool-status` carries none -- so a row cap bounds the wrong thing.
-An age cap would need the file read and rewritten on some schedule, which is a
-lot of machinery for a file nobody is obliged to keep.
-
-One previous generation is kept, and :func:`logs` is what makes that true --
-`activity` reads BOTH, or the rotation would silently do the thing this policy
-claims to prevent: the moment the log crossed the cap, every window would report
-on a near-empty file. Two generations would double the disk for a marginal gain
-in history; zero would lose everything at once, including the minute before
-whatever someone is currently investigating.
-
-Rotation is racy between processes -- two commands can both see the file over
-the cap and both rename, and the second clobbers what the first saved. Left
-that way ON PURPOSE: a lock file shared across every invocation of every command
-is real machinery, and what it would protect is a bounded number of rows in a
-file that is disposable by definition. It is a cost worth naming rather than
-paying for.
-"""
+# A size, not a row count: rows differ by an order of magnitude in width. One
+# previous generation is kept and :func:`logs` reads BOTH, or every window would
+# report on a near-empty file the moment the log crossed the cap. Rotation is
+# racy between processes and left that way -- what a lock would protect is a
+# bounded number of rows in a file that is disposable by definition.
 MAX_BYTES = 8 * 1024 * 1024
 
-"""Which surface asked.
-
-A ContextVar rather than a parameter: the argument list of ``execute`` belongs
-to the COMMAND, and adding a `surface=` to it would put a field there that no
-command declares and that could collide with one that did. Each entry point sets
-it once -- `headless` to `cli`, the console's `answer` to `console` -- and
-anything that sets neither is honestly reported as unknown rather than being
-quietly filed as the command line.
-"""
+# A ContextVar rather than a parameter: ``execute``'s argument list belongs to
+# the COMMAND, and a `surface=` could collide with a flag one declares. Anything
+# that sets neither entry point is reported as unknown, not assumed to be the CLI.
 _SURFACE: ContextVar[str] = ContextVar("surface", default="unknown")
 
 logger = logging.getLogger(__name__)
 
-"""Whether the "this is not working" line has already been said.
-
-Process-global rather than per-path: the point is to say it ONCE, and a
-per-path map would repeat it for a rotation."""
+# Process-global, not per-path: the point is to say it ONCE, and a per-path map
+# would repeat it for a rotation.
 _complained = False
 
 

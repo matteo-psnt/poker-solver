@@ -32,11 +32,8 @@ if TYPE_CHECKING:
 
 CONFIG_ROOT = repo.ROOT / "config"
 
-"""The two kinds, and the flag each one feeds.
-
-Kept as data rather than two code paths because the console renders them the
-same way and only the destination differs.
-"""
+# Data rather than two code paths: the console renders them identically and only
+# the destination differs.
 KINDS: dict[str, str] = {
     "training": "submit --config",
     "abstraction": "submit-precompute --config",

@@ -35,41 +35,25 @@ from src.shared import repo
 
 _REPO_ROOT = repo.ROOT
 
-"""Set by ``TaskSpec.environment()`` on the submitting machine, and inherited all
-the way down: Batch sets it on the task, ``infra/run_task.py`` inherits it, and
-the ``uv run poker-solver`` child inherits it in turn. Nothing has to thread
-it through a command line."""
+# Set on the submitting machine and inherited all the way down to the
+# `uv run poker-solver` child, so nothing threads it through a command line.
 COMMIT_ENV = "RUN_GIT_COMMIT"
 
-"""Three-state, unlike the other RUN_* booleans: ``1`` dirty, ``0`` verified
-clean, empty/absent unknown. Collapsing clean into unknown would throw away the
-exact distinction the module docstring calls load-bearing."""
+# Three-state, unlike the other RUN_* booleans: ``1`` dirty, ``0`` verified
+# clean, empty/absent unknown. Collapsing clean into unknown would lose the
+# distinction the module docstring calls load-bearing.
 DIRTY_ENV = "RUN_GIT_DIRTY"
 
-"""The branch, which is how a HUMAN names an experiment. Work here happens in
-several git worktrees at once -- one per line of investigation -- and they share
-a commit far more often than not, because a worktree branches from main and then
-carries its change UNCOMMITTED for as long as it is being iterated on. A hash
-plus a dirty bit cannot tell two of those apart; the branch can."""
+# The branch is how a HUMAN names an experiment. Worktrees share a commit far
+# more often than not -- one branches from main and carries its change
+# UNCOMMITTED while it is iterated on -- so a hash plus a dirty bit cannot tell
+# two apart and the branch can.
 BRANCH_ENV = "RUN_GIT_BRANCH"
 
-"""The code snapshot: not a git fact at all, and the only one that is COMPLETE.
-
-A commit plus a dirty bit says "these bytes, and some unrecorded changes". The
-snapshot IS the bytes -- the tarball a task actually extracted and ran. It lives
-here because this module answers one question, "which code is this", and the
-answer has three parts of increasing strength.
-
-Recorded on the run and eval documents because it was recorded ONLY on task
-records, and only from 2026-08-02. Measured 08-10: of 56 snapshots on the share,
-7 were named by anything at all. The other 49 read as garbage collectable while
-being the sole copy of code states that included uncommitted work -- and nothing
-could prove otherwise, because the run they belonged to never wrote down which
-one it used. Deleting them was considered and refused for exactly that reason.
-
-Empty off a node. There is no snapshot then: the code is the working tree, which
-the commit and dirty bit already describe as well as anything can.
-"""
+# Not a git fact, and the only answer that is COMPLETE: a commit plus a dirty bit
+# says "these bytes, and some unrecorded changes", while the snapshot IS the
+# bytes a task extracted and ran. Empty off a node, where the working tree is
+# already described by the commit and dirty bit.
 SNAPSHOT_ENV = "CODE_SNAPSHOT"
 
 
