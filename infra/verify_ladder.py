@@ -2,18 +2,17 @@
 
 Usage:  verify_ladder.py <training-config> <published-run-dir-on-the-share>
 
-WHY. Completion markers guarded ``checkpoint-*|keys-*`` but not ``static-*``, so
-every static rung was published unmarked -- and an unmarked rung is
-indistinguishable from one interrupted mid-copy. The fetch therefore has to
-refuse them all, which would strand an entire 30M-iteration ladder. Blanket
-marking would reinstate exactly the bug markers exist to prevent, so each rung is
-PROVEN instead: loaded end to end, and marked only if every chunk decompresses.
+Completion markers guard ``checkpoint-*|keys-*`` but not ``static-*``, so a
+static rung can be published unmarked -- and an unmarked rung is
+indistinguishable from one interrupted mid-copy, which the fetch must refuse.
+Blanket marking would reinstate exactly the bug markers exist to prevent, so
+each rung is PROVEN instead: loaded end to end, marked only if every chunk
+decompresses.
 
-Reads the share IN PLACE rather than copying to the node. Verification has to
-read every byte regardless, so a copy-then-read is pure duplicate I/O -- the
-first version of this did that AND started a fresh interpreter per rung,
-rebuilding the 57,604-node tree and reloading the 385 MB abstraction thirty
-times. The tree, abstraction and storage are built once here and reused.
+Reads the share IN PLACE rather than copying to the node -- verification reads
+every byte regardless, so a copy-then-read is pure duplicate I/O. The tree,
+abstraction and storage are built ONCE and reused across rungs; per-rung they
+cost a 57,604-node rebuild and a 385 MB reload.
 """
 
 from __future__ import annotations

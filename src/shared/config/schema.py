@@ -65,7 +65,6 @@ class TrainingConfig(StrictFrozenModel):
 
     num_iterations: PositiveInt = Field(default=100_000)
     checkpoint_frequency: PositiveInt = Field(default=50_000)
-    iterations_per_worker: PositiveInt = Field(default=1_000)
     verbose: bool = Field(default=True)
     runs_dir: str = Field(default=DEFAULT_RUNS_DIR)
 
@@ -75,37 +74,13 @@ class StorageConfig(StrictFrozenModel):
 
     initial_capacity: PositiveInt = Field(default=2_000_000)
     max_actions: PositiveInt = Field(default=10)
-    checkpoint_enabled: bool = Field(default=True)
-    # Cap on the fraction of wall-clock spent checkpointing. Back-pressure defers a
-    # checkpoint until (1-f)/f times the previous checkpoint's cost has elapsed, so
-    # checkpointing self-limits to ~f of compute at any scale (0.1 = at most ~10%).
-    max_checkpoint_overhead: Annotated[float, Field(gt=0.0, lt=1.0)] = Field(default=0.1)
     zarr_compression_level: Annotated[int, Field(ge=1, le=9)] = Field(default=1)
-    zarr_chunk_size: PositiveInt = Field(default=50_000)
     # Spare one checkpoint per this many iterations from pruning, so the run ends
     # holding a ladder of snapshots instead of only its last one (0 = keep only the
     # last). Costs a full copy of the table per retained point, so keep it a large
     # multiple of checkpoint_frequency: below that every checkpoint lands in its own
     # band and nothing is ever pruned.
     checkpoint_retain_every: NonNegInt = Field(default=0)
-    # Cap on each worker's cache of infoset ids owned by OTHER workers (0 =
-    # unbounded, the historical behaviour). Unbounded, this cache converges on
-    # the whole tree in every worker, so total memory scales O(N x workers)
-    # rather than O(N) -- measured at 315 B/entry, that is 37 GB across 16
-    # workers at 7M infosets, and it killed three tasks on a 32 GB node. A miss
-    # costs one dropped update and an id request, so the cap trades memory for
-    # sample efficiency, and the cliff is STEEP once it binds. Measured on
-    # quick_test at 4 workers, forcing eviction:
-    #
-    #   unbounded    drop 0.387  evictions 0        2489 it/s
-    #   cap 10,000   drop 0.584  evictions 201,549  1137 it/s
-    #
-    # i.e. an undersized cap costs +51% drop rate and -54% throughput. So size it
-    # to sit ABOVE the working set and treat it as an OOM backstop, not a tuning
-    # knob: at ~315 B/entry, 4M entries is ~1.3 GB per worker (~10 GB across 8).
-    # `remote_cache_evictions` in the metrics row is the signal -- non-zero and
-    # rising means it is binding and you are paying the cliff above.
-    remote_key_cache_size: NonNegInt = Field(default=4_000_000)
 
 
 class SystemConfig(StrictFrozenModel):

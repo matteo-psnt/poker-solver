@@ -47,15 +47,11 @@ Sections and fields, with defaults:
 |---|---|---|---|
 | `training` | `num_iterations` | 100000 | |
 | | `checkpoint_frequency` | 50000 | iterations between checkpoints |
-| | `iterations_per_worker` | 1000 | batch size = this × num_workers |
 | | `verbose` | true | |
 | | `runs_dir` | `data/runs` | |
-| `storage` | `initial_capacity` | 2000000 | max infosets in shared arrays |
+| `storage` | `initial_capacity` | 2000000 | recorded in run metadata only |
 | | `max_actions` | 10 | |
-| | `checkpoint_enabled` | true | |
-| | `max_checkpoint_overhead` | 0.1 | back-pressure: cap checkpointing at ~10% of wall-clock |
 | | `zarr_compression_level` | 1 | 1-9; 1 benchmarked fastest *and* smallest |
-| | `zarr_chunk_size` | 50000 | |
 | `system` | `seed` | null | |
 | | `config_name` | `default` | shown in run metadata |
 | | `log_level` | `INFO` | |

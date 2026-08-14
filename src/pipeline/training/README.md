@@ -141,7 +141,6 @@ training:
   checkpoint_frequency: 500000
 storage:
   zarr_compression_level: 1   # benchmarked: fastest AND smallest
-  zarr_chunk_size: 50000
 ```
 
 ## Testing

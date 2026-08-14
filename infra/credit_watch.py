@@ -128,23 +128,19 @@ class Report:
 def concurrently(thunks: list[Callable[[], object]]) -> None:
     """Run independent checks at once, and fail as though they had not been.
 
-    Each check below is its own `az` process and its own round trip to Azure,
-    and none needs another's answer -- so run one at a time they simply added
-    up: 14.8s of the 17.4s this spent was waiting for the previous question to
-    come back. Nothing here is CPU-bound; the threads are all blocked on a
-    socket.
+    Each check is its own `az` process and its own round trip, and none needs
+    another's answer -- 14.8s of 17.4s was spent waiting. Nothing here is CPU-bound.
 
     Two properties are preserved deliberately, because this is a watchdog:
 
     order
-        Each check writes into its OWN report and they are merged by the
-        caller, so the output is byte-identical to the sequential version. A
-        report that reorders itself run to run cannot be diffed, which is most
-        of what a person does with one.
+        Each check writes into its OWN report and the caller merges them, so output
+        is byte-identical to the sequential version. A report that reorders itself
+        run to run cannot be diffed, which is most of what a person does with one.
     the first failure, by DECLARATION
-        Not the first to be raised. The same broken environment has to produce
-        the same message every time, and which of five concurrent calls loses
-        its token first is a race.
+        Not the first raised. The same broken environment must produce the same
+        message every time, and which of five concurrent calls loses its token
+        first is a race.
     """
     with ThreadPoolExecutor(max_workers=len(thunks) or 1) as pool:
         futures = [pool.submit(thunk) for thunk in thunks]

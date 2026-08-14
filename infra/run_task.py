@@ -9,11 +9,6 @@ here could be tested.
 It runs on the interpreter the pool's start task installs -- not the OS's -- and
 BEFORE ``uv sync``. Everything it reaches must therefore be stdlib-only; see
 ``src/shared/cloudtask/node/__init__.py``.
-
-Previously ``run_task.sh``, 677 lines. The publish and fetch rules it carried
-now live in :mod:`src.shared.cloudtask.node.archive` with tests, and the argv it
-built by hand lives in :mod:`src.shared.cloudtask.node.plan`, checked against
-the real parsers.
 """
 
 import sys
