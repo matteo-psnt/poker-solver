@@ -31,7 +31,9 @@ import numpy as np
 from numba import jit
 
 from src.core.game.numba_eval import hand_rank
-from src.core.game.state import FULL_DECK
+from src.core.game.state import FULL_DECK, Street
+from src.engine.solver.infoset.index import preflop_hand_index
+from src.engine.solver.numba_lookup import board_id, hand_id, suit_labels
 from src.engine.solver.numba_ops import (
     WEIGHTING_CODES,
     compute_dcfr_strategy_weight,
@@ -45,7 +47,7 @@ from src.engine.solver.numba_random import (
     restore_numpy_state,
     restore_python_state,
 )
-from src.pipeline.abstraction.postflop.numba_lookup import board_id, hand_id, suit_labels
+from src.engine.solver.vector.walk_arrays import WalkArrays
 
 # `randrange(52)` names a POSITION in this deck, so the order is part of the
 # stream, not an implementation detail.
@@ -81,9 +83,21 @@ def _draw(deck_mask, known, count, out_index, filled, state, index):
 
 @jit(nopython=True, cache=True)
 def _bucket(
-    node_id, actor, is_preflop, buckets_per_node, street_of_node,
-    hole_index, board_index, board_len, deck_rank, deck_suit,
-    preflop_index, street_board_ids, street_matrix, street_offsets, hand_to_col, sentinel,
+    node_id,
+    actor,
+    is_preflop,
+    street_of_node,
+    hole_index,
+    board_index,
+    board_len,
+    deck_rank,
+    deck_suit,
+    preflop_index,
+    street_board_ids,
+    street_matrix,
+    street_offsets,
+    hand_to_col,
+    sentinel,
 ):
     """The acting player's bucket: the preflop class, or the abstraction's cell."""
     first = hole_index[actor * 2]
@@ -154,10 +168,24 @@ def _showdown_winner(hole_index, board_index, board_len, deck_rank, deck_suit):
 
 @jit(nopython=True, cache=True)
 def _terminal_value(
-    terminal, seat, traverser, hole_index, board_index, board_len,
-    deck_rank, deck_suit, deck_mask, known, state, index,
-    terminal_is_fold, terminal_cards_to_deal,
-    terminal_fold, terminal_win, terminal_lose, terminal_tie,
+    terminal,
+    seat,
+    traverser,
+    hole_index,
+    board_index,
+    board_len,
+    deck_rank,
+    deck_suit,
+    deck_mask,
+    known,
+    state,
+    index,
+    terminal_is_fold,
+    terminal_cards_to_deal,
+    terminal_fold,
+    terminal_win,
+    terminal_lose,
+    terminal_tie,
 ):
     """What the traverser is paid, dealing the runout an all-in outran."""
     if terminal_is_fold[terminal] == 1:
@@ -182,27 +210,77 @@ def _terminal_value(
 
 @jit(nopython=True, cache=True)
 def walk(
-    node_id, board_index, board_len, known,
-    traverser, button, seat, iteration, hole_index,
-    regrets, strategy_sum, reach_counts, cumulative_utility, visited,
-    edge_offset, edge_child, edge_deal, edge_terminal,
-    num_actions, row_offset, slot_offset, buckets_per_node,
-    actor_is_button, is_preflop, street_of_node,
-    terminal_is_fold, terminal_cards_to_deal,
-    terminal_fold, terminal_win, terminal_lose, terminal_tie,
-    deck_rank, deck_suit, deck_mask,
-    preflop_index, street_board_ids, street_matrix, street_offsets, hand_to_col, sentinel,
-    cfr_plus, weighting, alpha, beta, strategy_weight,
-    deal_state, deal_index, sample_state, sample_index, applied,
+    node_id,
+    board_index,
+    board_len,
+    known,
+    traverser,
+    button,
+    seat,
+    iteration,
+    hole_index,
+    regrets,
+    strategy_sum,
+    reach_counts,
+    cumulative_utility,
+    visited,
+    edge_offset,
+    edge_child,
+    edge_deal,
+    edge_terminal,
+    num_actions,
+    row_offset,
+    slot_offset,
+    buckets_per_node,
+    actor_is_button,
+    is_preflop,
+    street_of_node,
+    terminal_is_fold,
+    terminal_cards_to_deal,
+    terminal_fold,
+    terminal_win,
+    terminal_lose,
+    terminal_tie,
+    deck_rank,
+    deck_suit,
+    deck_mask,
+    preflop_index,
+    street_board_ids,
+    street_matrix,
+    street_offsets,
+    hand_to_col,
+    sentinel,
+    cfr_plus,
+    weighting,
+    alpha,
+    beta,
+    strategy_weight,
+    deal_state,
+    deal_index,
+    sample_state,
+    sample_index,
+    applied,
 ):
     """One decision node. Returns (utility, deal_index, sample_index, applied)."""
     count = num_actions[node_id]
     actor = button if actor_is_button[node_id] == 1 else 1 - button
 
     bucket = _bucket(
-        node_id, actor, is_preflop[node_id], buckets_per_node, street_of_node,
-        hole_index, board_index, board_len, deck_rank, deck_suit,
-        preflop_index, street_board_ids, street_matrix, street_offsets, hand_to_col, sentinel,
+        node_id,
+        actor,
+        is_preflop[node_id],
+        street_of_node,
+        hole_index,
+        board_index,
+        board_len,
+        deck_rank,
+        deck_suit,
+        preflop_index,
+        street_board_ids,
+        street_matrix,
+        street_offsets,
+        hand_to_col,
+        sentinel,
     )
     row = row_offset[node_id] + bucket
     start = slot_offset[node_id] + bucket * count
@@ -223,10 +301,24 @@ def walk(
             terminal = edge_terminal[slot]
             if terminal >= 0:
                 utilities[i], deal_index = _terminal_value(
-                    terminal, seat, traverser, hole_index, board_index, board_len,
-                    deck_rank, deck_suit, deck_mask, known, deal_state, deal_index,
-                    terminal_is_fold, terminal_cards_to_deal,
-                    terminal_fold, terminal_win, terminal_lose, terminal_tie,
+                    terminal,
+                    seat,
+                    traverser,
+                    hole_index,
+                    board_index,
+                    board_len,
+                    deck_rank,
+                    deck_suit,
+                    deck_mask,
+                    known,
+                    deal_state,
+                    deal_index,
+                    terminal_is_fold,
+                    terminal_cards_to_deal,
+                    terminal_fold,
+                    terminal_win,
+                    terminal_lose,
+                    terminal_tie,
                 )
                 continue
             owed = edge_deal[slot]
@@ -242,19 +334,56 @@ def walk(
                 )
                 child_len = board_len + owed
             utilities[i], deal_index, sample_index, applied = walk(
-                edge_child[slot], child_board, child_len, child_known,
-                traverser, button, seat, iteration, hole_index,
-                regrets, strategy_sum, reach_counts, cumulative_utility, visited,
-                edge_offset, edge_child, edge_deal, edge_terminal,
-                num_actions, row_offset, slot_offset, buckets_per_node,
-                actor_is_button, is_preflop, street_of_node,
-                terminal_is_fold, terminal_cards_to_deal,
-                terminal_fold, terminal_win, terminal_lose, terminal_tie,
-                deck_rank, deck_suit, deck_mask,
-                preflop_index, street_board_ids, street_matrix, street_offsets,
-                hand_to_col, sentinel,
-                cfr_plus, weighting, alpha, beta, strategy_weight,
-                deal_state, deal_index, sample_state, sample_index, applied,
+                edge_child[slot],
+                child_board,
+                child_len,
+                child_known,
+                traverser,
+                button,
+                seat,
+                iteration,
+                hole_index,
+                regrets,
+                strategy_sum,
+                reach_counts,
+                cumulative_utility,
+                visited,
+                edge_offset,
+                edge_child,
+                edge_deal,
+                edge_terminal,
+                num_actions,
+                row_offset,
+                slot_offset,
+                buckets_per_node,
+                actor_is_button,
+                is_preflop,
+                street_of_node,
+                terminal_is_fold,
+                terminal_cards_to_deal,
+                terminal_fold,
+                terminal_win,
+                terminal_lose,
+                terminal_tie,
+                deck_rank,
+                deck_suit,
+                deck_mask,
+                preflop_index,
+                street_board_ids,
+                street_matrix,
+                street_offsets,
+                hand_to_col,
+                sentinel,
+                cfr_plus,
+                weighting,
+                alpha,
+                beta,
+                strategy_weight,
+                deal_state,
+                deal_index,
+                sample_state,
+                sample_index,
+                applied,
             )
 
         # `np.dot`, not a running sum: the state-based traversal computes this
@@ -305,10 +434,24 @@ def walk(
     terminal = edge_terminal[slot]
     if terminal >= 0:
         value, deal_index = _terminal_value(
-            terminal, seat, traverser, hole_index, board_index, board_len,
-            deck_rank, deck_suit, deck_mask, known, deal_state, deal_index,
-            terminal_is_fold, terminal_cards_to_deal,
-            terminal_fold, terminal_win, terminal_lose, terminal_tie,
+            terminal,
+            seat,
+            traverser,
+            hole_index,
+            board_index,
+            board_len,
+            deck_rank,
+            deck_suit,
+            deck_mask,
+            known,
+            deal_state,
+            deal_index,
+            terminal_is_fold,
+            terminal_cards_to_deal,
+            terminal_fold,
+            terminal_win,
+            terminal_lose,
+            terminal_tie,
         )
         return value, deal_index, sample_index, applied
 
@@ -326,18 +469,75 @@ def walk(
         child_len = board_len + owed
 
     return walk(
-        edge_child[slot], child_board, child_len, child_known,
-        traverser, button, seat, iteration, hole_index,
-        regrets, strategy_sum, reach_counts, cumulative_utility, visited,
-        edge_offset, edge_child, edge_deal, edge_terminal,
-        num_actions, row_offset, slot_offset, buckets_per_node,
-        actor_is_button, is_preflop, street_of_node,
-        terminal_is_fold, terminal_cards_to_deal,
-        terminal_fold, terminal_win, terminal_lose, terminal_tie,
-        deck_rank, deck_suit, deck_mask,
-        preflop_index, street_board_ids, street_matrix, street_offsets, hand_to_col, sentinel,
-        cfr_plus, weighting, alpha, beta, strategy_weight,
-        deal_state, deal_index, sample_state, sample_index, applied,
+        edge_child[slot],
+        child_board,
+        child_len,
+        child_known,
+        traverser,
+        button,
+        seat,
+        iteration,
+        hole_index,
+        regrets,
+        strategy_sum,
+        reach_counts,
+        cumulative_utility,
+        visited,
+        edge_offset,
+        edge_child,
+        edge_deal,
+        edge_terminal,
+        num_actions,
+        row_offset,
+        slot_offset,
+        buckets_per_node,
+        actor_is_button,
+        is_preflop,
+        street_of_node,
+        terminal_is_fold,
+        terminal_cards_to_deal,
+        terminal_fold,
+        terminal_win,
+        terminal_lose,
+        terminal_tie,
+        deck_rank,
+        deck_suit,
+        deck_mask,
+        preflop_index,
+        street_board_ids,
+        street_matrix,
+        street_offsets,
+        hand_to_col,
+        sentinel,
+        cfr_plus,
+        weighting,
+        alpha,
+        beta,
+        strategy_weight,
+        deal_state,
+        deal_index,
+        sample_state,
+        sample_index,
+        applied,
+    )
+
+
+def _artifact_arrays(bucketer, street):
+    """One street's board ids and bucket matrix, straight off the artifact.
+
+    Reaching past `DenseBucketer`'s underscore is deliberate and confined here:
+    a kernel needs the raw arrays, and the public `get_bucket` is exactly the
+    Python call it exists to avoid. Named so the coupling is one function
+    rather than four scattered attribute reads.
+    """
+    return bucketer._board_ids[street], np.asarray(bucketer._buckets[street])  # noqa: SLF001
+
+
+def _artifact_columns(bucketer):
+    """The static hand-id-to-column map and the not-a-legal-combo sentinel."""
+    return (
+        np.asarray(bucketer._hand_id_to_col, dtype=np.int64),  # noqa: SLF001
+        int(next(iter(bucketer._sentinels.values()))),  # noqa: SLF001
     )
 
 
@@ -350,16 +550,20 @@ class CompiledContext:
     """
 
     __slots__ = (
-        "arrays", "deck_mask", "deck_rank", "deck_suit", "hand_to_col",
-        "matrix", "preflop_index", "sentinel", "street_ids", "street_offsets",
+        "arrays",
+        "deck_mask",
+        "deck_rank",
+        "deck_suit",
+        "hand_to_col",
+        "matrix",
+        "preflop_index",
+        "sentinel",
+        "street_ids",
         "street_of_node",
+        "street_offsets",
     )
 
     def __init__(self, tree, bucketer, deck):
-        from src.core.game.state import Street
-        from src.engine.solver.infoset.index import preflop_hand_index
-        from src.engine.solver.vector.walk_arrays import WalkArrays
-
         self.arrays = WalkArrays(tree)
         self.deck_rank = np.array([c.rank_eval7() for c in deck], dtype=np.int64)
         self.deck_suit = np.array([c.suit_eval7() for c in deck], dtype=np.int64)
@@ -377,15 +581,14 @@ class CompiledContext:
         order = (Street.FLOP, Street.TURN, Street.RIVER)
         ids, matrices, offsets = [], [], [0, 0]
         for street in order:
-            street_ids = bucketer._board_ids[street]
+            street_ids, matrix = _artifact_arrays(bucketer, street)
             ids.append(street_ids)
-            matrices.append(np.asarray(bucketer._buckets[street]))
+            matrices.append(matrix)
             offsets.append(offsets[-1] + street_ids.size)
         self.street_ids = np.concatenate(ids)
         self.matrix = np.vstack(matrices)
         self.street_offsets = np.array(offsets, dtype=np.int64)
-        self.hand_to_col = np.asarray(bucketer._hand_id_to_col, dtype=np.int64)
-        self.sentinel = int(next(iter(bucketer._sentinels.values())))
+        self.hand_to_col, self.sentinel = _artifact_columns(bucketer)
 
         index_of = {Street.PREFLOP: 0, Street.FLOP: 1, Street.TURN: 2, Street.RIVER: 3}
         self.street_of_node = np.array(
@@ -426,21 +629,56 @@ def run_iteration(solver, context, iteration: int) -> float:
     arrays = context.arrays
     storage = solver.storage
     utility, deal_index, sample_index, applied = walk(
-        0, np.zeros(5, dtype=np.int64), 0, known,
-        traverser, button, 0 if traverser == button else 1, iteration, hole_index,
-        storage.regrets, storage.strategy_sum, storage.reach_counts,
-        storage.cumulative_utility, storage.visited,
-        arrays.edge_offset, arrays.edge_child, arrays.edge_deal, arrays.edge_terminal,
-        arrays.num_actions, arrays.row_offset, arrays.slot_offset, arrays.buckets_per_node,
-        arrays.node_actor_is_button, arrays.is_preflop, context.street_of_node,
-        arrays.terminal_is_fold, arrays.terminal_cards_to_deal,
-        arrays.terminal_fold, arrays.terminal_win, arrays.terminal_lose, arrays.terminal_tie,
-        context.deck_rank, context.deck_suit, context.deck_mask,
-        context.preflop_index, context.street_ids, context.matrix, context.street_offsets,
-        context.hand_to_col, context.sentinel,
-        solver_config.cfr_plus, weighting, solver_config.dcfr_alpha, solver_config.dcfr_beta,
+        0,
+        np.zeros(5, dtype=np.int64),
+        0,
+        known,
+        traverser,
+        button,
+        0 if traverser == button else 1,
+        iteration,
+        hole_index,
+        storage.regrets,
+        storage.strategy_sum,
+        storage.reach_counts,
+        storage.cumulative_utility,
+        storage.visited,
+        arrays.edge_offset,
+        arrays.edge_child,
+        arrays.edge_deal,
+        arrays.edge_terminal,
+        arrays.num_actions,
+        arrays.row_offset,
+        arrays.slot_offset,
+        arrays.buckets_per_node,
+        arrays.node_actor_is_button,
+        arrays.is_preflop,
+        context.street_of_node,
+        arrays.terminal_is_fold,
+        arrays.terminal_cards_to_deal,
+        arrays.terminal_fold,
+        arrays.terminal_win,
+        arrays.terminal_lose,
+        arrays.terminal_tie,
+        context.deck_rank,
+        context.deck_suit,
+        context.deck_mask,
+        context.preflop_index,
+        context.street_ids,
+        context.matrix,
+        context.street_offsets,
+        context.hand_to_col,
+        context.sentinel,
+        solver_config.cfr_plus,
+        weighting,
+        solver_config.dcfr_alpha,
+        solver_config.dcfr_beta,
         strategy_weight,
-        deal_state, deal_index, sample_state, sample_index, 0,
+        deal_state,
+        deal_index,
+        sample_state,
+        sample_index,
+        0,
     )
 
     restore_python_state(deal_state, deal_index)

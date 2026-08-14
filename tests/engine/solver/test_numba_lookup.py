@@ -26,17 +26,22 @@ import numpy as np
 import pytest
 
 from src.core.game.state import Card, Street
+from src.engine.solver.numba_lookup import postflop_bucket, suit_labels
 from src.pipeline.abstraction.postflop.bucketer import (
     N_HAND_COLUMNS,
     DenseBucketer,
     build_hand_column_index,
 )
-from src.pipeline.abstraction.postflop.numba_lookup import postflop_bucket, suit_labels
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
     canonical_board_id,
 )
 
 DECK = [Card.new(rank + suit) for rank in "23456789TJQKA" for suit in "cdhs"]
+
+# The flop sweep walks all 22,100 canonical boards and pays numba's compile on
+# a cold cache, which is ~4s alone and past the 5s default under twelve xdist
+# workers. Tight enough to still catch a hang, loose enough not to fail on load.
+pytestmark = pytest.mark.timeout(60)
 NUM_BUCKETS = 250
 
 
