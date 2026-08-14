@@ -19,7 +19,9 @@ keeps the authentication question with the thing that already answers it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
@@ -57,7 +59,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class BlueprintServePayload(BaseModel):
+    """WHERE the blueprint server will listen, and which run it will hold."""
+
+    op: Literal["blueprint-serve"] = "blueprint-serve"
+    run: str
+    run_dir: str
+    """Kept so the server can stage a DIFFERENT run beside this one when asked
+    to switch, rather than only ever knowing the one it started on."""
+    runs_dir: str
+    at_iteration: int | None = None
+    idle_timeout: int = 0
+    url: str
+    host: str
+    port: int
+
+
+def run(args: argparse.Namespace) -> BlueprintServePayload:
     """Resolve the run and describe what would be served; :func:`render` serves it.
 
     Same shape as `serve`: a server never returns, which does not fit
@@ -68,19 +86,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = resolve_run_dir(args.run, args.runs_dir)
     if not run_dir.is_dir():
         raise CommandError(f"No run directory at {run_dir}.")
-    return {
-        "op": "blueprint-serve",
-        "run": run_dir.name,
-        "run_dir": str(run_dir),
-        # Kept so the server can stage a DIFFERENT run beside this one when
-        # asked to switch, rather than only ever knowing the one it started on.
-        "runs_dir": args.runs_dir,
-        "at_iteration": args.at,
-        "idle_timeout": args.idle_timeout,
-        "url": f"http://{HOST}:{args.port}",
-        "host": HOST,
-        "port": args.port,
-    }
+    return BlueprintServePayload(
+        run=run_dir.name,
+        run_dir=str(run_dir),
+        runs_dir=args.runs_dir,
+        at_iteration=args.at,
+        idle_timeout=args.idle_timeout,
+        url=f"http://{HOST}:{args.port}",
+        host=HOST,
+        port=args.port,
+    )
 
 
 def render(payload: dict[str, Any]) -> None:

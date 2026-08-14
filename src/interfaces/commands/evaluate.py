@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from src.interfaces.commands._base import (
     Command,
@@ -123,7 +123,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=int, default=None, help="Random seed (default: random).")
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+def run(args: argparse.Namespace) -> services.EvaluationPayload:
     """Argparse transport around :func:`services.evaluate_and_record`.
 
     All dispatch, payload shaping, and ledger recording live in the orchestrator;
@@ -163,12 +163,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def render(payload: dict[str, Any]) -> None:
-    results = payload["results"]
+def render(payload: services.EvaluationPayload) -> None:
+    results = payload.results
     print("Evaluation complete.")
-    print(f"  Run ID:        {payload['run_id']}")
-    print(f"  Estimator:     {payload['estimator']}")
-    print(f"  Infosets:      {payload['infosets']:,}")
+    print(f"  Run ID:        {payload.run_id}")
+    print(f"  Estimator:     {payload.estimator}")
+    print(f"  Infosets:      {payload.infosets:,}")
     print(
         f"  Exploitability: {results['exploitability_mbb']:.2f} mbb/g "
         f"(± {results['std_error_mbb']:.2f})"

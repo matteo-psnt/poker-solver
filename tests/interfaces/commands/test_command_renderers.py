@@ -39,13 +39,16 @@ from src.interfaces.commands.runinfo import RunInfoPayload
 from src.interfaces.commands.runs import RunsPayload, RunSummary
 from src.interfaces.commands.score import ScorePayload
 from src.interfaces.commands.serve_box import BoxPayload
+from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.submit_vector import SubmitVectorPayload, VectorArm
 from src.interfaces.commands.tasks import TasksPayload
 from src.interfaces.commands.train_static import StaticTrainingPayload
 from src.interfaces.commands.train_vector import VectorBlueprintPayload
+from src.interfaces.commands.vector_sweep import SweepPoint, VectorSweepPayload
 from src.interfaces.commands.warm_start import WarmStartPayload
+from src.pipeline.services import EvaluationPayload
 from src.pipeline.services.experiments import CurveOutput, CurvePoint
 from src.shared.task_history import TaskProgress, TaskRow
 from src.shared.task_states import Phase
@@ -70,40 +73,39 @@ PAYLOADS: dict[str, Any] = {
         dropped_updates=0,
         status="completed",
     ),
-    "vector-sweep": {
-        "op": "vector-sweep",
-        "abstraction": "buckets-F100T300R600-rexact-a1542e88",
-        "buckets": {"flop": 100, "turn": 300, "river": 600},
-        "kernel": "board-free",
-        "derive_boards": 6000,
-        "train_boards": 8,
-        "score_boards": 32,
-        "in_sample": False,
-        "stack": 20,
-        "nodes": 2140,
-        "infoset_rows": 1_132_552,
-        "derive_seconds": 457.0,
-        "uniform_baseline": 4.1869,
-        "uniform_baseline_unconstrained": 4.4021,
-        "done": 2,
-        "total": 9,
-        "points": [
-            {
-                "iterations": 400,
-                "train_seconds": 53.1,
-                "exploitability": 0.5392,
-                "unconstrained": 0.8811,
-            },
-            {
-                "iterations": 1600,
-                "train_seconds": 210.1,
-                "exploitability": 0.693,
-                "unconstrained": 0.9902,
-            },
+    "vector-sweep": VectorSweepPayload(
+        abstraction="buckets-F100T300R600-rexact-a1542e88",
+        buckets={"flop": 100, "turn": 300, "river": 600},
+        kernel="board-free",
+        derive_boards=6000,
+        train_boards=8,
+        score_boards=32,
+        in_sample=False,
+        stack=20,
+        nodes=2140,
+        infoset_rows=1_132_552,
+        derive_seconds=457.0,
+        uniform_baseline=4.1869,
+        uniform_baseline_unconstrained=4.4021,
+        done=2,
+        total=9,
+        points=[
+            SweepPoint(
+                iterations=400,
+                train_seconds=53.1,
+                exploitability=0.5392,
+                unconstrained=0.8811,
+            ),
+            SweepPoint(
+                iterations=1600,
+                train_seconds=210.1,
+                exploitability=0.693,
+                unconstrained=0.9902,
+            ),
         ],
-        "best_exploitability": 0.5392,
-        "best_at_iterations": 400,
-    },
+        best_exploitability=0.5392,
+        best_at_iterations=400,
+    ),
     "submit-vector": SubmitVectorPayload(
         arms=[
             VectorArm(
@@ -246,13 +248,15 @@ PAYLOADS: dict[str, Any] = {
             se_unpaired=9.0,
         ),
     ),
-    "evaluate": {
-        "op": "evaluate",
-        "run_id": "run-a",
-        "estimator": "local_best_response",
-        "infosets": 42,
-        "results": {"exploitability_mbb": 900.0, "std_error_mbb": 12.0},
-    },
+    "evaluate": EvaluationPayload(
+        run_id="run-a",
+        # `method` was absent from this fixture for as long as it existed; the
+        # payload has always carried it.
+        method="lbr",
+        estimator="local_best_response",
+        infosets=42,
+        results={"exploitability_mbb": 900.0, "std_error_mbb": 12.0},
+    ),
     "runinfo": RunInfoPayload(
         run_id="run-a",
         config_name="production",
@@ -627,25 +631,21 @@ PAYLOADS: dict[str, Any] = {
 # `tasks` is deliberately the FAILED panel here. A status screen's whole value is
 # that it still shows the other two when one is unavailable, and that path only
 # runs when something is already wrong -- so it is the one worth pinning.
-PAYLOADS["status"] = {
-    "op": "status",
-    "at": "2026-08-03T00:24:48-07:00",
-    "elapsed_seconds": 22.1,
-    "watch": 0,
-    "requested_watch": 0,
-    "limit": 10,
-    "with_tasks": True,
+PAYLOADS["status"] = StatusPayload(
+    at="2026-08-03T00:24:48-07:00",
+    elapsed_seconds=22.1,
+    limit=10,
     # DUMPED, because that is what a panel actually holds: `_compose._answer`
     # serialises each part so a view can join over plain data. Embedding the
     # models here instead made this fixture agree with itself and with nothing
     # else -- `status` crashed in production on exactly this difference while
     # rendering the fixture cleanly.
-    "panels": {
-        "pool": {"payload": PAYLOADS["pool-status"].model_dump(), "error": None},
-        "jobs": {"payload": PAYLOADS["jobs"].model_dump(), "error": None},
-        "tasks": {"payload": None, "error": "Azure rejected the credential — try `az login`."},
+    panels={
+        "pool": StatusPanel(payload=PAYLOADS["pool-status"].model_dump()),
+        "jobs": StatusPanel(payload=PAYLOADS["jobs"].model_dump()),
+        "tasks": StatusPanel(error="Azure rejected the credential — try `az login`."),
     },
-}
+)
 
 BY_NAME = {command.name: command for command in load_all()}
 

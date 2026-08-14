@@ -33,7 +33,9 @@ second read path.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import BaseModel, Field
 
 from src.interfaces.commands import jobs, pool_status, tasks
 from src.interfaces.commands._base import Command
@@ -76,7 +78,47 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def gather(*, limit: int = 10, with_tasks: bool = True) -> dict[str, Any]:
+class StatusPanel(BaseModel):
+    """One panel's answer, or the reason there is not one.
+
+    Exactly one of these is set. A panel that failed keeps its place so the
+    screen greys one heading and keeps the rest -- which is the property the
+    whole fan-out exists for, and it disappears if a failed panel is omitted.
+
+    `payload` is a plain dict rather than a union of the three panel models: it
+    arrives dumped from `_compose`, this command serves no endpoint, and naming
+    the three here would be a fourth place that has to know which panels exist.
+    `_render_panel` is where each is turned back into its own type.
+    """
+
+    payload: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class StatusPayload(BaseModel):
+    """Three commands' answers on one screen, plus what a follower needs.
+
+    `watch` rides on the payload rather than looping in `run`, because a `run`
+    that did not return a snapshot would break `--json` and every programmatic
+    caller. The renderer -- the only terminal-specific part -- is what repeats.
+    """
+
+    op: Literal["status"] = "status"
+    at: str
+    """The wall clock of the whole fan-out. A screen whose elapsed time equals
+    the sum of its panels has silently become serial, and nothing else shows
+    it."""
+    elapsed_seconds: float
+    panels: dict[str, StatusPanel] = Field(default_factory=dict)
+    """The interval actually used, and the one asked for -- they differ when a
+    tick could not finish before the next was due."""
+    watch: int = 0
+    requested_watch: int = 0
+    limit: int = 0
+    with_tasks: bool = True
+
+
+def gather(*, limit: int = 10, with_tasks: bool = True) -> StatusPayload:
     """Fetch every panel concurrently and return them keyed by name.
 
     The entry point for any surface that is not this command. The fan-out lives
@@ -98,11 +140,18 @@ def gather(*, limit: int = 10, with_tasks: bool = True) -> dict[str, Any]:
         if with_tasks or name != "tasks"
     ]
     composed = compose("status", parts)
-    composed["panels"] = composed.pop("parts")
-    return composed
+    return StatusPayload(
+        at=composed["at"],
+        elapsed_seconds=composed["elapsed_seconds"],
+        # `panels` rather than `compose`'s `parts`: that is the word this
+        # command's renderer and its `--json` consumers already use, and
+        # renaming a published key to match an internal one is a break with
+        # nothing behind it.
+        panels={name: StatusPanel.model_validate(part) for name, part in composed["parts"].items()},
+    )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+def run(args: argparse.Namespace) -> StatusPayload:
     """One snapshot, plus what a follower would need to take the next one.
 
     ``--watch`` rides on the payload rather than looping here, and rather than
@@ -116,13 +165,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     """
     interval = max(args.watch, MIN_INTERVAL) if args.watch else 0
     snapshot = gather(limit=args.limit, with_tasks=not args.no_tasks)
-    return {
-        **snapshot,
-        "watch": interval,
-        "requested_watch": args.watch,
-        "limit": args.limit,
-        "with_tasks": not args.no_tasks,
-    }
+    return snapshot.model_copy(
+        update={
+            "watch": interval,
+            "requested_watch": args.watch,
+            "limit": args.limit,
+            "with_tasks": not args.no_tasks,
+        }
+    )
 
 
 PANEL_TITLES: dict[str, str] = {
@@ -155,7 +205,7 @@ def _render_panel(name: str, payload: dict[str, Any]) -> None:
         tasks.render(tasks.TasksPayload.model_validate(payload))
 
 
-def _render_once(payload: dict[str, Any]) -> None:
+def _render_once(payload: StatusPayload) -> None:
     """Print each panel under a heading, delegating to the command that owns it.
 
     Deliberately no formatting of its own. A status screen that re-rendered the
@@ -163,16 +213,16 @@ def _render_once(payload: dict[str, Any]) -> None:
     with ``jobs`` about what a task looks like -- the ``checkpoint-profile``
     failure with the arrow reversed.
     """
-    print(f"{payload['at']}   ({payload['elapsed_seconds']}s)")
-    for name, panel in payload["panels"].items():
+    print(f"{payload.at}   ({payload.elapsed_seconds}s)")
+    for name, panel in payload.panels.items():
         print(f"\n── {PANEL_TITLES.get(name, name.upper())} " + "─" * 40)
-        if panel["error"]:
-            print(f"  unavailable: {panel['error']}")
+        if panel.error or panel.payload is None:
+            print(f"  unavailable: {panel.error}")
             continue
-        _render_panel(name, panel["payload"])
+        _render_panel(name, panel.payload)
 
 
-def render(payload: dict[str, Any]) -> None:
+def render(payload: StatusPayload) -> None:
     """Print the snapshot, then keep printing if it asked to be followed.
 
     Ctrl-C is the DOCUMENTED way out of the loop, so it has to be an ordinary
@@ -181,16 +231,16 @@ def render(payload: dict[str, Any]) -> None:
     prints a traceback every single time the user stops watching.
     """
     _render_once(payload)
-    interval = payload.get("watch") or 0
+    interval = payload.watch
     if not interval:
         return
-    if interval != payload.get("requested_watch", interval):
+    if interval != payload.requested_watch:
         print(f"\nnote: interval raised to {interval}s — a full cycle takes longer than that.")
     try:
         while True:
             print(f"\nrefreshing every {interval}s — Ctrl-C to stop")
             time.sleep(interval)
-            snapshot = gather(limit=payload["limit"], with_tasks=payload["with_tasks"])
+            snapshot = gather(limit=payload.limit, with_tasks=payload.with_tasks)
             # Home the cursor and clear, rather than scrolling: this is meant to
             # be watched, and a scrolling log of identical tables is not.
             print("\033[H\033[J", end="")

@@ -39,10 +39,11 @@ if TYPE_CHECKING:
 # EVERY invocation, including the `--help` the lazy registry took from 3.15s to
 # 0.18s; `from __future__ import annotations` keeps it out of the interpreter.
 
-# The ``dict`` arm is the commands not yet converted, and is the only reason this
-# is a union: when the last one lands it becomes ``BaseModel`` and every
-# remaining dict is a type error.
-type Payload = BaseModel | dict[str, Any]
+# Every command returns a MODEL. This was ``BaseModel | dict[str, Any]`` while
+# they were converted one at a time; the union is gone, so a handler that
+# returns a dict is now a type error at pre-commit rather than a shape nobody
+# checks.
+type Payload = BaseModel
 
 
 @dataclass(frozen=True)

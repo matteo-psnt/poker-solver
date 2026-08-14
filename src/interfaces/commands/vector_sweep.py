@@ -24,9 +24,10 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
@@ -154,7 +155,49 @@ def _bucket_counts(abstraction: DenseBucketer) -> dict[Street, int]:
     }
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class SweepPoint(BaseModel):
+    """One scored checkpoint of the sweep."""
+
+    iterations: int
+    train_seconds: float
+    exploitability: float
+    unconstrained: float
+
+
+class VectorSweepPayload(BaseModel):
+    """Exploitability vs iteration for one kernel on one abstraction.
+
+    NODE-ONLY: `submit-vector` is the console's door. `done`/`total` are read
+    back by the node's progress sampler -- a curve's honest unit is checkpoints
+    scored, and it cannot know the denominator otherwise.
+    """
+
+    op: Literal["vector-sweep"] = "vector-sweep"
+    done: int
+    total: int
+    abstraction: str
+    buckets: dict[str, int] = Field(default_factory=dict)
+    kernel: str
+    derive_boards: int
+    """Which boards the score was taken on, and whether they were held out.
+    `in_sample` false is the only reading worth trusting."""
+    train_boards: int
+    score_boards: int
+    in_sample: bool
+    stack: int
+    nodes: int
+    infoset_rows: int
+    derive_seconds: float
+    """What a UNIFORM strategy scores here -- the number every point has to be
+    read against, since the tree's own size sets the scale."""
+    uniform_baseline: float
+    uniform_baseline_unconstrained: float
+    points: list[SweepPoint] = Field(default_factory=list)
+    best_exploitability: float | None = None
+    best_at_iterations: int | None = None
+
+
+def run(args: argparse.Namespace) -> VectorSweepPayload:
     """Train one kernel, scoring it against the exact best response as it goes."""
     if args.seed == args.score_seed:
         raise CommandError("--seed and --score-seed must differ, or scoring is not held out.")
@@ -320,56 +363,52 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def _payload(
     args, counts, compiled, baseline, points, derive_seconds, total_checkpoints=0
-) -> dict[str, Any]:
+) -> VectorSweepPayload:
     best = min(points, key=lambda p: p["exploitability"]) if points else None
-    return {
-        "op": "vector-sweep",
-        # Read back by the node's progress sampler: a curve's honest unit is
-        # checkpoints scored, and it cannot know the denominator otherwise.
-        "done": len(points),
-        "total": total_checkpoints,
-        "abstraction": args.abstraction,
-        "buckets": {street.name.lower(): count for street, count in counts.items()},
-        "kernel": args.kernel,
-        "derive_boards": args.derive_boards if args.kernel == BOARD_FREE else 0,
-        "train_boards": args.train_boards or args.score_boards,
-        "score_boards": args.score_boards,
-        "in_sample": not args.train_boards,
-        "stack": args.stack,
-        "nodes": compiled.num_nodes,
-        "infoset_rows": compiled.tree.num_rows,
-        "derive_seconds": derive_seconds,
-        "uniform_baseline": round(baseline[0], 6),
-        "uniform_baseline_unconstrained": round(baseline[1], 6),
-        "points": points,
-        "best_exploitability": best["exploitability"] if best else None,
-        "best_at_iterations": best["iterations"] if best else None,
-    }
-
-
-def render(payload: dict[str, Any]) -> None:
-    buckets = payload["buckets"]
-    print(
-        f"vector-sweep {payload['kernel']} on {payload['abstraction']} "
-        f"(F{buckets['flop']}/T{buckets['turn']}/R{buckets['river']}, "
-        f"{payload['nodes']:,} nodes, {payload['infoset_rows']:,} rows)"
+    return VectorSweepPayload(
+        done=len(points),
+        total=total_checkpoints,
+        abstraction=args.abstraction,
+        buckets={street.name.lower(): count for street, count in counts.items()},
+        kernel=args.kernel,
+        derive_boards=args.derive_boards if args.kernel == BOARD_FREE else 0,
+        train_boards=args.train_boards or args.score_boards,
+        score_boards=args.score_boards,
+        in_sample=not args.train_boards,
+        stack=args.stack,
+        nodes=compiled.num_nodes,
+        infoset_rows=compiled.tree.num_rows,
+        derive_seconds=derive_seconds,
+        uniform_baseline=round(baseline[0], 6),
+        uniform_baseline_unconstrained=round(baseline[1], 6),
+        points=[SweepPoint.model_validate(point) for point in points],
+        best_exploitability=best["exploitability"] if best else None,
+        best_at_iterations=best["iterations"] if best else None,
     )
-    if payload["derive_seconds"] is not None:
-        print(f"  derived from {payload['derive_boards']:,} boards in {payload['derive_seconds']}s")
+
+
+def render(payload: VectorSweepPayload) -> None:
+    buckets = payload.buckets
     print(
-        f"  uniform baseline {payload['uniform_baseline']:.4f} in-abstraction, "
-        f"{payload['uniform_baseline_unconstrained']:.4f} per-hand"
+        f"vector-sweep {payload.kernel} on {payload.abstraction} "
+        f"(F{buckets['flop']}/T{buckets['turn']}/R{buckets['river']}, "
+        f"{payload.nodes:,} nodes, {payload.infoset_rows:,} rows)"
+    )
+    if payload.derive_seconds is not None:
+        print(f"  derived from {payload.derive_boards:,} boards in {payload.derive_seconds}s")
+    print(
+        f"  uniform baseline {payload.uniform_baseline:.4f} in-abstraction, "
+        f"{payload.uniform_baseline_unconstrained:.4f} per-hand"
     )
     print(f"  {'iters':>8} {'train s':>9} {'in-abs':>12} {'per-hand':>12}")
-    for point in payload["points"]:
+    for point in payload.points:
         print(
-            f"  {point['iterations']:>8,} {point['train_seconds']:>9.1f} "
-            f"{point['exploitability']:>12.5f} {point['unconstrained']:>12.5f}"
+            f"  {point.iterations:>8,} {point.train_seconds:>9.1f} "
+            f"{point.exploitability:>12.5f} {point.unconstrained:>12.5f}"
         )
-    if payload["best_exploitability"] is not None:
+    if payload.best_exploitability is not None:
         print(
-            f"  best {payload['best_exploitability']:.5f} at "
-            f"{payload['best_at_iterations']:,} iterations"
+            f"  best {payload.best_exploitability:.5f} at {payload.best_at_iterations:,} iterations"
         )
 
 
