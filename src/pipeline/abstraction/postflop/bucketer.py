@@ -27,11 +27,8 @@ import numpy as np
 
 from src.core.game.state import Card, Street
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
-    SuitMapping,
-    canonicalize_board,
-    canonicalize_hand,
-    get_canonical_board_id,
-    get_canonical_hand_id,
+    canonical_board_id,
+    canonical_hand_id,
 )
 from src.pipeline.abstraction.preflop.hand_classes import PreflopHandClasses
 
@@ -194,9 +191,16 @@ class DenseBucketer:
             return _PREFLOP_CLASSES.get_hand_index(hole_cards)
         return self._cached_postflop_bucket(hole_cards, tuple(board), street)
 
-    def _board_row(self, board: tuple[Card, ...], street: Street) -> tuple[int, SuitMapping]:
-        canonical_board, suit_mapping = canonicalize_board(board)
-        board_id = get_canonical_board_id(canonical_board)
+    def _board_row(self, board: tuple[Card, ...], street: Street) -> tuple[int, dict[str, int]]:
+        """Locate the board's row, and keep the suit labels the hand needs.
+
+        Uses the fused ``canonical_board_id`` rather than
+        ``canonicalize_board`` + ``get_canonical_board_id``: identical id and
+        labels, without the ``CanonicalCard`` objects that only existed to be
+        walked once and discarded. This is the miss path on turn and river,
+        where a fresh runout is a fresh key in both LRUs.
+        """
+        board_id, labels = canonical_board_id(board)
 
         board_ids = self._board_ids[street]
         row = int(np.searchsorted(board_ids, board_id))
@@ -205,7 +209,7 @@ class DenseBucketer:
                 f"Board {board} (canonical id {board_id}) not found for {street.name}; "
                 "the abstraction is incomplete or the board is malformed."
             )
-        return row, suit_mapping
+        return row, labels
 
     def _postflop_bucket(
         self, hole_cards: tuple[Card, Card], board: tuple[Card, ...], street: Street
@@ -214,10 +218,8 @@ class DenseBucketer:
         if matrix is None:
             raise KeyError(f"No buckets loaded for street {street.name}")
 
-        row, suit_mapping = self._cached_board_row(board, street)
-
-        canonical_hand = canonicalize_hand(hole_cards, suit_mapping)
-        col = int(self._hand_id_to_col[get_canonical_hand_id(canonical_hand)])
+        row, labels = self._cached_board_row(board, street)
+        col = int(self._hand_id_to_col[canonical_hand_id(hole_cards, labels)])
         bucket = int(matrix[row, col]) if col >= 0 else self._sentinels[street]
         if bucket == self._sentinels[street]:
             raise KeyError(f"Hand {hole_cards} is not a legal combo on board {board}")

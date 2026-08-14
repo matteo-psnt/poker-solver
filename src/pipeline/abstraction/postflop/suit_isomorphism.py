@@ -22,7 +22,6 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import permutations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -132,19 +131,66 @@ def get_card_rank_idx(card: Card) -> int:
     return EVAL7_RANK_TO_OUR_IDX[card.rank_eval7()]
 
 
+_SENTINEL = 99  # above every rank_idx, so a suit that stops appearing sorts last
+
+
+def _suit_labels(cards_info: list[tuple[int, str]]) -> dict[str, int]:
+    """The canonical suit labelling, derived rather than searched for.
+
+    The canonical board is the lexicographically smallest relabelling, and this
+    used to be found by trying all 4! of them — 24 sorts and 24 tuples per
+    board, which measured 10.5us and was 68% of a river bucket lookup.
+
+    It can be read off instead. Cards compare as ``rank_idx * 4 + label``, so
+    rank dominates and the label only breaks ties *within* a rank. Minimising
+    the sequence therefore means: the suit appearing at the highest card takes
+    label 0, and where two suits first appear at the same rank, the one that
+    keeps appearing at higher cards wins. That is a lexicographic order on each
+    suit's ascending rank list — with SHORTER-IS-GREATER, because a suit that
+    runs out of cards must lose to one that has more and plain tuple comparison
+    gets that backwards (``[0] < [0, 3]``). Padding to the board width with a
+    sentinel above every rank fixes it.
+
+    The final tie-break is the suit CHARACTER, which is load-bearing rather
+    than cosmetic: two suits with identical rank lists are interchangeable on
+    the board but NOT for the hand read against the resulting mapping, so
+    without a deterministic tie-break a hand's bucket would depend on the order
+    the board tuple happened to be dealt in. Verified against the exhaustive
+    relabelling search over every flop and turn and 200k random rivers, boards
+    shuffled — ``test_suit_isomorphism`` — which is also how the tie-break was
+    caught: enumerating boards in deck order never exercises it.
+    """
+    ranks_by_suit: dict[str, list[int]] = {}
+    for rank_idx, suit in cards_info:
+        ranks_by_suit.setdefault(suit, []).append(rank_idx)
+
+    width = len(cards_info)
+    order = sorted(
+        ranks_by_suit,
+        key=lambda suit: (
+            (
+                *sorted(ranks_by_suit[suit]),
+                *((_SENTINEL,) * (width - len(ranks_by_suit[suit]))),
+            ),
+            suit,
+        ),
+    )
+    return {suit: label for label, suit in enumerate(order)}
+
+
 def canonicalize_board(
     board: tuple[Card, ...], initial_mapping: SuitMapping | None = None
 ) -> tuple[tuple[CanonicalCard, ...], SuitMapping]:
     """
     Canonicalize a board under suit isomorphism.
 
-    The canonical form is determined by:
-    1. Sorting cards by rank (high to low)
-    2. Trying all possible suit permutations
-    3. Choosing the lexicographically smallest result
+    The canonical form is the lexicographically smallest suit relabelling, so
+    boards differing only in which suits are used share one form.
+    :func:`_suit_labels` derives that relabelling directly; the cards are then
+    emitted in ``(rank, label)`` order.
 
-    This ensures that isomorphic boards (boards that differ only in which
-    specific suits are used) map to the same canonical form.
+    Callers that only want the id — the runtime bucket lookup — should use
+    :func:`canonical_board_id`, which skips the ``CanonicalCard`` objects.
 
     Args:
         board: Tuple of Card objects
@@ -167,38 +213,10 @@ def canonicalize_board(
         suit = get_card_suit(card)
         cards_info.append((rank_idx, suit))
 
-    # Sort by rank, then suit (lower rank_idx = higher rank, e.g., 0=Ace). The suit
-    # tiebreak is load-bearing: `present_suits` takes its order from here, which decides
-    # which relabeling wins a tie below. Rank alone leaves same-rank cards in caller
-    # order, making a hand's bucket depend on how the board tuple was dealt.
-    sorted_cards = sorted(cards_info, key=lambda x: (x[0], x[1]))
-
-    # Find all suits present in the board
-    present_suits = list(dict.fromkeys(suit for _, suit in sorted_cards))
-
-    # Try all possible suit relabelings and keep the lexicographically smallest.
-    # Cards are compared as rank_idx*4+label integers, which orders exactly like
-    # CanonicalCard (rank first, then suit label); the CanonicalCard objects are
-    # only materialized once, for the winner.
-    suit_positions = {suit: pos for pos, suit in enumerate(present_suits)}
-    card_codes = [(rank_idx * 4, suit_positions[suit]) for rank_idx, suit in sorted_cards]
-
-    best_key: tuple[int, ...] | None = None
-    best_perm: tuple[int, ...] | None = None
-
-    for perm in permutations(range(len(present_suits))):
-        key = tuple(sorted(rank_base + perm[pos] for rank_base, pos in card_codes))
-        if best_key is None or key < best_key:
-            best_key = key
-            best_perm = perm
-
-    assert best_key is not None
-    assert best_perm is not None
-    best_canonical = tuple(CanonicalCard(code >> 2, code & 3) for code in best_key)
-    best_mapping = {suit: best_perm[pos] for suit, pos in suit_positions.items()}
-    final_mapping = SuitMapping(best_mapping, len(best_mapping))
-
-    return best_canonical, final_mapping
+    labels = _suit_labels(cards_info)
+    codes = sorted(rank_idx * 4 + labels[suit] for rank_idx, suit in cards_info)
+    canonical = tuple(CanonicalCard(code >> 2, code & 3) for code in codes)
+    return canonical, SuitMapping(labels, len(labels))
 
 
 def _canonicalize_board_with_mapping(
@@ -308,6 +326,61 @@ def get_canonical_hand_id(canonical_hand: tuple[CanonicalCard, CanonicalCard]) -
     # Combine (ordered pair within 52*52 space, but actually much smaller
     # since c1 <= c2 in canonical ordering)
     return idx1 * 52 + idx2
+
+
+def canonical_board_id(board: tuple[Card, ...]) -> tuple[int, dict[str, int]]:
+    """``(board id, suit labels)`` without building the cards in between.
+
+    What :meth:`DenseBucketer._board_row` wants is an integer to binary-search
+    and a mapping to read the hand against. Going through
+    ``canonicalize_board`` allocates a ``CanonicalCard`` per board card and a
+    ``SuitMapping``, then ``get_canonical_board_id`` walks the tuple once and
+    throws it away. On the river that is five dataclasses per lookup, on a path
+    where a fresh runout misses both LRUs every visit.
+
+    Same labelling as :func:`canonicalize_board` — both call
+    :func:`_suit_labels` — and the id is the same polynomial
+    :func:`get_canonical_board_id` computes, so the two agree by construction
+    and are pinned to agree by test.
+    """
+    cards_info = [(get_card_rank_idx(card), get_card_suit(card)) for card in board]
+    labels = _suit_labels(cards_info)
+
+    board_id = 0
+    for code in sorted(rank_idx * 4 + labels[suit] for rank_idx, suit in cards_info):
+        board_id = board_id * 52 + code
+    return board_id, labels
+
+
+def canonical_hand_id(hole_cards: tuple[Card, Card], labels: dict[str, int]) -> int:
+    """The hand's canonical id against a board's suit labels, in one pass.
+
+    Mirrors ``get_canonical_hand_id(canonicalize_hand(...))``, including the
+    part that is easy to miss: a hole-card suit absent from the board takes the
+    next free label, and those are handed out in RANK order (high card first)
+    so that ``(Ad, Kh)`` and ``(Kh, Ad)`` cannot canonicalise differently.
+
+    ``labels`` is not mutated — a new suit's label is local to this hand.
+    """
+    (rank_a, suit_a), (rank_b, suit_b) = sorted(
+        ((get_card_rank_idx(card), get_card_suit(card)) for card in hole_cards),
+        key=lambda pair: pair[0],
+    )
+
+    next_label = len(labels)
+    label_a = labels.get(suit_a)
+    if label_a is None:
+        label_a = next_label
+        next_label += 1
+    if suit_b == suit_a:
+        label_b = label_a
+    else:
+        label_b = labels.get(suit_b)
+        if label_b is None:
+            label_b = next_label
+
+    first, second = sorted((rank_a * 4 + label_a, rank_b * 4 + label_b))
+    return first * 52 + second
 
 
 def hand_relative_to_board(

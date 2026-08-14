@@ -1,12 +1,15 @@
 """Tests for suit isomorphism canonicalization."""
 
 import itertools
+import random
 
 import pytest
 
-from src.core.game.state import Card
+from src.core.game.state import FULL_DECK, Card
 from src.pipeline.abstraction.postflop.suit_isomorphism import (
     SuitMapping,
+    canonical_board_id,
+    canonical_hand_id,
     canonicalize_board,
     canonicalize_hand,
     get_canonical_board_id,
@@ -393,3 +396,132 @@ class TestBoardOrderInvariance:
                 for p in itertools.permutations(board)
             }
             assert len(ids) == 1, f"hand {hand} varies with board order: {ids}"
+
+
+class TestDerivedLabellingMatchesTheExhaustiveSearch:
+    """The canonical labelling is now READ OFF. Pin it to the search it replaced.
+
+    `_suit_labels` derives the lexicographically smallest suit relabelling
+    instead of enumerating all 4! of them, which took `canonicalize_board` from
+    ~10.5us to ~3.5us and mattered because it was 68% of a river bucket lookup.
+
+    The consequence of getting it wrong is not a crash. Every bucket in the
+    precomputed abstraction is addressed by these ids, and every checkpoint on
+    the share is addressed by those buckets — a labelling that disagrees on
+    even one board silently re-buckets that board's hands for every run that
+    ever reads it. So the oracle here is the exhaustive search itself, run over
+    the whole space rather than a sample.
+
+    BOARDS ARE SHUFFLED, and that is not incidental. `itertools.combinations`
+    yields cards in deck order, which happens to agree with the suit-character
+    tie-break — enumerating in deck order passed every flop and every turn
+    while the tie-break was still wrong, and only a shuffled river caught it
+    (`4s 8d Jh Qd Jc`: two jacks tie, and the reference orders them by suit).
+    """
+
+    @staticmethod
+    def _search_oracle(board):
+        """The pre-derivation implementation: try every relabelling, keep the best."""
+        cards_info = [(get_card_rank_idx(c), get_card_suit(c)) for c in board]
+        sorted_cards = sorted(cards_info, key=lambda x: (x[0], x[1]))
+        present = list(dict.fromkeys(suit for _, suit in sorted_cards))
+        positions = {suit: pos for pos, suit in enumerate(present)}
+        codes = [(rank * 4, positions[suit]) for rank, suit in sorted_cards]
+
+        best_key: tuple[int, ...] | None = None
+        best_perm: tuple[int, ...] = ()
+        for perm in itertools.permutations(range(len(present))):
+            key = tuple(sorted(base + perm[pos] for base, pos in codes))
+            if best_key is None or key < best_key:
+                best_key, best_perm = key, perm
+        assert best_key is not None
+        return best_key, {suit: best_perm[pos] for suit, pos in positions.items()}
+
+    def _agrees(self, board) -> None:
+        want_codes, want_labels = self._search_oracle(board)
+        canonical, mapping = canonicalize_board(board)
+
+        assert tuple(c.rank_idx * 4 + c.suit_label for c in canonical) == want_codes
+        assert mapping.mapping == want_labels
+
+        # And the fused hot-path entry point agrees with both.
+        board_id, labels = canonical_board_id(board)
+        assert labels == want_labels
+        assert board_id == get_canonical_board_id(canonical)
+
+    def _sweep(self, size: int, seed: int) -> int:
+        shuffler = random.Random(seed)
+        checked = 0
+        for combo in itertools.combinations(FULL_DECK, size):
+            board = list(combo)
+            shuffler.shuffle(board)
+            self._agrees(tuple(board))
+            checked += 1
+        return checked
+
+    def test_every_flop(self):
+        assert self._sweep(3, seed=1) == 22_100
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(600)
+    def test_every_turn(self):
+        assert self._sweep(4, seed=2) == 270_725
+
+    @pytest.mark.timeout(120)
+    def test_a_river_sample(self):
+        rng = random.Random(3)
+        for _ in range(20_000):
+            self._agrees(tuple(rng.sample(FULL_DECK, 5)))
+
+    def test_the_tie_break_case_that_deck_order_hides(self):
+        """The board that caught it: two jacks, ordered by suit, not by deal."""
+        board = (Card.new("4s"), Card.new("8d"), Card.new("Jh"), Card.new("Qd"), Card.new("Jc"))
+        self._agrees(board)
+        assert canonicalize_board(board)[1].mapping == {"d": 0, "c": 1, "h": 2, "s": 3}
+
+    def test_deal_order_does_not_change_the_answer(self):
+        """Isomorphism is a property of the board, not of how it arrived."""
+        rng = random.Random(4)
+        for _ in range(2_000):
+            board = rng.sample(FULL_DECK, 5)
+            first = canonical_board_id(tuple(board))
+            rng.shuffle(board)
+            assert canonical_board_id(tuple(board)) == first
+
+
+class TestFusedHandIdMatchesTheTwoStepForm:
+    """`canonical_hand_id` replaces `get_canonical_hand_id(canonicalize_hand(...))`.
+
+    The subtle half is a hole-card suit the board never showed: it takes the
+    next free label, and those are handed out in RANK order, so `(Ad, Kh)` and
+    `(Kh, Ad)` must not canonicalise differently.
+    """
+
+    def test_agrees_over_random_boards_and_hands(self):
+        rng = random.Random(5)
+        for _ in range(20_000):
+            cards = rng.sample(FULL_DECK, 7)
+            board, hole = tuple(cards[:5]), (cards[5], cards[6])
+            _, mapping = canonicalize_board(board)
+            want = get_canonical_hand_id(canonicalize_hand(hole, mapping))
+            _, labels = canonical_board_id(board)
+            assert canonical_hand_id(hole, labels) == want
+
+    def test_hole_card_order_does_not_matter(self):
+        rng = random.Random(6)
+        for _ in range(5_000):
+            cards = rng.sample(FULL_DECK, 7)
+            _, labels = canonical_board_id(tuple(cards[:5]))
+            a, b = cards[5], cards[6]
+            assert canonical_hand_id((a, b), labels) == canonical_hand_id((b, a), labels)
+
+    def test_a_suit_absent_from_the_board_gets_the_next_label(self):
+        board = (Card.new("As"), Card.new("Ks"), Card.new("Qs"))
+        _, labels = canonical_board_id(board)
+        assert labels == {"s": 0}
+        # Both hole cards share one unseen suit, so both take label 1.
+        _, mapping = canonicalize_board(board)
+        hole = (Card.new("Jh"), Card.new("Th"))
+        assert canonical_hand_id(hole, labels) == get_canonical_hand_id(
+            canonicalize_hand(hole, mapping)
+        )
