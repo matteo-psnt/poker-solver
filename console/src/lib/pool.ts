@@ -3,20 +3,13 @@ import type { Jobs, Phase } from "@/api/types";
 /**
  * What the pool IS, rather than what the API happened to return.
  *
- * The Batch panel used to be `jobs.flatMap(job => job.tasks)` with no sort at
- * all, so a task that finished two days ago sat between two that are running
- * now. Three things were invisible in that list:
+ * A flat list of tasks hides the three things a pool actually has, so this splits
+ * it into them: SLOTS (finite, some occupied), a QUEUE (ordered, waiting for a
+ * slot), and HISTORY (done, newest first).
  *
- *  - **The queue.** A waiting task was a row with a badge saying "queued". You
- *    could not see how many were ahead of it or which ran next.
- *  - **Occupancy.** A running task was a row with a colour, unconnected to the
- *    fact that it is holding one of a small, fixed number of nodes. Whether the
- *    pool was full or half idle did not show anywhere.
- *  - **Order.** There wasn't one.
- *
- * So this splits the flat list into the three things a pool actually has:
- * SLOTS (finite, some occupied), a QUEUE (ordered, waiting for a slot), and
- * HISTORY (done, newest first).
+ * Occupancy is the point of the first: a running task holds one of a small, fixed
+ * number of nodes, and whether the pool is full or half idle does not show
+ * anywhere else.
  */
 
 export type Task = Jobs["jobs"][number]["tasks"][number] & { job: string };

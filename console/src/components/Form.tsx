@@ -5,18 +5,16 @@ import { type ReactElement, type ReactNode, cloneElement, useId } from "react";
 /**
  * The controls the dispatching pages are built from.
  *
- * The console was read-only apart from one button, so there was no form
- * vocabulary at all and each of the seven writes would otherwise have invented
- * one. These deliberately look like the rest of the console rather than like a
- * web form: 12px, mono where the value is an identifier, a bordered row per
- * field, no floating labels and no tinted cards. A dispatch page that read as a
- * different application would be exactly the drift the row-not-card decision
- * elsewhere was made to avoid.
+ * Deliberately shaped like the rest of the console rather than like a web form:
+ * 12px, mono where the value is an identifier, a bordered row per field, no
+ * floating labels and no tinted cards. A dispatch page that read as a different
+ * application would be exactly the drift the row-not-card decision elsewhere
+ * avoids.
  *
- * Every control is CONTROLLED and holds a string, including the numeric ones.
- * An `<input type=number>` whose value is a number cannot represent "the field
- * is empty", and empty is the state that means *omit this argument* — which is
- * the whole contract the server's request bodies rest on.
+ * Every control is CONTROLLED and holds a STRING, including the numeric ones. An
+ * `<input type=number>` whose value is a number cannot represent "the field is
+ * empty", and empty is the state that means *omit this argument* -- which is the
+ * contract the server's request bodies rest on.
  */
 
 /**

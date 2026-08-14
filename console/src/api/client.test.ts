@@ -5,19 +5,11 @@ import { type ApiError, get, isTransient, send } from "./client";
  * Which failure a message BLAMES.
  *
  * Every panel renders `error` verbatim, so the sentence here is the whole
- * diagnosis. The one that went wrong: a 200 whose body was not JSON was reported
- * as "did not match the expected shape — Expected object, received null", which
- * named the contract and sent the reader to `schemas.ts`. The actual cause was
- * that `serve` was not running: under `console-dev` the Vite proxy answers a
- * refused connection with the SPA's own `index.html` at status 200. Every panel
- * blamed its payload.
- *
- * The schema-mismatch half of this file is GONE, along with the schemas. The
- * client no longer validates shapes, because there is no longer a second
- * declaration of them to disagree with the first: `contract.py` declares,
- * `openapi.json` exports, `types.gen.ts` is generated on every build. What
- * remains is the distinction the client is still the only place to draw —
- * transport failure versus the server declining to answer.
+ * diagnosis -- and blaming the wrong layer sends the reader to the wrong file. The
+ * distinction the client is still the only place to draw: a transport failure
+ * versus the server declining to answer. Under `console-dev` the Vite proxy
+ * answers a refused connection with the SPA's own `index.html` at status 200,
+ * which is why a 200 with a non-JSON body must not read as a contract violation.
  */
 
 const answers = (body: string, status = 200, statusText = "OK") =>

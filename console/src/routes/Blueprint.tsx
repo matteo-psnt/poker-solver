@@ -12,21 +12,15 @@ import { Play } from "./Play";
 const route = getRouteApi("/blueprint");
 
 /**
- * A trained blueprint, read two ways.
+ * A trained blueprint, read two ways: the grid is the strategy inspected, the
+ * table is the same strategy played against.
  *
- * The chart and the play table were separate destinations, which put the two
- * halves of one question — *what did it learn* — in different places, and made
- * the box that serves them a control belonging to neither. They are one subject
- * asked two ways: the grid is the strategy inspected, the table is the same
- * strategy played against. Both need the same run loaded on the same box.
+ * Both need the same run loaded on the same box, so the box control lives here
+ * above both rather than duplicated into each -- "the box is asleep" is the same
+ * fact whichever half you came for.
  *
- * So the box control is here, above both, rather than duplicated into each: it
- * is what makes either tab answer anything at all, and "the box is asleep" is
- * the same fact whichever half you came for.
- *
- * The tab is a search param, so a spot is still shareable — see `Tabs`, and the
- * chart's `path`/`board`/`average`, which are search params for the same reason
- * and which this page had to keep when it absorbed them.
+ * The tab is a search param, so a spot stays shareable -- as are the chart's
+ * `path`/`board`/`average`, which this page had to keep when it absorbed them.
  */
 export function Blueprint() {
   const { tab } = route.useSearch();

@@ -10,18 +10,14 @@ import { useState } from "react";
 /**
  * The three commands that put work on the pool.
  *
- * This page is where the console stopped being read-only in any meaningful
- * sense, so the rule it is subordinate to matters more here than anywhere else:
- * each button is one `Command.invoke` and nothing else. There is no "submit and
- * then score", no retry-then-cancel — if a composite is wanted it becomes a
- * command first and a button second, because anything else is behaviour that is
- * neither scriptable nor reproducible.
+ * Each button is one `Command.invoke` and nothing else. No "submit and then
+ * score", no retry-then-cancel -- a composite becomes a COMMAND first and a button
+ * second, because anything else is behaviour that is neither scriptable nor
+ * reproducible.
  *
- * All three forms are on ONE page rather than three. They share the same
- * question — what should the pool do next — and the answer usually depends on
- * the other two: you score the run you just trained, and you precompute the
- * abstraction the next run needs. Splitting them would put a click between
- * facts that belong on one screen.
+ * All three forms on ONE page: they share the question of what the pool should do
+ * next, and the answer usually depends on the other two -- you score the run you
+ * just trained, and you precompute the abstraction the next run needs.
  */
 export function Dispatch() {
   return (

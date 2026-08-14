@@ -38,17 +38,15 @@ window.scrollTo = () => {};
  *
  * Recharts' `ResponsiveContainer` constructs one on mount, so without this any
  * page carrying a chart THROWS during render and the test sees an empty body
- * rather than a failure it can read. That is why nothing rendered `Cost` or
- * `RunDetail` before: not a decision, an unimplemented API.
+ * rather than a failure it can read.
  *
- * **It stops the crash; it does not make the chart draw.** That was tried:
- * firing the callback with a fixed box, and stubbing `clientWidth` and friends,
- * still produces an empty chart, because jsdom has no layout engine for
- * `ResponsiveContainer` to measure against. So do not write a test that asserts
- * on a rendered axis tick — it will be testing jsdom, and it will fail for
- * reasons that have nothing to do with the code. Assert on what crosses the
- * boundary INTO the chart instead; `Cost.test.tsx` does exactly that, and
- * catches the unit bug a rendered tick was supposed to catch.
+ * **It stops the crash; it does not make the chart draw.** Firing the callback
+ * with a fixed box and stubbing `clientWidth` still produces an empty chart,
+ * because jsdom has no layout engine for `ResponsiveContainer` to measure against.
+ * So do not write a test that asserts on a rendered axis tick -- it will be
+ * testing jsdom. Assert on what crosses the boundary INTO the chart instead;
+ * `Cost.test.tsx` does that, and catches the unit bug a rendered tick was supposed
+ * to catch.
  */
 class NoopResizeObserver implements ResizeObserver {
   observe() {}

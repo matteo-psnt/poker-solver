@@ -6,22 +6,20 @@ import { Check, ChevronDown, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * Choosing a run, which the console had no way to do.
+ * Choosing a run, wherever the question starts with one.
  *
- * Runs were reachable only as a row in one flat table on one page: to look at a
- * run you went to `/runs`, read every run, clicked, and to compare against
- * another you went back. Every question worth asking here — is it converging,
- * score it, chart it, play it — starts with "which run", so that made the
- * FIRST step of every flow a page navigation and a linear scan.
+ * Every question worth asking here -- is it converging, score it, chart it, play
+ * it -- starts with "which run", so this is a control rather than a page
+ * navigation and a linear scan.
  *
- * Sorted by iteration count rather than by name, and searchable, because the
- * ids are timestamped stems (`production-1095-…`) that sort alphabetically into
- * an order nobody wants and are too long to scan. What identifies a run to a
- * person is its config, its size, and whether it is the one still running.
+ * Sorted by iteration count rather than name, and searchable: the ids are
+ * timestamped stems (`production-1095-...`) that sort alphabetically into an order
+ * nobody wants and are too long to scan. What identifies a run to a person is its
+ * config, its size, and whether it is the one still running.
  *
- * `loadable` is surfaced rather than filtered out. A run with no checkpoint
- * cannot be charted, played or scored — but it can still be continued, and
- * hiding it would make an existing run look deleted.
+ * `loadable` is surfaced rather than filtered out. A run with no checkpoint cannot
+ * be charted, played or scored -- but it can still be continued, and hiding it
+ * would make an existing run look deleted.
  */
 export function RunPicker({
   value,
