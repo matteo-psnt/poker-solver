@@ -36,20 +36,11 @@ class RunTracker:
         arm: str | None = None,
         parent_run_id: str | None = None,
     ):
-        """
-        Initialize run tracker.
+        """Initialize the tracker for one run.
 
-        Args:
-            run_dir: Directory for this run
-            config_name: Name of config used
-            config: Configuration object
-            action_config_hash: Hash of the action abstraction
-            card_abstraction_hash: Exact config hash of the card abstraction being
-                trained against, recorded so evaluation can pin it later
-            experiment_id: Experiment this run is an arm of, if any
-            arm: Which arm — e.g. ``"control"`` or ``"variant:<idea>"``. A variant's
-                score is uninterpretable without its paired control
-            parent_run_id: Base run this was forked from, for base-fork lineage
+        ``card_abstraction_hash`` is the EXACT config hash trained against, recorded so
+        evaluation can pin it later. ``arm`` is ``"control"`` or ``"variant:<idea>"`` --
+        a variant's score is uninterpretable without its paired control.
         """
         self.run_dir = Path(run_dir)
         self.run_id = self.run_dir.name
@@ -182,10 +173,8 @@ class RunTracker:
         self._emit_status("interrupted")
 
     def mark_failed(self, cleanup_if_empty: bool = True) -> None:
-        """Mark run as failed.
-
-        Args:
-            cleanup_if_empty: If True, deletes the run directory if no iterations completed
+        """Mark the run failed. ``cleanup_if_empty`` deletes the run directory when no
+        iterations completed.
         """
         if cleanup_if_empty and self.metadata.iterations == 0 and not self._initialized:
             # Failed before any training - don't create directory at all

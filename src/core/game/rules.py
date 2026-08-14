@@ -29,13 +29,7 @@ class GameRules:
     """
 
     def __init__(self, small_blind: int = 1, big_blind: int = 2):
-        """
-        Initialize game rules.
-
-        Args:
-            small_blind: Small blind size
-            big_blind: Big blind size
-        """
+        """Initialize with the blind sizes."""
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.evaluator = get_evaluator()
@@ -52,17 +46,7 @@ class GameRules:
         hole_cards: tuple[tuple[Card, Card], tuple[Card, Card]],
         button: int = 0,
     ) -> GameState:
-        """
-        Create initial game state (preflop, after blinds posted).
-
-        Args:
-            starting_stack: Starting stack for both players
-            hole_cards: Hole cards for (player0, player1)
-            button: Which player has the button (0 or 1)
-
-        Returns:
-            Initial GameState
-        """
+        """The initial preflop state, after blinds are posted."""
         # In heads-up, button posts small blind and acts first preflop
         # Other player posts big blind
         sb_player = button
@@ -95,19 +79,11 @@ class GameRules:
         )
 
     def is_action_valid(self, state: GameState, action: Action) -> bool:
-        """
-        Check if an action is valid for the current state without creating a new state.
+        """Whether an action is valid here, without building the successor state.
 
-        This is a lightweight validation method for use during MCCFR traversal
-        where we need to filter stored actions against the current state's constraints
-        (e.g., stack sizes may differ for states with the same InfoSetKey).
-
-        Args:
-            state: Current game state
-            action: Action to validate
-
-        Returns:
-            True if the action is valid, False otherwise
+        Lightweight validation for MCCFR traversal, which filters stored actions against
+        the current state's constraints -- stacks can differ between states sharing an
+        InfoSetKey.
         """
         if state.is_terminal:
             return False
@@ -150,24 +126,14 @@ class GameRules:
     def get_legal_actions(
         self, state: GameState, action_model: ActionModel | None = None
     ) -> tuple[Action, ...]:
-        """
-        Get all legal actions for the current player.
+        """Every legal action for the player to act, as a shared memoized tuple.
 
-        Returns a shared, memoized tuple: the action set is fully determined by
-        (street, normalized betting sequence, pot, current player's stack,
-        to_call, seat-relative position) for a fixed action model — the
-        sequence covers every history-derived input (raise counts, aggression
-        counts, template selection), and the scalars pin the absolute sizes.
-        MCCFR revisits the same finite betting tree every iteration, so the
-        key space is small (~hundreds of nodes) and hit rates approach 100%.
-
-        Args:
-            state: Current game state
-            action_model: Optional action model to discretize actions
-
-        Returns:
-            Tuple of legal actions (shared instance — do not mutate assumptions
-            apply automatically since tuples are immutable)
+        The action set is fully determined by (street, normalized betting sequence, pot,
+        current player's stack, to_call, seat-relative position) for a fixed action
+        model -- the sequence covers every history-derived input (raise counts,
+        aggression counts, template selection) and the scalars pin the absolute sizes.
+        MCCFR revisits the same finite betting tree every iteration, so the key space is
+        small (~hundreds of nodes) and hit rates approach 100%.
         """
         if state.is_terminal:
             return ()
@@ -246,16 +212,7 @@ class GameRules:
         return actions
 
     def apply_action(self, state: GameState, action: Action) -> GameState:
-        """
-        Apply an action to create a new game state.
-
-        Args:
-            state: Current game state
-            action: Action to apply
-
-        Returns:
-            New game state after action
-        """
+        """The new state after applying an action."""
         child = self._apply_action_impl(state, action)
         # Every branch appends exactly `action` at pot level `state.pot`, so the
         # child's betting sequence extends the parent's by one token — O(1)
@@ -560,16 +517,7 @@ class GameRules:
         return starting - state.stacks[0], starting - state.stacks[1]
 
     def get_payoff(self, state: GameState, player: int) -> float:
-        """
-        Get payoff for a player in a terminal state.
-
-        Args:
-            state: Terminal game state
-            player: Player index (0 or 1)
-
-        Returns:
-            Chips won/lost (positive = won, negative = lost)
-        """
+        """Chips won or lost by a player in a terminal state; negative means lost."""
         if not state.is_terminal:
             raise ValueError("Can only get payoff for terminal states")
 

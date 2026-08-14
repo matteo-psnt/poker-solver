@@ -31,24 +31,15 @@ def build_card_abstraction(
     abstractions_dir: Path | None = None,
     abstraction_hash: str | None = None,
 ) -> BucketingStrategy:
-    """
-    Build card abstraction from config.
+    """Build the card abstraction from config: combo-level, with suit isomorphism.
 
-    Uses combo-level abstraction with suit isomorphism for correct postflop bucketing.
-
-    Args:
-        config: Configuration object
-        abstractions_dir: Optional directory containing precomputed abstractions
-        abstraction_hash: Optional exact abstraction config hash to pin resolution to.
-            Required to faithfully evaluate a checkpoint whose abstraction has since
-            been recomputed under the same config name.
-
-    Returns:
-        BucketingStrategy instance (DenseBucketer)
+    ``abstraction_hash`` pins resolution to one exact abstraction config hash, which
+    is required to faithfully evaluate a checkpoint whose abstraction has since been
+    recomputed under the same config name.
 
     Raises:
-        ValueError: If config is invalid
-        FileNotFoundError: If abstraction file doesn't exist
+        ValueError: If config is invalid.
+        FileNotFoundError: If the abstraction file does not exist.
     """
     resolver = ComboAbstractionResolver(
         abstractions_dir=abstractions_dir,
