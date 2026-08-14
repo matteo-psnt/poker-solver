@@ -33,13 +33,14 @@ export function PlayingCard({
   const parsed = card ? parseCard(card) : null;
   const box = SIZES[size];
 
-  if (faceDown) return <FaceDown className={cn(box.frame, className)} />;
-  if (!parsed) return <Empty className={cn(box.frame, className)} />;
+  if (faceDown) return <FaceDown className={cn(box.frame, ALIGN, className)} />;
+  if (!parsed) return <Empty className={cn(box.frame, ALIGN, className)} />;
 
   return (
     <span
       className={cn(
         "inline-flex flex-col items-center justify-center border border-[var(--border)] bg-[#17171c] leading-none",
+        ALIGN,
         box.frame,
         dimmed && "opacity-30",
         className,
@@ -85,6 +86,23 @@ function FaceDown({ className }: { className?: string }) {
     />
   );
 }
+
+/**
+ * Why every state carries the same `vertical-align`.
+ *
+ * These are `inline-flex`, so in an inline context they sit on the text
+ * baseline — and an EMPTY one has no in-flow line box, so CSS takes its
+ * baseline from its bottom margin edge, while a filled one takes it from the
+ * rank inside it. Identical frames, two different baselines: picking a card
+ * made it drop a few pixels below the placeholder it replaced, on the one
+ * screen where you are staring straight at the slot you just clicked.
+ *
+ * `middle` rather than a baseline of any kind, because it is computed from the
+ * box, not from its contents — so an empty slot and a full one cannot disagree.
+ * A no-op wherever the parent is already a flex container (`CardRow`), which is
+ * why this never showed there.
+ */
+const ALIGN = "align-middle";
 
 const SIZES = {
   sm: { frame: "h-7 w-5 rounded-[3px] gap-px", rank: "text-[11px]", suit: "text-[9px]" },
