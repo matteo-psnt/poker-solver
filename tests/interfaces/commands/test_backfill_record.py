@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from src.adapters.postgres import legs
 from src.interfaces.commands import backfill_record
 from src.shared import task_history
 
@@ -92,20 +93,20 @@ class TestEveryWriterHasItsOwnClock:
         ],
     )
     def test_each_writers_field_is_found(self, field, value):
-        assert backfill_record._leg_instant({field: value}) == value
+        assert legs.leg_values("t", 1, "start", {field: value})["at"] == value
 
     def test_ts_wins_when_several_are_present(self):
         """The node's own account first: `observed_at` is when a reader looked,
         which is a different fact."""
         assert (
-            backfill_record._leg_instant(
-                {"ts": "node", "observed_at": "reader", "end_time": "batch"}
-            )
+            legs.leg_values(
+                "t", 1, "start", {"ts": "node", "observed_at": "reader", "end_time": "batch"}
+            )["at"]
             == "node"
         )
 
     def test_a_document_with_no_clock_at_all_reports_none(self):
-        assert backfill_record._leg_instant({"state": "running"}) is None
+        assert legs.leg_values("t", 1, "start", {"state": "running"})["at"] is None
 
 
 class TestLegacyEvalDocumentsAreSkipped:

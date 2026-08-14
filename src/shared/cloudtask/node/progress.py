@@ -23,7 +23,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from src.shared.cloudtask import kinds, task_log
-from src.shared.cloudtask.node import archive
+from src.shared.cloudtask.node import archive, mirror
 from src.shared.cloudtask.node.plan import TaskPlan, parse_environment
 from src.shared.cloudtask.node.process import GRACE_SECONDS
 
@@ -275,11 +275,16 @@ def publish(paths: NodePaths, plan: TaskPlan, state: Mapping[str, object]) -> No
     with contextlib.suppress(Exception):
         progress = kinds.kind(plan.op).sample(plan, state)
         if progress is not None:
+            task_id = task_log.current_task_id("local")
             task_log.write_progress_record(
-                paths.share,
-                task_id=task_log.current_task_id("local"),
-                progress=_windowed(progress),
+                paths.share, task_id=task_id, progress=_windowed(progress)
             )
+            # The share FIRST, then the copy. This runs on the WATCHER THREAD
+            # while the work runs as a subprocess, so the seconds it costs are
+            # not seconds the task is not training -- and a `progress` row that
+            # does not move is a bar that freezes, which is exactly what kept
+            # `tasks` reading the share.
+            mirror.publish(paths.share, task_id, cwd=paths.code, log=None)
 
 
 def _published_state(paths: NodePaths, name: str) -> dict[str, object]:

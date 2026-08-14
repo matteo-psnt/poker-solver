@@ -261,67 +261,23 @@ def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
     return rows
 
 
-def _leg_instant(document: dict[str, Any]) -> Any:
-    """When a leg happened, from whichever field its writer used.
-
-    Not one field, because the writers are different programs. The node stamps
-    `ts`; `write_observed_record` stamps `observed_at`, because it is the READER
-    saying when IT looked, not the node saying when something happened. Falling
-    back to Batch's own times last keeps a record that has neither from being
-    dropped for want of a clock.
-    """
-    for field in ("ts", "observed_at", "end_time", "start_time"):
-        value = document.get(field)
-        if value:
-            return value
-    return None
-
-
 def _leg_rows(legs_dir: Path, models: Any) -> list[Any]:
-    """Every leg document, through `read_documents`.
+    """Every leg document, through the same parse and the same row builder the
+    node's own `mirror-legs` uses -- so a record that arrived live and the same
+    record re-imported here are one row, which is what `--verify` compares.
 
-    NOT a glob. `compact-legs` bundles sealed records into one file, so a glob
-    over `*.json` sees the bundle and misses everything inside it --
-    `read_documents` reads both shapes, and the writer uses it too.
-
-    TWO NAME SHAPES, and requiring the first silently dropped 4,591 of 13,440
-    documents -- a third of the record, including every one of the 1,823
-    `observed` legs, which are the only account of a death the node did not
-    survive:
-
-        <task>.<attempt>.start.json      per ATTEMPT -- a retry reuses the id
-        <task>.<attempt>.exit.json
-        <task>.progress.json             per TASK
-        <task>.observed.json             per TASK, written by the READER
+    `read_documents` rather than a glob: `compact-legs` bundles sealed records
+    into one file, and a glob over `*.json` sees the bundle and misses
+    everything inside it.
     """
+    from src.adapters.postgres import legs as leg_store  # noqa: PLC0415
     from src.shared.cloudtask import task_log  # noqa: PLC0415
 
-    rows = []
-    seen: set[tuple[str, int, str]] = set()
-    for name, document in task_log.read_documents(legs_dir).items():
-        stem = name[: -len(".json")] if name.endswith(".json") else name
-        parts = stem.rsplit(".", 2)
-        if len(parts) == 3 and parts[1].isdigit():
-            task_id, attempt, leg = parts[0], int(parts[1]), parts[2]
-        elif len(parts) >= 2:
-            task_id, attempt, leg = stem.rsplit(".", 1)[0], task_history.TASK_SCOPED, parts[-1]
-        else:
-            continue
-        key = (task_id, attempt, leg)
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append(
-            models.Leg(
-                task_id=task_id,
-                attempt=attempt,
-                leg=leg,
-                run_id=document.get("run_id") or None,
-                at=_leg_instant(document),
-                body=document,
-            )
-        )
-    return rows
+    documents = task_log.read_documents(legs_dir)
+    return [
+        models.Leg(**leg_store.leg_values(*row))
+        for row in task_history.rows_from_documents(documents)
+    ]
 
 
 def run(args: argparse.Namespace) -> BackfillPayload:

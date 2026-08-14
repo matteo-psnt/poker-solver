@@ -540,6 +540,44 @@ def documents_from_rows(
     return named
 
 
+def rows_from_documents(
+    documents: dict[str, dict[str, Any]],
+) -> list[tuple[str, int, str, dict[str, Any]]]:
+    """Filename-keyed documents as `(task_id, attempt, leg, body)`.
+
+    The inverse of :func:`documents_from_rows`, and here beside it so the two
+    cannot drift: one turns rows back into the names the join reads, this turns
+    the names into rows a store can hold.
+
+    TWO NAME SHAPES, and requiring the first silently dropped 4,591 of 13,440
+    documents -- a third of the record, including every one of the 1,823
+    `observed` legs, which are the only account of a death the node did not
+    survive:
+
+        <task>.<attempt>.start.json      per ATTEMPT -- a retry reuses the id
+        <task>.<attempt>.exit.json
+        <task>.progress.json             per TASK
+        <task>.observed.json             per TASK, written by the READER
+    """
+    rows: list[tuple[str, int, str, dict[str, Any]]] = []
+    seen: set[tuple[str, int, str]] = set()
+    for name, document in documents.items():
+        stem = name.removesuffix(".json")
+        parts = stem.rsplit(".", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            task_id, attempt, leg = parts[0], int(parts[1]), parts[2]
+        elif len(parts) >= 2:
+            task_id, attempt, leg = stem.rsplit(".", 1)[0], TASK_SCOPED, parts[-1]
+        else:
+            continue
+        key = (task_id, attempt, leg)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append((task_id, attempt, leg, document))
+    return rows
+
+
 def join_documents(documents: dict[str, dict[str, Any]]) -> list[TaskRow]:
     """The join itself, over documents from wherever they were read.
 

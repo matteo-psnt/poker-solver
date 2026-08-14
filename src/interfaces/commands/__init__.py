@@ -189,6 +189,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "net-probe",
                 "Report what a node can reach outbound: ports, IMDS, and an AAD token for Postgres.",
             ),
+            CommandRef(
+                "mirror-legs",
+                "Put one task's own records into the database (the node runs this about itself).",
+            ),
         ),
     ),
     CommandGroup(

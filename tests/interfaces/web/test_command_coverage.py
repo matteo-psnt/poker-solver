@@ -59,6 +59,9 @@ NODE_ONLY: dict[str, str] = {
     "train-pcs": "compute, run BY the node wrapper — `submit --kernel pcs` is the door",
     "abstraction-coupling": "compute, run BY the node wrapper — the fine abstraction is on the share",
     "net-probe": "compute, run BY the node wrapper — `submit-net-probe` is the door",
+    "mirror-legs": "run BY the node wrapper about ITSELF, because the wrapper's own "
+    "interpreter has no database driver on its path; every task calls it, and there is "
+    "no task for a console to call it about",
 }
 
 DESTRUCTIVE: dict[str, str] = {

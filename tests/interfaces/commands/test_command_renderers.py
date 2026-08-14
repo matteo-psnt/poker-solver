@@ -45,6 +45,7 @@ from src.interfaces.commands.curve import CurvePayload
 from src.interfaces.commands.jobs import JobsPayload
 from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
+from src.interfaces.commands.mirror_legs import MirrorLegsPayload
 from src.interfaces.commands.net_probe import Check, ProbePayload
 from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
@@ -190,6 +191,10 @@ PAYLOADS: dict[str, Any] = {
             Check(name="tcp[portquiz.net:5432]", outcome="open", detail="tcp", ms=61.0),
             Check(name="aad-token", outcome="error", detail="HTTP 400: no identity", ms=12.5),
         ],
+    ),
+    # Both branches: dual-write on, and the no-DSN case that is the rollback.
+    "mirror-legs": MirrorLegsPayload(
+        task_id="score-pcs-7245-4k-154725-24096", documents=3, written=3, enabled=True
     ),
     "submit-net-probe": SubmitNetProbePayload(
         flags=["--port", "5432"],
