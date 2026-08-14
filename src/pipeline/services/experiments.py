@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.evaluation import ledger as eval_ledger
@@ -55,10 +55,18 @@ class CurveOutput(BaseModel):
     # empty curve beside a non-empty ledger otherwise reads as a bug.
     unplaceable_records: int = 0
 
+    @computed_field
     @property
     def decay_ratio(self) -> float | None:
         """First point's exploitability divided by the last. O(1/sqrt(T)) predicts
-        ~sqrt of the iteration ratio, so this is the number to read against theory."""
+        ~sqrt of the iteration ratio, so this is the number to read against theory.
+
+        ``computed_field`` and not a bare property, because a bare one does not
+        SERIALISE: `model_dump` skips it, exactly as `dataclasses.asdict` did.
+        `curve` used to work around that by spreading the value in by hand, which
+        meant `runinfo` -- which embeds one of these -- never carried it at all.
+        Declared here, both surfaces get it and so does the OpenAPI schema.
+        """
         if len(self.points) < 2 or self.points[-1].exploitability_mbb == 0:
             return None
         return self.points[0].exploitability_mbb / self.points[-1].exploitability_mbb
