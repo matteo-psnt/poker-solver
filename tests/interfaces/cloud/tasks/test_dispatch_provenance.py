@@ -326,3 +326,33 @@ class TestPoolBinding:
         with pytest.raises(CommandError, match="train-huge"):
             dispatch.stage_and_queue(lambda snap: [_task()], pool="huge")
         assert calls == []
+
+
+class TestADispatchSaysWhichRecordItSealed:
+    """`record_dsn` is read from the OPERATOR'S environment at dispatch and
+    sealed into the task for its whole life. A submit from a shell without it
+    produces a task that writes files only -- and said nothing, so two runs
+    finished at 10:40 while the database still called them running at 0
+    iterations, through a reader that had already been flipped to read it.
+    """
+
+    def test_a_sealed_dsn_reports_dual_write(self):
+        payload = dispatch.Dispatched(code_snapshot="s", job_id="j", dual_write=True)
+        assert payload.dual_write is True
+
+    def test_the_default_is_share_only(self):
+        """Absent is the pre-migration behaviour, which is the rollback -- but
+        it must be VISIBLE, not merely permitted."""
+        assert dispatch.Dispatched(code_snapshot="s", job_id="j").dual_write is False
+
+    def test_share_only_names_the_export_that_fixes_it(self, capsys):
+        dispatch.render_queued(dispatch.Dispatched(code_snapshot="s", job_id="j"))
+        printed = capsys.readouterr().out
+        assert "SHARE ONLY" in printed
+        assert "POKER_SOLVER_RECORD_DSN" in printed
+
+    def test_dual_write_does_not_shout(self, capsys):
+        dispatch.render_queued(dispatch.Dispatched(code_snapshot="s", job_id="j", dual_write=True))
+        printed = capsys.readouterr().out
+        assert "share + database" in printed
+        assert "SHARE ONLY" not in printed

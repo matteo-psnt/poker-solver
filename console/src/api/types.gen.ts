@@ -1729,6 +1729,11 @@ export interface components {
             /** Code Snapshot */
             code_snapshot: string;
             /**
+             * Dual Write
+             * @default false
+             */
+            dual_write: boolean;
+            /**
              * Force
              * @default false
              */
@@ -2117,6 +2122,11 @@ export interface components {
         ScorePayload: {
             /** Code Snapshot */
             code_snapshot: string;
+            /**
+             * Dual Write
+             * @default false
+             */
+            dual_write: boolean;
             /** Job Id */
             job_id: string;
             /** Method */
@@ -2244,6 +2254,11 @@ export interface components {
             boards: number;
             /** Code Snapshot */
             code_snapshot: string;
+            /**
+             * Dual Write
+             * @default false
+             */
+            dual_write: boolean;
             /** Job Id */
             job_id: string;
             /**
@@ -2265,6 +2280,11 @@ export interface components {
         SubmitPayload: {
             /** Code Snapshot */
             code_snapshot: string;
+            /**
+             * Dual Write
+             * @default false
+             */
+            dual_write: boolean;
             /** Job Id */
             job_id: string;
             /**
@@ -2319,6 +2339,11 @@ export interface components {
             arms?: components["schemas"]["VectorArm"][];
             /** Code Snapshot */
             code_snapshot: string;
+            /**
+             * Dual Write
+             * @default false
+             */
+            dual_write: boolean;
             /** Job Id */
             job_id: string;
             /**

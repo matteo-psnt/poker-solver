@@ -2493,6 +2493,11 @@
             "title": "Code Snapshot",
             "type": "string"
           },
+          "dual_write": {
+            "default": false,
+            "title": "Dual Write",
+            "type": "boolean"
+          },
           "force": {
             "default": false,
             "title": "Force",
@@ -3416,6 +3421,11 @@
             "title": "Code Snapshot",
             "type": "string"
           },
+          "dual_write": {
+            "default": false,
+            "title": "Dual Write",
+            "type": "boolean"
+          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
@@ -3882,6 +3892,11 @@
             "title": "Code Snapshot",
             "type": "string"
           },
+          "dual_write": {
+            "default": false,
+            "title": "Dual Write",
+            "type": "boolean"
+          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
@@ -3914,6 +3929,11 @@
           "code_snapshot": {
             "title": "Code Snapshot",
             "type": "string"
+          },
+          "dual_write": {
+            "default": false,
+            "title": "Dual Write",
+            "type": "boolean"
           },
           "job_id": {
             "title": "Job Id",
@@ -4094,6 +4114,11 @@
           "code_snapshot": {
             "title": "Code Snapshot",
             "type": "string"
+          },
+          "dual_write": {
+            "default": false,
+            "title": "Dual Write",
+            "type": "boolean"
           },
           "job_id": {
             "title": "Job Id",
