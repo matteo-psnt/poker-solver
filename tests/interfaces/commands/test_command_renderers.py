@@ -648,9 +648,14 @@ PAYLOADS["status"] = {
     "requested_watch": 0,
     "limit": 10,
     "with_tasks": True,
+    # DUMPED, because that is what a panel actually holds: `_compose._answer`
+    # serialises each part so a view can join over plain data. Embedding the
+    # models here instead made this fixture agree with itself and with nothing
+    # else -- `status` crashed in production on exactly this difference while
+    # rendering the fixture cleanly.
     "panels": {
-        "pool": {"payload": PAYLOADS["pool-status"], "error": None},
-        "jobs": {"payload": PAYLOADS["jobs"], "error": None},
+        "pool": {"payload": PAYLOADS["pool-status"].model_dump(), "error": None},
+        "jobs": {"payload": PAYLOADS["jobs"].model_dump(), "error": None},
         "tasks": {"payload": None, "error": "Azure rejected the credential — try `az login`."},
     },
 }

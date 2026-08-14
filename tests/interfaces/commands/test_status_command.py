@@ -22,6 +22,7 @@ from src.interfaces.cli import headless
 from src.interfaces.commands import status, tasks
 from src.interfaces.commands._base import Command
 from src.shared.task_history import TaskRow
+from tests.interfaces.commands.test_command_renderers import PAYLOADS
 
 
 def _command(name: str, run: Any) -> Command:
@@ -103,7 +104,7 @@ class TestWatch:
         """`render` carries the loop, so 'does it terminate' is a real question."""
         monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")),))
         payload = status.run(self._args(0))
-        monkeypatch.setitem(status.PANEL_RENDERERS, "pool", lambda p: print(p["op"]))
+        monkeypatch.setattr(status, "_render_panel", lambda name, p: print(p["op"]))
         status.render(payload)
         assert "pool" in capsys.readouterr().out
 
@@ -115,7 +116,7 @@ class TestWatch:
         A `timeout`-based probe never catches this: SIGTERM is not SIGINT.
         """
         monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")),))
-        monkeypatch.setitem(status.PANEL_RENDERERS, "pool", lambda _p: None)
+        monkeypatch.setattr(status, "_render_panel", lambda _name, _p: None)
 
         def _interrupt(_seconds):
             raise KeyboardInterrupt
@@ -128,17 +129,24 @@ class TestRenderDelegates:
     """No formatting of its own: a second renderer for the same payload could
     disagree with the command that owns it."""
 
-    def test_a_panel_is_rendered_by_its_owning_command(self, monkeypatch, capsys):
-        monkeypatch.setitem(status.PANEL_RENDERERS, "pool", lambda _p: print("OWNED"))
-        status.render(
-            {
-                "at": "now",
-                "elapsed_seconds": 1.0,
-                "watch": 0,
-                "panels": {"pool": {"payload": {}, "error": None}},
-            }
-        )
-        assert "OWNED" in capsys.readouterr().out
+    def test_every_panel_renders_through_its_real_renderer(self, capsys):
+        """The REAL renderers, on the real fixture payloads.
+
+        This screen shipped broken for one commit because the only test of it
+        stubbed all three (`render=lambda _p: None`) and the lookup table was a
+        `dict[str, Any]`, so neither the suite nor `ty` could see that
+        `_compose` hands a panel a DUMPED dict while the renderers had been
+        converted to take models. It died on the first panel with
+        `AttributeError: 'dict' object has no attribute 'pool_id'`.
+
+        So this drives `status.render` end to end and asserts something from
+        each panel reached the screen.
+        """
+        status.render(PAYLOADS["status"] | {"watch": 0})
+        out = capsys.readouterr().out
+        assert "standard_d16als_v6" in out, "the pool panel"
+        assert "poker-20260802" in out, "the jobs panel"
+        assert "unavailable:" in out, "and the failed tasks panel keeps its reason"
 
     def test_a_failed_panel_says_so_instead(self, capsys):
         status.render(
