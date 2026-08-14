@@ -12,11 +12,13 @@ same rule the rest of the command layer follows: one implementation per question
 
 from __future__ import annotations
 
-import dataclasses
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.commands._base import Command, records_root
 from src.pipeline import services
+from src.pipeline.services.runs import RunSummary
 
 if TYPE_CHECKING:
     import argparse
@@ -36,7 +38,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class RunsPayload(BaseModel):
+    """Every published run, newest first."""
+
+    op: Literal["runs"] = "runs"
+    runs: list[services.RunSummary] = []
+
+
+def run(args: argparse.Namespace) -> RunsPayload:
     """Summarise every published run, newest first."""
     with records_root(args) as root:
         summaries = services.describe_runs(root)
@@ -44,14 +53,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         summaries = [summary for summary in summaries if summary.loadable]
     if args.limit > 0:
         summaries = summaries[: args.limit]
-    return {
-        "op": "runs",
-        "runs": [dataclasses.asdict(summary) for summary in summaries],
-    }
+    return RunsPayload(runs=summaries)
 
 
-def render(payload: dict[str, Any]) -> None:
-    rows = payload["runs"]
+def render(payload: RunsPayload) -> None:
+    rows = payload.runs
     if not rows:
         print("No published runs.")
         return
@@ -60,17 +66,19 @@ def render(payload: dict[str, Any]) -> None:
     print(header)
     print("-" * len(header))
     for row in rows:
-        commits = row.get("commits_ago")
+        commits = row.commits_ago
         age = "commit unknown" if commits is None else f"{commits} commit(s) ago"
-        iterations = row.get("iterations")
+        iterations = row.iterations
         print(
-            f"{row['name'][:34]:<34} "
-            f"{(row.get('config_name') or '—')[:14]:<14} "
+            f"{row.name[:34]:<34} "
+            f"{(row.config_name or '—')[:14]:<14} "
             f"{(f'{iterations:,}' if iterations is not None else '—'):>13} "
-            f"{(row.get('status') or '—')[:11]:<11} "
-            f"{age:<16}" + ("" if row.get("loadable", True) else f"  ({row.get('blocker')})")
+            f"{(row.status or '—')[:11]:<11} "
+            f"{age:<16}" + ("" if row.loadable else f"  ({row.blocker})")
         )
 
+
+__all__ = ["COMMAND", "RunSummary", "add_arguments", "render", "run"]
 
 COMMAND = Command(
     name="runs",

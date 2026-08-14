@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import dataclasses
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.commands._base import (
     Command,
@@ -12,6 +11,7 @@ from src.interfaces.commands._base import (
     resolve_run_dir,
 )
 from src.pipeline import services
+from src.pipeline.services.experiments import CurvePoint
 
 if TYPE_CHECKING:
     import argparse
@@ -29,7 +29,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class CurvePayload(services.CurveOutput):
+    """Within-run exploitability vs iteration. Subclasses what the service
+    produces rather than restating its fields; the op tag is the only addition."""
+
+    op: Literal["curve"] = "curve"
+
+
+def run(args: argparse.Namespace) -> CurvePayload:
     """Argparse transport around :func:`services.exploitability_curve`."""
     with records_root(args) as root:
         out = services.exploitability_curve(
@@ -37,21 +44,21 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             ledger_path=ledger_for(root),
             tier_index=args.tier,
         )
-    return {"op": "curve", "decay_ratio": out.decay_ratio, **dataclasses.asdict(out)}
+    return CurvePayload(**out.model_dump())
 
 
-def render(payload: dict[str, Any]) -> None:
-    points = payload["points"]
-    print(f"Convergence curve for {payload['run_id']}")
+def render(payload: CurvePayload) -> None:
+    points = payload.points
+    print(f"Convergence curve for {payload.run_id}")
     if not points:
         print("  No placeable evaluations for this run.")
-        if payload["unplaceable_records"]:
+        if payload.unplaceable_records:
             print(
-                f"  {payload['unplaceable_records']} recorded eval(s) carry no "
+                f"  {payload.unplaceable_records} recorded eval(s) carry no "
                 "checkpoint_iteration (pre-provenance) — they cannot be placed on an axis."
             )
-        if payload["retained_iterations"]:
-            rungs = ", ".join(f"{i:,}" for i in payload["retained_iterations"])
+        if payload.retained_iterations:
+            rungs = ", ".join(f"{i:,}" for i in payload.retained_iterations)
             print(f"  Ladder on disk: {rungs}")
             print("  Score them with: evaluate --run <id> --at <iteration>")
         else:
@@ -61,27 +68,29 @@ def render(payload: dict[str, Any]) -> None:
             )
         return
 
-    print(f"  Tier: {payload['tier']}")
+    print(f"  Tier: {payload.tier}")
     print(f"  {'iteration':>12}  {'mbb/g':>10}  {'± se':>8}  {'hands':>8}")
     for point in points:
         print(
-            f"  {point['iteration']:>12,}  {point['exploitability_mbb']:>10.1f}  "
-            f"{point['std_error_mbb']:>8.1f}  {point['num_hands']:>8,}"
+            f"  {point.iteration:>12,}  {point.exploitability_mbb:>10.1f}  "
+            f"{point.std_error_mbb:>8.1f}  {point.num_hands:>8,}"
         )
 
-    if payload["decay_ratio"] is not None:
+    if payload.decay_ratio is not None:
         first, last = points[0], points[-1]
-        budget_ratio = last["iteration"] / first["iteration"] if first["iteration"] else 0
+        budget_ratio = last.iteration / first.iteration if first.iteration else 0
         print(
-            f"  Decay:       {payload['decay_ratio']:.2f}x over {budget_ratio:.0f}x budget "
+            f"  Decay:       {payload.decay_ratio:.2f}x over {budget_ratio:.0f}x budget "
             f"(O(1/sqrt(T)) predicts ~{budget_ratio**0.5:.2f}x)"
         )
-    if payload["missing_iterations"]:
-        gaps = ", ".join(f"{i:,}" for i in payload["missing_iterations"])
+    if payload.missing_iterations:
+        gaps = ", ".join(f"{i:,}" for i in payload.missing_iterations)
         print(f"  Unscored rungs: {gaps}")
-    for other in payload["other_tiers"]:
+    for other in payload.other_tiers:
         print(f"  (also recorded, not mixed in: {other})")
 
+
+__all__ = ["COMMAND", "CurvePoint", "add_arguments", "render", "run"]
 
 COMMAND = Command(
     name="curve",

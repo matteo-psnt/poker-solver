@@ -19,7 +19,9 @@ whose answer has to be exact.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.commands._base import Command
 from src.shared import repo
@@ -63,26 +65,39 @@ def _stems(directory: Path) -> list[str]:
     return sorted(path.stem for path in directory.glob("*.yaml"))
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class ConfigKind(BaseModel):
+    kind: str
+    """The flag these feed, verbatim -- so a picker can say what it sets."""
+    flag: str
+    names: list[str] = []
+
+
+class ConfigsPayload(BaseModel):
+    """The config stems each dispatching command will accept."""
+
+    op: Literal["configs"] = "configs"
+    root: str
+    kinds: list[ConfigKind] = []
+
+
+def run(args: argparse.Namespace) -> ConfigsPayload:
     """List the config stems each dispatching command will accept."""
     wanted = [args.kind] if args.kind else list(KINDS)
-    return {
-        "op": "configs",
-        "root": str(CONFIG_ROOT),
-        "kinds": [
-            {"kind": kind, "flag": KINDS[kind], "names": _stems(CONFIG_ROOT / kind)}
+    return ConfigsPayload(
+        root=str(CONFIG_ROOT),
+        kinds=[
+            ConfigKind(kind=kind, flag=KINDS[kind], names=_stems(CONFIG_ROOT / kind))
             for kind in wanted
         ],
-    }
+    )
 
 
-def render(payload: dict[str, Any]) -> None:
-    for group in payload["kinds"]:
-        names = group["names"]
-        print(f"{group['kind']} ({group['flag']}) — {len(names)} config(s)")
-        for name in names:
+def render(payload: ConfigsPayload) -> None:
+    for group in payload.kinds:
+        print(f"{group.kind} ({group.flag}) — {len(group.names)} config(s)")
+        for name in group.names:
             print(f"  {name}")
-        if not names:
+        if not group.names:
             print("  (none)")
 
 

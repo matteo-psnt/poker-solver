@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.commands._base import Command
 from src.pipeline import services
@@ -41,7 +40,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--arm", default=None, help="Arm within the experiment.")
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class WarmStartPayload(services.WarmStartOutput):
+    """What seeding a scalar run from another kernel produced. NODE-ONLY."""
+
+    op: Literal["warm-start"] = "warm-start"
+
+
+def run(args: argparse.Namespace) -> WarmStartPayload:
     """Argparse transport around :func:`services.warm_start_run`."""
     out = services.warm_start_run(
         args.config,
@@ -51,26 +56,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         at_iteration=args.at,
         experiment=services.ExperimentTag(experiment_id=args.experiment, arm=args.arm),
     )
-    return {"op": "warm-start", **dataclasses.asdict(out)}
+    return WarmStartPayload(**out.model_dump())
 
 
-def render(payload: dict[str, Any]) -> None:
+def render(payload: WarmStartPayload) -> None:
     print("Warm start written.")
-    print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
-    print(f"  Seeded from: {payload['source_run_id']}")
-    print(f"  Config:      {payload['config_name']}")
+    print(f"  Run ID:      {payload.run_id}  (under {payload.runs_dir})")
+    print(f"  Seeded from: {payload.source_run_id}")
+    print(f"  Config:      {payload.config_name}")
+    print(f"  Prior:       {payload.effective_iterations:,} effective iterations of claimed regret")
     print(
-        f"  Prior:       {payload['effective_iterations']:,} effective iterations of claimed regret"
-    )
-    print(
-        f"  Rows seeded: {payload['seeded_rows']:,} / {payload['num_rows']:,} "
-        f"({payload['seeded_fraction']:.1%}); the rest start uniform"
+        f"  Rows seeded: {payload.seeded_rows:,} / {payload.num_rows:,} "
+        f"({payload.seeded_fraction:.1%}); the rest start uniform"
     )
     # The average strategy is deliberately NOT seeded, so the reported blueprint
     # is an average over the real game only.
     print("  Average:     starts empty, so every contribution is earned on the real game")
-    print(f"  Status:      {payload['status']}")
-    print(f"\n  Continue it with: poker-solver-run train-static --run {payload['run_id']} ...")
+    print(f"  Status:      {payload.status}")
+    print(f"\n  Continue it with: poker-solver-run train-static --run {payload.run_id} ...")
 
 
 COMMAND = Command(

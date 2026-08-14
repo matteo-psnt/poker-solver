@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.tasks import batch
@@ -17,11 +17,24 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver pool-status`. It takes none."""
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:  # noqa: ARG001
+class PoolPayload(batch.PoolStatus):
+    """What `pool-status` answers: the pool, plus what it costs while up.
+
+    Subclasses the shape `batch.pool_status` already produces rather than
+    restating its six fields -- the command adds the op tag and the rate, which
+    come from config and not from Batch.
+    """
+
+    op: Literal["pool-status"] = "pool-status"
+    """Dollars per node-hour while the pool is up. It is 0 nodes at rest."""
+    hourly_cost: str | None = None
+
+
+def run(args: argparse.Namespace) -> PoolPayload:  # noqa: ARG001
     """Read the pool's allocation state and any resize errors."""
     config = CloudConfig.load()
     status = batch.pool_status(batch.client(config), config.pool_id)
-    return {"op": "pool-status", "hourly_cost": config.hourly_cost, **status}
+    return PoolPayload(hourly_cost=config.hourly_cost, **status.model_dump())
 
 
 def _print_values(values: dict[str, str | None]) -> None:
@@ -44,20 +57,20 @@ def _print_values(values: dict[str, str | None]) -> None:
         print(f"      {name}:\n      {rendered}")
 
 
-def render(payload: dict[str, Any]) -> None:
-    print(f"Pool {payload['pool_id']} ({payload['vm_size']})")
-    print(f"  state:   {payload['allocation_state']}")
-    print(f"  nodes:   {payload['current_dedicated_nodes']} / {payload['target_dedicated_nodes']}")
-    print(f"  cost:    {payload['hourly_cost']} (pool is 0 nodes at rest)")
-    if not payload["resize_errors"]:
+def render(payload: PoolPayload) -> None:
+    print(f"Pool {payload.pool_id} ({payload.vm_size})")
+    print(f"  state:   {payload.allocation_state}")
+    print(f"  nodes:   {payload.current_dedicated_nodes} / {payload.target_dedicated_nodes}")
+    print(f"  cost:    {payload.hourly_cost} (pool is 0 nodes at rest)")
+    if not payload.resize_errors:
         return
     print("\n  RESIZE ERRORS — Batch reports every allocation problem as a generic")
     print("  AllocationFailed; the real cause is in the values below.")
-    for error in payload["resize_errors"]:
-        print(f"    code: {error['code']}")
-        if error["message"]:
-            print(f"    {error['message']}")
-        _print_values(error["values"])
+    for error in payload.resize_errors:
+        print(f"    code: {error.code}")
+        if error.message:
+            print(f"    {error.message}")
+        _print_values(error.values)
 
 
 COMMAND = Command(

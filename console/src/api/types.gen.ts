@@ -656,7 +656,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * Activity
+         * ActivityPayload
          * @description The local activity log, summarised.
          *
          *     The only payload here that describes THIS TOOL rather than the solver or the
@@ -664,34 +664,33 @@ export interface components {
          *     -- nothing has run yet, versus recording is switched off -- and collapsing
          *     them would send someone hunting for a bug in the writer.
          */
-        Activity: {
-            /**
-             * By Surface
-             * @default {}
-             */
-            by_surface: {
+        ActivityPayload: {
+            /** By Surface */
+            by_surface?: {
                 [key: string]: number;
             };
-            /**
-             * Commands
-             * @default []
-             */
-            commands: components["schemas"]["CommandActivity"][];
+            /** Commands */
+            commands?: components["schemas"]["CommandActivity"][];
             /** Days */
             days: number;
             /** Enabled */
             enabled: boolean;
             /** Exists */
             exists: boolean;
+            /** Failures */
+            failures?: components["schemas"]["Failure"][];
             /**
-             * Failures
-             * @default []
+             * Failures Only
+             * @default false
              */
-            failures: components["schemas"]["Failure"][];
+            failures_only: boolean;
+            /** First At */
+            first_at?: string | null;
             /** Log */
             log: string;
             /**
              * Op
+             * @default activity
              * @constant
              */
             op: "activity";
@@ -704,8 +703,6 @@ export interface components {
             total_failures: number;
             /** Total Rows */
             total_rows: number;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * ApiError
@@ -717,45 +714,46 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** Arm */
-        Arm: {
+        /**
+         * ArmResult
+         * @description One arm of an experiment, scored and attributed against its control.
+         */
+        ArmResult: {
             /** Arm */
             arm: string;
             /** Checkpoint Iteration */
             checkpoint_iteration: number | null;
             /** Exploitability Mbb */
-            exploitability_mbb: number | null;
-            /** Git Branch */
-            git_branch?: string | null;
+            exploitability_mbb: number;
+            /**
+             * Git Branch
+             * @default
+             */
+            git_branch: string;
             /** Run Id */
             run_id: string;
             /** Std Error Mbb */
-            std_error_mbb: number | null;
-            /**
-             * Vs Control Blocked
-             * @default []
-             */
-            vs_control_blocked: string[];
+            std_error_mbb: number;
+            /** Vs Control Blocked */
+            vs_control_blocked?: string[];
             /** Vs Control Mbb */
-            vs_control_mbb: number | null;
+            vs_control_mbb?: number | null;
             /** Vs Control P Value */
-            vs_control_p_value: number | null;
-        } & {
-            [key: string]: unknown;
+            vs_control_p_value?: number | null;
         };
         /**
-         * Autoscale
-         * @description The deployed autoscale formula, evaluated against the live pool.
+         * AutoscalePayload
+         * @description The deployed formula, evaluated against the live pool.
          *
          *     `error` is a FIELD, not a failed request: Batch evaluates the formula and
          *     reports that it did not compute, which is the answer to "why is the pool not
          *     growing" and must reach the screen rather than blanking the panel.
          */
-        Autoscale: {
-            /** Error */
-            error: string | null;
+        AutoscalePayload: {
+            error?: components["schemas"]["ResizeError"] | null;
             /**
              * Op
+             * @default autoscale-check
              * @constant
              */
             op: "autoscale-check";
@@ -766,39 +764,63 @@ export interface components {
              * @default []
              */
             variables: string[];
-        } & {
-            [key: string]: unknown;
         };
-        /** BatchTask */
+        /**
+         * BatchTask
+         * @description One Batch task, in THIS project's vocabulary rather than Batch's.
+         *
+         *     The docstring above this used to make that claim while emitting
+         *     ``"BatchTaskState.ACTIVE"`` verbatim, which is why the browser ended up
+         *     carrying an Azure-semantics module: `shortState`, `taskOutcome` and
+         *     `exitMeaning` all existed to undo this. :attr:`phase` and :attr:`outcome` are
+         *     the claim made true, computed once, here, from
+         *     :mod:`~src.shared.task_states`.
+         *
+         *     ``state`` and ``result`` are kept RAW beside them. They are what Batch
+         *     actually said, they are what lands in an observer record on the share, and a
+         *     classification that cannot be checked against its input is a classification
+         *     nobody can debug.
+         */
         BatchTask: {
             /** Created */
             created?: string | null;
             /** End Time */
             end_time?: string | null;
             /** Exit Code */
-            exit_code: number | null;
+            exit_code?: number | null;
+            /** Exit Meaning */
+            exit_meaning?: string | null;
+            failure?: components["schemas"]["TaskFailure"] | null;
+            /**
+             * Job
+             * @default
+             */
+            job: string;
             /** Node */
             node?: string | null;
+            outcome?: components["schemas"]["Outcome"] | null;
+            phase: components["schemas"]["Phase"];
+            /** Result */
+            result?: string | null;
             /** Start Time */
             start_time?: string | null;
             /** State */
             state: string | null;
             /** Task */
             task: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
-         * Billed
-         * @description What Azure actually charged.
+         * BilledPayload
+         * @description What Azure actually CHARGED, as it crosses the wire.
          *
-         *     Nullable as a whole on :class:`Cost`: the billing API is asked independently
-         *     of the task log and is allowed to fail on its own, so the page has to render
-         *     node time with this absent.
+         *     Separate from the `Billed` dataclass above, which holds `date` objects and
+         *     tuples: this is the same figures in shapes TypeScript has. Nullable as a
+         *     whole on the cost payload, because the billing API is asked independently of
+         *     the task log and is allowed to fail on its own.
          */
-        Billed: {
+        BilledPayload: {
             /** As Of */
-            as_of: string | null;
+            as_of?: string | null;
             /**
              * By Service
              * @default []
@@ -807,7 +829,7 @@ export interface components {
             /** Currency */
             currency: string;
             /** First At */
-            first_at: string | null;
+            first_at?: string | null;
             /** Other */
             other: number;
             /** Pool Cost */
@@ -827,8 +849,6 @@ export interface components {
             standing_hours: number;
             /** Total */
             total: number;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * BlueprintLoad
@@ -865,7 +885,7 @@ export interface components {
             [key: string]: unknown;
         };
         /**
-         * Box
+         * BoxPayload
          * @description The blueprint host's power state.
          *
          *     `power` carries transitional values ("starting", "stopping") as well as the
@@ -873,13 +893,14 @@ export interface components {
          *     would show "stopped" for the whole two minutes a box takes to wake -- which
          *     reads as the button having done nothing.
          */
-        Box: {
+        BoxPayload: {
             /** Action */
             action: string;
             /** Location */
             location: string;
             /**
              * Op
+             * @default serve-box
              * @constant
              */
             op: "serve-box";
@@ -891,8 +912,6 @@ export interface components {
             usable: boolean;
             /** Vm */
             vm: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * Bucket
@@ -911,28 +930,26 @@ export interface components {
             [key: string]: unknown;
         };
         /**
-         * Cancelled
-         * @description What `cancel` reports back. Loose: the UI only needs to know it landed.
+         * CancelledPayload
+         * @description What `cancel` reports back.
          *
-         *     `job_id`/`task_id`, which is what `cancel.run` actually returns. The
+         *     `job_id`/`task_id`, which is what this command has always returned. The
          *     hand-written Zod this replaced declared `job`/`task`, so the console's cancel
-         *     button terminated the task and then threw a parse error reporting it had
+         *     button terminated the task and then threw a parse error reporting that it had
          *     failed -- the worst shape of bug this seam can produce, because the operator
-         *     retries an action that already worked. It survived because the fixture check
-         *     listing was hand-maintained too and simply never named `cancel`.
+         *     retries an action that already worked.
          */
-        Cancelled: {
+        CancelledPayload: {
             /** Job Id */
             job_id: string;
             /**
              * Op
+             * @default cancel
              * @constant
              */
             op: "cancel";
             /** Task Id */
             task_id: string;
-        } & {
-            [key: string]: unknown;
         };
         /** Combos */
         Combos: {
@@ -944,7 +961,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** CommandActivity */
+        /**
+         * CommandActivity
+         * @description One command's cost, over the window.
+         */
         CommandActivity: {
             /** Calls */
             calls: number;
@@ -962,8 +982,6 @@ export interface components {
             refusals: number;
             /** Total Seconds */
             total_seconds: number;
-        } & {
-            [key: string]: unknown;
         };
         /** CompactBody */
         CompactBody: {
@@ -977,50 +995,83 @@ export interface components {
             label?: string | null;
         };
         /**
-         * Compacted
+         * CompactedPayload
          * @description `compact-legs`, whose payload describes BOTH halves of the operation.
          *
          *     `applied`/`verified`/`deleted` separate a dry run from the irreversible one,
-         *     and the page renders the dry run's numbers as a preview before offering it --
-         *     so one shape carries "what would move" and "what did".
+         *     and the console renders the dry run's numbers as a preview before offering
+         *     it -- so one shape carries "what would move" and "what did".
+         *
+         *     Built up as the operation proceeds rather than at a return, which is why the
+         *     fields have defaults: a run that refuses early still answers with the counts
+         *     it managed to establish, and the dry run IS the early return.
          */
-        Compacted: {
-            /** Applied */
+        CompactedPayload: {
+            /**
+             * Applied
+             * @default false
+             */
             applied: boolean;
             /** Attempts */
             attempts?: number | null;
-            /** Backup */
-            backup: string | null;
+            /**
+             * Backup
+             * @default
+             */
+            backup: string;
             /** Bundle */
-            bundle: string | null;
+            bundle: string;
             /**
              * Carried
              * @default 0
              */
             carried: number;
-            /** Deleted */
+            /**
+             * Deleted
+             * @default 0
+             */
             deleted: number;
             /** Files After */
-            files_after: number;
+            files_after?: number | null;
             /** Files Before */
             files_before: number;
             /** Movable */
             movable: number;
             /**
              * Op
+             * @default compact-legs
              * @constant
              */
             op: "compact-legs";
-            /** Verified */
+            /**
+             * Verified
+             * @default false
+             */
             verified: boolean;
-        } & {
-            [key: string]: unknown;
         };
-        /** Comparison */
-        Comparison: {
-            comparison: components["schemas"]["PairedComparison"] | null;
+        /**
+         * ComparePayload
+         * @description A paired (common-random-numbers) comparison of two runs' latest evals.
+         *
+         *     `comparison` is null because the command REFUSES rather than guesses: two
+         *     runs with no shared seed have no paired statistic, and `tier_warnings` says
+         *     why. Both halves are needed -- a refusal with no reason is indistinguishable
+         *     from a bug.
+         */
+        ComparePayload: {
+            /** Checkpoint Iteration A */
+            checkpoint_iteration_a?: number | null;
+            /** Checkpoint Iteration B */
+            checkpoint_iteration_b?: number | null;
+            comparison?: components["schemas"]["PairedComparison"] | null;
+            /**
+             * Forced
+             * @default false
+             */
+            forced: boolean;
             /**
              * Op
+             * @default compare
              * @constant
              */
             op: "compare";
@@ -1033,8 +1084,6 @@ export interface components {
              * @default []
              */
             tier_warnings: string[];
-        } & {
-            [key: string]: unknown;
         };
         /** ConcurrencyPoint */
         ConcurrencyPoint: {
@@ -1042,8 +1091,6 @@ export interface components {
             at: string;
             /** Running */
             running: number;
-        } & {
-            [key: string]: unknown;
         };
         /** ConfigKind */
         ConfigKind: {
@@ -1056,11 +1103,12 @@ export interface components {
              * @default []
              */
             names: string[];
-        } & {
-            [key: string]: unknown;
         };
-        /** Configs */
-        Configs: {
+        /**
+         * ConfigsPayload
+         * @description The config stems each dispatching command will accept.
+         */
+        ConfigsPayload: {
             /**
              * Kinds
              * @default []
@@ -1068,36 +1116,44 @@ export interface components {
             kinds: components["schemas"]["ConfigKind"][];
             /**
              * Op
+             * @default configs
              * @constant
              */
             op: "configs";
             /** Root */
             root: string;
-        } & {
-            [key: string]: unknown;
         };
-        /** Cost */
-        Cost: {
-            billed: components["schemas"]["Billed"] | null;
+        /**
+         * CostPayload
+         * @description What it all cost: node time from the task log, and what Azure billed.
+         *
+         *     Subclasses `NodeTime` rather than restating its seven fields. The two halves
+         *     are asked independently and fail independently -- `billed` is null with
+         *     `billed_reason` set when Cost Management throttles, and the screen still
+         *     renders node time.
+         */
+        CostPayload: {
+            billed?: components["schemas"]["BilledPayload"] | null;
             /** Billed Reason */
-            billed_reason: string | null;
+            billed_reason?: string | null;
             /** Dollars */
-            dollars: number | null;
+            dollars?: number | null;
             /** First At */
-            first_at: string | null;
+            first_at?: string | null;
             /** Hours */
             hours: number;
             /** Last At */
-            last_at: string | null;
+            last_at?: string | null;
             /**
              * Op
+             * @default cost
              * @constant
              */
             op: "cost";
             /** Peak Concurrency */
             peak_concurrency: number;
             /** Rate Per Node Hour */
-            rate_per_node_hour: number | null;
+            rate_per_node_hour?: number | null;
             /**
              * Series
              * @default []
@@ -1109,98 +1165,82 @@ export interface components {
             tasks: number;
             /** Unended */
             unended: number;
-        } & {
-            [key: string]: unknown;
         };
-        /** Curve */
-        Curve: {
-            /**
-             * Missing Iterations
-             * @default []
-             */
+        /**
+         * CurveOutput
+         * @description A within-run exploitability-vs-iteration curve, plus what is still missing.
+         *
+         *     ``tier`` names the single instrument every point was measured with. Points from
+         *     different tiers are never merged: a curve mixing two scorers measures two
+         *     different things and its shape means nothing.
+         *
+         *     ``missing_iterations`` are ladder rungs on disk with no evaluation in this tier
+         *     -- the gaps to fill with ``evaluate --at N`` to complete the curve.
+         */
+        CurveOutput: {
+            /** Missing Iterations */
             missing_iterations: number[];
-            /**
-             * Op
-             * @constant
-             */
-            op: "curve";
-            /**
-             * Points
-             * @default []
-             */
+            /** Other Tiers */
+            other_tiers: string[];
+            /** Points */
             points: components["schemas"]["CurvePoint"][];
+            /** Retained Iterations */
+            retained_iterations: number[];
             /** Run Id */
             run_id: string;
             /** Tier */
             tier: string | null;
-        } & {
-            [key: string]: unknown;
+            /**
+             * Unplaceable Records
+             * @default 0
+             */
+            unplaceable_records: number;
         };
-        /** CurvePoint */
+        /**
+         * CurvePayload
+         * @description Within-run exploitability vs iteration. Subclasses what the service
+         *     produces rather than restating its fields; the op tag is the only addition.
+         */
+        CurvePayload: {
+            /** Missing Iterations */
+            missing_iterations: number[];
+            /**
+             * Op
+             * @default curve
+             * @constant
+             */
+            op: "curve";
+            /** Other Tiers */
+            other_tiers: string[];
+            /** Points */
+            points: components["schemas"]["CurvePoint"][];
+            /** Retained Iterations */
+            retained_iterations: number[];
+            /** Run Id */
+            run_id: string;
+            /** Tier */
+            tier: string | null;
+            /**
+             * Unplaceable Records
+             * @default 0
+             */
+            unplaceable_records: number;
+        };
+        /**
+         * CurvePoint
+         * @description One measured rung of a within-run convergence curve.
+         */
         CurvePoint: {
+            /** Eval Git Commit */
+            eval_git_commit: string | null;
             /** Exploitability Mbb */
-            exploitability_mbb: number | null;
+            exploitability_mbb: number;
             /** Iteration */
             iteration: number;
+            /** Num Hands */
+            num_hands: number;
             /** Std Error Mbb */
-            std_error_mbb: number | null;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * Dispatched
-         * @description What a dispatch reports back.
-         *
-         *     One shape for all three, because `dispatch.stage_and_queue` supplies the same
-         *     three keys to each: the snapshot it sealed, the job it queued into, and the
-         *     tasks it created. The op differs and is deliberately not narrowed -- the page
-         *     already knows which button it pressed, and a literal per command would be
-         *     three near-identical models whose only job is to disagree eventually.
-         */
-        Dispatched: {
-            /** Code Snapshot */
-            code_snapshot: string;
-            /** Job Id */
-            job_id: string;
-            /** Op */
-            op: string;
-            /**
-             * Tasks
-             * @default []
-             */
-            tasks: string[];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * DispatchedVector
-         * @description `submit-vector`, which is a dispatch plus WHICH ARMS it queued.
-         *
-         *     It had no schema at all in the console -- not a wrong one, an absent one --
-         *     while its endpoint had been served the whole time. The hand-maintained list
-         *     that was supposed to catch that never named it either. Which abstractions to
-         *     compare IS the experiment, so the arms are the part of this payload worth
-         *     reading back.
-         */
-        DispatchedVector: {
-            /**
-             * Arms
-             * @default []
-             */
-            arms: components["schemas"]["VectorArm"][];
-            /** Code Snapshot */
-            code_snapshot: string;
-            /** Job Id */
-            job_id: string;
-            /** Op */
-            op: string;
-            /**
-             * Tasks
-             * @default []
-             */
-            tasks: string[];
-        } & {
-            [key: string]: unknown;
+            std_error_mbb: number;
         };
         /** Edge */
         Edge: {
@@ -1215,8 +1255,8 @@ export interface components {
         };
         /** ExperimentParts */
         ExperimentParts: {
-            report: components["schemas"]["Part_Report_"];
-            runs: components["schemas"]["Part_Runs_"];
+            report: components["schemas"]["Part_ReportPayload_"];
+            runs: components["schemas"]["Part_RunsPayload_"];
         } & {
             [key: string]: unknown;
         };
@@ -1240,13 +1280,13 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** Failure */
+        /**
+         * Failure
+         * @description One recorded failure, with what was asked for when it happened.
+         */
         Failure: {
-            /**
-             * Asked
-             * @default {}
-             */
-            asked: {
+            /** Asked */
+            asked?: {
                 [key: string]: unknown;
             };
             /** At */
@@ -1261,8 +1301,6 @@ export interface components {
             outcome?: string | null;
             /** Surface */
             surface?: string | null;
-        } & {
-            [key: string]: unknown;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1352,7 +1390,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** Job */
+        /**
+         * Job
+         * @description One Batch job. ``tasks`` is empty until `attach_tasks` fills it in.
+         */
         Job: {
             /** Job */
             job: string;
@@ -1363,11 +1404,12 @@ export interface components {
              * @default []
              */
             tasks: components["schemas"]["BatchTask"][];
-        } & {
-            [key: string]: unknown;
         };
-        /** Jobs */
-        Jobs: {
+        /**
+         * JobsPayload
+         * @description What `jobs` answers. The console reads this through `/api/jobs`.
+         */
+        JobsPayload: {
             /** Hidden Jobs */
             hidden_jobs: number;
             /**
@@ -1377,47 +1419,49 @@ export interface components {
             jobs: components["schemas"]["Job"][];
             /**
              * Op
+             * @default jobs
              * @constant
              */
             op: "jobs";
             /** Total Jobs */
             total_jobs: number;
-        } & {
-            [key: string]: unknown;
         };
-        /** Ledger */
-        Ledger: {
+        /**
+         * LedgerPayload
+         * @description Recorded evaluations, derived from the published per-run documents.
+         */
+        LedgerPayload: {
             /** Ledger */
             ledger: string;
+            /** Matched */
+            matched: number;
             /**
              * Op
+             * @default ledger
              * @constant
              */
             op: "ledger";
-            /**
-             * Rows
-             * @default []
-             */
-            rows: components["schemas"]["LedgerRow"][];
-        } & {
-            [key: string]: unknown;
+            /** Rows */
+            rows?: components["schemas"]["LedgerRow"][];
         };
-        /** LedgerRow */
+        /**
+         * LedgerRow
+         * @description One recorded evaluation, as it sits in the derived index.
+         *
+         *     LENIENT, unlike the payloads this file builds. A row is a RECORD read off
+         *     the share, written by whatever version of `evaluate` produced it -- so this
+         *     names the fields a surface reads and lets the rest through, which is what
+         *     `extra="allow"` was for before the models became producers.
+         */
         LedgerRow: {
             /** Eval Git Commit */
             eval_git_commit?: string | null;
-            /**
-             * Knobs
-             * @default {}
-             */
-            knobs: {
+            /** Knobs */
+            knobs?: {
                 [key: string]: unknown;
             };
-            /**
-             * Results
-             * @default {}
-             */
-            results: {
+            /** Results */
+            results?: {
                 [key: string]: unknown;
             };
             /** Run Id */
@@ -1441,19 +1485,27 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** LogLines */
-        LogLines: {
+        /**
+         * LogsPayload
+         * @description One task's log, or the listing of what is published.
+         *
+         *     Exactly one of `listing`/`lines` is set: `--list` answers what exists,
+         *     everything else answers one task. Both nullable rather than two payloads,
+         *     because the caller asked one command one question.
+         */
+        LogsPayload: {
             /** Lines */
-            lines: string[] | null;
+            lines?: string[] | null;
+            /** Listing */
+            listing?: string[] | null;
             /**
              * Op
+             * @default logs
              * @constant
              */
             op: "logs";
             /** Task */
-            task: string | null;
-        } & {
-            [key: string]: unknown;
+            task?: string | null;
         };
         /** NodeGrid */
         NodeGrid: {
@@ -1492,11 +1544,11 @@ export interface components {
         };
         /** NowParts */
         NowParts: {
-            autoscale: components["schemas"]["Part_Autoscale_"];
-            cost: components["schemas"]["Part_Cost_"];
-            jobs: components["schemas"]["Part_Jobs_"];
-            pool: components["schemas"]["Part_Pool_"];
-            tasks: components["schemas"]["Part_Tasks_"];
+            autoscale: components["schemas"]["Part_AutoscalePayload_"];
+            cost: components["schemas"]["Part_CostPayload_"];
+            jobs: components["schemas"]["Part_JobsPayload_"];
+            pool: components["schemas"]["Part_PoolPayload_"];
+            tasks: components["schemas"]["Part_TasksPayload_"];
         } & {
             [key: string]: unknown;
         };
@@ -1515,14 +1567,28 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** PairedComparison */
+        /**
+         * Outcome
+         * @description What a task that STOPPED actually achieved.
+         *
+         *     Separate from :class:`Phase` because ``FINISHED`` says only that it is over.
+         *     Colouring on the phase alone made a cancellation and a crash identical.
+         * @enum {string}
+         */
+        Outcome: "done" | "failed" | "timed out" | "cancelled";
+        /**
+         * PairedComparison
+         * @description The statistic itself. Declared field by field because the console reads
+         *     it that way -- as a bare dict it crossed to TypeScript as `unknown`, and
+         *     every panel that drew a p-value had to cast.
+         */
         PairedComparison: {
             /** Ci Lower */
             ci_lower: number;
             /** Ci Upper */
             ci_upper: number;
             /** Correlation */
-            correlation: number | null;
+            correlation?: number | null;
             /** Is Significant */
             is_significant: boolean;
             /** Mean A */
@@ -1531,105 +1597,128 @@ export interface components {
             mean_b: number;
             /** Mean Diff */
             mean_diff: number;
+            /** N */
+            n: number;
             /** P Value */
             p_value: number;
             /** Se Diff */
             se_diff: number;
             /** Se Unpaired */
-            se_unpaired: number | null;
-        } & {
-            [key: string]: unknown;
+            se_unpaired?: number | null;
+            /** T Statistic */
+            t_statistic: number;
         };
-        /** Part[Autoscale] */
-        Part_Autoscale_: {
+        /** Part[AutoscalePayload] */
+        Part_AutoscalePayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Autoscale"] | null;
+            payload?: components["schemas"]["AutoscalePayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Cost] */
-        Part_Cost_: {
+        /** Part[CostPayload] */
+        Part_CostPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Cost"] | null;
+            payload?: components["schemas"]["CostPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Curve] */
-        Part_Curve_: {
+        /** Part[CurvePayload] */
+        Part_CurvePayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Curve"] | null;
+            payload?: components["schemas"]["CurvePayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Jobs] */
-        Part_Jobs_: {
+        /** Part[JobsPayload] */
+        Part_JobsPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Jobs"] | null;
+            payload?: components["schemas"]["JobsPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Ledger] */
-        Part_Ledger_: {
+        /** Part[LedgerPayload] */
+        Part_LedgerPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Ledger"] | null;
+            payload?: components["schemas"]["LedgerPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Pool] */
-        Part_Pool_: {
+        /** Part[PoolPayload] */
+        Part_PoolPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Pool"] | null;
+            payload?: components["schemas"]["PoolPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Progress] */
-        Part_Progress_: {
+        /** Part[ProgressPayload] */
+        Part_ProgressPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Progress"] | null;
+            payload?: components["schemas"]["ProgressPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Report] */
-        Part_Report_: {
+        /** Part[ReportPayload] */
+        Part_ReportPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Report"] | null;
+            payload?: components["schemas"]["ReportPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[RunInfo] */
-        Part_RunInfo_: {
+        /** Part[RunInfoPayload] */
+        Part_RunInfoPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["RunInfo"] | null;
+            payload?: components["schemas"]["RunInfoPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Runs] */
-        Part_Runs_: {
+        /** Part[RunsPayload] */
+        Part_RunsPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Runs"] | null;
+            payload?: components["schemas"]["RunsPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Part[Tasks] */
-        Part_Tasks_: {
+        /** Part[TasksPayload] */
+        Part_TasksPayload_: {
             /** Error */
             error?: string | null;
-            payload?: components["schemas"]["Tasks"] | null;
+            payload?: components["schemas"]["TasksPayload"] | null;
         } & {
             [key: string]: unknown;
         };
-        /** Pool */
-        Pool: {
+        /** Part[TasksSummary] */
+        Part_TasksSummary_: {
+            /** Error */
+            error?: string | null;
+            payload?: components["schemas"]["TasksSummary"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * Phase
+         * @description Where a Batch task is, in words that mean what they say.
+         * @enum {string}
+         */
+        Phase: "queued" | "starting" | "running" | "finished" | "unknown";
+        /**
+         * PoolPayload
+         * @description What `pool-status` answers: the pool, plus what it costs while up.
+         *
+         *     Subclasses the shape `batch.pool_status` already produces rather than
+         *     restating its six fields -- the command adds the op tag and the rate, which
+         *     come from config and not from Batch.
+         */
+        PoolPayload: {
             /** Allocation State */
             allocation_state: string | null;
             /** Current Dedicated Nodes */
@@ -1638,6 +1727,7 @@ export interface components {
             hourly_cost?: string | null;
             /**
              * Op
+             * @default pool-status
              * @constant
              */
             op: "pool-status";
@@ -1652,8 +1742,6 @@ export interface components {
             target_dedicated_nodes: number | null;
             /** Vm Size */
             vm_size: string | null;
-        } & {
-            [key: string]: unknown;
         };
         /** PrecomputeBody */
         PrecomputeBody: {
@@ -1666,37 +1754,90 @@ export interface components {
             /** Workers */
             workers?: number | null;
         };
-        /** Progress */
-        Progress: {
-            /** Coverage Plateau Iteration */
-            coverage_plateau_iteration: number | null;
+        /**
+         * PrecomputeDispatchPayload
+         * @description One queued abstraction build, and whether it would replace anything.
+         */
+        PrecomputeDispatchPayload: {
+            /** Abstraction Config */
+            abstraction_config: string;
+            /** Already Published */
+            already_published?: string[];
+            /** Code Snapshot */
+            code_snapshot: string;
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+            /** Job Id */
+            job_id: string;
             /**
              * Op
+             * @default submit-precompute
+             * @constant
+             */
+            op: "submit-precompute";
+            /** Target Name */
+            target_name: string;
+            /**
+             * Tasks
+             * @default []
+             */
+            tasks: string[];
+        };
+        /**
+         * ProgressPayload
+         * @description A run's per-checkpoint history: the only thing that can say how it went.
+         *
+         *     `rows` is TRUNCATED by `--last`; `total_rows` is how many there were. A
+         *     chart drawn from a truncated series looks like a complete measurement, which
+         *     is why the count travels beside it.
+         */
+        ProgressPayload: {
+            /** Coverage Plateau Iteration */
+            coverage_plateau_iteration?: number | null;
+            /**
+             * Op
+             * @default progress
              * @constant
              */
             op: "progress";
-            /**
-             * Rows
-             * @default []
-             */
-            rows: components["schemas"]["ProgressRow"][];
+            /** Rows */
+            rows?: components["schemas"]["ProgressRow"][];
             /** Run Id */
             run_id: string;
+            /** Schema Version Max */
+            schema_version_max: number;
+            /** Schema Version Min */
+            schema_version_min: number;
             /** Total Rows */
             total_rows: number;
-        } & {
-            [key: string]: unknown;
         };
-        /** ProgressRow */
+        /**
+         * ProgressRow
+         * @description One checkpoint's line of `progress.jsonl`.
+         *
+         *     LENIENT and almost entirely optional, and both are the shape of the data
+         *     rather than laziness: a resumed run appends across tasks, so one log spans
+         *     code versions and an old row genuinely lacks fields a new one carries.
+         *     Blanking those is the honest rendering; inventing a zero is not.
+         */
         ProgressRow: {
+            /** Checkpoint Seconds */
+            checkpoint_seconds?: number | null;
             /** Coverage */
-            coverage: number | null;
+            coverage?: number | null;
             /** Iteration */
             iteration: number;
             /** Iters Per Sec */
             iters_per_sec?: number | null;
             /** Mean Visits Per Touched */
             mean_visits_per_touched?: number | null;
+            /** Schema Version */
+            schema_version?: number | null;
+            /** Task Elapsed S */
+            task_elapsed_s?: number | null;
         } & {
             [key: string]: unknown;
         };
@@ -1707,23 +1848,25 @@ export interface components {
             /** Run */
             run: string;
         };
-        /** Promoted */
-        Promoted: {
+        /**
+         * PromotedPayload
+         * @description The new baseline, which is the conclusion of one turn of the fork loop.
+         */
+        PromotedPayload: {
             /** Checkpoint Iteration */
-            checkpoint_iteration: number | null;
+            checkpoint_iteration?: number | null;
             /**
              * Op
+             * @default promote
              * @constant
              */
             op: "promote";
             /** Promoted At */
-            promoted_at: string | null;
+            promoted_at: string;
             /** Rationale */
             rationale: string;
             /** Run Id */
             run_id: string;
-        } & {
-            [key: string]: unknown;
         };
         /** PushCodeBody */
         PushCodeBody: {
@@ -1737,22 +1880,28 @@ export interface components {
             /** Source */
             source?: string | null;
         };
-        /** PushedCode */
-        PushedCode: {
+        /**
+         * PushedCodePayload
+         * @description The snapshot that was sealed. Its id is what a task executes.
+         */
+        PushedCodePayload: {
             /** Code Snapshot */
             code_snapshot: string;
             /**
              * Op
+             * @default push-code
              * @constant
              */
             op: "push-code";
-        } & {
-            [key: string]: unknown;
         };
-        /** PushedData */
-        PushedData: {
+        /**
+         * PushedDataPayload
+         * @description Abstraction name to files uploaded. Empty means everything was current.
+         */
+        PushedDataPayload: {
             /**
              * Op
+             * @default push-data
              * @constant
              */
             op: "push-data";
@@ -1763,36 +1912,39 @@ export interface components {
             uploaded: {
                 [key: string]: number;
             };
-        } & {
-            [key: string]: unknown;
         };
-        /** Report */
-        Report: {
-            /**
-             * Arms
-             * @default []
-             */
-            arms: components["schemas"]["Arm"][];
+        /**
+         * ReportPayload
+         * @description Every arm of an experiment, attributed against its control.
+         */
+        ReportPayload: {
+            /** Arms */
+            arms: components["schemas"]["ArmResult"][];
             /** Baseline Run Id */
             baseline_run_id: string | null;
             /** Control Run Id */
             control_run_id: string | null;
             /** Experiment Id */
             experiment_id: string;
-            /**
-             * Notes
-             * @default []
-             */
+            /** Notes */
             notes: string[];
             /**
              * Op
+             * @default report
              * @constant
              */
             op: "report";
-        } & {
-            [key: string]: unknown;
         };
-        /** ResizeError */
+        /**
+         * ResizeError
+         * @description Why a resize failed, with Batch's own values kept whole.
+         *
+         *     Batch reports every allocation problem as a generic ``AllocationFailed`` and
+         *     hides the actual cause -- a Gen1-vs-Gen2 image, a policy denial, quota -- as
+         *     escaped JSON inside one of these values. Every value is kept rather than only
+         *     the ``*Json`` ones: a cause arriving under an unfamiliar name is exactly the
+         *     one worth seeing.
+         */
         ResizeError: {
             /** Code */
             code?: string | null;
@@ -1805,51 +1957,96 @@ export interface components {
             values: {
                 [key: string]: string | null;
             };
-        } & {
-            [key: string]: unknown;
         };
-        /** RunInfo */
-        RunInfo: {
+        /**
+         * RunInfoPayload
+         * @description Everything recorded about one run, joined into one view.
+         *
+         *     Subclasses the digest the service already produces. What this adds is what
+         *     the SURFACE needs and the digest does not carry: the op tag, the truncation
+         *     of `progress` to its tail, and the count of what was truncated.
+         *
+         *     `attempts` is renamed to `training_tasks` here because the digest's word is
+         *     about the task log and the reader's question is about the run.
+         */
+        RunInfoPayload: {
+            /** Arm */
+            arm: string | null;
+            /** Attempts */
+            attempts: number;
             /** Card Abstraction Hash */
             card_abstraction_hash: string | null;
             /** Config Name */
-            config_name: string | null;
+            config_name: string;
+            /** Coverage Flat From */
+            coverage_flat_from: number | null;
+            curve: components["schemas"]["CurveOutput"];
+            /** Experiment Id */
+            experiment_id: string | null;
+            /** Gaps */
+            gaps: string[];
             /** Git Commit */
             git_commit: string | null;
+            /** Git Dirty */
+            git_dirty: boolean | null;
             /** Iterations */
-            iterations: number | null;
+            iterations: number;
             /**
              * Op
+             * @default runinfo
              * @constant
              */
             op: "runinfo";
-            /**
-             * Progress
-             * @default []
-             */
-            progress: components["schemas"]["ProgressRow"][];
+            /** Parent Run Id */
+            parent_run_id: string | null;
+            /** Progress */
+            progress: {
+                [key: string]: unknown;
+            }[];
             /** Run Id */
             run_id: string;
             /** Runtime Seconds */
-            runtime_seconds: number | null;
+            runtime_seconds: number;
             /** Status */
-            status: string | null;
+            status: string;
+            /** Tasks */
+            tasks: components["schemas"]["TaskRow"][];
+            /**
+             * Total Progress Rows
+             * @default 0
+             */
+            total_progress_rows: number;
             /** Training Tasks */
-            training_tasks: number | null;
-        } & {
-            [key: string]: unknown;
+            training_tasks?: number | null;
         };
         /** RunParts */
         RunParts: {
-            curve: components["schemas"]["Part_Curve_"];
-            evals: components["schemas"]["Part_Ledger_"];
-            progress: components["schemas"]["Part_Progress_"];
-            run: components["schemas"]["Part_RunInfo_"];
-            tasks: components["schemas"]["Part_Tasks_"];
+            curve: components["schemas"]["Part_CurvePayload_"];
+            evals: components["schemas"]["Part_LedgerPayload_"];
+            progress: components["schemas"]["Part_ProgressPayload_"];
+            run: components["schemas"]["Part_RunInfoPayload_"];
+            tasks: components["schemas"]["Part_TasksSummary_"];
         } & {
             [key: string]: unknown;
         };
-        /** RunSummary */
+        /**
+         * RunSummary
+         * @description A run annotated with how old it is and whether it can still be loaded.
+         *
+         *     ``commits_ago`` is the number of commits HEAD is ahead of the run's train
+         *     commit (0 == trained on the current HEAD, None == commit unknown to this
+         *     checkout). ``loadable`` is False when the run never checkpointed, with
+         *     ``blocker`` naming the reason for the UI.
+         *
+         *     Experiment lineage
+         *     ------------------
+         *     ``experiment_id``/``arm`` are on every summary because a LISTING is the only
+         *     place the set of experiments exists. `report --experiment` takes an id and
+         *     `runinfo` reports one run's, so a caller who does not already know an id had
+         *     nowhere to learn one -- which made the report unreachable from any surface
+         *     that cannot be told the answer in advance. It costs nothing: both fields are
+         *     already loaded with the metadata each summary reads.
+         */
         RunSummary: {
             /** Arm */
             arm?: string | null;
@@ -1863,6 +2060,8 @@ export interface components {
             experiment_id?: string | null;
             /** Git Dirty */
             git_dirty: boolean | null;
+            /** Has Checkpoint */
+            has_checkpoint: boolean;
             /** Iterations */
             iterations: number | null;
             /** Loadable */
@@ -1873,8 +2072,6 @@ export interface components {
             num_infosets: number | null;
             /** Status */
             status: string | null;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * RunView
@@ -1896,10 +2093,22 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** Runs */
-        Runs: {
+        /** RunsParts */
+        RunsParts: {
+            jobs: components["schemas"]["Part_JobsPayload_"];
+            runs: components["schemas"]["Part_RunsPayload_"];
+            tasks: components["schemas"]["Part_TasksSummary_"];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * RunsPayload
+         * @description Every published run, newest first.
+         */
+        RunsPayload: {
             /**
              * Op
+             * @default runs
              * @constant
              */
             op: "runs";
@@ -1908,16 +2117,6 @@ export interface components {
              * @default []
              */
             runs: components["schemas"]["RunSummary"][];
-        } & {
-            [key: string]: unknown;
-        };
-        /** RunsParts */
-        RunsParts: {
-            jobs: components["schemas"]["Part_Jobs_"];
-            runs: components["schemas"]["Part_Runs_"];
-            tasks: components["schemas"]["Part_Tasks_"];
-        } & {
-            [key: string]: unknown;
         };
         /**
          * RunsView
@@ -1954,14 +2153,39 @@ export interface components {
             /** Timeout */
             timeout?: string | null;
         };
+        /**
+         * ScorePayload
+         * @description One scoring task per ladder rung, all against one code snapshot.
+         */
+        ScorePayload: {
+            /** Code Snapshot */
+            code_snapshot: string;
+            /** Job Id */
+            job_id: string;
+            /** Method */
+            method: string;
+            /**
+             * Op
+             * @default score
+             * @constant
+             */
+            op: "score";
+            /** Run Id */
+            run_id: string;
+            /** Rungs */
+            rungs?: string[];
+            /**
+             * Tasks
+             * @default []
+             */
+            tasks: string[];
+        };
         /** ServiceCharge */
         ServiceCharge: {
             /** Cost */
             cost: number;
             /** Service */
             service: string;
-        } & {
-            [key: string]: unknown;
         };
         /** SolverNode */
         SolverNode: {
@@ -1991,8 +2215,6 @@ export interface components {
             hours: number;
             /** Resource Group */
             resource_group: string;
-        } & {
-            [key: string]: unknown;
         };
         /** SubmitBody */
         SubmitBody: {
@@ -2017,6 +2239,29 @@ export interface components {
             /** Workers */
             workers?: number | null;
         };
+        /**
+         * SubmitPayload
+         * @description One queued training task, and what it is aiming at.
+         */
+        SubmitPayload: {
+            /** Code Snapshot */
+            code_snapshot: string;
+            /** Job Id */
+            job_id: string;
+            /**
+             * Op
+             * @default submit
+             * @constant
+             */
+            op: "submit";
+            /** Target Iteration */
+            target_iteration: number;
+            /**
+             * Tasks
+             * @default []
+             */
+            tasks: string[];
+        };
         /** SubmitVectorBody */
         SubmitVectorBody: {
             /** Abstractions */
@@ -2038,7 +2283,53 @@ export interface components {
             /** Train Boards */
             train_boards?: number | null;
         };
-        /** TaskProgress */
+        /**
+         * SubmitVectorPayload
+         * @description A dispatch, plus WHICH ARMS it queued.
+         *
+         *     The arms are the part worth reading back: which abstractions and kernels to
+         *     compare IS the experiment, and a payload that reported only "3 tasks queued"
+         *     could not say what was being measured.
+         */
+        SubmitVectorPayload: {
+            /** Arms */
+            arms?: components["schemas"]["VectorArm"][];
+            /** Code Snapshot */
+            code_snapshot: string;
+            /** Job Id */
+            job_id: string;
+            /**
+             * Op
+             * @default submit-vector
+             * @constant
+             */
+            op: "submit-vector";
+            /**
+             * Tasks
+             * @default []
+             */
+            tasks: string[];
+        };
+        /**
+         * TaskFailure
+         * @description Batch's failure detail, kept as data rather than a stringified object.
+         */
+        TaskFailure: {
+            /**
+             * Category
+             * @default
+             */
+            category: string;
+            /** Code */
+            code?: string | null;
+            /** Message */
+            message?: string | null;
+        };
+        /**
+         * TaskProgress
+         * @description How far a RUNNING task has got. Absent once it ends -- a finished task
+         *     showing "62%" is a sample that stopped arriving, not a task stuck at 62%.
+         */
         TaskProgress: {
             /** Done */
             done: number;
@@ -2046,71 +2337,178 @@ export interface components {
             total: number;
             /** Unit */
             unit: string;
-        } & {
-            [key: string]: unknown;
         };
-        /** TaskRow */
+        /**
+         * TaskRow
+         * @description One task-attempt, as the flat record every surface reads.
+         *
+         *     THE declaration of this shape, and the only one. It used to exist four
+         *     times -- as `_row`'s dict here, as `contract.TaskRow`, as a hand-written
+         *     fixture, and again in TypeScript -- with nothing checking any pair of them
+         *     against another.
+         *
+         *     The node's WRITER stays dicts, deliberately: it runs under
+         *     :mod:`src.shared.cloudtask` on the pinned image's 3.10 ``python3`` before
+         *     ``uv sync``, where pydantic does not exist. This is the reading half, and
+         *     constructing it from `_row`'s output is what binds the two.
+         */
         TaskRow: {
             /** Attempt */
-            attempt: number | null;
+            attempt: number;
             /** Cause */
-            cause: string | null;
-            /** Code Snapshot */
-            code_snapshot?: string | null;
+            cause: string;
+            /** Cause Source */
+            cause_source: string;
+            /**
+             * Code Snapshot
+             * @default
+             */
+            code_snapshot: string;
+            /**
+             * Config
+             * @default
+             */
+            config: string;
             /** Ended At */
-            ended_at: string | null;
+            ended_at?: string | null;
             /** Eta Seconds */
             eta_seconds?: number | null;
+            /**
+             * Eval At
+             * @default
+             */
+            eval_at: string;
+            /**
+             * Eval Flags
+             * @default []
+             */
+            eval_flags: string[];
             /** Exit Code */
-            exit_code: number | null;
-            /** Git Branch */
-            git_branch?: string | null;
-            /** Git Commit */
-            git_commit?: string | null;
-            /** Git Dirty */
-            git_dirty?: string | null;
-            /** Job Id */
-            job_id?: string | null;
-            /** Node Id */
-            node_id?: string | null;
-            /** Op */
-            op: string | null;
-            progress?: components["schemas"]["TaskProgress"] | null;
-            /** Run Id */
-            run_id: string | null;
-            /** Started At */
-            started_at?: string | null;
-            /** Task Id */
-            task_id: string;
-            /** Units */
-            units?: number | null;
-            /** What */
-            what?: string | null;
-            /** Workers */
-            workers?: number | null;
-        } & {
-            [key: string]: unknown;
-        };
-        /** Tasks */
-        Tasks: {
-            /** Hidden Rows */
-            hidden_rows?: number | null;
+            exit_code?: number | null;
+            /** Failure */
+            failure?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Git Branch
+             * @default
+             */
+            git_branch: string;
+            /**
+             * Git Commit
+             * @default
+             */
+            git_commit: string;
+            /**
+             * Git Dirty
+             * @default
+             */
+            git_dirty: string;
+            /**
+             * Job Id
+             * @default
+             */
+            job_id: string;
+            /**
+             * Node Id
+             * @default
+             */
+            node_id: string;
             /**
              * Op
+             * @default
+             */
+            op: string;
+            progress?: components["schemas"]["TaskProgress"] | null;
+            /**
+             * Run Id
+             * @default
+             */
+            run_id: string;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Target Iteration
+             * @default
+             */
+            target_iteration: number | string;
+            /** Task Id */
+            task_id: string;
+            /**
+             * Units
+             * @default 0
+             */
+            units: number;
+            /**
+             * Units Unit
+             * @default
+             */
+            units_unit: string;
+            /**
+             * What
+             * @default
+             */
+            what: string;
+            /**
+             * Workers
+             * @default 0
+             */
+            workers: number;
+        };
+        /**
+         * TasksPayload
+         * @description What `tasks` answers: one row per attempt, newest last.
+         */
+        TasksPayload: {
+            /**
+             * Hidden Rows
+             * @default 0
+             */
+            hidden_rows: number;
+            /**
+             * Op
+             * @default tasks
              * @constant
              */
             op: "tasks";
             /** Reconciled */
-            reconciled: number | null;
+            reconciled?: number | null;
             /**
              * Rows
              * @default []
              */
             rows: components["schemas"]["TaskRow"][];
+        };
+        /**
+         * TasksSummary
+         * @description A `tasks` payload fetched only to be JOINED, with its rows removed.
+         *
+         *     Its own type, because the alternative was one model describing two different
+         *     things. `views._summarised` replaces `rows` with a count when a view wants
+         *     the join and not the log, so `parts.tasks.payload` was sometimes four
+         *     hundred rows and sometimes a stub -- and `Tasks` had `source_rows` optional
+         *     to cover both, which meant a page reading `.rows` on a trimmed part got `[]`
+         *     and was correct about nothing. It survived on the author remembering to read
+         *     the join instead.
+         *
+         *     There is deliberately no ``rows`` field. TypeScript cannot offer one, so the
+         *     join is the only thing available, which is what it always should have been.
+         *
+         *     ``source_rows`` rather than silence: a run page showing two tasks out of a
+         *     log of four hundred has to say which number is which, because a join that
+         *     quietly returns few rows out of many is indistinguishable from a broken one.
+         */
+        TasksSummary: {
+            /**
+             * Op
+             * @default tasks
+             * @constant
+             */
+            op: "tasks";
+            /** Reconciled */
+            reconciled?: number | null;
             /** Source Rows */
-            source_rows?: number | null;
-        } & {
-            [key: string]: unknown;
+            source_rows: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -2133,8 +2531,6 @@ export interface components {
             derive_boards: number;
             /** Kernel */
             kernel: string;
-        } & {
-            [key: string]: unknown;
         };
     };
     responses: never;
@@ -2163,7 +2559,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Activity"];
+                    "application/json": components["schemas"]["ActivityPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2201,7 +2597,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Autoscale"];
+                    "application/json": components["schemas"]["AutoscalePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2481,7 +2877,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Box"];
+                    "application/json": components["schemas"]["BoxPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2519,7 +2915,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Box"];
+                    "application/json": components["schemas"]["BoxPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2557,7 +2953,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Box"];
+                    "application/json": components["schemas"]["BoxPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2599,7 +2995,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Compacted"];
+                    "application/json": components["schemas"]["CompactedPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2643,7 +3039,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Comparison"];
+                    "application/json": components["schemas"]["ComparePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2681,7 +3077,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Configs"];
+                    "application/json": components["schemas"]["ConfigsPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2721,7 +3117,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Cost"];
+                    "application/json": components["schemas"]["CostPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2761,7 +3157,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ledger"];
+                    "application/json": components["schemas"]["LedgerPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2801,7 +3197,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Report"];
+                    "application/json": components["schemas"]["ReportPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2842,7 +3238,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Jobs"];
+                    "application/json": components["schemas"]["JobsPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2884,7 +3280,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LogLines"];
+                    "application/json": components["schemas"]["LogsPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2922,7 +3318,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Pool"];
+                    "application/json": components["schemas"]["PoolPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -2964,7 +3360,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Dispatched"];
+                    "application/json": components["schemas"]["PrecomputeDispatchPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3006,7 +3402,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Promoted"];
+                    "application/json": components["schemas"]["PromotedPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3048,7 +3444,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PushedCode"];
+                    "application/json": components["schemas"]["PushedCodePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3090,7 +3486,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PushedData"];
+                    "application/json": components["schemas"]["PushedDataPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3130,7 +3526,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Runs"];
+                    "application/json": components["schemas"]["RunsPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3170,7 +3566,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunInfo"];
+                    "application/json": components["schemas"]["RunInfoPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3210,7 +3606,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Curve"];
+                    "application/json": components["schemas"]["CurvePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3252,7 +3648,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Progress"];
+                    "application/json": components["schemas"]["ProgressPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3294,7 +3690,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Dispatched"];
+                    "application/json": components["schemas"]["ScorePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3336,7 +3732,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Dispatched"];
+                    "application/json": components["schemas"]["SubmitPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3378,7 +3774,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DispatchedVector"];
+                    "application/json": components["schemas"]["SubmitVectorPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3419,7 +3815,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Tasks"];
+                    "application/json": components["schemas"]["TasksPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3460,7 +3856,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Cancelled"];
+                    "application/json": components["schemas"]["CancelledPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

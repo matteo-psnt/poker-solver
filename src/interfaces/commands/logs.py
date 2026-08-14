@@ -15,9 +15,10 @@ one thing a caller actually has to think about:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from azure.core.exceptions import ResourceNotFoundError
+from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
@@ -71,7 +72,21 @@ def _clean(text: str, *, raw: bool, lines: int) -> list[str]:
     return kept[-lines:] if lines > 0 else kept
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class LogsPayload(BaseModel):
+    """One task's log, or the listing of what is published.
+
+    Exactly one of `listing`/`lines` is set: `--list` answers what exists,
+    everything else answers one task. Both nullable rather than two payloads,
+    because the caller asked one command one question.
+    """
+
+    op: Literal["logs"] = "logs"
+    task: str | None = None
+    listing: list[str] | None = None
+    lines: list[str] | None = None
+
+
+def run(args: argparse.Namespace) -> LogsPayload:
     """Read one task's log, or list what is published.
 
     Ordering:
@@ -92,12 +107,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     config = CloudConfig.load()
     if args.list:
         service = share.share_client(config)
-        return {
-            "op": "logs",
-            "listing": share.task_log_names(service, config.share_name),
-            "lines": None,
-            "task": None,
-        }
+        return LogsPayload(listing=share.task_log_names(service, config.share_name))
 
     if args.source == "node":
         try:
@@ -124,22 +134,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             )
         text = found
 
-    return {
-        "op": "logs",
-        "listing": None,
-        "task": args.task,
-        "lines": _clean(text, raw=args.raw, lines=args.lines),
-    }
+    return LogsPayload(task=args.task, lines=_clean(text, raw=args.raw, lines=args.lines))
 
 
-def render(payload: dict[str, Any]) -> None:
-    if payload["listing"] is not None:
-        for name in payload["listing"]:
+def render(payload: LogsPayload) -> None:
+    if payload.listing is not None:
+        for name in payload.listing:
             print(f"  {name}")
-        if not payload["listing"]:
+        if not payload.listing:
             print("  no published logs yet")
         return
-    for line in payload["lines"]:
+    for line in payload.lines or []:
         print(line)
 
 

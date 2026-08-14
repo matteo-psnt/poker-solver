@@ -11,7 +11,9 @@ everything else that costs CPU moved to the pool.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
@@ -36,7 +38,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class PushedDataPayload(BaseModel):
+    """Abstraction name to files uploaded. Empty means everything was current."""
+
+    op: Literal["push-data"] = "push-data"
+    uploaded: dict[str, int] = {}
+
+
+def run(args: argparse.Namespace) -> PushedDataPayload:
     """Upload each abstraction directory to the share."""
     config = CloudConfig.load()
     service = share.share_client(config)
@@ -62,14 +71,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 count += 1
         uploaded[directory.name] = count
 
-    return {"op": "push-data", "uploaded": uploaded}
+    return PushedDataPayload(uploaded=uploaded)
 
 
-def render(payload: dict[str, Any]) -> None:
-    if not payload["uploaded"]:
+def render(payload: PushedDataPayload) -> None:
+    if not payload.uploaded:
         print("Nothing to upload.")
         return
-    for name, count in payload["uploaded"].items():
+    for name, count in payload.uploaded.items():
         print(f"  {name}: {count} file(s)")
     print("  abstractions published — this copy is now the authoritative one")
 

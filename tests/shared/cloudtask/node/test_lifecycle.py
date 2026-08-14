@@ -71,8 +71,8 @@ class TestMain:
 
         assert lifecycle.main() == 143
         (row,) = task_history.read_tasks(paths.share)
-        assert row["cause"] == task_log.CAUSE_CANCELLED
-        assert row["exit_code"] == 143
+        assert row.cause == task_log.CAUSE_CANCELLED
+        assert row.exit_code == 143
 
     def test_a_task_that_dies_before_the_sync_still_leaves_a_record(self, paths, monkeypatch):
         """The whole reason the started record is written first: a task dying
@@ -82,13 +82,13 @@ class TestMain:
 
         assert lifecycle.main() == 1
         (row,) = task_history.read_tasks(paths.share)
-        assert row["cause"] == task_log.CAUSE_FAILED
+        assert row.cause == task_log.CAUSE_FAILED
 
     def test_a_bad_environment_is_a_message_not_a_traceback(self, paths, monkeypatch):
         monkeypatch.setenv("RUN_TO", "0")
         assert lifecycle.main() == 1
         (row,) = task_history.read_tasks(paths.share)
-        assert row["cause"] == task_log.CAUSE_FAILED
+        assert row.cause == task_log.CAUSE_FAILED
         assert "ABSOLUTE" in (paths.share / "logs" / "task-1.log").read_text()
 
     def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch):

@@ -13,7 +13,9 @@ existing local copy onto a fresh share, not something to run routinely.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import Field
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
@@ -78,7 +80,24 @@ def target_name(abstraction_config: str) -> str:
     return abstraction_output_path(Path(), PrecomputeConfig.from_yaml(abstraction_config)).name
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class PrecomputeDispatchPayload(dispatch.Dispatched):
+    """One queued abstraction build, and whether it would replace anything."""
+
+    op: Literal["submit-precompute"] = "submit-precompute"
+    abstraction_config: str
+    """What it will publish as, and every abstraction ALREADY on the share.
+
+    The whole list rather than a yes/no: a name that collides is one answer, and
+    "here is what is there instead" is the one that lets someone pick another.
+    """
+    target_name: str
+    already_published: list[str] = Field(default_factory=list)
+    """The guard. An existing copy is replaced only when this is set, and the
+    node refuses to overwrite without it either."""
+    force: bool = False
+
+
+def run(args: argparse.Namespace) -> PrecomputeDispatchPayload:
     """Stage the tree and queue one precompute task."""
     config = CloudConfig.load()
     existing = published_abstractions(config)
@@ -105,20 +124,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             )
         ]
     )
-    return {
-        "op": "submit-precompute",
-        "abstraction_config": args.config,
-        "target_name": target,
-        "already_published": existing,
-        "force": args.force,
-        **payload,
-    }
+    return PrecomputeDispatchPayload(
+        abstraction_config=args.config,
+        target_name=target,
+        already_published=existing,
+        force=args.force,
+        **payload.model_dump(exclude={"op"}),
+    )
 
 
-def render(payload: dict[str, Any]) -> None:
-    print(f"Precomputing abstraction '{payload['abstraction_config']}' on the pool.")
-    print(f"  will publish as: {payload['target_name']}")
-    if payload["force"]:
+def render(payload: PrecomputeDispatchPayload) -> None:
+    print(f"Precomputing abstraction '{payload.abstraction_config}' on the pool.")
+    print(f"  will publish as: {payload.target_name}")
+    if payload.force:
         print("  --force: an existing copy of this abstraction WILL be replaced.")
     else:
         print("  Not yet on the share; the node also refuses to overwrite.")

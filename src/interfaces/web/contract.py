@@ -1,36 +1,155 @@
-"""The payload contract, declared ONCE, in Python, beside what produces it.
+"""The API's vocabulary: what each endpoint answers, NAMED rather than declared.
 
-These models are the declaration. ``response_model`` puts them in the OpenAPI
-schema, and `console/src/api/types.gen.ts` is GENERATED from it -- the
-TypeScript is not written by anyone, and never should be.
+``response_model`` puts these in the OpenAPI schema and
+`console/src/api/types.gen.ts` is generated from it -- the TypeScript is not
+written by anyone, and never should be.
 
-Why the models are lenient
---------------------------
-``extra="allow"`` throughout. A payload gaining a key is not a reason to break
-the console, and these models deliberately describe only what a surface READS --
-a contract, not a mirror. The commands remain free to return more.
+**Every command payload here is IMPORTED.** The shape is declared once, in the
+command that constructs it, and this file gives it the name the API uses. That
+is the whole design, and it is new: these models used to be a second, parallel
+declaration of every payload, hand-written and hand-maintained. Measured on
+2026-08-13 -- renaming a REQUIRED field in `jobs.py` passed 1061 tests, because
+the model here and the `PAYLOADS` fixture were both hand-written and drifted
+together, away from what `run()` actually returned. `ty` makes that a
+pre-commit failure now.
+
+What is still DECLARED in this file, and why
+--------------------------------------------
+Two kinds, and neither is a command's payload:
+
+- **The composed views** (`Part`, `View`, `NowView` and friends). These are the
+  console's own shapes -- `web/views.py` builds them and no command owns one --
+  so this is where they belong.
+- **The blueprint server's shapes.** That is a SEPARATE PROCESS holding a loaded
+  run, reached over HTTP through `/api/blueprint/*` precisely so the console
+  never imports the engine. They are declared here as a client describing a
+  server it cannot import from, which is the one place a second declaration is
+  the honest answer rather than a smell. They remain hand-maintained; if they
+  start to drift, the fix is the same move -- declare them in
+  `src/interfaces/blueprint/app.py` and import them here.
+
+Why the view models stay lenient
+--------------------------------
+``extra="allow"`` on :class:`Payload`, which only the classes below inherit. An
+imported command payload does not need it: the model IS the payload, so there is
+nothing extra to tolerate.
 
 Why this does not validate at request time
 ------------------------------------------
 It cannot. FastAPI skips validation and serialization for a handler that returns
 a ``Response``, and every endpoint here returns :class:`PayloadResponse` -- which
-exists because `jsonio.dumps` handles the numpy scalars and ``Path`` objects that
-reach these payloads (`runinfo` is `dataclasses.asdict` of a digest) and that
-plain ``json.dumps`` turns into a 500 the CLI never sees. Measured: a handler
-declaring ``response_model`` and returning a wrong-shaped ``JSONResponse``
-answers 200 with the wrong shape, while `/openapi.json` still carries the right
-``$ref``.
+exists because `jsonio.dumps` handles the numpy scalars and ``Path`` objects
+these payloads carry, and that plain ``json.dumps`` turns into a 500 the CLI
+never sees. Measured: a handler declaring ``response_model`` and returning a
+wrong-shaped ``JSONResponse`` answers 200 with the wrong shape, while
+`/openapi.json` still carries the right ``$ref``.
 
-So enforcement is a TEST -- `tests/interfaces/web/test_contract.py` -- which
-round-trips every model against the `PAYLOADS` examples the renderer tests
-already pin.
+So the request-time guarantee is the CONSTRUCTOR, checked statically, plus
+`tests/interfaces/web/test_contract.py` round-tripping each model against the
+`PAYLOADS` examples -- which are constructor calls now, not literals.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal
-
 from pydantic import BaseModel, ConfigDict
+
+from src.interfaces.cloud.cost.billing import BilledPayload as Billed
+from src.interfaces.cloud.cost.billing import ServiceCharge, StandingCharge
+from src.interfaces.cloud.cost.node_time import ConcurrencyPoint
+from src.interfaces.cloud.tasks.batch import BatchTask, Job, ResizeError
+from src.interfaces.cloud.tasks.dispatch import Dispatched
+from src.interfaces.commands.activity import ActivityPayload as Activity
+from src.interfaces.commands.activity import CommandActivity, Failure
+from src.interfaces.commands.autoscale_check import AutoscalePayload as Autoscale
+from src.interfaces.commands.cancel import CancelledPayload as Cancelled
+from src.interfaces.commands.compact_legs import CompactedPayload as Compacted
+from src.interfaces.commands.compare import ComparePayload as Comparison
+from src.interfaces.commands.compare import PairedComparison
+from src.interfaces.commands.configs import ConfigKind
+from src.interfaces.commands.configs import ConfigsPayload as Configs
+from src.interfaces.commands.cost import CostPayload as Cost
+from src.interfaces.commands.curve import CurvePayload as Curve
+from src.interfaces.commands.curve import CurvePoint
+from src.interfaces.commands.jobs import JobsPayload as Jobs
+from src.interfaces.commands.ledger import LedgerPayload as Ledger
+from src.interfaces.commands.logs import LogsPayload as LogLines
+from src.interfaces.commands.pool_status import PoolPayload as Pool
+from src.interfaces.commands.progress import ProgressPayload as Progress
+from src.interfaces.commands.promote import PromotedPayload as Promoted
+from src.interfaces.commands.push_code import PushedCodePayload as PushedCode
+from src.interfaces.commands.push_data import PushedDataPayload as PushedData
+from src.interfaces.commands.report import ArmResult as Arm
+from src.interfaces.commands.report import ReportPayload as Report
+from src.interfaces.commands.runinfo import RunInfoPayload as RunInfo
+from src.interfaces.commands.runs import RunsPayload as Runs
+from src.interfaces.commands.runs import RunSummary
+from src.interfaces.commands.score import ScorePayload
+from src.interfaces.commands.serve_box import BoxPayload as Box
+from src.interfaces.commands.submit import SubmitPayload
+from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
+from src.interfaces.commands.submit_vector import SubmitVectorPayload, VectorArm
+from src.interfaces.commands.tasks import TasksPayload as Tasks
+from src.interfaces.commands.tasks import TasksSummary
+from src.shared.task_history import TaskProgress, TaskRow
+
+"""What is IMPORTED here, and why that is the whole point
+-------------------------------------------------------
+A payload model that a command CONSTRUCTS is imported, never restated. Below,
+the shapes still declared in this file are the ones whose command has not been
+typed yet -- each is a second declaration of something, and the list is meant to
+shrink to nothing.
+
+The re-exports are not ceremony: `Jobs`, `Job` and `BatchTask` are the names the
+generated TypeScript uses, `response_model` needs the class, and a console
+importing `JobsPayload` would be reaching into the command layer for a name it
+has no business knowing. Aliasing here keeps the API's vocabulary the API's.
+"""
+__all__ = [
+    "Activity",
+    "Arm",
+    "Autoscale",
+    "BatchTask",
+    "Billed",
+    "Box",
+    "Cancelled",
+    "CommandActivity",
+    "Compacted",
+    "Comparison",
+    "ConcurrencyPoint",
+    "ConfigKind",
+    "Configs",
+    "Cost",
+    "Curve",
+    "CurvePoint",
+    "Dispatched",
+    "Failure",
+    "Job",
+    "Jobs",
+    "Ledger",
+    "LogLines",
+    "PairedComparison",
+    "Pool",
+    "PrecomputeDispatchPayload",
+    "Progress",
+    "Promoted",
+    "PushedCode",
+    "PushedData",
+    "Report",
+    "ResizeError",
+    "RunInfo",
+    "RunSummary",
+    "Runs",
+    "ScorePayload",
+    "ServiceCharge",
+    "StandingCharge",
+    "SubmitPayload",
+    "SubmitVectorPayload",
+    "TaskProgress",
+    "TaskRow",
+    "Tasks",
+    "TasksSummary",
+    "VectorArm",
+]
 
 
 class Payload(BaseModel):
@@ -43,47 +162,6 @@ class Payload(BaseModel):
 ------------------------------------"""
 
 
-class ResizeError(Payload):
-    code: str | None = None
-    message: str | None = None
-    values: dict[str, str | None] = {}
-
-
-class Pool(Payload):
-    op: Literal["pool-status"]
-    pool_id: str
-    allocation_state: str | None
-    current_dedicated_nodes: int | None
-    target_dedicated_nodes: int | None
-    vm_size: str | None
-    hourly_cost: str | None = None
-    resize_errors: list[ResizeError] = []
-
-
-class BatchTask(Payload):
-    task: str
-    state: str | None
-    exit_code: int | None
-    node: str | None = None
-    """Orders the queue: a task that has not started has no start_time."""
-    created: str | None = None
-    start_time: str | None = None
-    end_time: str | None = None
-
-
-class Job(Payload):
-    job: str
-    state: str | None
-    tasks: list[BatchTask] = []
-
-
-class Jobs(Payload):
-    op: Literal["jobs"]
-    jobs: list[Job] = []
-    total_jobs: int
-    hidden_jobs: int
-
-
 """The durable task account -- the only thing that can say why a task DIED
 ------------------------------------------------------------------------
 The run log cannot record a death: the container is gone first. The wrapper
@@ -92,469 +170,35 @@ record never landed against Batch's view.
 """
 
 
-class TaskProgress(Payload):
-    done: int
-    total: int
-    unit: str
+"""`TaskRow`, `TaskProgress`, `Tasks` and `TasksSummary` are all IMPORTED.
 
+`TaskRow` comes from `task_history`, which assembles it, rather than from the
+command that ships it: the shape is the reader's, and `report` joins the same
+rows into a run digest without going near an endpoint.
 
-class TaskRow(Payload):
-    task_id: str
-    attempt: int | None
-    op: str | None
-    run_id: str | None
-    cause: str | None
-    exit_code: int | None
-    ended_at: str | None
-    started_at: str | None = None
-    job_id: str | None = None
-    node_id: str | None = None
-    """Derived server-side so the terminal and the console word it identically."""
-    what: str | None = None
-    """Seconds left, derived server-side so both surfaces agree."""
-    eta_seconds: float | None = None
-    """What a FINISHED task achieved, and how wide it ran -- the two things an
-    estimate for the next one is built from."""
-    units: float | None = None
-    workers: int | None = None
-    """WHICH CODE RAN. Three answers that do not replace one another: the commit
-    names a history, the branch names the line of work (several worktrees share a
-    commit and differ only in what is uncommitted), and the snapshot names the
-    exact bytes. Absent on every task recorded before this existed."""
-    code_snapshot: str | None = None
-    git_commit: str | None = None
-    git_dirty: str | None = None
-    git_branch: str | None = None
-    """Present only while a task is running, and only if its kind can say."""
-    progress: TaskProgress | None = None
-
-
-class Tasks(Payload):
-    op: Literal["tasks"]
-    rows: list[TaskRow] = []
-    reconciled: int | None
-    hidden_rows: int | None = None
-    """How many rows the log held before a view trimmed them to a join.
-
-    Set by `views._summarised` and absent everywhere else. A run page showing two
-    tasks out of a log of four hundred has to be able to say which number is
-    which -- a join that quietly returns few rows out of many is
-    indistinguishable from a join that is broken.
-    """
-    source_rows: int | None = None
+`Tasks` and `TasksSummary` are two models on purpose -- see `TasksSummary` for
+what one model describing both cost.
+"""
 
 
 """The record: runs, their training history, and what they scored
 ---------------------------------------------------------------"""
 
 
-class RunSummary(Payload):
-    name: str
-    commits_ago: int | None
-    git_dirty: bool | None
-    loadable: bool
-    blocker: str | None
-    iterations: int | None
-    num_infosets: int | None
-    config_name: str | None
-    status: str | None
-    """Lineage. The run listing is the only place the SET of experiments exists
-    -- `report` takes an id and `runinfo` reports one run's -- so the experiment
-    picker is built from these. Absent on every legacy run."""
-    experiment_id: str | None = None
-    arm: str | None = None
-
-
-class Runs(Payload):
-    op: Literal["runs"]
-    runs: list[RunSummary] = []
-
-
-class ProgressRow(Payload):
-    iteration: int
-    coverage: float | None
-    """THE convergence diagnostic. Compare against the 1e3-1e4 regret updates per
-    infoset CFR needs before an average carries signal; coverage saturates early
-    and says nothing about it."""
-    mean_visits_per_touched: float | None = None
-    iters_per_sec: float | None = None
-
-
-class RunInfo(Payload):
-    op: Literal["runinfo"]
-    run_id: str
-    config_name: str | None
-    status: str | None
-    iterations: int | None
-    runtime_seconds: float | None
-    """The run's own count, which legitimately differs from what the task log
-    observed."""
-    training_tasks: int | None
-    git_commit: str | None
-    card_abstraction_hash: str | None
-    """TRUNCATED to `--last` (default eight). `progress` with `last=0` is the
-    full series -- the console's chart drew 8 of 112 checkpoints from this field
-    and looked like a complete history."""
-    progress: list[ProgressRow] = []
-
-
-class Progress(Payload):
-    op: Literal["progress"]
-    run_id: str
-    total_rows: int
-    coverage_plateau_iteration: int | None
-    rows: list[ProgressRow] = []
-
-
-class CurvePoint(Payload):
-    iteration: int
-    exploitability_mbb: float | None
-    std_error_mbb: float | None
-
-
-class Curve(Payload):
-    op: Literal["curve"]
-    run_id: str
-    tier: str | None
-    points: list[CurvePoint] = []
-    """Rungs with no score. A sparse line and a complete one look identical once
-    drawn, so a chart that silently omits most of its points reads as a finished
-    measurement."""
-    missing_iterations: list[int] = []
-
-
-class LedgerRow(Payload):
-    run_id: str | None = None
-    eval_git_commit: str | None = None
-    knobs: dict[str, Any] = {}
-    results: dict[str, Any] = {}
-
-
-class Ledger(Payload):
-    op: Literal["ledger"]
-    ledger: str
-    rows: list[LedgerRow] = []
-
-
-class LogLines(Payload):
-    op: Literal["logs"]
-    task: str | None
-    lines: list[str] | None
-
-
 """What it all cost
 -----------------"""
-
-
-class StandingCharge(Payload):
-    resource_group: str
-    hours: float
-    cost: float
-
-
-class ServiceCharge(Payload):
-    service: str
-    cost: float
-
-
-class Billed(Payload):
-    """What Azure actually charged.
-
-    Nullable as a whole on :class:`Cost`: the billing API is asked independently
-    of the task log and is allowed to fail on its own, so the page has to render
-    node time with this absent.
-    """
-
-    total: float
-    other: float
-    currency: str
-    """Batch pool nodes -- the ONLY figure node time may be compared against."""
-    pool_cost: float
-    pool_node_hours: float
-    """Machines left ON outside the pool. No task log will ever explain these."""
-    standing_cost: float
-    standing_hours: float
-    standing: list[StandingCharge] = []
-    since: str
-    """The earliest day carrying a charge, which is not the query floor."""
-    first_at: str | None
-    """The latest day with data. Cost lags hours, so the last day reads low."""
-    as_of: str | None
-    by_service: list[ServiceCharge] = []
-
-
-class ConcurrencyPoint(Payload):
-    at: str
-    running: int
-
-
-class Cost(Payload):
-    op: Literal["cost"]
-    hours: float
-    task_hours: float
-    tasks: int
-    """Attempts that started and never recorded an end: unknown, not zero."""
-    unended: int
-    peak_concurrency: int
-    first_at: str | None
-    last_at: str | None
-    rate_per_node_hour: float | None
-    dollars: float | None
-    billed: Billed | None
-    """Why there is no billed figure. Throttling is not an auth problem."""
-    billed_reason: str | None
-    series: list[ConcurrencyPoint] = []
 
 
 """Experiments, and the comparisons that decide them
 --------------------------------------------------"""
 
 
-class Arm(Payload):
-    arm: str
-    run_id: str
-    checkpoint_iteration: int | None
-    exploitability_mbb: float | None
-    std_error_mbb: float | None
-    git_branch: str | None = None
-    vs_control_mbb: float | None
-    vs_control_p_value: float | None
-    """The field that matters and the one easiest to drop: an arm that could not
-    be paired has no `vs_control_mbb`, and rendering that as a dash claims "no
-    difference" for a comparison that never happened."""
-    vs_control_blocked: list[str] = []
-
-
-class Report(Payload):
-    op: Literal["report"]
-    experiment_id: str
-    control_run_id: str | None
-    baseline_run_id: str | None
-    notes: list[str] = []
-    arms: list[Arm] = []
-
-
-class PairedComparison(Payload):
-    mean_a: float
-    mean_b: float
-    mean_diff: float
-    se_diff: float
-    ci_lower: float
-    ci_upper: float
-    p_value: float
-    is_significant: bool
-    correlation: float | None
-    se_unpaired: float | None
-
-
-class Comparison(Payload):
-    op: Literal["compare"]
-    run_a: str
-    run_b: str
-    tier_warnings: list[str] = []
-    """Null because the command REFUSES rather than guesses: two runs with no
-    shared seed have no paired statistic, and `tier_warnings` says why. Both
-    halves are needed -- a refusal with no reason is indistinguishable from a
-    bug."""
-    comparison: PairedComparison | None
-
-
 """This tool's own behaviour, and the local reads
 -----------------------------------------------"""
 
 
-class CommandActivity(Payload):
-    command: str
-    calls: int
-    """p50 is what it normally costs, p95 what it costs when it does not. A mean
-    would be wrong about both."""
-    p50_seconds: float
-    p95_seconds: float
-    max_seconds: float
-    """What says whether a command is worth optimising: 0.4s run 3,000 times
-    outranks 9s run twice."""
-    total_seconds: float
-    refusals: int
-    errors: int
-
-
-class Failure(Payload):
-    at: str | None = None
-    command: str | None = None
-    surface: str | None = None
-    outcome: str | None = None
-    error_type: str | None = None
-    error: str | None = None
-    asked: dict[str, Any] = {}
-
-
-class Activity(Payload):
-    """The local activity log, summarised.
-
-    The only payload here that describes THIS TOOL rather than the solver or the
-    cloud. `exists`/`enabled` are two different empty states with different fixes
-    -- nothing has run yet, versus recording is switched off -- and collapsing
-    them would send someone hunting for a bug in the writer.
-    """
-
-    op: Literal["activity"]
-    log: str
-    exists: bool
-    enabled: bool
-    days: float
-    rows: int
-    total_rows: int
-    commands: list[CommandActivity] = []
-    failures: list[Failure] = []
-    """Before `--limit` truncates `failures`. The list is a display cap and the
-    count is the fact; reporting the capped length said "20 failures" when there
-    were 100."""
-    total_failures: int = 0
-    by_surface: dict[str, int] = {}
-
-
-class ConfigKind(Payload):
-    kind: str
-    """The flag these feed, verbatim -- so a picker can say what it sets."""
-    flag: str
-    names: list[str] = []
-
-
-class Configs(Payload):
-    op: Literal["configs"]
-    root: str
-    kinds: list[ConfigKind] = []
-
-
-class Autoscale(Payload):
-    """The deployed autoscale formula, evaluated against the live pool.
-
-    `error` is a FIELD, not a failed request: Batch evaluates the formula and
-    reports that it did not compute, which is the answer to "why is the pool not
-    growing" and must reach the screen rather than blanking the panel.
-    """
-
-    op: Literal["autoscale-check"]
-    pool_id: str
-    variables: list[str] = []
-    error: str | None
-
-
 """The writes
 -----------"""
-
-
-class Dispatched(Payload):
-    """What a dispatch reports back.
-
-    One shape for all three, because `dispatch.stage_and_queue` supplies the same
-    three keys to each: the snapshot it sealed, the job it queued into, and the
-    tasks it created. The op differs and is deliberately not narrowed -- the page
-    already knows which button it pressed, and a literal per command would be
-    three near-identical models whose only job is to disagree eventually.
-    """
-
-    op: str
-    code_snapshot: str
-    job_id: str
-    tasks: list[str] = []
-
-
-class VectorArm(Payload):
-    abstraction: str
-    kernel: str
-    derive_boards: int
-
-
-class DispatchedVector(Dispatched):
-    """`submit-vector`, which is a dispatch plus WHICH ARMS it queued.
-
-    It had no schema at all in the console -- not a wrong one, an absent one --
-    while its endpoint had been served the whole time. The hand-maintained list
-    that was supposed to catch that never named it either. Which abstractions to
-    compare IS the experiment, so the arms are the part of this payload worth
-    reading back.
-    """
-
-    arms: list[VectorArm] = []
-
-
-class PushedCode(Payload):
-    op: Literal["push-code"]
-    code_snapshot: str
-
-
-class PushedData(Payload):
-    op: Literal["push-data"]
-    """Abstraction name to files uploaded. Empty means everything was current."""
-    uploaded: dict[str, int] = {}
-
-
-class Compacted(Payload):
-    """`compact-legs`, whose payload describes BOTH halves of the operation.
-
-    `applied`/`verified`/`deleted` separate a dry run from the irreversible one,
-    and the page renders the dry run's numbers as a preview before offering it --
-    so one shape carries "what would move" and "what did".
-    """
-
-    op: Literal["compact-legs"]
-    bundle: str | None
-    files_before: int
-    files_after: int
-    movable: int
-    """What an existing bundle at this label already held, and this round carries
-    forward rather than replaces. Reporting only `movable` would read as though
-    the earlier documents had been dropped -- which is what used to happen before
-    a second round absorbed the first."""
-    carried: int = 0
-    attempts: int | None = None
-    applied: bool
-    verified: bool
-    deleted: int
-    backup: str | None
-
-
-class Promoted(Payload):
-    op: Literal["promote"]
-    run_id: str
-    rationale: str
-    promoted_at: str | None
-    checkpoint_iteration: int | None
-
-
-class Cancelled(Payload):
-    """What `cancel` reports back. Loose: the UI only needs to know it landed.
-
-    `job_id`/`task_id`, which is what `cancel.run` actually returns. The
-    hand-written Zod this replaced declared `job`/`task`, so the console's cancel
-    button terminated the task and then threw a parse error reporting it had
-    failed -- the worst shape of bug this seam can produce, because the operator
-    retries an action that already worked. It survived because the fixture check
-    listing was hand-maintained too and simply never named `cancel`.
-    """
-
-    op: Literal["cancel"]
-    job_id: str
-    task_id: str
-
-
-class Box(Payload):
-    """The blueprint host's power state.
-
-    `power` carries transitional values ("starting", "stopping") as well as the
-    two stable ones, because a UI that only knew "running" and "deallocated"
-    would show "stopped" for the whole two minutes a box takes to wake -- which
-    reads as the button having done nothing.
-    """
-
-    op: Literal["serve-box"]
-    action: str
-    vm: str
-    resource_group: str
-    power: str
-    usable: bool
-    location: str
 
 
 """The blueprint server's shapes, proxied through `/api/blueprint/*`
@@ -732,9 +376,9 @@ class RunsParts(Payload):
     """Fetched with a LARGER job limit than the live screen uses, because a run
     outlives the daily job its tasks land in -- see `views.RUN_LIST_JOB_LIMIT`."""
     jobs: Part[Jobs]
-    """Answered, then trimmed to `source_rows`: what the client needs from it is
-    the `task_runs` projection below, not the rows."""
-    tasks: Part[Tasks]
+    """Answered, then trimmed: what the client needs from it is the `task_runs`
+    projection below, not the rows -- so the type has none."""
+    tasks: Part[TasksSummary]
 
 
 class RunsView(View):
@@ -760,9 +404,9 @@ class RunParts(Payload):
     progress: Part[Progress]
     curve: Part[Curve]
     evals: Part[Ledger]
-    """Answered, then trimmed to `source_rows`: the rows themselves reach the
-    client as `run_tasks` below, filtered to this run."""
-    tasks: Part[Tasks]
+    """Answered, then trimmed: the rows themselves reach the client as
+    `run_tasks` below, filtered to this run -- so the type has none."""
+    tasks: Part[TasksSummary]
 
 
 class RunView(View):

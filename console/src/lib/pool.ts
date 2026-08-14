@@ -1,5 +1,4 @@
-import type { Jobs } from "@/api/types";
-import { shortState } from "@/components/StatusBadge";
+import type { Jobs, Phase } from "@/api/types";
 
 /**
  * What the pool IS, rather than what the API happened to return.
@@ -22,10 +21,17 @@ import { shortState } from "@/components/StatusBadge";
 
 export type Task = Jobs["jobs"][number]["tasks"][number] & { job: string };
 
-/** Batch states meaning a node is committed to this task right now. */
-const OCCUPYING = new Set(["running", "preparing"]);
-/** Waiting for a node. Batch calls it `active`, which reads like "healthy". */
-const WAITING = "active";
+/**
+ * Which phases hold a node, and which wait for one.
+ *
+ * These used to be Batch's raw strings, re-derived here from
+ * `"BatchTaskState.*"` — one of four sites that each classified those strings
+ * independently. The phases are the server's now
+ * (`src/shared/task_states.py`), so this says only which of them this SCREEN
+ * draws as a slot and which as a queue.
+ */
+const OCCUPYING: ReadonlySet<Phase> = new Set<Phase>(["running", "starting"]);
+const WAITING: Phase = "queued";
 
 export type Slot = { index: number; task: Task | null };
 
@@ -49,20 +55,20 @@ export function poolShape(jobs: Jobs | undefined, nodes: number | null | undefin
     job.tasks.map((task) => ({ ...task, job: job.job })),
   );
 
-  const occupying = tasks.filter((t) => OCCUPYING.has(shortState(t.state)));
+  const occupying = tasks.filter((t) => OCCUPYING.has(t.phase));
   // Oldest first: a task that has been running longest is nearest to finishing,
   // so it is the one whose slot frees up next.
   occupying.sort((a, b) => at(a.start_time, at(a.created, 0)) - at(b.start_time, at(b.created, 0)));
 
   // Submission order — the order Batch will actually dispatch them.
   const queue = tasks
-    .filter((t) => shortState(t.state) === WAITING)
+    .filter((t) => t.phase === WAITING)
     .sort(
       (a, b) => at(a.created, Number.MAX_SAFE_INTEGER) - at(b.created, Number.MAX_SAFE_INTEGER),
     );
 
   const history = tasks
-    .filter((t) => !OCCUPYING.has(shortState(t.state)) && shortState(t.state) !== WAITING)
+    .filter((t) => !OCCUPYING.has(t.phase) && t.phase !== WAITING)
     .sort((a, b) => at(b.end_time, at(b.created, 0)) - at(a.end_time, at(a.created, 0)));
 
   // Never fewer slots than there are tasks running: the pool can be mid-resize,

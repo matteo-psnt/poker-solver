@@ -4,8 +4,9 @@ Every other service module starts here — training resumes a run, evaluation
 scores one — so this holds the readers and nothing that mutates.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
@@ -36,8 +37,7 @@ def list_runs(runs_dir: Path) -> list[str]:
     return RunTracker.list_runs(runs_dir)
 
 
-@dataclass(frozen=True)
-class RunSummary:
+class RunSummary(BaseModel):
     """A run annotated with how old it is and whether it can still be loaded.
 
     ``commits_ago`` is the number of commits HEAD is ahead of the run's train

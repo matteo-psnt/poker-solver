@@ -7,7 +7,20 @@ from typing import Any
 
 
 def json_default(obj: Any) -> Any:
-    """Coerce non-JSON-native values (e.g. numpy scalars) to plain types."""
+    """Coerce non-JSON-native values (e.g. numpy scalars) to plain types.
+
+    A payload MODEL is handled first and by duck typing rather than by importing
+    pydantic. Both are deliberate. First, because the float coercion below
+    swallows anything -- a model would fall through to ``str(obj)`` and reach the
+    browser as a repr, which parses as a string and fails nowhere. And duck
+    typed, because this module is inside the node's fail-closed import closure:
+    it runs on the pinned image's 3.10 ``python3`` before ``uv sync``, where
+    pydantic does not exist. ``model_dump`` recurses, so one hop is enough
+    however deeply models are nested.
+    """
+    dump = getattr(obj, "model_dump", None)
+    if callable(dump):
+        return dump()
     try:
         return float(obj)
     except (TypeError, ValueError):

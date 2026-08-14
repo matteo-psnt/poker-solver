@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import dataclasses
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.commands._base import Command, parse_overrides
 from src.pipeline import services
@@ -72,7 +71,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class VectorBlueprintPayload(services.VectorBlueprintOutput):
+    """What a board-free leg achieved. NODE-ONLY: no endpoint serves this."""
+
+    op: Literal["train-vector"] = "train-vector"
+
+
+def run(args: argparse.Namespace) -> VectorBlueprintPayload:
     """Argparse transport around :func:`services.train_vector_blueprint`."""
     out = services.train_vector_blueprint(
         args.config,
@@ -90,30 +95,30 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             parent_run_id=args.parent,
         ),
     )
-    return {"op": "train-vector", **dataclasses.asdict(out)}
+    return VectorBlueprintPayload(**out.model_dump())
 
 
-def render(payload: dict[str, Any]) -> None:
+def render(payload: VectorBlueprintPayload) -> None:
     print("Board-free vector training complete.")
-    print(f"  Run ID:      {payload['run_id']}  (under {payload['runs_dir']})")
-    print(f"  Config:      {payload['config_name']}")
-    print(f"  Iterations:  {payload['iterations']:,}")
+    print(f"  Run ID:      {payload.run_id}  (under {payload.runs_dir})")
+    print(f"  Config:      {payload.config_name}")
+    print(f"  Iterations:  {payload.iterations:,}")
     print(
-        f"  Universe:    {payload['universe_boards']:,} boards, seed "
-        f"{payload['universe_seed']}, {payload['dtype']}"
+        f"  Universe:    {payload.universe_boards:,} boards, seed "
+        f"{payload.universe_seed}, {payload.dtype}"
     )
     print(
-        f"  Coverage:    {payload['touched_rows']:,} / {payload['num_rows']:,} rows "
-        f"({payload['coverage']:.1%})"
+        f"  Coverage:    {payload.touched_rows:,} / {payload.num_rows:,} rows "
+        f"({payload.coverage:.1%})"
     )
     # Its own game, not the real one: the averaging in the bucket transitions
     # floors real-game exploitability well above this.
-    print(f"  Abstract:    {payload['abstract_exploitability']:.4f} exploitability, in-abstraction")
+    print(f"  Abstract:    {payload.abstract_exploitability:.4f} exploitability, in-abstraction")
     print(
-        f"  Runtime:     {payload['runtime_seconds']:.2f}s "
-        f"({payload['seconds_per_iteration']:.2f}s/iteration)"
+        f"  Runtime:     {payload.runtime_seconds:.2f}s "
+        f"({payload.seconds_per_iteration:.2f}s/iteration)"
     )
-    print(f"  Status:      {payload['status']}")
+    print(f"  Status:      {payload.status}")
 
 
 COMMAND = Command(

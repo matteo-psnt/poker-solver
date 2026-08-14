@@ -356,7 +356,8 @@ class TestPayload:
         result = billing.summarise("sub", since=SINCE, until=UNTIL)
         assert result is not None
         payload = result.as_payload()
-        assert payload["since"] == "2026-07-26"
-        assert payload["as_of"] == "2026-08-06"
-        assert payload["by_service"][0] == {"service": "Virtual Machines", "cost": 237.45}
-        assert payload["standing"][0]["resource_group"] == "poker-solver-serve-rg"
+        assert payload.since == "2026-07-26"
+        assert payload.as_of == "2026-08-06"
+        assert payload.by_service[0].service == "Virtual Machines"
+        assert payload.by_service[0].cost == 237.45
+        assert payload.standing[0].resource_group == "poker-solver-serve-rg"

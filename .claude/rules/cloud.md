@@ -32,6 +32,15 @@ paths:
 - **`task_history.py` is deliberately OUTSIDE that package** — it is the reading
   half, runs only on a laptop, and the fail-closed guard walks every file in
   `cloudtask/`, which would hold ~260 lines to a stdlib floor for no reason.
+- **A Batch task's state is classified ONCE, in `src/shared/task_states.py`.**
+  `Phase` (queued/starting/running/finished) and `Outcome` ride on the payload,
+  so nothing downstream parses `"BatchTaskState.ACTIVE"` again — the console
+  carried a whole Azure-semantics module (`shortState`, `taskOutcome`,
+  `exitMeaning`) because `/api/jobs` shipped raw enum strings while `/api/tasks`
+  shipped shortened ones. `OCCUPIES_A_NODE` excludes `queued` and
+  `IN_FLIGHT` includes it: **different questions, one vocabulary.** Cost
+  accounting must use the former — the latter credited queue time as node time,
+  for 455 of 718 node-hours.
 - **Exit 124 and 137 are DIFFERENT causes** — 124 is the guard's deadline (a
   hang), 137 is SIGKILL from outside (the OOM killer). A wrong terminal cause is
   permanent: it suppresses reconciliation. `poker-solver tasks` is how you find

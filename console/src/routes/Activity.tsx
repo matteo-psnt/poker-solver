@@ -64,7 +64,7 @@ export function Activity() {
           {data?.exists && (
             <span className="ml-auto font-mono text-[11px] text-[var(--fg-faint)]">
               {count(data.rows)} of {count(data.total_rows)} rows ·{" "}
-              {Object.entries(data.by_surface)
+              {Object.entries(data.by_surface ?? {})
                 .map(([surface, calls]) => `${surface} ${calls}`)
                 .join(" · ")}
             </span>
@@ -72,7 +72,7 @@ export function Activity() {
         </div>
 
         {data?.exists &&
-          (data.commands.length === 0 ? (
+          ((data.commands ?? []).length === 0 ? (
             <p className="px-3 py-6 text-center text-[var(--fg-faint)]">Nothing in this window.</p>
           ) : (
             <Table>
@@ -89,7 +89,7 @@ export function Activity() {
                 </tr>
               </thead>
               <tbody>
-                {data.commands.map((entry) => (
+                {(data.commands ?? []).map((entry) => (
                   <tr key={entry.command}>
                     <Td mono>{entry.command}</Td>
                     <Td right className="text-[var(--fg-muted)]">
@@ -132,11 +132,11 @@ export function Activity() {
           ))}
       </Panel>
 
-      {data && data.failures.length > 0 && (
+      {data && (data.failures ?? []).length > 0 && (
         <Panel
           title={
-            data.total_failures > data.failures.length
-              ? `Failures — ${data.failures.length} of ${data.total_failures}`
+            data.total_failures > (data.failures ?? []).length
+              ? `Failures — ${(data.failures ?? []).length} of ${data.total_failures}`
               : `Failures — ${data.total_failures}`
           }
         >
@@ -151,7 +151,7 @@ export function Activity() {
               </tr>
             </thead>
             <tbody>
-              {data.failures.map((failure, index) => (
+              {(data.failures ?? []).map((failure, index) => (
                 <tr key={`${failure.at}-${failure.command}-${index}`}>
                   <Td className="text-[var(--fg-faint)]" title={failure.at ?? undefined}>
                     {failure.at ? since(failure.at) : "—"}
@@ -171,9 +171,9 @@ export function Activity() {
                     {/* What was ASKED is usually the whole diagnosis: which run,
                         which config. Without it a list of refusals is just a
                         count. */}
-                    {Object.keys(failure.asked).length > 0 && (
+                    {Object.keys(failure.asked ?? {}).length > 0 && (
                       <span className="ml-2 font-mono text-[11px] text-[var(--fg-faint)]">
-                        {Object.entries(failure.asked)
+                        {Object.entries(failure.asked ?? {})
                           .map(([key, value]) => `${key}=${String(value)}`)
                           .join(" ")}
                       </span>

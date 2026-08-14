@@ -77,6 +77,7 @@ from typing import Any
 
 import httpx
 from azure.identity import AzureCliCredential
+from pydantic import BaseModel
 
 from src.shared import cache
 
@@ -122,6 +123,44 @@ CACHE_TTL_SECONDS = 900.0
 FAILURE_TTL_SECONDS = 60.0
 
 
+class StandingCharge(BaseModel):
+    resource_group: str
+    hours: float
+    cost: float
+
+
+class ServiceCharge(BaseModel):
+    service: str
+    cost: float
+
+
+class BilledPayload(BaseModel):
+    """What Azure actually CHARGED, as it crosses the wire.
+
+    Separate from the `Billed` dataclass above, which holds `date` objects and
+    tuples: this is the same figures in shapes TypeScript has. Nullable as a
+    whole on the cost payload, because the billing API is asked independently of
+    the task log and is allowed to fail on its own.
+    """
+
+    total: float
+    other: float
+    currency: str
+    """Batch pool nodes -- the ONLY figure node time may be compared against."""
+    pool_cost: float
+    pool_node_hours: float
+    """Machines left ON outside the pool. No task log will ever explain these."""
+    standing_cost: float
+    standing_hours: float
+    standing: list[StandingCharge] = []
+    since: str
+    """The earliest day carrying a charge, which is not the query floor."""
+    first_at: str | None = None
+    """The latest day with data. Cost lags hours, so the last day reads low."""
+    as_of: str | None = None
+    by_service: list[ServiceCharge] = []
+
+
 @dataclass(frozen=True)
 class Billed:
     """Actual charges over a window, as Cost Management reports them."""
@@ -153,26 +192,26 @@ class Billed:
     record to a period nothing happened in."""
     first_at: dt.date | None
 
-    def as_payload(self) -> dict[str, Any]:
+    def as_payload(self) -> BilledPayload:
         """The wire shape. Dates as ISO strings, because a payload crosses to
         TypeScript and a ``date`` does not."""
-        return {
-            "total": self.total,
-            "other": self.other,
-            "currency": self.currency,
-            "pool_cost": self.pool_cost,
-            "pool_node_hours": self.pool_node_hours,
-            "standing_cost": self.standing_cost,
-            "standing_hours": self.standing_hours,
-            "standing": [
-                {"resource_group": name, "hours": hours, "cost": cost}
+        return BilledPayload(
+            total=self.total,
+            other=self.other,
+            currency=self.currency,
+            pool_cost=self.pool_cost,
+            pool_node_hours=self.pool_node_hours,
+            standing_cost=self.standing_cost,
+            standing_hours=self.standing_hours,
+            standing=[
+                StandingCharge(resource_group=name, hours=hours, cost=cost)
                 for name, hours, cost in self.standing
             ],
-            "since": self.since.isoformat(),
-            "first_at": self.first_at.isoformat() if self.first_at else None,
-            "as_of": self.as_of.isoformat() if self.as_of else None,
-            "by_service": [{"service": name, "cost": cost} for name, cost in self.by_service],
-        }
+            since=self.since.isoformat(),
+            first_at=self.first_at.isoformat() if self.first_at else None,
+            as_of=self.as_of.isoformat() if self.as_of else None,
+            by_service=[ServiceCharge(service=name, cost=cost) for name, cost in self.by_service],
+        )
 
 
 class ThrottledError(Exception):
@@ -339,7 +378,8 @@ def _read_disk(key: tuple[str, str, str]) -> Billed | None:
 
 def _write_disk(key: tuple[str, str, str], result: Billed) -> None:
     """Store an answer for the next process."""
-    cache.store_json(CACHE_NAME, "|".join(key), result.as_payload())
+    # Dumped: the on-disk cache is JSON, and `cache` is stdlib-only.
+    cache.store_json(CACHE_NAME, "|".join(key), result.as_payload().model_dump())
 
 
 def _summarise_uncached(

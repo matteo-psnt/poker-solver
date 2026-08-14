@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.commands._base import (
     Command,
@@ -44,13 +46,53 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class PairedComparison(BaseModel):
+    """The statistic itself. Declared field by field because the console reads
+    it that way -- as a bare dict it crossed to TypeScript as `unknown`, and
+    every panel that drew a p-value had to cast."""
+
+    n: int
+    mean_a: float
+    mean_b: float
+    mean_diff: float
+    se_diff: float
+    ci_lower: float
+    ci_upper: float
+    t_statistic: float
+    p_value: float
+    is_significant: bool
+    """Null when either arm has no spread, which is not the same as zero."""
+    correlation: float | None = None
+    se_unpaired: float | None = None
+
+
+class ComparePayload(BaseModel):
+    """A paired (common-random-numbers) comparison of two runs' latest evals.
+
+    `comparison` is null because the command REFUSES rather than guesses: two
+    runs with no shared seed have no paired statistic, and `tier_warnings` says
+    why. Both halves are needed -- a refusal with no reason is indistinguishable
+    from a bug.
+    """
+
+    op: Literal["compare"] = "compare"
+    run_a: str
+    run_b: str
+    """WHICH checkpoints were compared: a run id alone does not say."""
+    checkpoint_iteration_a: int | None = None
+    checkpoint_iteration_b: int | None = None
+    forced: bool = False
+    tier_warnings: list[str] = []
+    comparison: PairedComparison | None = None
+
+
+def run(args: argparse.Namespace) -> ComparePayload:
     """Paired (common-random-numbers) comparison of two runs' latest evals."""
     with records_root(args) as root:
         return _compare(args, root)
 
 
-def _compare(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+def _compare(args: argparse.Namespace, root: Path) -> ComparePayload:
     ledger_path = ledger_for(root)
     rec_a = eval_ledger.latest_record_for_run(args.a, ledger_path, args.a_at)
     rec_b = eval_ledger.latest_record_for_run(args.b, ledger_path, args.b_at)
@@ -90,34 +132,36 @@ def _compare(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         )
 
     comparison = compare_paired_samples(samples_a, samples_b)
-    return {
-        "op": "compare",
-        "run_a": args.a,
-        "run_b": args.b,
-        # Which checkpoints were actually compared: a run id alone does not say.
-        "checkpoint_iteration_a": rec_a.get("checkpoint_iteration"),
-        "checkpoint_iteration_b": rec_b.get("checkpoint_iteration"),
-        "forced": bool(reasons and args.force),
-        "tier_warnings": reasons,
-        "comparison": comparison,
-    }
-
-
-def render(payload: dict[str, Any]) -> None:
-    c = payload["comparison"]
-    print(f"Paired comparison: {payload['run_a']}  vs  {payload['run_b']}")
-    if payload["tier_warnings"]:
-        print("  ⚠️  FORCED over tier mismatches (p-value not trustworthy):")
-        for w in payload["tier_warnings"]:
-            print(f"     - {w}")
-    print(f"  mean(a):       {c['mean_a']:+.2f} mbb/g")
-    print(f"  mean(b):       {c['mean_b']:+.2f} mbb/g")
-    print(f"  mean_diff:     {c['mean_diff']:+.2f} mbb/g (± {c['se_diff']:.2f})")
-    print(f"  95% CI:        [{c['ci_lower']:+.2f}, {c['ci_upper']:+.2f}]")
-    print(
-        f"  p-value:       {c['p_value']:.4g}  ({'significant' if c['is_significant'] else 'n.s.'})"
+    return ComparePayload(
+        run_a=args.a,
+        run_b=args.b,
+        checkpoint_iteration_a=rec_a.get("checkpoint_iteration"),
+        checkpoint_iteration_b=rec_b.get("checkpoint_iteration"),
+        forced=bool(reasons and args.force),
+        tier_warnings=reasons,
+        comparison=PairedComparison(**comparison) if comparison else None,
     )
-    print(f"  correlation:   {c['correlation']:.3f}  (se unpaired would be {c['se_unpaired']:.2f})")
+
+
+def render(payload: ComparePayload) -> None:
+    c = payload.comparison
+    print(f"Paired comparison: {payload.run_a}  vs  {payload.run_b}")
+    if payload.tier_warnings:
+        print("  ⚠️  FORCED over tier mismatches (p-value not trustworthy):")
+        for w in payload.tier_warnings:
+            print(f"     - {w}")
+    if c is None:
+        # A refusal is a value here: two runs with no shared seed have no paired
+        # statistic, and the warnings above are the reason. Printing the reason
+        # and stopping is the answer, not an error.
+        print("  no paired statistic — see the tier warnings above")
+        return
+    print(f"  mean(a):       {c.mean_a:+.2f} mbb/g")
+    print(f"  mean(b):       {c.mean_b:+.2f} mbb/g")
+    print(f"  mean_diff:     {c.mean_diff:+.2f} mbb/g (± {c.se_diff:.2f})")
+    print(f"  95% CI:        [{c.ci_lower:+.2f}, {c.ci_upper:+.2f}]")
+    print(f"  p-value:       {c.p_value:.4g}  ({'significant' if c.is_significant else 'n.s.'})")
+    print(f"  correlation:   {c.correlation:.3f}  (se unpaired would be {c.se_unpaired:.2f})")
 
 
 COMMAND = Command(

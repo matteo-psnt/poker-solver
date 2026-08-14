@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import dataclasses
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store.share import share_client
@@ -32,7 +31,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class PromotedPayload(services.Baseline):
+    """The new baseline, which is the conclusion of one turn of the fork loop."""
+
+    op: Literal["promote"] = "promote"
+
+
+def run(args: argparse.Namespace) -> PromotedPayload:
     """Point the baseline at a run, closing one turn of the base-fork loop.
 
     Publishing is no longer optional. A `--local-only` baseline was a pointer
@@ -60,7 +65,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "The share is the only copy now that local runs are gone — check "
             f"`az login` and Terraform state, then run this again.\n  Cause: {refused}"
         )
-    return {"op": "promote", **dataclasses.asdict(baseline)}
+    return PromotedPayload(**baseline.model_dump())
 
 
 def _publish(local: Path) -> str | None:
@@ -86,12 +91,11 @@ def _publish(local: Path) -> str | None:
     return None
 
 
-def render(payload: dict[str, Any]) -> None:
-    print(f"Baseline is now {payload['run_id']}")
-    if payload["checkpoint_iteration"] is not None:
-        print(f"  Checkpoint:  {payload['checkpoint_iteration']:,}")
-    print(f"  Rationale:   {payload['rationale']}")
-    print(f"  Recorded in: {payload['baseline']}")
+def render(payload: PromotedPayload) -> None:
+    print(f"Baseline is now {payload.run_id}")
+    if payload.checkpoint_iteration is not None:
+        print(f"  Checkpoint:  {payload.checkpoint_iteration:,}")
+    print(f"  Rationale:   {payload.rationale}")
     print("  Published:   yes — the share carries it, so a fresh checkout finds it")
 
 

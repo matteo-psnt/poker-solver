@@ -1,48 +1,46 @@
 import { describe, expect, it } from "vitest";
-import {
-  displayName,
-  exitMeaning,
-  shortState,
-  taskOutcome,
-  taskTone,
-  toneFor,
-} from "./StatusBadge";
+import { displayName, phaseTone, toneFor } from "./StatusBadge";
 
 /**
- * The console shows three state vocabularies with one colour scheme, and the
- * same word means different things in each. These pin the distinctions that
- * were actually wrong on screen.
+ * What this console still decides about a task's appearance.
+ *
+ * It used to decide more. `taskTone`, `taskOutcome`, `shortState` and
+ * `exitMeaning` classified Batch's raw enum strings here, and the tests for
+ * them lived here too — a browser test suite that knew exit 137 means the OOM
+ * killer. That classification is the server's now
+ * (`src/shared/task_states.py`), and its tests moved with it to
+ * `tests/shared/test_task_states.py`, which is also where the two deaths that
+ * must stay apart (124 vs 137) are pinned.
+ *
+ * What is left is presentation: which phase pulses, which word is shown, and
+ * the trap that separates the two.
  */
-describe("a Batch task's colour needs its exit code, not just its state", () => {
-  it("completed with exit 0 is success", () => {
-    expect(taskTone("BatchTaskState.COMPLETED", 0)).toBe("ok");
+describe("a finished task's colour comes from its OUTCOME, not the phase", () => {
+  it("finished says stopped, so it is never green on its own", () => {
+    // The original bug: Batch's `completed` means finished, not succeeded, so a
+    // badge coloured on the phase alone painted a crashed task green.
+    expect(phaseTone("finished", "done")).toBe("ok");
+    expect(phaseTone("finished", "failed")).toBe("bad");
   });
 
-  it("completed with a non-zero exit is NOT success", () => {
-    // The bug: Batch's `completed` means finished, not succeeded, so a badge
-    // coloured on state alone painted a crashed task green.
-    expect(taskTone("BatchTaskState.COMPLETED", 1)).toBe("bad");
-    expect(taskTone("BatchTaskState.COMPLETED", 137)).toBe("bad");
+  it("a cancelled task is muted and a timed-out one is a warning", () => {
+    expect(phaseTone("finished", "cancelled")).toBe("muted");
+    expect(phaseTone("finished", "timed out")).toBe("warn");
   });
 
-  it("a cancelled task is muted, not a failure", () => {
-    // -9 is Batch's SIGKILL on cancel. Reading it as a crash sent us looking
-    // for an OOM that never happened.
-    expect(taskTone("BatchTaskState.COMPLETED", -9)).toBe("muted");
+  it("queued does not pulse like live work", () => {
+    // A task waiting for a node is not working, and a frozen one never will be.
+    expect(phaseTone("queued", null)).toBe("pending");
   });
 
-  it("a timed-out task is a warning, not a failure", () => {
-    expect(taskTone("BatchTaskState.COMPLETED", 124)).toBe("warn");
+  it("running and starting are live", () => {
+    expect(phaseTone("running", null)).toBe("live");
+    expect(phaseTone("starting", null)).toBe("live");
   });
 
-  it("active is QUEUED, so it must not pulse like live work", () => {
-    // A task frozen `active` inside a finished job will never run at all.
-    expect(taskTone("BatchTaskState.ACTIVE", null)).toBe("muted");
-  });
-
-  it("running and preparing are live", () => {
-    expect(taskTone("BatchTaskState.RUNNING", null)).toBe("live");
-    expect(taskTone("BatchTaskState.PREPARING", null)).toBe("live");
+  it("an outcome the server has not sent yet is muted, not a guess", () => {
+    expect(phaseTone("finished", null)).toBe("muted");
+    expect(phaseTone("unknown", null)).toBe("muted");
   });
 });
 
@@ -68,44 +66,26 @@ describe("the task log's causes, where the word IS the outcome", () => {
   it("an unknown cause is muted rather than guessed at", () => {
     expect(toneFor("something-new")).toBe("muted");
   });
-});
 
-describe("exit codes are explained rather than left as numbers", () => {
-  it("names the ones that recur here", () => {
-    expect(exitMeaning(2)).toContain("rejected a flag");
-    expect(exitMeaning(124)).toContain("wall-clock");
-    expect(exitMeaning(137)).toContain("OOM");
-    expect(exitMeaning(-9)).toContain("cancellation");
-  });
-
-  it("leaves an unfamiliar code alone rather than inventing a meaning", () => {
-    expect(exitMeaning(42)).toBeNull();
-  });
-});
-
-describe("shortState", () => {
-  it("strips Batch's enum prefix", () => {
-    expect(shortState("BatchTaskState.RUNNING")).toBe("running");
-    expect(shortState(null)).toBe("");
+  it("reads the server's outcome words too, since they say the same things", () => {
+    // `timeout` (the task log) and `timed out` (a Batch outcome) are the same
+    // fact from two records, and a panel showing both must not colour them
+    // differently.
+    expect(toneFor("done")).toBe(toneFor("completed"));
+    expect(toneFor("timed out")).toBe(toneFor("timeout"));
   });
 });
 
 describe("displayed names are not always the names on the wire", () => {
-  it("shows a queued task as queued, not 'active'", () => {
-    // Azure's word reads as the opposite of what it means.
-    expect(taskOutcome("BatchTaskState.ACTIVE", null)).toBe("queued");
-  });
-
-  it("turns a stopped task into its outcome, one word", () => {
-    expect(taskOutcome("BatchTaskState.COMPLETED", 0)).toBe("done");
-    expect(taskOutcome("BatchTaskState.COMPLETED", 124)).toBe("timed out");
-    expect(taskOutcome("BatchTaskState.COMPLETED", -9)).toBe("cancelled");
-    expect(taskOutcome("BatchTaskState.COMPLETED", 137)).toBe("failed");
-  });
-
   it("renames the task causes that hid what they meant", () => {
     expect(displayName("started")).toBe("unresolved");
     expect(displayName("killed")).toBe("killed (oom)");
+  });
+
+  it("no longer renames Batch's words, because the server already did", () => {
+    // `active` -> `queued` used to happen here. It happens in `phase_of` now,
+    // and a second rename on this side would be a vocabulary to keep in step.
+    expect(displayName("queued")).toBe("queued");
   });
 
   it("leaves the wire value alone where it is already clear", () => {

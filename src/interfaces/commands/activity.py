@@ -20,7 +20,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import BaseModel, Field
 
 from src.interfaces import telemetry
 from src.interfaces.commands._base import Command
@@ -98,7 +100,65 @@ def _percentile(values: list[float], fraction: float) -> float:
     return values[index]
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class CommandActivity(BaseModel):
+    """One command's cost, over the window."""
+
+    command: str
+    calls: int
+    """p50 is what it normally costs, p95 what it costs when it does not. A mean
+    would be wrong about both."""
+    p50_seconds: float
+    p95_seconds: float
+    max_seconds: float
+    """What says whether a command is worth optimising: 0.4s run 3,000 times
+    outranks 9s run twice."""
+    total_seconds: float
+    refusals: int
+    errors: int
+
+
+class Failure(BaseModel):
+    """One recorded failure, with what was asked for when it happened."""
+
+    at: str | None = None
+    command: str | None = None
+    surface: str | None = None
+    outcome: str | None = None
+    error_type: str | None = None
+    error: str | None = None
+    asked: dict[str, Any] = Field(default_factory=dict)
+
+
+class ActivityPayload(BaseModel):
+    """The local activity log, summarised.
+
+    The only payload here that describes THIS TOOL rather than the solver or the
+    cloud. `exists`/`enabled` are two different empty states with different fixes
+    -- nothing has run yet, versus recording is switched off -- and collapsing
+    them would send someone hunting for a bug in the writer.
+    """
+
+    op: Literal["activity"] = "activity"
+    log: str
+    exists: bool
+    enabled: bool
+    days: float
+    """What the CALLER asked to see, carried so the renderer does not need the
+    args. The console ignores it and chooses for itself."""
+    failures_only: bool = False
+    rows: int
+    total_rows: int
+    first_at: str | None = None
+    commands: list[CommandActivity] = Field(default_factory=list)
+    failures: list[Failure] = Field(default_factory=list)
+    """Before `--limit` truncates `failures`. The list is a display cap and the
+    count is the fact; reporting the capped length said "20 failures" when there
+    were 100."""
+    total_failures: int = 0
+    by_surface: dict[str, int] = Field(default_factory=dict)
+
+
+def run(args: argparse.Namespace) -> ActivityPayload:
     """Summarise the local activity log."""
     path = telemetry.log_path()
     # Both generations, oldest first. Reading only the live file would make a
@@ -160,51 +220,47 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         summary = summary[: args.limit]
         failures = failures[: args.limit]
 
-    return {
-        "op": "activity",
-        "log": str(path),
-        "exists": path.is_file(),
-        "enabled": telemetry.enabled(),
-        "days": args.days,
-        # What the CALLER asked to see, carried so the renderer does not need
-        # the args. The console ignores it and chooses for itself — it gets both
-        # halves of the payload either way.
-        "failures_only": bool(args.failures),
-        "rows": len(selected),
-        "total_rows": len(rows),
-        "first_at": min((str(row.get("at", "")) for row in selected), default=None) or None,
-        "commands": summary,
-        "failures": failures,
-        "total_failures": total_failures,
+    return ActivityPayload(
+        log=str(path),
+        exists=path.is_file(),
+        enabled=telemetry.enabled(),
+        days=args.days,
+        failures_only=bool(args.failures),
+        rows=len(selected),
+        total_rows=len(rows),
+        first_at=min((str(row.get("at", "")) for row in selected), default=None) or None,
+        commands=[CommandActivity.model_validate(row) for row in summary],
+        failures=[Failure.model_validate(row) for row in failures],
+        total_failures=total_failures,
         # Counted off ONE expression, so the parts sum to `rows`. Deriving the
         # keys and the counts separately meant a row with a missing or null
         # `surface` contributed a key it then failed to match, and the header
         # rendered `unknown 0` beside a total that included it.
-        "by_surface": dict(sorted(Counter(_surface_of(row) for row in selected).items())),
-    }
+        by_surface=dict(sorted(Counter(_surface_of(row) for row in selected).items())),
+    )
 
 
-def render(payload: dict[str, Any]) -> None:
-    if not payload["exists"]:
+def render(payload: ActivityPayload) -> None:
+    if not payload.exists:
         # Two different states, and the fix differs. Nothing has run yet is
         # ordinary on a fresh checkout; switched off is a decision someone made.
         reason = (
             "no commands have been recorded yet"
-            if payload["enabled"]
+            if payload.enabled
             else f"recording is OFF ({telemetry.ENV_VAR} is set)"
         )
-        print(f"No activity log at {payload['log']} — {reason}.")
+        print(f"No activity log at {payload.log} — {reason}.")
         return
-    if not payload["rows"]:
-        window = "ever" if payload["days"] <= 0 else f"in the last {payload['days']:g} day(s)"
-        print(f"No matching invocations {window} ({payload['total_rows']} row(s) in the log).")
+    if not payload.rows:
+        window = "ever" if payload.days <= 0 else f"in the last {payload.days:g} day(s)"
+        print(f"No matching invocations {window} ({payload.total_rows} row(s) in the log).")
         return
 
-    window = "all time" if payload["days"] <= 0 else f"last {payload['days']:g} day(s)"
-    surfaces = ", ".join(f"{name} {count}" for name, count in payload["by_surface"].items())
-    print(f"{payload['rows']} invocation(s), {window} — {surfaces}")
+    window = "all time" if payload.days <= 0 else f"last {payload.days:g} day(s)"
+    surfaces = ", ".join(f"{name} {count}" for name, count in payload.by_surface.items())
+    print(f"{payload.rows} invocation(s), {window} — {surfaces}")
 
-    if payload["failures"] and _listing_failures(payload):
+    if payload.failures and _listing_failures(payload):
         _render_failures(payload)
         return
 
@@ -214,41 +270,39 @@ def render(payload: dict[str, Any]) -> None:
     )
     print(header)
     print("-" * len(header))
-    for entry in payload["commands"]:
+    for entry in payload.commands:
         print(
-            f"{entry['command'][:20]:<20} {entry['calls']:>7} "
-            f"{entry['p50_seconds']:>8.3f} {entry['p95_seconds']:>8.3f} "
-            f"{entry['max_seconds']:>8.3f} {entry['total_seconds']:>9.1f} "
-            f"{entry['refusals']:>8} {entry['errors']:>7}"
+            f"{entry.command[:20]:<20} {entry.calls:>7} "
+            f"{entry.p50_seconds:>8.3f} {entry.p95_seconds:>8.3f} "
+            f"{entry.max_seconds:>8.3f} {entry.total_seconds:>9.1f} "
+            f"{entry.refusals:>8} {entry.errors:>7}"
         )
-    total = payload.get("total_failures", len(payload["failures"]))
+    total = payload.total_failures
     if total:
-        shown = (
-            "" if total == len(payload["failures"]) else f" (showing {len(payload['failures'])})"
-        )
+        shown = "" if total == len(payload.failures) else f" (showing {len(payload.failures)})"
         print(f"\n{total} failure(s){shown} — `--failures` to list them.")
 
 
-def _listing_failures(payload: dict[str, Any]) -> bool:
+def _listing_failures(payload: ActivityPayload) -> bool:
     """Whether the caller asked for the failure listing.
 
     Read off the payload rather than the args so both surfaces see the same
     thing: the console gets `failures` either way and chooses for itself.
     """
-    return bool(payload.get("failures_only"))
+    return bool(payload.failures_only)
 
 
-def _render_failures(payload: dict[str, Any]) -> None:
-    for failure in payload["failures"]:
-        asked = " ".join(f"{key}={value}" for key, value in (failure["asked"] or {}).items())
+def _render_failures(payload: ActivityPayload) -> None:
+    for failure in payload.failures:
+        asked = " ".join(f"{key}={value}" for key, value in (failure.asked or {}).items())
         print(
-            f"{str(failure['at'])[:19]}  {failure['command']!s:<18} "
-            f"{failure['outcome']!s:<9} {failure['error_type'] or ''}"
+            f"{str(failure.at)[:19]}  {failure.command!s:<18} "
+            f"{failure.outcome!s:<9} {failure.error_type or ''}"
         )
         if asked:
             print(f"    asked: {asked}")
-        if failure["error"]:
-            print(f"    {failure['error']}")
+        if failure.error:
+            print(f"    {failure.error}")
 
 
 COMMAND = Command(

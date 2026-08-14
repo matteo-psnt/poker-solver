@@ -1,20 +1,17 @@
 {
   "components": {
     "schemas": {
-      "Activity": {
-        "additionalProperties": true,
+      "ActivityPayload": {
         "description": "The local activity log, summarised.\n\nThe only payload here that describes THIS TOOL rather than the solver or the\ncloud. `exists`/`enabled` are two different empty states with different fixes\n-- nothing has run yet, versus recording is switched off -- and collapsing\nthem would send someone hunting for a bug in the writer.",
         "properties": {
           "by_surface": {
             "additionalProperties": {
               "type": "integer"
             },
-            "default": {},
             "title": "By Surface",
             "type": "object"
           },
           "commands": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/CommandActivity"
             },
@@ -34,12 +31,27 @@
             "type": "boolean"
           },
           "failures": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/Failure"
             },
             "title": "Failures",
             "type": "array"
+          },
+          "failures_only": {
+            "default": false,
+            "title": "Failures Only",
+            "type": "boolean"
+          },
+          "first_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First At"
           },
           "log": {
             "title": "Log",
@@ -47,6 +59,7 @@
           },
           "op": {
             "const": "activity",
+            "default": "activity",
             "title": "Op",
             "type": "string"
           },
@@ -65,7 +78,6 @@
           }
         },
         "required": [
-          "op",
           "log",
           "exists",
           "enabled",
@@ -73,7 +85,7 @@
           "rows",
           "total_rows"
         ],
-        "title": "Activity",
+        "title": "ActivityPayload",
         "type": "object"
       },
       "ApiError": {
@@ -91,8 +103,8 @@
         "title": "ApiError",
         "type": "object"
       },
-      "Arm": {
-        "additionalProperties": true,
+      "ArmResult": {
+        "description": "One arm of an experiment, scored and attributed against its control.",
         "properties": {
           "arm": {
             "title": "Arm",
@@ -110,44 +122,23 @@
             "title": "Checkpoint Iteration"
           },
           "exploitability_mbb": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exploitability Mbb"
+            "title": "Exploitability Mbb",
+            "type": "number"
           },
           "git_branch": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Git Branch"
+            "default": "",
+            "title": "Git Branch",
+            "type": "string"
           },
           "run_id": {
             "title": "Run Id",
             "type": "string"
           },
           "std_error_mbb": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Std Error Mbb"
+            "title": "Std Error Mbb",
+            "type": "number"
           },
           "vs_control_blocked": {
-            "default": [],
             "items": {
               "type": "string"
             },
@@ -182,30 +173,27 @@
           "run_id",
           "checkpoint_iteration",
           "exploitability_mbb",
-          "std_error_mbb",
-          "vs_control_mbb",
-          "vs_control_p_value"
+          "std_error_mbb"
         ],
-        "title": "Arm",
+        "title": "ArmResult",
         "type": "object"
       },
-      "Autoscale": {
-        "additionalProperties": true,
-        "description": "The deployed autoscale formula, evaluated against the live pool.\n\n`error` is a FIELD, not a failed request: Batch evaluates the formula and\nreports that it did not compute, which is the answer to \"why is the pool not\ngrowing\" and must reach the screen rather than blanking the panel.",
+      "AutoscalePayload": {
+        "description": "The deployed formula, evaluated against the live pool.\n\n`error` is a FIELD, not a failed request: Batch evaluates the formula and\nreports that it did not compute, which is the answer to \"why is the pool not\ngrowing\" and must reach the screen rather than blanking the panel.",
         "properties": {
           "error": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ResizeError"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Error"
+            ]
           },
           "op": {
             "const": "autoscale-check",
+            "default": "autoscale-check",
             "title": "Op",
             "type": "string"
           },
@@ -223,15 +211,13 @@
           }
         },
         "required": [
-          "op",
-          "pool_id",
-          "error"
+          "pool_id"
         ],
-        "title": "Autoscale",
+        "title": "AutoscalePayload",
         "type": "object"
       },
       "BatchTask": {
-        "additionalProperties": true,
+        "description": "One Batch task, in THIS project's vocabulary rather than Batch's.\n\nThe docstring above this used to make that claim while emitting\n``\"BatchTaskState.ACTIVE\"`` verbatim, which is why the browser ended up\ncarrying an Azure-semantics module: `shortState`, `taskOutcome` and\n`exitMeaning` all existed to undo this. :attr:`phase` and :attr:`outcome` are\nthe claim made true, computed once, here, from\n:mod:`~src.shared.task_states`.\n\n``state`` and ``result`` are kept RAW beside them. They are what Batch\nactually said, they are what lands in an observer record on the share, and a\nclassification that cannot be checked against its input is a classification\nnobody can debug.",
         "properties": {
           "created": {
             "anyOf": [
@@ -266,6 +252,32 @@
             ],
             "title": "Exit Code"
           },
+          "exit_meaning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Meaning"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job": {
+            "default": "",
+            "title": "Job",
+            "type": "string"
+          },
           "node": {
             "anyOf": [
               {
@@ -276,6 +288,30 @@
               }
             ],
             "title": "Node"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Outcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "phase": {
+            "$ref": "#/components/schemas/Phase"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
           },
           "start_time": {
             "anyOf": [
@@ -307,14 +343,13 @@
         "required": [
           "task",
           "state",
-          "exit_code"
+          "phase"
         ],
         "title": "BatchTask",
         "type": "object"
       },
-      "Billed": {
-        "additionalProperties": true,
-        "description": "What Azure actually charged.\n\nNullable as a whole on :class:`Cost`: the billing API is asked independently\nof the task log and is allowed to fail on its own, so the page has to render\nnode time with this absent.",
+      "BilledPayload": {
+        "description": "What Azure actually CHARGED, as it crosses the wire.\n\nSeparate from the `Billed` dataclass above, which holds `date` objects and\ntuples: this is the same figures in shapes TypeScript has. Nullable as a\nwhole on the cost payload, because the billing API is asked independently of\nthe task log and is allowed to fail on its own.",
         "properties": {
           "as_of": {
             "anyOf": [
@@ -395,11 +430,9 @@
           "pool_node_hours",
           "standing_cost",
           "standing_hours",
-          "since",
-          "first_at",
-          "as_of"
+          "since"
         ],
-        "title": "Billed",
+        "title": "BilledPayload",
         "type": "object"
       },
       "BlueprintLoad": {
@@ -472,8 +505,7 @@
         "title": "BlueprintRun",
         "type": "object"
       },
-      "Box": {
-        "additionalProperties": true,
+      "BoxPayload": {
         "description": "The blueprint host's power state.\n\n`power` carries transitional values (\"starting\", \"stopping\") as well as the\ntwo stable ones, because a UI that only knew \"running\" and \"deallocated\"\nwould show \"stopped\" for the whole two minutes a box takes to wake -- which\nreads as the button having done nothing.",
         "properties": {
           "action": {
@@ -486,6 +518,7 @@
           },
           "op": {
             "const": "serve-box",
+            "default": "serve-box",
             "title": "Op",
             "type": "string"
           },
@@ -507,7 +540,6 @@
           }
         },
         "required": [
-          "op",
           "action",
           "vm",
           "resource_group",
@@ -515,7 +547,7 @@
           "usable",
           "location"
         ],
-        "title": "Box",
+        "title": "BoxPayload",
         "type": "object"
       },
       "Bucket": {
@@ -553,9 +585,8 @@
         "title": "Bucket",
         "type": "object"
       },
-      "Cancelled": {
-        "additionalProperties": true,
-        "description": "What `cancel` reports back. Loose: the UI only needs to know it landed.\n\n`job_id`/`task_id`, which is what `cancel.run` actually returns. The\nhand-written Zod this replaced declared `job`/`task`, so the console's cancel\nbutton terminated the task and then threw a parse error reporting it had\nfailed -- the worst shape of bug this seam can produce, because the operator\nretries an action that already worked. It survived because the fixture check\nlisting was hand-maintained too and simply never named `cancel`.",
+      "CancelledPayload": {
+        "description": "What `cancel` reports back.\n\n`job_id`/`task_id`, which is what this command has always returned. The\nhand-written Zod this replaced declared `job`/`task`, so the console's cancel\nbutton terminated the task and then threw a parse error reporting that it had\nfailed -- the worst shape of bug this seam can produce, because the operator\nretries an action that already worked.",
         "properties": {
           "job_id": {
             "title": "Job Id",
@@ -563,6 +594,7 @@
           },
           "op": {
             "const": "cancel",
+            "default": "cancel",
             "title": "Op",
             "type": "string"
           },
@@ -572,11 +604,10 @@
           }
         },
         "required": [
-          "op",
           "job_id",
           "task_id"
         ],
-        "title": "Cancelled",
+        "title": "CancelledPayload",
         "type": "object"
       },
       "Combos": {
@@ -595,7 +626,7 @@
         "type": "object"
       },
       "CommandActivity": {
-        "additionalProperties": true,
+        "description": "One command's cost, over the window.",
         "properties": {
           "calls": {
             "title": "Calls",
@@ -693,11 +724,11 @@
         "title": "CompactBody",
         "type": "object"
       },
-      "Compacted": {
-        "additionalProperties": true,
-        "description": "`compact-legs`, whose payload describes BOTH halves of the operation.\n\n`applied`/`verified`/`deleted` separate a dry run from the irreversible one,\nand the page renders the dry run's numbers as a preview before offering it --\nso one shape carries \"what would move\" and \"what did\".",
+      "CompactedPayload": {
+        "description": "`compact-legs`, whose payload describes BOTH halves of the operation.\n\n`applied`/`verified`/`deleted` separate a dry run from the irreversible one,\nand the console renders the dry run's numbers as a preview before offering\nit -- so one shape carries \"what would move\" and \"what did\".\n\nBuilt up as the operation proceeds rather than at a return, which is why the\nfields have defaults: a run that refuses early still answers with the counts\nit managed to establish, and the dry run IS the early return.",
         "properties": {
           "applied": {
+            "default": false,
             "title": "Applied",
             "type": "boolean"
           },
@@ -713,26 +744,13 @@
             "title": "Attempts"
           },
           "backup": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Backup"
+            "default": "",
+            "title": "Backup",
+            "type": "string"
           },
           "bundle": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bundle"
+            "title": "Bundle",
+            "type": "string"
           },
           "carried": {
             "default": 0,
@@ -740,12 +758,20 @@
             "type": "integer"
           },
           "deleted": {
+            "default": 0,
             "title": "Deleted",
             "type": "integer"
           },
           "files_after": {
-            "title": "Files After",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files After"
           },
           "files_before": {
             "title": "Files Before",
@@ -757,31 +783,49 @@
           },
           "op": {
             "const": "compact-legs",
+            "default": "compact-legs",
             "title": "Op",
             "type": "string"
           },
           "verified": {
+            "default": false,
             "title": "Verified",
             "type": "boolean"
           }
         },
         "required": [
-          "op",
           "bundle",
           "files_before",
-          "files_after",
-          "movable",
-          "applied",
-          "verified",
-          "deleted",
-          "backup"
+          "movable"
         ],
-        "title": "Compacted",
+        "title": "CompactedPayload",
         "type": "object"
       },
-      "Comparison": {
-        "additionalProperties": true,
+      "ComparePayload": {
+        "description": "A paired (common-random-numbers) comparison of two runs' latest evals.\n\n`comparison` is null because the command REFUSES rather than guesses: two\nruns with no shared seed have no paired statistic, and `tier_warnings` says\nwhy. Both halves are needed -- a refusal with no reason is indistinguishable\nfrom a bug.",
         "properties": {
+          "checkpoint_iteration_a": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Iteration A"
+          },
+          "checkpoint_iteration_b": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Iteration B"
+          },
           "comparison": {
             "anyOf": [
               {
@@ -792,8 +836,14 @@
               }
             ]
           },
+          "forced": {
+            "default": false,
+            "title": "Forced",
+            "type": "boolean"
+          },
           "op": {
             "const": "compare",
+            "default": "compare",
             "title": "Op",
             "type": "string"
           },
@@ -815,16 +865,13 @@
           }
         },
         "required": [
-          "op",
           "run_a",
-          "run_b",
-          "comparison"
+          "run_b"
         ],
-        "title": "Comparison",
+        "title": "ComparePayload",
         "type": "object"
       },
       "ConcurrencyPoint": {
-        "additionalProperties": true,
         "properties": {
           "at": {
             "title": "At",
@@ -843,7 +890,6 @@
         "type": "object"
       },
       "ConfigKind": {
-        "additionalProperties": true,
         "properties": {
           "flag": {
             "title": "Flag",
@@ -869,8 +915,8 @@
         "title": "ConfigKind",
         "type": "object"
       },
-      "Configs": {
-        "additionalProperties": true,
+      "ConfigsPayload": {
+        "description": "The config stems each dispatching command will accept.",
         "properties": {
           "kinds": {
             "default": [],
@@ -882,6 +928,7 @@
           },
           "op": {
             "const": "configs",
+            "default": "configs",
             "title": "Op",
             "type": "string"
           },
@@ -891,19 +938,18 @@
           }
         },
         "required": [
-          "op",
           "root"
         ],
-        "title": "Configs",
+        "title": "ConfigsPayload",
         "type": "object"
       },
-      "Cost": {
-        "additionalProperties": true,
+      "CostPayload": {
+        "description": "What it all cost: node time from the task log, and what Azure billed.\n\nSubclasses `NodeTime` rather than restating its seven fields. The two halves\nare asked independently and fail independently -- `billed` is null with\n`billed_reason` set when Cost Management throttles, and the screen still\nrenders node time.",
         "properties": {
           "billed": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Billed"
+                "$ref": "#/components/schemas/BilledPayload"
               },
               {
                 "type": "null"
@@ -960,6 +1006,7 @@
           },
           "op": {
             "const": "cost",
+            "default": "cost",
             "title": "Op",
             "type": "string"
           },
@@ -1000,44 +1047,44 @@
           }
         },
         "required": [
-          "op",
-          "hours",
           "task_hours",
           "tasks",
           "unended",
           "peak_concurrency",
-          "first_at",
-          "last_at",
-          "rate_per_node_hour",
-          "dollars",
-          "billed",
-          "billed_reason"
+          "hours"
         ],
-        "title": "Cost",
+        "title": "CostPayload",
         "type": "object"
       },
-      "Curve": {
-        "additionalProperties": true,
+      "CurveOutput": {
+        "description": "A within-run exploitability-vs-iteration curve, plus what is still missing.\n\n``tier`` names the single instrument every point was measured with. Points from\ndifferent tiers are never merged: a curve mixing two scorers measures two\ndifferent things and its shape means nothing.\n\n``missing_iterations`` are ladder rungs on disk with no evaluation in this tier\n-- the gaps to fill with ``evaluate --at N`` to complete the curve.",
         "properties": {
           "missing_iterations": {
-            "default": [],
             "items": {
               "type": "integer"
             },
             "title": "Missing Iterations",
             "type": "array"
           },
-          "op": {
-            "const": "curve",
-            "title": "Op",
-            "type": "string"
+          "other_tiers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Other Tiers",
+            "type": "array"
           },
           "points": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/CurvePoint"
             },
             "title": "Points",
+            "type": "array"
+          },
+          "retained_iterations": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Retained Iterations",
             "type": "array"
           },
           "run_id": {
@@ -1054,126 +1101,132 @@
               }
             ],
             "title": "Tier"
+          },
+          "unplaceable_records": {
+            "default": 0,
+            "title": "Unplaceable Records",
+            "type": "integer"
           }
         },
         "required": [
-          "op",
           "run_id",
-          "tier"
+          "tier",
+          "points",
+          "missing_iterations",
+          "other_tiers",
+          "retained_iterations"
         ],
-        "title": "Curve",
+        "title": "CurveOutput",
         "type": "object"
       },
-      "CurvePoint": {
-        "additionalProperties": true,
+      "CurvePayload": {
+        "description": "Within-run exploitability vs iteration. Subclasses what the service\nproduces rather than restating its fields; the op tag is the only addition.",
         "properties": {
-          "exploitability_mbb": {
+          "missing_iterations": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Missing Iterations",
+            "type": "array"
+          },
+          "op": {
+            "const": "curve",
+            "default": "curve",
+            "title": "Op",
+            "type": "string"
+          },
+          "other_tiers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Other Tiers",
+            "type": "array"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/CurvePoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "retained_iterations": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Retained Iterations",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "tier": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Exploitability Mbb"
+            "title": "Tier"
+          },
+          "unplaceable_records": {
+            "default": 0,
+            "title": "Unplaceable Records",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "tier",
+          "points",
+          "missing_iterations",
+          "other_tiers",
+          "retained_iterations"
+        ],
+        "title": "CurvePayload",
+        "type": "object"
+      },
+      "CurvePoint": {
+        "description": "One measured rung of a within-run convergence curve.",
+        "properties": {
+          "eval_git_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Git Commit"
+          },
+          "exploitability_mbb": {
+            "title": "Exploitability Mbb",
+            "type": "number"
           },
           "iteration": {
             "title": "Iteration",
             "type": "integer"
           },
+          "num_hands": {
+            "title": "Num Hands",
+            "type": "integer"
+          },
           "std_error_mbb": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Std Error Mbb"
+            "title": "Std Error Mbb",
+            "type": "number"
           }
         },
         "required": [
           "iteration",
           "exploitability_mbb",
-          "std_error_mbb"
+          "std_error_mbb",
+          "num_hands",
+          "eval_git_commit"
         ],
         "title": "CurvePoint",
-        "type": "object"
-      },
-      "Dispatched": {
-        "additionalProperties": true,
-        "description": "What a dispatch reports back.\n\nOne shape for all three, because `dispatch.stage_and_queue` supplies the same\nthree keys to each: the snapshot it sealed, the job it queued into, and the\ntasks it created. The op differs and is deliberately not narrowed -- the page\nalready knows which button it pressed, and a literal per command would be\nthree near-identical models whose only job is to disagree eventually.",
-        "properties": {
-          "code_snapshot": {
-            "title": "Code Snapshot",
-            "type": "string"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "op": {
-            "title": "Op",
-            "type": "string"
-          },
-          "tasks": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Tasks",
-            "type": "array"
-          }
-        },
-        "required": [
-          "op",
-          "code_snapshot",
-          "job_id"
-        ],
-        "title": "Dispatched",
-        "type": "object"
-      },
-      "DispatchedVector": {
-        "additionalProperties": true,
-        "description": "`submit-vector`, which is a dispatch plus WHICH ARMS it queued.\n\nIt had no schema at all in the console -- not a wrong one, an absent one --\nwhile its endpoint had been served the whole time. The hand-maintained list\nthat was supposed to catch that never named it either. Which abstractions to\ncompare IS the experiment, so the arms are the part of this payload worth\nreading back.",
-        "properties": {
-          "arms": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/VectorArm"
-            },
-            "title": "Arms",
-            "type": "array"
-          },
-          "code_snapshot": {
-            "title": "Code Snapshot",
-            "type": "string"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "op": {
-            "title": "Op",
-            "type": "string"
-          },
-          "tasks": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Tasks",
-            "type": "array"
-          }
-        },
-        "required": [
-          "op",
-          "code_snapshot",
-          "job_id"
-        ],
-        "title": "DispatchedVector",
         "type": "object"
       },
       "Edge": {
@@ -1204,10 +1257,10 @@
         "additionalProperties": true,
         "properties": {
           "report": {
-            "$ref": "#/components/schemas/Part_Report_"
+            "$ref": "#/components/schemas/Part_ReportPayload_"
           },
           "runs": {
-            "$ref": "#/components/schemas/Part_Runs_"
+            "$ref": "#/components/schemas/Part_RunsPayload_"
           }
         },
         "required": [
@@ -1255,11 +1308,10 @@
         "type": "object"
       },
       "Failure": {
-        "additionalProperties": true,
+        "description": "One recorded failure, with what was asked for when it happened.",
         "properties": {
           "asked": {
             "additionalProperties": true,
-            "default": {},
             "title": "Asked",
             "type": "object"
           },
@@ -1545,7 +1597,7 @@
         "type": "object"
       },
       "Job": {
-        "additionalProperties": true,
+        "description": "One Batch job. ``tasks`` is empty until `attach_tasks` fills it in.",
         "properties": {
           "job": {
             "title": "Job",
@@ -1578,8 +1630,8 @@
         "title": "Job",
         "type": "object"
       },
-      "Jobs": {
-        "additionalProperties": true,
+      "JobsPayload": {
+        "description": "What `jobs` answers. The console reads this through `/api/jobs`.",
         "properties": {
           "hidden_jobs": {
             "title": "Hidden Jobs",
@@ -1595,6 +1647,7 @@
           },
           "op": {
             "const": "jobs",
+            "default": "jobs",
             "title": "Op",
             "type": "string"
           },
@@ -1604,27 +1657,30 @@
           }
         },
         "required": [
-          "op",
           "total_jobs",
           "hidden_jobs"
         ],
-        "title": "Jobs",
+        "title": "JobsPayload",
         "type": "object"
       },
-      "Ledger": {
-        "additionalProperties": true,
+      "LedgerPayload": {
+        "description": "Recorded evaluations, derived from the published per-run documents.",
         "properties": {
           "ledger": {
             "title": "Ledger",
             "type": "string"
           },
+          "matched": {
+            "title": "Matched",
+            "type": "integer"
+          },
           "op": {
             "const": "ledger",
+            "default": "ledger",
             "title": "Op",
             "type": "string"
           },
           "rows": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/LedgerRow"
             },
@@ -1633,14 +1689,15 @@
           }
         },
         "required": [
-          "op",
-          "ledger"
+          "ledger",
+          "matched"
         ],
-        "title": "Ledger",
+        "title": "LedgerPayload",
         "type": "object"
       },
       "LedgerRow": {
         "additionalProperties": true,
+        "description": "One recorded evaluation, as it sits in the derived index.\n\nLENIENT, unlike the payloads this file builds. A row is a RECORD read off\nthe share, written by whatever version of `evaluate` produced it -- so this\nnames the fields a surface reads and lets the rest through, which is what\n`extra=\"allow\"` was for before the models became producers.",
         "properties": {
           "eval_git_commit": {
             "anyOf": [
@@ -1655,13 +1712,11 @@
           },
           "knobs": {
             "additionalProperties": true,
-            "default": {},
             "title": "Knobs",
             "type": "object"
           },
           "results": {
             "additionalProperties": true,
-            "default": {},
             "title": "Results",
             "type": "object"
           },
@@ -1700,8 +1755,8 @@
         "title": "LeftSession",
         "type": "object"
       },
-      "LogLines": {
-        "additionalProperties": true,
+      "LogsPayload": {
+        "description": "One task's log, or the listing of what is published.\n\nExactly one of `listing`/`lines` is set: `--list` answers what exists,\neverything else answers one task. Both nullable rather than two payloads,\nbecause the caller asked one command one question.",
         "properties": {
           "lines": {
             "anyOf": [
@@ -1717,8 +1772,23 @@
             ],
             "title": "Lines"
           },
+          "listing": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing"
+          },
           "op": {
             "const": "logs",
+            "default": "logs",
             "title": "Op",
             "type": "string"
           },
@@ -1734,12 +1804,7 @@
             "title": "Task"
           }
         },
-        "required": [
-          "op",
-          "task",
-          "lines"
-        ],
-        "title": "LogLines",
+        "title": "LogsPayload",
         "type": "object"
       },
       "NodeGrid": {
@@ -1807,19 +1872,19 @@
         "additionalProperties": true,
         "properties": {
           "autoscale": {
-            "$ref": "#/components/schemas/Part_Autoscale_"
+            "$ref": "#/components/schemas/Part_AutoscalePayload_"
           },
           "cost": {
-            "$ref": "#/components/schemas/Part_Cost_"
+            "$ref": "#/components/schemas/Part_CostPayload_"
           },
           "jobs": {
-            "$ref": "#/components/schemas/Part_Jobs_"
+            "$ref": "#/components/schemas/Part_JobsPayload_"
           },
           "pool": {
-            "$ref": "#/components/schemas/Part_Pool_"
+            "$ref": "#/components/schemas/Part_PoolPayload_"
           },
           "tasks": {
-            "$ref": "#/components/schemas/Part_Tasks_"
+            "$ref": "#/components/schemas/Part_TasksPayload_"
           }
         },
         "required": [
@@ -1861,8 +1926,19 @@
         "title": "NowView",
         "type": "object"
       },
+      "Outcome": {
+        "description": "What a task that STOPPED actually achieved.\n\nSeparate from :class:`Phase` because ``FINISHED`` says only that it is over.\nColouring on the phase alone made a cancellation and a crash identical.",
+        "enum": [
+          "done",
+          "failed",
+          "timed out",
+          "cancelled"
+        ],
+        "title": "Outcome",
+        "type": "string"
+      },
       "PairedComparison": {
-        "additionalProperties": true,
+        "description": "The statistic itself. Declared field by field because the console reads\nit that way -- as a bare dict it crossed to TypeScript as `unknown`, and\nevery panel that drew a p-value had to cast.",
         "properties": {
           "ci_lower": {
             "title": "Ci Lower",
@@ -1899,6 +1975,10 @@
             "title": "Mean Diff",
             "type": "number"
           },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
           "p_value": {
             "title": "P Value",
             "type": "number"
@@ -1917,24 +1997,28 @@
               }
             ],
             "title": "Se Unpaired"
+          },
+          "t_statistic": {
+            "title": "T Statistic",
+            "type": "number"
           }
         },
         "required": [
+          "n",
           "mean_a",
           "mean_b",
           "mean_diff",
           "se_diff",
           "ci_lower",
           "ci_upper",
+          "t_statistic",
           "p_value",
-          "is_significant",
-          "correlation",
-          "se_unpaired"
+          "is_significant"
         ],
         "title": "PairedComparison",
         "type": "object"
       },
-      "Part_Autoscale_": {
+      "Part_AutoscalePayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -1951,7 +2035,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Autoscale"
+                "$ref": "#/components/schemas/AutoscalePayload"
               },
               {
                 "type": "null"
@@ -1959,10 +2043,10 @@
             ]
           }
         },
-        "title": "Part[Autoscale]",
+        "title": "Part[AutoscalePayload]",
         "type": "object"
       },
-      "Part_Cost_": {
+      "Part_CostPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -1979,7 +2063,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Cost"
+                "$ref": "#/components/schemas/CostPayload"
               },
               {
                 "type": "null"
@@ -1987,10 +2071,10 @@
             ]
           }
         },
-        "title": "Part[Cost]",
+        "title": "Part[CostPayload]",
         "type": "object"
       },
-      "Part_Curve_": {
+      "Part_CurvePayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2007,7 +2091,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Curve"
+                "$ref": "#/components/schemas/CurvePayload"
               },
               {
                 "type": "null"
@@ -2015,10 +2099,10 @@
             ]
           }
         },
-        "title": "Part[Curve]",
+        "title": "Part[CurvePayload]",
         "type": "object"
       },
-      "Part_Jobs_": {
+      "Part_JobsPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2035,7 +2119,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Jobs"
+                "$ref": "#/components/schemas/JobsPayload"
               },
               {
                 "type": "null"
@@ -2043,10 +2127,10 @@
             ]
           }
         },
-        "title": "Part[Jobs]",
+        "title": "Part[JobsPayload]",
         "type": "object"
       },
-      "Part_Ledger_": {
+      "Part_LedgerPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2063,7 +2147,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Ledger"
+                "$ref": "#/components/schemas/LedgerPayload"
               },
               {
                 "type": "null"
@@ -2071,10 +2155,10 @@
             ]
           }
         },
-        "title": "Part[Ledger]",
+        "title": "Part[LedgerPayload]",
         "type": "object"
       },
-      "Part_Pool_": {
+      "Part_PoolPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2091,7 +2175,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Pool"
+                "$ref": "#/components/schemas/PoolPayload"
               },
               {
                 "type": "null"
@@ -2099,10 +2183,10 @@
             ]
           }
         },
-        "title": "Part[Pool]",
+        "title": "Part[PoolPayload]",
         "type": "object"
       },
-      "Part_Progress_": {
+      "Part_ProgressPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2119,7 +2203,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Progress"
+                "$ref": "#/components/schemas/ProgressPayload"
               },
               {
                 "type": "null"
@@ -2127,10 +2211,10 @@
             ]
           }
         },
-        "title": "Part[Progress]",
+        "title": "Part[ProgressPayload]",
         "type": "object"
       },
-      "Part_Report_": {
+      "Part_ReportPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2147,7 +2231,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Report"
+                "$ref": "#/components/schemas/ReportPayload"
               },
               {
                 "type": "null"
@@ -2155,10 +2239,10 @@
             ]
           }
         },
-        "title": "Part[Report]",
+        "title": "Part[ReportPayload]",
         "type": "object"
       },
-      "Part_RunInfo_": {
+      "Part_RunInfoPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2175,7 +2259,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RunInfo"
+                "$ref": "#/components/schemas/RunInfoPayload"
               },
               {
                 "type": "null"
@@ -2183,10 +2267,10 @@
             ]
           }
         },
-        "title": "Part[RunInfo]",
+        "title": "Part[RunInfoPayload]",
         "type": "object"
       },
-      "Part_Runs_": {
+      "Part_RunsPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2203,7 +2287,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Runs"
+                "$ref": "#/components/schemas/RunsPayload"
               },
               {
                 "type": "null"
@@ -2211,10 +2295,10 @@
             ]
           }
         },
-        "title": "Part[Runs]",
+        "title": "Part[RunsPayload]",
         "type": "object"
       },
-      "Part_Tasks_": {
+      "Part_TasksPayload_": {
         "additionalProperties": true,
         "properties": {
           "error": {
@@ -2231,7 +2315,7 @@
           "payload": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Tasks"
+                "$ref": "#/components/schemas/TasksPayload"
               },
               {
                 "type": "null"
@@ -2239,11 +2323,51 @@
             ]
           }
         },
-        "title": "Part[Tasks]",
+        "title": "Part[TasksPayload]",
         "type": "object"
       },
-      "Pool": {
+      "Part_TasksSummary_": {
         "additionalProperties": true,
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TasksSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "Part[TasksSummary]",
+        "type": "object"
+      },
+      "Phase": {
+        "description": "Where a Batch task is, in words that mean what they say.",
+        "enum": [
+          "queued",
+          "starting",
+          "running",
+          "finished",
+          "unknown"
+        ],
+        "title": "Phase",
+        "type": "string"
+      },
+      "PoolPayload": {
+        "description": "What `pool-status` answers: the pool, plus what it costs while up.\n\nSubclasses the shape `batch.pool_status` already produces rather than\nrestating its six fields -- the command adds the op tag and the rate, which\ncome from config and not from Batch.",
         "properties": {
           "allocation_state": {
             "anyOf": [
@@ -2280,6 +2404,7 @@
           },
           "op": {
             "const": "pool-status",
+            "default": "pool-status",
             "title": "Op",
             "type": "string"
           },
@@ -2319,14 +2444,13 @@
           }
         },
         "required": [
-          "op",
           "pool_id",
           "allocation_state",
           "current_dedicated_nodes",
           "target_dedicated_nodes",
           "vm_size"
         ],
-        "title": "Pool",
+        "title": "PoolPayload",
         "type": "object"
       },
       "PrecomputeBody": {
@@ -2375,8 +2499,63 @@
         "title": "PrecomputeBody",
         "type": "object"
       },
-      "Progress": {
-        "additionalProperties": true,
+      "PrecomputeDispatchPayload": {
+        "description": "One queued abstraction build, and whether it would replace anything.",
+        "properties": {
+          "abstraction_config": {
+            "title": "Abstraction Config",
+            "type": "string"
+          },
+          "already_published": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Already Published",
+            "type": "array"
+          },
+          "code_snapshot": {
+            "title": "Code Snapshot",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "op": {
+            "const": "submit-precompute",
+            "default": "submit-precompute",
+            "title": "Op",
+            "type": "string"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "tasks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code_snapshot",
+          "job_id",
+          "abstraction_config",
+          "target_name"
+        ],
+        "title": "PrecomputeDispatchPayload",
+        "type": "object"
+      },
+      "ProgressPayload": {
+        "description": "A run's per-checkpoint history: the only thing that can say how it went.\n\n`rows` is TRUNCATED by `--last`; `total_rows` is how many there were. A\nchart drawn from a truncated series looks like a complete measurement, which\nis why the count travels beside it.",
         "properties": {
           "coverage_plateau_iteration": {
             "anyOf": [
@@ -2391,11 +2570,11 @@
           },
           "op": {
             "const": "progress",
+            "default": "progress",
             "title": "Op",
             "type": "string"
           },
           "rows": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/ProgressRow"
             },
@@ -2406,23 +2585,43 @@
             "title": "Run Id",
             "type": "string"
           },
+          "schema_version_max": {
+            "title": "Schema Version Max",
+            "type": "integer"
+          },
+          "schema_version_min": {
+            "title": "Schema Version Min",
+            "type": "integer"
+          },
           "total_rows": {
             "title": "Total Rows",
             "type": "integer"
           }
         },
         "required": [
-          "op",
           "run_id",
           "total_rows",
-          "coverage_plateau_iteration"
+          "schema_version_min",
+          "schema_version_max"
         ],
-        "title": "Progress",
+        "title": "ProgressPayload",
         "type": "object"
       },
       "ProgressRow": {
         "additionalProperties": true,
+        "description": "One checkpoint's line of `progress.jsonl`.\n\nLENIENT and almost entirely optional, and both are the shape of the data\nrather than laziness: a resumed run appends across tasks, so one log spans\ncode versions and an old row genuinely lacks fields a new one carries.\nBlanking those is the honest rendering; inventing a zero is not.",
         "properties": {
+          "checkpoint_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Seconds"
+          },
           "coverage": {
             "anyOf": [
               {
@@ -2459,11 +2658,32 @@
               }
             ],
             "title": "Mean Visits Per Touched"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "task_elapsed_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Elapsed S"
           }
         },
         "required": [
-          "iteration",
-          "coverage"
+          "iteration"
         ],
         "title": "ProgressRow",
         "type": "object"
@@ -2486,8 +2706,8 @@
         "title": "PromoteBody",
         "type": "object"
       },
-      "Promoted": {
-        "additionalProperties": true,
+      "PromotedPayload": {
+        "description": "The new baseline, which is the conclusion of one turn of the fork loop.",
         "properties": {
           "checkpoint_iteration": {
             "anyOf": [
@@ -2502,19 +2722,13 @@
           },
           "op": {
             "const": "promote",
+            "default": "promote",
             "title": "Op",
             "type": "string"
           },
           "promoted_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Promoted At"
+            "title": "Promoted At",
+            "type": "string"
           },
           "rationale": {
             "title": "Rationale",
@@ -2526,13 +2740,11 @@
           }
         },
         "required": [
-          "op",
           "run_id",
           "rationale",
-          "promoted_at",
-          "checkpoint_iteration"
+          "promoted_at"
         ],
-        "title": "Promoted",
+        "title": "PromotedPayload",
         "type": "object"
       },
       "PushCodeBody": {
@@ -2580,8 +2792,8 @@
         "title": "PushDataBody",
         "type": "object"
       },
-      "PushedCode": {
-        "additionalProperties": true,
+      "PushedCodePayload": {
+        "description": "The snapshot that was sealed. Its id is what a task executes.",
         "properties": {
           "code_snapshot": {
             "title": "Code Snapshot",
@@ -2589,22 +2801,23 @@
           },
           "op": {
             "const": "push-code",
+            "default": "push-code",
             "title": "Op",
             "type": "string"
           }
         },
         "required": [
-          "op",
           "code_snapshot"
         ],
-        "title": "PushedCode",
+        "title": "PushedCodePayload",
         "type": "object"
       },
-      "PushedData": {
-        "additionalProperties": true,
+      "PushedDataPayload": {
+        "description": "Abstraction name to files uploaded. Empty means everything was current.",
         "properties": {
           "op": {
             "const": "push-data",
+            "default": "push-data",
             "title": "Op",
             "type": "string"
           },
@@ -2617,19 +2830,15 @@
             "type": "object"
           }
         },
-        "required": [
-          "op"
-        ],
-        "title": "PushedData",
+        "title": "PushedDataPayload",
         "type": "object"
       },
-      "Report": {
-        "additionalProperties": true,
+      "ReportPayload": {
+        "description": "Every arm of an experiment, attributed against its control.",
         "properties": {
           "arms": {
-            "default": [],
             "items": {
-              "$ref": "#/components/schemas/Arm"
+              "$ref": "#/components/schemas/ArmResult"
             },
             "title": "Arms",
             "type": "array"
@@ -2661,7 +2870,6 @@
             "type": "string"
           },
           "notes": {
-            "default": [],
             "items": {
               "type": "string"
             },
@@ -2670,21 +2878,23 @@
           },
           "op": {
             "const": "report",
+            "default": "report",
             "title": "Op",
             "type": "string"
           }
         },
         "required": [
-          "op",
           "experiment_id",
           "control_run_id",
-          "baseline_run_id"
+          "baseline_run_id",
+          "arms",
+          "notes"
         ],
-        "title": "Report",
+        "title": "ReportPayload",
         "type": "object"
       },
       "ResizeError": {
-        "additionalProperties": true,
+        "description": "Why a resize failed, with Batch's own values kept whole.\n\nBatch reports every allocation problem as a generic ``AllocationFailed`` and\nhides the actual cause -- a Gen1-vs-Gen2 image, a policy denial, quota -- as\nescaped JSON inside one of these values. Every value is kept rather than only\nthe ``*Json`` ones: a cause arriving under an unfamiliar name is exactly the\none worth seeing.",
         "properties": {
           "code": {
             "anyOf": [
@@ -2727,9 +2937,24 @@
         "title": "ResizeError",
         "type": "object"
       },
-      "RunInfo": {
-        "additionalProperties": true,
+      "RunInfoPayload": {
+        "description": "Everything recorded about one run, joined into one view.\n\nSubclasses the digest the service already produces. What this adds is what\nthe SURFACE needs and the digest does not carry: the op tag, the truncation\nof `progress` to its tail, and the count of what was truncated.\n\n`attempts` is renamed to `training_tasks` here because the digest's word is\nabout the task log and the reader's question is about the run.",
         "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arm"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
           "card_abstraction_hash": {
             "anyOf": [
               {
@@ -2742,6 +2967,24 @@
             "title": "Card Abstraction Hash"
           },
           "config_name": {
+            "title": "Config Name",
+            "type": "string"
+          },
+          "coverage_flat_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Flat From"
+          },
+          "curve": {
+            "$ref": "#/components/schemas/CurveOutput"
+          },
+          "experiment_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -2750,7 +2993,14 @@
                 "type": "null"
               }
             ],
-            "title": "Config Name"
+            "title": "Experiment Id"
+          },
+          "gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gaps",
+            "type": "array"
           },
           "git_commit": {
             "anyOf": [
@@ -2763,26 +3013,42 @@
             ],
             "title": "Git Commit"
           },
-          "iterations": {
+          "git_dirty": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "boolean"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Iterations"
+            "title": "Git Dirty"
+          },
+          "iterations": {
+            "title": "Iterations",
+            "type": "integer"
           },
           "op": {
             "const": "runinfo",
+            "default": "runinfo",
             "title": "Op",
             "type": "string"
           },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
           "progress": {
-            "default": [],
             "items": {
-              "$ref": "#/components/schemas/ProgressRow"
+              "additionalProperties": true,
+              "type": "object"
             },
             "title": "Progress",
             "type": "array"
@@ -2792,26 +3058,24 @@
             "type": "string"
           },
           "runtime_seconds": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Runtime Seconds"
+            "title": "Runtime Seconds",
+            "type": "number"
           },
           "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
+            "title": "Status",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskRow"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "total_progress_rows": {
+            "default": 0,
+            "title": "Total Progress Rows",
+            "type": "integer"
           },
           "training_tasks": {
             "anyOf": [
@@ -2826,36 +3090,44 @@
           }
         },
         "required": [
-          "op",
           "run_id",
           "config_name",
           "status",
+          "experiment_id",
+          "arm",
+          "parent_run_id",
+          "git_commit",
+          "git_dirty",
+          "card_abstraction_hash",
           "iterations",
           "runtime_seconds",
-          "training_tasks",
-          "git_commit",
-          "card_abstraction_hash"
+          "attempts",
+          "progress",
+          "coverage_flat_from",
+          "curve",
+          "tasks",
+          "gaps"
         ],
-        "title": "RunInfo",
+        "title": "RunInfoPayload",
         "type": "object"
       },
       "RunParts": {
         "additionalProperties": true,
         "properties": {
           "curve": {
-            "$ref": "#/components/schemas/Part_Curve_"
+            "$ref": "#/components/schemas/Part_CurvePayload_"
           },
           "evals": {
-            "$ref": "#/components/schemas/Part_Ledger_"
+            "$ref": "#/components/schemas/Part_LedgerPayload_"
           },
           "progress": {
-            "$ref": "#/components/schemas/Part_Progress_"
+            "$ref": "#/components/schemas/Part_ProgressPayload_"
           },
           "run": {
-            "$ref": "#/components/schemas/Part_RunInfo_"
+            "$ref": "#/components/schemas/Part_RunInfoPayload_"
           },
           "tasks": {
-            "$ref": "#/components/schemas/Part_Tasks_"
+            "$ref": "#/components/schemas/Part_TasksSummary_"
           }
         },
         "required": [
@@ -2869,7 +3141,7 @@
         "type": "object"
       },
       "RunSummary": {
-        "additionalProperties": true,
+        "description": "A run annotated with how old it is and whether it can still be loaded.\n\n``commits_ago`` is the number of commits HEAD is ahead of the run's train\ncommit (0 == trained on the current HEAD, None == commit unknown to this\ncheckout). ``loadable`` is False when the run never checkpointed, with\n``blocker`` naming the reason for the UI.\n\nExperiment lineage\n------------------\n``experiment_id``/``arm`` are on every summary because a LISTING is the only\nplace the set of experiments exists. `report --experiment` takes an id and\n`runinfo` reports one run's, so a caller who does not already know an id had\nnowhere to learn one -- which made the report unreachable from any surface\nthat cannot be told the answer in advance. It costs nothing: both fields are\nalready loaded with the metadata each summary reads.",
         "properties": {
           "arm": {
             "anyOf": [
@@ -2937,6 +3209,10 @@
             ],
             "title": "Git Dirty"
           },
+          "has_checkpoint": {
+            "title": "Has Checkpoint",
+            "type": "boolean"
+          },
           "iterations": {
             "anyOf": [
               {
@@ -2983,6 +3259,7 @@
           "name",
           "commits_ago",
           "git_dirty",
+          "has_checkpoint",
           "loadable",
           "blocker",
           "iterations",
@@ -3030,11 +3307,33 @@
         "title": "RunView",
         "type": "object"
       },
-      "Runs": {
+      "RunsParts": {
         "additionalProperties": true,
+        "properties": {
+          "jobs": {
+            "$ref": "#/components/schemas/Part_JobsPayload_"
+          },
+          "runs": {
+            "$ref": "#/components/schemas/Part_RunsPayload_"
+          },
+          "tasks": {
+            "$ref": "#/components/schemas/Part_TasksSummary_"
+          }
+        },
+        "required": [
+          "runs",
+          "jobs",
+          "tasks"
+        ],
+        "title": "RunsParts",
+        "type": "object"
+      },
+      "RunsPayload": {
+        "description": "Every published run, newest first.",
         "properties": {
           "op": {
             "const": "runs",
+            "default": "runs",
             "title": "Op",
             "type": "string"
           },
@@ -3047,31 +3346,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "op"
-        ],
-        "title": "Runs",
-        "type": "object"
-      },
-      "RunsParts": {
-        "additionalProperties": true,
-        "properties": {
-          "jobs": {
-            "$ref": "#/components/schemas/Part_Jobs_"
-          },
-          "runs": {
-            "$ref": "#/components/schemas/Part_Runs_"
-          },
-          "tasks": {
-            "$ref": "#/components/schemas/Part_Tasks_"
-          }
-        },
-        "required": [
-          "runs",
-          "jobs",
-          "tasks"
-        ],
-        "title": "RunsParts",
+        "title": "RunsPayload",
         "type": "object"
       },
       "RunsView": {
@@ -3171,8 +3446,57 @@
         "title": "ScoreBody",
         "type": "object"
       },
+      "ScorePayload": {
+        "description": "One scoring task per ladder rung, all against one code snapshot.",
+        "properties": {
+          "code_snapshot": {
+            "title": "Code Snapshot",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "op": {
+            "const": "score",
+            "default": "score",
+            "title": "Op",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "rungs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rungs",
+            "type": "array"
+          },
+          "tasks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code_snapshot",
+          "job_id",
+          "run_id",
+          "method"
+        ],
+        "title": "ScorePayload",
+        "type": "object"
+      },
       "ServiceCharge": {
-        "additionalProperties": true,
         "properties": {
           "cost": {
             "title": "Cost",
@@ -3237,7 +3561,6 @@
         "type": "object"
       },
       "StandingCharge": {
-        "additionalProperties": true,
         "properties": {
           "cost": {
             "title": "Cost",
@@ -3375,6 +3698,44 @@
         "title": "SubmitBody",
         "type": "object"
       },
+      "SubmitPayload": {
+        "description": "One queued training task, and what it is aiming at.",
+        "properties": {
+          "code_snapshot": {
+            "title": "Code Snapshot",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "op": {
+            "const": "submit",
+            "default": "submit",
+            "title": "Op",
+            "type": "string"
+          },
+          "target_iteration": {
+            "title": "Target Iteration",
+            "type": "integer"
+          },
+          "tasks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code_snapshot",
+          "job_id",
+          "target_iteration"
+        ],
+        "title": "SubmitPayload",
+        "type": "object"
+      },
       "SubmitVectorBody": {
         "properties": {
           "abstractions": {
@@ -3485,8 +3846,82 @@
         "title": "SubmitVectorBody",
         "type": "object"
       },
+      "SubmitVectorPayload": {
+        "description": "A dispatch, plus WHICH ARMS it queued.\n\nThe arms are the part worth reading back: which abstractions and kernels to\ncompare IS the experiment, and a payload that reported only \"3 tasks queued\"\ncould not say what was being measured.",
+        "properties": {
+          "arms": {
+            "items": {
+              "$ref": "#/components/schemas/VectorArm"
+            },
+            "title": "Arms",
+            "type": "array"
+          },
+          "code_snapshot": {
+            "title": "Code Snapshot",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "op": {
+            "const": "submit-vector",
+            "default": "submit-vector",
+            "title": "Op",
+            "type": "string"
+          },
+          "tasks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code_snapshot",
+          "job_id"
+        ],
+        "title": "SubmitVectorPayload",
+        "type": "object"
+      },
+      "TaskFailure": {
+        "description": "Batch's failure detail, kept as data rather than a stringified object.",
+        "properties": {
+          "category": {
+            "default": "",
+            "title": "Category",
+            "type": "string"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "title": "TaskFailure",
+        "type": "object"
+      },
       "TaskProgress": {
-        "additionalProperties": true,
+        "description": "How far a RUNNING task has got. Absent once it ends -- a finished task\nshowing \"62%\" is a sample that stopped arriving, not a task stuck at 62%.",
         "properties": {
           "done": {
             "title": "Done",
@@ -3510,40 +3945,29 @@
         "type": "object"
       },
       "TaskRow": {
-        "additionalProperties": true,
+        "description": "One task-attempt, as the flat record every surface reads.\n\nTHE declaration of this shape, and the only one. It used to exist four\ntimes -- as `_row`'s dict here, as `contract.TaskRow`, as a hand-written\nfixture, and again in TypeScript -- with nothing checking any pair of them\nagainst another.\n\nThe node's WRITER stays dicts, deliberately: it runs under\n:mod:`src.shared.cloudtask` on the pinned image's 3.10 ``python3`` before\n``uv sync``, where pydantic does not exist. This is the reading half, and\nconstructing it from `_row`'s output is what binds the two.",
         "properties": {
           "attempt": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attempt"
+            "title": "Attempt",
+            "type": "integer"
           },
           "cause": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cause"
+            "title": "Cause",
+            "type": "string"
+          },
+          "cause_source": {
+            "title": "Cause Source",
+            "type": "string"
           },
           "code_snapshot": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Code Snapshot"
+            "default": "",
+            "title": "Code Snapshot",
+            "type": "string"
+          },
+          "config": {
+            "default": "",
+            "title": "Config",
+            "type": "string"
           },
           "ended_at": {
             "anyOf": [
@@ -3567,6 +3991,19 @@
             ],
             "title": "Eta Seconds"
           },
+          "eval_at": {
+            "default": "",
+            "title": "Eval At",
+            "type": "string"
+          },
+          "eval_flags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Eval Flags",
+            "type": "array"
+          },
           "exit_code": {
             "anyOf": [
               {
@@ -3578,71 +4015,47 @@
             ],
             "title": "Exit Code"
           },
-          "git_branch": {
+          "failure": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Git Branch"
+            "title": "Failure"
+          },
+          "git_branch": {
+            "default": "",
+            "title": "Git Branch",
+            "type": "string"
           },
           "git_commit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Git Commit"
+            "default": "",
+            "title": "Git Commit",
+            "type": "string"
           },
           "git_dirty": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Git Dirty"
+            "default": "",
+            "title": "Git Dirty",
+            "type": "string"
           },
           "job_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Job Id"
+            "default": "",
+            "title": "Job Id",
+            "type": "string"
           },
           "node_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Node Id"
+            "default": "",
+            "title": "Node Id",
+            "type": "string"
           },
           "op": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Op"
+            "default": "",
+            "title": "Op",
+            "type": "string"
           },
           "progress": {
             "anyOf": [
@@ -3655,15 +4068,9 @@
             ]
           },
           "run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Id"
+            "default": "",
+            "title": "Run Id",
+            "type": "string"
           },
           "started_at": {
             "anyOf": [
@@ -3676,72 +4083,63 @@
             ],
             "title": "Started At"
           },
+          "target_iteration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": "",
+            "title": "Target Iteration"
+          },
           "task_id": {
             "title": "Task Id",
             "type": "string"
           },
           "units": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Units"
+            "default": 0.0,
+            "title": "Units",
+            "type": "number"
+          },
+          "units_unit": {
+            "default": "",
+            "title": "Units Unit",
+            "type": "string"
           },
           "what": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "What"
+            "default": "",
+            "title": "What",
+            "type": "string"
           },
           "workers": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workers"
+            "default": 0,
+            "title": "Workers",
+            "type": "integer"
           }
         },
         "required": [
           "task_id",
           "attempt",
-          "op",
-          "run_id",
           "cause",
-          "exit_code",
-          "ended_at"
+          "cause_source"
         ],
         "title": "TaskRow",
         "type": "object"
       },
-      "Tasks": {
-        "additionalProperties": true,
+      "TasksPayload": {
+        "description": "What `tasks` answers: one row per attempt, newest last.",
         "properties": {
           "hidden_rows": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hidden Rows"
+            "default": 0,
+            "title": "Hidden Rows",
+            "type": "integer"
           },
           "op": {
             "const": "tasks",
+            "default": "tasks",
             "title": "Op",
             "type": "string"
           },
@@ -3763,8 +4161,21 @@
             },
             "title": "Rows",
             "type": "array"
+          }
+        },
+        "title": "TasksPayload",
+        "type": "object"
+      },
+      "TasksSummary": {
+        "description": "A `tasks` payload fetched only to be JOINED, with its rows removed.\n\nIts own type, because the alternative was one model describing two different\nthings. `views._summarised` replaces `rows` with a count when a view wants\nthe join and not the log, so `parts.tasks.payload` was sometimes four\nhundred rows and sometimes a stub -- and `Tasks` had `source_rows` optional\nto cover both, which meant a page reading `.rows` on a trimmed part got `[]`\nand was correct about nothing. It survived on the author remembering to read\nthe join instead.\n\nThere is deliberately no ``rows`` field. TypeScript cannot offer one, so the\njoin is the only thing available, which is what it always should have been.\n\n``source_rows`` rather than silence: a run page showing two tasks out of a\nlog of four hundred has to say which number is which, because a join that\nquietly returns few rows out of many is indistinguishable from a broken one.",
+        "properties": {
+          "op": {
+            "const": "tasks",
+            "default": "tasks",
+            "title": "Op",
+            "type": "string"
           },
-          "source_rows": {
+          "reconciled": {
             "anyOf": [
               {
                 "type": "integer"
@@ -3773,14 +4184,17 @@
                 "type": "null"
               }
             ],
-            "title": "Source Rows"
+            "title": "Reconciled"
+          },
+          "source_rows": {
+            "title": "Source Rows",
+            "type": "integer"
           }
         },
         "required": [
-          "op",
-          "reconciled"
+          "source_rows"
         ],
-        "title": "Tasks",
+        "title": "TasksSummary",
         "type": "object"
       },
       "ValidationError": {
@@ -3824,7 +4238,6 @@
         "type": "object"
       },
       "VectorArm": {
-        "additionalProperties": true,
         "properties": {
           "abstraction": {
             "title": "Abstraction",
@@ -3885,7 +4298,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Activity"
+                  "$ref": "#/components/schemas/ActivityPayload"
                 }
               }
             },
@@ -3923,7 +4336,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Autoscale"
+                  "$ref": "#/components/schemas/AutoscalePayload"
                 }
               }
             },
@@ -4264,7 +4677,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Box"
+                  "$ref": "#/components/schemas/BoxPayload"
                 }
               }
             },
@@ -4302,7 +4715,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Box"
+                  "$ref": "#/components/schemas/BoxPayload"
                 }
               }
             },
@@ -4340,7 +4753,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Box"
+                  "$ref": "#/components/schemas/BoxPayload"
                 }
               }
             },
@@ -4388,7 +4801,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Compacted"
+                  "$ref": "#/components/schemas/CompactedPayload"
                 }
               }
             },
@@ -4488,7 +4901,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Comparison"
+                  "$ref": "#/components/schemas/ComparePayload"
                 }
               }
             },
@@ -4526,7 +4939,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Configs"
+                  "$ref": "#/components/schemas/ConfigsPayload"
                 }
               }
             },
@@ -4576,7 +4989,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Cost"
+                  "$ref": "#/components/schemas/CostPayload"
                 }
               }
             },
@@ -4626,7 +5039,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Ledger"
+                  "$ref": "#/components/schemas/LedgerPayload"
                 }
               }
             },
@@ -4675,7 +5088,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Report"
+                  "$ref": "#/components/schemas/ReportPayload"
                 }
               }
             },
@@ -4735,7 +5148,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Jobs"
+                  "$ref": "#/components/schemas/JobsPayload"
                 }
               }
             },
@@ -4794,7 +5207,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LogLines"
+                  "$ref": "#/components/schemas/LogsPayload"
                 }
               }
             },
@@ -4832,7 +5245,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Pool"
+                  "$ref": "#/components/schemas/PoolPayload"
                 }
               }
             },
@@ -4880,7 +5293,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Dispatched"
+                  "$ref": "#/components/schemas/PrecomputeDispatchPayload"
                 }
               }
             },
@@ -4928,7 +5341,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Promoted"
+                  "$ref": "#/components/schemas/PromotedPayload"
                 }
               }
             },
@@ -4976,7 +5389,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PushedCode"
+                  "$ref": "#/components/schemas/PushedCodePayload"
                 }
               }
             },
@@ -5024,7 +5437,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PushedData"
+                  "$ref": "#/components/schemas/PushedDataPayload"
                 }
               }
             },
@@ -5074,7 +5487,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Runs"
+                  "$ref": "#/components/schemas/RunsPayload"
                 }
               }
             },
@@ -5123,7 +5536,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunInfo"
+                  "$ref": "#/components/schemas/RunInfoPayload"
                 }
               }
             },
@@ -5172,7 +5585,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Curve"
+                  "$ref": "#/components/schemas/CurvePayload"
                 }
               }
             },
@@ -5231,7 +5644,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Progress"
+                  "$ref": "#/components/schemas/ProgressPayload"
                 }
               }
             },
@@ -5279,7 +5692,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Dispatched"
+                  "$ref": "#/components/schemas/ScorePayload"
                 }
               }
             },
@@ -5327,7 +5740,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Dispatched"
+                  "$ref": "#/components/schemas/SubmitPayload"
                 }
               }
             },
@@ -5375,7 +5788,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DispatchedVector"
+                  "$ref": "#/components/schemas/SubmitVectorPayload"
                 }
               }
             },
@@ -5435,7 +5848,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Tasks"
+                  "$ref": "#/components/schemas/TasksPayload"
                 }
               }
             },
@@ -5493,7 +5906,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Cancelled"
+                  "$ref": "#/components/schemas/CancelledPayload"
                 }
               }
             },

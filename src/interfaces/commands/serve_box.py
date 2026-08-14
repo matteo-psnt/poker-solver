@@ -11,7 +11,9 @@ command line are the same code and cannot drift.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.cloud import serve_box
 from src.interfaces.commands._base import Command
@@ -43,7 +45,25 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--subscription", default=DEFAULT_SUBSCRIPTION)
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class BoxPayload(BaseModel):
+    """The blueprint host's power state.
+
+    `power` carries transitional values ("starting", "stopping") as well as the
+    two stable ones, because a UI that only knew "running" and "deallocated"
+    would show "stopped" for the whole two minutes a box takes to wake -- which
+    reads as the button having done nothing.
+    """
+
+    op: Literal["serve-box"] = "serve-box"
+    action: str
+    vm: str
+    resource_group: str
+    power: str
+    usable: bool
+    location: str
+
+
+def run(args: argparse.Namespace) -> BoxPayload:
     """Act if asked, then report the state either way.
 
     Always reporting -- rather than returning "started" -- keeps one payload
@@ -61,21 +81,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         serve_box.deallocate(*where, wait=args.wait)
 
     state = serve_box.status(*where)
-    return {
-        "op": "serve-box",
-        "action": args.action,
-        "vm": state.name,
-        "resource_group": args.resource_group,
-        "power": state.power,
-        "usable": state.usable,
-        "location": state.location,
-    }
+    return BoxPayload(
+        action=args.action,
+        vm=state.name,
+        resource_group=args.resource_group,
+        power=state.power,
+        usable=state.usable,
+        location=state.location,
+    )
 
 
-def render(payload: dict[str, Any]) -> None:
-    usable = "ready" if payload["usable"] else "not serving"
-    print(f"{payload['vm']}  {payload['power']}  ({usable})")
-    if payload["power"] == "deallocated":
+def render(payload: BoxPayload) -> None:
+    usable = "ready" if payload.usable else "not serving"
+    print(f"{payload.vm}  {payload.power}  ({usable})")
+    if payload.power == "deallocated":
         print("  `poker-solver serve-box --action start` to wake it (~2 min).")
 
 

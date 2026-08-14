@@ -59,7 +59,15 @@ def _answer(part: Part) -> dict[str, Any]:
     console, picking a status code) asks `attempt` itself.
     """
     payload, failure = attempt(lambda: part.command.invoke(**part.arguments))
-    return {"payload": payload, "error": failure.message if failure else None}
+    # Dumped, so a join reads plain data. A view cross-references payloads it did
+    # not produce and cannot be typed against all of them at once; the models are
+    # what the COMMANDS are checked against, and the envelope is checked by
+    # `contract.py` on the way out.
+    dump = getattr(payload, "model_dump", None)
+    return {
+        "payload": dump() if callable(dump) else payload,
+        "error": failure.message if failure else None,
+    }
 
 
 def _bound(part: Part) -> Callable[[], dict[str, Any]]:

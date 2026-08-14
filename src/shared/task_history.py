@@ -30,7 +30,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.shared import records
+from pydantic import BaseModel
+
+from src.shared import records, task_states
 from src.shared.cloudtask import kinds
 from src.shared.cloudtask.task_log import (
     BUNDLE_SUFFIX,
@@ -94,11 +96,10 @@ TERMINAL_CAUSES = frozenset(
 
 """Causes that mean a node is committed RIGHT NOW
 -------------------------------------------------
-Batch's own state strings, lowercased by :func:`observed_cause`. Not-terminal is
-NOT the same as live: ``unresolved`` is what a task gets when the node wrote a
-start, never wrote an end, and Batch has nothing to say about it either -- which
-covers a task that is running and a task that died without stamping an end, and
-the record genuinely cannot tell them apart.
+Not-terminal is NOT the same as live: ``unresolved`` is what a task gets when the
+node wrote a start, never wrote an end, and Batch has nothing to say about it
+either -- which covers a task that is running and a task that died without
+stamping an end, and the record genuinely cannot tell them apart.
 
 That distinction has to be drawn somewhere, because anything reading an open
 interval has to decide whether to run it to ``now``. Doing that on
@@ -106,14 +107,15 @@ not-terminal credited four attempts abandoned on 2026-08-04 with 455 of the
 718 node-hours the cost screen reported, growing by four hours per elapsed
 hour. Only a live cause is positive evidence the clock is still running.
 
-``active`` is deliberately absent: a task waiting for a node has no
-``started_at`` yet, so it contributes nothing either way, and including it would
-invite crediting queue time as node time.
+DERIVED from :data:`~src.shared.task_states.OCCUPIES_A_NODE` rather than spelled
+again. Which phases hold a node is one decision, and it is made there -- this
+module needs the same decision in the SHARE's vocabulary, which is the only
+difference between the two names.
 """
-CAUSE_RUNNING = "running"
-CAUSE_PREPARING = "preparing"
+CAUSE_RUNNING = task_states.cause_of(task_states.Phase.RUNNING)
+CAUSE_PREPARING = task_states.cause_of(task_states.Phase.STARTING)
 
-LIVE_CAUSES = frozenset({CAUSE_RUNNING, CAUSE_PREPARING})
+LIVE_CAUSES = task_states.LIVE_CAUSES
 
 
 def _utcnow() -> str:
@@ -223,12 +225,20 @@ def _says_the_same(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> bo
 def observed_cause(record: dict[str, Any]) -> str:
     """Coarse exit cause from a Batch-observed record.
 
-    Anything not ``completed`` reports its own state rather than guessing:
-    ``preparing`` is more useful than a wrong ``failed``.
+    A task that has not FINISHED reports its own phase rather than guessing:
+    ``preparing`` is more useful than a wrong ``failed``. The spelling comes from
+    :func:`~src.shared.task_states.cause_of`, because it is what lands in a
+    record on the share and `TERMINAL_CAUSES` is read against those words.
     """
-    state = (record.get("state") or "").lower()
-    if state != "completed":
+    state = (record.get("state") or "").rsplit(".", 1)[-1].lower()
+    phase = task_states.phase_of(state)
+    if phase is task_states.Phase.UNKNOWN:
+        # The raw word, not "unknown": a state this does not recognise is the one
+        # worth reading verbatim, and flattening it would hide that Batch has
+        # started saying something new.
         return state or "unknown"
+    if phase is not task_states.Phase.FINISHED:
+        return task_states.cause_of(phase)
     result = (record.get("result") or "").lower()
     if result in _OBSERVED_CAUSE_BY_RESULT:
         return _OBSERVED_CAUSE_BY_RESULT[result]
@@ -390,6 +400,69 @@ def _cause(
     return "unknown", "none"
 
 
+class TaskProgress(BaseModel):
+    """How far a RUNNING task has got. Absent once it ends -- a finished task
+    showing "62%" is a sample that stopped arriving, not a task stuck at 62%."""
+
+    done: int
+    total: int
+    unit: str
+
+
+class TaskRow(BaseModel):
+    """One task-attempt, as the flat record every surface reads.
+
+    THE declaration of this shape, and the only one. It used to exist four
+    times -- as `_row`'s dict here, as `contract.TaskRow`, as a hand-written
+    fixture, and again in TypeScript -- with nothing checking any pair of them
+    against another.
+
+    The node's WRITER stays dicts, deliberately: it runs under
+    :mod:`src.shared.cloudtask` on the pinned image's 3.10 ``python3`` before
+    ``uv sync``, where pydantic does not exist. This is the reading half, and
+    constructing it from `_row`'s output is what binds the two.
+    """
+
+    task_id: str
+    attempt: int
+    job_id: str = ""
+    run_id: str = ""
+    op: str = ""
+    config: str = ""
+    target_iteration: int | str = ""
+    eval_at: str = ""
+    eval_flags: list[str] = []
+    workers: int = 0
+    """What a FINISHED task achieved, and how wide it ran -- the two things an
+    estimate for the next one is built from."""
+    units: float = 0.0
+    units_unit: str = ""
+    """WHICH CODE RAN. Three answers that do not replace one another: the commit
+    names a history, the branch names the line of work (several worktrees share
+    a commit and differ only in what is uncommitted), and the snapshot names the
+    exact bytes. Empty on every task recorded before this existed."""
+    code_snapshot: str = ""
+    git_commit: str = ""
+    git_dirty: str = ""
+    git_branch: str = ""
+    """One phrase saying what this task DID, derived once so the terminal and
+    the console cannot word it differently."""
+    what: str = ""
+    cause: str
+    """Whose account the cause came from: the node's, or Batch's."""
+    cause_source: str
+    progress: TaskProgress | None = None
+    exit_code: int | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    failure: dict[str, Any] | None = None
+    node_id: str = ""
+    """Seconds left, derived here so both surfaces agree. Set after the join,
+    because an estimate reads the OTHER attempts to know how fast this kind of
+    task goes."""
+    eta_seconds: float | None = None
+
+
 def _row(
     task_id: str,
     attempt: int,
@@ -397,7 +470,14 @@ def _row(
     batch: dict[str, Any],
     progress: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """One task-attempt, as the flat record every surface reads."""
+    """One task-attempt as a plain dict, for the join to finish.
+
+    Still a dict here rather than a :class:`TaskRow`, and that is not an
+    oversight: `kinds.remaining` reads these rows and lives under
+    ``cloudtask/``, which is held to the node's stdlib-only 3.10 floor and
+    cannot be handed a model. :func:`read_tasks` constructs the model once the
+    estimate is in, and that construction is what checks these keys.
+    """
     start, exit_record = sources.get("start", {}), sources.get("exit", {})
     cause, cause_source = _cause(start, exit_record, batch)
     # Exit-or-start, so a task that died before writing an exit still answers
@@ -444,8 +524,15 @@ def _row(
     }
 
 
-def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
-    """Join the node and observer records into one row per attempt, newest last."""
+def read_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
+    """Join the node and observer records into one row per attempt, newest last.
+
+    The rows are assembled as dicts and become :class:`TaskRow` at the end. That
+    ordering is forced: `kinds.remaining` needs every row to estimate any one of
+    them, and it runs under the node's 3.10 floor where a model cannot go. The
+    construction is the check -- pydantic rejects a key `_row` invented and a
+    field it stopped emitting, which is the binding this shape never had.
+    """
     directory = tasks_dir(share)
     if not directory.is_dir():
         return []
@@ -490,10 +577,10 @@ def read_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
     now = _utcnow()
     for row in joined:
         row["eta_seconds"] = kinds.remaining(row, joined, now)
-    return joined
+    return [TaskRow(**row) for row in joined]
 
 
-def unresolved_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
+def unresolved_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
     """The rows whose node record never reached a terminal event.
 
     Returned whole, not as ids, so a caller can ask Batch about exactly these
@@ -501,13 +588,13 @@ def unresolved_tasks(share: str | os.PathLike[str]) -> list[dict[str, Any]]:
     the one or two open questions cost ~0.39s per job -- the answer scaled with
     history rather than with what was actually unexplained.
     """
-    return [row for row in read_tasks(share) if row["cause"] not in TERMINAL_CAUSES]
+    return [row for row in read_tasks(share) if row.cause not in TERMINAL_CAUSES]
 
 
 def unresolved_task_ids(share: str | os.PathLike[str]) -> list[str]:
     """Tasks whose node record never reached a terminal event -- exactly the
     ones worth asking Batch about."""
-    return sorted({row["task_id"] for row in unresolved_tasks(share)})
+    return sorted({row.task_id for row in unresolved_tasks(share)})
 
 
 def reconcile(share: str | os.PathLike[str], tasks: Iterable[dict[str, Any]]) -> list[str]:

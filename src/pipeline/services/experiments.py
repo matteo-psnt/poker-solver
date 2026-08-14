@@ -8,10 +8,11 @@ actually measured beside.
 """
 
 import dataclasses
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel
 
 from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.evaluation import ledger as eval_ledger
@@ -22,8 +23,7 @@ from src.shared import records, run_events, task_history
 from src.shared.config import DEFAULT_RUNS_DIR
 
 
-@dataclass(frozen=True)
-class CurvePoint:
+class CurvePoint(BaseModel):
     """One measured rung of a within-run convergence curve."""
 
     iteration: int
@@ -33,8 +33,7 @@ class CurvePoint:
     eval_git_commit: str | None
 
 
-@dataclass(frozen=True)
-class CurveOutput:
+class CurveOutput(BaseModel):
     """A within-run exploitability-vs-iteration curve, plus what is still missing.
 
     ``tier`` names the single instrument every point was measured with. Points from
@@ -139,8 +138,7 @@ DEFAULT_BASELINE_PATH = Path("data/baseline.json")
 CONTROL_ARM = "control"
 
 
-@dataclass(frozen=True)
-class Baseline:
+class Baseline(BaseModel):
     """The run the base-fork loop currently treats as the thing to beat."""
 
     run_id: str
@@ -183,12 +181,11 @@ def promote_baseline(
         promoted_at=datetime.now(UTC).isoformat(),
         checkpoint_iteration=checkpoint_iteration,
     )
-    records.write_snapshot(path, dataclasses.asdict(baseline), records.REGISTRY["baseline.json"])
+    records.write_snapshot(path, baseline.model_dump(), records.REGISTRY["baseline.json"])
     return baseline
 
 
-@dataclass(frozen=True)
-class ArmResult:
+class ArmResult(BaseModel):
     """One arm of an experiment, scored and attributed against its control."""
 
     arm: str
@@ -210,8 +207,7 @@ class ArmResult:
     vs_control_blocked: list[str] = dataclasses.field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class ExperimentReport:
+class ExperimentReport(BaseModel):
     """Every arm of one experiment, each attributed against the control arm.
 
     A variant's raw exploitability is not evidence on its own: a fork receives extra
@@ -356,8 +352,7 @@ def experiment_report(
     )
 
 
-@dataclass(frozen=True)
-class RunDigest:
+class RunDigest(BaseModel):
     """Everything recorded about one run, joined into a single view.
 
     A run's evidence is spread across five artifacts written by four subsystems
@@ -387,7 +382,7 @@ class RunDigest:
     progress: list[dict[str, Any]]
     coverage_flat_from: int | None
     curve: CurveOutput
-    tasks: list[dict[str, Any]]
+    tasks: list[task_history.TaskRow]
     gaps: list[str]
 
 
@@ -407,7 +402,7 @@ def run_digest(
     progress = run_events.checkpoints(run_events.read(run_dir))
     curve = exploitability_curve(run_dir, ledger_path=ledger_path, tier_index=tier_index)
     tasks = (
-        [row for row in task_history.read_tasks(tasks_dir) if row["run_id"] == run_dir.name]
+        [row for row in task_history.read_tasks(tasks_dir) if row.run_id == run_dir.name]
         if tasks_dir
         else []
     )
@@ -437,7 +432,7 @@ def _digest_gaps(
     metadata: RunMetadata,
     progress: list[dict[str, Any]],
     curve: CurveOutput,
-    tasks: list[dict[str, Any]],
+    tasks: list[task_history.TaskRow],
 ) -> list[str]:
     """What this run cannot yet support a conclusion about.
 
@@ -471,7 +466,7 @@ def _digest_gaps(
         gaps.append("trained from a dirty working tree — the commit does not identify the code")
     if metadata.status != "completed":
         gaps.append(f"status is '{metadata.status}', not 'completed'")
-    unresolved = [row for row in tasks if row["cause"] not in task_history.TERMINAL_CAUSES]
+    unresolved = [row for row in tasks if row.cause not in task_history.TERMINAL_CAUSES]
     if unresolved:
         gaps.append(
             f"{len(unresolved)} task(s) with no terminal record — `poker-solver tasks` to reconcile"

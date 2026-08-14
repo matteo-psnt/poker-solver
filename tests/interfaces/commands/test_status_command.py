@@ -21,6 +21,7 @@ from azure.core.exceptions import ClientAuthenticationError
 from src.interfaces.cli import headless
 from src.interfaces.commands import status, tasks
 from src.interfaces.commands._base import Command
+from src.shared.task_history import TaskRow
 
 
 def _command(name: str, run: Any) -> Command:
@@ -157,12 +158,19 @@ class TestTasksLimit:
     Truncating a death log by default would hide the row being looked for.
     """
 
+    @staticmethod
+    def _rows(count: int) -> list[TaskRow]:
+        """Attempts distinguishable by `attempt`, which is what the trim orders on."""
+        return [
+            TaskRow(task_id="t", attempt=i, cause="completed", cause_source="node")
+            for i in range(count)
+        ]
+
     def test_the_default_hides_nothing(self):
-        rows = [{"n": i} for i in range(30)]
-        assert tasks._result(rows, None, 0)["rows"] == rows
+        rows = self._rows(30)
+        assert tasks._result(rows, None, 0).rows == rows
 
     def test_a_limit_keeps_the_most_recent_and_counts_the_rest(self):
-        rows = [{"n": i} for i in range(30)]
-        result = tasks._result(rows, None, 4)
-        assert [row["n"] for row in result["rows"]] == [26, 27, 28, 29]
-        assert result["hidden_rows"] == 26
+        result = tasks._result(self._rows(30), None, 4)
+        assert [row.attempt for row in result.rows] == [26, 27, 28, 29]
+        assert result.hidden_rows == 26

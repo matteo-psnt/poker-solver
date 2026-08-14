@@ -20,15 +20,17 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share, workspace
 from src.interfaces.cloud.tasks import batch
-from src.interfaces.commands import jobs
 from src.interfaces.commands._base import Command
 from src.shared import task_history
 from src.shared.cloudtask import kinds, task_log
+from src.shared.task_history import TaskRow
 
 if TYPE_CHECKING:
     import argparse
@@ -45,6 +47,41 @@ _LEGS_KEY = "legs"
 # because the tree it protects is too: readers sharing one legs directory are
 # exactly the callers that must not both write to it.
 _RECONCILE_LOCK = threading.Lock()
+
+
+class TasksPayload(BaseModel):
+    """What `tasks` answers: one row per attempt, newest last."""
+
+    op: Literal["tasks"] = "tasks"
+    rows: list[TaskRow] = []
+    """How many attempts Batch was asked about. Null when nothing was."""
+    reconciled: int | None = None
+    """Trimmed by ``--limit``. The count is the fact, the list is the display."""
+    hidden_rows: int = 0
+
+
+class TasksSummary(BaseModel):
+    """A `tasks` payload fetched only to be JOINED, with its rows removed.
+
+    Its own type, because the alternative was one model describing two different
+    things. `views._summarised` replaces `rows` with a count when a view wants
+    the join and not the log, so `parts.tasks.payload` was sometimes four
+    hundred rows and sometimes a stub -- and `Tasks` had `source_rows` optional
+    to cover both, which meant a page reading `.rows` on a trimmed part got `[]`
+    and was correct about nothing. It survived on the author remembering to read
+    the join instead.
+
+    There is deliberately no ``rows`` field. TypeScript cannot offer one, so the
+    join is the only thing available, which is what it always should have been.
+
+    ``source_rows`` rather than silence: a run page showing two tasks out of a
+    log of four hundred has to say which number is which, because a join that
+    quietly returns few rows out of many is indistinguishable from a broken one.
+    """
+
+    op: Literal["tasks"] = "tasks"
+    source_rows: int
+    reconciled: int | None = None
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -69,18 +106,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _result(rows: list[dict[str, Any]], reconciled: int | None, limit: int) -> dict[str, Any]:
+def _result(rows: list[TaskRow], reconciled: int | None, limit: int) -> TasksPayload:
     """One payload shape for both sources, newest last."""
     shown = rows[-limit:] if limit > 0 else rows
-    return {
-        "op": "tasks",
-        "rows": shown,
-        "reconciled": reconciled,
-        "hidden_rows": len(rows) - len(shown),
-    }
+    return TasksPayload(rows=shown, reconciled=reconciled, hidden_rows=len(rows) - len(shown))
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+def run(args: argparse.Namespace) -> TasksPayload:
     """Join the node's account with Batch's, and report one row per attempt."""
     if args.tasks_dir:
         return _result(task_history.read_tasks(Path(args.tasks_dir)), None, args.limit)
@@ -111,23 +143,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         return _result(task_history.read_tasks(local), reconciled, args.limit)
 
 
-def _translate(task: dict[str, Any]) -> dict[str, Any]:
-    """Batch's vocabulary into this project's.
-
-    Done HERE, not in `task_history`: that module is layer-neutral and knows
-    nothing of Azure, and `observed_cause` compares against bare
-    `completed`/`success`. A raw `BatchTaskState.COMPLETED` matches neither, so
-    every reconciled task would read as its own state string instead of an
-    outcome.
-    """
-    return {
-        **task,
-        "state": jobs.short_state(task.get("state")),
-        "result": jobs.short_state(task.get("result")) or None,
-    }
-
-
-def _ask_batch(config: CloudConfig, open_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _ask_batch(config: CloudConfig, open_tasks: list[TaskRow]) -> list[dict[str, Any]]:
     """Ask Batch about exactly the tasks the share could not explain.
 
     One ``get_task`` per open question, concurrently, rather than listing every
@@ -138,16 +154,23 @@ def _ask_batch(config: CloudConfig, open_tasks: list[dict[str, Any]]) -> list[di
     A row with no ``job_id`` cannot be addressed this way and falls back to the
     old enumeration. That is not dead code: it covers records written before
     the field existed, and losing the explanation would be worse than the cost.
+
+    Returns DICTS, and that is the one boundary in this file. `reconcile` reads
+    these with ``.get()`` and lives in :mod:`src.shared.task_history`, which is
+    layer-neutral and cannot import a shape from `interfaces`. Dumping here is
+    what keeps that true -- and the vocabulary translation this function used to
+    do (`_translate`, shortening Batch's enum strings so `observed_cause` could
+    match them) is gone: `batch._task_record` classifies once, at the source.
     """
     client = batch.client(config)
-    pairs = {(row["job_id"], row["task_id"]) for row in open_tasks if row.get("job_id")}
-    if len(pairs) < len({row["task_id"] for row in open_tasks}):
+    pairs = {(row.job_id, row.task_id) for row in open_tasks if row.job_id}
+    if len(pairs) < len({row.task_id for row in open_tasks}):
         listed = batch.attach_tasks(client, batch.list_jobs(client))
-        return [_translate(task) for job in listed for task in job["tasks"]]
+        return [task.model_dump() for job in listed for task in job.tasks]
 
     with ThreadPoolExecutor(max_workers=min(16, len(pairs) or 1)) as pool:
         fetched = pool.map(lambda pair: batch.task_record(client, *pair), sorted(pairs))
-    return [_translate(task) for task in fetched if task]
+    return [task.model_dump() for task in fetched if task]
 
 
 @contextmanager
@@ -217,7 +240,7 @@ def _upload_observed(service: Any, share_name: str, local: Path, explained: list
         list(pool.map(publish, explained))
 
 
-def format_table(rows: Iterable[dict[str, Any]]) -> str:
+def format_table(rows: Iterable[TaskRow]) -> str:
     """Compact fixed-width listing, one row per task.
 
     The terminal's renderer, and it lives with the command that prints it: for
@@ -256,18 +279,20 @@ def format_table(rows: Iterable[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _derived(row: dict[str, Any], column: str) -> Any:
+def _derived(row: TaskRow, column: str) -> Any:
     if column == "code":
         return code_label(row)
     if column == "done":
-        progress = kinds.Progress.from_record(row.get("progress"))
+        # Dumped because `kinds` reads a Mapping: it lives under `cloudtask/`,
+        # which is held to the node's stdlib-only 3.10 floor.
+        progress = kinds.Progress.from_record(row.progress.model_dump() if row.progress else None)
         return f"{progress.fraction:.0%} {progress.phrase}" if progress is not None else ""
     if column == "left":
-        return _duration(row.get("eta_seconds"))
-    return row.get(column)
+        return _duration(row.eta_seconds)
+    return getattr(row, column, None)
 
 
-def code_label(row: dict[str, Any]) -> str:
+def code_label(row: TaskRow) -> str:
     """One short phrase for which code a task ran, for a column or a chip.
 
     The branch when there is one, because that is the name the work has while it
@@ -280,12 +305,10 @@ def code_label(row: dict[str, Any]) -> str:
     ones on the share: a blank column reads as "not known" where a plausible
     filler would read as an answer.
     """
-    branch = row.get("git_branch") or ""
-    commit = row.get("git_commit") or ""
-    base = branch or commit[:7]
+    base = row.git_branch or row.git_commit[:7]
     if not base:
         return ""
-    return f"{base}+" if row.get("git_dirty") == "1" else base
+    return f"{base}+" if row.git_dirty == "1" else base
 
 
 def _duration(seconds: Any) -> str:
@@ -309,14 +332,12 @@ def _cell(value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def render(payload: dict[str, Any]) -> None:
-    rows = payload["rows"]
-    reconciled = payload.get("reconciled")
-    if reconciled:
-        print(f"Asked Batch about {reconciled} task(s) the share could not explain.")
-    print(format_table(rows))
-    if payload.get("hidden_rows"):
-        print(f"  {payload['hidden_rows']} earlier attempt(s) hidden — show with --limit 0")
+def render(payload: TasksPayload) -> None:
+    if payload.reconciled:
+        print(f"Asked Batch about {payload.reconciled} task(s) the share could not explain.")
+    print(format_table(payload.rows))
+    if payload.hidden_rows:
+        print(f"  {payload.hidden_rows} earlier attempt(s) hidden — show with --limit 0")
 
 
 COMMAND = Command(

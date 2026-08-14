@@ -338,14 +338,14 @@ function RunEvals({ view }: { view: RunViewQuery }) {
           <tbody>
             {rows.map((row, index) => (
               <tr key={`${row.run_id}-${index}`}>
-                <Td>{str(row.knobs.scorer)}</Td>
-                <Td>{str(row.knobs.opponent)}</Td>
+                <Td>{str(row.knobs?.scorer)}</Td>
+                <Td>{str(row.knobs?.opponent)}</Td>
                 <Td right className="text-[var(--fg-muted)]">
-                  {str(row.knobs.base_seed)}
+                  {str(row.knobs?.base_seed)}
                 </Td>
-                <Td right>{str(row.results.num_hands)}</Td>
+                <Td right>{str(row.results?.num_hands)}</Td>
                 <Td right>
-                  {mbb(num(row.results.exploitability_mbb), num(row.results.std_error_mbb))}
+                  {mbb(num(row.results?.exploitability_mbb), num(row.results?.std_error_mbb))}
                 </Td>
                 <Td mono className="text-[var(--fg-faint)]">
                   {row.eval_git_commit?.slice(0, 7) ?? "—"}

@@ -316,13 +316,11 @@ def create_app() -> FastAPI:
 
     @app.get("/api/tasks", response_model=contract.Tasks, responses=ERRORS)
     def _tasks(limit: int = 0, skip_reconcile: bool = False) -> JSONResponse:
-        return answer(
-            cache, tasks.COMMAND, limit=limit, skip_reconcile=skip_reconcile, tasks_dir=None
-        )
+        return answer(cache, tasks.COMMAND, limit=limit, skip_reconcile=skip_reconcile)
 
     @app.get("/api/runs", response_model=contract.Runs, responses=ERRORS)
     def _runs(limit: int = 0) -> JSONResponse:
-        return answer(cache, runs.COMMAND, limit=limit, loadable_only=False)
+        return answer(cache, runs.COMMAND, limit=limit)
 
     @app.get("/api/runs/{run_id}", response_model=contract.RunInfo, responses=ERRORS)
     def _run(run_id: str) -> JSONResponse:
@@ -338,13 +336,11 @@ def create_app() -> FastAPI:
 
     @app.get("/api/cost", response_model=contract.Cost, responses=ERRORS)
     def _cost(hours: float = 0.0) -> JSONResponse:
-        return answer(cache, cost.COMMAND, hours=hours, rate="")
+        return answer(cache, cost.COMMAND, hours=hours)
 
     @app.get("/api/evals", response_model=contract.Ledger, responses=ERRORS)
     def _evals(limit: int = 50) -> JSONResponse:
-        return answer(
-            cache, ledger.COMMAND, limit=limit, run=None, experiment=None, method=None, since=None
-        )
+        return answer(cache, ledger.COMMAND, limit=limit)
 
     @app.get("/api/logs/{task_id}", response_model=contract.LogLines, responses=ERRORS)
     def _log(task_id: str, lines: int = 200) -> JSONResponse:
@@ -356,16 +352,14 @@ def create_app() -> FastAPI:
     # has to make the operator type one from memory.
     @app.get("/api/configs", response_model=contract.Configs, responses=ERRORS)
     def _configs() -> JSONResponse:
-        return answer(cache, configs.COMMAND, kind="")
+        return answer(cache, configs.COMMAND)
 
     # Local, so it costs nothing and is memoised only to keep a shared tab from
     # re-reading the log every poll. It is also the one endpoint whose answer
     # this server's own requests keep changing.
     @app.get("/api/activity", response_model=contract.Activity, responses=ERRORS)
     def _activity(days: float = 7.0, limit: int = 20) -> JSONResponse:
-        return answer(
-            cache, activity.COMMAND, days=days, limit=limit, command="", surface="", failures=False
-        )
+        return answer(cache, activity.COMMAND, days=days, limit=limit)
 
     @app.get("/api/autoscale", response_model=contract.Autoscale, responses=ERRORS)
     def _autoscale() -> JSONResponse:
@@ -415,19 +409,21 @@ def create_app() -> FastAPI:
     not try.
     """
 
-    @app.post("/api/submit", response_model=contract.Dispatched, responses=ERRORS)
+    @app.post("/api/submit", response_model=contract.SubmitPayload, responses=ERRORS)
     def _submit(body: SubmitBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit.COMMAND, **given(body))
 
-    @app.post("/api/score", response_model=contract.Dispatched, responses=ERRORS)
+    @app.post("/api/score", response_model=contract.ScorePayload, responses=ERRORS)
     def _score(body: ScoreBody) -> JSONResponse:
         return answer(TtlCache(0.0), score.COMMAND, **given(body))
 
-    @app.post("/api/precompute", response_model=contract.Dispatched, responses=ERRORS)
+    @app.post(
+        "/api/precompute", response_model=contract.PrecomputeDispatchPayload, responses=ERRORS
+    )
     def _precompute(body: PrecomputeBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_precompute.COMMAND, **given(body))
 
-    @app.post("/api/submit-vector", response_model=contract.DispatchedVector, responses=ERRORS)
+    @app.post("/api/submit-vector", response_model=contract.SubmitVectorPayload, responses=ERRORS)
     def _submit_vector(body: SubmitVectorBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_vector.COMMAND, **given(body))
 
@@ -459,11 +455,14 @@ def create_app() -> FastAPI:
     # someone watches it boot.
     @app.get("/api/box", response_model=contract.Box, responses=ERRORS)
     def _box() -> JSONResponse:
+        # `action` is spelled out on all three even though `status` is the
+        # command's own default: these three endpoints differ in exactly one
+        # argument, and leaving it implicit on one of them makes the set read as
+        # though it were doing something different.
         return answer(
             TtlCache(0.0),
             serve_box.COMMAND,
             action="status",
-            wait=False,
             resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
             vm=serve_box.DEFAULT_VM,
             subscription=serve_box.DEFAULT_SUBSCRIPTION,
@@ -475,7 +474,6 @@ def create_app() -> FastAPI:
             TtlCache(0.0),
             serve_box.COMMAND,
             action="start",
-            wait=False,
             resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
             vm=serve_box.DEFAULT_VM,
             subscription=serve_box.DEFAULT_SUBSCRIPTION,
@@ -487,7 +485,6 @@ def create_app() -> FastAPI:
             TtlCache(0.0),
             serve_box.COMMAND,
             action="stop",
-            wait=False,
             resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
             vm=serve_box.DEFAULT_VM,
             subscription=serve_box.DEFAULT_SUBSCRIPTION,

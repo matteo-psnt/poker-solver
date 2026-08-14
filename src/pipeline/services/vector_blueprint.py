@@ -35,12 +35,12 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from pydantic import BaseModel
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
@@ -66,8 +66,7 @@ PREFLOP_BUCKETS = 169
 UNIVERSE_FILENAME = "vector_universe.json"
 
 
-@dataclass(frozen=True)
-class VectorBlueprintOutput:
+class VectorBlueprintOutput(BaseModel):
     """Portable summary; the CLI renders this and the cloud leg returns it."""
 
     run_id: str

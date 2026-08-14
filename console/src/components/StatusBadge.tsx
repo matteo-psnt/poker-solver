@@ -1,29 +1,28 @@
 /**
- * ONE mapping from state to colour — over THREE different vocabularies.
+ * State to colour, over the ONE vocabulary this file still owns.
  *
- * That is the subtlety this file exists for. The console shows Batch job
- * states, Batch task states and the task log's own causes, and the same word
- * means different things in each:
+ * It used to own three, and two of them were Azure's. `shortState`,
+ * `taskOutcome` and `exitMeaning` lived here to undo the fact that `/api/jobs`
+ * shipped `"BatchTaskState.ACTIVE"` to the browser while `/api/tasks` shipped
+ * `"active"` — the same concept, two vocabularies, from two endpoints of one
+ * server. The server now classifies once (`BatchTask.phase`, `.outcome`,
+ * `.exit_meaning`, from `src/shared/task_states.py`) and this file was deleted
+ * down to what genuinely belongs in a UI.
  *
- *   Job `active`     the container is open. It stays open all day with nothing
- *                    running, so it is not evidence of work.
- *   Task `active`    QUEUED, waiting for a node — not running. A task frozen
- *                    here inside a finished job will never run at all.
- *   Task `completed` FINISHED, not succeeded. Success lives in `exit_code` /
- *                    `result`; `completed` with -9 is a cancellation.
- *   Task `completed`  the node's own terminal record. This one does mean success.
+ * What remains is the TASK LOG's own causes, and they stay here on purpose:
+ * they are words the node wrote into records on the share, `TERMINAL_CAUSES`
+ * gates reconciliation against them, and renaming one at the source would make
+ * every historical task read as unresolved. So they are renamed for DISPLAY,
+ * which is a UI decision and is the only kind this file should be making.
  *
- * Painting Batch's `completed` green was therefore wrong: a cancelled task and
- * a clean one carried the same badge. `taskTone` combines state WITH outcome;
- * `toneFor` is for vocabularies where the word alone is the whole answer.
- *
- * Two distinctions inside the task vocabulary are load-bearing and were both
+ * Two distinctions inside that vocabulary are load-bearing and were both
  * learned the hard way:
  *
  *   `timeout` is NOT `failed` — an 8h wall-clock ceiling firing is information.
  *   `cancelled` is NOT `failed` — exit -9 there reads as a crash and is not
  *   one; Batch reports it as `TaskEnded` / UserError.
  */
+import type { Phase } from "@/api/types";
 import { cn } from "@/lib/utils";
 
 export type Tone = "live" | "ok" | "bad" | "warn" | "muted" | "pending";
@@ -37,15 +36,21 @@ const TONES: Record<Tone, string> = {
   pending: "bg-transparent text-amber-400 ring-amber-500/40",
 };
 
-/** The task log's causes, where the word IS the outcome. */
+/**
+ * Where the word IS the outcome: the task log's own causes, and the server's
+ * `Outcome` for a finished Batch task. One map because they say the same
+ * things — `timeout` and `timed out` are the same fact from two records.
+ */
 const BY_CAUSE: Record<string, Tone> = {
   running: "live",
   completed: "ok",
   success: "ok",
+  done: "ok",
   failed: "bad",
   killed: "bad",
   failure: "bad",
   timeout: "warn",
+  "timed out": "warn",
   partial: "warn",
   cancelled: "muted",
   canceled: "muted",
@@ -57,90 +62,44 @@ export function toneFor(state: string | null | undefined): Tone {
 }
 
 /**
- * The word to SHOW, which is not always the word on the wire.
+ * The word to SHOW for a task-log cause.
  *
- * Azure calls a queued task `active`, which reads as the opposite of what it
- * means, and `completed` for anything that stopped — success or not. Those are
- * Batch's names and cannot be changed; what is shown can. Our own task causes
- * are renamed here too rather than at the source, because they are already
- * written into records on the share and `TERMINAL_CAUSES` gates reconciliation
- * against them: a renamed cause would make every historical task look
- * unresolved.
+ * Renamed here rather than at the source: these are already written into
+ * records on the share, and `TERMINAL_CAUSES` gates reconciliation against
+ * them, so a renamed cause would make every historical task look unresolved.
+ *
+ * Batch's own vocabulary is deliberately absent. `active` used to be mapped to
+ * `queued` here; the server says `queued` now.
  */
 const DISPLAY: Record<string, string> = {
-  active: "queued",
   started: "unresolved",
   killed: "killed (oom)",
 };
 
 export function displayName(word: string | null | undefined): string {
-  const short = shortState(word);
-  return DISPLAY[short] ?? short;
+  const cause = (word ?? "").toLowerCase();
+  return DISPLAY[cause] ?? cause;
 }
+
+/** A Batch task's PHASE as a colour. The server already decided the word. */
+const BY_PHASE: Record<Phase, Tone> = {
+  running: "live",
+  starting: "live",
+  queued: "pending",
+  finished: "muted",
+  unknown: "muted",
+};
 
 /**
- * A Batch task's OUTCOME as a word, rather than its state plus a number.
+ * A Batch task's tone.
  *
- * `completed` says only that it stopped; the exit code says what happened. One
- * word carries both, and it uses the same vocabulary as the task log so the two
- * panels can be read the same way.
+ * `finished` is deliberately neutral rather than green: it says the task
+ * STOPPED, and whether that was clean lives in `outcome`. Painting it green
+ * made a cancelled task and a clean one carry the same badge.
  */
-export function taskOutcome(state: string | null | undefined, exitCode: number | null): string {
-  const short = shortState(state);
-  if (short !== "completed") return displayName(short);
-  if (exitCode === 0 || exitCode === null) return "done";
-  if (exitCode === 124) return "timed out";
-  if (exitCode === -9) return "cancelled";
-  return "failed";
-}
-
-/** `BatchTaskState.RUNNING` -> `running`. */
-export function shortState(raw: string | null | undefined): string {
-  return (raw ?? "").split(".").pop()?.toLowerCase() ?? "";
-}
-
-/**
- * A Batch TASK's tone, which needs the exit code as well as the state.
- *
- * `completed` alone says only that the task stopped. Colouring on it made a
- * cancelled task (`-9`) and a crashed one (`137`) look identical to a clean
- * run.
- */
-export function taskTone(state: string | null | undefined, exitCode: number | null): Tone {
-  const short = shortState(state);
-  if (short !== "completed") {
-    // `active` is queued, not running — it should not pulse like live work.
-    return short === "running" || short === "preparing" ? "live" : "muted";
-  }
-  if (exitCode === 0 || exitCode === null) return "ok";
-  if (exitCode === 124) return "warn"; // the wall-clock guard fired
-  if (exitCode === -9) return "muted"; // Batch's SIGKILL on cancel
-  return "bad";
-}
-
-/**
- * What a Batch task's exit code MEANT, in words.
- *
- * These are the ones that recur here; anything else is left as a bare number
- * rather than guessed at.
- */
-export function exitMeaning(exitCode: number | null): string | null {
-  switch (exitCode) {
-    case null:
-      return null;
-    case 0:
-      return "clean";
-    case 2:
-      return "the CLI rejected a flag — argparse exits before doing any work";
-    case 124:
-      return "the wall-clock guard fired (a hang, not a crash)";
-    case 137:
-      return "SIGKILL from outside — the OOM killer";
-    case -9:
-      return "Batch killed it on cancellation";
-    default:
-      return null;
-  }
+export function phaseTone(phase: Phase, outcome: string | null | undefined): Tone {
+  if (phase !== "finished") return BY_PHASE[phase] ?? "muted";
+  return toneFor(outcome);
 }
 
 export function StatusBadge({

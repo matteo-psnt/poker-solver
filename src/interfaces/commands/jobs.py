@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.tasks import batch
+from src.interfaces.cloud.tasks.batch import Job
 from src.interfaces.commands._base import Command
+from src.shared import task_states
 
 if TYPE_CHECKING:
     import argparse
 
-LIVE_TASK_STATES = {"active", "preparing", "running"}
+
+class JobsPayload(BaseModel):
+    """What `jobs` answers. The console reads this through `/api/jobs`."""
+
+    op: Literal["jobs"] = "jobs"
+    jobs: list[Job] = []
+    total_jobs: int
+    hidden_jobs: int
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -28,12 +39,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def short_state(state: str | None) -> str:
-    """``BatchTaskState.RUNNING`` -> ``running``."""
-    return (state or "").rsplit(".", 1)[-1].lower()
-
-
-def is_active(job: dict[str, Any]) -> bool:
+def is_active(job: Job) -> bool:
     """The half of ``is_live`` that can be decided WITHOUT listing tasks.
 
     Load-bearing on its own, and not only as an optimisation. A terminated job
@@ -43,18 +49,27 @@ def is_active(job: dict[str, Any]) -> bool:
     nodes, at the time this was written. Trusting task state alone reports an
     idle pool as busy, which is precisely backwards for the one question this
     command exists to answer.
+
+    A JOB's ``active`` is not a task's: it means the container is open, and it
+    stays open all day with nothing in it. That is why this is only half.
     """
-    return short_state(job["state"]) == "active"
+    return (job.state or "").rsplit(".", 1)[-1].lower() == "active"
 
 
-def is_live(job: dict[str, Any]) -> bool:
-    """A job worth showing by default: real work, still in flight."""
+def is_live(job: Job) -> bool:
+    """A job worth showing by default: real work, still in flight.
+
+    ``IN_FLIGHT`` rather than a set spelled here: this asks "is anything
+    happening", which includes a task queued for a node. That it differs from
+    what cost accounting counts is deliberate and is decided once, in
+    :mod:`~src.shared.task_states`.
+    """
     if not is_active(job):
         return False
-    return any(short_state(task["state"]) in LIVE_TASK_STATES for task in job["tasks"])
+    return any(task.phase in task_states.IN_FLIGHT for task in job.tasks)
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+def run(args: argparse.Namespace) -> JobsPayload:
     """List jobs and their tasks, newest last.
 
     Tasks are fetched only for the jobs that can survive the filter. Listing
@@ -68,25 +83,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     shown = jobs if args.all else [job for job in jobs if is_live(job)]
     if args.limit > 0:
         shown = shown[-args.limit :]
-    return {
-        "op": "jobs",
-        "jobs": shown,
-        "total_jobs": len(jobs),
-        "hidden_jobs": len(jobs) - len(shown),
-    }
+    return JobsPayload(jobs=shown, total_jobs=len(jobs), hidden_jobs=len(jobs) - len(shown))
 
 
-def render(payload: dict[str, Any]) -> None:
-    if not payload["jobs"]:
+def render(payload: JobsPayload) -> None:
+    if not payload.jobs:
         print("Nothing running.")
-    for job in payload["jobs"]:
-        print(f"== {job['job']}  [{short_state(job['state'])}]")
-        for task in job["tasks"]:
-            state = short_state(task["state"]) or "?"
-            exit_code = "" if task["exit_code"] is None else f"  exit={task['exit_code']}"
-            print(f"   {state:<10} {task['task']}{exit_code}")
-    if payload["hidden_jobs"]:
-        print(f"\n  {payload['hidden_jobs']} finished job(s) hidden — show with --all")
+    for job in payload.jobs:
+        print(f"== {job.job}  [{(job.state or '').rsplit('.', 1)[-1].lower()}]")
+        for task in job.tasks:
+            exit_code = "" if task.exit_code is None else f"  exit={task.exit_code}"
+            print(f"   {task.phase:<10} {task.task}{exit_code}")
+    if payload.hidden_jobs:
+        print(f"\n  {payload.hidden_jobs} finished job(s) hidden — show with --all")
 
 
 COMMAND = Command(

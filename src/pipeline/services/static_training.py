@@ -33,10 +33,11 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel
 
 from src.core.actions.action_model import ActionModel
 from src.pipeline import blueprint
@@ -54,8 +55,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class StaticTrainingOutput:
+class StaticTrainingOutput(BaseModel):
     """Machine-readable summary of a static-storage training run.
 
     Its namesake ``TrainingOutput`` was deleted with the dynamic backend; the

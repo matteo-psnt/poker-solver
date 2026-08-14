@@ -191,9 +191,9 @@ def test_cmd_ledger_lists_rows(tmp_path, published):
             runs_dir=str(tmp_path),
         )
     )
-    assert payload["op"] == "ledger"
-    assert len(payload["rows"]) == 1
-    assert payload["rows"][0]["run_id"] == "run-a"
+    assert payload.op == "ledger"
+    assert len(payload.rows) == 1
+    assert payload.rows[0].run_id == "run-a"
 
 
 def test_cmd_compare_valid_pairs(tmp_path, published):
@@ -214,10 +214,11 @@ def test_cmd_compare_valid_pairs(tmp_path, published):
             runs_dir=str(tmp_path),
         )
     )
-    assert payload["op"] == "compare"
-    assert payload["forced"] is False
-    assert payload["tier_warnings"] == []
-    assert "p_value" in payload["comparison"]
+    assert payload.op == "compare"
+    assert payload.forced is False
+    assert payload.tier_warnings == []
+    assert payload.comparison is not None
+    assert payload.comparison.p_value is not None
 
 
 def test_cmd_compare_refuses_seed_mismatch(tmp_path, published):
@@ -259,8 +260,8 @@ def test_cmd_compare_force_overrides_mismatch(tmp_path, published):
             runs_dir=str(tmp_path),
         )
     )
-    assert payload["forced"] is True
-    assert payload["tier_warnings"]  # non-empty: the override was recorded
+    assert payload.forced is True
+    assert payload.tier_warnings  # non-empty: the override was recorded
 
 
 def test_cmd_compare_missing_run_raises(tmp_path, published):
@@ -347,7 +348,7 @@ def test_since_filter_compares_instants_not_strings(tmp_path, published):
         )
 
     payload = ledger_cmd.run(_ledger_ns(led, tmp_path, since=now.isoformat()))
-    assert [r["run_id"] for r in payload["rows"]] == ["new"]
+    assert [r.run_id for r in payload.rows] == ["new"]
 
 
 def test_missing_samples_error_names_the_right_record(tmp_path, published):

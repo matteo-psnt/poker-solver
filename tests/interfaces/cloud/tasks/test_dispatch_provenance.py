@@ -249,7 +249,7 @@ class TestQueueLoop:
         payload = dispatch.stage_and_queue(lambda snap: [_task(), _task(run_id="run-b")])
 
         assert len(calls) == 2
-        assert [c["id"] for c in calls] == payload["tasks"]
+        assert [c["id"] for c in calls] == payload.tasks
         assert len({c["id"] for c in calls}) == 2, "two submissions collided on one id"
         # The SPEC reaches Batch, not the id string -- the shape that broke.
         assert all(isinstance(c["spec"], spec.TaskSpec) for c in calls)

@@ -47,11 +47,11 @@ contribution to the reported blueprint is earned on the real game.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from pydantic import BaseModel
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
@@ -78,8 +78,7 @@ after a failed seed is indistinguishable from a control -- which is exactly
 what two 30M sweeps turned out to be."""
 
 
-@dataclass(frozen=True)
-class WarmStartOutput:
+class WarmStartOutput(BaseModel):
     """Portable summary of a seeded run."""
 
     run_id: str

@@ -44,7 +44,9 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share
@@ -87,7 +89,36 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> dict[str, Any]:
+class CompactedPayload(BaseModel):
+    """`compact-legs`, whose payload describes BOTH halves of the operation.
+
+    `applied`/`verified`/`deleted` separate a dry run from the irreversible one,
+    and the console renders the dry run's numbers as a preview before offering
+    it -- so one shape carries "what would move" and "what did".
+
+    Built up as the operation proceeds rather than at a return, which is why the
+    fields have defaults: a run that refuses early still answers with the counts
+    it managed to establish, and the dry run IS the early return.
+    """
+
+    op: Literal["compact-legs"] = "compact-legs"
+    bundle: str
+    files_before: int
+    files_after: int | None = None
+    movable: int
+    """What an existing bundle at this label already held, and this round carries
+    forward rather than replaces. Reporting only `movable` would read as though
+    the earlier documents had been dropped -- which is what used to happen before
+    a second round absorbed the first."""
+    carried: int = 0
+    attempts: int | None = None
+    applied: bool = False
+    verified: bool = False
+    deleted: int = 0
+    backup: str = ""
+
+
+def run(args: argparse.Namespace) -> CompactedPayload:
     """Bundle the sealed leg records, verifying the join is unchanged."""
     if args.delete and not args.apply:
         raise CommandError("--delete needs --apply: there is nothing to delete until it verifies.")
@@ -107,20 +138,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
         before = task_history.read_tasks(local)
         movable, names = task_history.compactable(directory)
-        result: dict[str, Any] = {
-            "op": "compact-legs",
-            "bundle": f"{args.label}{task_log.BUNDLE_SUFFIX}",
-            "files_before": len(list(directory.glob("*.json"))),
-            "movable": len(names),
-            "attempts": len(before),
-            "applied": False,
-            "verified": False,
-            "deleted": 0,
-            "backup": "",
-            # How many records an existing bundle at this name already held, and
-            # this run therefore carries forward rather than replaces.
-            "carried": 0,
-        }
+        result = CompactedPayload(
+            bundle=f"{args.label}{task_log.BUNDLE_SUFFIX}",
+            files_before=len(list(directory.glob("*.json"))),
+            movable=len(names),
+            attempts=len(before),
+        )
         # The bundle already at this name, if any. Passing it is what stops a
         # second compaction from overwriting the first one's records -- the
         # documents it absorbed are no longer loose, so `compactable` does not
@@ -130,9 +153,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         # preview is where someone decides whether to apply, and a second round
         # that reported only its own 54 documents against a bundle holding 321
         # would look exactly like the bug this replaced.
-        bundle_path = directory / result["bundle"]
+        bundle_path = directory / result.bundle
         previous = records.read_snapshot(bundle_path) if bundle_path.exists() else None
-        result["carried"] = len((previous or {}).get("records", {}))
+        result.carried = len((previous or {}).get("records", {}))
 
         if not names:
             return result
@@ -140,9 +163,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             return result
 
         if args.backup:
-            result["backup"] = _back_up(directory, Path(args.backup))
+            result.backup = _back_up(directory, Path(args.backup))
 
-        remote = f"{task_log.RECORDS_DIRNAME}/{result['bundle']}"
+        remote = f"{task_log.RECORDS_DIRNAME}/{result.bundle}"
         records.write_snapshot(
             bundle_path,
             task_history.bundle_document(
@@ -151,7 +174,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             records.REGISTRY[f"legs/*{task_log.BUNDLE_SUFFIX}"],
         )
         share.write_text(service, config.share_name, remote, bundle_path.read_text())
-        result["applied"] = True
+        result.applied = True
 
         # Verified against a FRESH download, not the tree just written: the
         # question is whether the share now answers the same, and only the share
@@ -166,15 +189,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 f"deleted ({len(before)} rows before, {len(after)} after). The loose "
                 "files are all still there; delete the bundle to undo."
             )
-        result["verified"] = True
+        result.verified = True
 
         if args.delete:
-            result["deleted"] = _delete(service, config.share_name, names)
-            result["files_after"] = result["files_before"] - result["deleted"] + 1
+            result.deleted = _delete(service, config.share_name, names)
+            result.files_after = result.files_before - result.deleted + 1
         return result
 
 
-def _provenance(args: argparse.Namespace, result: dict[str, Any]) -> dict[str, Any]:
+def _provenance(args: argparse.Namespace, result: CompactedPayload) -> dict[str, Any]:
     """What this compaction was, recorded into the bundle it writes.
 
     Written BEFORE the delete, which is the only order available: the bundle has
@@ -193,9 +216,9 @@ def _provenance(args: argparse.Namespace, result: dict[str, Any]) -> dict[str, A
         "at": datetime.now(UTC).isoformat(),
         "host": socket.gethostname(),
         "label": args.label,
-        "bundled": result["movable"],
-        "carried": result["carried"],
-        "backup": result["backup"],
+        "bundled": result.movable,
+        "carried": result.carried,
+        "backup": result.backup,
         "deleting": bool(args.delete),
         "git_branch": gitinfo.get_git_branch() or "",
     }
@@ -219,18 +242,18 @@ def _delete(service: Any, share_name: str, names: list[str]) -> int:
         return sum(pool.map(remove, names))
 
 
-def render(payload: dict[str, Any]) -> None:
-    if not payload["movable"]:
-        print(f"Nothing to compact: {payload['attempts']} attempt(s), none sealed and loose.")
+def render(payload: CompactedPayload) -> None:
+    if not payload.movable:
+        print(f"Nothing to compact: {payload.attempts} attempt(s), none sealed and loose.")
         return
-    if not payload["applied"]:
-        carried = payload.get("carried", 0)
+    if not payload.applied:
+        carried = payload.carried
         print(
-            f"Would bundle {payload['movable']} of {payload['files_before']} file(s) "
-            f"into {payload['bundle']}, covering {payload['attempts']} attempt(s)."
+            f"Would bundle {payload.movable} of {payload.files_before} file(s) "
+            f"into {payload.bundle}, covering {payload.attempts} attempt(s)."
         )
         if carried:
-            print(f"  {payload['bundle']} already holds {carried}; they are carried forward.")
+            print(f"  {payload.bundle} already holds {carried}; they are carried forward.")
         print("  Nothing has changed. Re-run with --apply to write the bundle.")
         return
 
@@ -238,23 +261,19 @@ def render(payload: dict[str, Any]) -> None:
     # the same label absorbs the first, and reporting only the new documents
     # would read as though the earlier ones had been dropped -- which is exactly
     # what used to happen.
-    carried = payload.get("carried", 0)
-    held = payload["movable"] + carried
+    carried = payload.carried
+    held = payload.movable + carried
     print(
-        f"Wrote {payload['bundle']} holding {held} document(s)"
-        + (f" ({payload['movable']} new, {carried} carried forward)." if carried else ".")
+        f"Wrote {payload.bundle} holding {held} document(s)"
+        + (f" ({payload.movable} new, {carried} carried forward)." if carried else ".")
     )
     print(
-        "  verified: the joined task log is row-identical"
-        if payload["verified"]
-        else "  NOT verified"
+        "  verified: the joined task log is row-identical" if payload.verified else "  NOT verified"
     )
-    if payload["backup"]:
-        print(f"  backup:   {payload['backup']}")
-    if payload["deleted"]:
-        print(
-            f"  deleted:  {payload['deleted']} loose file(s) — legs/ is now ~{payload['files_after']}"
-        )
+    if payload.backup:
+        print(f"  backup:   {payload.backup}")
+    if payload.deleted:
+        print(f"  deleted:  {payload.deleted} loose file(s) — legs/ is now ~{payload.files_after}")
     else:
         print("  kept:     every loose file. Add --delete to remove them.")
 
