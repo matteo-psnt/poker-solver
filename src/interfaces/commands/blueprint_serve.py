@@ -19,7 +19,7 @@ keeps the authentication question with the thing that already answers it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
@@ -98,7 +98,7 @@ def run(args: argparse.Namespace) -> BlueprintServePayload:
     )
 
 
-def render(payload: dict[str, Any]) -> None:
+def render(payload: BlueprintServePayload) -> None:
     # Imported here, not at module scope, so `--help` and every other subcommand
     # is spared uvicorn, FastAPI and the whole pipeline import chain. This is a
     # `render()`, so it runs only when this command is the one being run --
@@ -115,8 +115,8 @@ def render(payload: dict[str, Any]) -> None:
     )
     from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415 -- see above
 
-    run_dir = Path(payload["run_dir"])
-    runs_dir = Path(payload["runs_dir"])
+    run_dir = Path(payload.run_dir)
+    runs_dir = Path(payload.runs_dir)
 
     def _build(directory: Path, at_iteration: int | None):
         """A run directory on local disk -> a blueprint. ~1 min in production."""
@@ -131,7 +131,7 @@ def render(payload: dict[str, Any]) -> None:
 
     def _load():
         """Load once, at app construction."""
-        return _build(run_dir, payload["at_iteration"])
+        return _build(run_dir, payload.at_iteration)
 
     def _load_run(run: str, at_iteration: int | None):
         """Serve a DIFFERENT run, staging it from the share if it is not local.
@@ -146,14 +146,14 @@ def render(payload: dict[str, Any]) -> None:
         directory = stage_run(run, runs_dir=runs_dir, at_iteration=at_iteration)
         return _build(directory, at_iteration), directory.name
 
-    print(f"Loading {payload['run']} …")
+    print(f"Loading {payload.run} …")
     app = create_app(
         _load,
-        run_id=payload["run"],
-        idle_timeout_seconds=payload["idle_timeout"],
+        run_id=payload.run,
+        idle_timeout_seconds=payload.idle_timeout,
         load_run=_load_run,
     )
-    print(f"Blueprint server on {payload['url']}   (Ctrl-C to stop)")
+    print(f"Blueprint server on {payload.url}   (Ctrl-C to stop)")
 
     # An explicit Server rather than `uvicorn.run(...)`, so idle expiry can ask
     # it to stop instead of signalling the process. MEASURED: uvicorn re-raises
@@ -161,7 +161,7 @@ def render(payload: dict[str, Any]) -> None:
     # path `run()` never returns and the process is 143 no matter what this
     # function would rather exit with. `should_exit` returns control here.
     server = uvicorn.Server(
-        uvicorn.Config(app, host=payload["host"], port=payload["port"], log_level="warning")
+        uvicorn.Config(app, host=payload.host, port=payload.port, log_level="warning")
     )
     app.state.idle.expire_with(lambda: setattr(server, "should_exit", True))
 

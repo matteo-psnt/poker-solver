@@ -258,5 +258,17 @@ class HeadsUpHand:
 
 
 def _action_type_name(action_type: ActionType) -> str:
-    """Wire-friendly action kind (e.g. ``"all-in"`` rather than ``"all_in"``)."""
-    return action_type.name.lower().replace("_", "-")
+    """The action kind, spelled as the rest of the wire spells it.
+
+    ``str(ActionType)`` -- so ``all_in``, with the underscore. It used to
+    hyphenate, which made ONE enum reach the console under two spellings: a
+    hand's `legal` menu carries `str(action.type)` while its `log` and every
+    `mix` came through here. The console then had to know both, and when a
+    cleanup collapsed that to one, shoves rendered as `all-in 99bb` in the log
+    and lost their colour while the button beside them was correct.
+
+    Nothing persists this -- it is a live session's log, read by the console and
+    then discarded -- so there was no format to preserve, only a difference to
+    remove.
+    """
+    return str(action_type)

@@ -61,10 +61,16 @@ export function toneFor(state: string | null | undefined): Tone {
  * records on the share, and `TERMINAL_CAUSES` gates reconciliation against
  * them, so a renamed cause would make every historical task look unresolved.
  *
- * Batch's own vocabulary is deliberately absent. `active` used to be mapped to
- * `queued` here; the server says `queued` now.
+ * `active` is here and must stay. It was removed on the reasoning that "the
+ * server says `queued` now" -- true of `BatchTask.phase`, but every caller of
+ * this function passes `TaskRow.cause`, and the CAUSE vocabulary still spells a
+ * queued task `active` (`src/shared/task_states.py`), frozen because
+ * `TERMINAL_CAUSES` is read against those words on records already on the
+ * share. Dropping it labelled a waiting task "active" -- the word that reads as
+ * healthy and means the opposite, which is the whole reason the map exists.
  */
 const DISPLAY: Record<string, string> = {
+  active: "queued",
   started: "unresolved",
   killed: "killed (oom)",
 };

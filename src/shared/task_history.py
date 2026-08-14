@@ -30,7 +30,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from src.shared import records, task_states
 from src.shared.cloudtask import kinds
@@ -356,11 +356,30 @@ def _cause(
 
 class TaskProgress(BaseModel):
     """How far a RUNNING task has got. Absent once it ends -- a finished task
-    showing "62%" is a sample that stopped arriving, not a task stuck at 62%."""
+    showing "62%" is a sample that stopped arriving, not a task stuck at 62%.
 
-    done: int
-    total: int
-    unit: str
+    TOLERANT, and matched deliberately to `kinds.Progress.from_record`, which
+    reads the same bytes and accepts a missing `unit` and float counts. These
+    are untyped JSON off an SMB share, written by a wrapper that may be an older
+    version or may have been killed halfway through the write -- and this module
+    reads `.get` with a default everywhere else for exactly that reason. A
+    required `unit` here would turn one malformed document into a failure of
+    `tasks`, `cost`, `runinfo` and `reconcile` at once.
+    """
+
+    done: float
+    total: float
+    unit: str = ""
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def _blank_when_absent(cls, value: object) -> object:
+        """A null `unit` is a blank one, exactly as `from_record` reads it.
+
+        The wrapper writes the key with no value on a kind that cannot name its
+        unit, so `None` is a shape that occurs rather than a malformed record.
+        """
+        return "" if value is None else value
 
 
 class TaskRow(BaseModel):

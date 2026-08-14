@@ -2322,13 +2322,24 @@ export interface components {
          * TaskProgress
          * @description How far a RUNNING task has got. Absent once it ends -- a finished task
          *     showing "62%" is a sample that stopped arriving, not a task stuck at 62%.
+         *
+         *     TOLERANT, and matched deliberately to `kinds.Progress.from_record`, which
+         *     reads the same bytes and accepts a missing `unit` and float counts. These
+         *     are untyped JSON off an SMB share, written by a wrapper that may be an older
+         *     version or may have been killed halfway through the write -- and this module
+         *     reads `.get` with a default everywhere else for exactly that reason. A
+         *     required `unit` here would turn one malformed document into a failure of
+         *     `tasks`, `cost`, `runinfo` and `reconcile` at once.
          */
         TaskProgress: {
             /** Done */
             done: number;
             /** Total */
             total: number;
-            /** Unit */
+            /**
+             * Unit
+             * @default
+             */
             unit: string;
         };
         /**
