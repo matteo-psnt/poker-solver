@@ -1,30 +1,24 @@
-"""
-Full-coverage precomputation pipeline for combo-level abstraction.
+"""Full-coverage precomputation pipeline for combo-level abstraction.
 
 For every canonical board on every street:
-1. Compute exact equity — and, on flop/turn, the equity-realization
-   histogram — for every canonical hand class (range-vs-range engine)
-2. Bucket all (board, class) pairs per street:
-   - flop/turn: k-means over realization-distribution CDFs (potential-aware —
-     Euclidean distance between 1D CDFs is the Cramér distance, an
-     EMD-family metric, so draws separate from made hands of equal equity)
-   - river: weighted 1D k-means over scalar equity (no potential remains)
-3. Store dense bucket matrices keyed by canonical board ID
 
-Every legal postflop state resolves to a bucket computed on its own board —
+1. Compute exact equity -- and, on flop/turn, the equity-realization histogram
+   -- for every canonical hand class (range-vs-range engine).
+2. Bucket all (board, class) pairs per street. Flop/turn cluster over
+   realization-distribution CDFs, which is potential-aware: Euclidean distance
+   between 1D CDFs is the Cramer distance, an EMD-family metric, so draws
+   separate from made hands of equal equity. River is weighted 1D k-means over
+   scalar equity, no potential remaining.
+3. Store dense bucket matrices keyed by canonical board ID.
+
+Every legal postflop state resolves to a bucket computed on its OWN board --
 there is no board clustering, no representative sampling, and no fallback.
 
-Why sklearn is imported at its two call sites and not at module scope
----------------------------------------------------------------------
-Against this project's own rule, and for a measured reason. ``sklearn.cluster``
-costs ~0.5s to import and pulls scipy behind it, and this module is reachable
-from ``src.pipeline.services`` -- the facade every reader command imports. So
-``poker-solver jobs``, and ``--help``, paid half a second to import a clusterer
-they will never call.
-
-The two methods below that actually cluster import it themselves; nothing else
-here needs it. ``tests/interfaces/test_import_weight.py`` fails if it comes back
-to module scope.
+sklearn is imported at its two call sites rather than module scope, against this
+project's own rule: ``sklearn.cluster`` costs ~0.5s and pulls scipy behind it,
+and this module is reachable from ``src.pipeline.services``, the facade every
+reader command imports. ``tests/interfaces/test_import_weight.py`` fails if it
+comes back.
 """
 
 import logging

@@ -1,32 +1,25 @@
 """Train a board-free blueprint and store it as an ordinary static checkpoint.
 
 The board-free kernel updates every row of the tree on every iteration, where
-external sampling touches 88-95. What made it unusable as anything but a probe
-was that it had no way out: it wrote its table into memory and nothing else in
-the project could read it.
+external sampling touches 88-95. ``BucketVectorCFR`` and ``StaticArrayStorage``
+both store ``regrets``/``strategy_sum`` as flat arrays of ``tree.num_slots``
+under the identical ``slot_offset[n] + b*num_actions[n] + a`` layout, so the
+strategy is already in the shape a checkpoint wants. This service is that
+bridge: train board-free, write a real ``STATIC_CHECKPOINT.json`` ladder, and
+``evaluate``, ``curve`` and ``report`` all work on it unchanged.
 
-It can, though, without translation. ``BucketVectorCFR`` and
-``StaticArrayStorage`` both store ``regrets``/``strategy_sum`` as flat arrays of
-``tree.num_slots`` under the identical ``slot_offset[n] + b*num_actions[n] + a``
-layout, so the strategy is already in the shape a checkpoint wants. This service
-is that bridge: train board-free, write a real ``STATIC_CHECKPOINT.json`` ladder,
-and every downstream reader — ``evaluate``, ``curve``, ``report`` — works on it
-unchanged.
+Two things here are load-bearing rather than incidental.
 
-## Two things here are load-bearing rather than incidental
-
-``visited`` must be written. ``TreePolicySource.infoset_at`` returns ``None`` for
-any row whose ``visited`` flag is false, and the caller reads that as
-*play uniform*. The vector kernels never touch that array, so a checkpoint built
-from one and left at zeros scores exactly like an untrained blueprint — no error,
-no warning, just a number that says the kernel is worthless. The flag is set from
-the strategy itself: a row has an answer exactly when it accumulated mass.
+``visited`` must be written. ``TreePolicySource.infoset_at`` returns ``None``
+for any row whose ``visited`` flag is false and the caller reads that as *play
+uniform*, so a checkpoint from a vector kernel left at zeros scores exactly like
+an untrained blueprint -- no error, no warning. The flag is set from the
+strategy itself: a row has an answer exactly when it accumulated mass.
 
 **The universe is part of the game.** Chance here is a bucket-to-bucket
 transition matrix estimated from sampled boards, so two runs with different
-boards are solving different games. Resuming across such a change would blend
-them silently, which is why ``universe_seed``/``universe_boards`` are recorded and
-verified on resume in the same way the card abstraction hash is.
+boards are solving DIFFERENT GAMES. ``universe_seed``/``universe_boards`` are
+recorded and verified on resume, as the card abstraction hash is.
 """
 
 from __future__ import annotations

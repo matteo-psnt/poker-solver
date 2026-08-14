@@ -1,23 +1,19 @@
-"""CFR over a uniform mixture of boards — a game with a chance layer.
+"""CFR over a uniform mixture of boards -- a game with a chance layer.
 
-:class:`~src.engine.solver.vector.kernel.VectorCFR` solves one board. That game
-has no chance node anywhere in it: both players effectively see the river from
-the first decision. It is the right object for validating the kernel's
-arithmetic and the wrong one for asking how many iterations real poker needs,
-because the whole difficulty of the real game is the chance layer.
+:class:`~src.engine.solver.vector.kernel.VectorCFR` solves one board, a game
+with no chance node anywhere in it: both players effectively see the river from
+the first decision. That is the right object for validating the kernel's
+arithmetic and the wrong one for asking how many iterations real poker needs.
 
-This module supplies the missing layer in its smallest honest form: chance deals
-one of ``K`` fixed boards uniformly, then play proceeds. The information set is
-still ``(node, bucket)`` — a player sees its bucket, not which board produced it
-— so exact best response is still computable, and ``K`` is a dial on how much
-chance the game contains.
+Here chance deals one of ``K`` fixed boards uniformly, then play proceeds. The
+information set is still ``(node, bucket)`` -- a player sees its bucket, not
+which board produced it -- so exact best response is still computable, and ``K``
+is a dial on how much chance the game contains. What it measures is how
+iterations-to-convergence scales with the number of boards, which is what
+decides whether a full-tree vector iteration on one sampled board is a step
+toward a converged blueprint or a fast step sideways.
 
-What that dial measures: how iterations-to-convergence scales with the number of
-boards. It is the quantity that decides whether a full-tree vector iteration on
-one sampled board is a step toward a converged blueprint or merely a fast step
-sideways, and it cannot be read off a single-board run at any depth.
-
-Two things have to be joint across boards rather than per board:
+Two things must be JOINT across boards rather than per board:
 
     regrets     one stored row is reached through every board, so the boards'
                 increments sum before the CFR+ floor applies. Flooring each
@@ -30,18 +26,17 @@ Two things have to be joint across boards rather than per board:
 That best response measures exploitability *inside* the abstraction: the
 opponent is only as sharp as our own bucketing, so the number falls as the
 solver improves and says nothing about what the bucketing costs.
-``best_response_value(unconstrained=True)`` measures the other one — the
-opponent is told its exact two cards, and the gap between the two figures is
-what the abstraction itself gives away. That gap does not shrink with more
-iterations; it is a property of the buckets, not of the solve.
+``best_response_value(unconstrained=True)`` measures the other one -- the
+opponent is told its exact two cards -- and the gap between them is what the
+abstraction gives away. That gap does not shrink with more iterations.
 
 Being told your cards is not being told the future, and the difference is easy
 to get wrong in the flattering direction. A street's bucket is a function of the
-hand and the cards face up on that street (``vector_universe.POSTFLOP_PREFIX``:
-three on the flop, four on the turn, none preflop), so two runouts sharing that
-prefix are one observation and must be maximised jointly. Maximising per board
-instead prices in clairvoyance and reads as a larger abstraction cost than is
-real. ``_visible_partition`` is what keeps the two apart.
+hand and the cards face up on that street
+(``vector_universe.POSTFLOP_PREFIX``), so two runouts sharing that prefix are
+ONE observation and must be maximised jointly. Maximising per board prices in
+clairvoyance and reads as a larger abstraction cost than is real.
+``_visible_partition`` is what keeps the two apart.
 """
 
 from __future__ import annotations

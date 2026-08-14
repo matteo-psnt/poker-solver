@@ -1,35 +1,27 @@
 """External-sampling MCCFR that walks node ids instead of game states.
 
-The generic traversal in :mod:`.traversal` rebuilds a :class:`GameState` for
-every edge it crosses, then asks the tree which node that state landed on. Both
-halves are avoidable once the tree is statically enumerated, because the public
-betting line is *card-independent*: which node an action leads to, how many
-board cards the dealer owes before the child acts, and what every terminal pays
-are all fixed at enumeration time and recorded on :class:`Edge`. Measured at
-production tree size, state construction alone was 44% of a training iteration
-and the string-keyed node lookup another 4%.
+The public betting line is CARD-INDEPENDENT: which node an action leads to, how
+many board cards the dealer owes before the child acts, and what every terminal
+pays are all fixed at enumeration time and recorded on :class:`Edge`. So this
+walks integers -- per iteration exactly one ``GameState`` is built, the dealt
+root the hole cards come from, and after that the traversal carries only
+``(node_id, board, known-card mask)``. At production tree size the state
+construction this avoids was 44% of an iteration and the string-keyed node
+lookup another 4%.
 
-So this walks integers. Per iteration exactly one ``GameState`` is built — the
-dealt root, which is where the hole cards come from — and after that the
-traversal carries only ``(node_id, board, known-card mask)``.
-
-What is deliberately NOT re-derived here: nothing about the rules. The edge
-table is recorded from the same ``GameRules.apply_action`` the state-based
-traversal called per visit, and the terminal payoffs are tabulated from the
-terminal states it produced. This module reads that table; it does not model
-the game a second time.
+Nothing about the RULES is re-derived here. The edge table is recorded from the
+same ``GameRules.apply_action`` the state-based traversal called per visit, and
+terminal payoffs are tabulated from the terminal states it produced. This module
+reads that table; it does not model the game a second time.
 
 Equivalence is a maintained property, not a claim:
 ``tests/engine/solver/mccfr/test_tree_traversal_equivalence.py`` runs both
 traversals from one seed and requires the shared arrays to come out
-bit-identical, which also pins the random stream — every draw happens at the
-same point, in the same order, so a run's trajectory is unchanged.
+bit-identical, which also pins the random stream.
 
-Pruning is the one thing not implemented here. It is off by default, measured
-monotonically worse at equal iterations and equal wall-clock, and its masked
-paths are most of the branching the state-based traversal has; carrying them
-would cost the fast path on every node to serve a mode nothing runs.
-:class:`StaticTreeSolver` keeps using the generic traversal when it is enabled.
+Pruning is deliberately not implemented here -- it is off by default and
+measured worse, and its masked paths would cost the fast path on every node.
+:class:`StaticTreeSolver` keeps the generic traversal when it is enabled.
 """
 
 from __future__ import annotations

@@ -1,42 +1,32 @@
 """Static enumeration of the public betting tree.
 
 The public betting tree of HUNL under a fixed action abstraction and stack depth
-is *small* and *finite*: 57,604 decision nodes under `config/training/production.yaml`,
-enumerable in seconds. Every information set the solver will ever touch is a pair
+is *small* and *finite*: 57,604 decision nodes under
+`config/training/production.yaml`, enumerable in seconds. Every information set
+the solver will ever touch is a pair
 
     (public betting node, card bucket)
 
-and both components are known before training starts. That makes the entire
-infoset space a preallocated flat array indexed by integer arithmetic, which is
-why this module exists.
-
-What it replaces: discovering infosets at runtime by hashing a string key,
-allocating an id, and reconciling those ids across worker processes. That
-machinery cost ~3,000 lines and produced the cross-worker id-frontier stall, the
-fork-OOM, the capacity/resize path, and a measured 39-74% rate of dropped
-updates. None of those failure modes have an analogue here: there is nothing to
-discover, so there is nothing to reconcile.
+and both components are known before training starts, which makes the whole
+infoset space a preallocated flat array indexed by integer arithmetic. Nothing
+is discovered at runtime, so nothing has to be reconciled across workers.
 
 Node identity:
-    A node is keyed by ``(street, betting_sequence)``. Verified unique — across
-    the full production enumeration, every such key maps to exactly one
+    A node is keyed by ``(street, betting_sequence)``. Verified unique -- across
+    the full production enumeration every such key maps to exactly one
     ``(actor, pot, stacks, to_call)``, so the flat cross-street token string does
     not merge structurally distinct nodes. See ``test_betting_tree.py``.
 
 Button relativity:
-    Nodes are enumerated once, button-relative. The tree is *exactly*
-    button-symmetric: enumerating from button=0 and button=1 yields identical key
-    sets with identical ``(relative actor, pot, button-relative stacks, to_call,
-    action count)``. The absolute seat therefore carries no strategic
-    information, and keying infosets on it — as ``InfoSetKey.player_position``
-    does — duplicates the whole space, splitting an already starved update budget
-    across two identical halves. This module keys on the acting seat *relative to
-    the button* instead.
+    Nodes are enumerated once, button-relative, and the tree is *exactly*
+    button-symmetric. The absolute seat carries no strategic information, so
+    keying infosets on it duplicates the whole space and splits an already
+    starved update budget across two identical halves. This module keys on the
+    acting seat *relative to the button*.
 
 Stack depth:
-    The enumeration is valid for one starting stack. A state that does not map to
-    an enumerated node raises rather than silently landing on a wrong row — the
-    stack-depth assumption the SPR bucket used to paper over is now enforced.
+    The enumeration is valid for ONE starting stack. A state that does not map
+    to an enumerated node raises rather than silently landing on a wrong row.
 """
 
 from __future__ import annotations
