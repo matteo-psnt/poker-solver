@@ -18,6 +18,13 @@ import { useState } from "react";
  *   cards and "this line needs three" is answerable by looking. The grouping is
  *   naming, not game logic — the server decides what a line reaches.
  *
+ *   The slots are also the WAY IN. There was a "pick cards" button beside them,
+ *   which is a control standing in for the thing it edits: you point at the
+ *   empty turn to say "deal a turn", so that is what takes the click. One
+ *   gesture covers dealing and re-dealing, because truncating to a slot at or
+ *   past the end of the board is a no-op and truncating to a filled one is
+ *   exactly what changing that card means.
+ *
  *   `live`, so a board longer than the line uses is visibly longer. Replay
  *   consumes cards street by street and IGNORES the surplus, which is what lets
  *   you hold one runout fixed while walking back up the line. Left undrawn, that
@@ -52,7 +59,13 @@ export function BoardPicker({
   const showDeck = open || forceOpen;
 
   const slots = Array.from({ length: BOARD_SIZE }, (_, index) => cards[index] ?? null);
-  const truncateTo = (count: number) => onChange(writeBoard(cards.slice(0, count)));
+  // Silent when there is nothing past `count` to drop — clicking an empty slot
+  // is opening the deck, not editing the board, and writing the same string
+  // back would be a router navigation per click and a history entry per open.
+  const truncateTo = (count: number) => {
+    if (count >= cards.length) return;
+    onChange(writeBoard(cards.slice(0, count)));
+  };
 
   return (
     <div className="space-y-2">
@@ -73,10 +86,22 @@ export function BoardPicker({
                       <button
                         key={index}
                         type="button"
-                        disabled={!card}
-                        onClick={() => truncateTo(index)}
-                        title={card ? `${card.text} — click to clear from here` : undefined}
-                        className="rounded-[4px] enabled:hover:opacity-70 disabled:cursor-default"
+                        // The slot IS the control. Clicking one truncates the
+                        // board to it and opens the deck, so "deal a flop" and
+                        // "change the turn" are the same gesture on the thing
+                        // you are changing — no button standing in for it.
+                        // Truncating to an index at or past the end is a no-op,
+                        // which is what makes the empty slots pure openers.
+                        onClick={() => {
+                          truncateTo(index);
+                          setOpen(true);
+                        }}
+                        title={
+                          card
+                            ? `${card.text} — click to pick it again, clearing what follows`
+                            : `pick the ${group.street}`
+                        }
+                        className="rounded-[4px] hover:opacity-70"
                       >
                         <PlayingCard
                           card={card?.text ?? null}
@@ -98,19 +123,7 @@ export function BoardPicker({
           })}
         </div>
 
-        <div className="flex items-center gap-2 pb-4">
-          <button
-            type="button"
-            onClick={() => setOpen((was) => !was)}
-            className={cn(
-              "rounded border px-2 py-1 text-[11px]",
-              showDeck
-                ? "border-[var(--fg-faint)] text-[var(--fg)]"
-                : "border-[var(--border)] text-[var(--fg-muted)] hover:text-[var(--fg)]",
-            )}
-          >
-            {showDeck ? "hide deck" : "pick cards"}
-          </button>
+        <div className="flex items-center gap-3 pb-4">
           {cards.length > 0 && (
             <button
               type="button"
@@ -118,6 +131,18 @@ export function BoardPicker({
               className="text-[11px] text-[var(--fg-faint)] underline-offset-2 hover:text-[var(--fg)] hover:underline"
             >
               clear
+            </button>
+          )}
+          {/* A dismiss for an open panel, not a way in — the slots are that.
+              Absent while the line still needs cards, where closing the deck
+              would hide the only thing that answers the question on screen. */}
+          {open && !forceOpen && (
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="text-[11px] text-[var(--fg-faint)] underline-offset-2 hover:text-[var(--fg)] hover:underline"
+            >
+              done
             </button>
           )}
         </div>
@@ -134,7 +159,12 @@ export function BoardPicker({
         <Deck
           taken={taken}
           full={cards.length >= BOARD_SIZE}
-          onPick={onChange}
+          // Closes itself on the fifth card: there is nothing left to pick, and
+          // a deck of 52 disabled cards is a worse way to say so than going.
+          onPick={(next) => {
+            onChange(next);
+            if (readBoard(next).length >= BOARD_SIZE) setOpen(false);
+          }}
           // The CARDS read back out, not the raw param. Appending to the raw
           // one carried a half-typed paste along with it: with `"AsK"` in the
           // field, clicking 7c wrote `"AsK7c"`, which the server refuses as not
