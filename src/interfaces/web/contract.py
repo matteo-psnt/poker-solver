@@ -26,6 +26,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from src.interfaces.blueprint.app import (
+    BlueprintLoad,
+    BlueprintRun,
+    Bucket,
+    Combos,
+    Edge,
+    Hand,
+    HandEvent,
+    LeftSession,
+    NodeGrid,
+    SolverNode,
+)
 from src.interfaces.cloud.cost.billing import BilledPayload as Billed
 from src.interfaces.cloud.cost.billing import ServiceCharge, StandingCharge
 from src.interfaces.cloud.cost.node_time import ConcurrencyPoint
@@ -74,8 +86,12 @@ __all__ = [
     "Autoscale",
     "BatchTask",
     "Billed",
+    "BlueprintLoad",
+    "BlueprintRun",
     "Box",
+    "Bucket",
     "Cancelled",
+    "Combos",
     "CommandActivity",
     "Compacted",
     "Comparison",
@@ -86,11 +102,16 @@ __all__ = [
     "Curve",
     "CurvePoint",
     "Dispatched",
+    "Edge",
     "Failure",
+    "Hand",
+    "HandEvent",
     "Job",
     "Jobs",
     "Ledger",
+    "LeftSession",
     "LogLines",
+    "NodeGrid",
     "PairedComparison",
     "Pool",
     "PrecomputeDispatchPayload",
@@ -105,6 +126,7 @@ __all__ = [
     "Runs",
     "ScorePayload",
     "ServiceCharge",
+    "SolverNode",
     "StandingCharge",
     "SubmitPayload",
     "SubmitVectorPayload",
@@ -125,115 +147,6 @@ class Payload(BaseModel):
 # The blueprint server is a separate process, reached over HTTP so the console
 # never imports the engine. Its shapes are declared here rather than imported
 # because they belong to no command.
-class BlueprintRun(Payload):
-    run: str
-    starting_stack: int
-    small_blind: int
-    big_blind: int
-    combos: int
-    loading: str | None = None
-    """The run being swapped in, while one is. Null when nothing is loading."""
-    can_switch: bool = False
-    """False on a server handed a blueprint directly -- a laptop, a test."""
-
-
-class BlueprintLoad(Payload):
-    """The 202 from asking for a swap. The work outlives the request."""
-
-    run: str
-    loading: bool
-
-
-class Combos(Payload):
-    combos: list[str] = []
-
-
-class LeftSession(Payload):
-    """Confirmation that a play session was dropped on the far side.
-
-    The session lives where the blueprint does, so leaving is a request rather
-    than a local forget -- which is also why the proxy holds no state and a
-    console restart does not lose a hand in progress.
-    """
-
-    session: str
-    dropped: bool
-
-
-class Bucket(Payload):
-    """`strategy` is null exactly when `trained` is false -- the server refuses to
-    emit the uniform an allocated-but-unvisited row would otherwise read as, and
-    this keeps that distinction rather than defaulting it away."""
-
-    trained: bool
-    strategy: list[float] | None
-    reach_count: int
-
-
-class Edge(Payload):
-    token: str
-    type: str
-    amount: float
-
-
-class NodeGrid(Payload):
-    street: str
-    board: list[str] = []
-    actor: int
-    actions: list[str] = []
-    combo_buckets: list[int] = []
-    """-1 where the board blocks the combo, so index i is always ALL_COMBOS[i]."""
-    blocked: int
-    trained_buckets: int
-    buckets: dict[str, Bucket] = {}
-
-
-class SolverNode(Payload):
-    path: str
-    terminal: bool
-    board: list[str] = []
-    grid: NodeGrid | None
-    children: list[Edge] = []
-
-
-class HandEvent(Payload):
-    seat: int
-    actor: str
-    action: str
-    amount: float
-    street: str
-    untrained: bool
-    mix: list[tuple[str, float]] | None
-    """Null until the hand is over -- see :class:`Hand`."""
-
-
-class Hand(Payload):
-    """A hand in progress.
-
-    `bot_hole_cards` and every `mix` are null until `over`: the server withholds
-    them, and this says so, because a client that received them could show them
-    and a sit-down where you see the opponent's hand measures nothing.
-    """
-
-    session: str
-    over: bool
-    street: str
-    board: list[str] = []
-    pot: float
-    stacks: list[float] = []
-    human_seat: int
-    button: int
-    to_act: int | None
-    hole_cards: list[str] = []
-    bot_hole_cards: list[str] | None
-    legal: list[Edge] = []
-    payoff: float | None
-    showdown: bool
-    bot_decisions: int
-    bot_untrained_decisions: int
-    log: list[HandEvent] = []
-
-
 # A view is several commands answered at once. `payload` is typed per view
 # rather than a bare dict, so the generated TypeScript keeps the part's type.
 class Part[T](Payload):

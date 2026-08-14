@@ -436,7 +436,6 @@
         "type": "object"
       },
       "BlueprintLoad": {
-        "additionalProperties": true,
         "description": "The 202 from asking for a swap. The work outlives the request.",
         "properties": {
           "loading": {
@@ -456,7 +455,7 @@
         "type": "object"
       },
       "BlueprintRun": {
-        "additionalProperties": true,
+        "description": "What is loaded here, so a client can label what it is looking at.",
         "properties": {
           "big_blind": {
             "title": "Big Blind",
@@ -500,7 +499,8 @@
           "starting_stack",
           "small_blind",
           "big_blind",
-          "combos"
+          "combos",
+          "loading"
         ],
         "title": "BlueprintRun",
         "type": "object"
@@ -551,8 +551,7 @@
         "type": "object"
       },
       "Bucket": {
-        "additionalProperties": true,
-        "description": "`strategy` is null exactly when `trained` is false -- the server refuses to\nemit the uniform an allocated-but-unvisited row would otherwise read as, and\nthis keeps that distinction rather than defaulting it away.",
+        "description": "One bucket's strategy at a spot.\n\n`strategy` is null exactly when `trained` is false: this server refuses to\nemit the uniform that an allocated-but-unvisited row would otherwise read\nas, and a client must be able to tell \"never visited\" from \"plays uniform\".",
         "properties": {
           "reach_count": {
             "title": "Reach Count",
@@ -611,10 +610,9 @@
         "type": "object"
       },
       "Combos": {
-        "additionalProperties": true,
+        "description": "The canonical combo order the grid indexes into. Fetch once.",
         "properties": {
           "combos": {
-            "default": [],
             "items": {
               "type": "string"
             },
@@ -622,6 +620,9 @@
             "type": "array"
           }
         },
+        "required": [
+          "combos"
+        ],
         "title": "Combos",
         "type": "object"
       },
@@ -1258,7 +1259,7 @@
         "type": "object"
       },
       "Edge": {
-        "additionalProperties": true,
+        "description": "One action on the menu: its path token, its type, and what it costs.",
         "properties": {
           "amount": {
             "title": "Amount",
@@ -1427,11 +1428,9 @@
         "type": "object"
       },
       "Hand": {
-        "additionalProperties": true,
-        "description": "A hand in progress.\n\n`bot_hole_cards` and every `mix` are null until `over`: the server withholds\nthem, and this says so, because a client that received them could show them\nand a sit-down where you see the opponent's hand measures nothing.",
+        "description": "A hand in progress.\n\n`bot_hole_cards` and every `mix` are null until `over`, and that is not\npoliteness: a client that received them could show them, and a sit-down\nwhere you can see the opponent's cards measures nothing at all.",
         "properties": {
           "board": {
-            "default": [],
             "items": {
               "type": "string"
             },
@@ -1465,7 +1464,6 @@
             "type": "integer"
           },
           "hole_cards": {
-            "default": [],
             "items": {
               "type": "string"
             },
@@ -1477,7 +1475,6 @@
             "type": "integer"
           },
           "legal": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/Edge"
             },
@@ -1485,7 +1482,6 @@
             "type": "array"
           },
           "log": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/HandEvent"
             },
@@ -1512,6 +1508,7 @@
             "type": "number"
           },
           "session": {
+            "default": "",
             "title": "Session",
             "type": "string"
           },
@@ -1520,7 +1517,6 @@
             "type": "boolean"
           },
           "stacks": {
-            "default": [],
             "items": {
               "type": "number"
             },
@@ -1544,24 +1540,28 @@
           }
         },
         "required": [
-          "session",
           "over",
           "street",
+          "board",
           "pot",
+          "stacks",
           "human_seat",
           "button",
           "to_act",
+          "hole_cards",
           "bot_hole_cards",
+          "legal",
           "payoff",
           "showdown",
           "bot_decisions",
-          "bot_untrained_decisions"
+          "bot_untrained_decisions",
+          "log"
         ],
         "title": "Hand",
         "type": "object"
       },
       "HandEvent": {
-        "additionalProperties": true,
+        "description": "One move in the hand log.",
         "properties": {
           "action": {
             "title": "Action",
@@ -1764,8 +1764,7 @@
         "type": "object"
       },
       "LeftSession": {
-        "additionalProperties": true,
-        "description": "Confirmation that a play session was dropped on the far side.\n\nThe session lives where the blueprint does, so leaving is a request rather\nthan a local forget -- which is also why the proxy holds no state and a\nconsole restart does not lose a hand in progress.",
+        "description": "Confirmation that a play session was dropped.\n\nThe session lives where the blueprint does, so leaving is a REQUEST rather\nthan a local forget -- which is also why the console's proxy holds no state\nand a console restart does not lose a hand in progress.",
         "properties": {
           "dropped": {
             "title": "Dropped",
@@ -1836,10 +1835,9 @@
         "type": "object"
       },
       "NodeGrid": {
-        "additionalProperties": true,
+        "description": "The strategy at one spot, for every combo the board allows.\n\n``buckets`` is keyed by STRING because JSON object keys are strings, and a\nclient that had to guess whether \"41\" meant the int or the str would get it\nwrong exactly once.",
         "properties": {
           "actions": {
-            "default": [],
             "items": {
               "type": "string"
             },
@@ -1855,7 +1853,6 @@
             "type": "integer"
           },
           "board": {
-            "default": [],
             "items": {
               "type": "string"
             },
@@ -1866,12 +1863,10 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/Bucket"
             },
-            "default": {},
             "title": "Buckets",
             "type": "object"
           },
           "combo_buckets": {
-            "default": [],
             "items": {
               "type": "integer"
             },
@@ -1889,9 +1884,13 @@
         },
         "required": [
           "street",
+          "board",
           "actor",
+          "actions",
+          "combo_buckets",
           "blocked",
-          "trained_buckets"
+          "trained_buckets",
+          "buckets"
         ],
         "title": "NodeGrid",
         "type": "object"
@@ -3538,10 +3537,9 @@
         "type": "object"
       },
       "SolverNode": {
-        "additionalProperties": true,
+        "description": "One spot in the tree. `grid` is null exactly when `terminal`.",
         "properties": {
           "board": {
-            "default": [],
             "items": {
               "type": "string"
             },
@@ -3549,7 +3547,6 @@
             "type": "array"
           },
           "children": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/Edge"
             },
@@ -3578,6 +3575,7 @@
         "required": [
           "path",
           "terminal",
+          "board",
           "grid"
         ],
         "title": "SolverNode",

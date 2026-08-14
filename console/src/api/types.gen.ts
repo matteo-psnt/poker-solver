@@ -859,10 +859,11 @@ export interface components {
             loading: boolean;
             /** Run */
             run: string;
-        } & {
-            [key: string]: unknown;
         };
-        /** BlueprintRun */
+        /**
+         * BlueprintRun
+         * @description What is loaded here, so a client can label what it is looking at.
+         */
         BlueprintRun: {
             /** Big Blind */
             big_blind: number;
@@ -874,15 +875,13 @@ export interface components {
             /** Combos */
             combos: number;
             /** Loading */
-            loading?: string | null;
+            loading: string | null;
             /** Run */
             run: string;
             /** Small Blind */
             small_blind: number;
             /** Starting Stack */
             starting_stack: number;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * BoxPayload
@@ -915,9 +914,11 @@ export interface components {
         };
         /**
          * Bucket
-         * @description `strategy` is null exactly when `trained` is false -- the server refuses to
-         *     emit the uniform an allocated-but-unvisited row would otherwise read as, and
-         *     this keeps that distinction rather than defaulting it away.
+         * @description One bucket's strategy at a spot.
+         *
+         *     `strategy` is null exactly when `trained` is false: this server refuses to
+         *     emit the uniform that an allocated-but-unvisited row would otherwise read
+         *     as, and a client must be able to tell "never visited" from "plays uniform".
          */
         Bucket: {
             /** Reach Count */
@@ -926,8 +927,6 @@ export interface components {
             strategy: number[] | null;
             /** Trained */
             trained: boolean;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * CancelledPayload
@@ -951,15 +950,13 @@ export interface components {
             /** Task Id */
             task_id: string;
         };
-        /** Combos */
+        /**
+         * Combos
+         * @description The canonical combo order the grid indexes into. Fetch once.
+         */
         Combos: {
-            /**
-             * Combos
-             * @default []
-             */
+            /** Combos */
             combos: string[];
-        } & {
-            [key: string]: unknown;
         };
         /**
          * CommandActivity
@@ -1266,7 +1263,10 @@ export interface components {
             /** Std Error Mbb */
             std_error_mbb: number;
         };
-        /** Edge */
+        /**
+         * Edge
+         * @description One action on the menu: its path token, its type, and what it costs.
+         */
         Edge: {
             /** Amount */
             amount: number;
@@ -1274,8 +1274,6 @@ export interface components {
             token: string;
             /** Type */
             type: string;
-        } & {
-            [key: string]: unknown;
         };
         /** ExperimentParts */
         ExperimentParts: {
@@ -1335,15 +1333,12 @@ export interface components {
          * Hand
          * @description A hand in progress.
          *
-         *     `bot_hole_cards` and every `mix` are null until `over`: the server withholds
-         *     them, and this says so, because a client that received them could show them
-         *     and a sit-down where you see the opponent's hand measures nothing.
+         *     `bot_hole_cards` and every `mix` are null until `over`, and that is not
+         *     politeness: a client that received them could show them, and a sit-down
+         *     where you can see the opponent's cards measures nothing at all.
          */
         Hand: {
-            /**
-             * Board
-             * @default []
-             */
+            /** Board */
             board: string[];
             /** Bot Decisions */
             bot_decisions: number;
@@ -1353,22 +1348,13 @@ export interface components {
             bot_untrained_decisions: number;
             /** Button */
             button: number;
-            /**
-             * Hole Cards
-             * @default []
-             */
+            /** Hole Cards */
             hole_cards: string[];
             /** Human Seat */
             human_seat: number;
-            /**
-             * Legal
-             * @default []
-             */
+            /** Legal */
             legal: components["schemas"]["Edge"][];
-            /**
-             * Log
-             * @default []
-             */
+            /** Log */
             log: components["schemas"]["HandEvent"][];
             /** Over */
             over: boolean;
@@ -1376,23 +1362,24 @@ export interface components {
             payoff: number | null;
             /** Pot */
             pot: number;
-            /** Session */
+            /**
+             * Session
+             * @default
+             */
             session: string;
             /** Showdown */
             showdown: boolean;
-            /**
-             * Stacks
-             * @default []
-             */
+            /** Stacks */
             stacks: number[];
             /** Street */
             street: string;
             /** To Act */
             to_act: number | null;
-        } & {
-            [key: string]: unknown;
         };
-        /** HandEvent */
+        /**
+         * HandEvent
+         * @description One move in the hand log.
+         */
         HandEvent: {
             /** Action */
             action: string;
@@ -1411,8 +1398,6 @@ export interface components {
             street: string;
             /** Untrained */
             untrained: boolean;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * Job
@@ -1495,19 +1480,17 @@ export interface components {
         };
         /**
          * LeftSession
-         * @description Confirmation that a play session was dropped on the far side.
+         * @description Confirmation that a play session was dropped.
          *
-         *     The session lives where the blueprint does, so leaving is a request rather
-         *     than a local forget -- which is also why the proxy holds no state and a
-         *     console restart does not lose a hand in progress.
+         *     The session lives where the blueprint does, so leaving is a REQUEST rather
+         *     than a local forget -- which is also why the console's proxy holds no state
+         *     and a console restart does not lose a hand in progress.
          */
         LeftSession: {
             /** Dropped */
             dropped: boolean;
             /** Session */
             session: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * LogsPayload
@@ -1531,40 +1514,33 @@ export interface components {
             /** Task */
             task?: string | null;
         };
-        /** NodeGrid */
+        /**
+         * NodeGrid
+         * @description The strategy at one spot, for every combo the board allows.
+         *
+         *     ``buckets`` is keyed by STRING because JSON object keys are strings, and a
+         *     client that had to guess whether "41" meant the int or the str would get it
+         *     wrong exactly once.
+         */
         NodeGrid: {
-            /**
-             * Actions
-             * @default []
-             */
+            /** Actions */
             actions: string[];
             /** Actor */
             actor: number;
             /** Blocked */
             blocked: number;
-            /**
-             * Board
-             * @default []
-             */
+            /** Board */
             board: string[];
-            /**
-             * Buckets
-             * @default {}
-             */
+            /** Buckets */
             buckets: {
                 [key: string]: components["schemas"]["Bucket"];
             };
-            /**
-             * Combo Buckets
-             * @default []
-             */
+            /** Combo Buckets */
             combo_buckets: number[];
             /** Street */
             street: string;
             /** Trained Buckets */
             trained_buckets: number;
-        } & {
-            [key: string]: unknown;
         };
         /** NowParts */
         NowParts: {
@@ -2212,25 +2188,20 @@ export interface components {
             /** Service */
             service: string;
         };
-        /** SolverNode */
+        /**
+         * SolverNode
+         * @description One spot in the tree. `grid` is null exactly when `terminal`.
+         */
         SolverNode: {
-            /**
-             * Board
-             * @default []
-             */
+            /** Board */
             board: string[];
-            /**
-             * Children
-             * @default []
-             */
-            children: components["schemas"]["Edge"][];
+            /** Children */
+            children?: components["schemas"]["Edge"][];
             grid: components["schemas"]["NodeGrid"] | null;
             /** Path */
             path: string;
             /** Terminal */
             terminal: boolean;
-        } & {
-            [key: string]: unknown;
         };
         /** StandingCharge */
         StandingCharge: {
