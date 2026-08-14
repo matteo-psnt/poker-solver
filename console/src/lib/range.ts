@@ -1,22 +1,18 @@
 /**
  * Turning 1326 combos into the 13x13 grid a poker player reads.
  *
- * The solver's unit is a bucket, the wire's unit is a combo, and the unit a
- * person recognises is a hand CLASS — "AKs", "72o", "TT". This module is the
- * only place those three meet.
+ * The solver's unit is a bucket, the wire's unit is a combo, and the unit a person
+ * recognises is a hand CLASS -- "AKs", "72o", "TT". This module is the only place
+ * those three meet.
  *
- * Aggregation is deliberate, not cosmetic
- * ---------------------------------------
- * A class holds up to 12 combos (4 suited, 12 offsuit, 6 paired), and the board
- * may block some of them. A cell therefore averages over the combos that are
- * still POSSIBLE, which is why a blocked-out class is drawn as absent rather
- * than as a zero row: "you cannot hold this" and "you fold this" are different
- * facts and must not render the same.
+ * A class holds up to 12 combos and the board may block some, so a cell averages
+ * over the combos still POSSIBLE and a fully blocked class is drawn as ABSENT
+ * rather than as a zero row: "you cannot hold this" and "you fold this" must not
+ * render the same.
  *
- * Averaging is unweighted across surviving combos. That is right here because
- * every combo of a class is equally likely a priori; it would be wrong the
- * moment a range weight enters, and that is the line where this stops being a
- * display concern.
+ * Averaging is unweighted, which is right because every combo of a class is
+ * equally likely a priori. It would be wrong the moment a range weight enters, and
+ * that is where this stops being a display concern.
  */
 
 const RANKS = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"] as const;

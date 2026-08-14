@@ -5,25 +5,8 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Activity, Grid3x3, LayoutDashboard, Rocket, ScrollText, Split } from "lucide-react";
 
 /**
- * Six destinations, one per SUBJECT.
- *
- * This list used to be the CLI's `COMMANDS` tuple in three groups, on the
- * reasoning that someone who knows one surface then knows where to look on the
- * other. That is a good property for a REFERENCE and the wrong organising idea
- * for a console: the command line is organised by what you can DO because argv
- * offers no other structure, and a screen does. It reached fourteen items
- * because every new command arrived with a page of its own, and nothing ever
- * said that was a decision.
- *
- * The test each survivor passed: is this a place you GO, or a follow-up you
- * arrive at? Seven of the fourteen were all "read the record", and answering
- * one question crossed three of them. A task log is a place you go — "why did
- * that die" is a question people start with. An eval is not: it belongs to the
- * run it scored, which is where it now lives.
- *
- * Ungrouped, because six items do not need headings. The three group labels
- * were carrying the old structure more than they were helping anyone find
- * anything.
+ * Six destinations, one per SUBJECT -- see `routes/tree.tsx` for the test each one
+ * passed. Ungrouped, because six items do not need headings.
  */
 const NAV = [
   { to: "/", label: "Now", icon: LayoutDashboard },

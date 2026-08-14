@@ -1,26 +1,15 @@
 /**
  * The payload types, named. Every one of them is GENERATED.
  *
- * This file is the only hand-written thing in the contract chain, and it
- * declares no shapes -- it gives the generated types the names the UI uses, so
- * a component imports `Pool` rather than
- * `components["schemas"]["Pool"]`. Adding a field to a payload does not touch
- * this file; adding a whole new payload adds one line.
+ * The only hand-written file in the contract chain, and it declares no shapes --
+ * it gives the generated types the names the UI uses, so a component imports
+ * `Pool` rather than `components["schemas"]["Pool"]`. Adding a field to a payload
+ * does not touch this file; adding a whole new payload adds one line.
  *
- * What this replaced
- * ------------------
- * `schemas.ts`: 682 lines of hand-written Zod, kept in sync with Python by
- * reading a fixture generated from a Python test. It opened by claiming it was
- * "ONE declaration rather than two" and was in fact the second declaration of
- * every payload in the system. It also disagreed with the server about `cancel`
- * -- it required `job`/`task` where the command returns `job_id`/`task_id` -- so
- * the console cancelled the task and then reported that it had failed. That went
- * unnoticed because the list of schemas checked against the fixture was
- * hand-maintained too, and never named `cancel`.
- *
- * The chain now: `contract.py` declares → FastAPI exports `openapi.json` (a
- * Python test fails if it is stale) → `openapi-typescript` generates
- * `types.gen.ts` (`npm run build` regenerates it every time) → this names them.
+ * The chain: `contract.py` declares -> FastAPI exports `openapi.json` (a Python
+ * test fails if it is stale) -> `openapi-typescript` generates `types.gen.ts`
+ * (`npm run build` regenerates it every time) -> this names them. Never hand-write
+ * a schema here.
  */
 import type { components } from "./types.gen";
 

@@ -10,33 +10,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /**
  * Sit down against the blueprint, one hand at a time.
  *
- * What this page is FOR is finding spots where the bot does something strange —
- * and the fastest way there is a human, who explores far off the distribution
- * self-play ever reached. Which is also why the untrained count is on screen
- * throughout rather than hidden in a detail view: off that distribution the bot
- * plays uniform-random because it has no strategy, and a player who cannot see
- * that will read it as a bad blueprint instead of an unvisited node.
+ * For finding spots where the bot does something strange -- the fastest way there
+ * is a human, who explores far off the distribution self-play ever reached. Which
+ * is why the untrained count stays on screen: off that distribution the bot plays
+ * uniform-random for want of a strategy, and a player who cannot see that reads it
+ * as a bad blueprint rather than an unvisited node.
  *
- * There is deliberately NO running win-rate. Head-to-head needs ~46k deals to
- * resolve ~100 mbb and the blueprint is under-trained, so a counter here would
- * invite exactly the conclusion the numbers cannot support. Per-hand chips are
- * shown because they are a fact about the hand; a total would be a claim about
- * the solver.
+ * Deliberately NO running win-rate. Head-to-head needs ~46k deals to resolve
+ * ~100 mbb and the blueprint is under-trained, so a counter would invite exactly
+ * the conclusion the numbers cannot support. Per-hand chips are a fact about the
+ * hand; a total would be a claim about the solver.
  *
- * Why it is a table now
- * ---------------------
- * It was three labelled rows of two-character cards — `board  As Kd 7c` — with
- * the pot and the stacks as one line of text above them. Everything on it was
- * legible and nothing on it was READABLE: whose turn it was, which seat had the
- * button, and whether the bot had acted since you last looked were all facts
- * you assembled by reading, on a page whose whole value is how many hands you
- * get through. Seats face each other, the board is between them, the cards are
- * cards, and the seat to act is the one that is lit.
- *
- * The keys matter for the same reason. Finding a strange spot is a numbers
- * game, and a hand costs two clicks and a mouse trip to a button whose position
- * moves with the size of the menu. Every action is a digit in menu order, the
- * common ones are also their own initial, and space deals the next hand.
+ * Every action is a digit in menu order, the common ones are also their own
+ * initial, and space deals the next hand -- finding a strange spot is a numbers
+ * game, and a button whose position moves with the size of the menu is a mouse
+ * trip per hand.
  */
 export function Play() {
   const [hand, setHand] = useState<Hand | null>(null);

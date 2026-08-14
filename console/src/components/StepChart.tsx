@@ -12,30 +12,15 @@ import {
  * Concurrency over time, drawn as the step function it is.
  *
  * `stepAfter` is the honest shape and the only part of this that is not
- * negotiable: a point means "this many tasks were running from here until the
- * next change", which is a step, not a ramp. A smoothed line would draw node
- * counts that never existed — fractional nodes, between two integers.
+ * negotiable: a point means "this many tasks were running from here until the next
+ * change", which is a step, not a ramp. A smoothed line would draw node counts
+ * that never existed -- fractional nodes, between two integers.
  *
- * Why this is Recharts now
- * -----------------------
- * It was uPlot, on a stated argument that turned out to describe code that does
- * not exist: *"the pool is sampled every 15s and kept for 30 days: 172,800
- * points, and Recharts renders one DOM node per point."* There is no sampling.
- * `cost/node_time.timeline` is an EVENT SWEEP — exactly two events per task
- * span, start and end, collapsed where they coincide — so the series is about
- * twice the task count. Hundreds of points, not six figures, and SVG is
- * completely comfortable there.
- *
- * With the arithmetic gone, what was left was one canvas chart needing
- * machinery no SVG chart needs: `lib/theme.ts` existed solely to read CSS
- * custom properties into JS, because a canvas cannot resolve `var(--fg-faint)`
- * and silently falls back to black — which is how these axes once rendered
- * black on a near-black panel. Plus 24 lines of `index.css` overriding uPlot's
- * defaults. That is ongoing complexity for one chart, and it is why the console
- * carried two charting libraries for one page each.
- *
- * If a genuinely long series ever arrives — a sampled pool metric, say — this is
- * the right place to reach for a canvas again. The premise just has to be true.
+ * The series is short. `cost/node_time.timeline` is an EVENT SWEEP, two events per
+ * task span collapsed where they coincide, so it is about twice the task count --
+ * hundreds of points, which SVG is comfortable with. If a genuinely long series
+ * ever arrives, a sampled pool metric say, that is when to reach for a canvas
+ * again.
  */
 export function StepChart({
   times,
