@@ -86,6 +86,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the solver. Changes resistance, never the strategy a row plays.",
     )
     parser.add_argument(
+        "--equity-prior",
+        type=int,
+        default=0,
+        dest="equity_prior_weight",
+        help="Seed a FRESH run with a strength-aware opening guess instead of "
+        "uniform: strong buckets lean to betting and raising, weak ones to "
+        "checking and folding. Needs no source run, so it applies to a cold "
+        "start -- which is where it matters, since the rows it helps are the "
+        "ones training has not reached. 0 disables.",
+    )
+    parser.add_argument(
         "--run",
         default=None,
         help="Continue an EXISTING run instead of starting one. --iterations is an "
@@ -126,6 +137,7 @@ def run(args: argparse.Namespace) -> StaticTrainingPayload:
         warm_start_at=args.warm_start_at,
         progress_file=Path(args.progress_file) if args.progress_file else None,
         warm_start_shape=args.warm_start_shape,
+        equity_prior_weight=args.equity_prior_weight,
     )
     return StaticTrainingPayload(**out.model_dump())
 

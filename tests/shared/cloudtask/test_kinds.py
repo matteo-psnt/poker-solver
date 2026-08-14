@@ -61,6 +61,7 @@ def _plan(**kwargs):
         "warm_start_weight": 0,
         "warm_start_at": 0,
         "warm_start_shape": "",
+        "equity_prior_weight": 0,
     }
     return SimpleNamespace(**(base | kwargs))
 

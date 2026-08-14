@@ -144,6 +144,7 @@ class TaskSpec:
     warm_start_weight: int = 0
     warm_start_at: int = 0
     warm_start_shape: str = ""
+    equity_prior_weight: int = 0
     force_publish: bool = False
     # Stamped by `dispatch.stage_and_queue`, never by a caller: the node has no
     # `.git` (the snapshot excludes it), so the submitting machine is the only

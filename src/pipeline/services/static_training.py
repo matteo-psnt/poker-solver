@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from src.core.actions.action_model import ActionModel
 from src.pipeline import blueprint
 from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
-from src.pipeline.services import warm_start
+from src.pipeline.services import equity_prior, warm_start
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import records, run_events
@@ -77,6 +77,7 @@ def train_static(
     warm_start_at: int | None = None,
     progress_file: Path | None = None,
     warm_start_shape: str = "flat",
+    equity_prior_weight: int = 0,
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
 
@@ -190,6 +191,22 @@ def train_static(
     # resuming one that never got seeded is not a smaller version of the
     # experiment -- it is a different arm wearing its label.
     seeded = False
+    if equity_prior_weight and warm_start_from is not None:
+        raise ValueError(
+            "--equity-prior and --warm-start-from are alternative seeds; passing both "
+            "would leave which one the run actually carries decided by ordering."
+        )
+    if equity_prior_weight and not resuming:
+        equity_prior.seed_checkpoint(
+            config,
+            run_dir=run_dir,
+            weight=equity_prior_weight,
+            abstraction_hash=tracker.metadata.card_abstraction_hash,
+        )
+        (run_dir / warm_start.SEEDED_MARKER).write_text(
+            f"equity-prior weight={equity_prior_weight}\n"
+        )
+        seeded = True
     if (
         warm_start_from is not None
         and resuming
