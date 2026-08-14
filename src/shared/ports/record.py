@@ -84,8 +84,14 @@ class EvalSink(Protocol):
     holds the same line one layer down.
     """
 
-    def scored(self, eval_id: str, document: Mapping[str, Any], tier_digest: str) -> None:
+    def scored(
+        self, eval_id: str, run_id: str, document: Mapping[str, Any], tier_digest: str
+    ) -> None:
         """Store one evaluation.
+
+        `run_id` is the RUN DIRECTORY'S name, which is what the importer reads
+        and therefore the answer both writers must agree on -- not the document's
+        own field, which is written from a different source.
 
         `tier_digest` is computed by the CALLER, from
         `pipeline.evaluation.ledger.tiers` -- the one implementation of which

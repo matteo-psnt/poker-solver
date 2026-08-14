@@ -21,18 +21,27 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def eval_values(eval_id: str, document: Mapping[str, Any], tier_digest: str) -> dict[str, Any]:
+def eval_values(
+    eval_id: str, run_id: str, document: Mapping[str, Any], tier_digest: str
+) -> dict[str, Any]:
     """One evaluation document as the columns `evals` holds.
 
     Shared by the live writer and `backfill-record`, so an eval that arrives
     live and the same eval re-imported from the share are the same row -- which
     is exactly what `--verify` compares.
+
+    `run_id` is PASSED rather than read from the document. Both callers know it
+    from the directory the document lives in, and that is the authoritative
+    answer; taking it from the payload instead would have let the two writers
+    disagree about which run an eval belongs to on any document where the two
+    differ. They agree on all 2,139 rows today, which is the data agreeing, not
+    the code.
     """
     results = document.get("results") or {}
     knobs = document.get("knobs") or {}
     return {
         "eval_id": eval_id,
-        "run_id": document.get("run_id"),
+        "run_id": run_id,
         "checkpoint_iteration": document.get("checkpoint_iteration"),
         "method": str(document.get("method") or document.get("estimator") or ""),
         # `base_seed`, which is where the seed actually lives -- not `board_seed`.
@@ -53,7 +62,9 @@ class PostgresEvalSink:
     def __init__(self, engine: Any) -> None:
         self._engine = engine
 
-    def scored(self, eval_id: str, document: Mapping[str, Any], tier_digest: str) -> None:
+    def scored(
+        self, eval_id: str, run_id: str, document: Mapping[str, Any], tier_digest: str
+    ) -> None:
         """Store one evaluation, or log and carry on.
 
         `eval_id` is the document's slug -- timestamp, knob hash and a random
@@ -65,7 +76,7 @@ class PostgresEvalSink:
             with self._engine.begin() as connection:
                 connection.execute(
                     insert(models.Eval)
-                    .values(eval_values(eval_id, document, tier_digest))
+                    .values(eval_values(eval_id, run_id, document, tier_digest))
                     .on_conflict_do_nothing(index_elements=["eval_id"])
                 )
         except Exception:
