@@ -372,9 +372,9 @@ class TaskRow(BaseModel):
     against another.
 
     The node's WRITER stays dicts, deliberately: it runs under
-    :mod:`src.shared.cloudtask` on the pinned image's 3.10 ``python3`` before
-    ``uv sync``, where pydantic does not exist. This is the reading half, and
-    constructing it from `_row`'s output is what binds the two.
+    :mod:`src.shared.cloudtask` before ``uv sync``, where pydantic does not
+    exist yet. This is the reading half, and constructing it from `_row`'s
+    output is what binds the two.
     """
 
     task_id: str
@@ -427,8 +427,8 @@ def _row(
 
     Still a dict here rather than a :class:`TaskRow`, and that is not an
     oversight: `kinds.remaining` reads these rows and lives under
-    ``cloudtask/``, which is held to the node's stdlib-only 3.10 floor and
-    cannot be handed a model. :func:`read_tasks` constructs the model once the
+    ``cloudtask/``, which is held to the node's stdlib-only rule and cannot be
+    handed a model. :func:`read_tasks` constructs the model once the
     estimate is in, and that construction is what checks these keys.
     """
     start, exit_record = sources.get("start", {}), sources.get("exit", {})
@@ -482,7 +482,7 @@ def read_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
 
     The rows are assembled as dicts and become :class:`TaskRow` at the end. That
     ordering is forced: `kinds.remaining` needs every row to estimate any one of
-    them, and it runs under the node's 3.10 floor where a model cannot go. The
+    them, and it runs under the node's stdlib-only rule where a model cannot go. The
     construction is the check -- pydantic rejects a key `_row` invented and a
     field it stopped emitting, which is the binding this shape never had.
     """

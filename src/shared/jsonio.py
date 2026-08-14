@@ -14,8 +14,8 @@ def json_default(obj: Any) -> Any:
     swallows anything -- a model would fall through to ``str(obj)`` and reach the
     browser as a repr, which parses as a string and fails nowhere. And duck
     typed, because this module is inside the node's fail-closed import closure:
-    it runs on the pinned image's 3.10 ``python3`` before ``uv sync``, where
-    pydantic does not exist. ``model_dump`` recurses, so one hop is enough
+    it runs before ``uv sync``, where pydantic does not exist yet.
+    ``model_dump`` recurses, so one hop is enough
     however deeply models are nested.
     """
     dump = getattr(obj, "model_dump", None)

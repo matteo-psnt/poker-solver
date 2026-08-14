@@ -17,7 +17,8 @@ The attribute names are strings on purpose: this module is imported by both
 ends, and ``shared -> interfaces`` is forbidden, so it can name ``TaskSpec`` no
 more than it can import it.
 
-Stdlib only, and the 3.10 floor: the node imports this before ``uv sync``.
+Stdlib only: the node imports this before ``uv sync``, so nothing third-party
+exists yet.
 """
 
 from __future__ import annotations

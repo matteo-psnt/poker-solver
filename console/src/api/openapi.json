@@ -3968,7 +3968,7 @@
         "type": "object"
       },
       "TaskRow": {
-        "description": "One task-attempt, as the flat record every surface reads.\n\nTHE declaration of this shape, and the only one. It used to exist four\ntimes -- as `_row`'s dict here, as `contract.TaskRow`, as a hand-written\nfixture, and again in TypeScript -- with nothing checking any pair of them\nagainst another.\n\nThe node's WRITER stays dicts, deliberately: it runs under\n:mod:`src.shared.cloudtask` on the pinned image's 3.10 ``python3`` before\n``uv sync``, where pydantic does not exist. This is the reading half, and\nconstructing it from `_row`'s output is what binds the two.",
+        "description": "One task-attempt, as the flat record every surface reads.\n\nTHE declaration of this shape, and the only one. It used to exist four\ntimes -- as `_row`'s dict here, as `contract.TaskRow`, as a hand-written\nfixture, and again in TypeScript -- with nothing checking any pair of them\nagainst another.\n\nThe node's WRITER stays dicts, deliberately: it runs under\n:mod:`src.shared.cloudtask` before ``uv sync``, where pydantic does not\nexist yet. This is the reading half, and constructing it from `_row`'s\noutput is what binds the two.",
         "properties": {
           "attempt": {
             "title": "Attempt",

@@ -67,9 +67,12 @@ an ETA plus a go-ahead check before anything multi-hour.
 
 ## Code style
 
-Python 3.13+ (ruff `target-version = "py313"`). The one exception is
-`src/shared/cloudtask/`, which the node imports on the pinned image's system
-`python3` — 3.10 — before `uv sync`; two tests enforce that floor.
+Python 3.13+ (ruff `target-version = "py313"`). `src/shared/cloudtask/` is
+**stdlib only** — the node imports it BEFORE `uv sync`, so nothing third-party
+exists yet — but it is on the same 3.13 as everything else: the pool's start task
+installs the interpreter (`uv python install 3.13`, `infra/main.tf`) rather than
+using the image's `python3`. There is no old-language floor to code around; two
+tests enforce the stdlib rule.
 
 Ruff enforces formatting and import sorting — don't hand-police style. What is
 *not* enforced by tooling:
