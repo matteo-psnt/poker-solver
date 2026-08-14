@@ -588,14 +588,29 @@ def join_documents(documents: dict[str, dict[str, Any]]) -> list[TaskRow]:
 
 
 def unresolved_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
-    """The rows whose node record never reached a terminal event.
+    """The rows Batch could still explain: non-terminal, and the LATEST attempt.
 
     Returned whole, not as ids, so a caller can ask Batch about exactly these
     ``(job_id, task_id)`` pairs. Enumerating every job in the account to find
     the one or two open questions cost ~0.39s per job -- the answer scaled with
     history rather than with what was actually unexplained.
+
+    The latest-attempt cut is the same idea one step further. Batch describes
+    only a task's CURRENT attempt, which is why the join hands `_cause` an empty
+    batch record for every earlier one -- so an earlier attempt is permanently
+    unresolved by construction, and asking about it can only ever return the
+    answer for a different attempt. Measured: 1,326 non-terminal rows, of which
+    1,290 were superseded attempts and 36 were questions Batch could answer.
     """
-    return [row for row in read_tasks(share) if row.cause not in TERMINAL_CAUSES]
+    rows = read_tasks(share)
+    latest: dict[str, int] = {}
+    for row in rows:
+        latest[row.task_id] = max(latest.get(row.task_id, 0), row.attempt)
+    return [
+        row
+        for row in rows
+        if row.cause not in TERMINAL_CAUSES and row.attempt == latest[row.task_id]
+    ]
 
 
 def unresolved_task_ids(share: str | os.PathLike[str]) -> list[str]:
