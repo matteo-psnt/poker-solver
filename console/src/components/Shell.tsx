@@ -1,4 +1,5 @@
 import { useJobs, usePool } from "@/api/queries";
+import type { Phase } from "@/api/types";
 import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
@@ -24,6 +25,9 @@ const NAV = [
  * you are, so they are never a click away. They reuse the same queries the
  * Overview panels use -- TanStack Query dedupes them, so this costs nothing.
  */
+/** Phases that mean a task is occupying a node or waiting for one. */
+const IN_FLIGHT = new Set<Phase>(["running", "starting", "queued"]);
+
 export function Shell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const pool = usePool();
@@ -37,7 +41,11 @@ export function Shell() {
     jobs.data?.jobs?.reduce(
       (total, job) =>
         total +
-        job.tasks.filter((t) => ["running", "active", "preparing"].includes(state(t.state))).length,
+        // `phase`, not a fourth copy of Batch's enum spelling. This file had a
+        // private `state()` helper duplicating `shortState` under another name,
+        // which is why it survived that deletion: nothing grepping for the
+        // callers of `shortState` could see it.
+        job.tasks.filter((t) => IN_FLIGHT.has(t.phase)).length,
       0,
     ) ?? null;
 
@@ -92,5 +100,3 @@ export function Shell() {
     </div>
   );
 }
-
-const state = (raw: string | null) => (raw ?? "").split(".").pop()?.toLowerCase() ?? "";

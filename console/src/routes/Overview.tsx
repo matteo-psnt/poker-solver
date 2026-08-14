@@ -75,7 +75,7 @@ export function Overview() {
                 poolData.target_dedicated_nodes,
               )} wanted`}
             />
-            <Stat label="allocation" value={poolData.allocation_state?.split(".").pop() ?? "—"} />
+            <Stat label="allocation" value={poolData.allocation_state ?? "—"} />
             <Stat label="vm size" value={poolData.vm_size ?? "—"} mono />
             {poolData.resize_errors.map((e) => (
               <p key={e.code} className="col-span-full font-mono text-[12px] text-red-400">
