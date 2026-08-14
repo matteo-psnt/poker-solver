@@ -32,9 +32,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from azure.identity import AzureCliCredential
 from pydantic import BaseModel
 
+from src.interfaces.cloud import credential
 from src.shared import cache
 
 COST_MANAGEMENT_API = "2023-03-01"
@@ -181,7 +181,7 @@ def _query(subscription_id: str, since: dt.date, until: dt.date) -> dict[str, An
     distinguish "complete through today" from "complete through Tuesday", and
     the difference is the whole freshness caveat.
     """
-    token = AzureCliCredential().get_token(SCOPE).token
+    token = credential.shared().get_token(SCOPE).token
     url = (
         f"{ARM}/subscriptions/{subscription_id}"
         f"/providers/Microsoft.CostManagement/query?api-version={COST_MANAGEMENT_API}"
