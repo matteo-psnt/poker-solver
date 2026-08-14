@@ -1,7 +1,7 @@
 """Deterministic filesystem paths for precomputed combo abstractions.
 
-Kept in the pipeline layer (not the interactive CLI) so headless and cloud
-precompute paths compute the same directory names the resolver scans for.
+In the pipeline layer so headless and cloud precompute compute the same
+directory names the resolver scans for.
 """
 
 from __future__ import annotations

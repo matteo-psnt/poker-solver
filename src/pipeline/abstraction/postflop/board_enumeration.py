@@ -15,8 +15,7 @@ This module provides:
 
 Enumeration results are cached on disk — the river's 2.6M raw boards take
 ~1 min to canonicalize but load from cache in under a second. The cache lives
-OUTSIDE the working tree (see :mod:`src.shared.cache`); it used to be
-``data/cache/canonical_boards`` and was the last thing recreating ``data/``.
+OUTSIDE the working tree (see :mod:`src.shared.cache`).
 """
 
 import logging
