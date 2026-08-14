@@ -189,19 +189,16 @@ class InfoSet:
         *,
         allocate_arrays: bool = True,
     ):
-        """
-        Initialize information set.
+        """Initialize an information set.
 
-        Args:
-            key: InfoSetKey identifier, or None for tree-indexed infosets.
-                ``StaticArrayStorage`` identifies an infoset by its
-                ``(node_id, bucket)`` position in the betting tree and never
-                builds a key — the string hashing a key exists to support is the
-                cost that design removes. Only ``__str__``/``__repr__`` read it.
-            legal_actions: List of legal actions at this infoset
-            allocate_arrays: Skip regret/strategy allocation when the caller
-                immediately replaces them with storage-backed views (this
-                constructor runs once per node visit in traversal).
+        ``key`` is None for tree-indexed infosets: ``StaticArrayStorage`` identifies one
+        by its ``(node_id, bucket)`` position and never builds a key -- the string
+        hashing it would need is the cost that design removes. Only ``__str__`` and
+        ``__repr__`` read it.
+
+        ``allocate_arrays=False`` skips regret/strategy allocation for a caller that
+        immediately replaces them with storage-backed views; this constructor runs once
+        per node visit in traversal.
         """
         self.key = key
         self.legal_actions = legal_actions
@@ -266,54 +263,24 @@ class InfoSet:
             self.cumulative_utility += value
 
     def get_strategy(self) -> np.ndarray:
-        """
-        Compute current strategy via regret matching.
-
-        The regret matching algorithm:
-        1. Take positive regrets (floor at 0)
-        2. Normalize to sum to 1
-        3. If all regrets <= 0, use uniform strategy
-
-        Returns:
-            Probability distribution over actions (sums to 1)
+        """Current strategy by regret matching: positive regrets normalised to sum to 1,
+        uniform when none are positive.
         """
         # Use Numba-optimized regret matching (or fallback)
         return regret_matching(self.regrets)
 
     def get_average_strategy(self) -> np.ndarray:
-        """
-        Compute average strategy over all iterations.
-
-        The average strategy converges to Nash equilibrium.
-
-        Returns:
-            Probability distribution over actions (sums to 1)
-        """
+        """The average strategy over all iterations -- what converges to Nash."""
         # Use Numba-optimized average strategy computation (or fallback)
         return average_strategy(self.strategy_sum)
 
     def get_filtered_strategy(
         self, valid_indices: list[int] | None = None, use_average: bool = True
     ) -> np.ndarray:
-        """
-        Get strategy filtered to valid actions and normalized.
+        """Strategy over ``valid_indices`` only, renormalised to sum to 1.
 
-        This method replaces the manual filter-normalize pattern that was
-        duplicated across mccfr.py, exploitability.py, and head_to_head.py.
-
-        Args:
-            valid_indices: Indices of valid actions to filter to. If None, returns full strategy.
-            use_average: If True, use average strategy. If False, use current strategy.
-
-        Returns:
-            Normalized probability distribution over valid actions (float64, sums to 1.0)
-
-        Examples:
-            # Get full average strategy
-            strategy = infoset.get_filtered_strategy()
-
-            # Get current strategy for specific actions
-            strategy = infoset.get_filtered_strategy(valid_indices=[0, 2, 3], use_average=False)
+        ``valid_indices=None`` returns the full strategy. ``use_average`` selects the
+        average strategy over the current one.
         """
         # Fast path: no filtering requested
         if valid_indices is None:
@@ -332,12 +299,7 @@ class InfoSet:
         return regret_matching(self.regrets[valid_indices])
 
     def get_average_utility(self) -> float:
-        """
-        Compute average utility (expected value) at this infoset.
-
-        Returns:
-            Average utility over all iterations (0 if never reached)
-        """
+        """Average utility at this infoset over all iterations; 0 if never reached."""
         if self.reach_count > 0:
             return self.cumulative_utility / self.reach_count
         return 0.0
@@ -352,23 +314,15 @@ class InfoSet:
         dcfr_alpha: float = 1.5,
         dcfr_beta: float = 0.0,
     ) -> None:
-        """
-        Update cumulative regret for one action.
+        """Update cumulative regret for one action.
 
-        Thin single-action delegate to :func:`apply_regret_updates` — the one
-        implementation of the CFR/CFR+/linear/DCFR regret math. With
-        ``node_utility=0`` and ``opponent_reach=1`` the kernel's weighted
-        regret reduces exactly to ``regret`` ((r - 0.0) * 1.0 == r), so this
-        adds no math of its own.
+        Thin single-action delegate to :func:`apply_regret_updates` -- the one
+        implementation of the CFR/CFR+/linear/DCFR regret math. With ``node_utility=0``
+        and ``opponent_reach=1`` the kernel's weighted regret reduces exactly to
+        ``regret`` ((r - 0.0) * 1.0 == r), so this adds no math of its own.
 
-        Args:
-            action_idx: Index of action in legal_actions
-            regret: Already-weighted regret value to add (can be negative)
-            cfr_plus: If True, floor regrets at 0 (CFR+)
-            iteration: Current iteration (for linear/DCFR weighting)
-            iteration_weighting: One of {'none', 'linear', 'dcfr'}.
-            dcfr_alpha: Positive regret discount exponent (DCFR)
-            dcfr_beta: Negative regret discount exponent (DCFR)
+        ``regret`` is already weighted and may be negative; ``iteration_weighting`` is
+        one of {'none', 'linear', 'dcfr'}.
         """
         if action_idx < 0 or action_idx >= self.num_actions:
             raise ValueError(f"Invalid action index: {action_idx}")

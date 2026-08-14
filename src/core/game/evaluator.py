@@ -43,16 +43,7 @@ class HandEvaluator:
         return HandEvaluator._MAX_RANK - rank
 
     def evaluate(self, hole_cards: tuple[Card, Card], board: tuple[Card, ...]) -> int:
-        """
-        Evaluate hand strength.
-
-        Args:
-            hole_cards: Player's two hole cards
-            board: Community cards (3-5 cards)
-
-        Returns:
-            Hand rank where lower values are stronger
-        """
+        """Hand strength as a rank, where LOWER is stronger."""
         if len(board) < 3:
             raise ValueError("Board must have at least 3 cards for evaluation")
         if len(hole_cards) != 2:
@@ -66,15 +57,7 @@ class HandEvaluator:
         return self._MAX_RANK - eval7_rank
 
     def get_rank_class(self, rank: int) -> int:
-        """
-        Get hand class (1=Straight Flush, 2=Quads, ..., 9=High Card).
-
-        Args:
-            rank: Hand rank from evaluate()
-
-        Returns:
-            Hand class (1-9)
-        """
+        """Hand class: 1=Straight Flush, 2=Quads, ..., 9=High Card."""
         hand_type = eval7.handtype(self._normalize_rank(rank))
         try:
             return _HAND_TYPE_TO_CLASS[hand_type]
@@ -82,30 +65,14 @@ class HandEvaluator:
             raise ValueError(f"Unknown hand type: {hand_type}") from exc
 
     def class_to_string(self, class_int: int) -> str:
-        """
-        Convert hand class to human-readable string.
-
-        Args:
-            class_int: Hand class (1-9)
-
-        Returns:
-            Hand class name (e.g., "Straight Flush", "Pair")
-        """
+        """Hand class as a name -- "Straight Flush", "Pair"."""
         try:
             return _CLASS_TO_HAND_TYPE[class_int]
         except KeyError as exc:
             raise ValueError(f"Unknown hand class: {class_int}") from exc
 
     def rank_to_string(self, rank: int) -> str:
-        """
-        Get human-readable hand description.
-
-        Args:
-            rank: Hand rank from evaluate()
-
-        Returns:
-            Hand description with class
-        """
+        """A rank from :meth:`evaluate` as a human-readable description."""
         hand_class = self.get_rank_class(rank)
         class_str = self.class_to_string(hand_class)
         rank_display = self._normalize_rank(rank)
@@ -117,17 +84,7 @@ class HandEvaluator:
         hole_cards2: tuple[Card, Card],
         board: tuple[Card, ...],
     ) -> int:
-        """
-        Compare two hands on the same board.
-
-        Args:
-            hole_cards1: Player 1's hole cards
-            hole_cards2: Player 2's hole cards
-            board: Community cards
-
-        Returns:
-            -1 if hand1 wins, 1 if hand2 wins, 0 if tie
-        """
+        """Compare two hands on one board: -1 if the first wins, 1 if the second, 0 for a tie."""
         rank1 = self.evaluate(hole_cards1, board)
         rank2 = self.evaluate(hole_cards2, board)
 
@@ -142,17 +99,7 @@ class HandEvaluator:
         hole_cards2: tuple[Card, Card],
         board: tuple[Card, ...],
     ) -> bool:
-        """
-        Check if hand1 beats hand2.
-
-        Args:
-            hole_cards1: First hand
-            hole_cards2: Second hand
-            board: Community cards
-
-        Returns:
-            True if hand1 wins
-        """
+        """Whether the first hand beats the second on this board."""
         return self.compare_hands(hole_cards1, hole_cards2, board) == -1
 
 

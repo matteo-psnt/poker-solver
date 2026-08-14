@@ -79,12 +79,7 @@ class Card:
     """
 
     def __init__(self, eval7_card: eval7.Card):
-        """
-        Initialize from eval7.Card object.
-
-        Args:
-            eval7_card: eval7.Card instance (use Card.new() to create)
-        """
+        """Initialize from an ``eval7.Card`` -- use :meth:`new` instead."""
         self._card = eval7_card
         self._hash: int | None = None  # Cache hash value for performance
 
@@ -107,19 +102,10 @@ class Card:
 
     @classmethod
     def new(cls, card_str: str) -> Card:
-        """
-        Create a card from string representation (e.g., 'As', 'Kh', '2d').
+        """A card from its string, e.g. 'As', 'Kh', '2d'.
 
-        Cards are cached - calling this multiple times with the same string
-        returns the same Card object for performance.
-
-        Args:
-            card_str: Two-character string (rank + suit)
-                     Ranks: '2'-'9', 'T', 'J', 'Q', 'K', 'A'
-                     Suits: 's', 'h', 'd', 'c'
-
-        Returns:
-            Card instance (cached)
+        Ranks are '2'-'9', 'T', 'J', 'Q', 'K', 'A'; suits are 's', 'h', 'd', 'c'.
+        Cached, so the same string returns the same object.
         """
         return cls._new_cached(card_str)
 
@@ -130,15 +116,7 @@ class Card:
 
     @classmethod
     def get_full_deck(cls) -> list[Card]:
-        """
-        Get a full 52-card deck.
-
-        The deck is cached for performance. Returns a copy to prevent
-        accidental mutation of the cached deck.
-
-        Returns:
-            List of all 52 cards
-        """
+        """A full 52-card deck. Cached, and copied so a caller cannot mutate the cache."""
         return list(cls._full_deck_cached())
 
     @classmethod
@@ -201,25 +179,8 @@ FULL_DECK: tuple[Card, ...] = tuple(Card.get_full_deck())
 
 @dataclass(frozen=True, slots=True)
 class GameState:
-    """
-    Immutable game state for Heads-Up No-Limit Hold'em.
-
-    This represents a complete snapshot of the game at any point,
-    including all public and private information.
-
-    Attributes:
-        street: Current betting round
-        pot: Total chips in the pot
-        stacks: Remaining chips for each player (player0, player1)
-        board: Community cards (empty on preflop)
-        hole_cards: Private cards for each player
-        betting_history: Chronological sequence of actions this hand
-        button_position: Which player is on the button (0 or 1)
-        current_player: Which player acts next (0 or 1)
-        is_terminal: Whether this state is terminal (hand over)
-        to_call: Amount current player needs to call (0 if can check)
-        last_aggressor: Player who last bet/raised (None if no betting yet)
-        _skip_validation: Skip validation (for CFR internal use)
+    """Immutable game state for Heads-Up No-Limit Hold'em: a complete snapshot,
+    public and private, at any point in a hand.
     """
 
     street: Street

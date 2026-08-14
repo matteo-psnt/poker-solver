@@ -54,13 +54,7 @@ EVAL7_RANK_TO_OUR_IDX = {
 
 @dataclass(frozen=True)
 class SuitMapping:
-    """
-    Mapping from real suits to canonical suit labels.
-
-    Attributes:
-        mapping: Dict mapping suit characters to canonical labels (0-3)
-        next_label: Next canonical label to assign for unseen suits
-    """
+    """Mapping from real suit characters to canonical labels 0-3."""
 
     mapping: dict[str, int]
     next_label: int
@@ -70,12 +64,7 @@ class SuitMapping:
         object.__setattr__(self, "next_label", next_label)
 
     def get_or_assign(self, suit: str) -> tuple[SuitMapping, int]:
-        """
-        Get canonical label for a suit, assigning a new one if needed.
-
-        Returns:
-            Tuple of (new SuitMapping, canonical label)
-        """
+        """The label for a suit, assigning a new one if unseen, with the mapping that results."""
         if suit in self.mapping:
             return self, self.mapping[suit]
 
@@ -94,13 +83,7 @@ class SuitMapping:
 
 @dataclass(frozen=True)
 class CanonicalCard:
-    """
-    A card in canonical form.
-
-    Attributes:
-        rank_idx: Rank index (0=A, 1=K, ..., 12=2)
-        suit_label: Canonical suit label (0-3)
-    """
+    """A card in canonical form: rank index (0=A ... 12=2) and suit label 0-3."""
 
     rank_idx: int
     suit_label: int
@@ -181,26 +164,15 @@ def _suit_labels(cards_info: list[tuple[int, str]]) -> dict[str, int]:
 def canonicalize_board(
     board: tuple[Card, ...], initial_mapping: SuitMapping | None = None
 ) -> tuple[tuple[CanonicalCard, ...], SuitMapping]:
-    """
-    Canonicalize a board under suit isomorphism.
+    """Canonicalize a board under suit isomorphism, with the mapping it used.
 
-    The canonical form is the lexicographically smallest suit relabelling, so
-    boards differing only in which suits are used share one form.
-    :func:`_suit_labels` derives that relabelling directly; the cards are then
-    emitted in ``(rank, label)`` order.
+    The canonical form is the lexicographically smallest suit relabelling, so boards
+    differing only in which suits are used share one form -- [T♠ 9♥ 8♠] and
+    [T♥ 9♠ 8♥] both give [T₀ 9₁ 8₀]. :func:`_suit_labels` derives that relabelling
+    directly; the cards are then emitted in ``(rank, label)`` order.
 
-    Callers that only want the id — the runtime bucket lookup — should use
+    Callers that only want the id -- the runtime bucket lookup -- should use
     :func:`canonical_board_id`, which skips the ``CanonicalCard`` objects.
-
-    Args:
-        board: Tuple of Card objects
-        initial_mapping: Optional pre-existing suit mapping (typically None)
-
-    Returns:
-        Tuple of (canonical board, final suit mapping)
-
-    Example:
-        [T♠ 9♥ 8♠] and [T♥ 9♠ 8♥] both → ([T₀ 9₁ 8₀], ...)
     """
     if initial_mapping is not None and len(initial_mapping.mapping) > 0:
         # If we have an existing mapping, use the simple left-to-right approach
@@ -244,26 +216,11 @@ def _canonicalize_board_with_mapping(
 def canonicalize_hand(
     hole_cards: tuple[Card, Card], suit_mapping: SuitMapping
 ) -> tuple[CanonicalCard, CanonicalCard]:
-    """
-    Canonicalize a hand relative to an existing suit mapping.
+    """Canonicalize a hand against a mapping, ordered high to low.
 
-    The suit mapping typically comes from canonicalizing the board first.
-    New suits in the hand that aren't in the board mapping are assigned
-    the next available canonical label.
-
-    Args:
-        hole_cards: Tuple of two Card objects
-        suit_mapping: Suit mapping from board canonicalization
-
-    Returns:
-        Tuple of two CanonicalCard objects (ordered high to low)
-
-    Example:
-        Given mapping {♠:0, ♥:1} from board:
-        [A♠ K♠] → (A₀, K₀)
-        [A♥ K♥] → (A₁, K₁)
-        [A♦ K♦] → (A₂, K₂)  # ♦ gets label 2
-        [A♠ K♥] → (A₀, K₁)
+    The mapping typically comes from canonicalizing the board first. A suit not in
+    it is assigned the next available label, so given {♠:0, ♥:1} a [A♦ K♦] becomes
+    (A₂, K₂).
     """
     mapping = suit_mapping
     canonical_cards = []
@@ -288,17 +245,7 @@ def canonicalize_hand(
 
 
 def get_canonical_board_id(canonical_board: tuple[CanonicalCard, ...]) -> int:
-    """
-    Compute a unique integer ID for a canonical board.
-
-    This provides a compact representation for hashing/lookup.
-
-    Args:
-        canonical_board: Tuple of CanonicalCard objects
-
-    Returns:
-        Integer ID
-    """
+    """A unique integer id for a canonical board, for hashing and lookup."""
     # Each card: rank (0-12) + suit (0-3) = 13*4 = 52 possible values
     # But canonical suits are assigned in order, so actual space is smaller
     # Use simple polynomial hash
@@ -309,15 +256,7 @@ def get_canonical_board_id(canonical_board: tuple[CanonicalCard, ...]) -> int:
 
 
 def get_canonical_hand_id(canonical_hand: tuple[CanonicalCard, CanonicalCard]) -> int:
-    """
-    Compute a unique integer ID for a canonical hand.
-
-    Args:
-        canonical_hand: Tuple of two CanonicalCard objects
-
-    Returns:
-        Integer ID (0 to ~2703 for 2-card hands with 4 canonical suits)
-    """
+    """A unique integer id for a canonical hand: 0 to ~2703 for two cards."""
     c1, c2 = canonical_hand
     # Each card: rank (0-12) * 4 + suit (0-3)
     idx1 = c1.rank_idx * 4 + c1.suit_label
@@ -386,17 +325,9 @@ def canonical_hand_id(hole_cards: tuple[Card, Card], labels: dict[str, int]) -> 
 def hand_relative_to_board(
     hole_cards: tuple[Card, Card], board: tuple[Card, ...]
 ) -> tuple[tuple[int, int], tuple[int, int]]:
-    """
-    Get canonical hand representation relative to a board.
+    """The canonical ``(rank_idx, suit_label)`` pair for a hand on a board.
 
-    This is the core function for postflop bucket lookup.
-
-    Args:
-        hole_cards: Player's hole cards
-        board: Current board
-
-    Returns:
-        Tuple of (canonical_card_1, canonical_card_2) each as (rank_idx, suit_label)
+    The core of postflop bucket lookup.
     """
     _, suit_mapping = canonicalize_board(board)
     canonical_hand = canonicalize_hand(hole_cards, suit_mapping)
