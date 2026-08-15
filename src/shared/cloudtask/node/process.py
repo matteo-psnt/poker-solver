@@ -185,11 +185,11 @@ def run_guarded(
         except subprocess.TimeoutExpired:
             timed_out = True
             log(f"TIMEOUT after {timeout}s -- guard fired; published rungs are on the share")
-            _terminate(process)
+            terminate(process)
     except Killed:
         # The wrapper itself was signalled. Take the child down with it, then
         # let the exception carry the cause to the exit record.
-        _terminate(process)
+        terminate(process)
         raise
     finally:
         if profiler is not None:
@@ -223,9 +223,16 @@ def _pump(stream: IO[bytes] | None, log: TaskLogger) -> None:
         return
 
 
-def _terminate(process: subprocess.Popen[bytes]) -> None:
-    """TERM the whole group so the trainer's handlers can flush, KILL if it
-    will not go -- the case that motivated the guard ignored TERM."""
+def terminate(process: subprocess.Popen[bytes]) -> None:
+    """TERM the whole GROUP so the trainer's handlers can flush, KILL if it
+    will not go -- the case that motivated the guard ignored TERM.
+
+    Public because it is the only correct way to end a subprocess on a node and
+    there are two callers. `terminate()` alone reaches `uv` and leaves the
+    python it spawned running, holding the pipes -- which is a hang, not a slow
+    exit: `subprocess.run(capture_output=True, timeout=...)` then blocks
+    forever draining a pipe the grandchild still owns.
+    """
     _signal_group(process, signal.SIGTERM)
     try:
         process.wait(timeout=GRACE_SECONDS)

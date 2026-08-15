@@ -246,6 +246,6 @@ def main() -> int:
         # the state one line before it. Best effort here as everywhere: the
         # share already has it, and a task that survived its work must not die
         # copying the account of it.
-        mirror.publish(paths.share, task, cwd=paths.code, log=log)
+        mirror.publish(paths.share, task, cwd=paths.code, log=log, force=True)
         log.close()
     return code
