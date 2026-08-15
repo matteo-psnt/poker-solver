@@ -68,3 +68,30 @@ def test_both_filename_shapes_survive(tmp_path, monkeypatch):
 def test_a_missing_directory_refuses(tmp_path):
     with pytest.raises(CommandError, match="No such legs directory"):
         mirror_legs.run(_args(tmp_path / "nope"))
+
+
+def test_it_reads_only_this_tasks_files(tmp_path, monkeypatch):
+    """Scoped by NAME, not filtered after reading. `read_documents` parses every
+    file in the directory -- 13,600 of them on the share -- which cost a node
+    ~100s per call and put three and a half minutes on the end of a task whose
+    training took twenty seconds.
+    """
+    directory = _legs(tmp_path)
+    for i in range(50):
+        (directory / f"noise-{i}.1.start.json").write_text(json.dumps({"task_id": f"n{i}"}))
+
+    read: list = []
+    original = task_log.read_task_documents
+
+    def _watched(where, task):
+        read.append(task)
+        return original(where, task)
+
+    monkeypatch.setattr(task_log, "read_task_documents", _watched)
+    monkeypatch.setattr(mirror_legs.task_log, "read_task_documents", _watched)
+    monkeypatch.setattr(mirror_legs.connect, "engine_from_environment", lambda **_: object())
+    monkeypatch.setattr(mirror_legs.legs, "record_legs", lambda _e, rows: len(rows))
+
+    payload = mirror_legs.run(_args(directory))
+    assert read == ["task-a"], "it must ask for one task, not read the directory"
+    assert payload.documents == 2

@@ -58,15 +58,11 @@ def run(args: argparse.Namespace) -> MirrorLegsPayload:
     if not directory.is_dir():
         raise CommandError(f"No such legs directory: {directory}")
 
-    # `read_documents`, not a glob: `compact-legs` bundles sealed records into
-    # one file, and a glob over `*.json` sees the bundle and misses everything
-    # inside it.
-    documents = {
-        name: document
-        for name, document in task_log.read_documents(directory).items()
-        if name.startswith(f"{args.task}.")
-    }
-    rows = task_history.rows_from_documents(documents)
+    # SCOPED BY NAME. Reading the directory and filtering afterwards reads and
+    # parses all 13,600 documents on the share to find two, which cost a node
+    # ~100s per call and put three and a half minutes on the end of a task whose
+    # training took twenty seconds.
+    rows = task_history.rows_from_documents(task_log.read_task_documents(directory, args.task))
 
     engine = connect.engine_from_environment(pre_ping=True)
     if engine is None:
