@@ -106,3 +106,41 @@ class TestBucketStrength:
 
     def test_a_single_bucket_street_is_neutral(self):
         assert bucket_strength(0, 1) == 0.5
+
+
+class TestComposition:
+    """Equity and a trained prior answer different questions, so they add.
+
+    The equity guess covers rows nothing has reached; the trained prior covers
+    rows it has a real opinion about. Replacing one with the other would discard
+    the guess exactly where the trained prior is weakest, which is the overlap
+    worth keeping.
+    """
+
+    def test_adding_a_base_raises_every_row_it_touches(self):
+        from src.pipeline.services.warm_start import regrets_encoding
+
+        strategy = np.array([2.0, 1.0, 1.0, 3.0, 1.0])
+        starts, widths = np.array([0, 3]), np.array([3, 2])
+        alone, _ = regrets_encoding(strategy, starts, widths, 1000.0)
+        base = np.full(5, 100.0)
+        with_base, _ = regrets_encoding(strategy, starts, widths, 1000.0, base_regrets=base)
+        assert (with_base > alone).all()
+        assert with_base.sum() == pytest.approx(alone.sum() + base.sum())
+
+    def test_a_row_the_trained_prior_missed_still_carries_the_guess(self):
+        """The whole point of composing: a row with no trained opinion is not
+        left uniform just because the trained prior never reached it."""
+        from src.pipeline.services.warm_start import regrets_encoding
+
+        strategy = np.array([2.0, 1.0, 1.0, 0.0, 0.0])  # row 1 unseen by the prior
+        starts, widths = np.array([0, 3]), np.array([3, 2])
+        alone, seeded_alone = regrets_encoding(strategy, starts, widths, 1000.0)
+        base = np.array([0.0, 0.0, 0.0, 70.0, 30.0])
+        composed, seeded_both = regrets_encoding(
+            strategy, starts, widths, 1000.0, base_regrets=base
+        )
+        assert alone[3:].sum() == 0.0, "unseen row is empty without a base"
+        assert composed[3:].tolist() == [70.0, 30.0]
+        assert not seeded_alone[1]
+        assert seeded_both[1], "composing must mark the row as carrying a prior"

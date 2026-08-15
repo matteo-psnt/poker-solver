@@ -114,9 +114,10 @@ __all__ = (
     "DEFAULT_TEMPERATURE",
     "action_aggression",
     "bucket_strength",
-    "seed_checkpoint",
     "seed_regrets",
     "strength_policy",
+    "tree_regrets",
+    "write_checkpoint",
 )
 
 
@@ -149,33 +150,50 @@ def seed_regrets(tree: BettingTree, weight: float, temperature: float = DEFAULT_
     return regrets, seeded
 
 
-def seed_checkpoint(
+def _tree_for(config: Config) -> BettingTree:
+    return build_betting_tree(
+        GameRules(config.game.small_blind, config.game.big_blind),
+        ActionModel(config),
+        construction.build_card_abstraction(config),
+        starting_stack=config.game.starting_stack,
+    )
+
+
+def tree_regrets(
+    config: Config, *, weight: int, temperature: float = DEFAULT_TEMPERATURE
+) -> np.ndarray:
+    """The guess as a regret vector, without writing anything.
+
+    Separate from the write so a warm start can take it as a BASE and add its
+    own confidence on top, rather than the two racing to write iteration 0.
+    """
+    if weight <= 0:
+        raise ValueError("equity prior weight must be positive; it scales the guess.")
+    regrets, _ = seed_regrets(_tree_for(config), float(weight), temperature)
+    return regrets
+
+
+def write_checkpoint(
     config: Config,
     *,
     run_dir,
-    weight: int,
+    regrets: np.ndarray,
     abstraction_hash: str | None,
-    temperature: float = DEFAULT_TEMPERATURE,
 ) -> int:
-    """Write an iteration-0 checkpoint holding the strength-aware opening guess.
+    """Write an iteration-0 checkpoint holding ``regrets``.
 
     Needs no source run: unlike a warm start this is computed from the tree and
     the abstraction alone, so it applies to a COLD run -- which is the point,
     since the rows it is meant to help are the ones nothing has reached.
     """
-    if weight <= 0:
-        raise ValueError("equity prior weight must be positive; it scales the guess.")
+    tree = _tree_for(config)
+    per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
+    starts = np.zeros(tree.num_rows, dtype=np.int64)
+    np.cumsum(per_row[:-1], out=starts[1:])
+    seeded = np.add.reduceat(np.asarray(regrets, dtype=np.float64), starts) > 0.0
 
-    action_model = ActionModel(config)
-    abstraction = construction.build_card_abstraction(config)
-    rules = GameRules(config.game.small_blind, config.game.big_blind)
-    tree = build_betting_tree(
-        rules, action_model, abstraction, starting_stack=config.game.starting_stack
-    )
-
-    regrets, seeded = seed_regrets(tree, float(weight), temperature)
     storage = StaticArrayStorage(tree)
-    storage.regrets[:] = regrets.astype(storage.regrets.dtype)
+    storage.regrets[:] = np.asarray(regrets).astype(storage.regrets.dtype)
     # strategy_sum stays ZERO: the reported blueprint must average real training
     # only, exactly as for a warm start.
     storage.visited[:] = seeded
