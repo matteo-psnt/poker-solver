@@ -204,12 +204,14 @@ class TestProgress:
         assert got is not None
         assert got.fraction == 1.0
 
-    def test_a_build_reports_the_streets_it_has_clustered(self):
-        """Coarse -- three streets means the bar moves twice -- but nothing
-        reaches the output directory until the build succeeds, so a street
-        boundary is the only observable moment there is."""
-        got = kinds.kind(TaskName.PRECOMPUTE).sample(_plan(), {"done": 2, "total": 3})
-        assert got == Progress(2, 3, "streets")
+    def test_a_build_reports_the_runouts_it_has_enumerated(self):
+        """NOT streets. Three of them means a bar that moves twice across hours,
+        and they are nowhere near equal -- a canonical flop is 1,176 runouts
+        against a river's one."""
+        got = kinds.kind(TaskName.PRECOMPUTE).sample(
+            _plan(), {"done": 2_000_000, "total": 3_000_000}
+        )
+        assert got == Progress(2_000_000, 3_000_000, "board runouts")
 
     def test_a_kind_with_nothing_yet_to_report_says_nothing(self):
         """None renders as no bar; zero renders as a bar that looks stuck."""
@@ -236,18 +238,41 @@ class TestEstimate:
     KIND = kinds.kind(TaskName.TRAIN)
 
     def test_a_task_measuring_itself_beats_any_prior(self):
-        """Halfway after 100s means about 100s left, whatever history claims --
-        it is measuring the machine it actually got, at the workers it got."""
+        """50 units in 100s is half a unit a second, so the 50 left are ~100s --
+        whatever history claims. It is measuring the machine it actually got, at
+        the workers it got."""
         remaining = self.KIND.estimate(
-            Progress(50, 100, "x"), elapsed=100, history=[Sample(1, 9999, 16)], workers=16
+            Progress(50, 100, "x", base=0, window_seconds=100),
+            elapsed=100,
+            history=[Sample(1, 9999, 16)],
+            workers=16,
         )
         assert remaining == pytest.approx(100)
 
-    def test_the_first_fraction_of_a_percent_is_not_extrapolated_from(self):
-        """Startup cost would otherwise project a wildly wrong total, so this
-        falls through to history instead."""
+    def test_a_task_continuing_a_run_is_measured_on_its_own_work(self):
+        """THE BUG THIS WINDOW EXISTS FOR. A task continuing a 30M run to 60M
+        opens at fraction 0.5, and `elapsed x (1 - f) / f` read that as almost
+        done from its first second: ~60s left on four more hours of training.
+
+        It has run 100s and moved 1M of the 30M it owes, so it is ~50 minutes in
+        and ~48 short of them."""
         remaining = self.KIND.estimate(
-            Progress(1, 1000, "units"), elapsed=60, history=[Sample(1000, 600, 16)], workers=16
+            Progress(31_000_000, 60_000_000, "iterations", base=30_000_000, window_seconds=100),
+            elapsed=100,
+            history=[],
+            workers=16,
+        )
+        assert remaining == pytest.approx(2900)
+
+    def test_a_window_holding_no_work_is_not_extrapolated_from(self):
+        """A node spends its first minutes fetching, syncing and loading a
+        ~773 MB abstraction. Nothing has moved, so there is no rate here and
+        this falls through to history."""
+        remaining = self.KIND.estimate(
+            Progress(1, 1000, "units", base=1, window_seconds=60),
+            elapsed=60,
+            history=[Sample(1000, 600, 16)],
+            workers=16,
         )
         # 999 units left at 1000/600 units per second.
         assert remaining == pytest.approx(599.4)
@@ -337,7 +362,9 @@ class TestEstimateDeclinesToGuess:
         assert self.KIND.estimate(Progress(0, 100, "x"), 0, history, workers=16) is None
 
     def test_a_finished_task_has_nothing_left(self):
-        remaining = self.KIND.estimate(Progress(100, 100, "x"), elapsed=50, history=[], workers=16)
+        remaining = self.KIND.estimate(
+            Progress(100, 100, "x", base=0, window_seconds=50), elapsed=50, history=[], workers=16
+        )
         assert remaining == pytest.approx(0)
 
 
@@ -376,6 +403,36 @@ class TestSamplesFromHistory:
     def test_an_unreadable_timestamp_is_skipped_not_fatal(self):
         assert kinds.samples([self._row(ended_at="nonsense")], "train") == []
 
+    def test_they_come_back_oldest_first_whatever_order_they_arrived_in(self):
+        """The recency cut downstream is a tail slice, so the order is not a
+        detail of whoever joined the rows."""
+        newer = self._row(ended_at="2026-08-05T12:00:00+00:00", units=7_200_000)
+        got = kinds.samples([newer, self._row()], "train")
+        assert [sample.units for sample in got] == [3_600_000, 7_200_000]
+
+    def test_an_estimate_looks_back_over_recent_tasks_only(self):
+        """THE STALE-HISTORY BUG. The tree walk got 2.6x faster in one commit,
+        and a median over everything the share holds keeps predicting the code
+        that was replaced: twenty old tasks at 1,000 it/s outvote every task run
+        since, and a 10M task is quoted at ~2.8 hours instead of ~1.
+
+        Five rather than one because throughput varies several-fold between
+        boxes on identical code."""
+        old = [self._row(units=3_600_000) for _ in range(20)]
+        new = [
+            self._row(
+                units=9_360_000,
+                started_at="2026-08-06T10:00:00+00:00",
+                ended_at="2026-08-06T11:00:00+00:00",
+            )
+            for _ in range(5)
+        ]
+        history = kinds.samples([*old, *new], "train")
+        left = kinds.kind(TaskName.TRAIN).estimate(
+            Progress(0, 10_000_000, "iterations"), elapsed=0, history=history, workers=16
+        )
+        assert left == pytest.approx(10_000_000 / 2600)
+
 
 class TestRemaining:
     """The one call a surface makes."""
@@ -397,12 +454,18 @@ class TestRemaining:
             "cause": "running",
             "started_at": "2026-08-05T12:00:00+00:00",
             "workers": 16,
-            "progress": {"done": 1_000_000.0, "total": 2_000_000.0, "unit": "iterations"},
+            "progress": {
+                "done": 1_000_000.0,
+                "total": 2_000_000.0,
+                "unit": "iterations",
+                "base": 0.0,
+                "window_seconds": 3600.0,
+            },
         }
         return base | kwargs
 
     def test_a_running_task_gets_an_estimate_from_its_own_rate(self):
-        """Halfway after an hour means about an hour left."""
+        """A million iterations in an hour, a million to go."""
         left = kinds.remaining(self._running(), self.HISTORY, "2026-08-05T13:00:00+00:00")
         assert left == pytest.approx(3600, rel=0.01)
 
@@ -417,7 +480,9 @@ class TestRemaining:
         assert kinds.remaining(self._running(cause="completed"), self.HISTORY, "x") is None
 
     def test_a_kind_this_code_no_longer_has_is_not_a_crash(self):
-        assert kinds.remaining(self._running(op="vector-sweep"), self.HISTORY, "x") is None
+        """A synthetic op, not `vector-sweep`: that one came BACK, and with it
+        the reason this test passed had nothing to do with the op."""
+        assert kinds.remaining(self._running(op=RETIRED_OP), self.HISTORY, "x") is None
 
 
 class TestAnEvaluationCanAlwaysBeEstimated:

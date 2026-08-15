@@ -81,6 +81,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Continue an EXISTING run instead of starting one. --iterations is an "
         "ABSOLUTE target, so re-running past it is a no-op and a retry converges.",
     )
+    parser.add_argument(
+        "--progress-file",
+        default="",
+        dest="progress_file",
+        help="Write {done,total} iterations here while training. Node-local: a "
+        "heartbeat for the task bar between checkpoints, not a record.",
+    )
 
 
 class StaticTrainingPayload(services.StaticTrainingOutput):
@@ -107,6 +114,7 @@ def run(args: argparse.Namespace) -> StaticTrainingPayload:
         warm_start_from=Path(args.warm_start_from) if args.warm_start_from else None,
         warm_start_weight=args.warm_start_weight,
         warm_start_at=args.warm_start_at,
+        progress_file=Path(args.progress_file) if args.progress_file else None,
     )
     return StaticTrainingPayload(**out.model_dump())
 

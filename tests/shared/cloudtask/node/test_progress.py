@@ -58,11 +58,12 @@ class TestProgressHeartbeat:
         progress.publish(paths, self._plan(), {"iteration": 250})
 
         (record,) = list((paths.share / "legs").glob("*.progress.json"))
-        assert json.loads(record.read_text())["progress"] == {
-            "done": 250.0,
-            "total": 1000.0,
-            "unit": "iterations",
-        }
+        published = json.loads(record.read_text())["progress"]
+        assert (published["done"], published["total"], published["unit"]) == (
+            250.0,
+            1000.0,
+            "iterations",
+        )
 
     def test_a_kind_with_nothing_to_say_writes_nothing(self, paths, monkeypatch):
         """No bar beats a bar frozen at zero, which reads as a stuck task."""
@@ -101,6 +102,69 @@ class TestProgressHeartbeat:
         (row,) = task_history.read_tasks(paths.share)
         assert row.cause == "completed"
         assert row.progress is None
+
+
+class TestTheRateWindow:
+    """What an estimate is actually built from, and why it is not the clock.
+
+    A task's own count is CUMULATIVE -- a resumed run's is the run's, not this
+    task's -- and the clock since the task started counts the node fetching a
+    snapshot, running `uv sync` and loading a ~773 MB abstraction. Differencing
+    a window closes both holes.
+    """
+
+    @staticmethod
+    def _plan(op: str = TaskName.TRAIN, to: int = 1000) -> node_plan.TaskPlan:
+        return node_plan.TaskPlan(op=op, config="quick_test", to=to)
+
+    @staticmethod
+    def _published(paths):
+        (record,) = list((paths.share / "legs").glob("*.progress.json"))
+        return json.loads(record.read_text())["progress"]
+
+    def test_the_window_opens_where_the_count_starts_moving(self, paths, monkeypatch):
+        """A resumed task inherits 800 of the run's 1,000 and has done none of
+        it. Its base is 850 -- where it was seen moving -- and never 0, which
+        would credit it with the whole run at the rate of its own first hour."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        for iteration in (800, 800, 850, 900):
+            progress.publish(paths, self._plan(), {"iteration": iteration})
+
+        published = self._published(paths)
+        assert (published["done"], published["base"]) == (900.0, 850.0)
+        assert published["window_seconds"] > 0
+
+    def test_a_count_that_arrives_in_jumps_is_not_a_rate_over_one_tick(self, paths, monkeypatch):
+        """`train-vector` reports only when a CHECKPOINT lands, so a million
+        iterations appear between two samples fifteen seconds apart. Anchoring
+        at the last stationary sample reads that as ~66,000 it/s against a real
+        one to three thousand, and quotes nearly nothing left on hours of
+        training -- the bug this window exists to fix, sign-flipped.
+
+        So the window opens ON the jump, and the FIRST one is not a rate at
+        all: two are needed to measure the interval between them."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        plan = self._plan(op=TaskName.TRAIN_VECTOR, to=3_000_000)
+        for iteration in (0, 0, 1_000_000):
+            progress.publish(paths, plan, {"iteration": iteration})
+
+        published = self._published(paths)
+        assert (published["done"], published["base"]) == (1_000_000.0, 1_000_000.0)
+        assert published["window_seconds"] == 0.0
+
+        progress.publish(paths, plan, {"iteration": 2_000_000})
+        assert self._published(paths)["base"] == 1_000_000.0
+
+    def test_a_kind_that_changes_what_it_counts_starts_over(self, paths, monkeypatch):
+        """An evaluation reports rungs until its first board branch lands. One
+        count minus another in a different unit is not a small error."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        plan = self._plan(op=TaskName.EVALUATE)
+        progress.publish(paths, plan, {"scored": 0})
+        progress.publish(paths, plan, {"done": 20, "total": 32})
+
+        published = self._published(paths)
+        assert (published["unit"], published["base"]) == ("board branches", 20.0)
 
 
 class TestTheWatcherReportsPromptly:

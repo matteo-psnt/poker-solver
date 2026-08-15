@@ -370,6 +370,11 @@ class TaskProgress(BaseModel):
     done: float
     total: float
     unit: str = ""
+    """The window the task measured its own rate over, mirrored from
+    `kinds.Progress` -- which is what reads them back, to say how long is left.
+    Zero on a wrapper that predates them, which costs an estimate, not a bar."""
+    base: float = 0.0
+    window_seconds: float = 0.0
 
     @field_validator("unit", mode="before")
     @classmethod

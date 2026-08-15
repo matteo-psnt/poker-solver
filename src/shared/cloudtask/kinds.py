@@ -160,6 +160,21 @@ class Progress:
     done: float
     total: float
     unit: str
+    base: float = 0.0
+    """This task's OWN measurement window: the count when it opened, and the
+    seconds since. Neither `done` nor wall clock can give a rate on its own -- a
+    resumed task inherits the whole run's count, and the clock since the task
+    started also counts the node's startup, which does no units of anything."""
+    window_seconds: float = 0.0
+
+    @property
+    def rate(self) -> float | None:
+        """Units per second THIS task is managing, or ``None`` until its window
+        holds some movement."""
+        moved = self.done - self.base
+        if moved <= 0 or self.window_seconds <= 0:
+            return None
+        return moved / self.window_seconds
 
     @property
     def fraction(self) -> float:
@@ -174,12 +189,22 @@ class Progress:
         return f"{compact(self.done)} / {compact(self.total)} {self.unit}"
 
     def as_record(self) -> dict[str, Any]:
-        return {"done": self.done, "total": self.total, "unit": self.unit}
+        return {
+            "done": self.done,
+            "total": self.total,
+            "unit": self.unit,
+            "base": self.base,
+            "window_seconds": self.window_seconds,
+        }
 
     @staticmethod
     def from_record(raw: object) -> Progress | None:
         """Tolerant: read back from a share record an older wrapper may not have
-        written, or may have been killed halfway through writing."""
+        written, or may have been killed halfway through writing.
+
+        A record without a window reads as one that has measured nothing, which
+        costs an estimate rather than a bar.
+        """
         if not isinstance(raw, Mapping):
             return None
         # All the narrowing on offer: the record is untyped JSON off an SMB
@@ -187,7 +212,11 @@ class Progress:
         record = cast("Mapping[str, Any]", raw)
         try:
             return Progress(
-                float(record["done"]), float(record["total"]), str(record.get("unit") or "")
+                float(record["done"]),
+                float(record["total"]),
+                str(record.get("unit") or ""),
+                float(record.get("base") or 0.0),
+                float(record.get("window_seconds") or 0.0),
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -225,8 +254,20 @@ class Sample:
         return self.units / self.seconds if self.seconds > 0 else 0.0
 
 
+"""How many finished tasks an estimate may look back over. RECENT ones only:
+the tree walk got 2.6x faster in a single commit, and a median taken over
+everything the share has ever held keeps predicting the code that was replaced.
+Five rather than one because throughput varies several-fold BETWEEN BOXES on
+identical code (504 vs 2,900 it/s measured), so the latest single task is a coin
+flip."""
+RECENT_SAMPLES = 5
+
+
 def comparable(history: Sequence[Sample], workers: int) -> list[Sample]:
-    """Past tasks worth predicting from: the same worker count if any ran at it.
+    """Past tasks worth predicting from: the same worker count if any ran at it,
+    and only the :data:`RECENT_SAMPLES` newest of those.
+
+    ``history`` is oldest-first, which is what makes the cut a tail slice.
 
     Falling back to the whole history rather than refusing is deliberate. A
     rough estimate beats none, and the first task at a new worker count would
@@ -234,7 +275,7 @@ def comparable(history: Sequence[Sample], workers: int) -> list[Sample]:
     """
     usable = [sample for sample in history if sample.seconds > 0]
     matched = [sample for sample in usable if sample.workers == workers]
-    return matched or usable
+    return (matched or usable)[-RECENT_SAMPLES:]
 
 
 class TaskKind(abc.ABC):
@@ -289,9 +330,10 @@ class TaskKind(abc.ABC):
 
         Four sources, best first:
 
-        1. The task's OWN rate. Once it has reported progress it is measuring
-           itself on the machine it is actually running on, at the worker count
-           it actually got -- which beats any prior, and needs no history.
+        1. The task's OWN measured rate, over the work remaining. It is
+           measuring itself on the machine it is actually running on, at the
+           worker count it actually got -- which beats any prior, and needs no
+           history.
         2. The rate of comparable past tasks, against the work remaining. This
            is why a sample carries units: it transfers across tasks of different
            SIZE, where a median duration does not.
@@ -299,11 +341,14 @@ class TaskKind(abc.ABC):
            and so has no "remaining" to scale.
         4. Nothing, said as ``None`` rather than guessed.
 
-        The 2% floor on (1) is not arbitrary: extrapolating from the first
-        fraction of a percent turns startup cost into a wildly wrong total.
+        (1) is a WINDOW rate, not `elapsed x (1 - fraction) / fraction`. That
+        form reads the whole run's progress against this task's clock, so a task
+        continuing a 30M run to 60M opened at fraction 0.5 and reported almost
+        nothing left from its first second; on a fresh run it charged the node's
+        startup to the work and ran long instead.
         """
-        if progress is not None and progress.fraction > 0.02 and elapsed > 0:
-            return elapsed * (1.0 - progress.fraction) / progress.fraction
+        if progress is not None and (measured := progress.rate):
+            return max(0.0, progress.total - progress.done) / measured
 
         usable = comparable(history, workers)
         rates = [sample.rate for sample in usable if sample.rate > 0]
@@ -320,6 +365,7 @@ class TrainTask(TaskKind):
 
     name = TaskName.TRAIN
     unit = "iterations"
+    progress_file = "train-progress.json"
 
     def validate(self, task: TaskFields) -> None:
         if not task.config:
@@ -349,6 +395,8 @@ class TrainTask(TaskKind):
         ]
         if plan.checkpoint_every:
             argv += ["--checkpoint-every", str(plan.checkpoint_every)]
+        if work := plan.progress_path:
+            argv += ["--progress-file", work]
         # Seeding is a property of a FRESH run; train_static ignores it when
         # continuing, so a retry cannot lay the prior back over real progress.
         if plan.warm_start_from:
@@ -386,15 +434,24 @@ class TrainTask(TaskKind):
         return f"train ->{compact(int(target))}" if target.isdigit() and target != "0" else "train"
 
     def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:
-        """Iterations done against the target, from the checkpoint manifest.
+        """Iterations done against the target.
 
-        The one kind that can already answer, because training writes a
-        checkpoint as it goes and the manifest names its iteration.
+        TWO sources, and the FURTHER ALONG of them wins. The trainer's own
+        `done` is the live one and the only one fine enough to watch: the
+        manifest is written per checkpoint, and at the default million
+        iterations a chunk that is a bar with a step every six to thirty
+        minutes, showing nothing at all until the first one lands. The manifest
+        is the floor, for the window before the trainer's writer starts and for
+        any task whose wrapper predates it.
         """
-        done = state.get("iteration")
-        if not isinstance(done, int | float) or plan.to <= 0:
+        counts = [
+            float(value)
+            for value in (state.get("done"), state.get("iteration"))
+            if isinstance(value, int | float)
+        ]
+        if not counts or plan.to <= 0:
             return None
-        return Progress(float(done), float(plan.to), self.unit)
+        return Progress(max(counts), float(plan.to), self.unit)
 
 
 class TrainVectorTask(TaskKind):
@@ -543,29 +600,30 @@ class EvaluateTask(TaskKind):
         genuinely off limits -- the turn and river deals are the walk's inner
         loops and a counter there WOULD be in the hot path.
 
-        Two state shapes reach here and both are wanted. The watcher publishes
-        `{done, total}` from the file the evaluator writes, which is the bar
-        while it runs; the handler publishes `{scored}` after each rung, which
-        closes it at the end and is all there is before the first branch lands.
+        Two state shapes reach here and both are wanted. The evaluator's file
+        says how far the walk IN FRONT has got; the node says how many rungs are
+        already behind it, which is not in any file the evaluator writes. Every
+        rung of one score walks the same branches, so the two combine in one
+        unit -- capped, because a finished rung is counted by both for as long
+        as it takes the node to notice.
         """
+        rungs = len(plan.eval_rungs) or 1
+        scored = state.get("scored")
+        behind = float(scored) if isinstance(scored, int | float) else 0.0
         walked, branches = state.get("done"), state.get("total")
         if isinstance(walked, int | float) and isinstance(branches, int | float) and branches > 0:
-            return Progress(float(walked), float(branches), self.unit)
+            total = rungs * float(branches)
+            return Progress(min(behind * float(branches) + float(walked), total), total, self.unit)
         # Nothing walked yet, or a method that does not report branches at all:
         # fall back to the rung count, which is what this reported before.
-        rungs = len(plan.eval_rungs)
-        if rungs <= 0:
-            return None
-        scored = state.get("scored")
-        done = float(scored if isinstance(scored, int) else 0)
-        return Progress(done, float(rungs), "rungs")
+        return Progress(behind, float(rungs), "rungs")
 
 
 class PrecomputeTask(TaskKind):
     """Build a card abstraction."""
 
     name = TaskName.PRECOMPUTE
-    unit = "streets"
+    unit = "board runouts"
     """NOT retried. A precompute has no partial-progress marker -- `metadata.json`
     is written only on success -- so a retry restarts the whole enumeration, and
     a deterministic failure would bill three full runs to fail three times."""
@@ -591,13 +649,14 @@ class PrecomputeTask(TaskKind):
         return f"precompute {record.get('config') or ''}".strip()
 
     def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
-        """Streets clustered, against streets to cluster.
+        """Runouts enumerated, against the runouts this abstraction costs.
 
-        Coarse -- three streets means the bar moves twice -- but the river is
-        far the largest, so "2 of 3" is genuinely most of the way. Nothing
-        reaches the output directory until the build succeeds, so a street
-        boundary is the only moment this work is observable from outside the
-        process at all.
+        STREETS WERE THE WRONG UNIT, twice over. Three of them means a bar that
+        moves twice across hours, and they are nowhere near equal: a canonical
+        flop carries 1,176 runouts against a river's one, so the flop is ~70% of
+        the build and the river ~5% -- "2 of 3" was reported as most of the way
+        when it was nearly all of it. The producer weights them and counts
+        within a street, so this is continuous.
         """
         done, total = state.get("done"), state.get("total")
         if not isinstance(done, int | float) or not isinstance(total, int | float) or total <= 0:
@@ -684,7 +743,7 @@ class VectorSweepTask(TaskKind):
 
 
 def samples(rows: Sequence[Mapping[str, Any]], name: str) -> list[Sample]:
-    """Finished tasks of one kind, as throughput observations.
+    """Finished tasks of one kind, oldest first, as throughput observations.
 
     Only tasks that COMPLETED: a task killed at 40% took the wall clock of a
     partial job and would drag every later estimate down. Only tasks that
@@ -693,7 +752,9 @@ def samples(rows: Sequence[Mapping[str, Any]], name: str) -> list[Sample]:
     """
     known = kind_of(name)
     found = []
-    for row in rows:
+    # By end time HERE, not by whatever order the caller joined its rows in: the
+    # cut below is the whole point of this function and must not depend on that.
+    for row in sorted(rows, key=lambda r: str(r.get("ended_at") or "")):
         if row.get("op") != name or row.get("cause") != "completed":
             continue
         # A row counted in a unit this kind no longer uses is a DIFFERENT

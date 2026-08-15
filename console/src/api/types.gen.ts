@@ -2332,6 +2332,11 @@ export interface components {
          *     `tasks`, `cost`, `runinfo` and `reconcile` at once.
          */
         TaskProgress: {
+            /**
+             * Base
+             * @default 0
+             */
+            base: number;
             /** Done */
             done: number;
             /** Total */
@@ -2341,6 +2346,11 @@ export interface components {
              * @default
              */
             unit: string;
+            /**
+             * Window Seconds
+             * @default 0
+             */
+            window_seconds: number;
         };
         /**
          * TaskRow

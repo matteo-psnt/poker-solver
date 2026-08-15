@@ -28,12 +28,14 @@ from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
 from src.pipeline.services import warm_start
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
 from src.pipeline.training.static_parallel import train_static_parallel
-from src.shared import run_events
+from src.shared import records, run_events
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
     from src.shared.config import Config
+
+PROGRESS_ARTIFACT = "train-progress.json"
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,7 @@ def train_static(
     warm_start_from: Path | None = None,
     warm_start_weight: int = warm_start.DEFAULT_EFFECTIVE_ITERATIONS,
     warm_start_at: int | None = None,
+    progress_file: Path | None = None,
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
 
@@ -102,6 +105,10 @@ def train_static(
         config_overrides: Nested config overrides (``__`` separator).
         experiment: Experiment/arm/parent recorded on the run.
         runs_dir: Base runs directory; defaults to the config's.
+        progress_file: Where to publish iterations done while they are being
+            done. The checkpoint is the durable answer, but one lands every
+            million iterations -- minutes to half an hour apart -- and that is
+            not a cadence anything can watch.
 
     Raises:
         FileNotFoundError: The card abstraction is missing (precompute it first).
@@ -226,6 +233,7 @@ def train_static(
             checkpoint_retain_every=config.storage.checkpoint_retain_every,
             checkpoint_every=checkpoint_every,
             resume=resuming or seeded,
+            on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
         )
     except Exception:
         # cleanup_if_empty so a run that died before writing anything does not

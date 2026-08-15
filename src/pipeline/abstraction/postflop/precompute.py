@@ -22,6 +22,7 @@ comes back.
 """
 
 import logging
+import math
 import multiprocessing as mp
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -32,7 +33,10 @@ from tqdm import tqdm
 
 from src.core.game.state import Card, Street
 from src.pipeline.abstraction.config import PrecomputeConfig
-from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.pipeline.abstraction.postflop.board_enumeration import (
+    EXPECTED_CANONICAL_COUNTS,
+    CanonicalBoardEnumerator,
+)
 from src.pipeline.abstraction.postflop.bucketer import (
     METADATA_FILENAME,
     N_HAND_COLUMNS,
@@ -128,6 +132,24 @@ def _worker_compute_board_chunk(
     return results
 
 
+def street_runouts(street: Street, flop_runouts: int | None = None) -> int:
+    """What one street's equity pass costs, in runouts enumerated.
+
+    Boards times runouts per board, which is what the pass actually walks:
+    1,755 flops of 1,176 runouts each is ~70% of a build, 16,432 turns of 48 is
+    ~27%, and 134,459 rivers of one is the remaining ~5%. Counting boards alone
+    inverts that, and counting streets flattens it.
+
+    Approximate on purpose, and only ever a WEIGHT: it ignores the k-means that
+    follows each pass, and hand classes per board are treated as equal across
+    streets. It decides how a bar is divided, never what is computed.
+    """
+    cards = {Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5}[street]
+    exact = math.comb(52 - cards, 5 - cards)
+    boards = EXPECTED_CANONICAL_COUNTS[street]
+    return boards * (min(flop_runouts, exact) if street == Street.FLOP and flop_runouts else exact)
+
+
 class PostflopPrecomputer:
     """
     Precomputes full-coverage combo abstraction tables.
@@ -144,7 +166,12 @@ class PostflopPrecomputer:
         self._num_buckets: dict[Street, int] = {}
         self._quality: dict[Street, dict] = {}
 
-    def precompute_street(self, street: Street, board_limit: int | None = None) -> None:
+    def precompute_street(
+        self,
+        street: Street,
+        board_limit: int | None = None,
+        on_fraction: Callable[[float], None] | None = None,
+    ) -> None:
         """
         Precompute buckets for every canonical board on a street.
 
@@ -153,9 +180,12 @@ class PostflopPrecomputer:
             board_limit: Optional cap on the number of canonical boards
                 (lowest board IDs first). Test hook — production runs cover
                 every board.
+            on_fraction: How much of this street's equity pass is done, in
+                [0, 1]. The bucketing that follows it is not counted; it is a
+                k-means over matrices that are already in memory.
         """
         board_ids, equity_matrix, weight_matrix, hist_matrix = self.compute_street_matrices(
-            street, board_limit=board_limit
+            street, board_limit=board_limit, on_fraction=on_fraction
         )
         logger.info(f"Bucketing {street.name} into {self.config.num_buckets[street]} buckets...")
         self.bucket_street(street, board_ids, equity_matrix, weight_matrix, hist_matrix)
@@ -168,13 +198,20 @@ class PostflopPrecomputer:
         )
 
     def compute_street_matrices(
-        self, street: Street, board_limit: int | None = None
+        self,
+        street: Street,
+        board_limit: int | None = None,
+        on_fraction: Callable[[float], None] | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
         """
         Compute per-board equity/weight (and flop/turn histogram) matrices.
 
         Exposed separately from bucketing so bucket-count sweeps can reuse one
         expensive equity pass across many bucketing configurations.
+
+        ``on_fraction`` is called with how much of this street's pass has
+        finished, in [0, 1] -- the only thing a caller outside the process can
+        watch, since nothing reaches disk until the whole build succeeds.
         """
         logger.info(f"Enumerating canonical boards for {street.name}...")
         enumerator = CanonicalBoardEnumerator(street)
@@ -229,12 +266,20 @@ class PostflopPrecomputer:
                 )
                 for chunk in chunks
             ]
-            for future in tqdm(
-                as_completed(futures),
-                total=len(futures),
-                desc=f"Computing {street.name} equities",
-                disable=not progress_bars_enabled(),
+            for finished, future in enumerate(
+                tqdm(
+                    as_completed(futures),
+                    total=len(futures),
+                    desc=f"Computing {street.name} equities",
+                    disable=not progress_bars_enabled(),
+                ),
+                start=1,
             ):
+                # The same count the bar in this terminal draws, for the caller
+                # who is not in this terminal. A node's is drawn to a log nobody
+                # reads, and it was the only place this number existed.
+                if on_fraction is not None:
+                    on_fraction(finished / len(futures))
                 for row, cols, equities, multiplicities, histograms in future.result():
                     equity_matrix[row, cols] = equities
                     weight_matrix[row, cols] = multiplicities
@@ -432,22 +477,35 @@ class PostflopPrecomputer:
     def precompute_all(
         self,
         streets: list[Street] | None = None,
-        on_street_done: Callable[[int, int], None] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> DenseBucketer:
         """Precompute all (or the given) postflop streets and return the bucketer.
 
-        ``on_street_done`` is called with (completed, total) after each street.
-        Nothing is written to the output directory until :meth:`save`, so a
-        street boundary is the only moment this work becomes observable from
-        outside the process.
+        ``on_progress`` is called with (runouts done, runouts to do) as the
+        build proceeds. Nothing is written to the output directory until
+        :meth:`save`, so this is the only way the work is observable from
+        outside the process at all — which is why it is counted in RUNOUTS and
+        not in streets. Streets are three, and unequal: a canonical flop is
+        1,176 runouts against a river's one, so the flop is most of the build
+        and "2 of 3 streets" said the opposite.
         """
         if streets is None:
             streets = list(POSTFLOP_STREETS)
 
-        for index, street in enumerate(streets, start=1):
-            self.precompute_street(street)
-            if on_street_done is not None:
-                on_street_done(index, len(streets))
+        weights = [street_runouts(street, self.config.flop_runouts) for street in streets]
+        total = sum(weights)
+        behind = 0
+        for street, weight in zip(streets, weights, strict=True):
+            within = None
+            if on_progress is not None:
+
+                def within(fraction: float, done: int = behind, of: int = weight) -> None:
+                    on_progress(done + int(fraction * of), total)
+
+            self.precompute_street(street, on_fraction=within)
+            behind += weight
+            if on_progress is not None:
+                on_progress(behind, total)
 
         return self.build_bucketer()
 

@@ -12,8 +12,17 @@ import time
 
 import pytest
 
+from src.shared.cloudtask.node import progress
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.process import TaskLogger
+
+
+@pytest.fixture(autouse=True)
+def _one_task_per_test():
+    """The baseline and the rate window are module globals, because the wrapper
+    process runs exactly ONE task. A test session is not one task."""
+    progress._BASELINE.clear()
+    progress._WINDOW.clear()
 
 
 @pytest.fixture
