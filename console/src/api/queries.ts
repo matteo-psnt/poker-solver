@@ -130,16 +130,26 @@ export const useCost = (hours = 0) =>
  * A task's published log. `enabled` so the query does not fire until a task is
  * actually selected — this is the slowest read in the console and there is no
  * reason to pay for it on a page nobody has opened.
+ *
+ * `live` is the caller's answer to "is this task still going", decided from the
+ * row it already has (no `ended_at`) — the client owns that judgement, the same
+ * way it owns which Batch states mean running.
+ *
+ * It has to be asked, because this used to be `refetchInterval: false` for
+ * every task on the grounds that "a published log for a finished task does not
+ * change". True of a finished one, and the whole problem for a running one: the
+ * node republishes the log every 60s and the console never asked again, so an
+ * open log was frozen at whatever it held when the page mounted.
  */
-export const useLog = (taskId: string | null, lines = 400) =>
+export const useLog = (taskId: string | null, lines = 400, live = false) =>
   useQuery<LogLines>({
     queryKey: ["log", taskId, lines],
     queryFn: () => get(`/api/logs/${encodeURIComponent(taskId ?? "")}?lines=${lines}`),
     enabled: Boolean(taskId),
-    // A published log for a finished task does not change. Refetching it would
-    // be a cloud read for an answer that cannot have moved.
-    refetchInterval: false,
-    staleTime: 5 * 60_000,
+    // FAST rather than SLOW: it matches the server's own 15s memo, so a tab
+    // polling this cannot cost more share reads than a tab that is merely open.
+    refetchInterval: live ? FAST : false,
+    staleTime: live ? 0 : 5 * 60_000,
   });
 
 /**
