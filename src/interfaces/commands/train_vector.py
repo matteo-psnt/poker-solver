@@ -91,25 +91,25 @@ def run(args: argparse.Namespace) -> VectorBlueprintPayload:
     # The composition root, and the only layer that may name an adapter:
     # `the_work_does_not_know_its_adapters` forbids the service from doing this
     # itself. `None` when no DSN is set, which is the pre-migration behaviour.
-    sink = connect.sink_from_environment()
-    out = services.train_vector_blueprint(
-        args.config,
-        sink=sink,
-        iterations=args.iterations,
-        universe_boards=args.universe_boards,
-        universe_seed=args.universe_seed,
-        checkpoint_every=args.checkpoint_every,
-        retain_every=args.retain_every,
-        dtype=args.dtype,
-        config_overrides=parse_overrides(args.overrides),
-        run_id=args.run,
-        progress_file=Path(args.progress_file) if args.progress_file else None,
-        experiment=services.ExperimentTag(
-            experiment_id=args.experiment,
-            arm=args.arm,
-            parent_run_id=args.parent,
-        ),
-    )
+    with connect.record_sink() as sink:
+        out = services.train_vector_blueprint(
+            args.config,
+            sink=sink,
+            iterations=args.iterations,
+            universe_boards=args.universe_boards,
+            universe_seed=args.universe_seed,
+            checkpoint_every=args.checkpoint_every,
+            retain_every=args.retain_every,
+            dtype=args.dtype,
+            config_overrides=parse_overrides(args.overrides),
+            run_id=args.run,
+            progress_file=Path(args.progress_file) if args.progress_file else None,
+            experiment=services.ExperimentTag(
+                experiment_id=args.experiment,
+                arm=args.arm,
+                parent_run_id=args.parent,
+            ),
+        )
     return VectorBlueprintPayload(**out.model_dump())
 
 

@@ -131,29 +131,29 @@ def run(args: argparse.Namespace) -> StaticTrainingPayload:
     # The composition root, and the only layer that may name an adapter:
     # `the_work_does_not_know_its_adapters` forbids the service from doing this
     # itself. `None` when no DSN is set, which is the pre-migration behaviour.
-    sink = connect.sink_from_environment()
-    out = services.train_static(
-        args.config,
-        sink=sink,
-        num_workers=args.workers,
-        num_iterations=args.iterations,
-        seed=args.seed,
-        config_overrides=parse_overrides(args.overrides),
-        experiment=services.ExperimentTag(
-            experiment_id=args.experiment,
-            arm=args.arm,
-            parent_run_id=args.parent,
-        ),
-        checkpoint_every=args.checkpoint_every,
-        run_id=args.run,
-        warm_start_from=Path(args.warm_start_from) if args.warm_start_from else None,
-        warm_start_weight=args.warm_start_weight,
-        warm_start_at=args.warm_start_at,
-        progress_file=Path(args.progress_file) if args.progress_file else None,
-        warm_start_shape=args.warm_start_shape,
-        equity_prior_weight=args.equity_prior_weight,
-        equity_prior_temperature=args.equity_prior_temperature,
-    )
+    with connect.record_sink() as sink:
+        out = services.train_static(
+            args.config,
+            sink=sink,
+            num_workers=args.workers,
+            num_iterations=args.iterations,
+            seed=args.seed,
+            config_overrides=parse_overrides(args.overrides),
+            experiment=services.ExperimentTag(
+                experiment_id=args.experiment,
+                arm=args.arm,
+                parent_run_id=args.parent,
+            ),
+            checkpoint_every=args.checkpoint_every,
+            run_id=args.run,
+            warm_start_from=Path(args.warm_start_from) if args.warm_start_from else None,
+            warm_start_weight=args.warm_start_weight,
+            warm_start_at=args.warm_start_at,
+            progress_file=Path(args.progress_file) if args.progress_file else None,
+            warm_start_shape=args.warm_start_shape,
+            equity_prior_weight=args.equity_prior_weight,
+            equity_prior_temperature=args.equity_prior_temperature,
+        )
     return StaticTrainingPayload(**out.model_dump())
 
 

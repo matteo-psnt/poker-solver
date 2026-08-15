@@ -86,24 +86,24 @@ def run(args: argparse.Namespace) -> PcsTrainingPayload:
     # The composition root, and the only layer that may name an adapter:
     # `the_work_does_not_know_its_adapters` forbids the service from doing this
     # itself. `None` when no DSN is set, which is the pre-migration behaviour.
-    sink = connect.sink_from_environment()
-    out = services.train_pcs(
-        args.config,
-        sink=sink,
-        iterations=args.iterations,
-        num_workers=args.workers,
-        seed=args.seed,
-        config_overrides=parse_overrides(args.overrides),
-        experiment=services.ExperimentTag(
-            experiment_id=args.experiment,
-            arm=args.arm,
-            parent_run_id=args.parent,
-        ),
-        checkpoint_every=args.checkpoint_every,
-        retain_every=args.retain_every,
-        run_id=args.run,
-        progress_file=Path(args.progress_file) if args.progress_file else None,
-    )
+    with connect.record_sink() as sink:
+        out = services.train_pcs(
+            args.config,
+            sink=sink,
+            iterations=args.iterations,
+            num_workers=args.workers,
+            seed=args.seed,
+            config_overrides=parse_overrides(args.overrides),
+            experiment=services.ExperimentTag(
+                experiment_id=args.experiment,
+                arm=args.arm,
+                parent_run_id=args.parent,
+            ),
+            checkpoint_every=args.checkpoint_every,
+            retain_every=args.retain_every,
+            run_id=args.run,
+            progress_file=Path(args.progress_file) if args.progress_file else None,
+        )
     return PcsTrainingPayload(**out.model_dump())
 
 
