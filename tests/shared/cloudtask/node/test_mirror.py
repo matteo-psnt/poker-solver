@@ -65,12 +65,13 @@ def test_a_nonzero_exit_is_reported_not_raised(tmp_path, monkeypatch):
     assert "rc=1" in logged[0]
 
 
-def test_the_timeout_stays_under_the_progress_interval():
-    """Two overlapping mirrors would both write the same rows and one would win
-    by arrival order rather than by being newer."""
-    from src.shared.cloudtask.node.progress import WATCH_INTERVAL_SECONDS
-
-    assert mirror.TIMEOUT_SECONDS < WATCH_INTERVAL_SECONDS
+def test_the_timeout_survives_a_cold_first_invocation():
+    """MEASURED on a node: the first `uv run` after a fresh `uv sync` took over
+    a minute -- the project install plus a cold import off an empty page cache
+    -- and a 60s ceiling timed it out. Nothing waits on this, and the watcher
+    publishes from ONE thread so two mirrors cannot overlap, which is what makes
+    a generous ceiling safe rather than merely tolerable."""
+    assert mirror.TIMEOUT_SECONDS >= 120
 
 
 def test_it_is_stdlib_only(tmp_path):
