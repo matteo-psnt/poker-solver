@@ -98,7 +98,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
 
     plan = _reporting(plan, paths)
     progress.note_baseline(paths, plan)
-    watcher = progress.LadderWatcher(paths, log, plan=plan)
+    watcher = progress.LadderWatcher(paths, log, plan=plan, publish_log=log.publish)
     watcher.start()
     try:
         log(
@@ -142,7 +142,7 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     progress.note_baseline(paths, plan)
     # Progress ONLY, no ladder: this task has just fetched rungs onto the node,
     # and a ladder tick would push ~540 MB of them straight back to the share.
-    watcher = progress.ProgressWatcher(paths, log, plan=plan)
+    watcher = progress.ProgressWatcher(paths, log, plan=plan, publish_log=log.publish)
     watcher.start()
     ok, bad = 0, 0
     # Built from the rungs that FETCHED, not the ones requested: `fetch_for_evaluation`
@@ -220,7 +220,7 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
     plan = _reporting(plan, paths)
     log(f"precompute: config={plan.config} (timeout {plan.timeout_seconds}s)")
     progress.note_baseline(paths, plan)
-    watcher = progress.ProgressWatcher(paths, log, plan=plan)
+    watcher = progress.ProgressWatcher(paths, log, plan=plan, publish_log=log.publish)
     watcher.start()
     try:
         code = run_guarded(
@@ -329,7 +329,7 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
 
     log(f"vector-sweep: {plan.arm or 'sweep'} on {plan.config} (timeout {plan.timeout_seconds}s)")
     progress.note_baseline(paths, plan)
-    watcher = progress.ProgressWatcher(paths, log, plan=plan)
+    watcher = progress.ProgressWatcher(paths, log, plan=plan, publish_log=log.publish)
     watcher.start()
     stop = threading.Event()
     publisher = threading.Thread(
