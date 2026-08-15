@@ -271,13 +271,13 @@ class TestMirroringRidesTheCoarseTick:
         fifteen seconds is not."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         called: list[str] = []
-        monkeypatch.setattr(progress.mirror, "publish", lambda *a, **k: called.append("x"))
+        monkeypatch.setattr(progress.legmirror, "publish", lambda *a, **k: called.append("x"))
         progress.publish(paths, self._plan(), {"iteration": 250})
         assert called == []
 
     def test_the_coarse_tick_mirrors(self, paths, log, monkeypatch):
         called: list[str] = []
-        monkeypatch.setattr(progress.mirror, "publish", lambda *a, **k: called.append("x"))
+        monkeypatch.setattr(progress.legmirror, "publish", lambda *a, **k: called.append("x"))
         watcher = progress.ProgressWatcher(paths, log, plan=self._plan())
         watcher._coarse()
         assert called == ["x"]
@@ -287,7 +287,7 @@ class TestMirroringRidesTheCoarseTick:
         training task that mirrors nothing -- training being the long-running
         kind, where a frozen row matters most."""
         called: list[str] = []
-        monkeypatch.setattr(progress.mirror, "publish", lambda *a, **k: called.append("x"))
+        monkeypatch.setattr(progress.legmirror, "publish", lambda *a, **k: called.append("x"))
         run_dir = paths.runs / "run-a"
         run_dir.mkdir(parents=True)
         watcher = progress.LadderWatcher(paths, log, run_dir=run_dir, plan=self._plan())

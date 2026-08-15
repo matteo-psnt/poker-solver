@@ -39,6 +39,8 @@ from typing import TYPE_CHECKING, Any
 from src.shared import records
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
     from src.shared.cloudtask import kinds
 
 RECORDS_DIRNAME = "legs"
@@ -122,6 +124,91 @@ def read_documents(directory: Path) -> dict[str, dict[str, Any]]:
         if document:
             found[path.name] = document
     return found
+
+
+# `progress` and `observed` are written per TASK, not per attempt, so their
+# filenames carry no attempt number. They are not attempt-scoped facts: the join
+# attaches them to the LATEST attempt. Carried under this sentinel so the
+# record's primary key still holds and the difference stays visible, rather than
+# being flattened onto attempt 0 where it would collide with a real first one.
+TASK_SCOPED = -1
+
+# When a leg happened, from whichever field its writer used. Not one field,
+# because the writers are different programs: the node stamps `ts`, while the
+# READER'S observation stamps `observed_at` -- when IT looked, not when
+# something happened. Batch's own times come last so a record with neither is
+# not dropped for want of a clock.
+_INSTANT_FIELDS = ("ts", "observed_at", "end_time", "start_time")
+
+
+def leg_row(task_id: str, attempt: int, leg: str, document: Mapping[str, Any]) -> dict[str, Any]:
+    """One leg document as the flat row BOTH stores hold.
+
+    Here, in the stdlib-only half, because there are three writers and one of
+    them is the node -- which runs on an interpreter that has no pydantic and no
+    ORM. A row built two ways is two answers about the same record, which is
+    what `backfill-record --verify` would then report as a divergence forever.
+    """
+    return {
+        "task_id": task_id,
+        "attempt": attempt,
+        "leg": leg,
+        "run_id": document.get("run_id") or None,
+        "at": next((document[f] for f in _INSTANT_FIELDS if document.get(f)), None),
+        "body": dict(document),
+    }
+
+
+def rows_from_documents(
+    documents: dict[str, dict[str, Any]],
+) -> list[tuple[str, int, str, dict[str, Any]]]:
+    """Filename-keyed documents as `(task_id, attempt, leg, body)`.
+
+    TWO NAME SHAPES, and requiring the first silently dropped 4,591 of 13,440
+    documents -- a third of the record, including every one of the 1,823
+    `observed` legs, which are the only account of a death the node did not
+    survive:
+
+        <task>.<attempt>.start.json      per ATTEMPT -- a retry reuses the id
+        <task>.<attempt>.exit.json
+        <task>.progress.json             per TASK
+        <task>.observed.json             per TASK, written by the READER
+    """
+    rows: list[tuple[str, int, str, dict[str, Any]]] = []
+    seen: set[tuple[str, int, str]] = set()
+    for name, document in documents.items():
+        stem = name.removesuffix(".json")
+        parts = stem.rsplit(".", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            task_id, attempt, leg = parts[0], int(parts[1]), parts[2]
+        elif len(parts) >= 2:
+            task_id, attempt, leg = stem.rsplit(".", 1)[0], TASK_SCOPED, parts[-1]
+        else:
+            continue
+        key = (task_id, attempt, leg)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append((task_id, attempt, leg, document))
+    return rows
+
+
+def documents_from_rows(
+    rows: Iterable[tuple[str, int, str, dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """`(task_id, attempt, leg, body)` rows as the filename-keyed dict a reader
+    joins over -- the inverse of :func:`rows_from_documents`, and beside it so
+    the two cannot drift.
+
+    The names are REBUILT rather than stored, from the same suffixes the node
+    writes with, so both stores present the join with the same keys and the
+    filename ordering that decides ties still decides them the same way.
+    """
+    named: dict[str, dict[str, Any]] = {}
+    for task_id, attempt, leg, body in rows:
+        stem = task_id if attempt == TASK_SCOPED else f"{task_id}.{attempt}"
+        named[f"{stem}.{leg}.json"] = body
+    return named
 
 
 def read_task_documents(directory: Path, task_id: str) -> dict[str, dict[str, Any]]:

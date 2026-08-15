@@ -135,6 +135,18 @@ locals {
     export UV_PYTHON_INSTALL_DIR=/opt/uv-python
     export UV_PYTHON_BIN_DIR=/usr/local/bin
     /usr/local/bin/uv python install 3.13
+
+    # The ONE dependency the wrapper itself needs, installed beside the
+    # interpreter rather than arriving with the code. The wrapper records a
+    # task's start and exit and mirrors both into the record database, and it
+    # runs before `uv sync` -- so the venv that holds the project's own driver
+    # does not exist yet and never will for this process. A wheel, no build.
+    #
+    # `legmirror` imports it LAZILY and catches ImportError, so a node that
+    # somehow lacks it mirrors nothing rather than dying at bootstrap with no
+    # record of why. That is what makes installing it here safe.
+    /usr/local/bin/uv pip install --system --python /usr/local/bin/python3.13 \
+      --quiet "psycopg[binary]"
     chmod -R a+rX /opt/uv-python
     SHARE="$AZ_BATCH_NODE_MOUNTS_DIR/shared"
     mkdir -p /mnt/work/data/combo_abstraction /mnt/work/data/runs

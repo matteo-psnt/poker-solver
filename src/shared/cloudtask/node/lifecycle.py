@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from src.shared import cache
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
-from src.shared.cloudtask.node import archive, mirror, progress
+from src.shared.cloudtask.node import archive, legmirror, progress
 from src.shared.cloudtask.node.handlers import HANDLERS, publish_own_run
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import BadEnvironmentError, parse_environment
@@ -212,14 +212,6 @@ def main() -> int:
             log(f"FATAL dependency sync failed rc={sync}")
             code = sync
         else:
-            # NO mirror here, though this is the first moment a database is
-            # reachable. MEASURED on a node: the first `uv run` after a fresh
-            # sync takes over a minute -- it pays the project install and a cold
-            # import off an empty page cache -- and this call site is on the
-            # critical path, so it delayed training by 60s and then timed out
-            # anyway. The watcher publishes progress within seconds of the
-            # handler starting and mirrors from ITS thread, which picks the
-            # started record up at no cost to the work.
             code, outcome = HANDLERS[plan.op](plan, paths, log)
     except Killed as killed:
         code = 128 + killed.signum
@@ -246,6 +238,6 @@ def main() -> int:
         # the state one line before it. Best effort here as everywhere: the
         # share already has it, and a task that survived its work must not die
         # copying the account of it.
-        mirror.publish(paths.share, task, cwd=paths.code, log=log)
+        legmirror.publish(paths.share, task, dsn=plan.record_dsn if plan else "", log=log)
         log.close()
     return code

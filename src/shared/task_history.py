@@ -58,12 +58,10 @@ if TYPE_CHECKING:
 # contend on a share with no atomic append; joins to the task's LATEST attempt.
 OBSERVED_SUFFIX = ".observed.json"
 
-# `progress` and `observed` are written per TASK, not per attempt, so their
-# filenames carry no attempt number. They are not attempt-scoped facts: the join
-# attaches them to the LATEST attempt. Stored under this sentinel so the record's
-# primary key still holds and the difference stays visible, rather than being
-# flattened onto attempt 0 where it would collide with a real first attempt.
-TASK_SCOPED = -1
+# The leg ROW shapes -- `TASK_SCOPED`, `leg_row`, `rows_from_documents`,
+# `documents_from_rows` -- live in `task_log`, not here. The node writes leg
+# rows on an interpreter that has no pydantic, so they have to be in the
+# stdlib-only half; this module is the reading side and imports them there.
 
 # Batch ``executionInfo.result`` / task state -> coarse exit cause. The dead
 # process cannot report these; Batch can. FAILURE conflates an in-container
@@ -519,63 +517,6 @@ def read_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
     if not directory.is_dir():
         return []
     return join_documents(read_documents(directory))
-
-
-def documents_from_rows(
-    rows: Iterable[tuple[str, int, str, dict[str, Any]]],
-) -> dict[str, dict[str, Any]]:
-    """`(task_id, attempt, leg, body)` rows as the filename-keyed dict the join reads.
-
-    The names are REBUILT rather than stored, from the same suffix constants the
-    node writes with -- so the two stores present the join with the same keys and
-    `_with_suffix`'s filename ordering, which decides ties, still decides them
-    the same way. `start` and `exit` are per attempt; `progress` and `observed`
-    are per task, and carry `TASK_SCOPED` where an attempt would go.
-    """
-    named: dict[str, dict[str, Any]] = {}
-    for task_id, attempt, leg, body in rows:
-        suffix = f".{leg}.json"
-        stem = task_id if attempt == TASK_SCOPED else f"{task_id}.{attempt}"
-        named[f"{stem}{suffix}"] = body
-    return named
-
-
-def rows_from_documents(
-    documents: dict[str, dict[str, Any]],
-) -> list[tuple[str, int, str, dict[str, Any]]]:
-    """Filename-keyed documents as `(task_id, attempt, leg, body)`.
-
-    The inverse of :func:`documents_from_rows`, and here beside it so the two
-    cannot drift: one turns rows back into the names the join reads, this turns
-    the names into rows a store can hold.
-
-    TWO NAME SHAPES, and requiring the first silently dropped 4,591 of 13,440
-    documents -- a third of the record, including every one of the 1,823
-    `observed` legs, which are the only account of a death the node did not
-    survive:
-
-        <task>.<attempt>.start.json      per ATTEMPT -- a retry reuses the id
-        <task>.<attempt>.exit.json
-        <task>.progress.json             per TASK
-        <task>.observed.json             per TASK, written by the READER
-    """
-    rows: list[tuple[str, int, str, dict[str, Any]]] = []
-    seen: set[tuple[str, int, str]] = set()
-    for name, document in documents.items():
-        stem = name.removesuffix(".json")
-        parts = stem.rsplit(".", 2)
-        if len(parts) == 3 and parts[1].isdigit():
-            task_id, attempt, leg = parts[0], int(parts[1]), parts[2]
-        elif len(parts) >= 2:
-            task_id, attempt, leg = stem.rsplit(".", 1)[0], TASK_SCOPED, parts[-1]
-        else:
-            continue
-        key = (task_id, attempt, leg)
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append((task_id, attempt, leg, document))
-    return rows
 
 
 def join_documents(documents: dict[str, dict[str, Any]]) -> list[TaskRow]:

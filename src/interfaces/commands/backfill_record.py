@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from src.interfaces.commands._base import Command, records_root
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation.ledger import tiers
-from src.shared import run_events, task_history
+from src.shared import run_events
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
@@ -270,14 +270,10 @@ def _leg_rows(legs_dir: Path, models: Any) -> list[Any]:
     into one file, and a glob over `*.json` sees the bundle and misses
     everything inside it.
     """
-    from src.adapters.postgres import legs as leg_store  # noqa: PLC0415
     from src.shared.cloudtask import task_log  # noqa: PLC0415
 
     documents = task_log.read_documents(legs_dir)
-    return [
-        models.Leg(**leg_store.leg_values(*row))
-        for row in task_history.rows_from_documents(documents)
-    ]
+    return [models.Leg(**task_log.leg_row(*row)) for row in task_log.rows_from_documents(documents)]
 
 
 def run(args: argparse.Namespace) -> BackfillPayload:
