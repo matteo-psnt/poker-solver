@@ -21,7 +21,15 @@ from src.engine.search.range_inference import (
     NUM_COMBOS,
     combo_index_for,
 )
-from src.engine.search.subgame_cfr import RunoutEvaluator, solve_subgame
+from src.engine.search.subgame_cfr import (
+    CHECK_DOWN,
+    Continuation,
+    RunoutEvaluator,
+    _leaf_values,
+    _LeafSpec,
+    _PassContext,
+    solve_subgame,
+)
 from src.engine.search.tree_builder import build_local_tree
 from tests.test_helpers import make_test_config
 
@@ -187,3 +195,99 @@ class TestSolveSubgame:
         first, second = _solve(), _solve()
         np.testing.assert_array_equal(first.root_strategy, second.root_strategy)
         np.testing.assert_array_equal(first.root_values, second.root_values)
+
+
+class TestLeafContinuations:
+    """What a depth-limit leaf ASSUMES happens between it and showdown.
+
+    `_leaf_values` had no direct test before this class: the correctness anchor
+    above covers `RunoutEvaluator.masses`, which is the machinery a leaf value is
+    built FROM, not the leaf value itself. That gap matters more than usual here
+    -- the module's own header warns that getting the valuation wrong is silent
+    ("nothing crashes... the solver converges to the wrong game"), and a
+    continuation is exactly the kind of change that would slip through it.
+    """
+
+    BOARD = (Card.new("Kh"), Card.new("8d"), Card.new("3c"), Card.new("Qs"), Card.new("2d"))
+
+    def _leaf(self, *, is_fold: bool = False, pot: float = 100.0, invested=(30.0, 30.0)):
+        return _LeafSpec(
+            is_fold=is_fold, hero_payoff=pot, opp_payoff=-pot, pot=pot, invested=invested
+        )
+
+    def _ctx(self):
+        evaluator = RunoutEvaluator(self.BOARD)
+        return _PassContext(
+            hero=0,
+            evaluators=[evaluator],
+            alive_count=np.ones(NUM_COMBOS),
+            node_data={},
+            leaf_specs={},
+        )
+
+    def _reaches(self, seed: int = 3):
+        rng = np.random.default_rng(seed)
+        board_mask = 0
+        for card in self.BOARD:
+            board_mask |= card.mask
+        alive = [i for i in range(NUM_COMBOS) if not (int(COMBO_MASKS[i]) & board_mask)]
+        hero, opp = np.zeros(NUM_COMBOS), np.zeros(NUM_COMBOS)
+        for i in alive:
+            hero[i] = rng.uniform(0.1, 1.0)
+            opp[i] = rng.uniform(0.1, 1.0)
+        return hero, opp
+
+    def test_the_default_is_check_down_and_changes_nothing(self):
+        """The parameter must be inert until something passes a continuation."""
+        spec, ctx = self._leaf(), self._ctx()
+        hero, opp = self._reaches()
+        implicit = _leaf_values(spec, ctx, hero, opp)
+        explicit = _leaf_values(spec, ctx, hero, opp, CHECK_DOWN)
+        np.testing.assert_array_equal(implicit[0], explicit[0])
+        np.testing.assert_array_equal(implicit[1], explicit[1])
+
+    def test_a_called_bet_grows_the_pot_by_twice_each_players_share(self):
+        """Both sides commit `pot_fraction` of the pot, so the pot gains 2x it.
+
+        Checked against a leaf built with the larger pot directly rather than
+        against a formula, so the test would fail if the continuation only
+        adjusted the pot and forgot the matching investment (the mistake that
+        would quietly inflate every leaf).
+        """
+        ctx = self._ctx()
+        hero, opp = self._reaches()
+        half_pot = Continuation(name="half-pot-called", pot_fraction=0.5)
+
+        continued = _leaf_values(self._leaf(pot=100.0), ctx, hero, opp, half_pot)
+        equivalent = _leaf_values(
+            self._leaf(pot=200.0, invested=(80.0, 80.0)), ctx, hero, opp, CHECK_DOWN
+        )
+        np.testing.assert_allclose(continued[0], equivalent[0], atol=1e-9)
+        np.testing.assert_allclose(continued[1], equivalent[1], atol=1e-9)
+
+    def test_a_fold_leaf_ignores_the_continuation(self):
+        """The hand is over: there is no rest-of-hand to assume anything about,
+        and this branch is exact. Scaling it would be a silent regression."""
+        spec, ctx = self._leaf(is_fold=True), self._ctx()
+        hero, opp = self._reaches()
+        base = _leaf_values(spec, ctx, hero, opp, CHECK_DOWN)
+        continued = _leaf_values(
+            spec, ctx, hero, opp, Continuation(name="pot-called", pot_fraction=1.0)
+        )
+        np.testing.assert_array_equal(base[0], continued[0])
+        np.testing.assert_array_equal(base[1], continued[1])
+
+    def test_a_bigger_continuation_widens_the_spread_between_hands(self):
+        """More money in means the same equity edge is worth more chips.
+
+        The DIRECTION is the invariant worth pinning: a continuation that grows
+        the pot must not compress the value spread, which is what a sign error
+        on the investment term would do.
+        """
+        ctx = self._ctx()
+        hero, opp = self._reaches()
+        small = _leaf_values(self._leaf(), ctx, hero, opp, CHECK_DOWN)[0]
+        large = _leaf_values(
+            self._leaf(), ctx, hero, opp, Continuation(name="pot-called", pot_fraction=1.0)
+        )[0]
+        assert large.std() > small.std()

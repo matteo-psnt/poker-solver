@@ -59,6 +59,15 @@ class MCCFRSolver[StorageT: CountsInfosets]:
         self.applied_updates = 0
         self.rules = GameRules(self.config.game.small_blind, self.config.game.big_blind)
 
+        # THE LEGACY `np.random` API IS DELIBERATE HERE -- do not "modernise" it
+        # to `np.random.Generator` (what ruff's NPY002 would tell you to do).
+        # Both streams this solver draws from are MT19937, and
+        # `src/engine/solver/numba_random.py` reproduces MT19937 *inside* the
+        # numba kernel by round-tripping `np.random.get_state()`, which is what
+        # makes the compiled walk bit-identical to the traversal it replaced --
+        # the property that let it deploy without re-baselining every published
+        # number. `Generator` is PCG64, has no equivalent state hand-off, and
+        # would break that module and every baseline at once.
         if self.config.system.seed is not None:
             random.seed(self.config.system.seed)
             np.random.seed(self.config.system.seed)
