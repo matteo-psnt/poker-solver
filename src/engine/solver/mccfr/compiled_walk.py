@@ -97,7 +97,7 @@ def _bucket(
     street_matrix,
     street_offsets,
     hand_to_col,
-    sentinel,
+    sentinels,
 ):
     """The acting player's bucket: the preflop class, or the abstraction's cell."""
     first = hole_index[actor * 2]
@@ -133,7 +133,7 @@ def _bucket(
     if column < 0:
         return -1
     value = street_matrix[row, column]
-    if value == sentinel:
+    if value == sentinels[street]:
         return -1
     return value
 
@@ -249,7 +249,7 @@ def walk(
     street_matrix,
     street_offsets,
     hand_to_col,
-    sentinel,
+    sentinels,
     cfr_plus,
     weighting,
     alpha,
@@ -280,7 +280,7 @@ def walk(
         street_matrix,
         street_offsets,
         hand_to_col,
-        sentinel,
+        sentinels,
     )
     if bucket < 0:
         # `_bucket` reports "board not in the abstraction" or "hand impossible
@@ -385,7 +385,7 @@ def walk(
                 street_matrix,
                 street_offsets,
                 hand_to_col,
-                sentinel,
+                sentinels,
                 cfr_plus,
                 weighting,
                 alpha,
@@ -526,7 +526,7 @@ def walk(
         street_matrix,
         street_offsets,
         hand_to_col,
-        sentinel,
+        sentinels,
         cfr_plus,
         weighting,
         alpha,
@@ -551,11 +551,21 @@ def _artifact_arrays(bucketer, street):
     return bucketer._board_ids[street], np.asarray(bucketer._buckets[street])  # noqa: SLF001
 
 
-def _artifact_columns(bucketer):
-    """The static hand-id-to-column map and the not-a-legal-combo sentinel."""
+def _artifact_columns(bucketer, order):
+    """The hand-id-to-column map, and the not-a-legal-combo sentinel PER STREET.
+
+    Per street, not one value: `bucket_dtype` picks the narrowest type that
+    fits, so at production counts the flop is uint8 (sentinel 255) while the
+    turn and river are uint16 (65535). Sharing one sentinel rejects every
+    legal turn or river bucket that happens to equal 255 -- ~1 lookup in 300 --
+    as "not a legal combination". Indexed to match `street_of_node`, whose
+    slot 0 is preflop and never reaches here.
+    """
+    sentinels = [0]
+    sentinels.extend(int(bucketer._sentinels[street]) for street in order)  # noqa: SLF001
     return (
         np.asarray(bucketer._hand_id_to_col, dtype=np.int64),  # noqa: SLF001
-        int(next(iter(bucketer._sentinels.values()))),  # noqa: SLF001
+        np.array(sentinels, dtype=np.int64),
     )
 
 
@@ -606,7 +616,7 @@ class CompiledContext:
         self.street_ids = np.concatenate(ids)
         self.matrix = np.vstack(matrices)
         self.street_offsets = np.array(offsets, dtype=np.int64)
-        self.hand_to_col, self.sentinel = _artifact_columns(bucketer)
+        self.hand_to_col, self.sentinels = _artifact_columns(bucketer, order)
 
         index_of = {Street.PREFLOP: 0, Street.FLOP: 1, Street.TURN: 2, Street.RIVER: 3}
         self.street_of_node = np.array(
@@ -686,7 +696,7 @@ def run_iteration(solver, context, iteration: int) -> float:
         context.matrix,
         context.street_offsets,
         context.hand_to_col,
-        context.sentinel,
+        context.sentinels,
         solver_config.cfr_plus,
         weighting,
         solver_config.dcfr_alpha,
