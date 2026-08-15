@@ -258,6 +258,19 @@ class ResolverConfig(StrictFrozenModel):
     # makes resolves machine/load-independent — a determinism knob for
     # reproducible experiments and tests.
     max_iterations: PositiveInt | None = Field(default=None)
+    # A SENSITIVITY KNOB, not a strategy choice, and 0.0 is the shipped
+    # behaviour. What each player is assumed to commit before showdown at a
+    # depth-limit leaf, as a fraction of the pot there — see
+    # `subgame_cfr.Continuation`. Zero is check-down, which is EXACT on the
+    # river and an approximation only on flop/turn.
+    #
+    # It exists to answer "does the leaf valuation move the resolver's decisions
+    # at all" before anyone builds the real thing, which is an opponent CHOICE
+    # among continuations expressed as a decision node in the local tree. A
+    # single fixed continuation is NOT that and may well score WORSE than
+    # check-down: it is a different biased guess with no choice attached. Read
+    # the MAGNITUDE of the change, never its sign.
+    leaf_continuation_fraction: NonNegFloat = Field(default=0.0)
 
 
 class SolverConfig(StrictFrozenModel):

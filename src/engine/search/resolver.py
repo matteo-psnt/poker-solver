@@ -18,7 +18,7 @@ from src.engine.search.range_inference import (
     replace_actor_hole_cards,
     update_ranges,
 )
-from src.engine.search.subgame_cfr import solve_subgame
+from src.engine.search.subgame_cfr import Continuation, solve_subgame
 from src.engine.search.tree_builder import build_local_tree
 from src.engine.solver.policy.lookup import blueprint_action_distribution
 from src.shared.numeric import NORMALIZE_EPS
@@ -198,6 +198,10 @@ class HUResolver:
             budget_ms=budget_ms,
             num_runouts=self.config.leaf_rollouts,
             max_iterations=self.config.max_iterations,
+            continuation=Continuation(
+                name=f"called-{self.config.leaf_continuation_fraction:g}-pot",
+                pot_fraction=self.config.leaf_continuation_fraction,
+            ),
             rng=self.rng,
         )
         return tree.root.actions, solution

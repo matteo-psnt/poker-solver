@@ -40,6 +40,37 @@ _CARD_A = COMBO_CARDS[:, 0]
 _CARD_B = COMBO_CARDS[:, 1]
 
 
+@dataclass(frozen=True)
+class Continuation:
+    """One assumed line for the rest of the hand, past a depth-limit leaf.
+
+    The module's valuation model (see the header) drops the blueprint's
+    future-street betting and checks down. That is EXACT on the river -- there
+    is no future street, so checking down is the rest of the hand -- and is an
+    approximation only on flop and turn, which is where the ~25% of leaves that
+    stay truncated at any ``max_depth`` live. This type is what makes a
+    different assumption expressible.
+
+    ``pot_fraction`` is what EACH player is assumed to put in before showdown,
+    as a fraction of the pot at the leaf. Zero is the check-down the module has
+    always used, so :data:`CHECK_DOWN` reproduces today's numbers exactly.
+
+    NOT YET WIRED TO A CHOICE. The literature's depth-limited solving gives the
+    OPPONENT a choice among several continuations, which is what stops the hero
+    exploiting one naive assumption. Doing that properly means adding the choice
+    as a decision node in the local tree so CFR learns a strategy over it --
+    taking a max inside the leaf instead would break the zero-sum structure the
+    solve rests on. Until then this is a parameter with one production value.
+    """
+
+    name: str
+    pot_fraction: float
+
+
+CHECK_DOWN = Continuation(name="check-down", pot_fraction=0.0)
+"""Today's assumption, and the default everywhere. Exact on the river."""
+
+
 class RunoutEvaluator:
     """Exact per-combo showdown masses vs a reach vector on one complete board.
 
@@ -187,6 +218,7 @@ def solve_subgame(
     num_runouts: int = 4,
     max_iterations: int | None = None,
     rng: np.random.Generator | None = None,
+    continuation: Continuation = CHECK_DOWN,
 ) -> SubgameSolution:
     """Run RM+ CFR over the local tree; both players adapt per combo.
 
@@ -218,6 +250,7 @@ def solve_subgame(
         alive_count=alive_count,
         node_data=node_data,
         leaf_specs=leaf_specs,
+        continuation=continuation,
     )
 
     deadline = time.perf_counter() + budget_ms / 1000.0
@@ -248,37 +281,6 @@ class _NodeData:
 
 
 @dataclass(frozen=True)
-class Continuation:
-    """One assumed line for the rest of the hand, past a depth-limit leaf.
-
-    The module's valuation model (see the header) drops the blueprint's
-    future-street betting and checks down. That is EXACT on the river -- there
-    is no future street, so checking down is the rest of the hand -- and is an
-    approximation only on flop and turn, which is where the ~25% of leaves that
-    stay truncated at any ``max_depth`` live. This type is what makes a
-    different assumption expressible.
-
-    ``pot_fraction`` is what EACH player is assumed to put in before showdown,
-    as a fraction of the pot at the leaf. Zero is the check-down the module has
-    always used, so :data:`CHECK_DOWN` reproduces today's numbers exactly.
-
-    NOT YET WIRED TO A CHOICE. The literature's depth-limited solving gives the
-    OPPONENT a choice among several continuations, which is what stops the hero
-    exploiting one naive assumption. Doing that properly means adding the choice
-    as a decision node in the local tree so CFR learns a strategy over it --
-    taking a max inside the leaf instead would break the zero-sum structure the
-    solve rests on. Until then this is a parameter with one production value.
-    """
-
-    name: str
-    pot_fraction: float
-
-
-CHECK_DOWN = Continuation(name="check-down", pot_fraction=0.0)
-"""Today's assumption, and the default everywhere. Exact on the river."""
-
-
-@dataclass(frozen=True)
 class _LeafSpec:
     """Iteration-invariant leaf facts, precomputed once per solve."""
 
@@ -298,6 +300,7 @@ class _PassContext:
     alive_count: np.ndarray
     node_data: dict[int, _NodeData]
     leaf_specs: dict[int, _LeafSpec]
+    continuation: Continuation = CHECK_DOWN
 
 
 def _prepare_nodes(
@@ -370,7 +373,9 @@ def _cfr_pass(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """One CFR traversal; returns (v_hero, v_opp, actor action values or None)."""
     if node.is_leaf or not node.children:
-        v_hero, v_opp = _leaf_values(ctx.leaf_specs[id(node)], ctx, reach_hero, reach_opp)
+        v_hero, v_opp = _leaf_values(
+            ctx.leaf_specs[id(node)], ctx, reach_hero, reach_opp, ctx.continuation
+        )
         return v_hero, v_opp, None
 
     nd = ctx.node_data[id(node)]
