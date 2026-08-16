@@ -140,6 +140,134 @@ def exploitability_curve(
     )
 
 
+class ArmPoint(BaseModel):
+    """One arm's score at one checkpoint, inside one tier."""
+
+    arm: str
+    iteration: int
+    exploitability_mbb: float
+    std_error_mbb: float
+    run_id: str | None
+    # Signed difference against the control arm at the SAME iteration and tier,
+    # null when the control has no row there. Negative is better: exploitability.
+    vs_control_mbb: float | None = None
+    # Combined standard error of that difference, null when both rows are exact
+    # (`exact_br` has zero evaluation variance, so the difference IS the answer
+    # and quoting an error on it would invent one).
+    vs_control_stderr_mbb: float | None = None
+
+
+class ArmTier(BaseModel):
+    """Every arm scored with ONE instrument, and their differences.
+
+    A tier is the unit of comparison, so it is also the unit of rendering. Two
+    arms scored at different board budgets are two numbers about different
+    games; they appear in separate tiers and are never subtracted.
+    """
+
+    tier: str
+    control: str | None
+    points: list[ArmPoint]
+    arms: list[str]
+    # Iterations where NOT every arm has a row. A difference read across a
+    # partial column compares the arms at different amounts of training.
+    unmatched_iterations: list[int]
+
+
+class ArmsOutput(BaseModel):
+    """What `arms` answers: one experiment's arms, grouped by instrument."""
+
+    experiment_id: str
+    tiers: list[ArmTier]
+    unplaceable_records: int = 0
+
+
+def experiment_arms(
+    records: list[dict[str, Any]],
+    experiment_id: str,
+    *,
+    control: str | None = None,
+) -> ArmsOutput:
+    """Group one experiment's evaluations by tier, then by arm.
+
+    The difference is taken DIRECTLY, without a p-value, and that is not a
+    weakening. `exact_br` has zero evaluation variance -- the same checkpoint
+    always scores identically -- so two arms in a matched tier differ by exactly
+    the number subtracted here. The paired-sample machinery this replaces
+    refused those rows outright (they carry no per-hand samples), which is why
+    every exact_br A/B in this project's history was subtracted by hand.
+
+    LBR rows DO carry sampling error, so their difference carries the combined
+    standard error rather than pretending to be exact.
+    """
+    rows = [r for r in records if r.get("experiment_id") == experiment_id]
+    unplaceable = sum(1 for r in rows if r.get("checkpoint_iteration") is None)
+
+    # (tier, arm, iteration) -> record; a re-evaluation supersedes its predecessor.
+    grouped: dict[tuple[Any, ...], dict[tuple[str, int], dict[str, Any]]] = {}
+    labels: dict[tuple[Any, ...], str] = {}
+    for record in rows:
+        iteration = record.get("checkpoint_iteration")
+        if iteration is None:
+            continue
+        arm = record.get("arm") or record.get("run_id") or "?"
+        key = eval_ledger.tier_key(record)
+        labels.setdefault(key, eval_ledger.tier_label(record))
+        grouped.setdefault(key, {})[(str(arm), int(iteration))] = record
+
+    tiers = []
+    for key, cells in sorted(grouped.items(), key=lambda kv: (-len(kv[1]), str(kv[0]))):
+        arms = sorted({arm for arm, _ in cells})
+        iterations = sorted({iteration for _, iteration in cells})
+        chosen = control if control in arms else None
+        points = [
+            _arm_point(arm, iteration, cells, chosen)
+            for arm, iteration in sorted(cells, key=lambda cell: (cell[1], cell[0]))
+        ]
+        tiers.append(
+            ArmTier(
+                tier=labels[key],
+                control=chosen,
+                points=points,
+                arms=arms,
+                unmatched_iterations=[
+                    i for i in iterations if any((a, i) not in cells for a in arms)
+                ],
+            )
+        )
+    return ArmsOutput(experiment_id=experiment_id, tiers=tiers, unplaceable_records=unplaceable)
+
+
+def _arm_point(
+    arm: str,
+    iteration: int,
+    cells: dict[tuple[str, int], dict[str, Any]],
+    control: str | None,
+) -> ArmPoint:
+    record = cells[(arm, iteration)]
+    results = record.get("results") or {}
+    value = float(results.get("exploitability_mbb", 0.0))
+    error = float(results.get("std_error_mbb", 0.0) or 0.0)
+    point = ArmPoint(
+        arm=arm,
+        iteration=iteration,
+        exploitability_mbb=value,
+        std_error_mbb=error,
+        run_id=record.get("run_id"),
+    )
+    if control is None or arm == control:
+        return point
+    against = cells.get((control, iteration))
+    if against is None:
+        return point
+    base = against.get("results") or {}
+    point.vs_control_mbb = value - float(base.get("exploitability_mbb", 0.0))
+    base_error = float(base.get("std_error_mbb", 0.0) or 0.0)
+    if error or base_error:
+        point.vs_control_stderr_mbb = (error**2 + base_error**2) ** 0.5
+    return point
+
+
 class RunDigest(BaseModel):
     """Everything recorded about one run, joined into a single view.
 

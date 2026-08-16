@@ -176,17 +176,17 @@ class BatchTask(BaseModel):
     """
 
     task: str
+    job: str = ""
     """Which job it belongs to. `task_history.reconcile` files an observer
     record under it, and a task fetched on its own has no other way to say."""
-    job: str = ""
     state: str | None
-    """The classification. What every reader should branch on."""
     phase: Phase
-    """What a task that STOPPED achieved. Null while it is still going."""
+    """The classification. What every reader should branch on."""
     outcome: Outcome | None = None
+    """What a task that STOPPED achieved. Null while it is still going."""
     exit_code: int | None = None
-    """The recurring exit codes in words, so the terminal explains them too."""
     exit_meaning: str | None = None
+    """The recurring exit codes in words, so the terminal explains them too."""
     result: str | None = None
     created: str | None = None
     start_time: str | None = None

@@ -32,6 +32,7 @@ from src.interfaces.commands.abstraction_coupling import (
     ConstantGap,
 )
 from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
+from src.interfaces.commands.arms import ArmsPayload
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
 from src.interfaces.commands.backfill_record import BackfillPayload, Counts
 from src.interfaces.commands.benchmark import BenchmarkPayload
@@ -71,7 +72,7 @@ from src.interfaces.commands.train_static import StaticTrainingPayload
 from src.interfaces.commands.train_vector import VectorBlueprintPayload
 from src.interfaces.commands.vector_sweep import SweepPoint, VectorSweepPayload
 from src.pipeline.services import EvaluationPayload
-from src.pipeline.services.experiments import CurveOutput, CurvePoint
+from src.pipeline.services.experiments import ArmPoint, ArmsOutput, ArmTier, CurveOutput, CurvePoint
 from src.shared.task_history import TaskProgress, TaskRow
 from src.shared.task_states import Phase
 
@@ -268,6 +269,38 @@ PAYLOADS: dict[str, Any] = {
         other_tiers=["lbr/myopic"],
         retained_iterations=[1000, 4000, 8000],
         unplaceable_records=1,
+    ),
+    "arms": ArmsPayload(
+        ledger="data/eval_ledger.jsonl",
+        result=ArmsOutput(
+            experiment_id="pcs-weighting",
+            tiers=[
+                ArmTier(
+                    tier="exact_br num_flops=4 num_turns=16 num_rivers=16 seed=7",
+                    control="linplus",
+                    arms=["dcfr", "linplus"],
+                    unmatched_iterations=[4000],
+                    points=[
+                        ArmPoint(
+                            arm="linplus",
+                            iteration=2000,
+                            exploitability_mbb=900.0,
+                            std_error_mbb=0.0,
+                            run_id="run-linplus",
+                        ),
+                        ArmPoint(
+                            arm="dcfr",
+                            iteration=2000,
+                            exploitability_mbb=780.0,
+                            std_error_mbb=0.0,
+                            run_id="run-dcfr",
+                            vs_control_mbb=-120.0,
+                        ),
+                    ],
+                )
+            ],
+            unplaceable_records=1,
+        ),
     ),
     "ledger": LedgerPayload(
         ledger="data/eval_ledger.jsonl",

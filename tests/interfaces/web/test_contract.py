@@ -40,6 +40,7 @@ MODELS: dict[str, type[BaseModel]] = {
     "runs": contract.Runs,
     "runinfo": contract.RunInfo,
     "progress": contract.Progress,
+    "arms": contract.Arms,
     "curve": contract.Curve,
     "ledger": contract.Ledger,
     "logs": contract.LogLines,

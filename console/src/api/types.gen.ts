@@ -277,6 +277,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/experiments/{experiment_id}/arms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Arms */
+        get: operations["_arms_api_experiments__experiment_id__arms_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs": {
         parameters: {
             query?: never;
@@ -696,6 +713,76 @@ export interface components {
             error: string;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * ArmPoint
+         * @description One arm's score at one checkpoint, inside one tier.
+         */
+        ArmPoint: {
+            /** Arm */
+            arm: string;
+            /** Exploitability Mbb */
+            exploitability_mbb: number;
+            /** Iteration */
+            iteration: number;
+            /** Run Id */
+            run_id: string | null;
+            /** Std Error Mbb */
+            std_error_mbb: number;
+            /** Vs Control Mbb */
+            vs_control_mbb?: number | null;
+            /** Vs Control Stderr Mbb */
+            vs_control_stderr_mbb?: number | null;
+        };
+        /**
+         * ArmTier
+         * @description Every arm scored with ONE instrument, and their differences.
+         *
+         *     A tier is the unit of comparison, so it is also the unit of rendering. Two
+         *     arms scored at different board budgets are two numbers about different
+         *     games; they appear in separate tiers and are never subtracted.
+         */
+        ArmTier: {
+            /** Arms */
+            arms: string[];
+            /** Control */
+            control: string | null;
+            /** Points */
+            points: components["schemas"]["ArmPoint"][];
+            /** Tier */
+            tier: string;
+            /** Unmatched Iterations */
+            unmatched_iterations: number[];
+        };
+        /**
+         * ArmsOutput
+         * @description What `arms` answers: one experiment's arms, grouped by instrument.
+         */
+        ArmsOutput: {
+            /** Experiment Id */
+            experiment_id: string;
+            /** Tiers */
+            tiers: components["schemas"]["ArmTier"][];
+            /**
+             * Unplaceable Records
+             * @default 0
+             */
+            unplaceable_records: number;
+        };
+        /**
+         * ArmsPayload
+         * @description What `arms` answers. The console can read this unchanged.
+         */
+        ArmsPayload: {
+            /** Ledger */
+            ledger: string;
+            /**
+             * Op
+             * @default arms
+             * @constant
+             */
+            op: "arms";
+            result: components["schemas"]["ArmsOutput"];
         };
         /**
          * AutoscalePayload
@@ -3188,6 +3275,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LedgerPayload"];
+                };
+            };
+            /** @description Understood, and the answer is no. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Azure did not answer. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    _arms_api_experiments__experiment_id__arms_get: {
+        parameters: {
+            query?: {
+                control?: string;
+            };
+            header?: never;
+            path: {
+                experiment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArmsPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
