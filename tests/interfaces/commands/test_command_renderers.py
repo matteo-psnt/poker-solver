@@ -338,6 +338,10 @@ PAYLOADS: dict[str, Any] = {
         # The digest's own word, which `training_tasks` renames for the reader.
         attempts=4,
         training_tasks=4,
+        trainer_knobs={
+            "solver": {"cfr_plus": False, "iteration_weighting": "dcfr", "dcfr_gamma": 2.0},
+            "pcs": {"cfr_br": "river", "runouts_per_flop": 1},
+        },
         total_progress_rows=2,
         progress=[
             {

@@ -295,6 +295,12 @@ class RunDigest(BaseModel):
     iterations: int
     runtime_seconds: float
     attempts: int
+    # The RESOLVED solver/pcs knobs, which is what `--config` plus a `--set` list
+    # actually produced. They were on the metadata's `config` all along and no
+    # reader surfaced them, so telling two arms apart meant reading a node's log:
+    # `w-noplus` and `w-dcfr-noplus` share a commit, a config name and an
+    # abstraction, and the only record of what they differed in was the label.
+    trainer_knobs: dict[str, Any]
     progress: list[dict[str, Any]]
     coverage_flat_from: int | None
     curve: CurveOutput
@@ -336,12 +342,27 @@ def run_digest(
         iterations=metadata.iterations,
         runtime_seconds=metadata.runtime_seconds,
         attempts=len(metadata.attempts),
+        trainer_knobs=_trainer_knobs(metadata),
         progress=progress,
         coverage_flat_from=run_events.plateau_iteration(progress),
         curve=curve,
         tasks=tasks,
         gaps=_digest_gaps(metadata, progress, curve, tasks, run_dir),
     )
+
+
+def _trainer_knobs(metadata: RunMetadata) -> dict[str, Any]:
+    """The knobs that decide what ALGORITHM ran, off the run's own config.
+
+    Solver and pcs only. The rest of `Config` describes the GAME -- blinds,
+    stack, action model, abstraction -- and is already pinned by
+    `action_config_hash` and `card_abstraction_hash`; repeating it would bury
+    the two lines that actually differ between two arms.
+    """
+    config = getattr(metadata, "config", None)
+    if config is None:
+        return {}
+    return {"solver": config.solver.model_dump(), "pcs": config.pcs.model_dump()}
 
 
 def _digest_gaps(

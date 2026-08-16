@@ -2057,6 +2057,10 @@ export interface components {
              * @default 0
              */
             total_progress_rows: number;
+            /** Trainer Knobs */
+            trainer_knobs: {
+                [key: string]: unknown;
+            };
             /** Training Tasks */
             training_tasks?: number | null;
         };
