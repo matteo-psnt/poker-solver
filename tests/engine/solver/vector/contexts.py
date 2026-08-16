@@ -121,6 +121,40 @@ def prefix_consistent_contexts(
     return contexts
 
 
+def sparse_context(
+    rng: np.random.Generator,
+    counts: dict[Street, int],
+    *,
+    occupancy: float = 0.2,
+    num_cards: int = 52,
+    board: Sequence[int] | np.ndarray | None = None,
+) -> HandContext:
+    """A context whose board occupies only PART of each street's bucket space.
+
+    :func:`ordered_context` spreads a board's hands over every bucket, which the
+    production abstraction does not: measured against the 100/300/600 artifact,
+    one runout occupies 48 of 100 flop, 58 of 300 turn and 81 of 600 river
+    buckets. A row is therefore written by a MINORITY of boards, and the
+    per-visit DCFR discount reaches it at a rate that varies by street -- the
+    regime the fixtures above cannot express and the one production trains in.
+
+    Each board draws its own sorted subset of the bucket space and ranks its
+    hands into it, so buckets stay strength-ordered (the showdown signal
+    survives) while different boards share an overlapping, non-identical set.
+    """
+    cards = rng.choice(num_cards, 5, replace=False) if board is None else board
+    hand_cards = enumerate_live_hands(cards, num_cards)
+    num_hands = hand_cards.shape[0]
+    ranks = rng.permutation(num_hands)
+
+    buckets = np.zeros((4, num_hands), dtype=np.int64)
+    for street, count in counts.items():
+        width = max(1, min(count, round(count * occupancy)))
+        occupied = np.sort(rng.choice(count, width, replace=False))
+        buckets[street.value - 1] = occupied[np.minimum(ranks * width // num_hands, width - 1)]
+    return HandContext(hand_cards, buckets, ranks, blocking_matrix(hand_cards))
+
+
 def showdown_signal(contexts: Sequence[HandContext], counts: dict[Street, int]) -> float:
     """Peak magnitude of the **bucket-space** showdown matrix these contexts imply.
 
@@ -141,4 +175,5 @@ __all__: Sequence[str] = (
     "ordered_context",
     "prefix_consistent_contexts",
     "showdown_signal",
+    "sparse_context",
 )
