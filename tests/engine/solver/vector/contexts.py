@@ -141,6 +141,12 @@ def sparse_context(
     Each board draws its own sorted subset of the bucket space and ranks its
     hands into it, so buckets stay strength-ordered (the showdown signal
     survives) while different boards share an overlapping, non-identical set.
+
+    Inherits :func:`ordered_context`'s per-board draw, so it BREAKS the prefix
+    rule :func:`prefix_consistent_contexts` exists to keep: two boards sharing a
+    flop give one hand unrelated flop buckets. Fine for a sampler that draws one
+    full board per iteration, where every board is alone in its partition —
+    never for a mixture or CFR-BR test, which would read the runout off it.
     """
     cards = rng.choice(num_cards, 5, replace=False) if board is None else board
     hand_cards = enumerate_live_hands(cards, num_cards)
