@@ -88,9 +88,7 @@ def pull_metadata(
         if len(matches) > 1:
             raise CommandError(run_names.ambiguous_message(run, matches))
         if not matches:
-            raise CommandError(
-                f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
-            )
+            raise CommandError(run_names.unknown_message(run, published))
         published = matches
 
     # The WALK, not only the downloads. Each run is an independent traversal of
@@ -190,9 +188,7 @@ def resolve_published_run(run: str) -> str:
     if len(matches) > 1:
         raise CommandError(run_names.ambiguous_message(run, matches))
     if not matches:
-        raise CommandError(
-            f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
-        )
+        raise CommandError(run_names.unknown_message(run, published))
     return matches[0]
 
 
@@ -458,9 +454,7 @@ def _require_published(root: Path, run: str) -> None:
     if len(matches) > 1:
         raise CommandError(run_names.ambiguous_message(run, matches))
     if not matches:
-        raise CommandError(
-            f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
-        )
+        raise CommandError(run_names.unknown_message(run, published))
 
 
 @contextmanager

@@ -14,6 +14,7 @@ about another -- so there is one definition and both import it. Nothing below
 
 from __future__ import annotations
 
+import difflib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -39,3 +40,24 @@ def ambiguous_message(fragment: str, matches: list[str], *, limit: int = 6) -> s
     shown = ", ".join(matches[:limit])
     more = f", +{len(matches) - limit} more" if len(matches) > limit else ""
     return f"'{fragment}' matches {len(matches)} runs ({shown}{more}). Be more specific."
+
+
+def unknown_message(fragment: str, published: list[str], *, limit: int = 6) -> str:
+    """The refusal for a fragment nothing matches -- the SIMILAR ids, not all of them.
+
+    The ambiguous path above was given a limit and this one was not, so a typo
+    printed every published run: measured 09-01, 303 ids in one paragraph, which
+    is a wall to scroll past rather than an answer. Ranked by similarity, because
+    the useful reply to a mistyped id is the id that was meant and alphabetical
+    order puts that nowhere in particular.
+    """
+    if not published:
+        return f"'{fragment}' is not published, and neither is anything else."
+    close = difflib.get_close_matches(fragment, published, n=limit, cutoff=0.4)
+    # Nothing similar -- a fragment of a run that was never created, or one still
+    # training and so not yet published. The newest ids are where that is.
+    shown = close or sorted(published)[-limit:]
+    return (
+        f"'{fragment}' is not published. {'Closest' if close else 'Newest'}: "
+        f"{', '.join(shown)} ({len(published)} published; `poker-solver runs` lists them)."
+    )
