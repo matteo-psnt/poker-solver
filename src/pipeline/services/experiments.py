@@ -180,6 +180,10 @@ class ArmsOutput(BaseModel):
     experiment_id: str
     tiers: list[ArmTier]
     unplaceable_records: int = 0
+    # Tiers dropped because they hold no row for the requested control, and so
+    # cannot answer the question `--control` asked. Reported, because a silent
+    # drop and an experiment that was never scored look the same.
+    tiers_without_control: int = 0
 
 
 def experiment_arms(
@@ -216,10 +220,18 @@ def experiment_arms(
         grouped.setdefault(key, {})[(str(arm), int(iteration))] = record
 
     tiers = []
+    skipped = 0
     for key, cells in sorted(grouped.items(), key=lambda kv: (-len(kv[1]), str(kv[0]))):
         arms = sorted({arm for arm, _ in cells})
         iterations = sorted({iteration for _, iteration in cells})
         chosen = control if control in arms else None
+        if control is not None and chosen is None:
+            # `--control X` asks one question, and a tier with no X row cannot
+            # answer it. Counted rather than rendered: `cfr-br` holds 47 tiers
+            # (avg_gamma, mixtures, thresholds, three seeds) and exactly one
+            # contains both weighting arms -- printing the other 46 buries it.
+            skipped += 1
+            continue
         points = [
             _arm_point(arm, iteration, cells, chosen)
             for arm, iteration in sorted(cells, key=lambda cell: (cell[1], cell[0]))
@@ -235,7 +247,12 @@ def experiment_arms(
                 ],
             )
         )
-    return ArmsOutput(experiment_id=experiment_id, tiers=tiers, unplaceable_records=unplaceable)
+    return ArmsOutput(
+        experiment_id=experiment_id,
+        tiers=tiers,
+        unplaceable_records=unplaceable,
+        tiers_without_control=skipped,
+    )
 
 
 def _arm_point(

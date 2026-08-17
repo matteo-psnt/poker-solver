@@ -764,6 +764,11 @@ export interface components {
             /** Tiers */
             tiers: components["schemas"]["ArmTier"][];
             /**
+             * Tiers Without Control
+             * @default 0
+             */
+            tiers_without_control: number;
+            /**
              * Unplaceable Records
              * @default 0
              */

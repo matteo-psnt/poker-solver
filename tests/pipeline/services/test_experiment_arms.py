@@ -89,29 +89,26 @@ class TestDifferences:
 
 class TestTiers:
     def test_two_board_budgets_are_never_subtracted(self):
-        out = experiment_arms(
-            [
-                row("linplus", 2000, 900.0),
-                row("dcfr", 2000, 780.0, knobs={"num_turns": 2, "num_rivers": 2}),
-            ],
-            "pcs-weighting",
-            control="linplus",
-        )
-        assert len(out.tiers) == 2
-        assert all(p.vs_control_mbb is None for tier in out.tiers for p in tier.points)
+        rows = [
+            row("linplus", 2000, 900.0),
+            row("dcfr", 2000, 780.0, knobs={"num_turns": 2, "num_rivers": 2}),
+        ]
+        assert len(experiment_arms(rows, "pcs-weighting").tiers) == 2
+        # Under a control the dcfr row is not merely undifferenced, it is not
+        # RENDERED: its tier cannot answer the question that was asked.
+        out = experiment_arms(rows, "pcs-weighting", control="linplus")
+        assert [t.arms for t in out.tiers] == [["linplus"]]
+        assert out.tiers_without_control == 1
 
     def test_a_different_tree_fingerprint_splits_the_tier(self):
         """The limp fix changed the tree under a fixed action config, so two rows
         agreeing on every knob can still describe different games."""
-        out = experiment_arms(
-            [
-                row("linplus", 2000, 900.0),
-                row("dcfr", 2000, 780.0, eval_tree_fingerprint="37e51fce"),
-            ],
-            "pcs-weighting",
-            control="linplus",
-        )
-        assert len(out.tiers) == 2
+        rows = [
+            row("linplus", 2000, 900.0),
+            row("dcfr", 2000, 780.0, eval_tree_fingerprint="37e51fce"),
+        ]
+        assert len(experiment_arms(rows, "pcs-weighting").tiers) == 2
+        assert experiment_arms(rows, "pcs-weighting", control="linplus").tiers_without_control == 1
 
     def test_the_best_covered_tier_comes_first(self):
         out = experiment_arms(
@@ -127,6 +124,33 @@ class TestTiers:
     def test_a_reevaluation_supersedes_its_predecessor(self):
         out = experiment_arms([row("dcfr", 2000, 999.0), row("dcfr", 2000, 780.0)], "pcs-weighting")
         assert out.tiers[0].points[0].exploitability_mbb == 780.0
+
+
+class TestWhatAControlSelects:
+    def test_a_tier_without_the_control_is_counted_not_rendered(self):
+        """`cfr-br` holds 47 tiers -- avg_gamma sweeps, mixtures, thresholds,
+        three seeds -- and exactly one contains both weighting arms. Printing the
+        other 46 buried the answer."""
+        out = experiment_arms(
+            [
+                row("linplus", 2000, 900.0),
+                row("dcfr", 2000, 780.0),
+                row("other", 3000, 500.0, knobs={"num_turns": 2}),
+                row("other", 3000, 510.0, knobs={"avg_gamma": 3.0}),
+            ],
+            "pcs-weighting",
+            control="linplus",
+        )
+        assert [t.arms for t in out.tiers] == [["dcfr", "linplus"]]
+        assert out.tiers_without_control == 2
+
+    def test_without_a_control_every_tier_is_kept(self):
+        out = experiment_arms(
+            [row("linplus", 2000, 900.0), row("other", 3000, 500.0, knobs={"num_turns": 2})],
+            "pcs-weighting",
+        )
+        assert len(out.tiers) == 2
+        assert out.tiers_without_control == 0
 
 
 class TestWhatItRefusesToPlace:
@@ -145,7 +169,9 @@ class TestWhatItRefusesToPlace:
         )
         assert out.tiers[0].arms == ["dcfr"]
 
-    def test_an_unknown_control_leaves_every_difference_null(self):
+    def test_an_unknown_control_leaves_nothing_to_render(self):
+        """The command turns this into "no tier holds an arm named X", which is a
+        different refusal from "nothing is scored" and needs a different fix."""
         out = experiment_arms([row("dcfr", 2000, 780.0)], "pcs-weighting", control="nope")
-        assert out.tiers[0].control is None
-        assert out.tiers[0].points[0].vs_control_mbb is None
+        assert out.tiers == []
+        assert out.tiers_without_control == 1
