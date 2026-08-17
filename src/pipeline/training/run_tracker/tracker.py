@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -248,6 +249,26 @@ class RunTracker:
                     "continuation: repeat every override the run was started with, or "
                     "the ladder ends up holding rungs from two different trainers."
                 )
+
+    def record_checkpoint(self, **fields: Any) -> None:
+        """The mid-flight row, through the SAME path as every other event.
+
+        It used to be appended straight to `run.jsonl` by the trainer, which
+        meant the one event type the sink never saw -- so `progress`, reading
+        checkpoint events out of the database, found none for any run since the
+        last import. Every other event reaches both stores because it comes
+        through here.
+
+        NEVER FATAL, which is why it is not just `_record`: this runs
+        immediately after `save_checkpoint` succeeded, so an IO error on the log
+        would throw away a good rung and mark the run failed over telemetry.
+        """
+        try:
+            self._record(run_events.CHECKPOINT, **fields)
+        except Exception:  # noqa: BLE001 -- telemetry must not fail a written rung
+            logging.getLogger(__name__).warning(
+                "Could not record the checkpoint event; training continues."
+            )
 
     def _record(self, event: str, **fields: Any) -> None:
         """Append the event to the log, then offer it to the sink.

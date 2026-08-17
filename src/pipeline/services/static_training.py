@@ -288,6 +288,7 @@ def train_static(
             checkpoint_every=checkpoint_every,
             resume=resuming or seeded,
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
+            on_checkpoint=tracker.record_checkpoint,
         )
     except Exception:
         # cleanup_if_empty so a run that died before writing anything does not

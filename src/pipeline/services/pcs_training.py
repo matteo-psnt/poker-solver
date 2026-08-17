@@ -233,6 +233,7 @@ def train_pcs(
             checkpoint_every=checkpoint_every,
             resume=resuming,
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
+            on_checkpoint=tracker.record_checkpoint,
             worker=pcs_parallel.pcs_worker,
             before_checkpoint=pcs_parallel.mark_visited_from_strategy,
             extra_arrays=extra,
