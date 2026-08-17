@@ -216,14 +216,26 @@ def read_task_documents(directory: Path, task_id: str) -> dict[str, dict[str, An
 
     Scoped by NAME rather than filtering what :func:`read_documents` returns,
     and the difference is the whole point: that reads and parses every file in
-    the directory, which is 13,600 of them on the share. A node mirroring its
-    own two records paid ~100s for that, on every call.
+    the directory -- 13,590 of them on the share, over SMB. Two callers paid it,
+    and the second cost every task on the pool FIVE MINUTES.
 
-    Bundles are not consulted, which is correct rather than a shortcut: a bundle
-    holds records `compact-legs` has SEALED, and a task asking about itself is
-    by definition not sealed yet.
+    Bundles ARE consulted, and cheaply: there are a handful of them however many
+    records they hold. `_next_attempt` counts across them deliberately -- if
+    compaction swept an earlier attempt's start record into a bundle and this
+    counted only loose files, a retry would reuse an attempt number and
+    overwrite the record of the failure that caused it.
     """
+    prefix = f"{task_id}."
     found: dict[str, dict[str, Any]] = {}
+    for path in sorted(directory.glob(f"*{BUNDLE_SUFFIX}")):
+        bundle = _load(path)
+        found.update(
+            {
+                name: document
+                for name, document in (bundle or {}).get("records", {}).items()
+                if isinstance(document, dict) and name.startswith(prefix)
+            }
+        )
     for path in sorted(directory.glob(f"{task_id}.*.json")):
         if path.name.endswith(BUNDLE_SUFFIX):
             continue
@@ -382,11 +394,8 @@ def _next_attempt(directory: Path, task_id: str) -> int:
     already been used and overwrite the record of the failure that caused it --
     silently, and on the durable copy.
     """
-    prefix = f"{task_id}."
     starts = [
-        name
-        for name in read_documents(directory)
-        if name.startswith(prefix) and name.endswith(START_SUFFIX)
+        name for name in read_task_documents(directory, task_id) if name.endswith(START_SUFFIX)
     ]
     return len(starts) + 1
 
