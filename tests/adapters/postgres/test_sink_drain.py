@@ -11,6 +11,9 @@ training, which is the zombie this whole migration exists to stop creating.
 
 from __future__ import annotations
 
+import queue
+import threading
+import time
 from typing import Any
 
 from src.adapters.postgres import connect
@@ -77,3 +80,35 @@ def test_every_trainer_goes_through_it():
         source = Path(repo.SRC / "interfaces" / "commands" / f"{name}.py").read_text()
         assert "connect.record_sink()" in source, f"{name} builds a sink it never drains"
         assert "connect.sink_from_environment()" not in source
+
+
+class TestTheFlushCeilingIsReal:
+    """`Queue.join()` takes no timeout. The version this replaces passed its
+    `timeout` to a log message and nowhere else, so the ceiling every caller
+    believed in did not exist -- and a sink that could not reach the database
+    would have hung the run at exit, after the work had succeeded.
+    """
+
+    def test_a_sink_that_never_drains_still_returns(self):
+        from src.adapters.postgres.sink import PostgresSink
+
+        class _Stalled:
+            def begin(self):
+                raise AssertionError("the writer must not be reached in this test")
+
+        sink = PostgresSink.__new__(PostgresSink)
+        sink._queue = _neverending()
+        sink._dropped = 0
+        sink._lock = threading.Lock()
+
+        started = time.monotonic()
+        drained = sink.flush(0.2)
+        assert time.monotonic() - started < 5, "flush ignored its ceiling"
+        assert drained is False, "a queue that did not drain means the database is behind"
+
+
+def _neverending():
+    """A queue that always reports work outstanding."""
+    made = queue.Queue()
+    made.put(object())
+    return made
