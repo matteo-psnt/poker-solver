@@ -116,8 +116,21 @@ class ProgressWatcher:
         work actually ended rather than wherever it was up to a tick before.
         """
         self._stop.set()
+        started = time.monotonic()
         self._thread.join(timeout=GRACE_SECONDS)
+        joined = time.monotonic() - started
+        alive = self._thread.is_alive()
         self._sample()
+        # The last unsplit piece of a task's tail. `run_guarded` now reports the
+        # child gone 25.7s in and the pump joined with it, while the handler
+        # returns 374s in -- so 348 of those seconds are HERE, and this says
+        # whether they are the join giving up on a tick still in flight or the
+        # final sample itself.
+        self._log(
+            f"watcher stopped: joined after {joined:.1f}s"
+            + (" (THREAD STILL RUNNING)" if alive else "")
+            + f", final sample after {time.monotonic() - started - joined:.1f}s"
+        )
 
     def _loop(self) -> None:
         # Progress goes out immediately and then on its OWN, much finer cadence
