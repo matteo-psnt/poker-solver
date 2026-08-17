@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import signal
+import time
 from typing import TYPE_CHECKING
 
 from src.shared import cache
@@ -212,7 +213,16 @@ def main() -> int:
             log(f"FATAL dependency sync failed rc={sync}")
             code = sync
         else:
+            started = time.monotonic()
             code, outcome = HANDLERS[plan.op](plan, paths, log)
+            # The ONE boundary this log had no line for, and it hides minutes.
+            # A quick_test whose training reports 22.6s of work publishes five
+            # minutes later, every time and long before any of the record work
+            # -- so the gap is the handler returning, not the publish. Which
+            # PART of the handler is the next question, and it cannot be asked
+            # while the log jumps straight from the child's last line to
+            # `publishing`.
+            log(f"handler returned rc={code} after {time.monotonic() - started:.1f}s")
     except Killed as killed:
         code = 128 + killed.signum
         log(f"signalled ({killed.signum}); publishing what this task has")
