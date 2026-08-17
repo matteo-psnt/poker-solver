@@ -169,11 +169,13 @@ def run(args: argparse.Namespace) -> CompactedPayload:
             check = Path(check_tmp)
             download_tasks(service, config.share_name, check)
             after = task_history.read_tasks(check)
-        if after != before:
+        lost, altered = _regressions(before, after, names)
+        if lost or altered:
             raise CommandError(
-                "The bundle landed but the joined task log CHANGED, so nothing was "
-                f"deleted ({len(before)} rows before, {len(after)} after). The loose "
-                "files are all still there; delete the bundle to undo."
+                "The bundle landed but the joined task log REGRESSED, so nothing was "
+                f"deleted: {len(lost)} attempt(s) gone, {len(altered)} of the ones it "
+                f"moved changed ({len(before)} rows before, {len(after)} after). The "
+                "loose files are all still there; delete the bundle to undo."
             )
         result.verified = True
 
@@ -181,6 +183,37 @@ def run(args: argparse.Namespace) -> CompactedPayload:
             result.deleted = _delete(service, config.share_name, names)
             result.files_after = result.files_before - result.deleted + 1
         return result
+
+
+def _regressions(
+    before: list[Any], after: list[Any], moved: list[str]
+) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+    """What compaction BROKE, as distinct from what merely moved on.
+
+    Two questions, and only these two. Did an attempt disappear -- the failure
+    this verification exists for, where records were swept into a bundle that
+    did not carry them. And did any attempt it MOVED come back different, which
+    is the same loss one row at a time.
+
+    An attempt it did not move is allowed to differ, because the world does not
+    stop for a compaction: a whole-list comparison could not pass while a single
+    task was running, and on this pool something is running nearly always. It
+    failed exactly that way -- one live task advanced its cause during the three
+    minutes the download, bundle and re-download took, and 10,718 files stayed
+    loose over a change compaction had nothing to do with.
+    """
+    # Through the ONE filename parser rather than a second `rsplit` here: both
+    # leg name shapes reach this list, and getting that wrong silently empties
+    # the set -- which reads as "nothing it moved changed" and would let the
+    # delete proceed over exactly the damage this is checking for.
+    seen = {
+        task_id for task_id, _, _, _ in task_log.rows_from_documents({name: {} for name in moved})
+    }
+    old = {(row.task_id, row.attempt): row for row in before}
+    new = {(row.task_id, row.attempt): row for row in after}
+    lost = sorted(set(old) - set(new))
+    altered = sorted(key for key in set(old) & set(new) if key[0] in seen and old[key] != new[key])
+    return lost, altered
 
 
 def _provenance(args: argparse.Namespace, result: CompactedPayload) -> dict[str, Any]:
