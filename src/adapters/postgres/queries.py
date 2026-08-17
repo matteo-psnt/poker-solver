@@ -141,3 +141,47 @@ def observed_legs(engine: Any) -> dict[str, dict[str, Any]]:
                 sa.text("SELECT task_id, body FROM legs WHERE leg = 'observed'")
             )
         }
+
+
+# ORDER BY the recorded instant, which is what `read_records` sorts on: rows
+# written by different machines arrive interleaved, so insertion order is
+# "whose write landed last" and not "when the eval happened".
+_EVALS = sa.text("SELECT payload FROM evals ORDER BY recorded_at, eval_id")
+
+# The same order, for one run. `curve_series` and the unplaceable count both
+# skip every record whose `run_id` is not the one asked about, so restricting
+# here is the same answer -- and it is 2,238 documents against a handful.
+_EVALS_FOR_RUN = sa.text("""
+    SELECT payload FROM evals WHERE run_id = :run_id ORDER BY recorded_at, eval_id
+""")
+
+
+def eval_records(engine: Any, run_id: str | None = None) -> list[dict[str, Any]]:
+    """Every evaluation, as the DOCUMENT the readers already parse.
+
+    `payload` is the whole document, so this returns what `read_records` returns
+    and the filtering, tiering and curve maths above it are untouched. Tiering
+    especially: it is ~30 knobs deep and a query that re-expressed it would be a
+    second answer to which evals may be compared -- a five-column version once
+    reported -100.0 mbb where the truth was -60.0.
+    """
+    with _read(engine) as connection:
+        if run_id is None:
+            return [row[0] for row in connection.execute(_EVALS)]
+        return [row[0] for row in connection.execute(_EVALS_FOR_RUN, {"run_id": run_id})]
+
+
+_LADDER = sa.text("""
+    SELECT iteration FROM checkpoints WHERE run_id = :run_id ORDER BY iteration
+""")
+
+
+def rung_ladder(engine: Any, run_id: str) -> list[int]:
+    """The retained rungs of one run, oldest first.
+
+    What the checkpoint manifest names on the share. A curve reads it to say
+    which rungs have NO eval -- a curve with holes and a curve that stops early
+    look identical once plotted.
+    """
+    with _read(engine) as connection:
+        return [int(row[0]) for row in connection.execute(_LADDER, {"run_id": run_id})]

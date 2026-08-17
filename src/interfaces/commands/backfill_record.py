@@ -195,7 +195,7 @@ def _rows_for_run(run_dir: Path, models: Any) -> tuple[Any, list[Any], list[Any]
                 # Where it WILL live. Nothing has moved to Blob yet, so this is
                 # the address the migration writes to, not a claim bytes are
                 # there -- the fingerprint is what a loader actually checks.
-                blob_uri=f"rungs/{run_dir.name}/{iteration}",
+                blob_uri=run_events.rung_uri(run_dir.name, iteration),
                 fingerprint=manifest.get("fingerprint") or "",
                 abstraction_id=manifest.get("abstraction_id"),
                 is_current=(iteration == current),
@@ -351,13 +351,29 @@ def run(args: argparse.Namespace) -> BackfillPayload:
                         set_={k: v for k, v in values.items() if k != "run_id"},
                     )
                 )
-            for table, rows in ((models.RunEvent, pending_events), (models.Eval, pending_evals)):
-                for chunk in _chunked(rows):
-                    session.execute(
-                        insert(table)
-                        .values([_columns(r, table) for r in chunk])
-                        .on_conflict_do_nothing()
+            for chunk in _chunked(pending_events):
+                session.execute(
+                    insert(models.RunEvent)
+                    .values([_columns(r, models.RunEvent) for r in chunk])
+                    .on_conflict_do_nothing()
+                )
+            # Evals UPSERT, unlike events. An event is immutable once written,
+            # but an eval row can already be in the database and WRONG -- the
+            # live sink stored 37 of them without the `schema_version` the file
+            # carries, and `DO NOTHING` would have left them wrong forever.
+            # The share is the source of truth; re-importing is how it says so.
+            for chunk in _chunked(pending_evals):
+                values = [_columns(r, models.Eval) for r in chunk]
+                session.execute(
+                    insert(models.Eval)
+                    .values(values)
+                    .on_conflict_do_update(
+                        index_elements=["eval_id"],
+                        set_={
+                            k: insert(models.Eval).excluded[k] for k in values[0] if k != "eval_id"
+                        },
                     )
+                )
             if pending_rungs:
                 _import_checkpoints(session, models, pending_rungs)
             session.commit()

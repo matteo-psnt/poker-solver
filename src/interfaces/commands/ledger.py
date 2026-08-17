@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
     Command,
+    eval_index_rows,
     ledger_for,
     records_root,
 )
@@ -79,13 +81,31 @@ def run(args: argparse.Namespace) -> LedgerPayload:
     the materialised tree is a throwaway copy -- it could only ever have
     reported a success that changed nothing.
     """
+    engine = connect.engine_from_environment()
+    if engine is not None:
+        return _list(args, eval_index_rows(engine), source="database")
     with records_root(args) as root:
-        return _list(args, root)
+        return _list(
+            args,
+            eval_ledger.read_records(ledger_for(root)),
+            source=str(ledger_for(root)),
+            root=root,
+        )
 
 
-def _list(args: argparse.Namespace, root: Path) -> LedgerPayload:
-    ledger_path = ledger_for(root)
-    records = eval_ledger.read_records(ledger_path)
+def _list(
+    args: argparse.Namespace,
+    records: list[dict[str, Any]],
+    *,
+    source: str,
+    root: Path | None = None,
+) -> LedgerPayload:
+    """The filtering, over records from wherever they were read.
+
+    Both stores hand this the same DOCUMENTS -- `evals.payload` is the whole
+    one -- so every filter, instant and tier rule below is unchanged and there
+    is no second implementation of any of them.
+    """
     if args.run:
         records = [r for r in records if r.get("run_id") == args.run]
     if args.experiment:
@@ -103,13 +123,16 @@ def _list(args: argparse.Namespace, root: Path) -> LedgerPayload:
     matched = len(records)
     if args.limit > 0:
         records = records[-args.limit :]
-    if getattr(args, "full", False):
+    if getattr(args, "full", False) and root is not None:
         # The index row keeps four summary fields; the document has the rest.
         # Loaded only for the rows that survived the filters, after paging.
+        #
+        # Share only. `evals.payload` IS the whole document, so a row from the
+        # database already carries `results` and there is nothing to go and get.
         for record in records:
             record["results"] = eval_ledger.load_payload(record, root).get("results", {})
     return LedgerPayload(
-        ledger=str(ledger_path),
+        ledger=source,
         matched=matched,
         rows=[LedgerRow.model_validate(row) for row in records],
     )

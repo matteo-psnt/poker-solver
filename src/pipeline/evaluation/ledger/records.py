@@ -180,7 +180,12 @@ def record_evaluation(
         eval_tree_fingerprint=payload.get("tree_fingerprint"),
     )
     path = write_eval(run_dir, document, slug)
-    return path, document
+    # STAMPED, because that is what landed on the share. `write_snapshot` stamps
+    # on the way out and returns nothing, so the unstamped dict used to be what
+    # every caller got -- and the record sink stored it, leaving 37 evals whose
+    # database row had no `schema_version` while the file it mirrors did. One
+    # eval, two answers.
+    return path, record_store.stamp(document, record_store.REGISTRY["evals/*.json"])
 
 
 def eval_slug(knobs: dict[str, Any]) -> str:

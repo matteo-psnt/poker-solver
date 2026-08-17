@@ -79,9 +79,9 @@ def exploitability_curve(
 ) -> CurveOutput:
     """Join the retained checkpoint ladder to recorded evaluations, as a curve.
 
-    Pure reader -- it never evaluates. Rungs without a recorded eval come back in
-    ``missing_iterations`` rather than being silently skipped, because a curve with
-    holes in it and a curve that stops early look identical once plotted.
+    The SHARE'S half: read the ladder from the manifest and the evals from the
+    index, then hand both to :func:`curve_from`. A caller with the same two
+    things from anywhere else calls that directly.
     """
     # The directory name IS the run id (RunTracker defines it that way), so this
     # reads nothing that a legacy or torn .run.json could make it fail on.
@@ -93,7 +93,31 @@ def exploitability_curve(
         # Legacy or torn manifest. A reporting command must still render the
         # evaluations it can find rather than dying on the ladder it cannot.
         retained = []
-    records = eval_ledger.read_records(ledger_path)
+    return curve_from(
+        run_id,
+        retained=retained,
+        records=eval_ledger.read_records(ledger_path),
+        tier_index=tier_index,
+    )
+
+
+def curve_from(
+    run_id: str,
+    *,
+    retained: list[int],
+    records: list[dict[str, Any]],
+    tier_index: int = 0,
+) -> CurveOutput:
+    """The curve itself, over a ladder and evals from wherever they were read.
+
+    Pure reader -- it never evaluates. Rungs without a recorded eval come back in
+    ``missing_iterations`` rather than being silently skipped, because a curve with
+    holes in it and a curve that stops early look identical once plotted.
+
+    Split from the reading so a second store can supply the same two inputs
+    without a second copy of the tiering, which is ~30 knobs deep: a version
+    that re-expressed it reported -100.0 mbb where the truth was -60.0.
+    """
     series = eval_ledger.curve_series(records, run_id)
     unplaceable = sum(
         1 for r in records if r.get("run_id") == run_id and r.get("checkpoint_iteration") is None

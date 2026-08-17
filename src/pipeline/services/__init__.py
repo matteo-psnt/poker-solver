@@ -28,6 +28,7 @@ from src.pipeline.services.experiments import (
     CurveOutput,
     CurvePoint,
     RunDigest,
+    curve_from,
     exploitability_curve,
     run_digest,
 )
@@ -78,6 +79,7 @@ __all__ = [
     "StaticTrainingOutput",
     "VectorBlueprintOutput",
     "checkpoint_iteration_of",
+    "curve_from",
     "describe_runs",
     "evaluate_and_record",
     "evaluate_blueprint_match",

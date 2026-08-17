@@ -53,10 +53,20 @@ def test_the_index_row_is_a_summary_and_full_is_the_document(tmp_path):
     _record(tmp_path, "run-a")
     ledger_for(tmp_path)
 
-    summary = ledger_cmd._list(_args(), tmp_path).rows[0].results
+    records = eval_ledger.read_records(ledger_for(tmp_path))
+    summary = ledger_cmd._list(_args(), records, source="x", root=tmp_path).rows[0].results
     assert "decomposition" not in summary
     assert summary["exploitability_mbb"] == 1500.0
 
-    full = ledger_cmd._list(_args(full=True), tmp_path).rows[0].results
+    full = (
+        ledger_cmd._list(
+            _args(full=True),
+            eval_ledger.read_records(ledger_for(tmp_path)),
+            source="x",
+            root=tmp_path,
+        )
+        .rows[0]
+        .results
+    )
     assert full["decomposition"]["by_street"] == {"preflop": 900.0, "flop": 600.0}
     assert full["exploitability_mbb"] == 1500.0
