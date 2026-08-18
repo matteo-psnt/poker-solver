@@ -27,6 +27,15 @@ from src.shared.cloudtask.kinds import TaskName
 
 
 @pytest.fixture(autouse=True)
+def _dispatching_shell_has_a_dsn(monkeypatch):
+    """`TaskSpec.record_dsn` defaults from the OPERATOR'S environment, and a
+    dispatch now refuses without one -- a task that cannot record itself has
+    nowhere to put its progress. Every test here dispatches, so every one of
+    them stands in for a shell that has run `just record-env`."""
+    monkeypatch.setenv("POKER_SOLVER_RECORD_DSN", "postgresql://u:p@h:5432/db")
+
+
+@pytest.fixture(autouse=True)
 def _cold_gitinfo():
     """Both readers are `lru_cache`d and other modules call them during a suite
     run; without clearing, these assert against a warmed value."""
@@ -356,3 +365,31 @@ class TestADispatchSaysWhichRecordItSealed:
         printed = capsys.readouterr().out
         assert "share + database" in printed
         assert "SHARE ONLY" not in printed
+
+
+class TestATaskThatCannotRecordItselfIsNotQueued:
+    """`record_dsn` used to be optional -- empty meant files only, which was the
+    pre-migration behaviour and the rollback. Progress is no longer published to
+    the share, so empty now means a task whose progress exists NOWHERE, and the
+    failure is silent: hours later, a screen showing a bar that never moved.
+    """
+
+    def test_no_dsn_refuses(self):
+        with pytest.raises(CommandError, match="record their progress nowhere"):
+            dispatch._refuse_without_a_record([spec.TaskSpec(code_snapshot="s", record_dsn="")])
+
+    def test_it_names_the_fix(self):
+        """The warning was already there -- `submit` has printed `record: SHARE
+        ONLY` since two runs finished while the database called them running --
+        and tasks kept being queued without it."""
+        with pytest.raises(CommandError, match="just record-env"):
+            dispatch._refuse_without_a_record([spec.TaskSpec(code_snapshot="s", record_dsn="")])
+
+    def test_a_dsn_passes(self):
+        dispatch._refuse_without_a_record(
+            [spec.TaskSpec(code_snapshot="s", record_dsn="postgresql://u:p@h/db")]
+        )
+
+    def test_no_specs_is_not_an_error(self):
+        """Nothing to queue is nothing to lose."""
+        dispatch._refuse_without_a_record([])
