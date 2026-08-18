@@ -306,12 +306,17 @@ def run(args: argparse.Namespace) -> BackfillPayload:
             run_row, event_rows, checkpoint_rows = built
             eval_rows = _eval_rows(run_dir, models)
             per_run[run_dir.name] = {
-                "events": len(event_rows),
+                # DISTINCT events, not lines. `run.jsonl` contains the same
+                # event twice for some runs -- 83 across the record -- and the
+                # importer now collapses them, because both writers compute one
+                # identity per event. Counting lines would report the database
+                # as permanently behind for exactly the runs it has cleaned up.
+                "events": len({r.event_uuid for r in event_rows}),
                 "evals": len(eval_rows),
                 "checkpoints": len(checkpoint_rows),
             }
             payload.share.runs += 1
-            payload.share.events += len(event_rows)
+            payload.share.events += len({r.event_uuid for r in event_rows})
             payload.share.checkpoints += len(checkpoint_rows)
             payload.share.evals += len(eval_rows)
             if not args.apply:
@@ -382,11 +387,25 @@ def run(args: argparse.Namespace) -> BackfillPayload:
     payload.share.legs = len(leg_rows)
     if args.apply and leg_rows:
         with Session(engine) as session:
+            # UPSERT, like evals and unlike events. `progress` and `observed`
+            # are OVERWRITTEN documents by nature -- a running task rewrites its
+            # progress every tick, and the reader rewrites its observation --
+            # so `DO NOTHING` froze whatever the row happened to hold first. 52
+            # progress and 10 observed rows were stale against the share, and an
+            # import that reported success left them stale.
             for chunk in _chunked(leg_rows):
+                values = [_columns(r, models.Leg) for r in chunk]
                 session.execute(
                     insert(models.Leg)
-                    .values([_columns(r, models.Leg) for r in chunk])
-                    .on_conflict_do_nothing()
+                    .values(values)
+                    .on_conflict_do_update(
+                        index_elements=["task_id", "attempt", "leg"],
+                        set_={
+                            k: insert(models.Leg).excluded[k]
+                            for k in values[0]
+                            if k not in ("task_id", "attempt", "leg")
+                        },
+                    )
                 )
             session.commit()
 
