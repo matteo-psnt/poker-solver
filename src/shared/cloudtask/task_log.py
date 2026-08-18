@@ -147,7 +147,7 @@ def leg_row(task_id: str, attempt: int, leg: str, document: Mapping[str, Any]) -
     Here, in the stdlib-only half, because there are three writers and one of
     them is the node -- which runs on an interpreter that has no pydantic and no
     ORM. A row built two ways is two answers about the same record, which is
-    what `backfill-record --verify` would then report as a divergence forever.
+    which nothing can reconcile away now that the importer is gone.
     """
     return {
         "task_id": task_id,

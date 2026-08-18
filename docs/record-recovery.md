@@ -1,8 +1,9 @@
 # Recovering the record database
 
-`backfill-record` was the recovery for this database while the share held a
-second copy of everything. Once publishing stops, **point-in-time restore is the
-whole story**, so this is what it actually involves — measured, not assumed.
+**Point-in-time restore is the whole story.** Publishing stopped on 2026-09-03
+and `backfill-record` is deleted; the share holds snapshots and leg documents,
+and nothing that can rebuild a run's events, its checkpoints or its evals. This
+is what a restore actually involves — measured, not assumed.
 
 ## Exercised 2026-09-02
 

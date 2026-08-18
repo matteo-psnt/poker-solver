@@ -8,7 +8,7 @@ where anyone would see it:
 * `sink.claim` RAISED on a run's second checkpoint, and `claim` is allowed to
   raise, so dual-write would have killed the run. Invisible until then, because
   a run with one rung works.
-* `backfill-record` used a bare `on_conflict_do_nothing()`, which ignores a
+* the importer (since deleted) used a bare `on_conflict_do_nothing()`, which ignores a
   conflict on ANY index -- so the new current rung was silently dropped and the
   old one kept the flag. Three runs pointed 2,000 iterations behind the share,
   and a stale pointer RESOLVES, so nothing failed at all.
