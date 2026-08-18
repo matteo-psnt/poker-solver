@@ -10,8 +10,8 @@ import pytest
 from src.pipeline.services import run_digest
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
 from src.shared import run_events
-from src.shared.cloudtask import task_log
 from src.shared.config import Config
+from tests.legacy_legs import write_leg
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -117,27 +117,23 @@ class TestTasks:
         """The share holds every run's tasks; a digest must not borrow another's."""
         share = tmp_path / "share"
         for task, run_id in (("t-1", "run-a"), ("t-2", "run-other")):
-            task_log.write_node_record(share, task_id=task, event="started", run_id=run_id)
-            task_log.write_node_record(
-                share, task_id=task, event="finished", run_id=run_id, cause="completed"
-            )
+            write_leg(share, task_id=task, event="started", run_id=run_id)
+            write_leg(share, task_id=task, event="finished", run_id=run_id, cause="completed")
 
         digest = _digest(_run(tmp_path, record), tmp_path, record, tasks_dir=share)
         assert [task.task_id for task in digest.tasks] == ["t-1"]
 
     def test_an_unresolved_task_becomes_a_gap(self, tmp_path, record):
         share = tmp_path / "share"
-        task_log.write_node_record(share, task_id="t-1", event="started", run_id="run-a")
+        write_leg(share, task_id="t-1", event="started", run_id="run-a")
 
         digest = _digest(_run(tmp_path, record), tmp_path, record, tasks_dir=share)
         assert any("no terminal record" in g for g in digest.gaps)
 
     def test_a_finished_task_is_not_a_gap(self, tmp_path, record):
         share = tmp_path / "share"
-        task_log.write_node_record(share, task_id="t-1", event="started", run_id="run-a")
-        task_log.write_node_record(
-            share, task_id="t-1", event="finished", run_id="run-a", cause="killed"
-        )
+        write_leg(share, task_id="t-1", event="started", run_id="run-a")
+        write_leg(share, task_id="t-1", event="finished", run_id="run-a", cause="killed")
 
         digest = _digest(_run(tmp_path, record), tmp_path, record, tasks_dir=share)
         assert digest.tasks[0].cause == "killed"

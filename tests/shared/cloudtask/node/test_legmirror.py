@@ -10,7 +10,11 @@ before it can write the record that would explain it.
 from __future__ import annotations
 
 import json
+import sys
+import types
 from typing import Any
+
+import pytest
 
 from src.shared.cloudtask import task_log
 from src.shared.cloudtask.node import legmirror
@@ -18,17 +22,54 @@ from src.shared.cloudtask.node import legmirror
 DSN = "postgresql://u:p@h:5432/db"
 
 
-def _legs(tmp_path, task: str = "task-a"):
-    directory = task_log.tasks_dir(tmp_path)
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{task}.1.start.json").write_text(
-        json.dumps({"task_id": task, "attempt": 1, "ts": "2026-09-01T00:00:00+00:00"})
-    )
-    (directory / f"{task}.progress.json").write_text(
-        json.dumps({"task_id": task, "done": 10.0, "ts": "2026-09-01T00:01:00+00:00"})
-    )
-    (directory / "other.1.start.json").write_text(json.dumps({"task_id": "other"}))
-    return directory
+class _Cursor:
+    """Just enough psycopg to see what statement was sent and answer it."""
+
+    def __init__(self, owner: _Connection) -> None:
+        self._owner = owner
+
+    def __enter__(self) -> _Cursor:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def execute(self, statement: str, params: dict[str, Any]) -> None:
+        self._owner.executed.append((statement, params))
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._owner.answer
+
+
+class _Connection:
+    def __init__(self, answer: tuple[Any, ...] | None = (3,)) -> None:
+        self.executed: list[tuple[str, dict[str, Any]]] = []
+        self.answer = answer
+        self.committed = False
+
+    def __enter__(self) -> _Connection:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def cursor(self) -> _Cursor:
+        return _Cursor(self)
+
+    def commit(self) -> None:
+        self.committed = True
+
+
+def _driver(monkeypatch, connection: _Connection) -> _Connection:
+    """Stand in for the driver the START TASK installs beside the interpreter.
+
+    Patched into `sys.modules` rather than onto the module, because the import
+    is deliberately INSIDE the function -- see the module docstring -- and
+    patching an attribute would test a seam that does not exist.
+    """
+    module = types.SimpleNamespace(connect=lambda _dsn, **_kw: connection)
+    monkeypatch.setitem(sys.modules, "psycopg", module)
+    return connection
 
 
 def _stored(monkeypatch) -> list[list[dict[str, Any]]]:
@@ -37,79 +78,89 @@ def _stored(monkeypatch) -> list[list[dict[str, Any]]]:
     return calls
 
 
-class TestNothingItDoesCanCostTheTask:
-    def test_an_unreachable_database_is_survivable(self, tmp_path, monkeypatch):
-        def _explode(_dsn, _rows):
+class TestClaimingAnAttempt:
+    """The ONE thing on the node allowed to fail, and it has to be.
+
+    The number it returns names the attempt every later record of this task
+    belongs to. Inventing one after a failed write means the exit record and the
+    progress samples overwrite a PREVIOUS attempt -- destroying the account of
+    the failure that caused this retry, on what is now the only copy.
+    """
+
+    def test_it_returns_the_attempt_the_database_assigned(self, monkeypatch):
+        _driver(monkeypatch, _Connection(answer=(3,)))
+        assert legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN) == 3
+
+    def test_the_number_is_derived_inside_the_insert(self, monkeypatch):
+        """Not read, then written. A SELECT-then-INSERT can interleave, and the
+        loser overwrites rather than failing; `MAX(attempt) + 1` inside the
+        INSERT makes the primary key the referee."""
+        connection = _driver(monkeypatch, _Connection(answer=(1,)))
+        legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
+        (statement, _params), *rest = connection.executed
+        assert rest == [], "one statement, or the race is back"
+        assert "INSERT INTO legs" in statement
+        assert "MAX(attempt)" in statement
+        assert "RETURNING attempt" in statement
+
+    def test_it_commits(self, monkeypatch):
+        connection = _driver(monkeypatch, _Connection(answer=(1,)))
+        legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
+        assert connection.committed, "an uncommitted claim is not a claim"
+
+    def test_an_unreachable_database_raises(self, monkeypatch):
+        """Unlike every other write here. `record` logs and continues because
+        losing one row costs a row; losing the CLAIM costs a previous attempt's
+        whole account."""
+
+        def _explode(_dsn, **_kw):
             raise RuntimeError("database is gone")
 
-        monkeypatch.setattr(legmirror, "_store", _explode)
-        _legs(tmp_path)
-        logged: list[str] = []
-        legmirror.publish(tmp_path, "task-a", dsn=DSN, log=logged.append)
-        assert logged
-        assert "not mirrored" in logged[0]
+        monkeypatch.setitem(sys.modules, "psycopg", types.SimpleNamespace(connect=_explode))
+        with pytest.raises(RuntimeError):
+            legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
 
-    def test_a_missing_driver_is_survivable(self, tmp_path, monkeypatch):
-        """A node whose start task did not install it mirrors nothing. That is
-        the same as having no DSN, which is already the policy."""
+    def test_an_answer_of_nothing_raises(self, monkeypatch):
+        """A statement that returned no row assigned no number, and proceeding
+        would mean guessing one."""
+        _driver(monkeypatch, _Connection(answer=None))
+        with pytest.raises(RuntimeError):
+            legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
 
-        def _missing(_dsn, _rows):
-            raise ImportError("no module named psycopg")
+    def test_the_body_is_task_logs_row_and_not_a_second_one(self, monkeypatch):
+        """One builder for the row, as everywhere else."""
+        connection = _driver(monkeypatch, _Connection(answer=(1,)))
+        document = {"task_id": "task-a", "ts": "t"}
+        legmirror.claim_attempt("task-a", document, dsn=DSN)
+        _statement, params = connection.executed[0]
+        expected = task_log.leg_row("task-a", 0, "start", document)
+        assert params["task_id"] == expected["task_id"]
+        assert params["leg"] == "start"
+        assert json.loads(params["body"]) == expected["body"]
 
-        monkeypatch.setattr(legmirror, "_store", _missing)
-        _legs(tmp_path)
-        legmirror.publish(tmp_path, "task-a", dsn=DSN)
 
-    def test_a_missing_legs_directory_is_survivable(self, tmp_path, monkeypatch):
-        _stored(monkeypatch)
-        legmirror.publish(tmp_path, "task-a", dsn=DSN)
+class TestTheLatestAttempt:
+    """What the terminal record belongs to. Derived rather than carried: the
+    exit trap may have lost anything the entry point computed."""
 
+    def test_it_reads_the_maximum(self, monkeypatch):
+        connection = _driver(monkeypatch, _Connection(answer=(4,)))
+        assert legmirror.latest_attempt("task-a", dsn=DSN) == 4
+        assert "MAX(attempt)" in connection.executed[0][0]
 
-class TestWhatItStores:
-    def test_no_dsn_writes_nothing(self, tmp_path, monkeypatch):
-        """The pre-migration behaviour, which is the rollout and the rollback."""
-        calls = _stored(monkeypatch)
-        _legs(tmp_path)
-        legmirror.publish(tmp_path, "task-a", dsn="")
-        assert calls == []
-
-    def test_only_this_tasks_records(self, tmp_path, monkeypatch):
-        calls = _stored(monkeypatch)
-        _legs(tmp_path)
-        legmirror.publish(tmp_path, "task-a", dsn=DSN)
-        assert {row["task_id"] for row in calls[0]} == {"task-a"}
-
-    def test_both_filename_shapes(self, tmp_path, monkeypatch):
-        """`<task>.<attempt>.start.json` is per ATTEMPT; `<task>.progress.json`
-        is per TASK. Requiring the first dropped a third of the record once."""
-        calls = _stored(monkeypatch)
-        _legs(tmp_path)
-        legmirror.publish(tmp_path, "task-a", dsn=DSN)
-        assert {(row["attempt"], row["leg"]) for row in calls[0]} == {
-            (1, "start"),
-            (task_log.TASK_SCOPED, "progress"),
-        }
-
-    def test_the_row_is_task_logs_and_not_a_second_one(self, tmp_path, monkeypatch):
-        """The importer builds the same row from the same function. Two ways of
-        building it is two answers about one record, which `--verify` would
-        report as a divergence forever."""
-        calls = _stored(monkeypatch)
-        _legs(tmp_path)
-        legmirror.publish(tmp_path, "task-a", dsn=DSN)
-        start = next(row for row in calls[0] if row["leg"] == "start")
-        assert start == task_log.leg_row(
-            "task-a",
-            1,
-            "start",
-            {"task_id": "task-a", "attempt": 1, "ts": "2026-09-01T00:00:00+00:00"},
-        )
+    def test_nothing_claimed_is_zero(self, monkeypatch):
+        """A task that died before its start row landed has no attempt to
+        belong to, and 0 says so rather than claiming attempt 1's."""
+        _driver(monkeypatch, _Connection(answer=None))
+        assert legmirror.latest_attempt("task-a", dsn=DSN) == 0
 
 
 class TestTheRowIsWrittenWhereTheRecordIsMade:
-    """The direct half. `publish` re-reads this task's files and upserts what it
-    finds, which is self-healing -- but it can only heal a record that HAS a
-    file, and progress is about to stop having one.
+    """Every record writes its own row where it is made.
+
+    There was a second half -- `publish` re-read this task's files and upserted
+    whatever it found, which was self-healing. It could only heal a record that
+    HAD a file, and none do now.
     """
 
     def test_one_record_becomes_one_row(self, tmp_path, monkeypatch):

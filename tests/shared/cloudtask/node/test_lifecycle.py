@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.shared import cache, task_history
+from src.shared import cache
 from src.shared.cloudtask import task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import lifecycle
@@ -49,9 +49,12 @@ class TestMain:
     """The wiring `run_task.sh`'s traps used to carry."""
 
     @pytest.fixture(autouse=True)
-    def _node(self, paths, monkeypatch):
+    def _node(self, paths, monkeypatch, recorded):
         monkeypatch.setattr(NodePaths, "from_environment", classmethod(lambda cls: paths))
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "task-1")
+        # A DSN, because there has to be one: `_record` refuses to start a task
+        # that cannot claim an attempt, and that refusal is the design.
+        monkeypatch.setenv("POKER_SOLVER_RECORD_DSN", "postgresql://u:p@h:5432/db")
         for key, value in {
             "RUN_OP": "train",
             "RUN_CONFIG": "quick_test",
@@ -61,7 +64,7 @@ class TestMain:
         }.items():
             monkeypatch.setenv(key, value)
 
-    def test_a_signalled_task_records_cancelled_not_completed(self, paths, monkeypatch):
+    def test_a_signalled_task_records_cancelled_not_completed(self, paths, monkeypatch, recorded):
         """THE defect this port fixes. Bash's EXIT trap reads `$?` as zero when
         killed while blocked on a child -- measured: SIGTERM ran the trap with
         `$? = 0` and exited 143, so a cancelled task was recorded as clean and
@@ -70,28 +73,30 @@ class TestMain:
         monkeypatch.setitem(lifecycle.HANDLERS, TaskName.TRAIN, _signalled)
 
         assert lifecycle.main() == 143
-        (row,) = task_history.read_tasks(paths.share)
+        (row,) = recorded.join()
         assert row.cause == task_log.CAUSE_CANCELLED
         assert row.exit_code == 143
 
-    def test_a_task_that_dies_before_the_sync_still_leaves_a_record(self, paths, monkeypatch):
+    def test_a_task_that_dies_before_the_sync_still_leaves_a_record(
+        self, paths, monkeypatch, recorded
+    ):
         """The whole reason the started record is written first: a task dying
         during dependency install must not be indistinguishable from one that
         never ran."""
         monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 1)
 
         assert lifecycle.main() == 1
-        (row,) = task_history.read_tasks(paths.share)
+        (row,) = recorded.join()
         assert row.cause == task_log.CAUSE_FAILED
 
-    def test_a_bad_environment_is_a_message_not_a_traceback(self, paths, monkeypatch):
+    def test_a_bad_environment_is_a_message_not_a_traceback(self, paths, monkeypatch, recorded):
         monkeypatch.setenv("RUN_TO", "0")
         assert lifecycle.main() == 1
-        (row,) = task_history.read_tasks(paths.share)
+        (row,) = recorded.join()
         assert row.cause == task_log.CAUSE_FAILED
         assert "ABSOLUTE" in (paths.share / "logs" / "task-1.log").read_text()
 
-    def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch):
+    def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch, recorded):
         """An operator-cancelled task still leaves its progress on the share."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")  # the task's own run is run-a
         run_dir = paths.runs / "run-a"
@@ -103,7 +108,7 @@ class TestMain:
         lifecycle.main()
         assert (paths.archive / "run-a" / ".run.json").exists()
 
-    def test_only_the_tasks_own_run_is_published(self, paths, monkeypatch):
+    def test_only_the_tasks_own_run_is_published(self, paths, monkeypatch, recorded):
         """A node is reused: runs/ also holds what earlier tasks fetched. Pushing
         those back took ~30 minutes per training task."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")
@@ -144,7 +149,7 @@ def _signalled(plan, paths, log):
 
 
 class TestStage:
-    def test_the_data_symlink_points_at_the_node_disk(self, paths, monkeypatch):
+    def test_the_data_symlink_points_at_the_node_disk(self, paths, monkeypatch, recorded):
         """`precompute` writes to <base>/data/, and <base> is the throwaway code
         tree; the symlink is what lands it on the data disk instead."""
         paths.code.mkdir(parents=True)
@@ -156,7 +161,7 @@ class TestStage:
             logger.close()
         assert (paths.code / "data").resolve() == paths.data.resolve()
 
-    def test_a_stale_symlink_is_replaced(self, paths, monkeypatch):
+    def test_a_stale_symlink_is_replaced(self, paths, monkeypatch, recorded):
         """A Batch retry reuses the extracted tree."""
         paths.code.mkdir(parents=True)
         (paths.code / "data").symlink_to(paths.work / "somewhere-else")
@@ -182,7 +187,9 @@ class TestTheCacheSurvivesBetweenTasks:
         finally:
             logger.close()
 
-    def test_the_cache_points_at_the_data_disk_not_the_task_home(self, paths, monkeypatch):
+    def test_the_cache_points_at_the_data_disk_not_the_task_home(
+        self, paths, monkeypatch, recorded
+    ):
         """A Batch task's HOME is its own working directory, wiped with the
         task, so the ~/.cache default would rebuild the river's 2.6M-board
         cache on every single task."""
@@ -190,7 +197,7 @@ class TestTheCacheSurvivesBetweenTasks:
         self._stage(paths, monkeypatch)
         assert os.environ[cache.ENV_OVERRIDE] == str(paths.work / "cache")
 
-    def test_the_child_process_inherits_it(self, paths, monkeypatch):
+    def test_the_child_process_inherits_it(self, paths, monkeypatch, recorded):
         """`run_guarded` passes no `env=`, so the training subprocess -- and its
         16 workers -- see what the wrapper set. Checked against the REAL
         run_guarded, not the stub the other cases use."""
@@ -208,7 +215,7 @@ class TestTheCacheSurvivesBetweenTasks:
         finally:
             logger.close()
 
-    def test_it_is_writable_by_a_later_task(self, paths, monkeypatch):
+    def test_it_is_writable_by_a_later_task(self, paths, monkeypatch, recorded):
         """`submit_task` sets no `user_identity`, so tasks run as Batch's
         default auto-user. A directory left with the first task's ownership and
         umask is one the SECOND task cannot write into -- which would silently
@@ -218,7 +225,9 @@ class TestTheCacheSurvivesBetweenTasks:
         mode = (paths.work / "cache").stat().st_mode & 0o777
         assert mode == 0o777, f"cache dir is {oct(mode)}, not shareable across task users"
 
-    def test_a_cache_that_cannot_be_prepared_does_not_kill_the_task(self, paths, monkeypatch):
+    def test_a_cache_that_cannot_be_prepared_does_not_kill_the_task(
+        self, paths, monkeypatch, recorded
+    ):
         monkeypatch.delenv(cache.ENV_OVERRIDE, raising=False)
 
         real = Path.chmod

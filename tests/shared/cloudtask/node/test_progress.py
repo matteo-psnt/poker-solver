@@ -93,7 +93,7 @@ class TestProgressHeartbeat:
 
     def test_a_training_task_publishes_how_far_it_has_got(self, paths, monkeypatch, recorded):
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        progress.publish(paths, self._plan(), {"iteration": 250})
+        progress.publish(self._plan(), {"iteration": 250})
 
         (record,) = recorded
         published = record["progress"]
@@ -106,7 +106,7 @@ class TestProgressHeartbeat:
     def test_a_kind_with_nothing_to_say_writes_nothing(self, paths, monkeypatch, recorded):
         """No bar beats a bar frozen at zero, which reads as a stuck task."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        progress.publish(paths, self._plan(op=TaskName.PRECOMPUTE), {"iteration": 1})
+        progress.publish(self._plan(op=TaskName.PRECOMPUTE), {"iteration": 1})
         assert recorded == []
 
     def test_every_tick_records_and_none_of_them_writes_a_file(self, paths, monkeypatch, recorded):
@@ -115,7 +115,7 @@ class TestProgressHeartbeat:
         thousands. It now writes none at all: each sample is a row."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         for iteration in (100, 200, 300):
-            progress.publish(paths, self._plan(), {"iteration": iteration})
+            progress.publish(self._plan(), {"iteration": iteration})
         assert [r["progress"]["done"] for r in recorded] == [100.0, 200.0, 300.0]
         assert list((paths.share / "legs").glob("*.progress.json")) == []
 
@@ -125,19 +125,43 @@ class TestProgressHeartbeat:
         this existed."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         monkeypatch.setattr(progress.task_log, "progress_record", lambda *a, **k: 1 / 0)
-        progress.publish(paths, self._plan(), {"iteration": 1})
+        progress.publish(self._plan(), {"iteration": 1})
 
     def test_a_finished_task_stops_showing_a_bar(self, paths, monkeypatch):
         """A completed task at 62% is a sample that stopped arriving, not a
-        task stuck at 62%."""
-        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        progress.publish(paths, self._plan(), {"iteration": 620})
-        task_log.write_node_record(paths.share, task_id="t-1", event=task_log.EVENT_STARTED)
-        task_log.write_node_record(
-            paths.share, task_id="t-1", event=task_log.EVENT_FINISHED, cause="completed"
-        )
+        task stuck at 62%.
 
-        (row,) = task_history.read_tasks(paths.share)
+        Joined from ROWS, which is how `tasks` reads it: the node writes no
+        files, so `read_tasks` over a share directory is the legacy path and
+        joining there would test one production no longer takes.
+        """
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        sample: list[dict] = []
+        monkeypatch.setattr(
+            progress.legmirror,
+            "record",
+            lambda _t, _a, _l, doc, **_kw: sample.append(dict(doc)),
+        )
+        progress.publish(self._plan(), {"iteration": 620})
+
+        rows = [
+            ("t-1", task_log.TASK_SCOPED, "progress", sample[0]),
+            (
+                "t-1",
+                1,
+                "start",
+                task_log.node_record(task_id="t-1", attempt=1, event=task_log.EVENT_STARTED),
+            ),
+            (
+                "t-1",
+                1,
+                "exit",
+                task_log.node_record(
+                    task_id="t-1", attempt=1, event=task_log.EVENT_FINISHED, cause="completed"
+                ),
+            ),
+        ]
+        (row,) = task_history.join_documents(task_log.documents_from_rows(rows))
         assert row.cause == "completed"
         assert row.progress is None
 
@@ -166,7 +190,7 @@ class TestTheRateWindow:
         would credit it with the whole run at the rate of its own first hour."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         for iteration in (800, 800, 850, 900):
-            progress.publish(paths, self._plan(), {"iteration": iteration})
+            progress.publish(self._plan(), {"iteration": iteration})
 
         published = self._published(recorded)
         assert (published["done"], published["base"]) == (900.0, 850.0)
@@ -186,13 +210,13 @@ class TestTheRateWindow:
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         plan = self._plan(op=TaskName.TRAIN_VECTOR, to=3_000_000)
         for iteration in (0, 0, 1_000_000):
-            progress.publish(paths, plan, {"iteration": iteration})
+            progress.publish(plan, {"iteration": iteration})
 
         published = self._published(recorded)
         assert (published["done"], published["base"]) == (1_000_000.0, 1_000_000.0)
         assert published["window_seconds"] == 0.0
 
-        progress.publish(paths, plan, {"iteration": 2_000_000})
+        progress.publish(plan, {"iteration": 2_000_000})
         assert self._published(recorded)["base"] == 1_000_000.0
 
     def test_a_kind_that_changes_what_it_counts_starts_over(self, paths, monkeypatch, recorded):
@@ -200,8 +224,8 @@ class TestTheRateWindow:
         count minus another in a different unit is not a small error."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         plan = self._plan(op=TaskName.EVALUATE)
-        progress.publish(paths, plan, {"scored": 0})
-        progress.publish(paths, plan, {"done": 20, "total": 32})
+        progress.publish(plan, {"scored": 0})
+        progress.publish(plan, {"done": 20, "total": 32})
 
         published = self._published(recorded)
         assert (published["unit"], published["base"]) == ("board branches", 20.0)
@@ -277,42 +301,52 @@ class TestProgressReadsThisTasksRun:
         assert progress.units_done(paths) == 10_000_000
 
 
-class TestMirroringRidesTheCoarseTick:
-    """The database copy belongs on the slow cadence, and the watcher already
-    has one. Mirroring from `publish` put a subprocess on the 15s progress tick
-    and three and a half minutes on the end of a task whose training took twenty
-    seconds -- and needed a module-global throttle to hold it back, which is a
-    cadence invented next to one that already existed.
+class TestEachRecordWritesItsOwnRow:
+    """There WAS a mirror on the slow tick: it re-read the task's files and
+    upserted what it found. Nothing has files now, so every record writes its
+    row where it is made -- which is also what removed the last reason for the
+    fine tick to touch the share.
+
+    The shape it replaced put a subprocess on the 15s progress tick and three
+    and a half minutes on the end of a task whose training took twenty seconds.
     """
 
     @staticmethod
     def _plan() -> node_plan.TaskPlan:
         return node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000)
 
-    def test_the_progress_tick_does_not_mirror(self, paths, monkeypatch):
-        """A bar that moves every fifteen seconds is the point; a leg row every
-        fifteen seconds is not."""
+    def test_the_progress_tick_writes_its_row_directly(self, paths, monkeypatch):
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        called: list[str] = []
-        monkeypatch.setattr(progress.legmirror, "publish", lambda *a, **k: called.append("x"))
-        progress.publish(paths, self._plan(), {"iteration": 250})
-        assert called == []
+        rows: list[tuple] = []
+        monkeypatch.setattr(
+            progress.legmirror,
+            "record",
+            lambda task, attempt, leg, _doc, **_kw: rows.append((task, attempt, leg)),
+        )
+        progress.publish(self._plan(), {"iteration": 250})
+        assert rows == [("t-1", task_log.TASK_SCOPED, "progress")]
 
-    def test_the_coarse_tick_mirrors(self, paths, log, monkeypatch):
-        called: list[str] = []
-        monkeypatch.setattr(progress.legmirror, "publish", lambda *a, **k: called.append("x"))
-        watcher = progress.ProgressWatcher(paths, log, plan=self._plan())
-        watcher._coarse()
-        assert called == ["x"]
+    def test_the_sample_is_task_scoped_not_per_attempt(self, paths, monkeypatch):
+        """One live sample per TASK, replaced in place. Keyed per attempt it
+        would accumulate a row per retry and the bar would read the wrong one."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        rows: list[tuple] = []
+        monkeypatch.setattr(
+            progress.legmirror,
+            "record",
+            lambda task, attempt, leg, _doc, **_kw: rows.append((task, attempt, leg)),
+        )
+        progress.publish(self._plan(), {"iteration": 250})
+        progress.publish(self._plan(), {"iteration": 500})
+        assert {row[1] for row in rows} == {task_log.TASK_SCOPED}
 
-    def test_the_ladder_watcher_still_mirrors(self, paths, log, monkeypatch):
-        """It OVERRIDES `_coarse`, and an override that forgot `super()` is a
-        training task that mirrors nothing -- training being the long-running
-        kind, where a frozen row matters most."""
-        called: list[str] = []
-        monkeypatch.setattr(progress.legmirror, "publish", lambda *a, **k: called.append("x"))
-        run_dir = paths.runs / "run-a"
-        run_dir.mkdir(parents=True)
-        watcher = progress.LadderWatcher(paths, log, run_dir=run_dir, plan=self._plan())
-        watcher._coarse()
-        assert called == ["x"]
+    def test_a_failing_row_cannot_cost_the_task(self, paths, monkeypatch):
+        """`publish` suppresses everything: a task must not die because the
+        thing describing it could not be written."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+
+        def _explode(*_a, **_k):
+            raise RuntimeError("database is gone")
+
+        monkeypatch.setattr(progress.legmirror, "record", _explode)
+        progress.publish(self._plan(), {"iteration": 250})

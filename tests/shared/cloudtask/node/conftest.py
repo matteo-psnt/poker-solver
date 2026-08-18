@@ -12,7 +12,9 @@ import time
 
 import pytest
 
-from src.shared.cloudtask.node import progress
+from src.shared import task_history
+from src.shared.cloudtask import task_log
+from src.shared.cloudtask.node import legmirror, progress
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.process import TaskLogger
 
@@ -48,3 +50,41 @@ def eventually(predicate, attempts: int = 200) -> None:
             return
         time.sleep(0.01)
     raise AssertionError("condition never became true")
+
+
+class _Recorded:
+    """The database, for a node test: what the task claimed and what it wrote.
+
+    `RunTracker`-style file assertions are gone with the files. A node's whole
+    account is now rows, so a test reads it back the way `tasks` does -- through
+    `join_documents`, the ONE join both stores go through.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[tuple[str, int, str, dict]] = []
+        self.attempts: dict[str, int] = {}
+
+    def claim(self, task_id: str, document, *, dsn: str) -> int:
+        attempt = self.attempts.get(task_id, 0) + 1
+        self.attempts[task_id] = attempt
+        self.rows.append((task_id, attempt, "start", {**dict(document), "attempt": attempt}))
+        return attempt
+
+    def latest(self, task_id: str, *, dsn: str) -> int:
+        return self.attempts.get(task_id, 0)
+
+    def record(self, task_id: str, attempt: int, leg: str, document, **_kw: object) -> None:
+        self.rows.append((task_id, attempt, leg, dict(document)))
+
+    def join(self):
+        return task_history.join_documents(task_log.documents_from_rows(self.rows))
+
+
+@pytest.fixture
+def recorded(monkeypatch) -> _Recorded:
+    """Stand in for the record database on the node path."""
+    store = _Recorded()
+    monkeypatch.setattr(legmirror, "claim_attempt", store.claim)
+    monkeypatch.setattr(legmirror, "latest_attempt", store.latest)
+    monkeypatch.setattr(legmirror, "record", store.record)
+    return store

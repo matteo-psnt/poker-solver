@@ -27,7 +27,6 @@ from src.shared.cloudtask import task_log
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
-    from pathlib import Path
 
 # One statement, and the conflict target is the leg's own key. `progress` is
 # OVERWRITTEN as a task runs, so the row has to move or the bar it feeds freezes
@@ -38,6 +37,24 @@ _UPSERT = """
     ON CONFLICT (task_id, attempt, leg)
     DO UPDATE SET body = EXCLUDED.body, at = EXCLUDED.at, run_id = EXCLUDED.run_id
 """
+
+# ONE STATEMENT, and it is what makes attempt numbering safe without a lock.
+# `MAX(attempt) + 1` is computed inside the INSERT, so two writers racing both
+# derive the same number and the PRIMARY KEY on (task_id, attempt, leg) makes
+# one of them lose -- loudly, as a unique violation, rather than by overwriting
+# the record of the failure that caused the retry. Batch retries one task
+# sequentially, so the race is theoretical; the constraint is what makes it not
+# matter.
+_CLAIM = """
+    INSERT INTO legs (task_id, attempt, leg, run_id, at, body)
+    SELECT %(task_id)s,
+           COALESCE(MAX(attempt), 0) + 1,
+           %(leg)s, %(run_id)s, %(at)s, %(body)s
+      FROM legs WHERE task_id = %(task_id)s
+    RETURNING attempt
+"""
+
+_LATEST = "SELECT COALESCE(MAX(attempt), 0) FROM legs WHERE task_id = %(task_id)s"
 
 # Short on purpose. Nothing waits on the answer, and the alternative to failing
 # fast is holding the watcher thread while a task's work is what matters.
@@ -70,29 +87,54 @@ def record(
             log(f"leg {leg} not recorded: {type(exc).__name__}: {exc}".strip()[:200])
 
 
-def publish(
-    share: Path, task_id: str, *, dsn: str, log: Callable[[str], None] | None = None
-) -> None:
-    """Mirror this task's leg documents. NEVER FATAL.
+def claim_attempt(task_id: str, document: Mapping[str, Any], *, dsn: str) -> int:
+    """Reserve this attempt's number by WRITING the start row. RAISES.
 
-    Reads the task's CURRENT records rather than a delta, so a call that fails
-    is repaired by the next one instead of losing a document forever. An empty
-    `dsn` writes nothing: that is the pre-migration behaviour, and the rollback.
+    The one place in the node that is allowed to fail, and it has to be: the
+    number it returns names the attempt every later record of this task belongs
+    to, and inventing one on a failed write means the exit record and the
+    progress samples overwrite a PREVIOUS attempt -- destroying the account of
+    the failure that caused this retry, on what is now the only copy.
+
+    It used to be counted by listing `.start.json` files on the share. Nothing
+    writes those, so the count is the database's now, and the claim is the same
+    statement as the write: `MAX + 1` inside the INSERT, refereed by the primary
+    key. Fail-fast is not a new failure mode -- since the record moved, a task
+    that cannot reach the database fails at its first training event anyway;
+    this names the real reason minutes earlier.
     """
-    if not dsn:
-        return
-    try:
-        rows = [
-            task_log.leg_row(*row)
-            for row in task_log.rows_from_documents(
-                task_log.read_task_documents(task_log.tasks_dir(share), task_id)
-            )
-        ]
-        if rows:
-            _store(dsn, rows)
-    except Exception as exc:  # noqa: BLE001 -- the share has the record; this is the copy
-        if log:
-            log(f"legs not mirrored: {type(exc).__name__}: {exc}".strip()[:200])
+    row = task_log.leg_row(task_id, 0, "start", document)
+    import psycopg  # noqa: PLC0415 -- see the module docstring
+
+    with (
+        psycopg.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(_CLAIM, {**row, "body": json.dumps(row["body"], default=str)})
+        claimed = cursor.fetchone()
+        connection.commit()
+    if not claimed:
+        raise RuntimeError(f"could not claim an attempt number for {task_id}")
+    return int(claimed[0])
+
+
+def latest_attempt(task_id: str, *, dsn: str) -> int:
+    """The attempt this task's terminal record belongs to. RAISES.
+
+    Derived rather than carried: the exit trap may have lost anything the entry
+    point computed, which is why this was a directory listing before and is a
+    query now. 0 when nothing was ever claimed -- a task that died before its
+    start row landed, which has no attempt to belong to.
+    """
+    import psycopg  # noqa: PLC0415 -- see the module docstring
+
+    with (
+        psycopg.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(_LATEST, {"task_id": task_id})
+        found = cursor.fetchone()
+    return int(found[0]) if found else 0
 
 
 def _store(dsn: str, rows: list[dict[str, Any]]) -> None:
