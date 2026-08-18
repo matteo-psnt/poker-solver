@@ -62,13 +62,13 @@ class Dispatched(BaseModel):
     code_snapshot: str
     job_id: str
     tasks: list[str] = []
-    dual_write: bool = False
-    """Whether these tasks will write their record to the database as well as
-    the share. Reported because it is decided by the DISPATCHING SHELL'S
-    environment and sealed here for the task's whole life -- so a submit from a
-    shell without the DSN produces a task that writes files only, silently, and
-    the database falls behind for every run it starts. Two runs finished while
-    the database still called them running at 0 iterations."""
+    records_to_database: bool = False
+    """That these tasks carry a DSN, which `_refuse_without_a_record` has already
+    guaranteed. Kept in the payload rather than dropped as redundant: it is
+    sealed from the DISPATCHING SHELL'S environment for the task's whole life,
+    and it is the one fact a caller cannot recover afterwards from the task id.
+    A task without it records NOWHERE -- there is no file half to fall back
+    on."""
 
     def extend[T: Dispatched](self, model: type[T], **fields: Any) -> T:
         """These three facts, plus what the command adds, as the command's payload.
@@ -139,7 +139,7 @@ def stage_and_queue(
         # From the SPECS, not from this process's environment: what matters is
         # what was sealed into the tasks, and a caller may have set it another
         # way. Any one of them answers -- they are stamped together.
-        dual_write=bool(specs and specs[0].record_dsn),
+        records_to_database=bool(specs and specs[0].record_dsn),
     )
 
 
@@ -154,10 +154,10 @@ def _refuse_without_a_record(specs: Sequence[TaskSpec]) -> None:
     screen showing a bar that never moved.
 
     Refused here rather than warned about, because the warning was already
-    there. `submit` has printed `record: SHARE ONLY` since the day two runs
-    finished while the database still called them running, and tasks kept being
-    queued without it -- 65 leg documents from one afternoon reached the share
-    and nothing else.
+    there. `submit` printed `record: SHARE ONLY` from the day two runs finished
+    while the database still called them running, and tasks kept being queued
+    without it -- 65 leg documents from one afternoon reached the share and
+    nothing else.
     """
     if specs and not specs[0].record_dsn:
         raise CommandError(
@@ -224,15 +224,10 @@ def render_queued(payload: Dispatched) -> None:
     """Shared human rendering for a dispatch result."""
     print(f"  code snapshot: {payload.code_snapshot}")
     print(f"  job:           {payload.job_id}")
-    if payload.dual_write:
-        print("  record:        share + database")
-    else:
-        print(
-            "  record:        SHARE ONLY -- no POKER_SOLVER_RECORD_DSN when this was\n"
-            "                 submitted, so the database will not see these tasks.\n"
-            "                 export POKER_SOLVER_RECORD_DSN="
-            "$(terraform -chdir=infra/store output -raw postgres_dsn)"
-        )
+    # No `else`: `_refuse_without_a_record` raises before anything is queued,
+    # so a dispatch that got this far carries a DSN.
+    if payload.records_to_database:
+        print("  record:        database")
     for task in payload.tasks:
         print(f"  queued:        {task}")
     count = len(payload.tasks)
