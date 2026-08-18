@@ -16,6 +16,7 @@ from src.pipeline.services.scoring._shared import (
     load_blueprint,
 )
 from src.pipeline.training.run_tracker import RunMetadata
+from src.shared.ports.record import RecordSource
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ def evaluate_run_resolver_gate(
     blend_alpha: float | None = None,
     workers: int = 1,
     allin_runouts: int = 1,
+    record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Head-to-head resolver gate on a run: blueprint+resolver vs bare blueprint.
 
@@ -94,7 +96,7 @@ def evaluate_run_resolver_gate(
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
         ValueError: Invalid configuration or checkpoint state.
     """
-    metadata = load_run_metadata(run_dir)
+    metadata = load_run_metadata(run_dir, record_source)
     config = _with_resolver_overrides(
         metadata.config,
         leaf_continuation_fraction=leaf_continuation_fraction,
@@ -161,6 +163,7 @@ def evaluate_blueprint_match(
     *,
     num_deals: int = 2000,
     seed: int = 1,
+    record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Head-to-head match between two runs' blueprints on duplicate deals.
 
@@ -171,8 +174,8 @@ def evaluate_blueprint_match(
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
         ValueError: Invalid checkpoint state, or mismatched game configurations.
     """
-    metadata_a = load_run_metadata(run_dir_a)
-    metadata_b = load_run_metadata(run_dir_b)
+    metadata_a = load_run_metadata(run_dir_a, record_source)
+    metadata_b = load_run_metadata(run_dir_b, record_source)
     if metadata_a.config.game != metadata_b.config.game:
         raise ValueError(
             f"Game configs differ between runs ({metadata_a.config.game} vs "
@@ -217,6 +220,7 @@ def record_blueprint_match(
     *,
     num_deals: int = 2000,
     seed: int = 1,
+    record_source: RecordSource | None = None,
 ) -> dict[str, Any]:
     """Run a head-to-head match and persist a durable, self-describing payload.
 
@@ -229,9 +233,11 @@ def record_blueprint_match(
     The payload IS the durable record; there is no ledger row to keep in step with
     it. Writing is best-effort and never fails the match.
     """
-    metadata_a = load_run_metadata(run_dir_a)
-    metadata_b = load_run_metadata(run_dir_b)
-    out = evaluate_blueprint_match(run_dir_a, run_dir_b, num_deals=num_deals, seed=seed)
+    metadata_a = load_run_metadata(run_dir_a, record_source)
+    metadata_b = load_run_metadata(run_dir_b, record_source)
+    out = evaluate_blueprint_match(
+        run_dir_a, run_dir_b, num_deals=num_deals, seed=seed, record_source=record_source
+    )
 
     def _provenance(meta: RunMetadata) -> dict[str, Any]:
         return {

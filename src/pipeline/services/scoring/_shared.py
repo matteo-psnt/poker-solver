@@ -22,6 +22,7 @@ from src.pipeline.blueprint.construction import build_static_evaluation_solver
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.config import Config
+from src.shared.ports.record import RecordSource
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,9 @@ def effective_abstraction_hash(
     return effective
 
 
-def verify_mixable(run_dir: Path, effective_hash: str, mix_run: Path) -> None:
+def verify_mixable(
+    run_dir: Path, effective_hash: str, mix_run: Path, source: RecordSource | None = None
+) -> None:
     """Refuse a mixture of two runs that bucket hands differently.
 
     Read off the RUN METADATA, not the checkpoint manifest: ordinary training
@@ -97,7 +100,7 @@ def verify_mixable(run_dir: Path, effective_hash: str, mix_run: Path) -> None:
     eval path already pins to. Blending two differently-bucketed tables would
     line the rows up perfectly and add a different hand's strategy into each.
     """
-    other = load_run_metadata(mix_run)
+    other = load_run_metadata(mix_run, source)
     theirs = effective_abstraction_hash(mix_run, other, None)
     if theirs != effective_hash:
         raise AbstractionMismatchError(
@@ -162,6 +165,7 @@ def prepare_blueprint(
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
     mix: tuple[Path | None, int | None, float] = (None, None, 0.5),
+    record_source: RecordSource | None = None,
 ) -> PreparedBlueprint:
     """Everything an estimator needs before it can score: metadata, blueprint, factory.
 
@@ -173,12 +177,15 @@ def prepare_blueprint(
     result would look like an ordinary number.
 
     The factory is None below two workers -- there is no subprocess to rebuild
-    anything -- and otherwise captures only picklable arguments.
+    anything -- and otherwise captures only picklable arguments. `record_source`
+    is resolved HERE, coordinator-side: it holds a connection pool, so a worker
+    that carried one would be unpicklable and, at 16 workers, would open 16 more
+    pools against a server with no pooler in front of it.
     """
-    metadata = load_run_metadata(run_dir)
+    metadata = load_run_metadata(run_dir, record_source)
     effective_hash = effective_abstraction_hash(run_dir, metadata, abstraction_hash)
     if mix[0] is not None:
-        verify_mixable(run_dir, effective_hash, mix[0])
+        verify_mixable(run_dir, effective_hash, mix[0], record_source)
     solver, storage, policy_record = build_blueprint_for(
         run_dir,
         metadata,

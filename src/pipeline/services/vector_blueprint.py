@@ -161,7 +161,7 @@ def train_vector_blueprint(
 
     if resuming:
         _verify_universe(run_dir, universe_boards, universe_seed)
-        tracker = RunTracker.load(run_dir, record_source)
+        tracker = RunTracker.load(run_dir, record_source, sink)
         tracker.verify_action_config_hash(action_model.get_config_hash())
         tracker.mark_resumed()
     else:

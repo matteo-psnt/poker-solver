@@ -23,10 +23,13 @@ class RunTracker:
     """
     Tracks a single training run.
 
-    Appends what happened to ``run_dir/run.jsonl``; the current state is the
-    fold of that log. Nothing is rewritten, so there is no window in which a
-    kill can leave the record torn -- the failure mode that used to strand a run
-    whose checkpoints were fine.
+    Appends what happened to the record; the current state is the fold of that
+    log. Nothing is rewritten, so there is no window in which a kill can leave
+    the record torn -- the failure mode that used to strand a run whose
+    checkpoints were fine.
+
+    The log is a TABLE, not a file. `run.jsonl` is still read for runs written
+    before the database, and is never written again.
     """
 
     def __init__(
@@ -51,9 +54,9 @@ class RunTracker:
         """
         self.run_dir = Path(run_dir)
         self.run_id = self.run_dir.name
-        # DUAL WRITE, and the file half is not optional. `None` is the
-        # pre-migration behaviour and stays the default, so a task dispatched
-        # without a DSN writes exactly what it always wrote.
+        # THE ONLY WRITER. There is no file half any more, so `None` here is
+        # not the pre-migration behaviour -- it is a run that records nowhere.
+        # `_record` refuses rather than let one train for hours and vanish.
         self._sink = sink
         # The read side, asked before the file. A resume folds the run's events
         # to decide whether it may continue; once the log stops being published
@@ -63,7 +66,7 @@ class RunTracker:
         self._initialized = False
 
         # Load existing or prepare new metadata
-        if _has_run_record(self.run_dir, source):
+        if has_run_record(self.run_dir, source):
             # Loading an existing run, from whichever store holds it.
             self.metadata = RunMetadata.load(self.run_dir, source)
             self._initialized = True
@@ -98,7 +101,7 @@ class RunTracker:
         """
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._initialized = True
-        events = run_events.read(self.run_dir)
+        events = self._events()
 
         # Guard on the CREATED event, not on the log being empty and not on a
         # flag: training appends checkpoints to this log before the tracker is
@@ -169,7 +172,7 @@ class RunTracker:
             # Before initialize(), so the reap is ordered ahead of the attempt
             # that replaced it.
             self.run_dir.mkdir(parents=True, exist_ok=True)
-            if run_events.head(run_events.read(self.run_dir)):
+            if run_events.head(self._events()):
                 self._emit_attempt_ended(reaped[-1])
         # Announces `created` if missing and any attempt not yet in the log --
         # which on a run converted from the old layout is all of them.
@@ -285,20 +288,38 @@ class RunTracker:
                 "Could not record the checkpoint event; training continues."
             )
 
-    def _record(self, event: str, **fields: Any) -> None:
-        """Append the event to the log, then offer it to the sink.
+    def _events(self) -> list[dict[str, Any]]:
+        """This run's log so far, from whichever store holds it.
 
-        FILE FIRST, always. The share is still the source of truth through the
-        dual-write phase, so a sink that is unreachable must cost nothing --
-        `run_events.append` has already returned by the time the sink is asked.
+        The source first, the file only for runs that predate it. `initialize`
+        folds this to decide whether `created` and each attempt have already
+        been announced, so reading the wrong store re-announces a run that is
+        already open.
+        """
+        if self._source is not None:
+            recorded = self._source.events(self.run_id)
+            if recorded:
+                return [dict(event) for event in recorded]
+        return run_events.read(self.run_dir)
+
+    def _record(self, event: str, **fields: Any) -> None:
+        """Offer the event to the sink, which is the only place it lands.
+
+        REFUSES WITHOUT ONE. While the file was still written, a missing sink
+        meant "files only", which was both the rollout and the rollback. It no
+        longer means anything of the kind: a tracker with no sink records
+        nowhere, and a run that trains for hours and leaves no record reports as
+        a success. The refusal is at the first event, before any compute.
 
         `created` goes through `opened`, which BLOCKS and may raise, because it
         carries the resolved config a resume reads to decide it may continue.
         Everything else goes through `emit`, which drops rather than waits.
         """
-        run_events.append(self.run_dir, event, **fields)
         if self._sink is None:
-            return
+            raise RuntimeError(
+                f"No record sink: {self.run_id} would train and leave no record. "
+                "Set POKER_SOLVER_RECORD_DSN, or pass a sink."
+            )
         if event == run_events.CREATED:
             self._sink.opened(self.run_id, fields)
         elif event == run_events.STATUS:
@@ -342,12 +363,25 @@ class RunTracker:
         )
 
     @classmethod
-    def load(cls, run_dir: Path, source: RecordSource | None = None) -> RunTracker:
-        """Load an existing run tracker, from whichever store holds the run."""
+    def load(
+        cls,
+        run_dir: Path,
+        source: RecordSource | None = None,
+        sink: RecordSink | None = None,
+    ) -> RunTracker:
+        """Load an existing run tracker, from whichever store holds the run.
+
+        `sink` IS NEEDED WHENEVER THE LOADED TRACKER WILL WRITE, which is every
+        resume: `mark_resumed`, `record_checkpoint` and `mark_completed` all go
+        through it. It was omitted here while the file was the real record, so a
+        resumed run's whole second attempt -- its checkpoints and its terminal
+        status -- reached the log and never the database. A pure reader
+        (`load_run_metadata`) passes no sink and writes nothing.
+        """
         run_path = Path(run_dir)
-        if not _has_run_record(run_path, source):
+        if not has_run_record(run_path, source):
             raise FileNotFoundError(f"No run record in {run_path}")
-        return cls(run_path, source=source)
+        return cls(run_path, source=source, sink=sink)
 
     @staticmethod
     def list_runs(base_dir: Path) -> list[str]:
@@ -359,11 +393,11 @@ class RunTracker:
         return sorted(
             item.name
             for item in base_path.iterdir()
-            if item.is_dir() and not item.name.startswith(".") and _has_run_record(item)
+            if item.is_dir() and not item.name.startswith(".") and has_run_record(item)
         )
 
 
-def _has_run_record(run_dir: Path, source: RecordSource | None = None) -> bool:
+def has_run_record(run_dir: Path, source: RecordSource | None = None) -> bool:
     """Whether this directory holds a run, in either layout.
 
     ``.run.json`` still counts. Every run written before the event log has one

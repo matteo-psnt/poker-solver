@@ -18,6 +18,7 @@ from src.pipeline.training.run_tracker import RunTracker
 from src.pipeline.training.run_tracker.metadata import RunMetadata
 from src.shared import run_events
 from src.shared.config import Config
+from tests.memory_record import MemoryRecord
 
 
 class _Source:
@@ -41,16 +42,33 @@ class _Source:
 
 
 def _record_at(where) -> list[dict[str, Any]]:
-    """A real run record, written the way a run writes one."""
+    """A real run record, written the way a run writes one -- to the SINK.
+
+    Nothing lands on disk: this is what a run created after the flip leaves
+    behind, which is exactly the input the source-first path has to handle.
+    """
     config = Config.default()
+    record = MemoryRecord()
     tracker = RunTracker(
         run_dir=where,
         config_name="test",
         config=config,
         action_config_hash=ActionModel(config).get_config_hash(),
+        sink=record,
+        source=record,
     )
     tracker.mark_completed()
-    return run_events.read(tracker.run_dir)
+    return [dict(event) for event in record.events(tracker.run_id)]
+
+
+def _legacy_record_at(where) -> list[dict[str, Any]]:
+    """The same record as a FILE, the way every run written before the flip
+    left one. The fallback tests need a real `run.jsonl`; the tracker no longer
+    writes one, so these events are appended directly."""
+    where.mkdir(parents=True, exist_ok=True)
+    for event in _record_at(where.parent / f"{where.name}-source"):
+        run_events.append(where, event.pop("event"), **event)
+    return run_events.read(where)
 
 
 class TestAResumeCanFoldFromTheDatabase:
@@ -62,9 +80,8 @@ class TestAResumeCanFoldFromTheDatabase:
         assert loaded.config_name == "test"
 
     def test_a_run_the_source_does_not_know_falls_back_to_the_file(self, tmp_path):
-        """A run that predates the database, or a task with no DSN, resumes
-        exactly as it always did."""
-        _record_at(tmp_path / "run-b")
+        """A run that predates the database resumes exactly as it always did."""
+        _legacy_record_at(tmp_path / "run-b")
         loaded = RunMetadata.load(tmp_path / "run-b", _Source([]))
         assert loaded.config_name == "test"
 
@@ -83,7 +100,7 @@ class TestAResumeCanFoldFromTheDatabase:
     def test_the_fold_is_the_same_one_either_way(self, tmp_path):
         """The stored body IS the line the log holds, so the metadata a resume
         gets from the database is the metadata it got from the file."""
-        events = _record_at(tmp_path / "run-d")
+        events = _legacy_record_at(tmp_path / "run-d")
         from_file = RunMetadata.load(tmp_path / "run-d")
         from_db = RunMetadata.load(tmp_path / "run-d", _Source(events))
         assert from_db.to_dict() == from_file.to_dict()

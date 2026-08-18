@@ -15,6 +15,7 @@ from src.pipeline.evaluation.statistics import variance_decomposition
 from src.pipeline.evaluation.units import pair_mean_mbb
 from src.pipeline.services.runs import checkpoint_iteration_of
 from src.pipeline.services.scoring._shared import EvaluationOutput, prepare_blueprint
+from src.shared.ports.record import RecordSource
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ def evaluate_run_lbr(
     resolver_blend_alpha: float | None = None,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
+    record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Evaluate a run's exploitability via Local Best Response (trustworthy default).
 
@@ -95,7 +97,13 @@ def evaluate_run_lbr(
     config = config or LBRConfig()
     # Each parallel LBR worker rebuilds its own solver from the checkpoint --
     # the solver is not picklable across processes.
-    prepared = prepare_blueprint(run_dir, abstraction_hash, at_iteration, config.num_workers)
+    prepared = prepare_blueprint(
+        run_dir,
+        abstraction_hash,
+        at_iteration,
+        config.num_workers,
+        record_source=record_source,
+    )
     metadata, solver, storage, factory = (
         prepared.metadata,
         prepared.solver,

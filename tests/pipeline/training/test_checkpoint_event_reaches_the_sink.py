@@ -5,7 +5,8 @@ type the record sink never saw. `progress` reads checkpoint events, and once it
 answered from the database it found none for any run since the last import --
 which a comparison over historical runs cannot catch, because those had all been
 imported. Caught by `backfill-record --verify` on a live run instead: share 6
-events, database 5.
+events, database 5. The sink is now the ONLY store, so this is not a
+dual-write check -- it is the whole record for a rung.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from src.shared.config import Config
 class _Sink:
     def __init__(self) -> None:
         self.events: list[str] = []
+        self.claims: list[tuple[str, int, str]] = []
 
     def opened(self, run_id: str, body: Any) -> None:
         self.events.append("created")
@@ -31,7 +33,8 @@ class _Sink:
     def emit(self, run_id: str, event: str, body: Any) -> None:
         self.events.append(event)
 
-    def claim(self, run_id: str, iteration: int, uri: str) -> None: ...
+    def claim(self, run_id: str, iteration: int, uri: str) -> None:
+        self.claims.append((run_id, iteration, uri))
 
     def flush(self, timeout: float) -> bool:
         return True
@@ -55,14 +58,15 @@ def test_a_checkpoint_reaches_the_sink(tmp_path):
     assert run_events.CHECKPOINT in sink.events
 
 
-def test_it_also_reaches_the_log(tmp_path):
-    """Both stores, like every other event -- the share stays the source of
-    truth."""
+def test_it_also_claims_the_rung(tmp_path):
+    """The event says a checkpoint happened; the CLAIM says which rung is
+    current, and it is the only live writer `checkpoints` has. Without it a
+    running run reads `has_checkpoint = false` and its ladder is whatever the
+    last import saw."""
     sink = _Sink()
     tracker = _tracker(tmp_path, sink)
     tracker.record_checkpoint(iteration=1000, coverage=0.5)
-    kinds = [e.get("event") for e in run_events.read(tracker.run_dir)]
-    assert run_events.CHECKPOINT in kinds
+    assert sink.claims == [("run-a", 1000, run_events.rung_uri("run-a", 1000))]
 
 
 def test_a_sink_that_explodes_does_not_fail_the_rung(tmp_path):

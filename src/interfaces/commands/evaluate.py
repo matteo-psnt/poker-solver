@@ -294,6 +294,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         # and this decides what implements it. No DSN is no sink, which is the
         # rollout and the rollback both.
         sink=connect.eval_sink_from_environment(),
+        record_source=connect.record_source_from_environment(),
         method=args.method,
         lbr=LBRConfig(
             num_hands=args.hands,

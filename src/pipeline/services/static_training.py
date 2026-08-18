@@ -26,9 +26,9 @@ from src.core.actions.action_model import ActionModel
 from src.pipeline import blueprint
 from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
 from src.pipeline.services import equity_prior, warm_start
-from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
+from src.pipeline.training.run_tracker import ExperimentTag, RunTracker, has_run_record
 from src.pipeline.training.static_parallel import train_static_parallel
-from src.shared import records, run_events
+from src.shared import records
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
 
@@ -151,11 +151,15 @@ def train_static(
     # fresh metadata over a live run, skips verify_action_config_hash, and
     # restarts training from zero into a directory holding a real ladder --
     # which save_checkpoint then extends with mixed-lineage rungs and prunes.
-    resuming = run_events.log_path(run_dir).exists() or (run_dir / ".run.json").exists()
+    # THROUGH THE RECORD, not the filesystem. `run.jsonl` is no longer
+    # written, so a directory check answers `False` for every run created
+    # after the flip -- which mints fresh metadata over a live ladder and
+    # restarts training from zero.
+    resuming = has_run_record(run_dir, record_source)
 
     action_model = ActionModel(config)
     if resuming:
-        tracker = RunTracker.load(run_dir, record_source)
+        tracker = RunTracker.load(run_dir, record_source, sink)
         tracker.verify_action_config_hash(action_model.get_config_hash())
         tracker.verify_trainer_knobs(config, TRAINER_BLOCKS)
         tracker.mark_resumed()

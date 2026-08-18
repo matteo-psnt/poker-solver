@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import Command, records_root, resolve_run_dir
 from src.interfaces.errors import CommandError
 from src.shared import run_events
@@ -27,6 +28,8 @@ from src.shared.cloudtask.node import archive
 if TYPE_CHECKING:
     import argparse
     from pathlib import Path
+
+    from src.shared.ports.record import RecordSource
 
 GB = 1024**3
 
@@ -102,7 +105,7 @@ def _scored_iterations(run_dir: Path) -> set[int]:
     return found
 
 
-def _is_terminal(run_dir: Path) -> bool:
+def _is_terminal(run_dir: Path, source: RecordSource | None) -> bool:
     """Whether the run has stopped writing, defaulting to NO.
 
     A run still training publishes new rungs, and its newest may be mid-copy.
@@ -114,7 +117,11 @@ def _is_terminal(run_dir: Path) -> bool:
     prunes.
     """
     try:
-        events = run_events.read(run_dir)
+        events = (
+            [dict(event) for event in source.events(run_dir.name)]
+            if source is not None
+            else run_events.read(run_dir)
+        )
     except (OSError, ValueError):
         return False
     status = run_events.tail_value(events, "status", "running", kind=run_events.STATUS)
@@ -146,6 +153,7 @@ def run(args: argparse.Namespace) -> PrunePlan:
     from src.interfaces.cloud.config import CloudConfig  # noqa: PLC0415 -- Azure only when applying
     from src.interfaces.cloud.store import share  # noqa: PLC0415
 
+    source = connect.record_source_from_environment()
     plan = PrunePlan(applied=bool(args.apply))
     with records_root(args) as root:
         wanted = (
@@ -162,7 +170,7 @@ def run(args: argparse.Namespace) -> PrunePlan:
             rungs = _published_rungs(run_dir)
             if not rungs:
                 continue
-            if not _is_terminal(run_dir):
+            if not _is_terminal(run_dir, source):
                 plan.protected.append(f"{run_dir.name}: still running")
                 continue
             swept.append(run_dir.name)

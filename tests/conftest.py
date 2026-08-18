@@ -16,6 +16,7 @@ import pytest
 from hypothesis import HealthCheck, settings
 
 from src.interfaces import telemetry
+from tests.memory_record import MemoryRecord
 
 # `derandomize=True` is the whole reason property tests are allowed in here.
 # `pytest-randomly` was rejected for this suite because random order x xdist x a
@@ -97,3 +98,15 @@ def requires_card_abstraction():
             "and copy the result into data/combo_abstraction/, or pull it from "
             "the share. Everything else in the suite runs without it."
         )
+
+
+@pytest.fixture
+def record() -> MemoryRecord:
+    """A record a tracker can write to and read back.
+
+    `RunTracker` refuses to run without a sink -- there is no file half any
+    more -- so every test that builds one passes this as BOTH halves. Asserting
+    against it exercises the port pair production uses; asserting against
+    `run.jsonl` exercised a format nothing reads.
+    """
+    return MemoryRecord()

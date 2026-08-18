@@ -114,12 +114,13 @@ def _agent(args: argparse.Namespace) -> agents.Agent:
     # Imported here, not at module scope: the engine and its numba kernels are
     # the expensive half of start-up, and `--help` and the baseline probe -- the
     # thing this command is FOR until a 200 bb arm exists -- must not pay it.
+    from src.adapters.postgres import connect  # noqa: PLC0415 -- see above
     from src.interfaces.gtowizard.player import BlueprintPlayer  # noqa: PLC0415
     from src.pipeline.services.scoring._shared import build_blueprint_for  # noqa: PLC0415
     from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415
 
     run_dir = resolve_run_dir(args.run, args.runs_dir)
-    metadata = RunTracker.load(run_dir).metadata
+    metadata = RunTracker.load(run_dir, connect.record_source_from_environment()).metadata
     blueprint, _storage, _policy = build_blueprint_for(
         run_dir,
         metadata,
