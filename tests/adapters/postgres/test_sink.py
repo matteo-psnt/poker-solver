@@ -54,19 +54,36 @@ class _Engine:
         return _Tx()
 
 
-class TestEmitNeverBlocksAndNeverRaises:
-    """A sink that stalls puts a network round trip inside the training loop;
-    one that raises turns a transport fault into a dead task."""
+class TestEmitNeverRaisesAndPushesBack:
+    """One that raises turns a transport fault into a dead task, so `emit` still
+    never raises. What changed with the share's copy going away is that it no
+    longer DISCARDS: a full queue means the database is unreachable, and the
+    right answer is to slow down rather than to forget.
+    """
 
-    def test_a_full_queue_drops_instead_of_waiting(self):
+    def test_a_full_queue_waits_rather_than_discarding(self, monkeypatch):
+        """`put_nowait` threw an event away the instant the queue filled, which
+        was fine while the same event sat in a file on the share."""
+        monkeypatch.setattr("src.adapters.postgres.sink._BACKPRESSURE_SECONDS", 0.2)
         gate = threading.Event()
         sink = PostgresSink(_Engine(block=gate), queue_depth=2)
         started = time.perf_counter()
-        for i in range(50):
+        for i in range(8):
             sink.emit("run-a", "progress", {"iteration": i})
-        elapsed = time.perf_counter() - started
+        waited = time.perf_counter() - started
         gate.set()
-        assert elapsed < 1.0, "emit waited on a stalled writer"
+        assert waited > 0.2, "emit discarded instead of pushing back"
+        sink.close(timeout=2)
+
+    def test_it_still_never_raises_on_the_caller(self, monkeypatch):
+        """The ceiling exists so an outage cannot wedge the training loop
+        forever -- reaching it is a lost event, not an exception."""
+        monkeypatch.setattr("src.adapters.postgres.sink._BACKPRESSURE_SECONDS", 0.05)
+        gate = threading.Event()
+        sink = PostgresSink(_Engine(block=gate), queue_depth=1)
+        for i in range(5):
+            sink.emit("run-a", "progress", {"iteration": i})  # must not raise
+        gate.set()
         assert sink.flush(1.0) is False, "and it must SAY it dropped"
         sink.close(timeout=2)
 

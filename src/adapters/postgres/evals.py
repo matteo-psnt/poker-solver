@@ -2,13 +2,19 @@
 
 Synchronous and unbatched, unlike `sink.py`: an evaluation is one row produced
 by hours of compute, so there is nothing to amortise and no loop to keep out of
-the way. What it shares with the sink is the policy -- it never raises, because
-the document is already on the share and the share is the source of truth.
+the way.
+
+IT RAISES, and that is the change that came with retiring the share's copy. It
+used to swallow everything "because the document is already on the share" --
+true then, and the whole justification. Now the row IS the evaluation, and an
+eval that ran for hours and recorded nothing is worse than one that says so.
+Retried first, because a dropped connection is not a lost evaluation.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.dialects.postgresql import insert
@@ -19,6 +25,10 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 log = logging.getLogger(__name__)
+
+# A dropped connection is not a lost evaluation; a database that is gone is.
+ATTEMPTS = 3
+BACKOFF_SECONDS = 0.5
 
 
 def eval_values(
@@ -65,19 +75,26 @@ class PostgresEvalSink:
     def scored(
         self, eval_id: str, run_id: str, document: Mapping[str, Any], tier_digest: str
     ) -> None:
-        """Store one evaluation, or log and carry on.
+        """Store one evaluation. RAISES when it cannot.
 
         `eval_id` is the document's slug -- timestamp, knob hash and a random
         suffix -- so it is unique by construction and a conflict means this
         exact eval was already recorded. Doing nothing on one is what makes a
-        retried task idempotent rather than a duplicate row.
+        retried task idempotent rather than a duplicate row, and what makes the
+        retries below safe.
         """
-        try:
-            with self._engine.begin() as connection:
-                connection.execute(
-                    insert(models.Eval)
-                    .values(eval_values(eval_id, run_id, document, tier_digest))
-                    .on_conflict_do_nothing(index_elements=["eval_id"])
-                )
-        except Exception:
-            log.warning("eval %s not recorded to the database", eval_id, exc_info=True)
+        for attempt in range(ATTEMPTS):
+            try:
+                with self._engine.begin() as connection:
+                    connection.execute(
+                        insert(models.Eval)
+                        .values(eval_values(eval_id, run_id, document, tier_digest))
+                        .on_conflict_do_nothing(index_elements=["eval_id"])
+                    )
+            except Exception:
+                if attempt + 1 == ATTEMPTS:
+                    log.exception("eval %s could not be recorded", eval_id)
+                    raise
+                time.sleep(BACKOFF_SECONDS * (2**attempt))
+            else:
+                return

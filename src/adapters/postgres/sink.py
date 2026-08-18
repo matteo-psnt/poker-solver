@@ -57,6 +57,16 @@ BATCH = 200
 # that waiting costs nothing measurable.
 _DRAIN_POLL_SECONDS = 0.02
 
+# How long `emit` will WAIT for room before giving up on an event. Long enough
+# to ride out a failover or a restart, short enough that a database that is gone
+# for good cannot wedge a training loop indefinitely.
+_BACKPRESSURE_SECONDS = 120.0
+
+# A dropped connection and a failover both succeed on a second attempt a moment
+# later; only a database that is actually gone survives all three.
+_WRITE_ATTEMPTS = 3
+_WRITE_BACKOFF_SECONDS = 0.5
+
 _SENTINEL = object()
 
 
@@ -182,18 +192,26 @@ class PostgresSink:
             "event_uuid": uuid.uuid4(),
         }
         try:
-            if blocking:
-                self._queue.put(row)
-            else:
-                self._queue.put_nowait(row)
+            # BACKPRESSURE, not discard. `put_nowait` threw an event away the
+            # moment the queue filled, which was defensible while the share held
+            # the same event in a file and is not once this is the only copy.
+            # Waiting is the cheaper failure: the queue drains at ~40,000
+            # rows/s, so a full one means the database is unreachable and the
+            # right response is to slow down, not to forget.
+            self._queue.put(row, timeout=None if blocking else _BACKPRESSURE_SECONDS)
         except queue.Full:
+            # The ceiling exists so an outage cannot wedge the training loop
+            # forever. Reaching it IS a lost event and is counted as one.
             with self._lock:
                 self._dropped += 1
-            # Once per outage, not once per event: a full queue means the
-            # database is unreachable, and logging 10,000 lines about it is its
-            # own failure.
-            if self._dropped == 1:
-                log.warning("record sink queue full; dropping events until it drains")
+                first = self._dropped == 1
+            # Once per outage, not once per event: 10,000 lines about an
+            # unreachable database is its own failure.
+            if first:
+                log.warning(
+                    "record sink queue full for %.0fs; the database is behind",
+                    _BACKPRESSURE_SECONDS,
+                )
 
     def _drain(self) -> None:
         batch: list[dict[str, Any]] = []
@@ -224,19 +242,47 @@ class PostgresSink:
                 self._queue.task_done()
 
     def _write(self, batch: list[dict[str, Any]]) -> None:
+        """Write a batch, RETRYING, and only count it lost when it truly is.
+
+        The version this replaces gave up on the first exception, which threw
+        away a batch over a dropped connection or a failover -- recoverable
+        things that a second attempt a moment later gets through. That was
+        survivable while the share held the same events; it is not once this is
+        the only copy.
+
+        Idempotent by construction, so a retry after an ambiguous failure cannot
+        double-write: events carry a client-assigned `event_uuid` behind
+        `on_conflict_do_nothing`, and the folded counters are MAX, not
+        increments.
+        """
         if not batch:
             return
-        try:
-            with self._engine.begin() as connection:
-                connection.execute(insert(models.RunEvent).values(batch).on_conflict_do_nothing())
-                for run_id, values in _folded(batch).items():
+        for attempt in range(_WRITE_ATTEMPTS):
+            try:
+                with self._engine.begin() as connection:
                     connection.execute(
-                        sa_update(models.Run).where(models.Run.run_id == run_id).values(**values)
+                        insert(models.RunEvent).values(batch).on_conflict_do_nothing()
                     )
-        except Exception:
-            with self._lock:
-                self._dropped += len(batch)
-            log.warning("record sink lost %d events", len(batch), exc_info=True)
+                    for run_id, values in _folded(batch).items():
+                        connection.execute(
+                            sa_update(models.Run)
+                            .where(models.Run.run_id == run_id)
+                            .values(**values)
+                        )
+            except Exception:
+                if attempt + 1 == _WRITE_ATTEMPTS:
+                    with self._lock:
+                        self._dropped += len(batch)
+                    log.warning(
+                        "record sink lost %d events after %d attempts",
+                        len(batch),
+                        _WRITE_ATTEMPTS,
+                        exc_info=True,
+                    )
+                    return
+                time.sleep(_WRITE_BACKOFF_SECONDS * (2**attempt))
+            else:
+                return
 
 
 def _folded(batch: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
