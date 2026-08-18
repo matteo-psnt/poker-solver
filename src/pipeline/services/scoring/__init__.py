@@ -53,9 +53,9 @@ class EvaluationPayload(BaseModel):
     """What one evaluation of one checkpoint measured.
 
     NODE-ONLY: `score` is the console's door, and the durable record is the
-    per-run document this writes, not this payload. `ledger_result_path` is
-    absent when recording failed -- which is deliberate and must stay possible,
-    because a failed WRITE must never lose the measurement that was made.
+    document this hands the sink, not this payload. `eval_id` is absent when
+    recording failed -- deliberate, and it must stay possible: a failed RECORD
+    must never lose the measurement that was made.
     """
 
     op: Literal["evaluate"] = "evaluate"
@@ -65,7 +65,9 @@ class EvaluationPayload(BaseModel):
     infosets: int
     checkpoint_iteration: int | None = None
     results: dict[str, Any] = Field(default_factory=dict)
-    ledger_result_path: str | None = None
+    # The slug the document is stored under. Was `ledger_result_path`, which
+    # named a file; there is no file.
+    eval_id: str | None = None
     tree_fingerprint: str | None = None
 
 
@@ -98,8 +100,8 @@ def evaluate_and_record(
     here once, so a cloud eval and a local eval cannot drift.
 
     Returns the portable evaluate payload; when recording succeeded it carries
-    ``ledger_result_path``. Recording failures print a warning but never fail
-    the evaluation itself — the ledger is a research convenience.
+    ``eval_id``. Recording failures print a warning but never fail the
+    evaluation itself — the ledger is a research convenience.
 
     ``at_iteration`` scores a retained ladder rung rather than the published
     snapshot; each rung records its own ``checkpoint_iteration``, so a run's
@@ -181,7 +183,7 @@ def evaluate_and_record(
     )
     try:
         metadata = load_run_metadata(run_dir, record_source)
-        result_path, document = eval_ledger.record_evaluation(
+        eval_id, document = eval_ledger.record_evaluation(
             run_dir=run_dir,
             payload=payload.model_dump(),
             provenance=eval_ledger.RunProvenance(
@@ -203,14 +205,16 @@ def evaluate_and_record(
             estimator=estimator,
             knobs=knobs,
         )
-        payload.ledger_result_path = str(result_path)
-        logger.info(f"  Recorded:      {result_path}")
-        if sink is not None:
-            # The share FIRST, then the sink -- `record_evaluation` has already
-            # returned, so a database that is unreachable costs this eval
-            # nothing. The digest is derived HERE because `tiers` owns the rule
-            # and a sink may not import it.
-            sink.scored(result_path.stem, run_dir.name, document, tiers.tier_digest(document))
+        payload.eval_id = eval_id
+        # The SINK is the record now; there is no file to fall back to, so a
+        # sink that is None means this measurement is not kept. Said plainly
+        # rather than logged as a success. The digest is derived HERE because
+        # `tiers` owns the rule and a sink may not import it.
+        if sink is None:
+            logger.warning(f"  Ledger:        NOT RECORDED ({eval_id}): no eval sink")
+        else:
+            sink.scored(eval_id, run_dir.name, document, tiers.tier_digest(document))
+            logger.info(f"  Recorded:      {eval_id}")
     except Exception as exc:  # recording must never break the eval  # noqa: BLE001 -- recording must never break the eval it records
         logger.warning(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
     return payload

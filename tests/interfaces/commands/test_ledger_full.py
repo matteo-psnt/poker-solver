@@ -12,7 +12,9 @@ from src.pipeline.evaluation import ledger as eval_ledger
 def _record(root, run_id: str) -> None:
     run_dir = root / run_id
     run_dir.mkdir()
-    eval_ledger.record_evaluation(
+    # `--full` reads the DOCUMENT off the share, so this fixture has to leave
+    # one there; `record_evaluation` only builds it now.
+    eval_id, document = eval_ledger.record_evaluation(
         run_dir=run_dir,
         payload={
             "infosets": 10,
@@ -35,6 +37,7 @@ def _record(root, run_id: str) -> None:
         estimator="exact",
         knobs={"num_flops": 4, "num_turns": 2, "num_rivers": 2, "base_seed": 7},
     )
+    eval_ledger.write_eval(run_dir, document, eval_id)
 
 
 def _args(**over) -> argparse.Namespace:
