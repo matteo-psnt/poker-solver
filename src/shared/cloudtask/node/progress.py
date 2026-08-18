@@ -305,15 +305,17 @@ def publish(paths: NodePaths, plan: TaskPlan, state: Mapping[str, object]) -> No
     with contextlib.suppress(Exception):
         progress = kinds.kind(plan.op).sample(plan, state)
         if progress is not None:
-            written = task_log.write_progress_record(
+            # THE ROW, AND NO FILE. Progress is the first record to stop being
+            # published: `tasks` reads it from the database, it is replaced
+            # every fifteen seconds, and a sample that is superseded that fast
+            # is the one whose loss costs least. Writing it to a share with
+            # 14,000 files in one directory was also the single most expensive
+            # thing a running task did.
+            written = task_log.progress_record(
                 paths.share,
                 task_id=task_log.current_task_id("local"),
                 progress=_windowed(progress),
             )
-            # Directly, on THIS tick. The coarse tick's re-read heals whatever
-            # has a file, and progress is the record that is about to stop
-            # having one -- so the row has to be written where the sample is
-            # taken. Still on the watcher thread, so it costs the work nothing.
             legmirror.record(
                 str(written["task_id"]),
                 task_log.TASK_SCOPED,
