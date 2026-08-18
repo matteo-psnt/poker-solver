@@ -191,11 +191,20 @@ def rung_ladder(engine: Any, run_id: str) -> list[int]:
 # order and two processes write one run's events -- the node wrapper and the
 # trainer -- so a fold keyed on arrival can see an attempt end before it began.
 _RUN_EVENTS = sa.text("""
-    SELECT body FROM run_events WHERE run_id = :run_id ORDER BY at, gseq
+    SELECT event, body FROM run_events WHERE run_id = :run_id ORDER BY at, gseq
 """)
 
 
 def run_event_bodies(engine: Any, run_id: str) -> list[dict[str, Any]]:
-    """One run's events, as the documents the fold reads."""
+    """One run's events, as the LINES the log holds.
+
+    `event` comes back merged into the body. It is a column here and a key
+    there, and the fold looks it up by key -- so a body handed over as stored
+    has no `created` event in it and a resume dies looking for one. Measured on
+    a node: `ValueError: run log has no 'created' event`.
+    """
     with _read(engine) as connection:
-        return [row[0] for row in connection.execute(_RUN_EVENTS, {"run_id": run_id})]
+        return [
+            {**(body or {}), "event": event}
+            for event, body in connection.execute(_RUN_EVENTS, {"run_id": run_id})
+        ]
