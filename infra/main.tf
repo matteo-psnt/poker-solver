@@ -147,15 +147,22 @@ locals {
     # wrapper puts on its own path touches that interpreter not at all. Pinned
     # against `spec.py`, which sets PYTHONPATH, by `test_node_interpreter.py`.
     #
-    # `|| echo`, like the ptrace knob above and for the same reason: a start
-    # task that fails BRICKS THE NODE, and this is the one thing here whose
-    # absence costs nothing that matters. `legmirror` catches the missing driver
-    # and the task trains exactly as before, which is what an unset DSN already
-    # does. Bricking a node to protect a copy of a record the share already
-    # holds is the wrong way round.
-    /usr/local/bin/uv pip install --target /opt/node-deps --quiet "psycopg[binary]" \
-      || echo "WARN could not install psycopg; legs will not mirror"
+    # NOT `|| echo`, and this one is worth bricking a node over -- the tradeoff
+    # inverted when `run.jsonl` stopped being written. It used to be that a node
+    # without the driver trained exactly as before and merely failed to mirror a
+    # copy of a record the share already held. The share holds nothing now: a
+    # node that cannot reach the database accepts training work and fails every
+    # task at its first event, having already been handed the work.
+    #
+    # So it FAILS HERE, where Batch marks the node unusable and autoscale
+    # replaces it, rather than N task failures later. The install is verified by
+    # importing rather than by its exit code, under the same interpreter and the
+    # same PYTHONPATH the wrapper uses -- a `pip install` that "succeeded" into a
+    # directory the wrapper cannot import from is the failure this actually
+    # guards.
+    /usr/local/bin/uv pip install --target /opt/node-deps --quiet "psycopg[binary]"
     chmod -R a+rX /opt/node-deps 2>/dev/null || true
+    PYTHONPATH=/opt/node-deps /usr/local/bin/python3.13 -c "import psycopg"
     chmod -R a+rX /opt/uv-python
     SHARE="$AZ_BATCH_NODE_MOUNTS_DIR/shared"
     mkdir -p /mnt/work/data/combo_abstraction /mnt/work/data/runs
