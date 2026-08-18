@@ -17,7 +17,6 @@ import json
 import os
 import re
 import tempfile
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -37,8 +36,6 @@ DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 
 # The namespace for the deterministic event ids below. Any fixed uuid does; what
 # matters is that it never changes, or every event re-imports as a new row.
-_EVENT_NS = uuid.UUID("6f1a9c2e-1f4a-4a1e-9f7d-0b2c3d4e5f60")
-
 # `.complete-static-<iteration>.zarr`, the same shape `prune-checkpoints` matches.
 _RUNG = re.compile(r"^static-(\d+)\.zarr$")
 
@@ -88,16 +85,6 @@ class BackfillPayload(BaseModel):
     skipped: list[str] = Field(default_factory=list)
     # Empty is the answer this command exists to produce during dual write.
     divergences: list[Divergence] = Field(default_factory=list)
-
-
-def _event_uuid(run_id: str, index: int, body: dict[str, Any]) -> uuid.UUID:
-    """A DETERMINISTIC id, so re-importing the same event is a no-op.
-
-    Position plus content: two `progress` events in one run can carry identical
-    bodies, and hashing content alone would silently collapse them into one.
-    """
-    material = f"{run_id}|{index}|{json.dumps(body, sort_keys=True, default=str)}"
-    return uuid.uuid5(_EVENT_NS, material)
 
 
 def _rows_for_run(run_dir: Path, models: Any) -> tuple[Any, list[Any], list[Any]] | None:
@@ -152,7 +139,7 @@ def _rows_for_run(run_dir: Path, models: Any) -> tuple[Any, list[Any], list[Any]
     # the run's own status.
     attempt = 0
     event_rows = []
-    for index, body in enumerate(events):
+    for body in events:
         if body.get(run_events.EVENT_KEY) == run_events.ATTEMPT_STARTED:
             attempt = int(body.get("index", attempt))
         event_rows.append(
@@ -162,7 +149,9 @@ def _rows_for_run(run_dir: Path, models: Any) -> tuple[Any, list[Any], list[Any]
                 event=str(body.get(run_events.EVENT_KEY) or ""),
                 at=body.get("ts"),
                 body=body,
-                event_uuid=_event_uuid(run_dir.name, index, body),
+                event_uuid=run_events.event_identity(
+                    run_dir.name, str(body.get(run_events.EVENT_KEY) or ""), body
+                ),
             )
         )
 

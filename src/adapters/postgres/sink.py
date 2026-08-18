@@ -15,7 +15,6 @@ import logging
 import queue
 import threading
 import time
-import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -23,6 +22,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert
 
 from src.adapters.postgres import models
+from src.shared import run_events
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -185,11 +185,13 @@ class PostgresSink:
             "event": event,
             "at": body.get("ts") or datetime.now(UTC).isoformat(),
             "body": dict(body),
-            # Client-assigned and random rather than a counter: two processes
-            # write one run's events -- the node wrapper and the trainer -- and
-            # a monotone `seq` would collide between them, which the unique
-            # index would then reject and this sink would swallow.
-            "event_uuid": uuid.uuid4(),
+            # DETERMINISTIC and shared with the importer. Random ids meant an
+            # event written live and then re-imported landed twice -- 6 events
+            # on the share, 11 in the database, for one task. A monotone `seq`
+            # is not the answer either: two processes write one run's events,
+            # the node wrapper and the trainer, and it would collide between
+            # them.
+            "event_uuid": run_events.event_identity(run_id, event, body),
         }
         try:
             # BACKPRESSURE, not discard. `put_nowait` threw an event away the
