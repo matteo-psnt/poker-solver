@@ -33,7 +33,7 @@ from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
     from src.shared.config import Config
-    from src.shared.ports.record import RecordSink
+    from src.shared.ports.record import RecordSink, RecordSource
 
 PROGRESS_ARTIFACT = "train-progress.json"
 KERNEL = "pcs"
@@ -115,6 +115,7 @@ def train_pcs(
     # still does. Constructed by the COMMAND, never here: the composition
     # root is the only layer allowed to know which adapter this is.
     sink: RecordSink | None = None,
+    record_source: RecordSource | None = None,
 ) -> PcsTrainingOutput:
     """Train to an ABSOLUTE iteration target; continuing past it is a no-op.
 
@@ -139,7 +140,7 @@ def train_pcs(
     abstraction = blueprint.build_card_abstraction(config)
     abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
     if resuming:
-        tracker = RunTracker.load(run_dir)
+        tracker = RunTracker.load(run_dir, record_source)
         tracker.verify_action_config_hash(action_model.get_config_hash())
         if tracker.metadata.kernel != KERNEL:
             raise ValueError(
@@ -152,6 +153,7 @@ def train_pcs(
         tag = experiment or ExperimentTag()
         tracker = RunTracker(
             sink=sink,
+            source=record_source,
             run_dir=run_dir,
             config_name=config.system.config_name,
             config=config,

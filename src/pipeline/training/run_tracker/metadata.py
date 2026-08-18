@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.pipeline.training.run_tracker.attempts import (
     AttemptRecord,
@@ -19,6 +19,9 @@ from src.shared.gitinfo import (
     get_git_commit,
     is_git_dirty,
 )
+
+if TYPE_CHECKING:
+    from src.shared.ports.record import RecordSource
 
 
 @dataclass
@@ -320,13 +323,23 @@ class RunMetadata:
         return cls.from_dict(payload)
 
     @classmethod
-    def load(cls, run_dir: Path) -> RunMetadata:
-        """Read a run's state by folding its event log.
+    def load(cls, run_dir: Path, source: RecordSource | None = None) -> RunMetadata:
+        """Read a run's state by folding its events.
 
         Takes the run DIRECTORY, not a file: which files a run keeps is this
         module's business, not its callers'.
+
+        `source` is asked FIRST when there is one. A resume needs the config,
+        the abstraction hash and the kernel to decide whether it may continue,
+        and once the log stops being published the database is the only place
+        those are. The file remains the fallback, so a run that predates the
+        database -- or a task with no DSN -- resumes exactly as it always did.
         """
         directory = Path(run_dir)
+        if source is not None:
+            recorded = source.events(directory.name)
+            if recorded:
+                return cls.from_events([dict(event) for event in recorded])
         events = run_events.read(directory)
         if events:
             return cls.from_events(events)

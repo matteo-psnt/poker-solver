@@ -34,7 +34,7 @@ from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
     from src.shared.config import Config
-    from src.shared.ports.record import RecordSink
+    from src.shared.ports.record import RecordSink, RecordSource
 
 PROGRESS_ARTIFACT = "train-progress.json"
 
@@ -87,6 +87,7 @@ def train_static(
     # still does. Constructed by the COMMAND, never here: the composition
     # root is the only layer allowed to know which adapter this is.
     sink: RecordSink | None = None,
+    record_source: RecordSource | None = None,
     warm_start_shape: str = "flat",
     equity_prior_weight: int = 0,
     equity_prior_temperature: float = equity_prior.DEFAULT_TEMPERATURE,
@@ -154,7 +155,7 @@ def train_static(
 
     action_model = ActionModel(config)
     if resuming:
-        tracker = RunTracker.load(run_dir)
+        tracker = RunTracker.load(run_dir, record_source)
         tracker.verify_action_config_hash(action_model.get_config_hash())
         tracker.verify_trainer_knobs(config, TRAINER_BLOCKS)
         tracker.mark_resumed()
@@ -178,6 +179,7 @@ def train_static(
             ) from e
         tracker = RunTracker(
             sink=sink,
+            source=record_source,
             run_dir=run_dir,
             config_name=config.system.config_name,
             config=config,

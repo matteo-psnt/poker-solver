@@ -99,3 +99,25 @@ class EvalSink(Protocol):
         not import `pipeline`, and a second derivation would pair rows that must
         not be compared.
         """
+
+
+class RecordSource(Protocol):
+    """Where a run's record is READ from, declared without saying what holds it.
+
+    The mirror of `RecordSink`, and it exists for one caller: a RESUME. The
+    tracker folds a run's events to decide whether this task may continue --
+    the config it was trained under, the abstraction it is pinned to, the
+    kernel. Without that it mints fresh metadata over a live ladder and trains
+    from zero, which is the failure `opened` calls unrecoverable.
+
+    One method, because everything else folds from events. `RunMetadata` already
+    knows how; what it lacked was anywhere but a file to fold from.
+    """
+
+    def events(self, run_id: str) -> list[Mapping[str, Any]]:
+        """Every event of one run, oldest first.
+
+        The order is the fold's order. `gseq` is arrival, and two processes
+        write one run's events, so the reader sorts by what the events THEMSELVES
+        say rather than by when they landed.
+        """

@@ -90,6 +90,9 @@ def run(args: argparse.Namespace) -> PcsTrainingPayload:
         out = services.train_pcs(
             args.config,
             sink=sink,
+            # The READ side, for a resume: without it the tracker folds the
+            # run's events out of a file that is on its way out.
+            record_source=connect.record_source_from_environment(),
             iterations=args.iterations,
             num_workers=args.workers,
             seed=args.seed,

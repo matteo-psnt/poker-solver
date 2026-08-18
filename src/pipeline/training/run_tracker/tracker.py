@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     from src.pipeline.training.run_tracker.attempts import AttemptRecord
     from src.shared.config import Config
-    from src.shared.ports.record import RecordSink
+    from src.shared.ports.record import RecordSink, RecordSource
 
 
 class RunTracker:
@@ -41,6 +41,7 @@ class RunTracker:
         parent_run_id: str | None = None,
         kernel: str | None = None,
         sink: RecordSink | None = None,
+        source: RecordSource | None = None,
     ):
         """Initialize the tracker for one run.
 
@@ -54,13 +55,17 @@ class RunTracker:
         # pre-migration behaviour and stays the default, so a task dispatched
         # without a DSN writes exactly what it always wrote.
         self._sink = sink
+        # The read side, asked before the file. A resume folds the run's events
+        # to decide whether it may continue; once the log stops being published
+        # the database is the only place they are.
+        self._source = source
         self.metadata_file = run_events.log_path(self.run_dir)
         self._initialized = False
 
         # Load existing or prepare new metadata
-        if _has_run_record(self.run_dir):
-            # Loading an existing run, in either layout.
-            self.metadata = RunMetadata.load(self.run_dir)
+        if _has_run_record(self.run_dir, source):
+            # Loading an existing run, from whichever store holds it.
+            self.metadata = RunMetadata.load(self.run_dir, source)
             self._initialized = True
             self._initialized = True
         else:
@@ -337,12 +342,12 @@ class RunTracker:
         )
 
     @classmethod
-    def load(cls, run_dir: Path) -> RunTracker:
-        """Load existing run tracker."""
+    def load(cls, run_dir: Path, source: RecordSource | None = None) -> RunTracker:
+        """Load an existing run tracker, from whichever store holds the run."""
         run_path = Path(run_dir)
-        if not _has_run_record(run_path):
+        if not _has_run_record(run_path, source):
             raise FileNotFoundError(f"No run record in {run_path}")
-        return cls(run_path)
+        return cls(run_path, source=source)
 
     @staticmethod
     def list_runs(base_dir: Path) -> list[str]:
@@ -358,7 +363,7 @@ class RunTracker:
         )
 
 
-def _has_run_record(run_dir: Path) -> bool:
+def _has_run_record(run_dir: Path, source: RecordSource | None = None) -> bool:
     """Whether this directory holds a run, in either layout.
 
     ``.run.json`` still counts. Every run written before the event log has one
@@ -367,6 +372,8 @@ def _has_run_record(run_dir: Path) -> bool:
     from zero.
     """
     directory = Path(run_dir)
+    if source is not None and source.events(directory.name):
+        return True
     return run_events.log_path(directory).exists() or (directory / ".run.json").exists()
 
 
