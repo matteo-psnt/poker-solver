@@ -160,7 +160,7 @@ def _record(
     install -- still leaves an account on the share.
     """
     with contextlib.suppress(Exception):
-        task_log.write_node_record(
+        written = task_log.write_node_record(
             paths.share,
             task_id=os.environ.get("AZ_BATCH_TASK_ID", "local"),
             job_id=os.environ.get("AZ_BATCH_JOB_ID", ""),
@@ -190,6 +190,17 @@ def _record(
             event=event,
             cause=cause,
             exit_code=code,
+        )
+        # The row, at the moment the record is made rather than on the next
+        # coarse tick. `_record(STARTED)` runs BEFORE `uv sync`, and the driver
+        # is installed beside the interpreter for exactly that -- so the started
+        # record reaches the database at the instant it reaches the share.
+        legmirror.record(
+            written["task_id"],
+            int(written["attempt"]),
+            "start" if event == task_log.EVENT_STARTED else "exit",
+            written,
+            dsn=os.environ.get("POKER_SOLVER_RECORD_DSN", ""),
         )
 
 

@@ -273,7 +273,7 @@ def write_node_record(
     git_branch: str = "",
     exit_code: int | None = None,
     cause: str | None = None,
-) -> Path:
+) -> dict[str, Any]:
     """Record what the node knows about this task. One file per event, per attempt.
 
     Never overwrites -- see the module docstring for why the attempt number and
@@ -334,9 +334,13 @@ def write_node_record(
         "cause": cause,
     }
     suffix = START_SUFFIX if event == EVENT_STARTED else EXIT_SUFFIX
-    path = directory / f"{task_id}.{attempt}{suffix}"
-    records.write_snapshot(path, record, records.REGISTRY[f"legs/*{suffix}"])
-    return path
+    records.write_snapshot(
+        directory / f"{task_id}.{attempt}{suffix}", record, records.REGISTRY[f"legs/*{suffix}"]
+    )
+    # The RECORD, not the path. Every caller ignored the path, and the record is
+    # what a second store needs -- writing the row from this rather than reading
+    # the file back is what removes the round trip through the share.
+    return record
 
 
 def write_progress_record(
@@ -344,7 +348,7 @@ def write_progress_record(
     *,
     task_id: str,
     progress: kinds.Progress,
-) -> Path:
+) -> dict[str, Any]:
     """How far along a RUNNING task is. Overwritten, unlike start and exit.
 
     Current state, not history: only the latest matters, and keeping every
@@ -364,9 +368,12 @@ def write_progress_record(
         "progress": progress.as_record(),
         "ts": utcnow(),
     }
-    path = directory / f"{task_id}{PROGRESS_SUFFIX}"
-    records.write_snapshot(path, record, records.REGISTRY[f"legs/*{PROGRESS_SUFFIX}"])
-    return path
+    records.write_snapshot(
+        directory / f"{task_id}{PROGRESS_SUFFIX}",
+        record,
+        records.REGISTRY[f"legs/*{PROGRESS_SUFFIX}"],
+    )
+    return record
 
 
 # The attempt number cannot change inside one process -- a Batch retry is a NEW
