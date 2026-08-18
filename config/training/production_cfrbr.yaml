@@ -1,0 +1,13 @@
+# Production plus the CFR-BR setup measured best on the gate: a turn-legal best
+# response over four runouts sharing a flop AND a turn. `extends`, not a copy,
+# so the action and card hashes stay matched to production by construction.
+
+extends: production.yaml
+
+pcs:
+  cfr_br: turn_river
+  runout_mode: turn
+  runouts_per_flop: 4
+
+system:
+  config_name: "production_cfrbr"
