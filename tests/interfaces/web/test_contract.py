@@ -55,8 +55,6 @@ MODELS: dict[str, type[BaseModel]] = {
     "submit": contract.SubmitPayload,
     "score": contract.ScorePayload,
     "submit-precompute": contract.PrecomputeDispatchPayload,
-    "submit-coupling": contract.SubmitCouplingPayload,
-    "submit-vector": contract.SubmitVectorPayload,
     "push-code": contract.PushedCode,
     "push-data": contract.PushedData,
     "compact-legs": contract.Compacted,

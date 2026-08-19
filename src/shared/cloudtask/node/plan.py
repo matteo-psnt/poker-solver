@@ -62,9 +62,6 @@ class TaskPlan:
     workers: int = 1
     checkpoint_every: int = 0
     retain_every: int = 0
-    universe_boards: int = 0
-    universe_seed: int = 0
-    dtype: str = ""
     warm_start_from: str = ""
     warm_start_weight: int = 0
     warm_start_at: int = 0

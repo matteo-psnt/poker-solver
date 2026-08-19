@@ -76,7 +76,7 @@ def test_every_trainer_goes_through_it():
 
     from src.shared import repo
 
-    for name in ("train_static", "train_pcs", "train_vector"):
+    for name in ("train_static", "train_pcs"):
         source = Path(repo.SRC / "interfaces" / "commands" / f"{name}.py").read_text()
         assert "connect.record_sink()" in source, f"{name} builds a sink it never drains"
         assert "connect.sink_from_environment()" not in source

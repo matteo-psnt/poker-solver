@@ -64,9 +64,7 @@ from src.interfaces.commands import (
     score,
     serve_box,
     submit,
-    submit_coupling,
     submit_precompute,
-    submit_vector,
     tasks,
 )
 from src.interfaces.errors import attempt
@@ -172,9 +170,6 @@ class SubmitBody(BaseModel):
     # only cold ones -- a gap that reads as a missing feature rather than a
     # missing field. `test_endpoint_arguments` now pins every body to its flags.
     kernel: str | None = None
-    universe_boards: int | None = None
-    universe_seed: int | None = None
-    dtype: str | None = None
     warm_start_from: str | None = None
     warm_start_weight: int | None = None
     warm_start_at: int | None = None
@@ -194,34 +189,6 @@ class ScoreBody(BaseModel):
     # business -- so it has no meaning here and `_passthrough` tolerates its
     # absence.
     flags: list[str] | None = None
-
-
-class SubmitVectorBody(BaseModel):
-    # `abstractions` is required and repeatable: one arm per abstraction per
-    # kernel, and the command has no default for it because which abstractions
-    # to compare IS the experiment.
-    abstractions: list[str]
-    kernels: list[str] | None = None
-    derive_boards: list[int] | None = None
-    train_boards: int | None = None
-    score_boards: int | None = None
-    checkpoints: str | None = None
-    config: str | None = None
-    stack: int | None = None
-    score_seeds: list[int] | None = None
-    board_relative: bool | None = None
-    timeout: str | None = None
-
-
-class SubmitCouplingBody(BaseModel):
-    # Repeatable and required for the same reason as the sweep's: WHICH
-    # abstractions to price against each other is the measurement.
-    abstractions: list[str]
-    boards: int | None = None
-    classes: str | None = None
-    seed: int | None = None
-    board_relative: bool | None = None
-    timeout: str | None = None
 
 
 class PrecomputeBody(BaseModel):
@@ -426,16 +393,6 @@ def create_app() -> FastAPI:
     )
     def _precompute(body: PrecomputeBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_precompute.COMMAND, **given(body))
-
-    @app.post("/api/submit-vector", response_model=contract.SubmitVectorPayload, responses=ERRORS)
-    def _submit_vector(body: SubmitVectorBody) -> JSONResponse:
-        return answer(TtlCache(0.0), submit_vector.COMMAND, **given(body))
-
-    @app.post(
-        "/api/submit-coupling", response_model=contract.SubmitCouplingPayload, responses=ERRORS
-    )
-    def _submit_coupling(body: SubmitCouplingBody) -> JSONResponse:
-        return answer(TtlCache(0.0), submit_coupling.COMMAND, **given(body))
 
     # `push-code` and `push-data` read a tree on the machine RUNNING THIS
     # SERVER, which is the one fact about them a browser hides. `--root` and

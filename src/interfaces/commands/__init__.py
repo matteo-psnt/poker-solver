@@ -99,9 +99,6 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Build a card abstraction on a node and publish it to the share.",
             ),
             CommandRef(
-                "submit-vector", "Queue CFR kernel measurements on the pool, one task per arm."
-            ),
-            CommandRef(
                 "jobs", "Every queued/running task on the pool (--all includes finished jobs)."
             ),
             CommandRef("logs", "Read a task's log from the share (default) or live from its node."),
@@ -131,10 +128,6 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Publish card abstractions to the share (copied, never recomputed on a node).",
             ),
             CommandRef(
-                "submit-coupling",
-                "Queue board-free abstraction-cost measurements on the pool, one per abstraction.",
-            ),
-            CommandRef(
                 "compact-legs",
                 "Bundle sealed task records into one file, so reading legs/ is one round trip.",
             ),
@@ -156,20 +149,8 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Train over the statically-enumerated tree (fixed memory, no key maps).",
             ),
             CommandRef(
-                "train-vector",
-                "Train the board-free vector kernel, stored as an ordinary static checkpoint.",
-            ),
-            CommandRef(
                 "train-pcs",
                 "Train by public chance sampling: one board per iteration, every hand at once.",
-            ),
-            CommandRef(
-                "vector-sweep",
-                "Exploitability vs iteration for one vector-CFR kernel on one abstraction.",
-            ),
-            CommandRef(
-                "abstraction-coupling",
-                "What board-free's board averaging costs, and what conditioning would buy back.",
             ),
             CommandRef(
                 "precompute", "Precompute a combo abstraction into data/combo_abstraction/."

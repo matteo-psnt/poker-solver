@@ -515,40 +515,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/submit-coupling": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Submit Coupling */
-        post: operations["_submit_coupling_api_submit_coupling_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/submit-vector": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Submit Vector */
-        post: operations["_submit_vector_api_submit_vector_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/tasks": {
         parameters: {
             query?: never;
@@ -2282,8 +2248,6 @@ export interface components {
             checkpoint_every?: number | null;
             /** Config */
             config?: string | null;
-            /** Dtype */
-            dtype?: string | null;
             /** Equity Prior Temperature */
             equity_prior_temperature?: number | null;
             /** Equity Prior Weight */
@@ -2306,10 +2270,6 @@ export interface components {
             timeout?: string | null;
             /** To */
             to: number;
-            /** Universe Boards */
-            universe_boards?: number | null;
-            /** Universe Seed */
-            universe_seed?: number | null;
             /** Warm Start At */
             warm_start_at?: number | null;
             /** Warm Start From */
@@ -2320,54 +2280,6 @@ export interface components {
             warm_start_weight?: number | null;
             /** Workers */
             workers?: number | null;
-        };
-        /** SubmitCouplingBody */
-        SubmitCouplingBody: {
-            /** Abstractions */
-            abstractions: string[];
-            /** Board Relative */
-            board_relative?: boolean | null;
-            /** Boards */
-            boards?: number | null;
-            /** Classes */
-            classes?: string | null;
-            /** Seed */
-            seed?: number | null;
-            /** Timeout */
-            timeout?: string | null;
-        };
-        /**
-         * SubmitCouplingPayload
-         * @description A dispatch, plus which abstractions it priced.
-         */
-        SubmitCouplingPayload: {
-            /** Abstractions */
-            abstractions?: string[];
-            /**
-             * Boards
-             * @default 0
-             */
-            boards: number;
-            /** Code Snapshot */
-            code_snapshot: string;
-            /** Job Id */
-            job_id: string;
-            /**
-             * Op
-             * @default submit-coupling
-             * @constant
-             */
-            op: "submit-coupling";
-            /**
-             * Records To Database
-             * @default false
-             */
-            records_to_database: boolean;
-            /**
-             * Tasks
-             * @default []
-             */
-            tasks: string[];
         };
         /**
          * SubmitPayload
@@ -2391,63 +2303,6 @@ export interface components {
             records_to_database: boolean;
             /** Target Iteration */
             target_iteration: number;
-            /**
-             * Tasks
-             * @default []
-             */
-            tasks: string[];
-        };
-        /** SubmitVectorBody */
-        SubmitVectorBody: {
-            /** Abstractions */
-            abstractions: string[];
-            /** Board Relative */
-            board_relative?: boolean | null;
-            /** Checkpoints */
-            checkpoints?: string | null;
-            /** Config */
-            config?: string | null;
-            /** Derive Boards */
-            derive_boards?: number[] | null;
-            /** Kernels */
-            kernels?: string[] | null;
-            /** Score Boards */
-            score_boards?: number | null;
-            /** Score Seeds */
-            score_seeds?: number[] | null;
-            /** Stack */
-            stack?: number | null;
-            /** Timeout */
-            timeout?: string | null;
-            /** Train Boards */
-            train_boards?: number | null;
-        };
-        /**
-         * SubmitVectorPayload
-         * @description A dispatch, plus WHICH ARMS it queued.
-         *
-         *     The arms are the part worth reading back: which abstractions and kernels to
-         *     compare IS the experiment, and a payload that reported only "3 tasks queued"
-         *     could not say what was being measured.
-         */
-        SubmitVectorPayload: {
-            /** Arms */
-            arms?: components["schemas"]["VectorArm"][];
-            /** Code Snapshot */
-            code_snapshot: string;
-            /** Job Id */
-            job_id: string;
-            /**
-             * Op
-             * @default submit-vector
-             * @constant
-             */
-            op: "submit-vector";
-            /**
-             * Records To Database
-             * @default false
-             */
-            records_to_database: boolean;
             /**
              * Tasks
              * @default []
@@ -2687,20 +2542,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-        };
-        /** VectorArm */
-        VectorArm: {
-            /** Abstraction */
-            abstraction: string;
-            /** Derive Boards */
-            derive_boards: number;
-            /** Kernel */
-            kernel: string;
-            /**
-             * Score Seed
-             * @default 999
-             */
-            score_seed: number;
         };
     };
     responses: never;
@@ -3857,90 +3698,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmitPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    _submit_coupling_api_submit_coupling_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitCouplingBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubmitCouplingPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    _submit_vector_api_submit_vector_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitVectorBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubmitVectorPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

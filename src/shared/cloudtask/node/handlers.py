@@ -382,10 +382,7 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
 
 # Where each measurement kind's result lands on the share. Separate folders
 # because they answer different questions and a reader globs one of them.
-MEASUREMENT_OUTPUT: dict[str, str] = {
-    TaskName.VECTOR_SWEEP: "vector-sweeps",
-    TaskName.ABSTRACTION_COUPLING: "abstraction-coupling",
-}
+MEASUREMENT_OUTPUT: dict[str, str] = {}
 
 
 def _measurement(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
@@ -506,12 +503,9 @@ HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN: _train,
     # Same executor: the board-free kernel writes ordinary checkpoints, so
     # the fetch, the ladder watcher and the publish path are identical.
-    TaskName.TRAIN_VECTOR: _train,
     TaskName.TRAIN_PCS: _train,
     TaskName.EVALUATE: _evaluate,
     TaskName.PRECOMPUTE: _precompute,
-    TaskName.VECTOR_SWEEP: _measurement,
     # Same executor: an abstraction off the share, one command, one JSON result.
-    TaskName.ABSTRACTION_COUPLING: _measurement,
     TaskName.NET_PROBE: _probe,
 }

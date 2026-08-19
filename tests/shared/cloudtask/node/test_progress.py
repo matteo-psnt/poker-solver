@@ -208,7 +208,7 @@ class TestTheRateWindow:
         So the window opens ON the jump, and the FIRST one is not a rate at
         all: two are needed to measure the interval between them."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        plan = self._plan(op=TaskName.TRAIN_VECTOR, to=3_000_000)
+        plan = self._plan(op=TaskName.TRAIN_PCS, to=3_000_000)
         for iteration in (0, 0, 1_000_000):
             progress.publish(plan, {"iteration": iteration})
 
