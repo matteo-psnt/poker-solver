@@ -8,7 +8,7 @@ from src.interfaces.commands import migrate_checkpoints, submit_migrate
 
 
 def _flags(**over):
-    args = argparse.Namespace(runs=None, limit=0, pool=None, timeout="6h")
+    args = argparse.Namespace(runs=None, limit=0, verify=False, pool=None, timeout="6h")
     for key, value in over.items():
         setattr(args, key, value)
     return submit_migrate._flags(args)
@@ -33,6 +33,11 @@ class TestTheFlagsReachTheSweepIntact:
         parsed = _parse(())
         assert parsed.runs is None
         assert parsed.limit == 0
+
+    def test_verify_survives(self):
+        """It existed on the sweep and had no way to reach the node: the
+        submitter never emitted it, so `--verify` silently ran a real sweep."""
+        assert _parse(_flags(verify=True)).verify is True
 
     def test_both_together(self):
         parsed = _parse(_flags(runs=["run-a", "run-b"], limit=3))
