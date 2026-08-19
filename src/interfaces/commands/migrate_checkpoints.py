@@ -152,7 +152,14 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 # Classified BEFORE the verify branch, because "missing" and
                 # "can never be migrated as it stands" are different answers and
                 # a count that merges them cannot gate a deletion.
-                if not (run_dir / archive.marker_for(snapshot)).exists():
+                marker = run_dir / archive.marker_for(snapshot)
+                if not marker.exists():
+                    # PRINTED, not merely counted. A skip used to produce no
+                    # output at all, so a sweep that skipped everything looked
+                    # identical to one that was working -- forty minutes of
+                    # HEADs and no upload, with the summary never reaching the
+                    # log because the task hit its ceiling first.
+                    print(f"  {snapshot}: SKIP, no marker at {marker.name}", flush=True)
                     payload.unmarked.append(f"{run_dir.name}/{snapshot}")
                     continue
                 if args.verify:
@@ -194,6 +201,7 @@ def _upload(sas: str, run_dir: Path, snapshot: str, work: Path) -> int:
     at = time.monotonic()
     copied = archive.copy_tree(run_dir / snapshot, staged, update=False)
     fetched = time.monotonic() - at
+    print(f"    staged {copied / 1024**2:.0f} MiB in {fetched:.1f}s", flush=True)
     at = time.monotonic()
     try:
         size = blobstore.put_rung(sas, run_dir.name, snapshot, staged)
