@@ -74,6 +74,54 @@ resource "azurerm_storage_account" "store" {
   }
 }
 
+# WHERE THE CHECKPOINTS GO. A rung is ~4,200 zarr chunk files on the share and
+# takes minutes to copy over SMB; as ONE tar object it is a single request, and
+# object existence becomes completeness -- which is what `checkpoints` in the
+# record already claims to be a cache OF.
+#
+# A container rather than a second share because Azure Files cannot TIER. One
+# rung per run is current and the rest are scored evidence nobody reads; the
+# lifecycle policy below moves those toward Cold at a fraction of the price.
+resource "azurerm_storage_container" "checkpoints" {
+  name                  = var.checkpoints_container_name
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# COLD, NOT ARCHIVE, and the distinction is operational rather than thrifty:
+# rehydrating an archived blob takes HOURS, and a rung is exactly the thing a
+# resume or a score reaches for without warning. Cold is milliseconds to read
+# and still a fraction of Hot.
+#
+# Keyed on the blob's own age, which is a proxy for the rung's: a run publishes
+# its ladder as it trains, so an old blob is an old rung. The CURRENT rung of an
+# active run is republished on every publish pass, which keeps it warm for as
+# long as the run is alive.
+resource "azurerm_storage_management_policy" "checkpoints" {
+  storage_account_id = azurerm_storage_account.store.id
+
+  rule {
+    name    = "cool-then-cold"
+    enabled = true
+    filters {
+      prefix_match = ["${var.checkpoints_container_name}/"]
+      blob_types   = ["blockBlob"]
+    }
+    actions {
+      base_blob {
+        # 14 days: longer than any arm has taken to go from training to scored,
+        # so a rung is never chilled while its own experiment is still reading it.
+        tier_to_cool_after_days_since_modification_greater_than = 14
+        tier_to_cold_after_days_since_modification_greater_than = 90
+      }
+    }
+  }
+}
+
 resource "azurerm_storage_share" "data" {
   name               = var.share_name
   storage_account_id = azurerm_storage_account.store.id

@@ -79,3 +79,9 @@ variable "operator_ip" {
   type        = string
   default     = null
 }
+
+variable "checkpoints_container_name" {
+  description = "Blob container holding one tar object per retained rung."
+  type        = string
+  default     = "checkpoints"
+}
