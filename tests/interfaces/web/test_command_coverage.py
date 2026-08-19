@@ -59,6 +59,11 @@ NODE_ONLY: dict[str, str] = {
 }
 
 DESTRUCTIVE: dict[str, str] = {
+    "submit-migrate": "a one-off migration sweep, dispatched a handful of times and "
+    "then never again; a permanent button for a temporary job",
+    "migrate-checkpoints": "it runs ON A NODE against the mounted share and takes hours; "
+    "a console button would be a request the browser cannot wait for, and the thing "
+    "worth watching is the task log",
     "prune-checkpoints": "it deletes checkpoints irreversibly; a button is the wrong "
     "shape for that, and its dry run is the thing worth reading anyway",
     "reconcile-runs": "it writes an INFERRED status into the record, which is the one "

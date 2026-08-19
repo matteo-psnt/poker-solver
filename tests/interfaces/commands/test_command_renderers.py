@@ -41,6 +41,7 @@ from src.interfaces.commands.curve import CurvePayload
 from src.interfaces.commands.jobs import JobsPayload
 from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
+from src.interfaces.commands.migrate_checkpoints import MigratedPayload
 from src.interfaces.commands.net_probe import Check, ProbePayload
 from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
@@ -57,6 +58,7 @@ from src.interfaces.commands.serve import ServePayload
 from src.interfaces.commands.serve_box import BoxPayload
 from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
+from src.interfaces.commands.submit_migrate import SubmitMigratePayload
 from src.interfaces.commands.submit_net_probe import SubmitNetProbePayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.tasks import TasksPayload
@@ -111,6 +113,20 @@ PAYLOADS: dict[str, Any] = {
         ],
         unsettled=["run-pcs-production-to4k-turn-river-072201-7245"],
         no_evidence=["run-production-025433-1095"],
+    ),
+    "migrate-checkpoints": MigratedPayload(
+        runs_considered=314,
+        rungs_uploaded=1177,
+        rungs_already_there=0,
+        bytes_uploaded=892_000_000_000,
+        failures=["run-a/static-100.zarr: no completion marker"],
+    ),
+    "submit-migrate": SubmitMigratePayload(
+        code_snapshot="code-20260903_230001",
+        job_id="poker-20260903",
+        tasks=["migrate-checkpoints-230001-9545"],
+        records_to_database=True,
+        flags=["--limit", "50"],
     ),
     "net-probe": ProbePayload(
         hostname="a1b2c3d4e5",

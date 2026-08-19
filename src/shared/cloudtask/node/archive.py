@@ -408,8 +408,14 @@ def fetch_metadata(source: Path, destination: Path) -> None:
             copy_file(child, destination / child.name)
 
 
-def fetch_snapshot(source: Path, destination: Path, name: str) -> None:
-    """Copy one snapshot down, replacing whatever is on the node.
+def fetch_snapshot(source: Path, destination: Path, name: str, sas: str = "") -> None:
+    """Get one snapshot onto the node, replacing whatever is there.
+
+    THE CONTAINER FIRST, the share as the fallback, and that order is the whole
+    read flip: while both stores hold rungs this prefers the one that is a
+    single request, and when the share stops holding them the fallback simply
+    stops finding anything. `source.name` IS the run id -- the archive
+    directory is named for it -- so nothing has to thread one.
 
     Remove first, and no update check. A cancelled task leaves partial rungs on
     the node, and treating those as already-present means the next task
@@ -419,10 +425,12 @@ def fetch_snapshot(source: Path, destination: Path, name: str) -> None:
     """
     target = destination / name
     shutil.rmtree(target, ignore_errors=True)
+    if sas and blobstore.get_rung(sas, source.name, name, destination):
+        return
     copy_tree(source / name, target, update=False)
 
 
-def require_complete(source: Path, name: str) -> None:
+def require_complete(source: Path, name: str, sas: str = "") -> None:
     """A rung without its marker is either pre-marker or was interrupted.
 
     The two are indistinguishable from here, and loading a truncated one yields
@@ -434,6 +442,11 @@ def require_complete(source: Path, name: str) -> None:
     and the answer to that is to publish it again from the node that has it,
     not to bless whatever reached the share.
     """
+    # IN THE CONTAINER IS COMPLETE, with nothing else to check. One rung is one
+    # atomically-committed blob: it is either there whole or not there, so the
+    # marker this function exists to demand has no counterpart and needs none.
+    if sas and blobstore.exists(sas, source.name, name):
+        return
     if not (source / name).is_dir():
         raise FetchRefusedError(f"the manifest names {name} but it is not on the share")
     if not (source / marker_for(name)).exists():
@@ -443,7 +456,7 @@ def require_complete(source: Path, name: str) -> None:
         )
 
 
-def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet) -> str:
+def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: str = "") -> str:
     """Fetch the one rung the manifest calls current. Returns its name, or "".
 
     What both continuing a run and scoring "the latest checkpoint" need, and in
@@ -475,15 +488,15 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet) -> st
         raise FetchRefusedError(
             f"{records.STATIC_CHECKPOINT} on the share names no current snapshot"
         )
-    require_complete(source, current)
-    fetch_snapshot(source, destination, current)
+    require_complete(source, current, sas)
+    fetch_snapshot(source, destination, current, sas)
     copy_file(source / records.STATIC_CHECKPOINT, destination / records.STATIC_CHECKPOINT)
     log(f"fetched current rung {current} (ladder left on the share)")
     return current
 
 
 def fetch_for_evaluation(
-    source: Path, destination: Path, rungs: Sequence[str], log: Log = _quiet
+    source: Path, destination: Path, rungs: Sequence[str], log: Log = _quiet, sas: str = ""
 ) -> list[str]:
     """Fetch only the rungs being scored. Returns the ones that arrived.
 
@@ -496,12 +509,12 @@ def fetch_for_evaluation(
     for rung in rungs:
         name = f"static-{rung}.zarr"
         try:
-            require_complete(source, name)
+            require_complete(source, name, sas)
         except FetchRefusedError as refusal:
             log(f"  WARN rung {rung}: {refusal}")
             continue
         try:
-            fetch_snapshot(source, destination, name)
+            fetch_snapshot(source, destination, name, sas)
         except OSError as error:
             # Reported, not swallowed: a silent copy failure becomes a
             # confusing load error minutes later, in a different subsystem.

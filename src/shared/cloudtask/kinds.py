@@ -50,6 +50,7 @@ class TaskName(StrEnum):
     EVALUATE = "evaluate"
     PRECOMPUTE = "precompute"
     NET_PROBE = "net-probe"
+    MIGRATE_CHECKPOINTS = "migrate-checkpoints"
 
 
 class BadTaskError(ValueError):
@@ -776,6 +777,41 @@ class NetProbeTask(TaskKind):
         return None
 
 
+class MigrateCheckpointsTask(TaskKind):
+    """Move published rungs from the mounted share into the checkpoint container.
+
+    A TASK because the bytes are on the share: ~1,200 retained rungs of ~4,200
+    zarr chunk files each, roughly five million reads. A node has that share
+    mounted inside the region; a laptop has it over the internet.
+
+    ``retries = 0``. The sweep is idempotent -- every rung is checked against
+    the container before it is read -- so a retry would be free, but it would
+    also hide that the first attempt hit its deadline rather than finished.
+    Re-running it deliberately is the resume, and the counts say how far it got.
+    """
+
+    name = TaskName.MIGRATE_CHECKPOINTS
+    unit = "rungs"
+    retries = 0
+
+    def validate(self, task: TaskFields) -> None:
+        """Nothing required: it walks whatever the share holds."""
+
+    def commands(self, plan: NodePlan) -> list[list[str]]:
+        return [["migrate-checkpoints", *plan.eval_flags]]
+
+    def label(self, task: Submission) -> str:  # noqa: ARG002 -- one sweep, no distinguishing field
+        return "migrate-checkpoints"
+
+    def describe(self, record: Mapping[str, Any]) -> str:  # noqa: ARG002
+        return "share -> container checkpoint migration"
+
+    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
+        """No bar: the total is only knowable by walking the share, which is
+        the expensive thing this task exists to do once."""
+        return None
+
+
 def samples_by_op(rows: Sequence[Mapping[str, Any]]) -> dict[str, list[Sample]]:
     """:func:`samples` for every kind at once, from ONE pass over the history.
 
@@ -884,6 +920,7 @@ KINDS: dict[str, TaskKind] = {
         EvaluateTask(),
         PrecomputeTask(),
         NetProbeTask(),
+        MigrateCheckpointsTask(),
     )
 }
 
