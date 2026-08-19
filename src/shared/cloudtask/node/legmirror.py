@@ -50,11 +50,19 @@ _CLAIM = """
     SELECT %(task_id)s,
            COALESCE(MAX(attempt), 0) + 1,
            %(leg)s, %(run_id)s, %(at)s, %(body)s
-      FROM legs WHERE task_id = %(task_id)s
+      FROM legs WHERE task_id = %(task_id)s AND attempt >= 0
     RETURNING attempt
 """
 
-_LATEST = "SELECT COALESCE(MAX(attempt), 0) FROM legs WHERE task_id = %(task_id)s"
+# `attempt >= 0` in both, and it is not defensive noise: a progress row is
+# stored at `TASK_SCOPED` (-1), which is a real value in this column. Today the
+# start row always lands first so MAX is never negative, but that is an argument
+# about ORDERING, and the numbering of every subsequent record hangs on it. The
+# predicate makes it an argument about the DATA instead.
+_LATEST = """
+    SELECT COALESCE(MAX(attempt), 0) FROM legs
+     WHERE task_id = %(task_id)s AND attempt >= 0
+"""
 
 # Short on purpose. Nothing waits on the answer, and the alternative to failing
 # fast is holding the watcher thread while a task's work is what matters.

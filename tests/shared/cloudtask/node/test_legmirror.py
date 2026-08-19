@@ -103,6 +103,15 @@ class TestClaimingAnAttempt:
         assert "MAX(attempt)" in statement
         assert "RETURNING attempt" in statement
 
+    def test_the_task_scoped_progress_row_cannot_skew_it(self, monkeypatch):
+        """A progress row lives at `TASK_SCOPED` (-1), which is a REAL value in
+        this column. Aggregating over it would make the numbering depend on the
+        start row happening to land first -- an argument about ordering, holding
+        up the numbering of every record that follows."""
+        connection = _driver(monkeypatch, _Connection(answer=(1,)))
+        legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
+        assert "attempt >= 0" in connection.executed[0][0]
+
     def test_it_commits(self, monkeypatch):
         connection = _driver(monkeypatch, _Connection(answer=(1,)))
         legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
@@ -147,6 +156,11 @@ class TestTheLatestAttempt:
         connection = _driver(monkeypatch, _Connection(answer=(4,)))
         assert legmirror.latest_attempt("task-a", dsn=DSN) == 4
         assert "MAX(attempt)" in connection.executed[0][0]
+
+    def test_it_ignores_the_task_scoped_progress_row(self, monkeypatch):
+        connection = _driver(monkeypatch, _Connection(answer=(2,)))
+        legmirror.latest_attempt("task-a", dsn=DSN)
+        assert "attempt >= 0" in connection.executed[0][0]
 
     def test_nothing_claimed_is_zero(self, monkeypatch):
         """A task that died before its start row landed has no attempt to
