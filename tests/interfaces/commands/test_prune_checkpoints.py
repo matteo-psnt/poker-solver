@@ -13,7 +13,9 @@ import pytest
 
 from src.interfaces.commands import prune_checkpoints
 from src.interfaces.errors import CommandError
+from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.cloudtask.node import archive
+from src.shared.config import Config
 
 
 def _run(published, name, *, rungs, status="completed", scored=()):
@@ -22,7 +24,13 @@ def _run(published, name, *, rungs, status="completed", scored=()):
     (run_dir / "evals").mkdir(parents=True)
     for rung in rungs:
         (run_dir / f"{archive.MARKER_PREFIX}static-{rung}.zarr").write_text("")
-    events = [{"event": "created", "run_id": name}]
+    # A REAL `created`, not a hand-rolled one. The fold refuses a created event
+    # without a config -- so a sparse fixture reads as an UNREADABLE run, which
+    # protects, and every drop assertion below would pass for the wrong reason.
+    created = RunMetadata.new(
+        name, "quick_test", Config.default(), action_config_hash="abc123"
+    ).creation_facts()
+    events = [{"event": "created", **created}]
     if status is not None:
         events.append({"event": "status", "status": status})
     (run_dir / "run.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
@@ -178,3 +186,46 @@ class TestTheOrphanSweep:
 
 class _Config:
     share_name = "s"
+
+
+class TestALegacyRunIsNotProtectedForever:
+    """MEASURED: 9 completed runs holding 44 rungs, protected as "still running".
+
+    A run written before the event log carries a `.run.json` and no log at all.
+    This folded the events itself, found none, and `tail_value` handed back its
+    `running` default -- so their ladders could never be pruned. Going through
+    `RunMetadata.load`, which knows all three layouts, is what `reconcile-runs`
+    already did; two answers to "is this run finished" was one too many.
+    """
+
+    def test_a_snapshot_only_run_reads_as_terminal(self, published):
+        run_dir = published / "run-legacy"
+        run_dir.mkdir(parents=True)
+        (run_dir / f"{archive.MARKER_PREFIX}static-100.zarr").write_text("")
+        (run_dir / f"{archive.MARKER_PREFIX}static-200.zarr").write_text("")
+        metadata = RunMetadata.new(
+            "run-legacy", "quick_test", Config.default(), action_config_hash="abc123"
+        )
+        metadata.status = "completed"
+        (run_dir / ".run.json").write_text(json.dumps(metadata.to_dict()))
+
+        plan = _plan(published, keep=1)
+        entry = next((e for e in plan.plan if e["run"] == "run-legacy"), None)
+        assert entry is not None, "a legacy run must be prunable, not protected forever"
+        assert entry["drop"] == [100]
+
+    def test_a_snapshot_only_run_still_training_is_protected(self, published):
+        """The safe direction has to survive the fix: a run whose snapshot says
+        it is running keeps its whole ladder."""
+        run_dir = published / "run-live"
+        run_dir.mkdir(parents=True)
+        (run_dir / f"{archive.MARKER_PREFIX}static-100.zarr").write_text("")
+        (run_dir / f"{archive.MARKER_PREFIX}static-200.zarr").write_text("")
+        metadata = RunMetadata.new(
+            "run-live", "quick_test", Config.default(), action_config_hash="abc123"
+        )
+        (run_dir / ".run.json").write_text(json.dumps(metadata.to_dict()))
+
+        plan = _plan(published, keep=1)
+        assert not [e for e in plan.plan if e["run"] == "run-live"]
+        assert any("run-live" in p for p in plan.protected)
