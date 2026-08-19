@@ -140,6 +140,10 @@ class TaskSpec:
     # than something every call site has to remember. Unset means the node
     # writes files only, which is the pre-migration behaviour.
     record_dsn: str = field(default_factory=lambda: os.environ.get("POKER_SOLVER_RECORD_DSN", ""))
+    # Minted at dispatch, not read from the environment: a SAS is short-lived
+    # by design, so an operator exporting one would be exporting something
+    # that expires under them. `submit` fills this in.
+    checkpoint_sas: str = ""
     op: str = TaskName.TRAIN
     config: str = ""
     to: int = 0

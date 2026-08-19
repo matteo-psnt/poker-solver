@@ -157,6 +157,20 @@ KEYS: tuple[Key, ...] = (
     # EMPTY DISABLES IT, and that is the rollout: a task dispatched without this
     # set behaves exactly as it did before, writing files and nothing else.
     Key("POKER_SOLVER_RECORD_DSN", "record_dsn", "record_dsn"),
+    # The checkpoint container, as a SAS URL carrying its own authorisation.
+    #
+    # A SAS rather than the account key for the same reason the DSN is tolerable
+    # above -- it is revocable and it is SCOPED. The key opens every container
+    # and the share; this opens one container, for a bounded window, and it is
+    # minted per dispatch rather than stored anywhere.
+    #
+    # It also means the node needs no SDK: `blobstore` speaks REST through
+    # `urllib`, and a SAS URL already carries endpoint, scope and signature.
+    # That matters because `archive` is imported before `uv sync`, where a
+    # third-party import would kill the task at bootstrap.
+    #
+    # EMPTY DISABLES IT: the task publishes to the share exactly as before.
+    Key("POKER_SOLVER_CHECKPOINT_SAS", "checkpoint_sas", "checkpoint_sas"),
     Key("RUN_OP", "op", "op"),
     Key("RUN_CONFIG", "config", "config"),
     Key("RUN_TO", "to", "to", str, _int),

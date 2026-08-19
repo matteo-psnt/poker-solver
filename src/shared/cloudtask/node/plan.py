@@ -79,6 +79,8 @@ class TaskPlan:
     # Empty when the dispatching machine had none, which is how a task runs
     # exactly as it did before the database existed.
     record_dsn: str = ""
+    #: Container SAS for the checkpoint store. Empty publishes to the share.
+    checkpoint_sas: str = ""
     to: int = 0
     run_id: str = ""
     experiment: str = ""
