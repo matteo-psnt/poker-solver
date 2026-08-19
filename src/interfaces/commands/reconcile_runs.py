@@ -18,7 +18,6 @@ DRY RUN BY DEFAULT. `--apply` is the only thing that writes.
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -28,7 +27,8 @@ from pydantic import BaseModel, Field
 from src.adapters.postgres import connect
 from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.commands._base import Command, records_root
-from src.shared import records, run_events, task_history
+from src.interfaces.errors import CommandError
+from src.shared import task_history
 
 if TYPE_CHECKING:
     import argparse
@@ -132,11 +132,6 @@ def _status_of(run_dir: Path, source: RecordSource | None) -> str:
 
 def run(args: argparse.Namespace) -> ReconcilePlan:
     """Decide which runs to close, and write only under `--apply`."""
-    from src.interfaces.cloud.config import CloudConfig  # noqa: PLC0415 -- Azure only when applying
-    from src.interfaces.cloud.store import share  # noqa: PLC0415
-
-    config = CloudConfig.load()
-    service = share.share_client(config)
     source = connect.record_source_from_environment()
 
     # Through `tasks`, not `task_history.read_tasks`, and that is the whole
@@ -195,38 +190,35 @@ def run(args: argparse.Namespace) -> ReconcilePlan:
     if not args.apply:
         return plan
 
-    for closure in plan.closures:
-        path = f"{share.ARCHIVE_DIR}/{closure.run}/{run_events.RUN_LOG_FILENAME}"
-        body = share.read_text(service, config.share_name, path)
-        if body is None:
-            continue
-        # Read-modify-write, which is only safe because of the check above: the
-        # writer that would race us is the trainer, and this runs exactly on the
-        # runs whose trainer is gone.
-        event = {
-            # Stamped like every other event, because a hand-built one is not a
-            # different KIND of record. Ten written without `ts` were the only
-            # events in 3,480 missing one, and they broke the import that read
-            # them -- the schema was right and the writer was not.
-            records.SCHEMA_VERSION_KEY: run_events.ARTIFACT.version,
-            run_events.EVENT_KEY: run_events.STATUS,
-            "ts": datetime.now(UTC).isoformat(),
-            "status": closure.status,
-            # This is an INFERENCE, and the record says so rather than passing
-            # it off as a first-hand report. A reader that cannot tell the two
-            # apart is a reader that will eventually trust the wrong one.
-            "reconciled": True,
-            "from_task": closure.task_id,
-            "task_cause": closure.cause,
-            "cause_source": closure.cause_source,
-        }
-        share.write_text(
-            service,
-            config.share_name,
-            path,
-            body.rstrip("\n") + "\n" + json.dumps(event) + "\n",
-        )
-        plan.written += 1
+    # THROUGH THE SINK, which is where a terminal status lives. This appended
+    # the event to `run.jsonl` on the share, and kept doing so after nothing
+    # wrote or read that file: 19 runs were reported CLOSED while every reader
+    # went on showing them as training. It also skipped any run with no such
+    # file, so a run created after the flip could never be reconciled at all --
+    # exactly the zombie this command exists to clear.
+    with connect.record_sink() as sink:
+        if sink is None:
+            raise CommandError(
+                "No POKER_SOLVER_RECORD_DSN: the closures would be written nowhere.\n"
+                '  eval "$(just record-env)"'
+            )
+        for closure in plan.closures:
+            sink.closed(
+                closure.run,
+                closure.status,
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "status": closure.status,
+                    # An INFERENCE, and the record says so rather than passing it
+                    # off as a first-hand report. A reader that cannot tell the
+                    # two apart is one that will eventually trust the wrong one.
+                    "reconciled": True,
+                    "from_task": closure.task_id,
+                    "task_cause": closure.cause,
+                    "cause_source": closure.cause_source,
+                },
+            )
+            plan.written += 1
     return plan
 
 

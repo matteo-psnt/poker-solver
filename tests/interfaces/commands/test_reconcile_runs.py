@@ -9,12 +9,14 @@ death as a failure when the last task was cancelled.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from typing import Any
 
 import pytest
 
 from src.interfaces.commands import reconcile_runs
+from src.interfaces.errors import CommandError
 from src.pipeline.training.run_tracker.tracker import RunTracker
 from src.shared import run_events
 from src.shared.config import Config
@@ -68,7 +70,7 @@ def _run_dir(tmp_path, record, name: str, status: str | None):
     return directory
 
 
-def _plan(monkeypatch, tmp_path, record, tasks: list[Any], **args: Any):
+def _plan(monkeypatch, tmp_path, record, tasks: list[Any], sink_factory=None, **args: Any):
     # Patched at the COMPOSE seam, because that is where the rows now come from:
     # `reconcile-runs` asks `tasks`, which materialises legs/ and reconciles the
     # unresolved ones against Batch. Patching lower would test a path the
@@ -96,6 +98,13 @@ def _plan(monkeypatch, tmp_path, record, tasks: list[Any], **args: Any):
 
     monkeypatch.setattr(reconcile_runs, "records_root", _root)
     monkeypatch.setattr(reconcile_runs.connect, "record_source_from_environment", lambda: record)
+
+    @contextlib.contextmanager
+    def _sink():
+        """The record the closures must land in, so a test can SEE where."""
+        yield record
+
+    monkeypatch.setattr(reconcile_runs.connect, "record_sink", sink_factory or _sink)
     monkeypatch.setitem(
         __import__("sys").modules,
         "src.interfaces.cloud.config",
@@ -106,7 +115,7 @@ def _plan(monkeypatch, tmp_path, record, tasks: list[Any], **args: Any):
         "src.interfaces.cloud.store",
         type("m", (), {"share": type("s", (), {"share_client": staticmethod(lambda _c: None)})}),
     )
-    namespace = argparse.Namespace(apply=False, runs=None, **args)
+    namespace = argparse.Namespace(**{"apply": False, "runs": None, **args})
     return reconcile_runs.run(namespace)
 
 
@@ -267,3 +276,55 @@ class TestItOnlyLooksAtOpenRuns:
         assert plan.applied is False
         assert plan.written == 0
         assert len(plan.closures) == 1, "but it still says what it WOULD do"
+
+
+class TestTheClosureReachesTheRecord:
+    """WHERE it is written was never asserted, and that is how it broke.
+
+    This appended the status event to `run.jsonl` on the share, and went on
+    doing so after nothing wrote or read that file. `reconcile-runs --apply`
+    reported 19 runs CLOSED while every reader went on showing them as
+    training -- and it SKIPPED any run with no such file, so a run created
+    after the flip could never be reconciled at all.
+
+    The suite passed before and after the fix, because it only ever checked the
+    COUNT. A count says something happened; it does not say where.
+    """
+
+    def test_the_status_goes_to_the_sink(self, monkeypatch, tmp_path, record):
+        _run_dir(tmp_path, record, "run-a", "running")
+        plan = _plan(monkeypatch, tmp_path, record, [_Task("run-a", "killed")], apply=True)
+        assert plan.written == 1
+        closed = [r for owner, r in record.rows if owner == "run-a" and r["event"] == "status"]
+        assert closed, "the closure must reach the record, not a file nothing reads"
+        assert closed[-1]["status"] == "failed"
+
+    def test_it_is_marked_as_an_inference(self, monkeypatch, tmp_path, record):
+        """A reader that cannot tell a reconciled status from a first-hand one
+        is a reader that will eventually trust the wrong one."""
+        _run_dir(tmp_path, record, "run-a", "running")
+        _plan(monkeypatch, tmp_path, record, [_Task("run-a", "killed")], apply=True)
+        closed = [r for owner, r in record.rows if owner == "run-a" and r["event"] == "status"][-1]
+        assert closed["reconciled"] is True
+        assert closed["from_task"]
+        assert closed["cause_source"]
+
+    def test_no_sink_refuses_rather_than_writing_nowhere(self, monkeypatch, tmp_path, record):
+        """The failure this replaced was silent success. Without a record to
+        write to there is nothing to do but say so."""
+        _run_dir(tmp_path, record, "run-a", "running")
+        with pytest.raises(CommandError):
+            _plan(
+                monkeypatch,
+                tmp_path,
+                record,
+                [_Task("run-a", "killed")],
+                sink_factory=_no_sink,
+                apply=True,
+            )
+
+
+@contextlib.contextmanager
+def _no_sink():
+    """A shell with no DSN: `record_sink` yields None."""
+    yield None
