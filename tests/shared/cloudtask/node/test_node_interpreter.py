@@ -199,13 +199,13 @@ def test_the_pool_installs_the_wrappers_one_dependency_where_it_will_be_found():
     manages ("externally managed ... should not be modified"), which failed the
     start task and left a node START_TASK_FAILED.
     """
-    from src.interfaces.cloud.tasks.spec import NODE_DEPS_DIR, TASK_COMMAND_TEMPLATE
+    from src.interfaces.cloud.tasks.spec import NODE_DEPS_DIR, TASK_COMMAND
 
     main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
     install = next(line for line in main_tf.splitlines() if "psycopg[binary]" in line)
     assert f"--target {NODE_DEPS_DIR}" in install, "installed somewhere the wrapper does not look"
     assert "--system" not in install, "uv refuses to modify the interpreter it manages"
-    assert f"PYTHONPATH={NODE_DEPS_DIR}" in TASK_COMMAND_TEMPLATE
+    assert f"PYTHONPATH={NODE_DEPS_DIR}" in TASK_COMMAND
 
 
 def test_a_node_that_cannot_import_the_driver_does_not_come_up():

@@ -53,9 +53,16 @@ TASK_ID_LIMIT = 64
 
 _UNSAFE_TASK_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
-TASK_COMMAND_TEMPLATE = (
+# The URL of the sealed tree travels HERE and not in the command line: Batch
+# prints command lines in every task listing, and a SAS is a credential.
+CODE_URL_ENV = "POKER_SOLVER_CODE_URL"
+
+TASK_COMMAND = (
+    # `pipefail`, or a failed fetch hands tar an empty stream and the task dies
+    # on a missing `run_task.py` instead of on curl's own message.
+    "set -o pipefail && "
     "CODE_DIR=/mnt/work/code-$AZ_BATCH_TASK_ID && mkdir -p $CODE_DIR && "
-    "tar xzf $AZ_BATCH_NODE_MOUNTS_DIR/shared/code/{snapshot}.tar.gz -C $CODE_DIR "
+    f'curl -fsSL --retry 3 "${CODE_URL_ENV}" | tar xz -C $CODE_DIR '
     "--no-same-owner --no-same-permissions && "
     # NOT the system python3, which is 3.10 on the pinned 22.04 image. The start
     # task installs this one and links it onto PATH; see NODE_PYTHON_BIN.
@@ -107,20 +114,17 @@ def task_id(label: str, now: datetime, nonce: int) -> str:
     return f"{head}{suffix}"
 
 
-def task_command(snapshot: str) -> str:
-    """The task command line: extract the pinned snapshot, then run the wrapper.
+def task_command() -> str:
+    """The task command line: fetch the sealed tree, then run the wrapper.
 
     The wrapper lives INSIDE the tarball, so the command line has to bootstrap
-    it -- it cannot ``chmod`` a path that only exists after extraction. It
-    extracts into a directory the TASK creates, because the start task runs
-    elevated and tar restoring the archive root's mode onto a root-owned
-    directory fails with ``Cannot change mode``. Keying on ``AZ_BATCH_TASK_ID``
-    also stops two tasks on one node sharing a tree.
-
-    The ``$``-prefixed names must survive into the node's shell unexpanded;
-    only ``snapshot`` is substituted here.
+    it. It extracts into a directory the TASK creates, because the start task
+    runs elevated and tar restoring the archive root's mode onto a root-owned
+    directory fails with ``Cannot change mode``; keying on ``AZ_BATCH_TASK_ID``
+    also stops two tasks on one node sharing a tree. Every ``$`` name is the
+    node shell's to expand -- the snapshot arrives through the environment.
     """
-    return TASK_COMMAND_TEMPLATE.format(snapshot=snapshot)
+    return TASK_COMMAND
 
 
 @dataclass(frozen=True)
@@ -135,15 +139,16 @@ class TaskSpec:
     """
 
     code_snapshot: str
-    # Read from the OPERATOR'S environment rather than passed by each submit
-    # command, so dual-write is a property of the machine dispatching rather
-    # than something every call site has to remember. Unset means the node
-    # writes files only, which is the pre-migration behaviour.
+    # Sealed into the task from the dispatcher's environment, which the CLI
+    # fills from the store state at startup; the node has no Terraform to ask.
     record_dsn: str = field(default_factory=lambda: os.environ.get("POKER_SOLVER_RECORD_DSN", ""))
     # Minted at dispatch, not read from the environment: a SAS is short-lived
     # by design, so an operator exporting one would be exporting something
     # that expires under them. `submit` fills this in.
     checkpoint_sas: str = ""
+    # Read-only SAS URL of `code_snapshot`'s tarball; the command line fetches
+    # it. Sealed by `dispatch` like the checkpoint SAS.
+    code_url: str = ""
     op: str = TaskName.TRAIN
     config: str = ""
     to: int = 0

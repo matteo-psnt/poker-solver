@@ -7,7 +7,7 @@ import { errorOf } from "@/lib/error";
 import { count } from "@/lib/format";
 
 /**
- * The three commands that write to the share without queueing anything.
+ * The three commands that write to the store without queueing anything.
  *
  * They sit apart from Dispatch because none of them puts work on the pool: two
  * publish something a later task will need, and the third rewrites the account

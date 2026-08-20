@@ -204,6 +204,11 @@ WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
         "https://acct.blob.core.windows.net/checkpoints?sv=2021-08-06&sig=abc%3D",
         "https://acct.blob.core.windows.net/checkpoints?sv=2021-08-06&sig=abc%3D",
     ),
+    # One blob, read-only: the tarball the command line already fetched.
+    "POKER_SOLVER_CODE_URL": (
+        "https://acct.blob.core.windows.net/code/code-20260904_120000.tar.gz?sp=r&sig=abc%3D",
+        "https://acct.blob.core.windows.net/code/code-20260904_120000.tar.gz?sp=r&sig=abc%3D",
+    ),
     "RUN_OP": ("evaluate", "evaluate"),
     "RUN_CONFIG": ("production", "production"),
     "RUN_TO": (25_000_000, 25_000_000),

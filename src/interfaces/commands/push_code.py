@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
+from src.interfaces.cloud.store import blob
 from src.interfaces.cloud.tasks import spec
 from src.interfaces.commands._base import Command
 
@@ -38,8 +38,12 @@ class PushedCodePayload(BaseModel):
 def run(args: argparse.Namespace) -> PushedCodePayload:
     """Build and upload one snapshot; return its id."""
     config = CloudConfig.load()
-    snapshot = share.publish_code_snapshot(
-        share.share_client(config), config.share_name, Path(args.root), spec.utcnow()
+    snapshot = blob.publish_code_snapshot(
+        config.storage_account,
+        config.share_key,
+        config.code_container,
+        Path(args.root),
+        spec.utcnow(),
     )
     return PushedCodePayload(code_snapshot=snapshot)
 

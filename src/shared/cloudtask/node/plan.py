@@ -81,6 +81,8 @@ class TaskPlan:
     record_dsn: str = ""
     #: Container SAS for the checkpoint store. Empty publishes to the share.
     checkpoint_sas: str = ""
+    # Already spent: the command line fetched the tree with it before this ran.
+    code_url: str = ""
     to: int = 0
     run_id: str = ""
     experiment: str = ""

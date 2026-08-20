@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
+from src.interfaces.cloud.store import blob
 from src.interfaces.cloud.tasks import batch, spec
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo
@@ -103,13 +103,15 @@ def stage_and_queue(
 
     # VALIDATED BEFORE ANYTHING IS UPLOADED. Staging first would mean a
     # rejected submission -- `--to 0`, a `--set` missing its `=` -- still
-    # leaving a full tarball on the share, permanently, for a task that never
-    # ran. The specs are built against a placeholder id purely to check them;
+    # uploading a full tarball for a task that never ran. The specs are built
+    # against a placeholder id purely to check them;
     # the real snapshot id is substituted below.
     for task in make_tasks("unvalidated"):
         task.validate()
 
-    snapshot = share.publish_code_snapshot(share.share_client(config), config.share_name, root, now)
+    snapshot = blob.publish_code_snapshot(
+        config.storage_account, config.share_key, config.code_container, root, now
+    )
     specs = [_stamped(task) for task in make_tasks(snapshot)]
     if not specs:
         raise CommandError("Nothing to submit.")
@@ -124,6 +126,7 @@ def stage_and_queue(
     # collision raises mid-loop, after some rungs are already queued and with
     # no record of which.
     _refuse_without_a_record(specs)
+    specs = _with_code_access(config, specs, snapshot)
     specs = _with_checkpoint_access(config, specs)
     for index, task in enumerate(specs):
         nonce = index * NONCE_CEILING + secrets.randbelow(NONCE_CEILING)
@@ -144,6 +147,21 @@ def stage_and_queue(
     )
 
 
+def _with_code_access(
+    config: CloudConfig, specs: Sequence[TaskSpec], snapshot: str
+) -> list[TaskSpec]:
+    """Seal a read-only URL for the sealed tree into each task.
+
+    In the ENVIRONMENT, never the command line: Batch prints command lines in
+    every task listing, and this URL is a credential. Minted once per dispatch
+    -- every task here runs the same snapshot.
+    """
+    url = blob.code_snapshot_sas(
+        config.storage_account, config.share_key, config.code_container, snapshot
+    )
+    return [replace(task, code_url=url) for task in specs]
+
+
 def _with_checkpoint_access(config: CloudConfig, specs: Sequence[TaskSpec]) -> list[TaskSpec]:
     """Seal a container SAS into each task, scoped to what its KIND may do.
 
@@ -155,8 +173,6 @@ def _with_checkpoint_access(config: CloudConfig, specs: Sequence[TaskSpec]) -> l
 
     Minted per dispatch and never stored, so there is nothing to rotate.
     """
-    from src.interfaces.cloud.store import blob  # noqa: PLC0415 -- Azure only when dispatching
-
     minted: dict[bool, str] = {}
     sealed = []
     for task in specs:
@@ -187,9 +203,8 @@ def _refuse_without_a_record(specs: Sequence[TaskSpec]) -> None:
     """
     if specs and not specs[0].record_dsn:
         raise CommandError(
-            "No POKER_SOLVER_RECORD_DSN in this shell, so these tasks would record "
-            "their progress nowhere -- the share no longer holds it.\n"
-            '  eval "$(just record-env)"'
+            "No record DSN to seal into these tasks: the store state could not be read "
+            "and POKER_SOLVER_RECORD_DSN is unset. Apply infra/store, or export the DSN."
         )
 
 
