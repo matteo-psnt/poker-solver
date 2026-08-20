@@ -24,8 +24,9 @@ from typing import TYPE_CHECKING
 
 from src.interfaces import run_names
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
+from src.interfaces.cloud.store import blob, share
 from src.interfaces.errors import CommandError
+from src.shared import records
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
@@ -195,13 +196,14 @@ def resolve_published_run(run: str) -> str:
 def verify_published_rungs(run_id: str, rungs: Sequence[str]) -> None:
     """Refuse rungs the SHARE does not actually hold, before anything is dispatched.
 
-    Checked against the share's own listing rather than the run's manifest,
-    because the two disagree: pruning removes a snapshot without rewriting the
-    manifest that advertises it, so `runinfo` offers rungs that
-    `fetch_for_evaluation` then cannot find. Unverified, each such rung cost a
+    THE MARKER SAYS PUBLISHED, THE STORES SAY WHERE. Pruning removes a snapshot
+    without rewriting the manifest that advertises it, so `runinfo` offers rungs
+    that `fetch_for_evaluation` then cannot find -- unverified, each cost a
     snapshot upload, a node allocation and a `uv sync` before dying on "the
-    manifest names static-N.zarr but it is not on the share" -- ~26 tasks in the
-    2026-08-23/24 window.
+    manifest names static-N.zarr but it is not on the share", ~26 tasks in the
+    2026-08-23/24 window. But the share is no longer where the bytes are: a
+    migrated rung has a marker, no directory, and an object in the container,
+    and requiring the directory refused every run the migration had moved.
 
     An empty rung means "the latest checkpoint", which the ladder cannot name in
     advance and the node resolves itself, so it is not checked here.
@@ -213,16 +215,34 @@ def verify_published_rungs(run_id: str, rungs: Sequence[str]) -> None:
     service = share.share_client(config)
     entries = share.list_entries(service, config.share_name, f"{share.ARCHIVE_DIR}/{run_id}")
     names = {entry.name for entry in entries}
-    available = sorted(
-        name.removeprefix("static-").removesuffix(".zarr")
+    published = {
+        name.removeprefix("static-")
+        .removesuffix(".zarr")
+        .removesuffix(records.SNAPSHOT_SUFFIX): name
         for name in names
         if name.startswith("static-") and archive.marker_for(name) in names
-    )
+    }
+    marked = {
+        name[len(archive.MARKER_PREFIX) :]
+        for name in names
+        if name.startswith(f"{archive.MARKER_PREFIX}static-")
+    }
+    for name in marked:
+        published.setdefault(
+            name.removeprefix("static-")
+            .removesuffix(".zarr")
+            .removesuffix(records.SNAPSHOT_SUFFIX),
+            name,
+        )
+    available = sorted(published)
     missing = [
         rung
         for rung in wanted
-        if f"static-{rung}.zarr" not in names
-        or archive.marker_for(f"static-{rung}.zarr") not in names
+        if rung not in published
+        or (
+            published[rung] not in names
+            and not blob.holds_rung(config, run_id, records.object_name(published[rung]))
+        )
     ]
     if missing:
         raise CommandError(
