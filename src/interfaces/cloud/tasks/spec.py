@@ -188,6 +188,18 @@ class TaskSpec:
         for override in self.sets:
             if "=" not in override:
                 raise BadTaskError(f"--set expects key=value, got '{override}'.")
+        # Both shape a guess that only exists when a weight asks for one, and
+        # the argv builder skips them without it. Silently dropping them would
+        # train a plain control under the variant's arm label -- the failure
+        # that has twice cost a whole sweep, so it raises at submit instead.
+        if not self.equity_prior_weight and (
+            self.equity_prior_temperature or self.equity_prior_fallback
+        ):
+            raise BadTaskError(
+                "--equity-prior-temperature/--equity-prior-fallback shape the equity "
+                "prior, and without --equity-prior there is no prior to shape. This "
+                "would train a control under a variant's arm name."
+            )
 
 
 def utcnow() -> datetime:
