@@ -8,7 +8,6 @@ only. This holds the properties that comparison depended on.
 from __future__ import annotations
 
 import argparse
-import contextlib
 
 import pytest
 
@@ -27,30 +26,7 @@ def _series(n: int) -> list[dict[str, object]]:
     ]
 
 
-class TestTheStoreThatAnsweredIsInThePayload:
-    def test_the_database_path_says_database(self, monkeypatch):
-        monkeypatch.setattr(progress.connect, "engine_from_environment", lambda: object())
-        monkeypatch.setattr(progress, "resolve_run_id", lambda run, _e: run)
-        monkeypatch.setattr(progress.queries, "checkpoint_series", lambda _e, _r: _series(3))
-        assert progress.run(_args()).source == "database"
-
-    def test_no_dsn_falls_back_to_the_share(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(progress.connect, "engine_from_environment", lambda: None)
-        run_dir = tmp_path / "run-a"
-        run_dir.mkdir()
-        (run_dir / "run.jsonl").write_text(
-            '{"event":"checkpoint","iteration":1000,"coverage":0.5}\n'
-        )
-
-        @contextlib.contextmanager
-        def _root(_args):
-            yield tmp_path
-
-        monkeypatch.setattr(progress, "records_root", _root)
-        payload = progress.run(_args())
-        assert payload.source == "share"
-        assert payload.total_rows == 1
-
+class TestAnEmptySeriesRefuses:
     def test_a_run_with_no_series_refuses_rather_than_returning_nothing(self, monkeypatch):
         """An empty chart and "this run never checkpointed" are different facts."""
         monkeypatch.setattr(progress.connect, "engine_from_environment", lambda: object())

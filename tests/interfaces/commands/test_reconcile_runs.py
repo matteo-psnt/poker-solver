@@ -16,7 +16,6 @@ from typing import Any
 import pytest
 
 from src.interfaces.commands import reconcile_runs
-from src.interfaces.errors import CommandError
 from src.pipeline.training.run_tracker.tracker import RunTracker
 from src.shared import run_events
 from src.shared.config import Config
@@ -89,8 +88,6 @@ def _plan(monkeypatch, tmp_path, record, tasks: list[Any], sink_factory=None, **
         @staticmethod
         def load():
             return _Config()
-
-    import contextlib
 
     @contextlib.contextmanager
     def _root(_args):
@@ -308,23 +305,3 @@ class TestTheClosureReachesTheRecord:
         assert closed["reconciled"] is True
         assert closed["from_task"]
         assert closed["cause_source"]
-
-    def test_no_sink_refuses_rather_than_writing_nowhere(self, monkeypatch, tmp_path, record):
-        """The failure this replaced was silent success. Without a record to
-        write to there is nothing to do but say so."""
-        _run_dir(tmp_path, record, "run-a", "running")
-        with pytest.raises(CommandError):
-            _plan(
-                monkeypatch,
-                tmp_path,
-                record,
-                [_Task("run-a", "killed")],
-                sink_factory=_no_sink,
-                apply=True,
-            )
-
-
-@contextlib.contextmanager
-def _no_sink():
-    """A shell with no DSN: `record_sink` yields None."""
-    yield None

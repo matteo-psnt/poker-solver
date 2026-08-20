@@ -203,6 +203,14 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "runinfo",
                 "Everything recorded about a run: provenance, curve, scores, tasks, gaps.",
             ),
+            CommandRef(
+                "record-admit",
+                "Admit this machine's current public IP to the record server's firewall.",
+            ),
+            CommandRef(
+                "record-migrate",
+                "Apply pending schema migrations to the record database (--check to only compare).",
+            ),
         ),
     ),
 )

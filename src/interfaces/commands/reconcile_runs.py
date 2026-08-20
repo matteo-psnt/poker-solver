@@ -27,7 +27,6 @@ from pydantic import BaseModel, Field
 from src.adapters.postgres import connect
 from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.commands._base import Command, records_root
-from src.interfaces.errors import CommandError
 from src.shared import task_history
 
 if TYPE_CHECKING:
@@ -197,11 +196,6 @@ def run(args: argparse.Namespace) -> ReconcilePlan:
     # file, so a run created after the flip could never be reconciled at all --
     # exactly the zombie this command exists to clear.
     with connect.record_sink() as sink:
-        if sink is None:
-            raise CommandError(
-                "No POKER_SOLVER_RECORD_DSN: the closures would be written nowhere.\n"
-                '  eval "$(just record-env)"'
-            )
         for closure in plan.closures:
             sink.closed(
                 closure.run,

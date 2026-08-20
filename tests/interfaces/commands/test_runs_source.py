@@ -7,7 +7,6 @@ CONTENT after the counts already agreed.
 
 from __future__ import annotations
 
-import argparse
 from typing import Any
 
 import pytest
@@ -82,28 +81,6 @@ class TestTheGitAnswerIsPerCheckout:
         rows = [_row(run_id=f"run-{i}", git_commit="same") for i in range(50)]
         runs_cmd._from_database(object())
         assert len(calls) == 1, f"{len(calls)} git calls for one distinct commit"
-
-
-class TestThePayloadSaysWhichStoreAnswered:
-    def test_the_share_path_says_share(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(runs_cmd.connect, "engine_from_environment", lambda: None)
-
-        import contextlib
-
-        @contextlib.contextmanager
-        def _root(_args):
-            yield tmp_path
-
-        monkeypatch.setattr(runs_cmd, "records_root", _root)
-        payload = runs_cmd.run(argparse.Namespace(limit=0, loadable_only=False, run=None))
-        assert payload.source == "share"
-
-    def test_the_database_path_says_database(self, monkeypatch):
-        monkeypatch.setattr(runs_cmd.connect, "engine_from_environment", lambda: object())
-        monkeypatch.setattr(runs_cmd.queries, "describe_runs", lambda _e, **_k: [_row()])
-        monkeypatch.setattr(runs_cmd, "commits_ahead_of", lambda _c: 1)
-        payload = runs_cmd.run(argparse.Namespace(limit=0, loadable_only=False, run=None))
-        assert payload.source == "database", "a silent fallback hides a stale answer"
 
 
 @pytest.mark.parametrize(

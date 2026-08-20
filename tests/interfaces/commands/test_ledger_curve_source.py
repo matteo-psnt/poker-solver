@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from src.interfaces.commands import _base, arms, curve, ledger
+from src.interfaces.commands import _base, arms, curve
 from src.pipeline.evaluation import ledger as eval_ledger
 
 DOCUMENT: dict[str, Any] = {
@@ -55,15 +55,6 @@ def test_the_stamped_version_survives_the_crossing(monkeypatch):
     assert row["schema_version"] == 3
 
 
-def test_ledger_says_which_store_answered(monkeypatch):
-    monkeypatch.setattr(ledger.connect, "engine_from_environment", lambda: object())
-    monkeypatch.setattr(ledger, "eval_index_rows", lambda _e: [eval_ledger.ledger_row(DOCUMENT)])
-    payload = ledger.run(
-        argparse.Namespace(run=None, experiment=None, method=None, since=None, limit=0, full=False)
-    )
-    assert payload.ledger == "database"
-
-
 def test_curve_asks_for_one_runs_evals_only(monkeypatch):
     """`curve_series` skips every record whose run_id is not the one asked
     about, so fetching all 2,238 documents to plot one run is 2,238 payloads
@@ -99,5 +90,4 @@ def test_arms_reads_the_database_when_one_is_configured(monkeypatch):
     monkeypatch.setattr(arms.connect, "engine_from_environment", lambda: object())
     monkeypatch.setattr(arms, "eval_index_rows", lambda _e: [row])
     payload = arms.run(argparse.Namespace(experiment="e1", control=None))
-    assert payload.ledger == "database"
     assert [a for tier in payload.result.tiers for a in tier.arms] == ["a1"]

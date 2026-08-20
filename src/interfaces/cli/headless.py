@@ -24,7 +24,9 @@ import sys
 import textwrap
 from typing import TYPE_CHECKING
 
+from src.adapters.postgres.connect import NoRecordError, unreachable_hint
 from src.interfaces import telemetry
+from src.interfaces.cloud.config import export_record_dsn
 from src.interfaces.commands import BY_NAME, COMMANDS, GROUPS
 from src.interfaces.errors import CommandError
 from src.shared import jsonio
@@ -132,6 +134,10 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     configure_logging()
+    # The record's address comes from the store state, once, before any command
+    # asks. Sealed into a task at dispatch under the same name, so a node --
+    # which has no Terraform -- finds it already set.
+    export_record_dsn()
     # Resolved before the parser is built, not by it: which subcommand was asked
     # for is what decides how much of the tool has to be imported.
     argv = sys.argv[1:] if argv is None else argv
@@ -158,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 payload = command.execute(args)
                 command.render(payload)
-    except CommandError as error:
+    except (CommandError, NoRecordError) as error:
         # This is where the command line puts back what the core no longer
         # assumes. A bad request used to `raise SystemExit(msg)` from wherever
         # it was detected, which printed to stderr and exited 1; that is
@@ -166,6 +172,12 @@ def main(argv: list[str] | None = None) -> int:
         # it. Anything that is NOT a CommandError still tracebacks -- a bug
         # should look like one.
         print(f"error: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:
+        hint = unreachable_hint(error)
+        if hint is None:
+            raise
+        print(f"error: {hint}", file=sys.stderr)
         return 1
     return 0
 

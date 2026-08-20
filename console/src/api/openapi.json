@@ -251,10 +251,6 @@
       "ArmsPayload": {
         "description": "What `arms` answers. The console can read this unchanged.",
         "properties": {
-          "ledger": {
-            "title": "Ledger",
-            "type": "string"
-          },
           "op": {
             "const": "arms",
             "default": "arms",
@@ -266,7 +262,6 @@
           }
         },
         "required": [
-          "ledger",
           "result"
         ],
         "title": "ArmsPayload",
@@ -1743,10 +1738,6 @@
       "LedgerPayload": {
         "description": "Recorded evaluations, derived from the published per-run documents.",
         "properties": {
-          "ledger": {
-            "title": "Ledger",
-            "type": "string"
-          },
           "matched": {
             "title": "Matched",
             "type": "integer"
@@ -1766,7 +1757,6 @@
           }
         },
         "required": [
-          "ledger",
           "matched"
         ],
         "title": "LedgerPayload",
@@ -2825,15 +2815,6 @@
             "title": "Schema Version Min",
             "type": "integer"
           },
-          "source": {
-            "default": "share",
-            "enum": [
-              "database",
-              "share"
-            ],
-            "title": "Source",
-            "type": "string"
-          },
           "total_rows": {
             "title": "Total Rows",
             "type": "integer"
@@ -3467,15 +3448,6 @@
             },
             "title": "Runs",
             "type": "array"
-          },
-          "source": {
-            "default": "share",
-            "enum": [
-              "database",
-              "share"
-            ],
-            "title": "Source",
-            "type": "string"
           }
         },
         "title": "RunsPayload",

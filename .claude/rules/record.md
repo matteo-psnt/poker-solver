@@ -23,17 +23,22 @@ holds checkpoints, logs and legs; scores and run state do not live there.
 and not SQLAlchemy Core (`ty` checks `Eval.scor_mbb`; it cannot check
 `evals.c.scor_mbb`).
 
-- **`POKER_SOLVER_RECORD_DSN` is read from the shell at dispatch AND at read
-  time.** `submit`/`score` refuse without it. `runs`, `ledger` and `runinfo`
-  do not refuse — they answer from the share and silently omit every DB-only
-  row. `eval "$(just record-env)"` first, in the same shell as the command.
+- **The DSN comes from the store's Terraform state**, resolved once at CLI and
+  console startup (`export_record_dsn`) and sealed into every task. Nothing
+  answers from the share any more: no record is `NoRecordError`, which both
+  surfaces render as a refusal. `POKER_SOLVER_RECORD_DSN` in the shell is an
+  OVERRIDE for pointing at a restored server, not a prerequisite.
+- **A read that times out is the firewall, not the server.** The laptop's IP
+  rotates; `poker-solver record-admit` rewrites the rule in place and Terraform
+  ignores the address. Writers refuse when the schema is behind the code:
+  `poker-solver record-migrate` applies the migrations.
 - **A read costs round trips, not query time.** Measured 175 ms of RTT against
   3 ms of query. A fresh engine per call, or a transaction around a
   one-statement read, turns a screen into seconds without raising. One engine
   per process; the reader pool at least as wide as the widest screen's fan-out.
-- **The node cannot import the driver.** The wrapper runs bare `python3.13`,
-  so the stdlib-only node closure writes the record by shelling out to
-  `poker-solver mirror-legs`, never by importing `adapters`.
+- **The node's wrapper writes with `psycopg` alone.** The start task installs
+  it beside the interpreter; the stdlib-only closure imports it lazily and
+  never `adapters`, and the row shape comes from `task_log.leg_row`.
 - **The fake driver parses no SQL.** A statement can pass the whole suite and
   fail on the server. Before dispatching anything that writes, run the write
   against the live server from the laptop: seconds, and it exercises retry

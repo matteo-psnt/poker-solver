@@ -162,13 +162,7 @@ def run(args: argparse.Namespace) -> PrunePlan:
 
     source = connect.record_source_from_environment()
     engine = connect.engine_from_environment()
-    if engine is None and args.apply:
-        raise CommandError(
-            "no record configured: export POKER_SOLVER_RECORD_DSN before --apply. "
-            "Scored rungs are protected by what the evals table names, and without "
-            "it this would delete rungs whose scores are recorded nowhere else."
-        )
-    scored_by_run = queries.scored_rungs(engine) if engine is not None else {}
+    scored_by_run = queries.scored_rungs(engine)
     plan = PrunePlan(applied=bool(args.apply))
     with records_root(args) as root:
         wanted = (

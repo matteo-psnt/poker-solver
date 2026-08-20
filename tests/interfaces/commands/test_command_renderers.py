@@ -51,6 +51,8 @@ from src.interfaces.commands.prune_checkpoints import PrunePlan
 from src.interfaces.commands.push_code import PushedCodePayload
 from src.interfaces.commands.push_data import PushedDataPayload
 from src.interfaces.commands.reconcile_runs import Closure, ReconcilePlan
+from src.interfaces.commands.record_admit import AdmittedPayload
+from src.interfaces.commands.record_migrate import MigratedPayload as SchemaMigratedPayload
 from src.interfaces.commands.runinfo import RunInfoPayload
 from src.interfaces.commands.runs import RunsPayload, RunSummary
 from src.interfaces.commands.score import ScorePayload
@@ -174,7 +176,6 @@ PAYLOADS: dict[str, Any] = {
         unplaceable_records=1,
     ),
     "arms": ArmsPayload(
-        ledger="data/eval_ledger.jsonl",
         result=ArmsOutput(
             experiment_id="pcs-weighting",
             tiers=[
@@ -206,7 +207,6 @@ PAYLOADS: dict[str, Any] = {
         ),
     ),
     "ledger": LedgerPayload(
-        ledger="data/eval_ledger.jsonl",
         matched=1,
         rows=[
             LedgerRow(
@@ -281,6 +281,8 @@ PAYLOADS: dict[str, Any] = {
         tasks=[TaskRow(task_id="prod-101010-1", attempt=1, cause="killed", cause_source="batch")],
         gaps=["unscored ladder rungs: 5,000,000, 20,000,000"],
     ),
+    "record-admit": AdmittedPayload(server="poker-solver-record", address="203.0.113.7"),
+    "record-migrate": SchemaMigratedPayload(before="", after="9eb7f485ecad", applied=True),
     "serve-box": BoxPayload(
         action="status",
         vm="blueprint-server",
@@ -795,7 +797,10 @@ class TestTheServersStillFormatTheirPayload:
         """
         import uvicorn
 
+        from src.adapters.postgres import connect
+
         monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+        monkeypatch.setattr(connect, "record_source_from_environment", lambda: None)
         with pytest.raises(Exception, match=r"run-production|No such file|not found|Errno"):
             BY_NAME["blueprint-serve"].render(PAYLOADS["blueprint-serve"])
 

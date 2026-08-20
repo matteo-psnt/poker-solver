@@ -125,6 +125,13 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "operator" {
   server_id        = azurerm_postgresql_flexible_server.record.id
   start_ip_address = var.operator_ip
   end_ip_address   = var.operator_ip
+
+  # `poker-solver record-admit` rewrites the address in place whenever the ISP
+  # rotates it. Terraform creates the rule and then leaves the address alone,
+  # or every apply would put a stale one back.
+  lifecycle {
+    ignore_changes = [start_ip_address, end_ip_address]
+  }
 }
 
 resource "azurerm_postgresql_flexible_server_database" "record" {

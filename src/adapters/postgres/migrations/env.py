@@ -20,12 +20,11 @@ DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 
 
 def _url() -> str:
-    url = os.environ.get(DSN_ENV)
+    url = config.get_main_option("sqlalchemy.url") or os.environ.get(DSN_ENV)
     if not url:
         raise RuntimeError(
-            f"{DSN_ENV} is unset. It is the record database's DSN, and it is read from the "
-            "environment rather than alembic.ini because it carries a password: "
-            "`export POKER_SOLVER_RECORD_DSN=$(terraform -chdir=infra/store output -raw postgres_dsn)`"
+            f"{DSN_ENV} is unset. `poker-solver record-migrate` resolves it from the store "
+            "state; the bare `alembic` CLI needs it exported."
         )
     # Alembic writes the URL into a config that logs it; psycopg is the driver.
     return url.replace("postgresql://", "postgresql+psycopg://", 1)

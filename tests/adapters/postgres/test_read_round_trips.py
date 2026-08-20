@@ -71,9 +71,10 @@ class TestOneEnginePerProcess:
             f"a {widest}-panel screen serialises through a pool of {engine.pool.size()}"
         )
 
-    def test_no_dsn_is_no_engine(self, monkeypatch):
+    def test_no_dsn_is_a_refusal_not_a_second_answer(self, monkeypatch):
         monkeypatch.setenv(connect.DSN_ENV, "   ")
-        assert connect.engine_from_environment() is None
+        with pytest.raises(connect.NoRecordError):
+            connect.engine_from_environment()
 
 
 class _Recorder:

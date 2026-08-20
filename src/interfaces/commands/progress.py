@@ -11,8 +11,6 @@ from src.interfaces.commands._base import (
     Command,
     num,
     pct,
-    records_root,
-    resolve_run_dir,
     resolve_run_id,
 )
 from src.interfaces.errors import CommandError
@@ -64,9 +62,6 @@ class ProgressPayload(BaseModel):
 
     op: Literal["progress"] = "progress"
     run_id: str
-    source: Literal["database", "share"] = "share"
-    """Which store answered. A silent fallback to the share would serve an
-    answer minutes stale and look identical to a fresh one."""
     total_rows: int
     """The span of record schema versions in the series. A resumed run appends
     across tasks, so one log legitimately spans code versions."""
@@ -83,14 +78,8 @@ def run(args: argparse.Namespace) -> ProgressPayload:
     where coverage plateaued or whether throughput decayed over wall clock.
     """
     engine = connect.engine_from_environment()
-    if engine is not None:
-        run_id = resolve_run_id(args.run, engine)
-        rows, source = queries.checkpoint_series(engine, run_id), "database"
-    else:
-        with records_root(args) as root:
-            run_dir = resolve_run_dir(args.run, str(root))
-            rows, source = run_events.checkpoints(run_events.read(run_dir)), "share"
-        run_id = run_dir.name
+    run_id = resolve_run_id(args.run, engine)
+    rows = queries.checkpoint_series(engine, run_id)
     if not rows:
         raise CommandError(
             f"No checkpoint history for {run_id}. It is recorded per checkpoint, so "
@@ -99,7 +88,6 @@ def run(args: argparse.Namespace) -> ProgressPayload:
     low, high = records.version_span(rows)
     return ProgressPayload(
         run_id=run_id,
-        source=source,
         total_rows=len(rows),
         schema_version_min=low,
         schema_version_max=high,
