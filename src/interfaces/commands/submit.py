@@ -132,6 +132,20 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "instead of uniform. Needs no prior run.",
     )
     parser.add_argument(
+        "--equity-prior-temperature",
+        type=float,
+        default=0.0,
+        help="[scalar] How sharply the guess commits. High flattens toward "
+        "uniform, so a large value is a null arm.",
+    )
+    parser.add_argument(
+        "--equity-prior-fallback",
+        type=float,
+        default=0.0,
+        help="[scalar] Strategy mass the guess claims, which is what makes it "
+        "play on rows training never reaches. 0 disables.",
+    )
+    parser.add_argument(
         "--timeout",
         default=spec.DEFAULT_TIMEOUT,
         help="Wall-clock ceiling on the TRAINING process. It fires before the task-level "
@@ -204,6 +218,8 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 warm_start_at=args.warm_start_at,
                 warm_start_shape=args.warm_start_shape,
                 equity_prior_weight=args.equity_prior_weight,
+                equity_prior_temperature=args.equity_prior_temperature,
+                equity_prior_fallback=args.equity_prior_fallback,
             )
         ]
     )

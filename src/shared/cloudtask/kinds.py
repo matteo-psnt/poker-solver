@@ -151,6 +151,10 @@ class NodePlan(TaskFields, Protocol):
     def warm_start_shape(self) -> str: ...
     @property
     def equity_prior_weight(self) -> int: ...
+    @property
+    def equity_prior_temperature(self) -> float: ...
+    @property
+    def equity_prior_fallback(self) -> float: ...
 
 
 @dataclass(frozen=True)
@@ -447,6 +451,12 @@ class TrainTask(TaskKind):
                 argv += ["--warm-start-shape", plan.warm_start_shape]
         if plan.equity_prior_weight:
             argv += ["--equity-prior", str(plan.equity_prior_weight)]
+            # Only alongside a weight: both shape the same guess, and
+            # passing them without one asks for a prior that is not there.
+            if plan.equity_prior_temperature:
+                argv += ["--equity-prior-temperature", str(plan.equity_prior_temperature)]
+            if plan.equity_prior_fallback:
+                argv += ["--equity-prior-fallback", str(plan.equity_prior_fallback)]
         # Appended only when set: `--arm ""` records an arm literally named
         # empty string rather than an unaffiliated run.
         for flag, value in (

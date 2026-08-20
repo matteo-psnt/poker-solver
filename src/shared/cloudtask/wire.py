@@ -66,6 +66,16 @@ def _int(raw: str | None, default: int = 0) -> int:
         return default
 
 
+def _float(raw: str | None, default: float = 0.0) -> float:
+    """Every key is decoded on every task, set or not, so an unset knob arrives
+    as the empty string -- which bare ``float`` raises on and ``_int`` does not.
+    """
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def _number(value: Any) -> str:
     """An int that is written only when set, so an unused knob stays absent."""
     return str(value) if value else ""
@@ -167,6 +177,20 @@ KEYS: tuple[Key, ...] = (
     Key("RUN_WARM_START_AT", "warm_start_at", "warm_start_at", _number, _int),
     Key("RUN_WARM_START_SHAPE", "warm_start_shape", "warm_start_shape"),
     Key("RUN_EQUITY_PRIOR", "equity_prior_weight", "equity_prior_weight", _number, _int),
+    Key(
+        "RUN_EQUITY_PRIOR_TEMPERATURE",
+        "equity_prior_temperature",
+        "equity_prior_temperature",
+        _number,
+        _float,
+    ),
+    Key(
+        "RUN_EQUITY_PRIOR_FALLBACK",
+        "equity_prior_fallback",
+        "equity_prior_fallback",
+        _number,
+        _float,
+    ),
 )
 
 

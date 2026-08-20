@@ -31,6 +31,26 @@ MENU = (
 )
 
 
+def _test_tree(config, abstraction):
+    from src.core.actions.action_model import ActionModel
+    from src.core.game.rules import GameRules
+    from src.engine.solver.betting_tree import build_betting_tree
+
+    return build_betting_tree(
+        GameRules(config.game.small_blind, config.game.big_blind),
+        ActionModel(config),
+        abstraction,
+        starting_stack=config.game.starting_stack,
+    )
+
+
+def _row_starts(tree) -> np.ndarray:
+    per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
+    starts = np.zeros(tree.num_rows, dtype=np.int64)
+    np.cumsum(per_row[:-1], out=starts[1:])
+    return starts
+
+
 def _policy(strength: float) -> np.ndarray:
     return strength_policy(strength, action_aggression(MENU, POT))
 
@@ -144,3 +164,58 @@ class TestComposition:
         assert composed[3:].tolist() == [70.0, 30.0]
         assert not seeded_alone[1]
         assert seeded_both[1], "composing must mark the row as carrying a prior"
+
+
+class TestTheTwoChannels:
+    """Regrets steer training; ``strategy_sum`` is what evaluation plays.
+
+    Seeding only regrets is what the module did first, and it made the guess
+    unreachable on exactly the rows it exists for: `average_strategy` normalises
+    `strategy_sum` and returns uniform when it is zero, never consulting
+    regrets. These pin the distinction so it cannot silently collapse again.
+    """
+
+    def test_seeding_scales_one_guess_rather_than_making_two(self):
+        """Regrets and the fallback must be the SAME distribution, differently
+        scaled -- otherwise the arm trains toward one guess and plays another."""
+        from src.pipeline.services.equity_prior import seed_regrets
+        from tests.test_helpers import DummyCardAbstraction, make_test_config
+
+        tree = _test_tree(make_test_config(), DummyCardAbstraction())
+        unit, _ = seed_regrets(tree, 1.0)
+        scaled, _ = seed_regrets(tree, 250.0)
+        np.testing.assert_allclose(scaled, unit * 250.0, rtol=1e-12)
+
+    def test_only_a_fallback_row_reports_itself_visited(self):
+        """`visited` gates whether a row answers at all, so it has to track
+        PLAYABLE policy. Marking a regret-only row visited makes it answer
+        uniform while reporting full coverage -- which is how the fallback-mass
+        diagnostic read ~0% on a table playing uniform throughout."""
+        from src.pipeline.services.equity_prior import seed_regrets
+        from tests.test_helpers import DummyCardAbstraction, make_test_config
+
+        tree = _test_tree(make_test_config(), DummyCardAbstraction())
+        regrets, _ = seed_regrets(tree, 1000.0)
+        starts = _row_starts(tree)
+        assert (np.add.reduceat(regrets, starts) > 0).any(), "prior must reach some row"
+        assert not (np.add.reduceat(np.zeros_like(regrets), starts) > 0).any()
+
+    def test_a_regret_only_row_is_read_as_uniform_by_the_evaluator(self):
+        from src.engine.solver.numba_ops import average_strategy
+
+        played = average_strategy(np.zeros(len(MENU)))
+        np.testing.assert_allclose(played, np.full(len(MENU), 1 / len(MENU)))
+
+    def test_a_fallback_seeded_row_plays_the_guess(self):
+        from src.engine.solver.numba_ops import average_strategy
+
+        guess = _policy(0.95)
+        np.testing.assert_allclose(average_strategy(guess * 1e-3), guess, rtol=1e-9)
+
+    def test_real_training_mass_overwhelms_the_fallback(self):
+        """The fallback must decide untouched rows and nothing else."""
+        from src.engine.solver.numba_ops import average_strategy
+
+        trained = np.array([0.0, 0.0, 0.0, 0.0, 5_000.0])
+        played = average_strategy(_policy(0.05) * 1e-3 + trained)
+        assert played[-1] > 0.999, played

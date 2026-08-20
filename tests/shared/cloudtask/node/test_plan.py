@@ -221,6 +221,8 @@ WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
     "RUN_WARM_START_AT": (9, 9),
     "RUN_WARM_START_SHAPE": ("confidence", "confidence"),
     "RUN_EQUITY_PRIOR": (250, 250),
+    "RUN_EQUITY_PRIOR_TEMPERATURE": (0.4, 0.4),
+    "RUN_EQUITY_PRIOR_FALLBACK": (1.0, 1.0),
 }
 
 
