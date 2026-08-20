@@ -50,6 +50,12 @@ paths:
 - **`infra/store/` is a separate Terraform state** holding the durable share,
   so `just destroy` cannot reach the experiment record. Jobs and tasks are
   created at runtime by Python, never in HCL.
+- **Always spell it `terraform -chdir=<dir> …`, never `cd infra && terraform`.**
+  The approved forms are per-directory (`-chdir=infra`, `-chdir=infra/serve`,
+  `-chdir=infra/store`), so a `cd` form matches nothing and is refused — that
+  cost 15 blocked applies across past sessions, every one of them a change the
+  user had already agreed to. `apply` on `infra/store` is denied outright: it
+  holds the durable share.
 - **Two shell things remain shell**: `just panic` (must work from a phone in
   Cloud Shell) and `main.tf`'s `start_task` (runs before any code snapshot
   exists).

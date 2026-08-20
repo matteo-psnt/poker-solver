@@ -54,6 +54,29 @@ console/node_modules`. `.gitignore` has `console/node_modules/` with a trailing
 slash, so it matches a directory and **not** this symlink — it shows up
 untracked. Delete the link once types are regenerated.
 
+## Running commands once you are isolated
+
+`EnterWorktree` isolates the session, and Bash then **refuses any command it
+cannot statically prove stays inside the worktree** — "too complex to verify".
+That refusal fired 111 times across past sessions, and it costs a whole turn
+each. What trips it, all of it ordinary shell:
+
+- `&&` / `;` chains, `for` loops, and `A=x B=y cmd` prefixes
+- heredocs — `python3 - <<'PY' … PY` and `git commit -F - <<'MSG'`
+- anything writing a path the checker cannot resolve to this worktree
+
+So in an isolated session:
+
+- **One plain command per Bash call.** Split the chain; do not try to smuggle
+  it past with a `cd`. Bash's cwd does not persist between calls anyway, so a
+  relative path resolves against the PRIMARY checkout, not this one.
+- **Edit files with Edit/Write, not `python3 - <<PY`.** The bash-first habit
+  is what generates most of these refusals. Pass absolute worktree paths.
+- **Commit messages go in a file**, `git commit -F <path>`, not a heredoc.
+
+`CLAUDE.md` is a symlink to `AGENTS.md` in every checkout, and Edit refuses to
+write through a symlink. Edit `AGENTS.md`.
+
 ## Establish the baseline before editing
 
     uv run pytest -m "not slow" && uv run pre-commit run --all-files
