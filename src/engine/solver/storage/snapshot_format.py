@@ -33,7 +33,7 @@ import numpy as np
 import zstandard
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
     from pathlib import Path
 
 #: Level 3, measured. 1 -> 3 buys 38 MB per rung for +0.08 s; 3 -> 7 costs
@@ -96,18 +96,31 @@ def read_header(path: Path) -> dict[str, Any]:
         return json.loads(handle.read(length))
 
 
-def read_snapshot(path: Path) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
-    """Every array and the attrs. Frames decode in PARALLEL.
+def read_snapshot(
+    path: Path, names: Iterable[str] | None = None
+) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+    """The arrays and the attrs. Frames decode in PARALLEL.
+
+    `names` decodes only what is asked for and SEEKS PAST the rest, which is
+    what one frame per array buys over a single stream: the reweighted-average
+    path opens many rungs for `strategy_sum` alone, and making it pay for all
+    five would be 1.7 GB of decompression per rung to use 0.6 GB of it.
 
     One decompressor PER FRAME, never shared. `ZstdDecompressor` is not
     thread-safe and a shared instance raises "decompression error: Data
     corruption detected" under a pool -- intermittently, which is the worst way
     to find out. Do not hoist it out of the worker.
     """
+    wanted = None if names is None else set(names)
     with path.open("rb") as handle:
         length = int.from_bytes(handle.read(HEADER_LENGTH_BYTES), "little")
         header = json.loads(handle.read(length))
-        frames = [(spec, handle.read(spec["frame_bytes"])) for spec in header["arrays"]]
+        frames = []
+        for spec in header["arrays"]:
+            if wanted is not None and spec["name"] not in wanted:
+                handle.seek(spec["frame_bytes"], 1)
+                continue
+            frames.append((spec, handle.read(spec["frame_bytes"])))
 
     def _decode(item: tuple[dict[str, Any], bytes]) -> tuple[str, np.ndarray]:
         spec, raw = item

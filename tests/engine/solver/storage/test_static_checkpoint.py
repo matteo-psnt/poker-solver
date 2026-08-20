@@ -20,6 +20,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import BettingTree
+from src.engine.solver.storage import snapshot_format
 from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import (
     AbstractionMismatchError,
@@ -194,8 +195,11 @@ class TestRetentionLadder:
                 save_checkpoint(storage, tmp_path, iteration, retain_every=1000)
         finally:
             storage.close()
-        on_disk = {p.name for p in tmp_path.glob("static-*.zarr")}
-        assert on_disk == {"static-1000.zarr", "static-2000.zarr"}
+        on_disk = {p.name for p in tmp_path.glob("static-*")}
+        assert on_disk == {
+            f"static-1000{snapshot_format.SUFFIX}",
+            f"static-2000{snapshot_format.SUFFIX}",
+        }
 
     def test_ladder_survives_a_task_that_forgets_retain_every(self, tree, tmp_path):
         """A resume that drops the knob must not delete earlier measurement points."""
@@ -393,19 +397,25 @@ class TestLegacyLayoutTranslation:
         save_checkpoint(storage, tmp_path, 5)
         storage.close()
 
-        # Rewrite the snapshot as v1 wrote it: every value scattered back to
-        # its node-major address, both fingerprints stamped with the legacy id.
+        # Write the snapshot as v1 wrote it -- a ZARR DIRECTORY, every value
+        # scattered back to its node-major address, both fingerprints stamped
+        # with the legacy id. Built directly rather than by mutating what
+        # `save_checkpoint` produced: it no longer produces zarr, and the point
+        # of this test is reading the artifact the share is actually full of.
         row_source, slot_source = _legacy_index_maps(tree)
-        root = zarr.open(zarr.DirectoryStore(str(tmp_path / "static-5.zarr")), mode="r+")
-        for name in _ARRAYS:
-            gather = slot_source if name in ("regrets", "strategy_sum") else row_source
-            legacy = np.empty_like(expected[name])
-            legacy[gather] = expected[name]
-            root[name][:] = legacy
-        root.attrs["fingerprint"] = tree.legacy_fingerprint()
+        _write_legacy_zarr(
+            tmp_path / "static-5.zarr",
+            {
+                name: _scatter(expected[name], slot_source if name in _SLOTTED else row_source)
+                for name in _ARRAYS
+            },
+            {"iteration": 5, "fingerprint": tree.legacy_fingerprint()},
+        )
         manifest_path = tmp_path / "STATIC_CHECKPOINT.json"
         raw = json.loads(manifest_path.read_text())
         raw["fingerprint"] = tree.legacy_fingerprint()
+        raw["zarr"] = "static-5.zarr"
+        raw["retained"] = [{"iteration": 5, "zarr": "static-5.zarr"}]
         manifest_path.write_text(json.dumps(raw))
 
         fresh = StaticArrayStorage(tree)
@@ -455,3 +465,29 @@ class TestTheAbstractionGuardIsArmed:
         fresh = StaticArrayStorage(tree)
         assert load_checkpoint(fresh, tmp_path, abstraction_id="abs-anything") == 10
         assert float(fresh.strategy_sum[0]) == 1.0
+
+
+#: The two arrays addressed per SLOT rather than per row.
+_SLOTTED = ("regrets", "strategy_sum")
+
+
+def _scatter(values, gather):
+    """`values` put back at their node-major addresses."""
+    legacy = np.empty_like(values)
+    legacy[gather] = values
+    return legacy
+
+
+def _write_legacy_zarr(path, arrays, attrs):
+    """A pre-`.ckpt.zst` snapshot, as the share is full of.
+
+    `save_checkpoint` writes one zstd object now, so a legacy fixture has to be
+    built rather than obtained -- and building it is what keeps the legacy READ
+    path honest until the last zarr rung is converted.
+    """
+
+    root = zarr.open(zarr.DirectoryStore(str(path)), mode="w")
+    for name, array in arrays.items():
+        root.create_dataset(name, data=np.asarray(array), dtype=array.dtype)
+    for key, value in attrs.items():
+        root.attrs[key] = value

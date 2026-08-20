@@ -136,3 +136,36 @@ def test_a_truncated_object_raises_rather_than_returning_short_arrays(tmp_path):
     (tmp_path / "s.ckpt.zst").write_bytes(raw[: len(raw) // 2])
     with pytest.raises(Exception):  # noqa: B017, PT011 -- any refusal beats a short read
         fmt.read_snapshot(tmp_path / "s.ckpt.zst")
+
+
+class TestSelectiveDecode:
+    """One frame per array means a reader can take one array and skip the rest.
+
+    The reweighted-average path opens many rungs for `strategy_sum` alone;
+    making it decompress all five would be 1.7 GB per rung to use 0.6 GB.
+    """
+
+    def test_it_returns_only_what_was_asked_for(self, tmp_path):
+        fmt.write_snapshot(tmp_path / "s.ckpt.zst", _arrays(), {})
+        back, _ = fmt.read_snapshot(tmp_path / "s.ckpt.zst", names=["strategy_sum"])
+        assert list(back) == ["strategy_sum"]
+
+    def test_the_array_it_returns_is_still_exact(self, tmp_path):
+        arrays = _arrays()
+        fmt.write_snapshot(tmp_path / "s.ckpt.zst", arrays, {})
+        back, _ = fmt.read_snapshot(tmp_path / "s.ckpt.zst", names=["regrets"])
+        assert np.array_equal(back["regrets"], arrays["regrets"])
+
+    def test_skipping_seeks_rather_than_decompresses(self, tmp_path):
+        """A skipped frame must not be decoded -- the point is not paying for
+        it. Asking for the LAST array proves the earlier frames were stepped
+        over rather than read."""
+        arrays = _arrays()
+        fmt.write_snapshot(tmp_path / "s.ckpt.zst", arrays, {})
+        back, _ = fmt.read_snapshot(tmp_path / "s.ckpt.zst", names=["visited"])
+        assert np.array_equal(back["visited"], arrays["visited"])
+
+    def test_asking_for_everything_is_the_default(self, tmp_path):
+        fmt.write_snapshot(tmp_path / "s.ckpt.zst", _arrays(), {})
+        back, _ = fmt.read_snapshot(tmp_path / "s.ckpt.zst")
+        assert set(back) == set(_arrays())
