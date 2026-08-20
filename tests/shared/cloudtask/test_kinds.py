@@ -269,12 +269,12 @@ class TestEstimate:
         ~773 MB abstraction. Nothing has moved, so there is no rate here and
         this falls through to history."""
         remaining = self.KIND.estimate(
-            Progress(1, 1000, "units", base=1, window_seconds=60),
+            Progress(1, 1000, self.KIND.unit, base=1, window_seconds=60),
             elapsed=60,
             history=[Sample(1000, 600, 16)],
             workers=16,
         )
-        # 999 units left at 1000/600 units per second.
+        # 999 iterations left at 1000/600 iterations per second.
         assert remaining == pytest.approx(599.4)
 
     def test_history_transfers_across_tasks_of_different_size(self):
@@ -503,12 +503,28 @@ class TestAnEvaluationCanAlwaysBeEstimated:
 
     def test_ten_rungs_are_not_predicted_by_the_duration_of_one(self):
         """The reason reporting the total matters. One rung took 600s; ten of
-        them is 6000, not 600."""
-        history = [Sample(units=1, seconds=600, workers=16)]
-        one = self.KIND.estimate(Progress(0, 1, "rungs"), 0, history, workers=16)
-        ten = self.KIND.estimate(Progress(0, 10, "rungs"), 0, history, workers=16)
+        them is 6000, not 600.
+
+        It scales through the BRANCH total and not the rung count, because a
+        rung is not the unit any history is recorded in: `sample` multiplies the
+        rungs by the branches each one walks, so the work asked for is stated in
+        the same unit the rate is."""
+        history = [Sample(units=32, seconds=600, workers=16)]
+        branches = self.KIND.unit
+        one = self.KIND.estimate(Progress(0, 32, branches), 0, history, workers=16)
+        ten = self.KIND.estimate(Progress(0, 320, branches), 0, history, workers=16)
         assert one == pytest.approx(600)
         assert ten == pytest.approx(6000)
+
+    def test_a_rung_count_is_not_divided_by_a_board_branch_rate(self):
+        """MEASURED ON THE POOL. Before its first branch lands an evaluation
+        reports rungs, and 1 rung over ~500 branches/second is nothing at all:
+        the task quoted `0m left` with six minutes to go. A count in one unit
+        cannot be scaled by a rate in another, so this falls through to how long
+        these tasks TOOK -- 600s, less the 100s elapsed."""
+        history = [Sample(units=30, seconds=600, workers=16)]
+        left = self.KIND.estimate(Progress(0, 1, "rungs"), elapsed=100, history=history, workers=16)
+        assert left == pytest.approx(500)
 
     def test_it_still_has_an_estimate_with_no_progress_at_all(self):
         """A kind that cannot report position falls back to how long its past
