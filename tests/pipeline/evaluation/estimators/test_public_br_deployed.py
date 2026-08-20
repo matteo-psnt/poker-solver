@@ -69,3 +69,41 @@ class TestTheNumberIsReproducible:
             [sys.executable, "-c", script], capture_output=True, text=True, check=True
         )
         assert float(out.stdout.strip().splitlines()[-1]) == here
+
+
+class TestTheLedgerCanTellTheArmsApart:
+    """blueprint+resolver is a different STRATEGY, not a knob on the same one.
+
+    Measured 08-31 before this entered the tier: a deployed row scoring 3076.4
+    and a blueprint row scoring 2409.8 recorded byte-identical knobs, so the
+    ledger paired them and the 667 mbb/hand difference read as noise on one arm.
+    """
+
+    def test_deployed_does_not_share_a_tier_with_the_blueprint(self):
+        from src.pipeline.evaluation.ledger.tiers import build_exact_br_knobs_from_params
+
+        blueprint = build_exact_br_knobs_from_params(
+            num_flops=1, num_turns=1, num_rivers=1, board_seed=7
+        )
+        deployed = build_exact_br_knobs_from_params(
+            num_flops=1,
+            num_turns=1,
+            num_rivers=1,
+            board_seed=7,
+            deployed=True,
+            resolver_iterations=200,
+            resolver_prior_weight=50.0,
+        )
+        assert blueprint != deployed
+        assert deployed["deployed"] is True
+        # Two deployed arms that solved differently are also different tiers.
+        other = build_exact_br_knobs_from_params(
+            num_flops=1,
+            num_turns=1,
+            num_rivers=1,
+            board_seed=7,
+            deployed=True,
+            resolver_iterations=40,
+            resolver_prior_weight=50.0,
+        )
+        assert other != deployed

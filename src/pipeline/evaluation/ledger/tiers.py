@@ -151,6 +151,9 @@ def build_exact_br_knobs_from_params(
     mix_run: str | None = None,
     mix_at: int | None = None,
     mix_weight: float = 0.5,
+    deployed: bool = False,
+    resolver_iterations: int | None = None,
+    resolver_prior_weight: float | None = None,
 ) -> dict[str, Any]:
     """Canonical exact-BR knob tier: the board plan IS the comparison tier.
 
@@ -186,6 +189,14 @@ def build_exact_br_knobs_from_params(
         knobs["mix_run"] = str(mix_run)
         knobs["mix_at"] = mix_at
         knobs["mix_weight"] = float(mix_weight)
+    if deployed:
+        # blueprint+resolver is a DIFFERENT STRATEGY, not a knob on the same
+        # one, so it has to enter the tier or a deployed row pairs with a
+        # blueprint row and the difference reads as noise. Measured 08-31:
+        # the two scored 3076.4 and 2409.8 under identical recorded knobs.
+        knobs["deployed"] = True
+        knobs["resolver_iterations"] = resolver_iterations
+        knobs["resolver_prior_weight"] = resolver_prior_weight
     return knobs
 
 

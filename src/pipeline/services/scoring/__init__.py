@@ -138,6 +138,9 @@ def evaluate_and_record(
             mix_run=br_config.mix_run.name if br_config.mix_run else None,
             mix_at=br_config.mix_at,
             mix_weight=br_config.mix_weight,
+            deployed=br_config.deployed,
+            resolver_iterations=br_config.resolver_iterations,
+            resolver_prior_weight=br_config.resolver_prior_weight,
         )
     elif method == "resolver_match":
         # Not an exploitability estimate at all: a head-to-head chip edge of
