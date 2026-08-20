@@ -21,12 +21,10 @@ either.
   imports NO handler.** Eagerly importing every module cost 1.2s on every
   invocation, `--help` included. Do not add an import that loads handlers.
 - **Grouping is STRUCTURAL: a ref lives inside one `CommandGroup`, and
-  `COMMANDS` is derived by flattening them.** So a command is in exactly one
-  group by construction — no label to typo, no default to fall into. `--help`
-  renders the groups from `headless._listing()` as the parser's epilog, and
-  `add_parser` is given no `help=`, which is what suppresses argparse's own
-  flat block. Do not re-add it: that block, plus the choice list `metavar`
-  replaces, is how `--help` came to print every name twice in one long token.
+  `COMMANDS` is derived by flattening them**, so a command is in exactly one
+  group by construction. `--help` renders the groups from `headless._listing()`
+  as the epilog; `add_parser` gets no `help=` and the choice list is hidden by
+  `metavar`, which is what stops argparse printing every name twice.
 - **`Command.invoke(**kwargs)` builds arguments from the command's own parser**,
   so a second surface cannot drift from it, and returns the payload unrendered.
 - **Refusals are values.** Anything the caller could have got right raises
