@@ -32,6 +32,7 @@ from src.shared.cloudtask.node import blobstore
 
 if TYPE_CHECKING:
     from pathlib import Path
+from uuid import uuid4
 
 # The deleted dynamic backend's manifest, recognised only so a run predating the
 # static tree is REFUSED rather than fetched and failed several minutes deeper.
@@ -123,7 +124,7 @@ def copy_tree(source: Path, destination: Path, *, update: bool = True, atomic: b
             return 0
         size = item.stat().st_size
         if atomic:
-            partial = target.with_name(target.name + ".partial")
+            partial = _partial_path(target)
             shutil.copyfile(item, partial)
             partial.replace(target)
         else:
@@ -134,6 +135,18 @@ def copy_tree(source: Path, destination: Path, *, update: bool = True, atomic: b
         return 0
     with ThreadPoolExecutor(max_workers=min(copy_workers(), len(files))) as pool:
         return sum(pool.map(transfer, files))
+
+
+def _partial_path(destination: Path) -> Path:
+    """A staging name unique to THIS writer.
+
+    `<name>.partial` is deterministic, so two sessions publishing the same run
+    stage to the SAME path: one `replace()` moves it and the other raises
+    ENOENT, aborting a copy whose file was already written correctly. Measured
+    09-03 -- two scoring tasks scored fine, logged "1 scored, 0 failed", and
+    never reached the share because a concurrent publisher won the rename.
+    """
+    return destination.with_name(f"{destination.name}.{os.getpid()}-{uuid4().hex[:8]}.partial")
 
 
 def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = "") -> bool:
@@ -357,7 +370,7 @@ def _copy_one(source: Path, destination: Path, log: Log) -> bool:
             return True
     except OSError:
         return True
-    partial = destination.with_name(destination.name + ".partial")
+    partial = _partial_path(destination)
     try:
         copy_file(source, partial)
         partial.replace(destination)
@@ -379,7 +392,7 @@ def _read_bytes(path: Path) -> bytes | None:
 
 def _write_one(body: bytes, destination: Path, log: Log) -> bool:
     """:func:`_copy_one` for bytes already in hand -- the captured manifest."""
-    partial = destination.with_name(destination.name + ".partial")
+    partial = _partial_path(destination)
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(body)
