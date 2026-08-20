@@ -111,6 +111,28 @@ def build_exact_br_knobs_from_params(
     }
 
 
+def build_resolver_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
+    """Canonical resolver-gate knob tier, read back off the RESULTS.
+
+    Off the results rather than off the caller's arguments on purpose: both
+    knobs may be `None` at the call site meaning "whatever the run's config
+    says", and two arms that resolved to different values must not share a tier
+    just because both were spelled as a default.
+
+    `leaf_continuation_fraction` is IN the tier because a different leaf
+    valuation is a different game to score -- the same reason the resolver's
+    `max_depth` change was recorded as a tier break. Pairing two arms across it
+    is the comparison being made, and `compare`/`report` refusing to do it
+    silently is correct.
+    """
+    return {
+        "num_deals": results["num_deals"],
+        "base_seed": results["seed"],
+        "leaf_continuation_fraction": results["leaf_continuation_fraction"],
+        "resolver_max_iterations": results["resolver_max_iterations"],
+    }
+
+
 def tier_key(record: dict[str, Any]) -> tuple[Any, ...]:
     """Identity of the comparison tier a row belongs to.
 

@@ -18,7 +18,16 @@ import pytest
 from src.interfaces.cloud.cost.billing import BilledPayload, ServiceCharge, StandingCharge
 from src.interfaces.cloud.cost.node_time import ConcurrencyPoint
 from src.interfaces.cloud.tasks.batch import BatchTask, Job, ResizeError
-from src.interfaces.commands import load_all
+
+# CONSTRUCTOR CALLS, not dict literals. A literal here is a second declaration
+# of a payload's shape and drifts with `contract.py` rather than against it --
+# which is how renaming a REQUIRED field passed 1061 tests. A model instance is
+# checked by `ty` against the same class the command constructs.
+# The remaining dicts are the commands whose payload is not typed yet.
+from src.interfaces.commands import (
+    evaluate,
+    load_all,
+)
 from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
 from src.interfaces.commands.autoscale_check import AutoscalePayload
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
@@ -57,11 +66,6 @@ from src.pipeline.services.experiments import CurveOutput, CurvePoint
 from src.shared.task_history import TaskProgress, TaskRow
 from src.shared.task_states import Phase
 
-# CONSTRUCTOR CALLS, not dict literals. A literal here is a second declaration
-# of a payload's shape and drifts with `contract.py` rather than against it --
-# which is how renaming a REQUIRED field passed 1061 tests. A model instance is
-# checked by `ty` against the same class the command constructs.
-# The remaining dicts are the commands whose payload is not typed yet.
 PAYLOADS: dict[str, Any] = {
     "train-static": StaticTrainingPayload(
         run_id="run-a",
@@ -760,3 +764,49 @@ class TestTheServersStillFormatTheirPayload:
         monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
         with pytest.raises(Exception, match=r"run-production|No such file|not found|Errno"):
             BY_NAME["blueprint-serve"].render(PAYLOADS["blueprint-serve"])
+
+
+class TestResolverMatchRenderer:
+    """The resolver gate reports a chip edge, not exploitability.
+
+    Its payload carries no `exploitability_mbb` at all, and its
+    `confidence_95_mbb` is an INTERVAL rather than a half-width. Both facts
+    broke this renderer on first contact with a real run -- the second one as a
+    `TypeError: unsupported format string passed to tuple.__format__`, six
+    minutes into a paid box. A shape example here costs nothing and catches it
+    in milliseconds, which is the whole argument for `PAYLOADS`.
+    """
+
+    PAYLOAD = EvaluationPayload(
+        run_id="run-a",
+        method="resolver_match",
+        estimator="resolver_match (duplicate-deal chip edge)",
+        infosets=32_240_608,
+        results={
+            "resolver_mbb_per_hand": 12.5,
+            "se_mbb": 4.0,
+            "confidence_95_mbb": (4.7, 20.3),
+            "p_value": 0.0018,
+            "num_deals": 1000,
+            "num_hands": 2000,
+            "resolver_decisions": 5000,
+            "resolver_fallbacks": 3,
+            "leaf_continuation_fraction": 0.5,
+            "resolver_max_iterations": 64,
+        },
+    )
+
+    def test_it_renders_the_interval_without_dying(self, capsys):
+        evaluate.render(self.PAYLOAD)
+        out = capsys.readouterr().out
+        assert "+12.50 mbb/hand" in out
+        assert "+4.70..+20.30" in out
+
+    def test_it_shows_the_arm_and_the_fallback_count(self, capsys):
+        """Two numbers that decide whether the result means anything: which arm
+        produced it, and whether the resolver actually resolved."""
+        evaluate.render(self.PAYLOAD)
+        out = capsys.readouterr().out
+        assert "0.5 pot" in out
+        assert "fell back" in out
+        assert "5,000" in out

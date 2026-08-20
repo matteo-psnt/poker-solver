@@ -34,6 +34,7 @@ from src.pipeline.services.scoring.lbr import (
 )
 from src.pipeline.services.scoring.matches import (
     BLUEPRINT_MATCH_ESTIMATOR_LABEL,
+    RESOLVER_GATE_ESTIMATOR_LABEL,
     evaluate_blueprint_match,
     evaluate_run_resolver_gate,
     record_blueprint_match,
@@ -71,6 +72,9 @@ def evaluate_and_record(
     lbr: LBRConfig | None = None,
     exact_br: PublicBRConfig | None = None,
     resolver_iterations: int = 64,
+    resolver_gate_deals: int = 1000,
+    leaf_continuation_fraction: float | None = None,
+    resolver_max_iterations: int | None = None,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     progress_file: Path | None = None,
@@ -109,6 +113,19 @@ def evaluate_and_record(
             num_rivers=br_config.num_rivers,
             board_seed=br_config.board_seed,
         )
+    elif method == "resolver_match":
+        # Not an exploitability estimate at all: a head-to-head chip edge of
+        # blueprint+resolver over the bare blueprint, on duplicate deals. It
+        # carries no `exploitability_mbb`, which is why `evaluate.render` picks
+        # its branch off the method rather than reaching into `results`.
+        out = evaluate_run_resolver_gate(
+            run_dir,
+            num_deals=resolver_gate_deals,
+            leaf_continuation_fraction=leaf_continuation_fraction,
+            max_iterations=resolver_max_iterations,
+        )
+        estimator = RESOLVER_GATE_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_resolver_match_knobs(out.results)
     else:  # "lbr" (default, trustworthy)
         config = lbr or LBRConfig()
         out = evaluate_run_lbr(
@@ -162,6 +179,7 @@ __all__ = (
     "BLUEPRINT_MATCH_ESTIMATOR_LABEL",
     "EXACT_BR_ESTIMATOR_LABEL",
     "LBR_ESTIMATOR_LABEL",
+    "RESOLVER_GATE_ESTIMATOR_LABEL",
     "EvaluationOutput",
     "build_blueprint_for",
     "evaluate_and_record",
