@@ -101,8 +101,10 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
     watcher = progress.LadderWatcher(paths, log, plan=plan, publish_log=log.publish)
     watcher.start()
     try:
+        # The command this actually runs, not a hardcoded one: `_train` is the
+        # executor for the board-free kernel too, and said `train-static` for it.
         log(
-            f"train-static: config={plan.config} run={run_id} to={plan.to} "
+            f"{plan.commands[0][0]}: config={plan.config} run={run_id} to={plan.to} "
             f"(timeout {plan.timeout_seconds}s)"
         )
         code = run_guarded(
