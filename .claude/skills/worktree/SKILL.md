@@ -44,6 +44,10 @@ worktree, with `P` = primary checkout:
     (cd infra       && terraform init -input=false)
     (cd infra/store && terraform init -input=false)
 
+Once the remote state backend has been migrated (`backend.tf` present in each
+root rather than `backend.tf.disabled` -- see "State" in `infra/README.md`),
+step 2 is the two `terraform init` lines only: there is no state file to link.
+
 Cloud commands (`pool-status`, `submit`, `score`) work from a worktree once
 those are in place. Symlinking `.terraform` ITSELF does not work — init must
 populate a real directory; symlinking the state FILE is fine. `INFRA_DIR` is a

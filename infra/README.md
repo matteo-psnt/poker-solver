@@ -375,11 +375,34 @@ that is not a copy.
 
 ## State
 
-Terraform state is local (`infra/terraform.tfstate`, `infra/store/terraform.tfstate`,
-`infra/serve/terraform.tfstate`) and gitignored — it can
-contain resource detail you would not want committed. Solo use makes a remote
-backend unnecessary; if this ever becomes shared, move state to an Azure Storage
-backend before a second person runs `apply`.
+Terraform state is local today (`infra/terraform.tfstate`,
+`infra/store/terraform.tfstate`, `infra/serve/terraform.tfstate`, all
+gitignored -- they carry resource detail you would not want committed). A
+remote backend is **prepared, not applied**: each root holds a
+`backend.tf.disabled` pointing at a private `tfstate` container on the store
+account (`pokersolverstore`, `poker-solver-store-rg`), one blob per root --
+`compute.tfstate`, `store.tfstate`, `serve.tfstate` -- authenticated with AAD,
+never the account key.
+
+The hand-off, in this order, because the store root will keep its own state in
+the container it creates:
+
+```bash
+terraform -chdir=infra/store apply          # creates the tfstate container and
+                                            # grants you Storage Blob Data Contributor
+for d in infra infra/store infra/serve; do
+  mv "$d/backend.tf.disabled" "$d/backend.tf"
+  terraform -chdir="$d" init -migrate-state # answer yes: copies local -> blob
+done
+```
+
+`use_azuread_auth` needs **Storage Blob Data Contributor** on the account for
+whoever runs Terraform; `infra/store/main.tf` declares that assignment for the
+applying identity, and it also covers reading `checkpoints`, so no separate
+Reader grant is needed. Role assignments take a few minutes to propagate -- an
+`AuthorizationPermissionMismatch` from `init -migrate-state` straight after the
+apply means wait, not misconfigured. Once migrated, a fresh worktree needs
+`terraform init` per root and no tfstate symlinks.
 
 `infra/.terraform.lock.hcl` *is* committed, like `uv.lock`: it pins the `azurerm`
 provider version so a fresh `terraform init` elsewhere resolves the same one.

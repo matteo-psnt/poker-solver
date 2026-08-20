@@ -298,3 +298,13 @@ variable "allowed_locations" {
     "westus2",
   ]
 }
+
+variable "pool_identity_enabled" {
+  description = <<-EOT
+    Attach `azurerm_user_assigned_identity.pool` to every pool. MEASURED to
+    plan as an in-place update on all four (2026-09-04, azurerm 4.81.0), not
+    a replacement. Off until the identity has a role assignment to use.
+  EOT
+  type        = bool
+  default     = false
+}

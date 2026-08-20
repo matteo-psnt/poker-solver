@@ -1,0 +1,12 @@
+# Remote state, PREPARED BUT OFF. Rename to backend.tf and run
+# `terraform -chdir=infra/serve init -migrate-state` once the `tfstate` container
+# exists (`infra/store` creates it). Procedure: "State" in infra/README.md.
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "poker-solver-store-rg"
+    storage_account_name = "pokersolverstore"
+    container_name       = "tfstate"
+    key                  = "serve.tfstate"
+    use_azuread_auth     = true
+  }
+}

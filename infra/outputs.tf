@@ -26,23 +26,23 @@ output "batch_account_endpoint" {
 }
 
 output "pool_id" {
-  value = azurerm_batch_pool.train.name
+  value = azurerm_batch_pool.pool["train"].name
 }
 
 output "pool_vm_size" {
-  value = azurerm_batch_pool.train.vm_size
+  value = azurerm_batch_pool.pool["train"].vm_size
 }
 
 output "pool_big_id" {
-  value = azurerm_batch_pool.train_big.name
+  value = azurerm_batch_pool.pool["train_big"].name
 }
 
 output "pool_huge_id" {
-  value = azurerm_batch_pool.train_huge.name
+  value = azurerm_batch_pool.pool["train_huge"].name
 }
 
 output "pool_mem_id" {
-  value = azurerm_batch_pool.train_mem.name
+  value = azurerm_batch_pool.pool["train_mem"].name
 }
 
 output "resource_group" {
@@ -71,20 +71,20 @@ output "hourly_cost" {
   #
   # RE-MEASURE rather than edit by hand if a SKU is added: `poker-solver cost`
   # prints billed dollars beside billed node-hours for exactly this purpose.
-  value = lookup(local.node_rates, lower(azurerm_batch_pool.train.vm_size), "see the Azure price list")
+  value = lookup(local.node_rates, lower(azurerm_batch_pool.pool["train"].vm_size), "see the Azure price list")
 }
 
 output "pool_big_hourly_cost" {
   description = "USD/hr PER NODE on the train-big pool. Same table, other SKU."
-  value       = lookup(local.node_rates, lower(azurerm_batch_pool.train_big.vm_size), "see the Azure price list")
+  value       = lookup(local.node_rates, lower(azurerm_batch_pool.pool["train_big"].vm_size), "see the Azure price list")
 }
 
 output "pool_huge_hourly_cost" {
   description = "USD/hr PER NODE on the train-huge pool. Same table, other SKU."
-  value       = lookup(local.node_rates, lower(azurerm_batch_pool.train_huge.vm_size), "see the Azure price list")
+  value       = lookup(local.node_rates, lower(azurerm_batch_pool.pool["train_huge"].vm_size), "see the Azure price list")
 }
 
 output "pool_mem_hourly_cost" {
   description = "USD/hr PER NODE on the train-mem pool. Same table, other SKU."
-  value       = lookup(local.node_rates, lower(azurerm_batch_pool.train_mem.vm_size), "see the Azure price list")
+  value       = lookup(local.node_rates, lower(azurerm_batch_pool.pool["train_mem"].vm_size), "see the Azure price list")
 }
