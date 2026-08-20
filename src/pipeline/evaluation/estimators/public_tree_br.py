@@ -36,13 +36,16 @@ would be fielded.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
+import multiprocessing as mp
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from itertools import repeat
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -53,6 +56,7 @@ from src.engine.solver.infoset.encoder import get_spr_bucket
 from src.engine.solver.infoset.index import preflop_hand_index
 from src.engine.solver.policy.lookup import blueprint_action_distribution
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.shared.cache import cached_json, store_json
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
@@ -205,10 +209,15 @@ class PublicTreeBestResponse:
         starting_stack: int,
         blueprint_factory: Callable[[], ScorableBlueprint] | None = None,
         on_branch: Callable[[int, int], None] | None = None,
+        branches_per_walk: int = 0,
     ):
         self._on_branch = on_branch
         self._branches_done = 0
-        self._branches_per_walk = 0
+        # Given when a previous evaluation measured it. That is the ONLY way a
+        # walk can report against a denominator before one walk has finished,
+        # and under `--workers` the four finish together -- so without it the
+        # bar's first movement is also its last.
+        self._branches_per_walk = branches_per_walk
         self._policy_source = blueprint.policy_source
         self._factory = blueprint_factory
         self._rules = blueprint.rules
@@ -239,29 +248,29 @@ class PublicTreeBestResponse:
             # Independent walks: same tree, disjoint responder/button, no shared
             # mutable state. Ordered results, so seat_results stays in the same
             # order the serial path produces.
-            with ProcessPoolExecutor(max_workers=min(self._config.num_workers, len(walks))) as pool:
-                # Iterated rather than list()-ed, so a walk landing is observable
-                # while the others are still running. `map` still yields IN ORDER,
-                # which is what keeps the aggregate identical to the serial path.
-                parts = []
-                for part in pool.map(
-                    _walk_worker,
-                    repeat(self._factory),
-                    repeat(self._config),
-                    repeat(self._starting_stack),
-                    [s for s, _ in walks],
-                    [b for _, b in walks],
-                ):
-                    parts.append(part)
-                    # Every walk traverses the same public tree, so the first one
-                    # to return has priced all four. Four steps rather than the
-                    # serial path's hundreds -- the walks are in other processes
-                    # and share no counter -- but in the SAME unit, so the two
-                    # paths' throughput samples stay one lineage.
-                    self._branches_per_walk = self._branches_per_walk or part[4]
-                    self._branches_done = len(parts) * self._branches_per_walk
-                    if self._on_branch is not None and self._branches_per_walk:
-                        self._on_branch(self._branches_done, self.branch_total)
+            self._branches_per_walk = self._branches_per_walk or self._remembered_walk_cost()
+            with (
+                _WalkReports(self._on_branch, self.branch_total) as reports,
+                ProcessPoolExecutor(max_workers=min(self._config.num_workers, len(walks))) as pool,
+            ):
+                # `map` yields IN ORDER, which is what keeps the aggregate
+                # identical to the serial path.
+                parts = list(
+                    pool.map(
+                        _walk_worker,
+                        repeat(self._factory),
+                        repeat(self._config),
+                        repeat(self._starting_stack),
+                        [s for s, _ in walks],
+                        [b for _, b in walks],
+                        repeat(reports.queue),
+                        range(len(walks)),
+                        repeat(self._branches_per_walk),
+                    )
+                )
+            # What a walk MEASURED, which settles any remembered value.
+            self._branches_per_walk = parts[0][4]
+            self._branches_done = len(parts) * self._branches_per_walk
         else:
             parts = []
             for br_seat, button in walks:
@@ -273,6 +282,11 @@ class PublicTreeBestResponse:
                     self._branches_per_walk = self._branches_done
                     if self._on_branch is not None and self._branches_done:
                         self._on_branch(self._branches_done, self.branch_total)
+
+        # EITHER path measures it, and a SERIAL evaluation teaching a later
+        # parallel one is the case that matters: only the parallel one is blind
+        # without it, because its four walks finish together.
+        self._remember_walk_cost(self._branches_per_walk)
 
         for (br_seat, button), (chips, nodes, decision, missing, _) in zip(
             walks, parts, strict=True
@@ -393,7 +407,11 @@ class PublicTreeBestResponse:
         # than once per node, and costs nothing measurable. Turn and river deals
         # reach this same method and are deliberately not counted: they are the
         # inner loops, and a counter there WOULD be in the hot path.
-        top_level = self._on_branch is not None and not state.board
+        # Counted whether or not anyone is listening. An evaluation with no bar
+        # is exactly the one that MEASURES what a walk costs for the next one,
+        # and while this was tied to `on_branch` it measured zero and taught the
+        # next evaluation nothing.
+        top_level = not state.board
         for cards, weight in self._plan.deal_options(state.board):
             block = blocked_combos(cards)
             child_reach = np.where(block, 0.0, opp_reach) * weight
@@ -411,15 +429,42 @@ class PublicTreeBestResponse:
                 child = self._walk(child_state, child_reach)
                 child[block] = 0.0
                 values += child
-            if top_level and self._on_branch is not None:
+            if top_level:
                 self._branches_done += 1
-                # Silent through the first walk, which is what MEASURES the
-                # total: publishing against a total of zero would be a bar with
-                # no denominator, and publishing against a growing one would
-                # move it backwards.
-                if self._branches_per_walk:
+                # Silent until the denominator is known -- measured by a walk of
+                # this tree, here or in an earlier evaluation. Publishing against
+                # a total of zero would be a bar with no denominator, and against
+                # a growing one a bar that moves backwards.
+                if self._on_branch is not None and self._branches_per_walk:
                     self._on_branch(self._branches_done, self.branch_total)
         return values
+
+    def _walk_cost_key(self) -> str:
+        """What a walk's branch count depends on, and nothing else.
+
+        The top-level deal is reached once per preflop betting line that
+        survives to a flop -- a property of the ACTION abstraction -- and each
+        one iterates `num_flops`. Neither the blueprint's numbers nor the
+        turn/river sample can move it.
+        """
+        return f"{self._action_model.get_config_hash()}|{self._config.num_flops}"
+
+    def _remembered_walk_cost(self) -> int:
+        """What a walk cost LAST time, if this tree has been walked before.
+
+        A cache and never a source of truth: the measured value replaces it at
+        the end of every evaluation, and a wrong one can only mis-draw a bar --
+        `done` is clamped to it, and the value being computed never reads it.
+        """
+        stored = cached_json("public_br_walk_cost", self._walk_cost_key(), WALK_COST_TTL_SECONDS)
+        remembered = (stored or {}).get("branches_per_walk")
+        return int(remembered) if isinstance(remembered, int) and remembered > 0 else 0
+
+    def _remember_walk_cost(self, branches: int) -> None:
+        if branches > 0:
+            store_json(
+                "public_br_walk_cost", self._walk_cost_key(), {"branches_per_walk": branches}
+            )
 
     @property
     def branch_total(self) -> int:
@@ -533,12 +578,78 @@ class PublicTreeBestResponse:
         return cached
 
 
+"""How long the drainer waits on an empty queue before checking whether the
+walks are done. Not a publish cadence: a message publishes as it arrives, and
+the walks emit one per top-level flop branch."""
+REPORT_INTERVAL_SECONDS = 1.0
+
+"""How long a remembered walk cost stays usable. Long, because what it depends
+on -- the action abstraction and `--br-flops` -- changes with a code release and
+not with time; and cheap to be wrong about, since the measured value replaces it
+at the end of every evaluation."""
+WALK_COST_TTL_SECONDS = 90 * 24 * 3600
+
+
+class _WalkReports:
+    """Totals what the four walks report, while the parent is blocked on them.
+
+    A DRAINING THREAD, because there is nowhere else to do it: the parent spends
+    the whole evaluation inside `pool.map`, and consuming the queue from that
+    loop only lets a count through when a walk has already finished. That is
+    what this replaces -- four steps that all landed within seconds of the end,
+    so a ten-minute score showed 0% for nine and a half minutes of it and a hung
+    one looked identical.
+
+    Nothing here may fail the evaluation: it describes the walk, it is not the
+    walk.
+    """
+
+    def __init__(self, publish: Callable[[int, int], None] | None, total: int) -> None:
+        self._publish = publish
+        self._total = total
+        self._manager = mp.Manager() if publish is not None else None
+        self.queue = self._manager.Queue() if self._manager is not None else None
+        self._done: dict[int, int] = {}
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._drain, name="br-progress", daemon=True)
+
+    def __enter__(self) -> _WalkReports:
+        if self._publish is not None:
+            self._thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=REPORT_INTERVAL_SECONDS * 2)
+        if self._manager is not None:
+            self._manager.shutdown()
+
+    def _drain(self) -> None:
+        publish, inbox = self._publish, self.queue
+        if publish is None or inbox is None:  # the thread is not started without both
+            return
+        while not self._stop.is_set():
+            try:
+                walk, done = inbox.get(timeout=REPORT_INTERVAL_SECONDS)
+            except Exception:  # noqa: BLE001 -- an empty queue is the normal case
+                continue
+            # Each walk reports its own running count, so this is a replace and
+            # never an add: a message that arrives twice cannot inflate the bar.
+            self._done[walk] = done
+            with contextlib.suppress(Exception):
+                publish(min(sum(self._done.values()), self._total), self._total)
+
+
 def _walk_worker(
     factory: Callable[[], ScorableBlueprint],
     config: PublicBRConfig,
     starting_stack: int,
     br_seat: int,
     button: int,
+    reports: Any = None,
+    walk: int = 0,
+    branches_per_walk: int = 0,
 ) -> tuple[float, int, float, float, int]:
     """One (responder seat, button) walk, in its own process.
 
@@ -547,11 +658,31 @@ def _walk_worker(
     Returns the raw parts so the parent aggregates exactly as the serial path
     does -- deriving the seat value here would duplicate that arithmetic in two
     places and let the two drift.
+
+    ``reports`` is a MANAGER queue, and that is not incidental: a shared ctypes
+    array -- what the trainer uses -- cannot cross a `ProcessPoolExecutor`,
+    which pickles its arguments (measured: "objects should only be shared
+    between processes through inheritance").
     """
     # Spawned: logging config does not inherit, and factory() rebuilds the
     # blueprint, which logs.
     configure_logging()
-    engine = PublicTreeBestResponse(factory(), config, starting_stack=starting_stack)
+    tell = None
+    if reports is not None:
+
+        def tell(done: int, _total: int) -> None:
+            # The walk's OWN count, keyed by walk. The parent sums the four,
+            # because only it knows there are four.
+            with contextlib.suppress(Exception):
+                reports.put((walk, done))
+
+    engine = PublicTreeBestResponse(
+        factory(),
+        config,
+        starting_stack=starting_stack,
+        on_branch=tell,
+        branches_per_walk=branches_per_walk,
+    )
     return engine.run_walk(br_seat, button)
 
 
