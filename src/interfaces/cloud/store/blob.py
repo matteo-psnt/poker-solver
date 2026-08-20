@@ -20,10 +20,16 @@ from src.shared.cloudtask.kinds import TaskName
 
 CONTAINER = "checkpoints"
 
-# The ops that PUBLISH a rung. Everything else fetches one, and a fetch has no
+# The ops that PUT a rung. Everything else fetches one, and a fetch has no
 # business holding a credential that can overwrite what it read. Kept beside the
 # minting rather than at the call site so there is one list of who may write.
-WRITES_CHECKPOINTS = frozenset({TaskName.TRAIN, TaskName.TRAIN_PCS})
+#
+# MIGRATE_CHECKPOINTS is here because moving the history IS writing rungs -- it
+# was omitted, handed a read-only SAS, and every upload came back 403
+# `AuthorizationPermissionMismatch`. The scoping worked exactly as designed;
+# the list was wrong. A task that writes checkpoints must be named here, and
+# `test_every_kind_is_classified` now fails if a new one is not.
+WRITES_CHECKPOINTS = frozenset({TaskName.TRAIN, TaskName.TRAIN_PCS, TaskName.MIGRATE_CHECKPOINTS})
 
 # Longer than any job, not any task. A ladder score fans out 30 rungs behind one
 # dispatch and the last of them can start hours after the first; a SAS that
