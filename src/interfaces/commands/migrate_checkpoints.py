@@ -18,6 +18,7 @@ verification and decides otherwise.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
@@ -168,7 +169,20 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 print(f"  {snapshot}: uploading...", flush=True)
                 payload.bytes_uploaded += _upload(sas, run_dir, snapshot, work)
             except Exception as error:  # noqa: BLE001 -- one bad rung must not end the sweep
-                payload.failures.append(f"{run_dir.name}/{snapshot}: {type(error).__name__}")
+                # THE MESSAGE, AND IMMEDIATELY. Recording only the exception
+                # CLASS threw away the one thing that identifies the fault, and
+                # holding it until `render` meant a task that hit its ceiling
+                # first took every failure with it. An HTTP error also carries
+                # the service's own explanation in its body, which is the
+                # difference between "HTTPError" and knowing which header the
+                # service objected to.
+                detail = f"{type(error).__name__}: {error}"
+                body = getattr(error, "read", None)
+                if callable(body):
+                    with contextlib.suppress(Exception):
+                        detail += f" | {body().decode('utf-8', 'replace')[:400]}"
+                print(f"  {snapshot}: FAILED {detail}", flush=True)
+                payload.failures.append(f"{run_dir.name}/{snapshot}: {detail}")
                 continue
             payload.rungs_uploaded += 1
     return payload
