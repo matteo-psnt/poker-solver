@@ -9,32 +9,33 @@ Parallel experiment lines. This is the source of truth for the procedure —
 `fresh-worktree-setup-gotchas` in memory points here and carries nothing else.
 **Correct this file when a step goes void; do not re-record it in memory.**
 
-## Create — base ref first, or you silently lose work
+## Create
 
-`worktree.baseRef` defaults to `origin/main`, and local `main` runs far ahead of
-it. `EnterWorktree({name})` branches from the stale ref and says nothing. It has
-bitten at least seven sessions: 11, 25, 29, 68, ~100 and 129 commits dropped —
-one worktree had no `console/` in it at all.
+`.claude/settings.json` sets `worktree.baseRef: "head"`, so `EnterWorktree`
+branches from local `HEAD` — local `main` runs far ahead of `origin/main`, and
+the default base once dropped up to 129 commits without a word. Either works:
 
-Always branch from local `HEAD` explicitly, then enter by path:
+    EnterWorktree({name: "<name>"})          # branch worktree-<name>, from HEAD
+    git worktree add -b wt-<name> .claude/worktrees/<name> HEAD   # by hand
 
-    git worktree add -b wt-<name> .claude/worktrees/<name> HEAD
-    # then EnterWorktree({path: ".claude/worktrees/<name>"})
+Whichever you used, `git log --oneline main -1` inside the worktree must show
+main's tip. If it does not, `git reset --hard main` — before editing anything.
 
-Already used `EnterWorktree({name})`? Run `git log --oneline main -3` first
-thing. A clean, just-created worktree recovers with `git reset --hard main` —
-but only before you have edited anything.
+## Then the links, or the tools quietly do the wrong thing
 
-## Then three links, or the tools quietly do the wrong thing
-
-`.claude/` is gitignored, and so is half of each Terraform state, so a fresh
-worktree lacks all of it. From inside the worktree, with `P` = primary checkout:
+`.claude/skills/*` is gitignored except this skill, and half of
+each Terraform state is too, so a fresh worktree lacks them. From inside the
+worktree, with `P` = primary checkout:
 
     uv sync --group dev
 
-    # 1. project skills — a worktree has NONE until linked.
-    #    Never symlink `.claude` itself: it contains worktrees/ and would recurse.
-    mkdir -p .claude && ln -sfn "$P/.claude/skills" .claude/skills
+    # 1. the untracked skills, ONE LINK EACH. `.claude/skills` already exists
+    #    (worktree/ is tracked), so linking the directory itself
+    #    nests a `skills/skills` link and loads nothing — every worktree made
+    #    before 09-03 was missing these.
+    for s in coding-standards testing tooling; do
+      ln -sfn "$P/.claude/skills/$s" ".claude/skills/$s"
+    done
 
     # 2. BOTH Terraform states. Initialising only infra/ leaves the identical
     #    error, because config.py reads infra/store too.
@@ -52,9 +53,6 @@ Only if you need `npm run gen:types`: `ln -sfn "$P/console/node_modules"
 console/node_modules`. `.gitignore` has `console/node_modules/` with a trailing
 slash, so it matches a directory and **not** this symlink — it shows up
 untracked. Delete the link once types are regenerated.
-
-The `data/combo_abstraction` symlink step is **void**: `data/` is deleted on
-purpose and caches resolve to `~/.cache/poker-solver`, shared across worktrees.
 
 ## Establish the baseline before editing
 
@@ -79,7 +77,7 @@ not filename.
 tree, which then shows the whole changeset as uncommitted deletions.
 
     # ExitWorktree({action: "keep"}), then from the primary checkout:
-    git merge --ff-only wt-<name>
+    git merge --ff-only wt-<name>        # or worktree-<name>
 
 Never `git add -A` — a hook blocks it, because parallel sessions share the
 primary checkout and it has swept their work into a commit three times.
@@ -92,5 +90,6 @@ A worktree created with `git worktree add` is not session-owned, so
     # ExitWorktree({action: "keep"}), then:
     git worktree remove .claude/worktrees/<name>
     git branch -d wt-<name>          # -d, so git refuses if anything is unmerged
+    # (an EnterWorktree one: ExitWorktree({action: "remove"}) does both)
 
 Confirm "fully merged" with `git merge-base --is-ancestor`, not `git cherry`.
