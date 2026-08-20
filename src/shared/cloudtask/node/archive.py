@@ -480,11 +480,24 @@ def fetch_snapshot(source: Path, destination: Path, name: str, sas: str = "") ->
     to rung 10000000: "fetched" in one second, then a read error. Node-local
     state is never evidence of a complete copy.
     """
-    target = destination / name
-    shutil.rmtree(target, ignore_errors=True)
-    if sas and blobstore.get_rung(sas, source.name, name, destination):
+    stored = records.object_name(name)
+    destination.mkdir(parents=True, exist_ok=True)
+    # BOTH SPELLINGS, not merely the one asked for. The container holds the
+    # object and the share may still hold the directory it was converted from,
+    # so a node that fetched under one name can be holding the other from a
+    # cancelled task -- and a loader that finds the stale one loads a rung this
+    # fetch did not fetch.
+    for stale in {name, stored}:
+        path = destination / stale
+        shutil.rmtree(path, ignore_errors=True)
+        path.unlink(missing_ok=True)
+    if sas and blobstore.get_rung(sas, source.name, stored, destination):
         return
-    copy_tree(source / name, target, update=False)
+    published = source / name
+    if published.is_file():
+        copy_file(published, destination / name)
+        return
+    copy_tree(published, destination / name, update=False)
 
 
 def require_complete(source: Path, name: str, sas: str = "") -> None:
@@ -502,9 +515,9 @@ def require_complete(source: Path, name: str, sas: str = "") -> None:
     # IN THE CONTAINER IS COMPLETE, with nothing else to check. One rung is one
     # atomically-committed blob: it is either there whole or not there, so the
     # marker this function exists to demand has no counterpart and needs none.
-    if sas and blobstore.exists(sas, source.name, name):
+    if sas and blobstore.exists(sas, source.name, records.object_name(name)):
         return
-    if not (source / name).is_dir():
+    if not (source / name).exists():
         raise FetchRefusedError(f"the manifest names {name} but it is not on the share")
     if not (source / marker_for(name)).exists():
         raise FetchRefusedError(

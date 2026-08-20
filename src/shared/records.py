@@ -60,10 +60,12 @@ def object_name(snapshot: str) -> str:
     """The name a rung is STORED under, whatever a manifest happens to call it.
 
     `static-100.zarr` and `static-100.ckpt.zst` both name one rung; only the
-    second is a thing any store now holds. Migration converts the bytes and a
-    manifest written before it still spells the old name, so the two spellings
-    coexist until every manifest is repointed -- and the mapping between them
-    must exist exactly once, because the sweep that writes the object and the
+    second is a thing the container holds. A manifest written before the
+    migration still spells the old name and is never rewritten -- repointing
+    would mutate 300+ manifests on the durable share and destroy the share
+    fallback for exactly the runs whose only other copy is the container. So
+    the two spellings coexist permanently, and the mapping between them exists
+    HERE and nowhere else, because the sweep that writes the object and the
     check that looks for it have to agree or the object is unreachable. They
     did not agree: 1,081 rungs were uploaded that no reader could resolve.
 

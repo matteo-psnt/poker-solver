@@ -312,8 +312,17 @@ def _open_snapshot(
     directory every rung published before the format changed, and that half
     goes when the last of them has been converted -- it is migration
     scaffolding, not a second supported format.
+
+    THE MANIFEST'S OWN SPELLING FIRST, then the object it converts to. A
+    manifest written before the migration names the directory while a fetch
+    from the container brings down the object, and only the fallback makes that
+    rung loadable. Preferring the object would read a `.ckpt.zst` in favour of
+    the `.zarr` the manifest actually names; `fetch_snapshot` is what keeps a
+    stale copy of the other spelling from sitting there to be picked up.
     """
     path = Path(checkpoint_dir) / entry["zarr"]
+    if not path.exists():
+        path = Path(checkpoint_dir) / records.object_name(entry["zarr"])
     if path.name.endswith(snapshot_format.SUFFIX):
         arrays, attrs = snapshot_format.read_snapshot(path, names)
     else:
