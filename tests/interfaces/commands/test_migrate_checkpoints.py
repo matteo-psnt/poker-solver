@@ -63,9 +63,7 @@ def _run(share, monkeypatch, **over):
     monkeypatch.setattr(
         blobstore, "put_rung", lambda _s, _r, _n, path: (seen.append(Path(path)), 4096)[1]
     )
-    args = argparse.Namespace(
-        share=str(share), runs=None, limit=0, verify=False, recover_tars=False, **over
-    )
+    args = argparse.Namespace(share=str(share), runs=None, limit=0, verify=False, **over)
     return migrate_checkpoints.run(args), seen
 
 
@@ -93,9 +91,7 @@ class TestItConvertsRatherThanCopies:
 
         monkeypatch.setattr(blobstore, "put_rung", _put)
         migrate_checkpoints.run(
-            argparse.Namespace(
-                share=str(share), runs=None, limit=0, verify=False, recover_tars=False
-            )
+            argparse.Namespace(share=str(share), runs=None, limit=0, verify=False)
         )
         arrays, attrs = snapshot_format.read_snapshot(kept["at"])
         for name, original in ARRAYS.items():
@@ -144,7 +140,7 @@ def _header(body: bytes) -> bytes:
 
 
 def _args(share, **over):
-    base = {"share": str(share), "runs": None, "limit": 0, "verify": False, "recover_tars": False}
+    base = {"share": str(share), "runs": None, "limit": 0, "verify": False}
     return argparse.Namespace(**(base | over))
 
 
@@ -170,15 +166,6 @@ class TestTheGateSeesWhatIsNotOnTheShare:
     was one confirmation away from deleting the only other copy.
     """
 
-    def test_a_rung_with_no_share_bytes_but_a_tar_is_recoverable(self, stranded, monkeypatch):
-        import src.shared.cloudtask.node.blobstore as blobstore
-
-        monkeypatch.setattr(blobstore, "exists", lambda _s, _r, name: name.endswith(".tar"))
-        payload = migrate_checkpoints.run(_args(stranded, verify=True))
-
-        assert payload.recoverable == ["run-b/static-100.zarr"]
-        assert payload.missing == [], "it is not on the share; a sweep cannot move it"
-
     def test_a_rung_with_no_bytes_at_all_is_a_phantom_and_blocks_nothing(
         self, stranded, monkeypatch, capsys
     ):
@@ -195,20 +182,6 @@ class TestTheGateSeesWhatIsNotOnTheShare:
 
         assert payload.phantom == ["run-b/static-100.zarr"]
         out = capsys.readouterr().out
-        assert "SHARE: every rung it holds is in the container" in out
-
-    def test_a_rung_only_a_tar_holds_refuses_the_tar_deletion_alone(
-        self, stranded, monkeypatch, capsys
-    ):
-        """The two deletions are gated on different things: the share can be
-        safe while the tars are not."""
-        import src.shared.cloudtask.node.blobstore as blobstore
-
-        monkeypatch.setattr(blobstore, "exists", lambda _s, _r, name: name.endswith(".tar"))
-        migrate_checkpoints.render(migrate_checkpoints.run(_args(stranded, verify=True)))
-
-        out = capsys.readouterr().out
-        assert "TARS:  DO NOT DELETE" in out
         assert "SHARE: every rung it holds is in the container" in out
 
     def test_a_rung_the_share_holds_and_the_container_lacks_refuses_the_share(
@@ -254,49 +227,3 @@ class TestPresentIsNotTheSameAsReadable:
 
         assert payload.unreadable, "a truncated object passed as present"
         assert payload.rungs_already_there == 0
-
-
-class TestRecoveringARungThatOnlyExistsAsATar:
-    def test_the_arrays_survive_the_tar_and_come_back_identical(
-        self, stranded, monkeypatch, tmp_path
-    ):
-        """313 rungs across six production runs have no other copy, so this
-        crossing is the only thing standing between them and being lost."""
-        import tarfile
-
-        import zarr
-
-        import src.shared.cloudtask.node.blobstore as blobstore
-
-        source = tmp_path / "src" / "static-100.zarr"
-        group = zarr.open(zarr.DirectoryStore(str(source)), mode="w")
-        for name, array in ARRAYS.items():
-            group.create_dataset(name, data=array, dtype=array.dtype)
-        group.attrs["fingerprint"] = "cafe"
-        tar_path = tmp_path / "rung.tar"
-        with tarfile.open(tar_path, "w") as bundle:
-            bundle.add(source, arcname="static-100.zarr")
-
-        def _get(_s, _r, name, destination):
-            Path(destination).mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(tar_path, Path(destination) / name)
-            return True
-
-        kept: dict[str, Path] = {}
-
-        def _put(_s, _r, _n, path):
-            kept["at"] = tmp_path / "kept.ckpt.zst"
-            shutil.copyfile(path, kept["at"])
-            return Path(path).stat().st_size
-
-        monkeypatch.setattr(blobstore, "exists", lambda _s, _r, name: name.endswith(".tar"))
-        monkeypatch.setattr(blobstore, "get_rung", _get)
-        monkeypatch.setattr(blobstore, "put_rung", _put)
-
-        payload = migrate_checkpoints.run(_args(stranded, recover_tars=True))
-
-        assert payload.rungs_uploaded == 1
-        arrays, attrs = snapshot_format.read_snapshot(kept["at"])
-        for name, expected in ARRAYS.items():
-            assert np.array_equal(arrays[name], expected), name
-        assert attrs["fingerprint"] == "cafe", "provenance must survive the crossing"
