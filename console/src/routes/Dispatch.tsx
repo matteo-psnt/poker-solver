@@ -118,9 +118,9 @@ function Train() {
         </Field>
         <Field
           label="kernel"
-          hint="Blank is scalar MCCFR. pcs = vector kernel on a sampled board per iteration; board-free = bucket-transition vector kernel."
+          hint="Blank is pcs, the vector kernel on a sampled board per iteration. scalar = external-sampling MCCFR, the smoke test and the frozen baselines' lineage."
         >
-          <Select value={kernel} onChange={setKernel} options={["scalar", "pcs", "board-free"]} />
+          <Select value={kernel} onChange={setKernel} options={["pcs", "scalar"]} />
         </Field>
         <Field
           label="workers"
