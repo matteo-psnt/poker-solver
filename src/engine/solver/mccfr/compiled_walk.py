@@ -591,6 +591,20 @@ class CompiledContext:
         "street_offsets",
     )
 
+    @classmethod
+    def for_abstraction(cls, tree, bucketer, deck) -> CompiledContext | None:
+        """A context, or None when the abstraction cannot supply the arrays.
+
+        The kernel reads the artifact's board ids, bucket matrices and column
+        map directly. Anything that only implements `get_bucket` -- the
+        small-game harnesses, every unit-test stand-in -- cannot be compiled
+        against, and the caller falls back.
+        """
+        needed = ("_board_ids", "_buckets", "_hand_id_to_col", "_sentinels")
+        if not all(hasattr(bucketer, name) for name in needed):
+            return None
+        return cls(tree, bucketer, deck)
+
     def __init__(self, tree, bucketer, deck):
         self.arrays = WalkArrays(tree)
         self.deck_rank = np.array([c.rank_eval7() for c in deck], dtype=np.int64)
