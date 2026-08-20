@@ -102,7 +102,9 @@ def test_the_compiled_kernel_is_bit_identical_to_the_tree_walk():
         values = []
         for i in range(iterations):
             solver.iteration = i
-            values.append(run_iteration(solver, context, i) if compiled else solver.train_iteration())
+            values.append(
+                run_iteration(solver, context, i) if compiled else solver.train_iteration()
+            )
         arrays = {name: getattr(storage, name).copy() for name in ARRAYS}
         return arrays, values, (random.random(), np.random.random())
 
