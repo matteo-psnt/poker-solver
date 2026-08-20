@@ -177,6 +177,18 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = 
     failed = False
 
     for child in children:
+        if child.is_file() and is_snapshot(child.name):
+            # ONE FILE PER RUNG since the format changed. With a SAS the bytes
+            # go to the container and only the marker lands here; without one
+            # this is the old behaviour with a file where a directory was.
+            marker = destination / marker_for(child.name)
+            if marker.exists():
+                continue
+            if sas or _copy_one(child, destination / child.name, log):
+                _touch(marker)
+            else:
+                failed = True
+            continue
         if not child.is_dir():
             continue
         if not is_snapshot(child.name):
@@ -191,21 +203,24 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = 
         # measured at 6.6 minutes re-uploading 809 MB already on the share.
         if marker.exists():
             continue
-        if sas:
-            # THE BYTES GO TO THE CONTAINER, and the marker records that this
-            # rung is complete somewhere. `_rungs_landed` below checks the
-            # marker rather than the directory for exactly this case.
-            _touch(marker)
-            continue
+        # A DIRECTORY SNAPSHOT STILL GOES TO THE SHARE, SAS or not. It is a
+        # rung in the format that came before `.ckpt.zst`, and the container
+        # only takes files -- `publish_rungs_to_blob` skips directories,
+        # because converting one needs `zarr` and this module is imported
+        # before `uv sync`. Skipping the copy here on the strength of a SAS
+        # marked such a rung complete and wrote it NOWHERE.
         _unlink(marker)
         if _publish_snapshot(child, destination / child.name, log):
             _touch(marker)
         else:
             failed = True
 
-    # Loose files -- .run.json, metrics.jsonl, result json -- manifests excluded.
+    # Loose files -- .run.json, metrics.jsonl, result json -- manifests excluded,
+    # and SNAPSHOTS excluded: a snapshot is a file now, the branch above has
+    # already decided where its bytes go, and this pass would copy it to the
+    # share regardless of that decision.
     for child in children:
-        if child.is_file() and child.name not in MANIFESTS:
+        if child.is_file() and child.name not in MANIFESTS and not is_snapshot(child.name):
             failed |= not _copy_one(child, destination / child.name, log)
 
     if failed:
@@ -252,7 +267,12 @@ def publish_rungs_to_blob(run_dir: Path, run_id: str, sas: str, log: Log = _quie
         return 0
     landed = 0
     for child in sorted(run_dir.iterdir()):
-        if not child.is_dir() or not is_snapshot(child.name):
+        # A snapshot is a FILE now -- the `.ckpt.zst` the trainer wrote. The
+        # directory form is a rung published before the format changed, and the
+        # node never produces one, so it is not uploaded here: `migrate-
+        # checkpoints` converts those, because converting needs zarr and this
+        # module is imported before `uv sync`.
+        if not child.is_file() or not is_snapshot(child.name):
             continue
         try:
             if blobstore.exists(sas, run_id, child.name):

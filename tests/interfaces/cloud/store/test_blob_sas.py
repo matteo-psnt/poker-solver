@@ -103,9 +103,11 @@ class TestTheUrlItBuilds:
         the blob name in BEFORE the query."""
         from src.shared.cloudtask.node import blobstore
 
-        url = blobstore.rung_uri(blob.container_sas(ACCOUNT, KEY, write=True), "run-a", "s.zarr")
+        url = blobstore.rung_uri(
+            blob.container_sas(ACCOUNT, KEY, write=True), "run-a", "s.ckpt.zst"
+        )
         head, _, query = url.partition("?")
-        assert head.endswith("/checkpoints/run-a/s.zarr.tar")
+        assert head.endswith("/checkpoints/run-a/s.ckpt.zst")
         assert "sig=" in query
 
 

@@ -10,22 +10,31 @@ whole gate was green, because nothing asserted WHERE the bytes were read from.
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from src.engine.solver.storage import snapshot_format
 from src.interfaces.commands import migrate_checkpoints
 from src.shared.cloudtask.node import archive
+
+ARRAYS = {"regrets": np.arange(64, dtype=np.float32), "visited": np.ones(16, dtype=np.uint8)}
 
 
 @pytest.fixture
 def share(tmp_path, monkeypatch):
-    """A share holding one marked rung, and a node-local work directory."""
+    """A share holding one marked ZARR rung -- what the migration converts."""
+    import zarr
+
     root = tmp_path / "share" / "archive" / "run-a"
-    rung = root / "static-100.zarr"
-    (rung / "c").mkdir(parents=True)
-    (rung / ".zarray").write_text("{}")
-    (rung / "c" / "0").write_bytes(b"\x01" * 64)
+    root.mkdir(parents=True)
+    group = zarr.open(zarr.DirectoryStore(str(root / "static-100.zarr")), mode="w")
+    for name, array in ARRAYS.items():
+        group.create_dataset(name, data=array, dtype=array.dtype)
+    group.attrs["iteration"] = 100
+    group.attrs["fingerprint"] = "cafe"
     (root / archive.marker_for("static-100.zarr")).write_text("")
     monkeypatch.setenv("POKER_SOLVER_CHECKPOINT_SAS", "https://a.blob.core.windows.net/c?sig=x")
     monkeypatch.setenv("RUN_WORK_DIR", str(tmp_path / "work"))
@@ -50,37 +59,47 @@ def _run(share, monkeypatch, **over):
     return migrate_checkpoints.run(args), seen
 
 
-class TestItUploadsFromStagingNotTheShare:
-    def test_the_path_handed_to_put_rung_is_not_on_the_share(self, share, monkeypatch):
-        """THE REGRESSION. Tarring straight off the share walks ~5,500 chunk
-        files serially over SMB -- more than eight minutes for one rung, and
-        three sweeps died proving it."""
+class TestItConvertsRatherThanCopies:
+    """The share holds zarr and the container holds the format that replaced
+    it, so migrating is a re-encode -- not a copy, and not a tar of a copy."""
+
+    def test_the_object_is_named_for_the_new_format(self, share, monkeypatch):
         _payload, seen = _run(share, monkeypatch)
         assert seen, "nothing was uploaded at all"
-        uploaded = seen[0]
-        assert share not in uploaded.parents, f"tarred straight off the share: {uploaded}"
+        assert seen[0].name == "static-100.ckpt.zst"
 
-    def test_it_is_under_the_node_work_directory(self, share, monkeypatch, tmp_path):
-        _payload, seen = _run(share, monkeypatch)
-        assert (tmp_path / "work") in seen[0].parents
-
-    def test_the_staged_copy_is_the_same_tree(self, share, monkeypatch):
-        """Staging must reproduce the rung, or the object is wrong in a way
-        nothing downstream can see until a load fails."""
-        captured: dict[str, list[str]] = {}
+    def test_what_is_uploaded_reads_back_as_the_same_arrays(self, share, monkeypatch, tmp_path):
+        """A conversion that changes a value is a run trained on a different
+        number, and nothing downstream could see it."""
+        kept: dict[str, Path] = {}
         import src.shared.cloudtask.node.blobstore as blobstore
 
         monkeypatch.setattr(blobstore, "exists", lambda *_a: False)
 
         def _put(_s, _r, _n, path):
-            captured["names"] = sorted(p.name for p in Path(path).rglob("*") if p.is_file())
-            return 4096
+            kept["at"] = Path(tmp_path / "kept.ckpt.zst")
+            shutil.copyfile(path, kept["at"])
+            return Path(path).stat().st_size
 
         monkeypatch.setattr(blobstore, "put_rung", _put)
         migrate_checkpoints.run(
             argparse.Namespace(share=str(share), runs=None, limit=0, verify=False)
         )
-        assert captured["names"] == [".zarray", "0"]
+        arrays, attrs = snapshot_format.read_snapshot(kept["at"])
+        for name, original in ARRAYS.items():
+            assert np.array_equal(arrays[name], original), name
+        assert attrs["fingerprint"] == "cafe", "the tree identity must survive the conversion"
+
+    def test_the_path_handed_to_put_rung_is_not_on_the_share(self, share, monkeypatch):
+        """Reading a rung straight off the share walks ~5,500 chunk files
+        serially over SMB -- more than eight minutes for one, and three sweeps
+        died proving it."""
+        _payload, seen = _run(share, monkeypatch)
+        assert share not in seen[0].parents, f"read straight off the share: {seen[0]}"
+
+    def test_it_is_under_the_node_work_directory(self, share, monkeypatch, tmp_path):
+        _payload, seen = _run(share, monkeypatch)
+        assert (tmp_path / "work") in seen[0].parents
 
     def test_staging_is_cleaned_up(self, share, monkeypatch, tmp_path):
         """A node runs many rungs and its disk is 256 GB; leaving each staged
