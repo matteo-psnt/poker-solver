@@ -552,23 +552,36 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: 
     return current
 
 
+def manifest_entries(source: Path) -> list[tuple[int, str]]:
+    """Every (iteration, snapshot name) the manifest CLAIMS, ascending.
+
+    The claim is what a fetch resolves and what a migration has to reproduce.
+    Listing the share's directories answers a different question and cannot see
+    a rung whose bytes are gone: six runs hold 316 marked rungs with no
+    directory at all, and a directory-driven check reported nothing to do.
+    """
+    manifest = read_manifest(source / records.STATIC_CHECKPOINT)
+    if not manifest:
+        return []
+    entries = [*manifest.get("retained", [])]
+    if manifest.get("zarr"):
+        entries.append({"iteration": manifest.get("iteration"), "zarr": manifest["zarr"]})
+    claimed: dict[int, str] = {}
+    for entry in entries:
+        iteration, name = entry.get("iteration"), entry.get("zarr")
+        if iteration is None or not name:
+            continue
+        claimed[int(iteration)] = str(name)
+    return sorted(claimed.items())
+
+
 def _ladder_names(source: Path) -> dict[str, str]:
     """Iteration (as a string) -> the snapshot name the manifest gives it.
 
     Keyed on the string because that is what a `--at` flag carries; an int key
     would make every caller convert, and one of them would forget.
     """
-    manifest = read_manifest(source / records.STATIC_CHECKPOINT)
-    if not manifest:
-        return {}
-    entries = [*manifest.get("retained", [])]
-    if manifest.get("zarr"):
-        entries.append({"iteration": manifest.get("iteration"), "zarr": manifest["zarr"]})
-    return {
-        str(entry["iteration"]): str(entry["zarr"])
-        for entry in entries
-        if entry.get("iteration") is not None and entry.get("zarr")
-    }
+    return {str(iteration): name for iteration, name in manifest_entries(source)}
 
 
 def fetch_for_evaluation(

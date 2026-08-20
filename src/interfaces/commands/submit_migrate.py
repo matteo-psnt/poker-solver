@@ -45,6 +45,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Stop after this many rungs. Useful for a first, small, provable sweep.",
     )
     parser.add_argument(
+        "--recover-tars",
+        action="store_true",
+        help="Convert rungs that exist only as .tar objects; skip everything the share holds.",
+    )
+    parser.add_argument(
         "--verify",
         action="store_true",
         help="Upload nothing; report which published rungs the container lacks.",
@@ -64,6 +69,8 @@ def _flags(args: argparse.Namespace) -> tuple[str, ...]:
     flags: list[str] = []
     if args.verify:
         flags.append("--verify")
+    if args.recover_tars:
+        flags.append("--recover-tars")
     if args.limit:
         flags += ["--limit", str(args.limit)]
     if args.runs:

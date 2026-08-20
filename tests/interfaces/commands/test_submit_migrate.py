@@ -8,7 +8,9 @@ from src.interfaces.commands import migrate_checkpoints, submit_migrate
 
 
 def _flags(**over):
-    args = argparse.Namespace(runs=None, limit=0, verify=False, pool=None, timeout="6h")
+    args = argparse.Namespace(
+        runs=None, limit=0, verify=False, recover_tars=False, pool=None, timeout="6h"
+    )
     for key, value in over.items():
         setattr(args, key, value)
     return submit_migrate._flags(args)
@@ -38,6 +40,22 @@ class TestTheFlagsReachTheSweepIntact:
         """It existed on the sweep and had no way to reach the node: the
         submitter never emitted it, so `--verify` silently ran a real sweep."""
         assert _parse(_flags(verify=True)).verify is True
+
+    def test_recover_tars_survives(self):
+        assert _parse(_flags(recover_tars=True)).recover_tars is True
+
+    def test_every_flag_the_sweep_takes_can_be_asked_for(self):
+        """The general form of the `--verify` gap: a flag declared on the node
+        side that no dispatch can emit is a capability that does not exist.
+        `--share` is the exception -- the node's own mount, never dispatched."""
+        sweep = argparse.ArgumentParser()
+        migrate_checkpoints.add_arguments(sweep)
+        submitter = argparse.ArgumentParser()
+        submit_migrate.add_arguments(submitter)
+
+        emitted = {a.dest for a in submitter._actions}
+        unreachable = {a.dest for a in sweep._actions} - emitted - {"help", "share"}
+        assert not unreachable, f"the sweep accepts flags nothing can send: {sorted(unreachable)}"
 
     def test_both_together(self):
         parsed = _parse(_flags(runs=["run-a", "run-b"], limit=3))
