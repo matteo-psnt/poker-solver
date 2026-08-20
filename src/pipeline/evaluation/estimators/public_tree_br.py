@@ -56,7 +56,6 @@ from src.engine.solver.infoset.encoder import get_spr_bucket
 from src.engine.solver.infoset.index import preflop_hand_index
 from src.engine.solver.policy.lookup import blueprint_action_distribution
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
-from src.shared.cache import cached_json, store_json
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
@@ -209,15 +208,9 @@ class PublicTreeBestResponse:
         starting_stack: int,
         blueprint_factory: Callable[[], ScorableBlueprint] | None = None,
         on_branch: Callable[[int, int], None] | None = None,
-        branches_per_walk: int = 0,
     ):
         self._on_branch = on_branch
         self._branches_done = 0
-        # Given when a previous evaluation measured it. That is the ONLY way a
-        # walk can report against a denominator before one walk has finished,
-        # and under `--workers` the four finish together -- so without it the
-        # bar's first movement is also its last.
-        self._branches_per_walk = branches_per_walk
         self._policy_source = blueprint.policy_source
         self._factory = blueprint_factory
         self._rules = blueprint.rules
@@ -234,6 +227,8 @@ class PublicTreeBestResponse:
         self._nodes = 0
         self._decision_mass = 0.0
         self._missing_mass = 0.0
+        # Last, because it needs the rules, the action model and the board plan.
+        self._branches_per_walk = self._count_flop_deals()
 
     def evaluate(self) -> PublicBRResult:
         """Run all four (responder seat, button) walks and aggregate."""
@@ -248,7 +243,6 @@ class PublicTreeBestResponse:
             # Independent walks: same tree, disjoint responder/button, no shared
             # mutable state. Ordered results, so seat_results stays in the same
             # order the serial path produces.
-            self._branches_per_walk = self._branches_per_walk or self._remembered_walk_cost()
             with (
                 _WalkReports(self._on_branch, self.branch_total) as reports,
                 ProcessPoolExecutor(max_workers=min(self._config.num_workers, len(walks))) as pool,
@@ -265,28 +259,11 @@ class PublicTreeBestResponse:
                         [b for _, b in walks],
                         repeat(reports.queue),
                         range(len(walks)),
-                        repeat(self._branches_per_walk),
                     )
                 )
-            # What a walk MEASURED, which settles any remembered value.
-            self._branches_per_walk = parts[0][4]
-            self._branches_done = len(parts) * self._branches_per_walk
+            self._branches_done = sum(part[4] for part in parts)
         else:
-            parts = []
-            for br_seat, button in walks:
-                parts.append(self.run_walk(br_seat, button))
-                if self._branches_per_walk == 0:
-                    # The first walk has just told us what a walk costs. Publish
-                    # immediately at the 1-of-4 it has really reached, rather than
-                    # waiting for the next branch to carry the news.
-                    self._branches_per_walk = self._branches_done
-                    if self._on_branch is not None and self._branches_done:
-                        self._on_branch(self._branches_done, self.branch_total)
-
-        # EITHER path measures it, and a SERIAL evaluation teaching a later
-        # parallel one is the case that matters: only the parallel one is blind
-        # without it, because its four walks finish together.
-        self._remember_walk_cost(self._branches_per_walk)
+            parts = [self.run_walk(br_seat, button) for br_seat, button in walks]
 
         for (br_seat, button), (chips, nodes, decision, missing, _) in zip(
             walks, parts, strict=True
@@ -439,47 +416,42 @@ class PublicTreeBestResponse:
                     self._on_branch(self._branches_done, self.branch_total)
         return values
 
-    def _walk_cost_key(self) -> str:
-        """What a walk's branch count depends on, and nothing else.
+    def _flop_deals_below(self, state: GameState) -> int:
+        """Top-level flop branches in the tree below ``state``, walked structurally.
 
-        The top-level deal is reached once per preflop betting line that
-        survives to a flop -- a property of the ACTION abstraction -- and each
-        one iterates `num_flops`. Neither the blueprint's numbers nor the
-        turn/river sample can move it.
+        NOT `4 * num_flops`. The flop deal is reached once per preflop betting
+        line that survives to a flop, so the count per walk is a property of the
+        betting tree -- but it is a property this can READ, by recursing over
+        the same legal actions the walk does with no cards, no combos and no
+        policy. Counted UP FRONT, which is the only way the bar has a
+        denominator before a walk has finished: under `--workers` the four walks
+        that could measure it all finish together, so a bar that waits for one
+        is a bar that never draws.
+
+        Cheap because the board is empty throughout: it recurses over the
+        PREFLOP betting tree only and stops at the deal.
         """
-        return f"{self._action_model.get_config_hash()}|{self._config.num_flops}"
+        if state.board or state.is_terminal:
+            return 0
+        if len(state.board) < state.street.board_card_count:
+            return len(self._plan.deal_options(()))
+        return sum(
+            self._flop_deals_below(self._rules.apply_action(state, action))
+            for action in self._rules.get_legal_actions(state, self._action_model)
+        )
 
-    def _remembered_walk_cost(self) -> int:
-        """What a walk cost LAST time, if this tree has been walked before.
-
-        A cache and never a source of truth: the measured value replaces it at
-        the end of every evaluation, and a wrong one can only mis-draw a bar --
-        `done` is clamped to it, and the value being computed never reads it.
-        """
-        stored = cached_json("public_br_walk_cost", self._walk_cost_key(), WALK_COST_TTL_SECONDS)
-        remembered = (stored or {}).get("branches_per_walk")
-        return int(remembered) if isinstance(remembered, int) and remembered > 0 else 0
-
-    def _remember_walk_cost(self, branches: int) -> None:
-        if branches > 0:
-            store_json(
-                "public_br_walk_cost", self._walk_cost_key(), {"branches_per_walk": branches}
-            )
+    def _count_flop_deals(self) -> int:
+        """What one walk costs, from the root. Identical across the four walks:
+        they traverse the same public tree and differ only in whose values are
+        being maximised."""
+        root = self._rules.create_initial_state(
+            starting_stack=self._starting_stack, hole_cards=self._dummy_holes, button=0
+        )
+        return self._flop_deals_below(root)
 
     @property
     def branch_total(self) -> int:
-        """Top-level flop branches across the whole evaluation, or 0 until known.
-
-        NOT `4 * num_flops`. The flop deal is reached once per preflop betting
-        line that survives to a flop, not once per walk, so the count per walk is
-        a property of the betting tree and is not known without walking it.
-
-        It IS identical across the four (responder seat, button) walks -- they
-        traverse the same public tree and differ only in whose values are being
-        maximised -- so the first walk measures it and the remaining three are
-        predicted exactly. Zero while the first walk is still running, which the
-        reader renders as no bar, exactly as it did before any of this existed.
-        """
+        """Top-level flop branches across the whole evaluation."""
         return 4 * self._branches_per_walk
 
     def _opponent_values(
@@ -490,11 +462,24 @@ class PublicTreeBestResponse:
         self._missing_mass += float(opp_reach[missing].sum())
         values = np.zeros(NUM_COMBOS, dtype=np.float64)
         for a_idx, action in enumerate(legal):
+            child = self._rules.apply_action(state, action)
             child_reach = opp_reach * sigma[:, a_idx]
             if not child_reach.any():
+                # An action the blueprint never takes with ANY combo. The flop
+                # branches under it are work that will not happen, so they are
+                # DONE -- otherwise the denominator, which counts the tree and
+                # cannot know the policy, is one the bar can never reach.
+                self._skip_branches(self._flop_deals_below(child))
                 continue
-            values += self._walk(self._rules.apply_action(state, action), child_reach)
+            values += self._walk(child, child_reach)
         return values
+
+    def _skip_branches(self, branches: int) -> None:
+        if branches <= 0:
+            return
+        self._branches_done += branches
+        if self._on_branch is not None:
+            self._on_branch(self._branches_done, self.branch_total)
 
     def _policy_matrix(
         self, state: GameState, legal: tuple[Action, ...]
@@ -583,12 +568,6 @@ walks are done. Not a publish cadence: a message publishes as it arrives, and
 the walks emit one per top-level flop branch."""
 REPORT_INTERVAL_SECONDS = 1.0
 
-"""How long a remembered walk cost stays usable. Long, because what it depends
-on -- the action abstraction and `--br-flops` -- changes with a code release and
-not with time; and cheap to be wrong about, since the measured value replaces it
-at the end of every evaluation."""
-WALK_COST_TTL_SECONDS = 90 * 24 * 3600
-
 
 class _WalkReports:
     """Totals what the four walks report, while the parent is blocked on them.
@@ -649,7 +628,6 @@ def _walk_worker(
     button: int,
     reports: Any = None,
     walk: int = 0,
-    branches_per_walk: int = 0,
 ) -> tuple[float, int, float, float, int]:
     """One (responder seat, button) walk, in its own process.
 
@@ -681,7 +659,6 @@ def _walk_worker(
         config,
         starting_stack=starting_stack,
         on_branch=tell,
-        branches_per_walk=branches_per_walk,
     )
     return engine.run_walk(br_seat, button)
 
