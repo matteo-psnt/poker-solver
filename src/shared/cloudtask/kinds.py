@@ -366,6 +366,30 @@ class TaskKind(abc.ABC):
         return None
 
 
+def _iterations_done(plan: NodePlan, state: Mapping[str, object], unit: str) -> Progress | None:
+    """Iterations done against the target, for either trainer.
+
+    TWO sources, and the FURTHER ALONG of them wins. The trainer's own `done` is
+    the live one and the only one fine enough to watch: the manifest is written
+    per checkpoint, which for the scalar trainer is a million iterations -- a bar
+    with a step every six to thirty minutes, showing nothing at all until the
+    first one lands. The manifest is the floor, for the window before the
+    trainer's writer starts and for any task whose wrapper predates it.
+
+    Shared rather than inherited: the two kinds have nothing else in common, and
+    a base class holding one method would put the scalar trainer's `--workers`
+    contract one override away from the board-free kernel, which refuses it.
+    """
+    counts = [
+        float(value)
+        for value in (state.get("done"), state.get("iteration"))
+        if isinstance(value, int | float)
+    ]
+    if not counts or plan.to <= 0:
+        return None
+    return Progress(max(counts), float(plan.to), unit)
+
+
 class TrainTask(TaskKind):
     """Train a run to an ABSOLUTE iteration target."""
 
@@ -440,24 +464,7 @@ class TrainTask(TaskKind):
         return f"train ->{compact(int(target))}" if target.isdigit() and target != "0" else "train"
 
     def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:
-        """Iterations done against the target.
-
-        TWO sources, and the FURTHER ALONG of them wins. The trainer's own
-        `done` is the live one and the only one fine enough to watch: the
-        manifest is written per checkpoint, and at the default million
-        iterations a chunk that is a bar with a step every six to thirty
-        minutes, showing nothing at all until the first one lands. The manifest
-        is the floor, for the window before the trainer's writer starts and for
-        any task whose wrapper predates it.
-        """
-        counts = [
-            float(value)
-            for value in (state.get("done"), state.get("iteration"))
-            if isinstance(value, int | float)
-        ]
-        if not counts or plan.to <= 0:
-            return None
-        return Progress(max(counts), float(plan.to), self.unit)
+        return _iterations_done(plan, state, self.unit)
 
 
 class TrainVectorTask(TaskKind):
@@ -478,6 +485,10 @@ class TrainVectorTask(TaskKind):
 
     name = TaskName.TRAIN_VECTOR
     unit = "iterations"
+    """The SAME file as the scalar trainer's, and deliberately: one task runs on
+    a node, it counts the same thing against the same kind of target, and two
+    names for one shape is a second thing to keep true."""
+    progress_file = "train-progress.json"
 
     def validate(self, task: Any) -> None:
         if not task.config:
@@ -509,6 +520,8 @@ class TrainVectorTask(TaskKind):
                 argv += [flag, str(value)]
         if plan.dtype:
             argv += ["--dtype", plan.dtype]
+        if work := plan.progress_path:
+            argv += ["--progress-file", work]
         for flag, value in (
             ("--experiment", plan.experiment),
             ("--arm", plan.arm),
@@ -535,11 +548,9 @@ class TrainVectorTask(TaskKind):
         return "board-free"
 
     def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:
-        """Same manifest as the scalar trainer: it writes ordinary checkpoints."""
-        done = state.get("iteration")
-        if not isinstance(done, int | float) or plan.to <= 0:
-            return None
-        return Progress(float(done), float(plan.to), self.unit)
+        """Same shape as the scalar trainer: ordinary checkpoints, and a live
+        count between them."""
+        return _iterations_done(plan, state, self.unit)
 
 
 class EvaluateTask(TaskKind):
