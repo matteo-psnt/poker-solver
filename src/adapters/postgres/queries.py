@@ -171,6 +171,25 @@ def eval_records(engine: Any, run_id: str | None = None) -> list[dict[str, Any]]
         return [row[0] for row in connection.execute(_EVALS_FOR_RUN, {"run_id": run_id})]
 
 
+_SCORED = sa.text("""
+    SELECT run_id, checkpoint_iteration FROM evals WHERE checkpoint_iteration IS NOT NULL
+""")
+
+
+def scored_rungs(engine: Any) -> dict[str, set[int]]:
+    """Rungs an eval NAMES, per run. Deleting one makes its score unreproducible.
+
+    Two columns rather than the document, because the only caller asks whether a
+    rung may be deleted, not what it scored -- and that answer must not depend on
+    a payload shape.
+    """
+    found: dict[str, set[int]] = {}
+    with _read(engine) as connection:
+        for run_id, iteration in connection.execute(_SCORED):
+            found.setdefault(str(run_id), set()).add(int(iteration))
+    return found
+
+
 _LADDER = sa.text("""
     SELECT iteration FROM checkpoints WHERE run_id = :run_id ORDER BY iteration
 """)

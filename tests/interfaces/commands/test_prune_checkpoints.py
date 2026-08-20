@@ -64,6 +64,33 @@ class TestWhatItDrops:
         assert entry["drop"] == [300]
         assert entry["scored_kept"] == [100, 200]
 
+    def test_a_rung_scored_only_in_the_record_is_kept(self, published, monkeypatch):
+        """Scores stopped being written beside the run. The protection above
+        reads `evals/*.json`, so without this a run scored into the database
+        alone -- every run since -- has the rungs its numbers name deleted."""
+        monkeypatch.setattr(prune_checkpoints.connect, "engine_from_environment", lambda: object())
+        # The status still comes off `run.jsonl`, as it does for every other case
+        # here; patching the engine alone would hand `_is_terminal` a fake one.
+        monkeypatch.setattr(
+            prune_checkpoints.connect, "record_source_from_environment", lambda: None
+        )
+        monkeypatch.setattr(
+            prune_checkpoints.queries, "scored_rungs", lambda _: {"run-a": {100, 200}}
+        )
+        _run(published, "run-a", rungs=[100, 200, 300, 400, 500])
+        plan = _plan(published, keep=2)
+        entry = next(e for e in plan.plan if e["run"] == "run-a")
+        assert entry["drop"] == [300]
+        assert entry["scored_kept"] == [100, 200]
+
+    def test_apply_without_a_record_is_refused(self, published, monkeypatch):
+        """The record is the only place a score names its rung now, so applying
+        without one deletes blind rather than protecting."""
+        monkeypatch.setattr(prune_checkpoints.connect, "engine_from_environment", lambda: None)
+        _run(published, "run-a", rungs=[100, 200, 300])
+        with pytest.raises(CommandError, match="POKER_SOLVER_RECORD_DSN"):
+            _plan(published, keep=2, apply=True)
+
     def test_the_latest_rung_survives_keep_of_one(self, published):
         _run(published, "run-a", rungs=[100, 200, 300])
         plan = _plan(published, keep=1)
@@ -176,6 +203,13 @@ class TestTheOrphanSweep:
             f"{base}/static-999.zarr/c/0",
         }
         deleted = self._share(monkeypatch, set(files))
+        # `--apply` refuses without a record, since that is what protects a
+        # scored rung. This case is about the sweep, so give it an empty one.
+        monkeypatch.setattr(prune_checkpoints.connect, "engine_from_environment", lambda: object())
+        monkeypatch.setattr(
+            prune_checkpoints.connect, "record_source_from_environment", lambda: None
+        )
+        monkeypatch.setattr(prune_checkpoints.queries, "scored_rungs", lambda _: {})
 
         prune_checkpoints.COMMAND.invoke(keep=2, price=False, apply=True, runs=["run-a"])
 

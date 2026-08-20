@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from src.adapters.postgres import connect
+from src.adapters.postgres import connect, queries
 from src.interfaces.commands._base import Command, records_root, resolve_run_dir
 from src.interfaces.errors import CommandError
 from src.shared.cloudtask.node import archive
@@ -88,7 +88,13 @@ class PrunePlan(BaseModel):
 
 
 def _scored_iterations(run_dir: Path) -> set[int]:
-    """Rungs an eval document names. Deleting one makes its score unreproducible."""
+    """Rungs a LEGACY eval document names, for runs scored before the record.
+
+    `evals/*.json` stopped being written when the sink became the database, so
+    this answers for old runs only and the record answers for the rest. It was
+    the whole answer once, and a run scored only in the database lost the rungs
+    its scores name.
+    """
     found: set[int] = set()
     evals = run_dir / "evals"
     if not evals.is_dir():
@@ -155,6 +161,14 @@ def run(args: argparse.Namespace) -> PrunePlan:
     from src.interfaces.cloud.store import share  # noqa: PLC0415
 
     source = connect.record_source_from_environment()
+    engine = connect.engine_from_environment()
+    if engine is None and args.apply:
+        raise CommandError(
+            "no record configured: export POKER_SOLVER_RECORD_DSN before --apply. "
+            "Scored rungs are protected by what the evals table names, and without "
+            "it this would delete rungs whose scores are recorded nowhere else."
+        )
+    scored_by_run = queries.scored_rungs(engine) if engine is not None else {}
     plan = PrunePlan(applied=bool(args.apply))
     with records_root(args) as root:
         wanted = (
@@ -175,7 +189,7 @@ def run(args: argparse.Namespace) -> PrunePlan:
                 plan.protected.append(f"{run_dir.name}: still running")
                 continue
             swept.append(run_dir.name)
-            scored = _scored_iterations(run_dir)
+            scored = _scored_iterations(run_dir) | scored_by_run.get(run_dir.name, set())
             keep = set(rungs[-args.keep :]) | scored
             drop = [rung for rung in rungs if rung not in keep]
             if not drop:
