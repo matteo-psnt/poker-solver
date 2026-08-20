@@ -10,11 +10,18 @@ so two arms in a matched tier differ by exactly the number printed here.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from src.interfaces.commands._base import Command, CommandError, ledger_for, records_root
+from src.adapters.postgres import connect
+from src.interfaces.commands._base import (
+    Command,
+    CommandError,
+    eval_index_rows,
+    ledger_for,
+    records_root,
+)
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services.experiments import ArmsOutput, experiment_arms
 
@@ -41,11 +48,26 @@ class ArmsPayload(BaseModel):
 
 
 def run(args: argparse.Namespace) -> ArmsPayload:
-    """Read the published record and group one experiment's evals by tier and arm."""
+    """Group one experiment's evals by tier and arm, from the database when set.
+
+    The same switch `ledger` reads on, and for the same reason: the share's
+    documents stopped being written when the sink became the database, so a
+    share-only read here answered every `--experiment` with a world that ended
+    on 09-03 -- silently, since a missing arm looks exactly like an unscored one.
+    """
+    engine = connect.engine_from_environment()
+    if engine is not None:
+        return _grouped(args, eval_index_rows(engine), source="database")
     with records_root(args) as root:
         ledger_path = ledger_for(root)
-        records = eval_ledger.read_records(ledger_path)
-        result = experiment_arms(records, args.experiment, control=args.control)
+        return _grouped(args, eval_ledger.read_records(ledger_path), source=str(ledger_path))
+
+
+def _grouped(
+    args: argparse.Namespace, records: list[dict[str, Any]], *, source: str
+) -> ArmsPayload:
+    """Tier and difference the rows, whichever store handed them over."""
+    result = experiment_arms(records, args.experiment, control=args.control)
     if not result.tiers and result.tiers_without_control:
         # Distinct from "nothing scored": the experiment HAS rows, none of them
         # in a tier holding this control. Naming the arms is the fix.
@@ -60,7 +82,7 @@ def run(args: argparse.Namespace) -> ArmsPayload:
             f"No scored evaluations tagged experiment={args.experiment!r}. "
             f"Recorded experiments: {', '.join(known) or 'none'}."
         )
-    return ArmsPayload(ledger=str(ledger_path), result=result)
+    return ArmsPayload(ledger=source, result=result)
 
 
 def render(payload: ArmsPayload) -> None:
