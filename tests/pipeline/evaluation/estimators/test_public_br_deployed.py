@@ -107,3 +107,32 @@ class TestTheLedgerCanTellTheArmsApart:
             resolver_prior_weight=50.0,
         )
         assert other != deployed
+
+
+class TestTheResolverCacheIsBounded:
+    """Keyed by (context, BOARD), the resolver cache grows with the walk instead
+    of saturating like the blueprint's per-context table -- and the fork-join's
+    RAM guard cannot see it, so it hands out workers sized for the blueprint's
+    caches alone. Unbounded, deployed arms were killed after 4-6 h on a node
+    while short ones passed, which reads as a flaky pool rather than a leak.
+
+    Eviction is safe because the row is a deterministic function of its key, so
+    the bound costs recomputes and never the answer -- asserted here, since a
+    cache that changed the number would be a correctness bug, not a tuning one.
+    """
+
+    def test_the_cache_never_exceeds_its_bound(self, solver, monkeypatch):
+        import src.pipeline.evaluation.estimators.public_tree_br as module
+
+        monkeypatch.setattr(module, "_RESOLVER_CACHE_ENTRIES", 4)
+        walker = module.PublicTreeBestResponse(solver, _tier(deployed=True), starting_stack=400)
+        walker.evaluate()
+        assert len(walker._resolver_cache) <= 5
+
+    def test_evicting_does_not_move_the_number(self, solver, monkeypatch):
+        import src.pipeline.evaluation.estimators.public_tree_br as module
+
+        roomy = _score(solver, deployed=True)
+        monkeypatch.setattr(module, "_RESOLVER_CACHE_ENTRIES", 1)
+        cramped = _score(solver, deployed=True)
+        assert roomy == cramped
