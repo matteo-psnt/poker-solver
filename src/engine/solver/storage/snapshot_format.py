@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import zstandard
 
+from src.shared import records
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
     from pathlib import Path
@@ -51,7 +53,10 @@ COMPRESS_THREADS = -1
 #: How many frames decode at once. Five arrays, so more workers buy nothing.
 READ_WORKERS = 8
 
-SUFFIX = ".ckpt.zst"
+#: The extension lives in `shared.records`, not here: the node wrapper resolves
+#: a rung's file name and is stdlib-only, so it cannot import this module.
+SUFFIX = records.SNAPSHOT_SUFFIX
+
 HEADER_LENGTH_BYTES = 8
 
 

@@ -193,3 +193,28 @@ class TestTheRegistryIsAuthoritative:
             # Glob entries are referenced by their suffix, not their whole name.
             needle = name.split("*")[-1] if "*" in name else name
             assert needle in sources, f"{name} is registered but never referenced"
+
+
+class TestTheObjectNameIsSpelledOnce:
+    """The sweep uploaded 1,081 rungs under a name no reader ever asked for.
+
+    The upload named the object `static-N.ckpt.zst`; every lookup passed the
+    manifest's `static-N.zarr` straight through. Both were right on their own
+    and nothing reconciled them, so every object was unreachable and reads
+    silently fell back to the share -- which would have looked like a working
+    migration right up to the moment the share was deleted.
+    """
+
+    def test_a_legacy_name_maps_to_the_object(self):
+        assert records.object_name("static-100.zarr") == "static-100.ckpt.zst"
+
+    def test_the_object_name_maps_to_itself(self):
+        """A repointed manifest already names the object, and passing it back
+        through must not produce `static-100.ckpt.zst.ckpt.zst`."""
+        assert records.object_name("static-100.ckpt.zst") == "static-100.ckpt.zst"
+
+    def test_the_suffix_the_format_writes_is_the_suffix_lookups_use(self):
+        """One constant, or the two halves drift apart exactly as they did."""
+        from src.engine.solver.storage import snapshot_format
+
+        assert snapshot_format.SUFFIX == records.SNAPSHOT_SUFFIX

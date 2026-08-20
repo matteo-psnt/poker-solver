@@ -48,6 +48,34 @@ UNVERSIONED = 0
 # solver. Spelled once, so a rename cannot leave a copy behind.
 STATIC_CHECKPOINT = "STATIC_CHECKPOINT.json"
 
+# The snapshot format's own extension, named here for the reason above: the
+# node wrapper resolves a rung's file name and cannot import `snapshot_format`,
+# which is what defines it.
+SNAPSHOT_SUFFIX = ".ckpt.zst"
+
+LEGACY_SNAPSHOT_SUFFIX = ".zarr"
+
+
+def object_name(snapshot: str) -> str:
+    """The name a rung is STORED under, whatever a manifest happens to call it.
+
+    `static-100.zarr` and `static-100.ckpt.zst` both name one rung; only the
+    second is a thing any store now holds. Migration converts the bytes and a
+    manifest written before it still spells the old name, so the two spellings
+    coexist until every manifest is repointed -- and the mapping between them
+    must exist exactly once, because the sweep that writes the object and the
+    check that looks for it have to agree or the object is unreachable. They
+    did not agree: 1,081 rungs were uploaded that no reader could resolve.
+
+    IDEMPOTENT, because a repointed manifest already names the object and the
+    same lookups run against both. Appending unconditionally produced
+    `static-100.ckpt.zst.ckpt.zst`, which is a 404 that reads as a missing rung.
+    """
+    if snapshot.endswith(SNAPSHOT_SUFFIX):
+        return snapshot
+    return snapshot.removesuffix(LEGACY_SNAPSHOT_SUFFIX) + SNAPSHOT_SUFFIX
+
+
 Kind = Literal["snapshot", "log"]
 Scope = Literal["local", "share"]
 
