@@ -154,11 +154,11 @@ resource "azurerm_postgresql_flexible_server_database" "record_ca" {
 #     it until it ends, so its firewall must stay open until the queue drains;
 #   - its 35-day point-in-time window is the only history older than the move.
 #
-# It keeps the address `record` so that no state was moved to retire it.
+# It keeps the address `record` so that no state was moved to retire it, and
+# `record_live` (outputs.tf) says which of the two the readers see.
 # `ignore_changes = all`: nothing about it is managed again, only that it
-# exists. To delete it -- after the delta has been copied and a week of reading
-# the new server -- remove this section, drop `prevent_destroy`, apply, and
-# `moved { from = record_ca, to = record }` gives the live server its name back.
+# exists. It is deleted right after the switch reads correctly -- stage 3 of
+# docs/record-move.md -- not kept: the data is not worth a second server.
 # --------------------------------------------------------------------------- #
 
 resource "azurerm_postgresql_flexible_server" "record" {

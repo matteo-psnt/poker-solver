@@ -111,3 +111,19 @@ variable "code_container_name" {
   type        = string
   default     = "code"
 }
+
+variable "record_live" {
+  description = <<-EOT
+    Which server the readers and every dispatch are pointed at: `sweden` or
+    `canada`. The Canada server is created, copied into and validated while
+    this still says `sweden`; the switch is this value and one apply, at a
+    moment nothing is running. Deleted with the Sweden server.
+  EOT
+  type        = string
+  default     = "sweden"
+
+  validation {
+    condition     = contains(["sweden", "canada"], var.record_live)
+    error_message = "record_live is `sweden` or `canada`."
+  }
+}
