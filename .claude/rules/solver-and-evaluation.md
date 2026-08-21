@@ -26,6 +26,10 @@ unreadable by design.
   code that reads that directory to decide something sees almost nothing —
   `prune-checkpoints` protects scored rungs from it and cannot see a DB-scored
   rung. **Score before pruning**, and fix that reader before trusting it.
+- **Best measured PCS/CFR-BR setup: `--config production_cfrbr`** — 940.1 →
+  756.7 mbb on the gate (3 board seeds, converged). Most of that is plain
+  K-fold averaging: flop-mode `runouts_per_flop=4` alone reaches 820.7 at 2.3x
+  less wall-clock, and R=8 is WORSE than R=4.
 - **Experiment bookkeeping** goes through `--experiment`/`--arm`/`--parent`,
   with `--set k=v` for config overrides; the tags are recorded on every eval.
   `--set` flags are dropped on resume — check for a continuation boundary
