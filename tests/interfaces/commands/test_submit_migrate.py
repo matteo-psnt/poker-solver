@@ -8,7 +8,15 @@ from src.interfaces.commands import migrate_checkpoints, submit_migrate
 
 
 def _flags(**over):
-    args = argparse.Namespace(runs=None, limit=0, verify=False, pool=None, timeout="6h")
+    args = argparse.Namespace(
+        runs=None,
+        limit=0,
+        verify=False,
+        drop_share=False,
+        apply=False,
+        pool=None,
+        timeout="6h",
+    )
     for key, value in over.items():
         setattr(args, key, value)
     return submit_migrate._flags(args)

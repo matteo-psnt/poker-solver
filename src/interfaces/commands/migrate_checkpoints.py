@@ -12,8 +12,17 @@ per rung and uploads only what is missing. That is also what makes it safe to
 run while training continues: a rung republished underneath it is simply
 already there.
 
-IT DELETES NOTHING. The share keeps every byte until someone looks at the
-verification and decides otherwise.
+`--drop-share` is the other end of the migration: once a rung is in the
+container and its header opens, the zarr directory it was converted from is
+duplicate weight. It deletes the DIRECTORY and keeps the MARKER -- the marker
+is a zero-byte file and it is the share's index of what was ever published,
+which `prune-checkpoints` and `verify_published_rungs` both read. A run left
+with markers and no directories is exactly the shape the post-flip publish
+already produces.
+
+NOTHING IS DELETED WITHOUT `--apply`, and nothing is deleted that the container
+cannot supply: every drop is gated on a HEAD plus a header read of the object
+that replaces it.
 """
 
 from __future__ import annotations
@@ -60,6 +69,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Upload nothing; report which published rungs the container lacks.",
     )
+    parser.add_argument(
+        "--drop-share",
+        action="store_true",
+        help="Delete zarr directories the container already holds. Reports unless --apply.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="With --drop-share, actually delete. Without it nothing is removed.",
+    )
 
 
 class MigratedPayload(BaseModel):
@@ -105,6 +124,13 @@ class MigratedPayload(BaseModel):
     unclaimed: list[str] = Field(default_factory=list)
     """Share directories NO manifest names. Nothing can resolve them, so they
     are not migrated -- and they are the one thing safe to delete outright."""
+    dropped_mode: bool = False
+    applied: bool = False
+    rungs_dropped: int = 0
+    """Zarr directories deleted from the share because the container holds them."""
+    kept: list[str] = Field(default_factory=list)
+    """Share directories NOT dropped, and why. Each is a rung the container
+    cannot supply, so the share copy is still the only one."""
     unreadable: list[str] = Field(default_factory=list)
     """Objects that are present but whose header would not parse, or whose
     fingerprint is not the one the manifest claims."""
@@ -131,7 +157,11 @@ def run(args: argparse.Namespace) -> MigratedPayload:
     # Node-local scratch: staging is the point, so it must not be on the share.
     work = Path(os.environ.get("RUN_WORK_DIR") or "/mnt/work") / "migrate-staging"
     work.mkdir(parents=True, exist_ok=True)
-    payload = MigratedPayload(verified=bool(args.verify))
+    payload = MigratedPayload(
+        verified=bool(args.verify),
+        dropped_mode=bool(args.drop_share),
+        applied=bool(args.drop_share and args.apply),
+    )
     wanted = set(args.runs or [])
     # TIMED AND PRINTED AT EVERY STAGE, because the first version of this
     # printed only after a successful upload and told me nothing when it spent
@@ -163,12 +193,18 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 f"listed in {time.monotonic() - at:.1f}s",
                 flush=True,
             )
-        for snapshot in claimed:
-            if args.limit and payload.rungs_uploaded >= args.limit:
+        # DROPPING WALKS THE SHARE, not the manifest: an unclaimed directory is
+        # duplicate weight too, and the manifest is exactly what cannot see it.
+        targets = sorted(on_share) if args.drop_share else claimed
+        for snapshot in targets:
+            if args.limit and payload.rungs_uploaded + payload.rungs_dropped >= args.limit:
                 payload.stopped_early = True
                 return payload
             try:
-                _one_rung(args, payload, sas, run_dir, snapshot, on_share, work)
+                if args.drop_share:
+                    _drop_one(args, payload, sas, run_dir, snapshot)
+                else:
+                    _one_rung(args, payload, sas, run_dir, snapshot, on_share, work)
             except Exception as error:  # noqa: BLE001 -- one bad rung must not end the sweep
                 # THE MESSAGE, AND IMMEDIATELY. Recording only the exception
                 # CLASS threw away the one thing that identifies the fault, and
@@ -185,6 +221,43 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 print(f"  {snapshot}: FAILED {detail}", flush=True)
                 payload.failures.append(f"{run_dir.name}/{snapshot}: {detail}")
     return payload
+
+
+def _drop_one(
+    args: argparse.Namespace,
+    payload: MigratedPayload,
+    sas: str,
+    run_dir: Path,
+    snapshot: str,
+) -> None:
+    """Delete one zarr directory, but only if the container can supply it.
+
+    THE MARKER STAYS. It is zero bytes and it is the share's index of what was
+    published: `prune-checkpoints` reads markers to know the ladder, and
+    `verify_published_rungs` builds from them before it asks the container.
+    Deleting it would make a rung the container holds unscoreable.
+    """
+    import shutil  # noqa: PLC0415 -- node-only
+
+    from src.shared import records  # noqa: PLC0415 -- node-only
+    from src.shared.cloudtask.node import blobstore  # noqa: PLC0415 -- node-only
+
+    stored = records.object_name(snapshot)
+    if not blobstore.exists(sas, run_dir.name, stored):
+        print(f"  {snapshot}: KEPT, the container has no {stored}", flush=True)
+        payload.kept.append(f"{run_dir.name}/{snapshot}: not in the container")
+        return
+    fault = _header_fault(sas, run_dir, stored)
+    if fault:
+        print(f"  {snapshot}: KEPT, {fault}", flush=True)
+        payload.kept.append(f"{run_dir.name}/{snapshot}: {fault}")
+        return
+    if not args.apply:
+        payload.rungs_dropped += 1
+        return
+    shutil.rmtree(run_dir / snapshot)
+    payload.rungs_dropped += 1
+    print(f"  {snapshot}: dropped", flush=True)
 
 
 def _one_rung(
@@ -342,6 +415,20 @@ def _snapshots(run_dir: Path) -> list[str]:
 def render(payload: MigratedPayload) -> None:
     if payload.verified:
         _render_verification(payload)
+        return
+    if payload.dropped_mode:
+        verb = "dropped" if payload.applied else "would drop"
+        print(f"runs considered:  {payload.runs_considered:,}")
+        print(f"zarr dirs {verb}: {payload.rungs_dropped:,}")
+        print(f"KEPT (container cannot supply): {len(payload.kept):,}")
+        for line in payload.kept[:20]:
+            print(f"  kept  {line}")
+        if len(payload.kept) > 20:
+            print(f"  ... and {len(payload.kept) - 20:,} more kept")
+        if payload.stopped_early:
+            print("STOPPED EARLY at --limit; re-run to continue.")
+        if not payload.applied:
+            print("\nDRY RUN -- nothing was deleted. Re-run with --apply.")
         return
     print(f"runs considered:  {payload.runs_considered:,}")
     print(
