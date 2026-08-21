@@ -64,8 +64,8 @@ variable "postgres_location" {
 variable "postgres_server_name" {
   description = <<-EOT
     Globally unique across Azure; change it if creation fails with a name-taken
-    error. `-ca` because the Sweden server still holds `poker-solver-record`
-    until it is deleted (postgres.tf, the retired `record`).
+    error. `-ca` is a scar: the name `poker-solver-record` belonged to the
+    Sweden server this one replaced, and Azure reserves a deleted name a while.
   EOT
   type        = string
   default     = "poker-solver-record-ca"
@@ -116,20 +116,4 @@ variable "abstractions_container_name" {
   description = "Blob container holding one object per precomputed card abstraction."
   type        = string
   default     = "abstractions"
-}
-
-variable "record_live" {
-  description = <<-EOT
-    Which server the readers and every dispatch are pointed at: `sweden` or
-    `canada`. The Canada server is created, copied into and validated while
-    this still says `sweden`; the switch is this value and one apply, at a
-    moment nothing is running. Deleted with the Sweden server.
-  EOT
-  type        = string
-  default     = "sweden"
-
-  validation {
-    condition     = contains(["sweden", "canada"], var.record_live)
-    error_message = "record_live is `sweden` or `canada`."
-  }
 }
