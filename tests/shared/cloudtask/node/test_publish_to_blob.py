@@ -203,3 +203,60 @@ class TestALegacyRungIsNeverStranded:
             archive.blobstore, "put_object", lambda *_a: pytest.fail("uploaded a directory")
         )
         assert archive.publish_rungs_to_blob(self._legacy(tmp_path), "run-a", SAS) == 0
+
+
+class TestTheManifestGoesWithTheRungs:
+    """A pointer stored apart from what it points at drifts. The manifest names
+    which rung is current, so it belongs beside them -- and the share's copy is
+    only what answers while the share still holds one.
+    """
+
+    def test_it_is_published_into_the_container(self, tmp_path, monkeypatch):
+        sent: dict[str, bytes] = {}
+        monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: False)
+        monkeypatch.setattr(archive.blobstore, "put_object", lambda _s, _n, _p: 1)
+        monkeypatch.setattr(
+            archive.blobstore, "put_bytes", lambda _s, name, body: sent.setdefault(name, body) and 1
+        )
+        run_dir = _run(tmp_path, "static-100.ckpt.zst")
+
+        archive.publish_run(run_dir, tmp_path / "archive" / run_dir.name, sas=SAS)
+
+        assert f"{run_dir.name}/STATIC_CHECKPOINT.json" in sent
+
+    def test_the_rungs_land_before_it(self, tmp_path, monkeypatch):
+        """Published first, the manifest advertises a rung nothing can fetch --
+        which is why the share copy is written last too."""
+        order: list[str] = []
+        monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: False)
+        monkeypatch.setattr(
+            archive.blobstore, "put_object", lambda _s, name, _p: order.append(name) or 1
+        )
+        monkeypatch.setattr(
+            archive.blobstore, "put_bytes", lambda _s, name, _b: order.append(name) or 1
+        )
+        run_dir = _run(tmp_path, "static-100.ckpt.zst")
+
+        archive.publish_run(run_dir, tmp_path / "archive" / run_dir.name, sas=SAS)
+
+        assert order[-1].endswith("STATIC_CHECKPOINT.json"), order
+
+    def test_a_container_manifest_is_read_before_the_share(self, tmp_path, monkeypatch):
+        share = tmp_path / "archive" / "run-a"
+        share.mkdir(parents=True)
+        (share / "STATIC_CHECKPOINT.json").write_text('{"zarr": "from-the-share"}')
+        monkeypatch.setattr(
+            archive.blobstore, "read_object", lambda _s, _n: b'{"zarr": "from-the-container"}'
+        )
+
+        body = archive.published_manifest(share, SAS)
+
+        assert "from-the-container" in body
+
+    def test_the_share_answers_when_the_container_has_none(self, tmp_path, monkeypatch):
+        share = tmp_path / "archive" / "run-a"
+        share.mkdir(parents=True)
+        (share / "STATIC_CHECKPOINT.json").write_text('{"zarr": "from-the-share"}')
+        monkeypatch.setattr(archive.blobstore, "read_object", lambda _s, _n: None)
+
+        assert "from-the-share" in archive.published_manifest(share, SAS)

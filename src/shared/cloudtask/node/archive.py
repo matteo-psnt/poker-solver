@@ -238,6 +238,14 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = 
     for name, body in manifests.items():
         if body is None:
             continue
+        if sas and name == records.STATIC_CHECKPOINT:
+            # BESIDE THE RUNGS IT NAMES, and after them for the same reason the
+            # share copy is written last: a manifest that lands before the
+            # snapshot it points at advertises a rung nothing can fetch.
+            try:
+                blobstore.put_bytes(sas, f"{run_dir.name}/{name}", body)
+            except Exception as error:  # noqa: BLE001 -- the share copy still lands
+                log(f"WARN could not publish {name} to the container: {error}")
         if not _rungs_landed(body, destination, log) or not _write_one(
             body, destination / name, log
         ):
@@ -444,6 +452,15 @@ class FetchRefusedError(Exception):
     """
 
 
+def _parse_manifest(body: str) -> dict:
+    """Parse a manifest's text, or ``{}`` if it is empty or torn."""
+    try:
+        parsed = json.loads(body) if body else {}
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def read_manifest(manifest: Path) -> dict:
     """Parse a checkpoint manifest, or ``{}`` if it is absent or torn."""
     try:
@@ -540,13 +557,14 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: 
     re-uploaded nor removed.
     """
     fetch_metadata(source, destination)
-    if (source / LEGACY_MANIFEST).is_file() and not (source / records.STATIC_CHECKPOINT).is_file():
+    body = published_manifest(source, sas)
+    if (source / LEGACY_MANIFEST).is_file() and not body:
         raise FetchRefusedError(
             f"{source.name} was trained by the dynamic backend, which no longer "
             f"exists. Its checkpoints are unreadable at HEAD by design, so this "
             f"run cannot be continued."
         )
-    manifest = read_manifest(source / records.STATIC_CHECKPOINT)
+    manifest = _parse_manifest(body)
     if not manifest:
         # An absent manifest is not an error: a task that died before its first
         # checkpoint publishes .run.json and nothing else, and the right thing
@@ -555,13 +573,12 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: 
         return ""
     current = manifest.get("zarr") or ""
     if not current:
-        raise FetchRefusedError(
-            f"{records.STATIC_CHECKPOINT} on the share names no current snapshot"
-        )
+        raise FetchRefusedError(f"{records.STATIC_CHECKPOINT} names no current snapshot")
     require_complete(source, current, sas)
     fetch_snapshot(source, destination, current, sas)
-    copy_file(source / records.STATIC_CHECKPOINT, destination / records.STATIC_CHECKPOINT)
-    log(f"fetched current rung {current} (ladder left on the share)")
+    # The node's own copy comes from WHICHEVER STORE ANSWERED, not the mount.
+    (destination / records.STATIC_CHECKPOINT).write_text(body, encoding="utf-8")
+    log(f"fetched current rung {current}")
     return current
 
 
@@ -628,7 +645,27 @@ def fetch_abstractions(sas: str, destination: Path, log: Log = _quiet) -> int:
     return fetched
 
 
-def manifest_entries(source: Path) -> list[tuple[int, str]]:
+def published_manifest(source: Path, sas: str = "") -> str:
+    """A run's manifest as TEXT, from the container first and the share second.
+
+    The manifest lives beside the rungs it names -- `<run>/STATIC_CHECKPOINT
+    .json` in the checkpoints container -- because it is the thing that says
+    which of them is current, and a pointer stored apart from what it points at
+    is the drift this migration spent a day undoing. The share answers only
+    while it still holds one.
+
+    `source.name` IS the run id, as everywhere else here: the archive directory
+    is named for it, so nothing has to thread one.
+    """
+    if sas:
+        body = blobstore.read_object(sas, f"{source.name}/{records.STATIC_CHECKPOINT}")
+        if body is not None:
+            return body.decode("utf-8")
+    path = source / records.STATIC_CHECKPOINT
+    return path.read_text() if path.is_file() else ""
+
+
+def manifest_entries(source: Path, sas: str = "") -> list[tuple[int, str]]:
     """Every (iteration, snapshot name) the manifest CLAIMS, ascending.
 
     The claim is what a fetch resolves and what a migration has to reproduce.
@@ -636,7 +673,7 @@ def manifest_entries(source: Path) -> list[tuple[int, str]]:
     a rung whose bytes are gone: six runs hold 316 marked rungs with no
     directory at all, and a directory-driven check reported nothing to do.
     """
-    manifest = read_manifest(source / records.STATIC_CHECKPOINT)
+    manifest = _parse_manifest(published_manifest(source, sas))
     if not manifest:
         return []
     entries = [*manifest.get("retained", [])]
@@ -651,13 +688,13 @@ def manifest_entries(source: Path) -> list[tuple[int, str]]:
     return sorted(claimed.items())
 
 
-def _ladder_names(source: Path) -> dict[str, str]:
+def _ladder_names(source: Path, sas: str = "") -> dict[str, str]:
     """Iteration (as a string) -> the snapshot name the manifest gives it.
 
     Keyed on the string because that is what a `--at` flag carries; an int key
     would make every caller convert, and one of them would forget.
     """
-    return {str(iteration): name for iteration, name in manifest_entries(source)}
+    return {str(iteration): name for iteration, name in manifest_entries(source, sas)}
 
 
 def fetch_for_evaluation(
@@ -676,7 +713,7 @@ def fetch_for_evaluation(
     "missing" here while sitting on the share untouched.
     """
     fetch_metadata(source, destination)
-    ladder = _ladder_names(source)
+    ladder = _ladder_names(source, sas)
     fetched = []
     for rung in rungs:
         name = ladder.get(str(rung), "")
