@@ -5,7 +5,6 @@ from src.pipeline.training.run_tracker.metadata import RunMetadata
 from src.pipeline.training.run_tracker.tracker import (
     RunTracker,
     has_run_record,
-    migrate_run_log,
 )
 
 __all__ = (
@@ -14,5 +13,4 @@ __all__ = (
     "RunMetadata",
     "RunTracker",
     "has_run_record",
-    "migrate_run_log",
 )

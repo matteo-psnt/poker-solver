@@ -18,6 +18,7 @@ from src.pipeline.training.run_tracker import RunTracker
 from src.pipeline.training.run_tracker.metadata import RunMetadata
 from src.shared import run_events
 from src.shared.config import Config
+from tests.legacy_runs import append_event
 from tests.memory_record import MemoryRecord
 
 
@@ -67,7 +68,7 @@ def _legacy_record_at(where) -> list[dict[str, Any]]:
     writes one, so these events are appended directly."""
     where.mkdir(parents=True, exist_ok=True)
     for event in _record_at(where.parent / f"{where.name}-source"):
-        run_events.append(where, event.pop("event"), **event)
+        append_event(where, event.pop("event"), **event)
     return run_events.read(where)
 
 

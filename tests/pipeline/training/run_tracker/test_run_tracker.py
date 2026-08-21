@@ -3,9 +3,10 @@
 import json
 
 from src.core.actions.action_model import ActionModel
-from src.pipeline.training.run_tracker import RunMetadata, RunTracker, migrate_run_log
+from src.pipeline.training.run_tracker import RunMetadata, RunTracker
 from src.shared import run_events
 from src.shared.config import Config
+from tests.legacy_runs import append_event
 
 
 class TestRunTracker:
@@ -80,7 +81,6 @@ class TestRunTracker:
             "config": Config.default().to_dict(),
         }
         (run_dir / ".run.json").write_text(json.dumps(metadata))
-        assert migrate_run_log(run_dir)
         tracker = RunTracker.load(run_dir, record, record)
         assert tracker.metadata.git_commit is None
         assert tracker.metadata.git_dirty is None
@@ -103,7 +103,6 @@ class TestRunTracker:
         }
 
         (run_dir / ".run.json").write_text(json.dumps(metadata))
-        assert migrate_run_log(run_dir), "a legacy run dir must convert"
 
         tracker = RunTracker.load(run_dir, record, record)
 
@@ -241,7 +240,6 @@ class TestRunTracker:
         run_dir = tmp_path / "run-legacy"
         run_dir.mkdir()
         (run_dir / ".run.json").write_text(json.dumps(legacy))
-        assert migrate_run_log(run_dir)
         loaded = RunTracker.load(run_dir, record, record).metadata
 
         assert len(loaded.attempts) == 1
@@ -321,8 +319,8 @@ class TestTheRunLog:
         source and never open the file."""
         run_dir = tmp_path / "run-torn"
         run_dir.mkdir()
-        run_events.append(run_dir, run_events.CREATED, config_name="quick_test")
-        run_events.append(run_dir, "progress", iterations=50)
+        append_event(run_dir, run_events.CREATED, config_name="quick_test")
+        append_event(run_dir, "progress", iterations=50)
         with run_events.log_path(run_dir).open("a") as handle:
             handle.write('{"event": "progress", "iterations": 99')
 
@@ -336,60 +334,6 @@ class TestTheRunLog:
         again = RunTracker.load(tracker.run_dir, record, record)
         again.mark_resumed()
         assert len(RunTracker.load(tracker.run_dir, record, record).metadata.attempts) == 2
-
-
-class TestMigrationFromTheSnapshotLayout:
-    """The back-compat path for every run directory already on disk."""
-
-    def _legacy(self, tmp_path, **over):
-        run_dir = tmp_path / "run-old"
-        run_dir.mkdir()
-        metadata = RunMetadata.new(
-            "run-old", "quick_test", Config.default(), action_config_hash="abc123"
-        )
-        metadata.update_progress(
-            iterations=5_000_000, runtime_seconds=1800.0, num_infosets=1234, storage_capacity=10**6
-        )
-        metadata.mark_completed()
-        payload = metadata.to_dict()
-        payload.update(over)
-        (run_dir / ".run.json").write_text(json.dumps(payload))
-        return run_dir
-
-    def test_the_fold_reproduces_the_snapshot(self, tmp_path, record):
-        run_dir = self._legacy(tmp_path)
-        before = RunMetadata.from_dict(json.loads((run_dir / ".run.json").read_text()))
-        assert migrate_run_log(run_dir)
-        after = RunTracker.load(run_dir, record, record).metadata
-
-        assert (after.run_id, after.iterations, after.status) == (
-            before.run_id,
-            before.iterations,
-            before.status,
-        )
-        assert after.num_infosets == before.num_infosets
-        assert len(after.attempts) == len(before.attempts)
-
-    def test_the_progress_series_is_folded_in(self, tmp_path):
-        run_dir = self._legacy(tmp_path)
-        (run_dir / "progress.jsonl").write_text(
-            json.dumps({"schema_version": 1, "iteration": 1000, "coverage": 0.1}) + "\n"
-        )
-        migrate_run_log(run_dir)
-
-        checkpoints = run_events.events_of(run_events.read(run_dir), run_events.CHECKPOINT)
-        assert [c["iteration"] for c in checkpoints] == [1000]
-
-    def test_it_is_idempotent_and_non_destructive(self, tmp_path):
-        run_dir = self._legacy(tmp_path)
-        assert migrate_run_log(run_dir) is True
-        assert migrate_run_log(run_dir) is False
-        assert (run_dir / ".run.json").exists(), "the original stays for the operator"
-
-    def test_a_directory_with_no_snapshot_is_left_alone(self, tmp_path):
-        empty = tmp_path / "nothing"
-        empty.mkdir()
-        assert migrate_run_log(empty) is False
 
 
 class TestFieldsAreScopedToTheEventThatOwnsThem:
@@ -406,11 +350,11 @@ class TestFieldsAreScopedToTheEventThatOwnsThem:
         metadata = RunMetadata.new(
             "run-a", "quick_test", Config.default(), action_config_hash="abc123"
         )
-        run_events.append(run_dir, run_events.CREATED, **metadata.creation_facts())
-        run_events.append(run_dir, run_events.ATTEMPT_STARTED, index=0, kind="fresh", start_iter=0)
-        run_events.append(run_dir, run_events.ATTEMPT_ENDED, index=0, status="died")
-        run_events.append(run_dir, run_events.ATTEMPT_STARTED, index=1, kind="resume", start_iter=5)
-        run_events.append(run_dir, run_events.PROGRESS, iterations=10, num_infosets=5)
+        append_event(run_dir, run_events.CREATED, **metadata.creation_facts())
+        append_event(run_dir, run_events.ATTEMPT_STARTED, index=0, kind="fresh", start_iter=0)
+        append_event(run_dir, run_events.ATTEMPT_ENDED, index=0, status="died")
+        append_event(run_dir, run_events.ATTEMPT_STARTED, index=1, kind="resume", start_iter=5)
+        append_event(run_dir, run_events.PROGRESS, iterations=10, num_infosets=5)
 
         folded = RunTracker.load(run_dir, record, record).metadata
         assert folded.status == "running", "the run is still training"
@@ -422,10 +366,10 @@ class TestFieldsAreScopedToTheEventThatOwnsThem:
         metadata = RunMetadata.new(
             "run-b", "quick_test", Config.default(), action_config_hash="abc123"
         )
-        run_events.append(run_dir, run_events.CREATED, **metadata.creation_facts())
-        run_events.append(run_dir, run_events.ATTEMPT_STARTED, index=0, kind="fresh", start_iter=0)
-        run_events.append(run_dir, run_events.ATTEMPT_ENDED, index=0, status="interrupted")
-        run_events.append(run_dir, run_events.STATUS, status="completed", iterations=99)
+        append_event(run_dir, run_events.CREATED, **metadata.creation_facts())
+        append_event(run_dir, run_events.ATTEMPT_STARTED, index=0, kind="fresh", start_iter=0)
+        append_event(run_dir, run_events.ATTEMPT_ENDED, index=0, status="interrupted")
+        append_event(run_dir, run_events.STATUS, status="completed", iterations=99)
 
         assert RunTracker.load(run_dir, record, record).metadata.status == "completed"
 
