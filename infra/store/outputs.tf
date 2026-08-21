@@ -36,31 +36,12 @@ output "abstractions_container_name" {
   value       = azurerm_storage_container.abstractions.name
 }
 
-# The live server is a CHOICE while both exist: see `record_live`.
-locals {
-  live_server = (
-    var.record_live == "canada"
-    ? azurerm_postgresql_flexible_server.record_ca
-    : azurerm_postgresql_flexible_server.record
-  )
-  live_database = (
-    var.record_live == "canada"
-    ? azurerm_postgresql_flexible_server_database.record_ca
-    : azurerm_postgresql_flexible_server_database.record
-  )
-}
-
 output "postgres_host" {
-  value = local.live_server.fqdn
+  value = azurerm_postgresql_flexible_server.record_ca.fqdn
 }
 
 output "postgres_database" {
-  value = local.live_database.name
-}
-
-output "postgres_host_canada" {
-  description = "The Canada server, live or not -- the copy and the validation address it directly."
-  value       = azurerm_postgresql_flexible_server.record_ca.fqdn
+  value = azurerm_postgresql_flexible_server_database.record_ca.name
 }
 
 # Sensitive so it never reaches a log or a plan diff. `terraform output -raw
@@ -71,8 +52,8 @@ output "postgres_dsn" {
     "postgresql://%s:%s@%s:5432/%s?sslmode=require",
     var.postgres_admin_user,
     urlencode(random_password.postgres.result),
-    local.live_server.fqdn,
-    local.live_database.name,
+    azurerm_postgresql_flexible_server.record_ca.fqdn,
+    azurerm_postgresql_flexible_server_database.record_ca.name,
   )
   sensitive = true
 }
