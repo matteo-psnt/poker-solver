@@ -84,6 +84,9 @@ data/
 *.tfstate
 *.tfstate.*
 *.tfvars
+# A saved plan is a binary snapshot of one moment's state, and applying a stale
+# one does something nobody read. They are written beside the root they plan.
+*.tfplan
 
 # console build output
 console/dist/
