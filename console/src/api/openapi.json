@@ -1,93 +1,6 @@
 {
   "components": {
     "schemas": {
-      "ActivityPayload": {
-        "description": "The local activity log, summarised.\n\nThe only payload here that describes THIS TOOL rather than the solver or the\ncloud. `exists`/`enabled` are two different empty states with different fixes\n-- nothing has run yet, versus recording is switched off -- and collapsing\nthem would send someone hunting for a bug in the writer.",
-        "properties": {
-          "by_surface": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "By Surface",
-            "type": "object"
-          },
-          "commands": {
-            "items": {
-              "$ref": "#/components/schemas/CommandActivity"
-            },
-            "title": "Commands",
-            "type": "array"
-          },
-          "days": {
-            "title": "Days",
-            "type": "number"
-          },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "exists": {
-            "title": "Exists",
-            "type": "boolean"
-          },
-          "failures": {
-            "items": {
-              "$ref": "#/components/schemas/Failure"
-            },
-            "title": "Failures",
-            "type": "array"
-          },
-          "failures_only": {
-            "default": false,
-            "title": "Failures Only",
-            "type": "boolean"
-          },
-          "first_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "First At"
-          },
-          "log": {
-            "title": "Log",
-            "type": "string"
-          },
-          "op": {
-            "const": "activity",
-            "default": "activity",
-            "title": "Op",
-            "type": "string"
-          },
-          "rows": {
-            "title": "Rows",
-            "type": "integer"
-          },
-          "total_failures": {
-            "default": 0,
-            "title": "Total Failures",
-            "type": "integer"
-          },
-          "total_rows": {
-            "title": "Total Rows",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "log",
-          "exists",
-          "enabled",
-          "days",
-          "rows",
-          "total_rows"
-        ],
-        "title": "ActivityPayload",
-        "type": "object"
-      },
       "ApiError": {
         "additionalProperties": true,
         "description": "A refusal (422) or an outage (503). The only non-payload body served.",
@@ -101,6 +14,170 @@
           "error"
         ],
         "title": "ApiError",
+        "type": "object"
+      },
+      "ArmPoint": {
+        "description": "One arm's score at one checkpoint, inside one tier.",
+        "properties": {
+          "arm": {
+            "title": "Arm",
+            "type": "string"
+          },
+          "exploitability_mbb": {
+            "title": "Exploitability Mbb",
+            "type": "number"
+          },
+          "iteration": {
+            "title": "Iteration",
+            "type": "integer"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "std_error_mbb": {
+            "title": "Std Error Mbb",
+            "type": "number"
+          },
+          "vs_control_mbb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vs Control Mbb"
+          },
+          "vs_control_stderr_mbb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vs Control Stderr Mbb"
+          }
+        },
+        "required": [
+          "arm",
+          "iteration",
+          "exploitability_mbb",
+          "std_error_mbb",
+          "run_id"
+        ],
+        "title": "ArmPoint",
+        "type": "object"
+      },
+      "ArmTier": {
+        "description": "Every arm scored with ONE instrument, and their differences.\n\nA tier is the unit of comparison, so it is also the unit of rendering. Two\narms scored at different board budgets are two numbers about different\ngames; they appear in separate tiers and are never subtracted.",
+        "properties": {
+          "arms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Arms",
+            "type": "array"
+          },
+          "control": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Control"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/ArmPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "unmatched_iterations": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Unmatched Iterations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tier",
+          "control",
+          "points",
+          "arms",
+          "unmatched_iterations"
+        ],
+        "title": "ArmTier",
+        "type": "object"
+      },
+      "ArmsOutput": {
+        "description": "What `arms` answers: one experiment's arms, grouped by instrument.",
+        "properties": {
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "tiers": {
+            "items": {
+              "$ref": "#/components/schemas/ArmTier"
+            },
+            "title": "Tiers",
+            "type": "array"
+          },
+          "tiers_without_control": {
+            "default": 0,
+            "title": "Tiers Without Control",
+            "type": "integer"
+          },
+          "unplaceable_records": {
+            "default": 0,
+            "title": "Unplaceable Records",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "tiers"
+        ],
+        "title": "ArmsOutput",
+        "type": "object"
+      },
+      "ArmsPayload": {
+        "description": "What `arms` answers. The console can read this unchanged.",
+        "properties": {
+          "op": {
+            "const": "arms",
+            "default": "arms",
+            "title": "Op",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ArmsOutput"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ArmsPayload",
         "type": "object"
       },
       "AutoscalePayload": {
@@ -618,55 +695,6 @@
           "combos"
         ],
         "title": "Combos",
-        "type": "object"
-      },
-      "CommandActivity": {
-        "description": "One command's cost, over the window.",
-        "properties": {
-          "calls": {
-            "title": "Calls",
-            "type": "integer"
-          },
-          "command": {
-            "title": "Command",
-            "type": "string"
-          },
-          "errors": {
-            "title": "Errors",
-            "type": "integer"
-          },
-          "max_seconds": {
-            "title": "Max Seconds",
-            "type": "number"
-          },
-          "p50_seconds": {
-            "title": "P50 Seconds",
-            "type": "number"
-          },
-          "p95_seconds": {
-            "title": "P95 Seconds",
-            "type": "number"
-          },
-          "refusals": {
-            "title": "Refusals",
-            "type": "integer"
-          },
-          "total_seconds": {
-            "title": "Total Seconds",
-            "type": "number"
-          }
-        },
-        "required": [
-          "command",
-          "calls",
-          "p50_seconds",
-          "p95_seconds",
-          "max_seconds",
-          "total_seconds",
-          "refusals",
-          "errors"
-        ],
-        "title": "CommandActivity",
         "type": "object"
       },
       "CompactBody": {
@@ -1216,84 +1244,6 @@
         "title": "Edge",
         "type": "object"
       },
-      "Failure": {
-        "description": "One recorded failure, with what was asked for when it happened.",
-        "properties": {
-          "asked": {
-            "additionalProperties": true,
-            "title": "Asked",
-            "type": "object"
-          },
-          "at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "At"
-          },
-          "command": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Command"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "error_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Type"
-          },
-          "outcome": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcome"
-          },
-          "surface": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Surface"
-          }
-        },
-        "title": "Failure",
-        "type": "object"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1574,10 +1524,6 @@
       "LedgerPayload": {
         "description": "Recorded evaluations, derived from the published per-run documents.",
         "properties": {
-          "ledger": {
-            "title": "Ledger",
-            "type": "string"
-          },
           "matched": {
             "title": "Matched",
             "type": "integer"
@@ -1597,7 +1543,6 @@
           }
         },
         "required": [
-          "ledger",
           "matched"
         ],
         "title": "LedgerPayload",
@@ -2508,6 +2453,11 @@
             "title": "Op",
             "type": "string"
           },
+          "records_to_database": {
+            "default": false,
+            "title": "Records To Database",
+            "type": "boolean"
+          },
           "target_name": {
             "title": "Target Name",
             "type": "string"
@@ -2528,6 +2478,88 @@
           "target_name"
         ],
         "title": "PrecomputeDispatchPayload",
+        "type": "object"
+      },
+      "ProfilePayload": {
+        "description": "What was asked for, and what came back.\n\n`landed` is null for `--no-wait` and for a wait that timed out; the two are\ntold apart by `waited`, because a request that was served slowly and one\nthat was never served are different problems.",
+        "properties": {
+          "available": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available"
+          },
+          "downloaded": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downloaded"
+          },
+          "landed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Landed"
+          },
+          "op": {
+            "const": "profile",
+            "default": "profile",
+            "title": "Op",
+            "type": "string"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          },
+          "waited": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waited"
+          }
+        },
+        "title": "ProfilePayload",
         "type": "object"
       },
       "ProgressPayload": {
@@ -2681,34 +2713,6 @@
         "title": "PushCodeBody",
         "type": "object"
       },
-      "PushDataBody": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
-          }
-        },
-        "title": "PushDataBody",
-        "type": "object"
-      },
       "PushedCodePayload": {
         "description": "The snapshot that was sealed. Its id is what a task executes.",
         "properties": {
@@ -2727,27 +2731,6 @@
           "code_snapshot"
         ],
         "title": "PushedCodePayload",
-        "type": "object"
-      },
-      "PushedDataPayload": {
-        "description": "Abstraction name to files uploaded. Empty means everything was current.",
-        "properties": {
-          "op": {
-            "const": "push-data",
-            "default": "push-data",
-            "title": "Op",
-            "type": "string"
-          },
-          "uploaded": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "default": {},
-            "title": "Uploaded",
-            "type": "object"
-          }
-        },
-        "title": "PushedDataPayload",
         "type": "object"
       },
       "ResizeError": {
@@ -2930,6 +2913,11 @@
             "title": "Total Progress Rows",
             "type": "integer"
           },
+          "trainer_knobs": {
+            "additionalProperties": true,
+            "title": "Trainer Knobs",
+            "type": "object"
+          },
           "training_tasks": {
             "anyOf": [
               {
@@ -2954,6 +2942,7 @@
           "card_abstraction_hash",
           "iterations",
           "runtime_seconds",
+          "trainer_knobs",
           "progress",
           "coverage_flat_from",
           "curve",
@@ -3276,6 +3265,17 @@
             ],
             "title": "Method"
           },
+          "pool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool"
+          },
           "run": {
             "title": "Run",
             "type": "string"
@@ -3318,6 +3318,11 @@
             "default": "score",
             "title": "Op",
             "type": "string"
+          },
+          "records_to_database": {
+            "default": false,
+            "title": "Records To Database",
+            "type": "boolean"
           },
           "run_id": {
             "title": "Run Id",
@@ -3469,17 +3474,6 @@
             ],
             "title": "Config"
           },
-          "dtype": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dtype"
-          },
           "equity_prior_temperature": {
             "anyOf": [
               {
@@ -3597,28 +3591,6 @@
             "title": "To",
             "type": "integer"
           },
-          "universe_boards": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Universe Boards"
-          },
-          "universe_seed": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Universe Seed"
-          },
           "warm_start_at": {
             "anyOf": [
               {
@@ -3681,122 +3653,6 @@
         "title": "SubmitBody",
         "type": "object"
       },
-      "SubmitCouplingBody": {
-        "properties": {
-          "abstractions": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Abstractions",
-            "type": "array"
-          },
-          "board_relative": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Board Relative"
-          },
-          "boards": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Boards"
-          },
-          "classes": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Classes"
-          },
-          "seed": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seed"
-          },
-          "timeout": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timeout"
-          }
-        },
-        "required": [
-          "abstractions"
-        ],
-        "title": "SubmitCouplingBody",
-        "type": "object"
-      },
-      "SubmitCouplingPayload": {
-        "description": "A dispatch, plus which abstractions it priced.",
-        "properties": {
-          "abstractions": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Abstractions",
-            "type": "array"
-          },
-          "boards": {
-            "default": 0,
-            "title": "Boards",
-            "type": "integer"
-          },
-          "code_snapshot": {
-            "title": "Code Snapshot",
-            "type": "string"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "op": {
-            "const": "submit-coupling",
-            "default": "submit-coupling",
-            "title": "Op",
-            "type": "string"
-          },
-          "tasks": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Tasks",
-            "type": "array"
-          }
-        },
-        "required": [
-          "code_snapshot",
-          "job_id"
-        ],
-        "title": "SubmitCouplingPayload",
-        "type": "object"
-      },
       "SubmitPayload": {
         "description": "One queued training task, and what it is aiming at.",
         "properties": {
@@ -3813,6 +3669,11 @@
             "default": "submit",
             "title": "Op",
             "type": "string"
+          },
+          "records_to_database": {
+            "default": false,
+            "title": "Records To Database",
+            "type": "boolean"
           },
           "target_iteration": {
             "title": "Target Iteration",
@@ -3833,181 +3694,6 @@
           "target_iteration"
         ],
         "title": "SubmitPayload",
-        "type": "object"
-      },
-      "SubmitVectorBody": {
-        "properties": {
-          "abstractions": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Abstractions",
-            "type": "array"
-          },
-          "board_relative": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Board Relative"
-          },
-          "checkpoints": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Checkpoints"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config"
-          },
-          "derive_boards": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Derive Boards"
-          },
-          "kernels": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Kernels"
-          },
-          "score_boards": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Score Boards"
-          },
-          "score_seeds": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Score Seeds"
-          },
-          "stack": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stack"
-          },
-          "timeout": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timeout"
-          },
-          "train_boards": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Train Boards"
-          }
-        },
-        "required": [
-          "abstractions"
-        ],
-        "title": "SubmitVectorBody",
-        "type": "object"
-      },
-      "SubmitVectorPayload": {
-        "description": "A dispatch, plus WHICH ARMS it queued.\n\nThe arms are the part worth reading back: which abstractions and kernels to\ncompare IS the experiment, and a payload that reported only \"3 tasks queued\"\ncould not say what was being measured.",
-        "properties": {
-          "arms": {
-            "items": {
-              "$ref": "#/components/schemas/VectorArm"
-            },
-            "title": "Arms",
-            "type": "array"
-          },
-          "code_snapshot": {
-            "title": "Code Snapshot",
-            "type": "string"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "op": {
-            "const": "submit-vector",
-            "default": "submit-vector",
-            "title": "Op",
-            "type": "string"
-          },
-          "tasks": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Tasks",
-            "type": "array"
-          }
-        },
-        "required": [
-          "code_snapshot",
-          "job_id"
-        ],
-        "title": "SubmitVectorPayload",
         "type": "object"
       },
       "TaskFailure": {
@@ -4370,34 +4056,6 @@
         ],
         "title": "ValidationError",
         "type": "object"
-      },
-      "VectorArm": {
-        "properties": {
-          "abstraction": {
-            "title": "Abstraction",
-            "type": "string"
-          },
-          "derive_boards": {
-            "title": "Derive Boards",
-            "type": "integer"
-          },
-          "kernel": {
-            "title": "Kernel",
-            "type": "string"
-          },
-          "score_seed": {
-            "default": 999,
-            "title": "Score Seed",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "abstraction",
-          "kernel",
-          "derive_boards"
-        ],
-        "title": "VectorArm",
-        "type": "object"
       }
     }
   },
@@ -4407,66 +4065,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/activity": {
-      "get": {
-        "operationId": "_activity_api_activity_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "days",
-            "required": false,
-            "schema": {
-              "default": 7.0,
-              "title": "Days",
-              "type": "number"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActivityPayload"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Understood, and the answer is no."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Azure did not answer."
-          }
-        },
-        "summary": " Activity"
-      }
-    },
     "/api/autoscale": {
       "get": {
         "operationId": "_autoscale_api_autoscale_get",
@@ -5108,6 +4706,65 @@
         "summary": " Evals"
       }
     },
+    "/api/experiments/{experiment_id}/arms": {
+      "get": {
+        "operationId": "_arms_api_experiments__experiment_id__arms_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "control",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Control",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArmsPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " Arms"
+      }
+    },
     "/api/jobs": {
       "get": {
         "operationId": "_jobs_api_jobs_get",
@@ -5313,6 +4970,44 @@
         "summary": " Precompute"
       }
     },
+    "/api/profiles": {
+      "get": {
+        "operationId": "_profiles_api_profiles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilePayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " Profiles"
+      }
+    },
     "/api/push-code": {
       "post": {
         "operationId": "_push_code_api_push_code_post",
@@ -5359,54 +5054,6 @@
           }
         },
         "summary": " Push Code"
-      }
-    },
-    "/api/push-data": {
-      "post": {
-        "operationId": "_push_data_api_push_data_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PushDataBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PushedDataPayload"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Understood, and the answer is no."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Azure did not answer."
-          }
-        },
-        "summary": " Push Data"
       }
     },
     "/api/runs": {
@@ -5712,102 +5359,6 @@
         "summary": " Submit"
       }
     },
-    "/api/submit-coupling": {
-      "post": {
-        "operationId": "_submit_coupling_api_submit_coupling_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubmitCouplingBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubmitCouplingPayload"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Understood, and the answer is no."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Azure did not answer."
-          }
-        },
-        "summary": " Submit Coupling"
-      }
-    },
-    "/api/submit-vector": {
-      "post": {
-        "operationId": "_submit_vector_api_submit_vector_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubmitVectorBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubmitVectorPayload"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Understood, and the answer is no."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Azure did not answer."
-          }
-        },
-        "summary": " Submit Vector"
-      }
-    },
     "/api/tasks": {
       "get": {
         "operationId": "_tasks_api_tasks_get",
@@ -5924,6 +5475,65 @@
           }
         },
         "summary": " Cancel"
+      }
+    },
+    "/api/tasks/{task_id}/profile": {
+      "post": {
+        "operationId": "_profile_api_tasks__task_id__profile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "seconds",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "title": "Seconds",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilePayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " Profile"
       }
     },
     "/api/view/now": {

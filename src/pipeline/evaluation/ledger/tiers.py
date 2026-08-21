@@ -151,6 +151,9 @@ def build_exact_br_knobs_from_params(
     mix_run: str | None = None,
     mix_at: int | None = None,
     mix_weight: float = 0.5,
+    deployed: bool = False,
+    resolver_iterations: int | None = None,
+    resolver_prior_weight: float | None = None,
 ) -> dict[str, Any]:
     """Canonical exact-BR knob tier: the board plan IS the comparison tier.
 
@@ -186,6 +189,14 @@ def build_exact_br_knobs_from_params(
         knobs["mix_run"] = str(mix_run)
         knobs["mix_at"] = mix_at
         knobs["mix_weight"] = float(mix_weight)
+    if deployed:
+        # blueprint+resolver is a DIFFERENT STRATEGY, not a knob on the same
+        # one, so it has to enter the tier or a deployed row pairs with a
+        # blueprint row and the difference reads as noise. Measured 08-31:
+        # the two scored 3076.4 and 2409.8 under identical recorded knobs.
+        knobs["deployed"] = True
+        knobs["resolver_iterations"] = resolver_iterations
+        knobs["resolver_prior_weight"] = resolver_prior_weight
     return knobs
 
 
@@ -239,6 +250,19 @@ def tier_key(record: dict[str, Any]) -> tuple[Any, ...]:
         *(knobs.get(k) for k in CONDITIONAL_TIER_KNOBS),
         knobs.get("base_seed"),
     )
+
+
+def tier_digest(record: dict[str, Any]) -> str:
+    """:func:`tier_key`, hashed, for storing beside a row.
+
+    Here rather than at either call site because there are two -- the importer
+    and the live writer -- and a tier computed two ways is two answers to which
+    evals may be compared. A five-column version of this pairing reported
+    -100.0 mbb where the truth was -60.0.
+    """
+    return hashlib.sha256(
+        json.dumps(list(tier_key(record)), sort_keys=True, default=str).encode()
+    ).hexdigest()[:32]
 
 
 def tier_label(record: dict[str, Any]) -> str:

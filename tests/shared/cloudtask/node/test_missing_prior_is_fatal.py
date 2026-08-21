@@ -86,7 +86,7 @@ def test_a_present_prior_is_fetched(
     monkeypatch.setattr(
         handlers.archive,
         "fetch_current_rung",
-        lambda source, destination, log=None: (fetched.append(source.name), "")[1],
+        lambda source, destination, log=None, sas="": (fetched.append(source.name), "")[1],
     )
     monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
     monkeypatch.setattr(progress, "LadderWatcher", _StubWatcher)

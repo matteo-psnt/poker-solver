@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
-from src.shared.cloudtask.node import handlers
+from src.shared.cloudtask.node import archive, handlers
 from src.shared.cloudtask.node import plan as node_plan
 
 
@@ -35,6 +35,37 @@ class TestEvaluateFetch:
         assert handlers._evaluate(task, paths, log) == (0, None)
         assert (paths.runs / "run-a" / "static-2000.zarr" / "chunk").exists()
 
+    def test_every_evaluation_fetch_carries_the_container_credential(self, paths, log, monkeypatch):
+        """Two of the three fetch sites passed no SAS, so scoring read the
+        share exclusively and the container it was migrated into was never
+        consulted -- invisible while both stores held the rungs."""
+        self._published(paths)
+        (paths.archive / "run-a" / "static-1000.zarr").mkdir()
+        (paths.archive / "run-a" / ".complete-static-1000.zarr").write_text("")
+        (paths.archive / "run-a" / "STATIC_CHECKPOINT.json").write_text(
+            '{"zarr": "static-2000.zarr", "iteration": 2000, '
+            '"retained": [{"iteration": 1000, "zarr": "static-1000.zarr"}]}'
+        )
+        seen: list[str] = []
+
+        def record(_source, _destination, rungs, _log=None, sas="", **_kwargs):
+            seen.append(sas)
+            return list(rungs)
+
+        monkeypatch.setattr(archive, "fetch_for_evaluation", record)
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE,
+            run_id="run-a",
+            eval_rungs=("1000", "2000"),
+            checkpoint_sas="https://example/checkpoints?sig=x",
+        )
+
+        handlers._evaluate(task, paths, log)
+
+        assert seen, "no evaluation fetch happened"
+        assert all(sas == task.checkpoint_sas for sas in seen), seen
+
     def test_a_run_with_nothing_published_is_refused(self, paths, log):
         (paths.archive / "run-a").mkdir(parents=True)
         task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a")
@@ -48,6 +79,12 @@ class TestEvaluateFetch:
         (paths.archive / "run-a" / "static-1000.zarr").mkdir()
         (paths.archive / "run-a" / "static-1000.zarr" / "chunk").write_text("d")
         (paths.archive / "run-a" / ".complete-static-1000.zarr").write_text("")
+        # In the manifest too: it is what names a rung, and a fetch resolves
+        # the iteration through it rather than assuming a spelling.
+        (paths.archive / "run-a" / "STATIC_CHECKPOINT.json").write_text(
+            '{"zarr": "static-2000.zarr", "iteration": 2000, '
+            '"retained": [{"iteration": 1000, "zarr": "static-1000.zarr"}]}'
+        )
         codes = iter([0, 1])
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: next(codes))
         task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("1000", "2000"))
@@ -183,15 +220,13 @@ class TestTrain:
         (argv,) = seen
         assert argv[argv.index("--progress-file") + 1] == str(paths.work / "train-progress.json")
 
-    def test_the_board_free_trainer_reports_into_the_same_file(self, paths, log, monkeypatch):
+    def test_the_pcs_trainer_reports_into_the_same_file(self, paths, log, monkeypatch):
         """One task runs on a node and both trainers count the same thing
         against the same kind of target, so they share the file rather than
         keeping two names for one shape."""
         seen: list[list[str]] = []
         monkeypatch.setattr(handlers, "run_guarded", lambda argv, **k: seen.append(argv) or 0)
-        task = node_plan.TaskPlan(
-            op=TaskName.TRAIN_VECTOR, config="quick_test", to=1000, universe_boards=10
-        )
+        task = node_plan.TaskPlan(op=TaskName.TRAIN_PCS, config="quick_test", to=1000)
 
         handlers._train(task, paths, log)
 
@@ -257,14 +292,36 @@ class TestAbstractionRefresh:
 
         assert (paths.data / "combo_abstraction" / "buckets-F400T1200R600-rexact-e5c873dc").is_dir()
 
-    def test_a_share_without_abstractions_is_a_warning_not_a_failure(self, paths, log, monkeypatch):
+    def test_neither_store_holding_one_is_not_a_failure(self, paths, log, monkeypatch):
         """The node may already hold what this task needs, and the resolver says
         so precisely if it does not -- refusing here would only move the error."""
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a")
 
         assert handlers._train(task, paths, log)[0] == 0
-        assert "no" in log.path.read_text()
+
+    def test_the_container_is_read_before_the_share(self, paths, log, monkeypatch):
+        """Same order, and the same reason, as a rung's fetch: the share is the
+        store being left, so it is the fallback and never the first answer."""
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        seen: list[str] = []
+        monkeypatch.setattr(
+            handlers.archive,
+            "fetch_abstractions",
+            lambda sas, destination, _log: seen.append(sas) or 0,
+        )
+        task = node_plan.TaskPlan(
+            op=TaskName.TRAIN,
+            config="quick_test",
+            to=1000,
+            run_id="run-a",
+            checkpoint_sas="https://a.blob.core.windows.net/checkpoints?sig=x",
+        )
+
+        handlers._train(task, paths, log)
+
+        assert seen, "the container was never consulted"
+        assert seen[0].partition("?")[0].endswith("/abstractions")
 
     def test_an_abstraction_already_on_the_node_is_not_recopied(self, paths, log, monkeypatch):
         """`update=True` is the whole reason the steady-state cost is a directory

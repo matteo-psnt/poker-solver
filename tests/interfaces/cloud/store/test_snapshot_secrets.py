@@ -17,7 +17,7 @@ import tarfile
 
 import pytest
 
-from src.interfaces.cloud.store.share import build_code_snapshot
+from src.interfaces.cloud.store.blob import build_code_snapshot
 
 SECRETS = (".env", ".env.local", "chipzen.toml")
 

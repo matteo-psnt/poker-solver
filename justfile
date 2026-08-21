@@ -34,29 +34,50 @@ plan:
     {{tf}} init -input=false
     {{tf}} plan
 
+# The commands cache `terraform output` for an hour (src/interfaces/cloud/
+# config.py: 3 s per read against the remote state). An apply is the one event
+# that changes the answer, so every apply recipe ends here.
+_forget-coordinates:
+    rm -rf "${POKER_SOLVER_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/poker-solver}/terraform-outputs"
+
+# The `create` recipes below are `-auto-approve`. That MOVES the review step
+# rather than removing it: `just plan` and `serve-plan` are where a change gets
+# read, and they are read properly because reading is all they do. The prompt was
+# not buying that -- an apply driven through a non-TTY dies on `error asking for
+# approval: EOF` having already printed the plan, and a prompt on a plan just
+# read is the step people paste past.
+#
+# The `destroy` recipes are deliberately NOT auto-approved. A create is
+# re-runnable; a teardown of the Batch account is not.
+
 # Create the durable share. Separate state, `prevent_destroy` -- run once, ever.
 store-create:
     {{tfs}} init -input=false
-    {{tfs}} apply
+    {{tfs}} apply -input=false -auto-approve
+    just _forget-coordinates
 
 # Create/update the Batch account, pool and guardrails. Safe to re-run.
 # Requires store-create first: the pool mounts the share by name.
 create:
     {{tf}} init -input=false
-    {{tf}} apply
+    {{tf}} apply -input=false -auto-approve
+    just _forget-coordinates
     @echo ""
-    @echo "  next:  just cli push-data && just submit quick_test 3000"
+    @echo "  next:  uv run poker-solver submit-precompute --config quick_test && just submit quick_test 3000"
 
 # Delete the Batch account and pool. The share and every published run survive.
+# Prompts, on purpose -- see the note above `store-create`.
 destroy:
     {{tf}} destroy
+    just _forget-coordinates
 
 # Create the box that serves a trained run for reading. Its own state, so
 # `destroy` above cannot reach it -- and it is NOT part of the pool, because the
 # pool is for work that finishes and a server never does.
 serve-create:
     {{tfv}} init -input=false
-    {{tfv}} apply
+    {{tfv}} apply -input=false -auto-approve
+    just _forget-coordinates
     @echo ""
     @echo "  next:  just serve-ssh to point it at a run, then eval \"$(just serve-env)\""
 
@@ -79,18 +100,22 @@ serve-ssh:
 
 # Put code, the abstraction and one run on the box, and start serving it.
 # The script is PIPED over ssh rather than installed, so the box always runs the
-# version in this repo and keeps none of it. Args: run (id or fragment), and
-# optionally the code snapshot `push-code` echoed -- PIN IT when another session
-# might be pushing, because the default is whichever snapshot is newest on the
-# share and that is not necessarily yours -- `at`, the rung to stage and seat
-# (without it both the reader and the seat take the manifest head) -- and
-# `rungs`, a comma-separated `run[:at]` list of SHALLOWER blueprints, each staged
-# and turned into a `--rung` so the seat plays a depth ladder rather than one
-# tree.
-# Put code, the abstraction and one run (or a ladder) on the box, and serve it.
+# version in this repo and keeps none of it.
+#
+# Args: run (id or fragment), and optionally the code snapshot `push-code`
+# echoed -- PIN IT when another session might be pushing, because the default is
+# whichever snapshot sorts newest in the container and that is not necessarily
+# yours -- `at`, the rung to stage and seat (without it both the reader and the
+# seat take the manifest head) -- and `rungs`, a comma-separated
+# `run[:at[:threshold]]` list of SHALLOWER blueprints, each staged and turned
+# into a `--rung` so the seat plays a depth ladder rather than one tree.
+#
+# The record's address rides along as $2: the box reads the run from Postgres
+# and has no Terraform of its own to ask.
 serve-deploy run code="" at="" rungs="":
     ssh solver@$({{tfv}} output -raw public_ip) \
-        "CODE={{code}} AT={{at}} RUNGS={{rungs}} bash -s" -- {{run}} < infra/serve/deploy.sh
+        "CODE={{code}} AT={{at}} RUNGS={{rungs}} bash -s" \
+        -- {{run}} "$({{tfs}} output -raw postgres_dsn)" < infra/serve/deploy.sh
 
 # Wake the box, or put it back to sleep. The console does this too; these are
 # for when the console is what you are trying to fix.
@@ -101,6 +126,7 @@ serve-stop:
     uv run poker-solver serve-box --action stop
 
 # Delete the serving box. Nothing on it is a source of truth; it holds copies.
+# Prompts, on purpose -- see the note above `store-create`.
 serve-destroy:
     {{tfv}} destroy
 
@@ -214,7 +240,7 @@ credit-check *flags:
 # the escape hatch for everything else.
 #
 # The nine pure passthroughs that used to sit here (`status`, `jobs`, `tasks`,
-# `logs`, `cancel`, `pool-status`, `autoscale-check`, `push-code`, `push-data`,
+# `logs`, `cancel`, `pool-status`, `autoscale-check`, `push-code`,
 # `ledger`) are gone. They retyped a command without changing it, and they
 # answered "what can I do here?" with 13 of 26 -- a hand-maintained subset that
 # `poker-solver --help` already answers in full and cannot drift from.

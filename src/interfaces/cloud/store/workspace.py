@@ -24,8 +24,9 @@ from typing import TYPE_CHECKING
 
 from src.interfaces import run_names
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
+from src.interfaces.cloud.store import blob, share
 from src.interfaces.errors import CommandError
+from src.shared import records
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
@@ -44,6 +45,11 @@ DEAD_SUFFIX = "_result.json"
 # 4.6s at 32, 3.5s at 64. Threads blocked on a socket cost almost nothing.
 _PARALLEL_DOWNLOADS = 64
 
+# The etag manifest an incremental refresh compares against, written at the ROOT
+# of a materialised tree. Every reader of that tree filters to directories, so a
+# file beside the run directories is invisible to them.
+_ETAGS_NAME = "records.etags"
+
 
 def _is_snapshot_dir(name: str) -> bool:
     """A checkpoint directory, never worth descending into to ask a question.
@@ -61,8 +67,14 @@ def pull_metadata(
     destination: Path,
     *,
     run: str | None = None,
+    previous: Path | None = None,
 ) -> int:
-    """Download every published JSON record into ``destination``. Returns the count."""
+    """Materialise the published JSON record into ``destination``.
+
+    Returns how many files were FETCHED, not how many the tree holds: with
+    ``previous`` -- a tree this function built earlier -- an unchanged etag is
+    hard-linked across instead of downloaded.
+    """
     published = [
         entry.name
         for entry in share.list_entries(service, share_name, share.ARCHIVE_DIR)
@@ -77,19 +89,17 @@ def pull_metadata(
         if len(matches) > 1:
             raise CommandError(run_names.ambiguous_message(run, matches))
         if not matches:
-            raise CommandError(
-                f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
-            )
+            raise CommandError(run_names.unknown_message(run, published))
         published = matches
 
     # The WALK, not only the downloads. Each run is an independent traversal of
     # directory listings, and a listing is a round trip like any other: 18 runs
     # walked one after another was 12.4s of the ~20s a `--source share` read
     # took, before a single file had been fetched.
-    def _walk(name: str) -> tuple[list[tuple[str, Path]], list[Path]]:
-        found: list[tuple[str, Path]] = []
+    def _walk(name: str) -> tuple[list[tuple[str, Path, str | None]], list[Path]]:
+        found: list[tuple[str, Path, str | None]] = []
         markers: list[Path] = []
-        for remote in share.walk_files(
+        for remote, etag in share.walk_files(
             service,
             share_name,
             f"{share.ARCHIVE_DIR}/{name}",
@@ -109,7 +119,7 @@ def pull_metadata(
                 continue
             if leaf.endswith(DEAD_SUFFIX):
                 continue
-            found.append((remote, destination / relative))
+            found.append((remote, destination / relative, etag))
         return found, markers
 
     with ThreadPoolExecutor(max_workers=min(_PARALLEL_DOWNLOADS, len(published) or 1)) as pool:
@@ -120,18 +130,42 @@ def pull_metadata(
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.touch()
 
+    # INCREMENTAL against `previous`, on the same argument `download_tasks` uses
+    # for legs/: a published record never changes once written, so an unchanged
+    # etag means the bytes are already on disk and a hard link is the whole
+    # refresh. Before this, a 45s console TTL re-fetched all 4,251 immutable
+    # documents every time -- 6.4s of the 24.4s rebuild, paid every 45 seconds.
+    known = _etags(previous)
+    fetch: list[tuple[str, Path]] = []
+    for remote, local, etag in wanted:
+        relative = remote[len(f"{share.ARCHIVE_DIR}/") :]
+        held = previous / relative if previous is not None else None
+        if held is not None and etag is not None and known.get(relative) == etag and held.is_file():
+            local.parent.mkdir(parents=True, exist_ok=True)
+            _link(held, local)
+        else:
+            fetch.append((remote, local))
+
     # One round trip per file, and a run's eval documents now carry their full
     # sample vectors -- so this is latency-bound on a link where latency is the
     # whole cost. The downloads are independent and `download_file` builds its
     # own file client, so they overlap.
-    with ThreadPoolExecutor(max_workers=_PARALLEL_DOWNLOADS) as pool:
-        futures = [
-            pool.submit(share.download_file, service, share_name, remote, local)
-            for remote, local in wanted
-        ]
-        for future in futures:
-            future.result()
-    return len(wanted)
+    if fetch:
+        with ThreadPoolExecutor(max_workers=_PARALLEL_DOWNLOADS) as pool:
+            futures = [
+                pool.submit(share.download_file, service, share_name, remote, local)
+                for remote, local in fetch
+            ]
+            for future in futures:
+                future.result()
+
+    (destination / _ETAGS_NAME).write_text(
+        "".join(
+            f"{etag or ''}\t{remote[len(f'{share.ARCHIVE_DIR}/') :]}\n"
+            for remote, _, etag in wanted
+        )
+    )
+    return len(fetch)
 
 
 def resolve_published_run(run: str) -> str:
@@ -155,22 +189,21 @@ def resolve_published_run(run: str) -> str:
     if len(matches) > 1:
         raise CommandError(run_names.ambiguous_message(run, matches))
     if not matches:
-        raise CommandError(
-            f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
-        )
+        raise CommandError(run_names.unknown_message(run, published))
     return matches[0]
 
 
 def verify_published_rungs(run_id: str, rungs: Sequence[str]) -> None:
     """Refuse rungs the SHARE does not actually hold, before anything is dispatched.
 
-    Checked against the share's own listing rather than the run's manifest,
-    because the two disagree: pruning removes a snapshot without rewriting the
-    manifest that advertises it, so `runinfo` offers rungs that
-    `fetch_for_evaluation` then cannot find. Unverified, each such rung cost a
+    THE MARKER SAYS PUBLISHED, THE STORES SAY WHERE. Pruning removes a snapshot
+    without rewriting the manifest that advertises it, so `runinfo` offers rungs
+    that `fetch_for_evaluation` then cannot find -- unverified, each cost a
     snapshot upload, a node allocation and a `uv sync` before dying on "the
-    manifest names static-N.zarr but it is not on the share" -- ~26 tasks in the
-    2026-08-23/24 window.
+    manifest names static-N.zarr but it is not on the share", ~26 tasks in the
+    2026-08-23/24 window. But the share is no longer where the bytes are: a
+    migrated rung has a marker, no directory, and an object in the container,
+    and requiring the directory refused every run the migration had moved.
 
     An empty rung means "the latest checkpoint", which the ladder cannot name in
     advance and the node resolves itself, so it is not checked here.
@@ -182,16 +215,34 @@ def verify_published_rungs(run_id: str, rungs: Sequence[str]) -> None:
     service = share.share_client(config)
     entries = share.list_entries(service, config.share_name, f"{share.ARCHIVE_DIR}/{run_id}")
     names = {entry.name for entry in entries}
-    available = sorted(
-        name.removeprefix("static-").removesuffix(".zarr")
+    published = {
+        name.removeprefix("static-")
+        .removesuffix(".zarr")
+        .removesuffix(records.SNAPSHOT_SUFFIX): name
         for name in names
         if name.startswith("static-") and archive.marker_for(name) in names
-    )
+    }
+    marked = {
+        name[len(archive.MARKER_PREFIX) :]
+        for name in names
+        if name.startswith(f"{archive.MARKER_PREFIX}static-")
+    }
+    for name in marked:
+        published.setdefault(
+            name.removeprefix("static-")
+            .removesuffix(".zarr")
+            .removesuffix(records.SNAPSHOT_SUFFIX),
+            name,
+        )
+    available = sorted(published)
     missing = [
         rung
         for rung in wanted
-        if f"static-{rung}.zarr" not in names
-        or archive.marker_for(f"static-{rung}.zarr") not in names
+        if rung not in published
+        or (
+            published[rung] not in names
+            and not blob.holds_rung(config, run_id, records.object_name(published[rung]))
+        )
     ]
     if missing:
         raise CommandError(
@@ -234,9 +285,19 @@ class SharedTrees:
         A tree is deleted when it expires AND nobody holds it. Expiry alone
         would pull the directory out from under a reader mid-answer; never
         deleting would leak one tree per refresh for the life of the server.
+    stale-while-revalidate
+        A reader arriving during a rebuild is handed the EXPIRED tree rather
+        than blocked on the new one, for ``stale_grace`` past the TTL. Discovery
+        alone is ~5.4s against the share (measured: 1.3s to list 300 runs, 4.0s
+        to walk them), so blocking made roughly one page load in six pay a
+        multi-second wait for data it did not need to be that fresh.
     """
 
     ttl: float
+    # Mirrors `TtlCache`'s `serve_stale_for` one layer up, and for the same
+    # reason: a refresh that keeps failing must reach the caller as a failure at
+    # a bounded age rather than ageing silently behind a badge.
+    stale_grace: float = 0.0
     _lock: threading.Condition = field(default_factory=threading.Condition, repr=False)
     _trees: dict[str, _Tree] = field(default_factory=dict, repr=False)
     _building: set[str] = field(default_factory=set, repr=False)
@@ -265,8 +326,16 @@ class SharedTrees:
                     previous.holders += 1
                     return previous
                 if key in self._building:
-                    # Someone else is already paying for this. Waiting costs the
-                    # remainder of ONE sweep; racing costs a whole extra one.
+                    # Someone else is already paying for this. Racing them costs
+                    # a whole extra sweep, so never build here -- but do not WAIT
+                    # for them either while a readable tree is in hand: the
+                    # builder already holds `previous`, so serving it costs one
+                    # more refcount and no round trips. Bounded, because a build
+                    # that keeps failing must eventually be reported rather than
+                    # answered from an ever-older tree.
+                    if previous is not None and self._within_grace(previous):
+                        previous.holders += 1
+                        return previous
                     self._lock.wait()
                     continue
                 if previous is not None:
@@ -298,6 +367,10 @@ class SharedTrees:
             self._building.discard(key)
             self._lock.notify_all()
             return fresh
+
+    def _within_grace(self, tree: _Tree) -> bool:
+        """Whether an EXPIRED tree is still young enough to answer from."""
+        return time.monotonic() - tree.born < self.ttl + self.stale_grace
 
     def _release(self, tree: _Tree | None) -> None:
         """Let go of the hold a build took on its predecessor. Caller holds the lock."""
@@ -334,7 +407,7 @@ RECORD_KEY = "record"
 
 
 @contextmanager
-def shared_record_cache(ttl: float) -> Iterator[SharedTrees]:
+def shared_record_cache(ttl: float, stale_grace: float = 0.0) -> Iterator[SharedTrees]:
     """For the duration, materialising the record is memoised across readers.
 
     NESTS rather than refusing. Two applications in one process is something
@@ -345,7 +418,7 @@ def shared_record_cache(ttl: float) -> Iterator[SharedTrees]:
     with it, so neither can serve the other's answers.
     """
     global _ACTIVE
-    cache = SharedTrees(ttl=ttl)
+    cache = SharedTrees(ttl=ttl, stale_grace=stale_grace)
     with _ACTIVE_LOCK:
         previous, _ACTIVE = _ACTIVE, cache
     try:
@@ -361,11 +434,31 @@ def active_cache() -> SharedTrees | None:
     return _ACTIVE
 
 
-def _materialise(root: Path, *, run: str | None) -> None:
-    """Pull the published record into ``root``."""
+def _etags(tree: Path | None) -> dict[str, str]:
+    """The versions a tree was built from. Empty for a tree with no manifest."""
+    if tree is None or not (tree / _ETAGS_NAME).is_file():
+        return {}
+    found: dict[str, str] = {}
+    for line in (tree / _ETAGS_NAME).read_text().splitlines():
+        etag, sep, name = line.partition("\t")
+        if sep and etag:
+            found[name] = etag
+    return found
+
+
+def _link(source: Path, destination: Path) -> None:
+    """A hard link where the filesystem allows one, a copy where it does not."""
+    try:
+        destination.hardlink_to(source)
+    except OSError:
+        shutil.copyfile(source, destination)
+
+
+def _materialise(root: Path, *, run: str | None, previous: Path | None = None) -> None:
+    """Pull the published record into ``root``, reusing ``previous`` where it can."""
     config = CloudConfig.load()
     service = share.share_client(config)
-    pull_metadata(service, config.share_name, root, run=run)
+    pull_metadata(service, config.share_name, root, run=run, previous=previous)
 
 
 def _require_published(root: Path, run: str) -> None:
@@ -381,9 +474,7 @@ def _require_published(root: Path, run: str) -> None:
     if len(matches) > 1:
         raise CommandError(run_names.ambiguous_message(run, matches))
     if not matches:
-        raise CommandError(
-            f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
-        )
+        raise CommandError(run_names.unknown_message(run, published))
 
 
 @contextmanager
@@ -407,7 +498,11 @@ def share_records(*, run: str | None = None) -> Iterator[Path]:
             yield root
         return
 
-    with cache.acquire(RECORD_KEY, lambda root, _previous: _materialise(root, run=None)) as root:
+    def _refresh(root: Path, previous: Path | None) -> None:
+        """The count `pull_metadata` returns is not part of the cache protocol."""
+        _materialise(root, run=None, previous=previous)
+
+    with cache.acquire(RECORD_KEY, _refresh) as root:
         if run is not None:
             _require_published(root, run)
         yield root

@@ -30,8 +30,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Street
 from src.engine.solver.betting_tree import BettingTree
-from src.engine.solver.vector import bucket_game, compile_tree
-from src.engine.solver.vector.bucket_kernel import BucketVectorCFR
+from src.engine.solver.vector import compile_tree
 from src.engine.solver.vector.compiled_tree import TerminalKind
 from src.engine.solver.vector.hand_context import (
     HandContext,
@@ -75,28 +74,6 @@ def _showdown_terminals(compiled, street: Street | None = None) -> np.ndarray:
     if street is not None:
         selected &= np.asarray(compiled.terminal_street) == street.value
     return np.flatnonzero(selected)
-
-
-def test_bucket_kernel_showdown_value_rises_with_bucket_strength(compiled):
-    rng = np.random.default_rng(31)
-    game = bucket_game.derive([_ordered_context(rng) for _ in range(6)], ALL_COUNTS)
-
-    signal = float(np.abs(game.showdown).max())
-    assert signal > MIN_SHOWDOWN_SIGNAL, (
-        f"showdown matrix peaks at {signal:.3f}; buckets do not track strength, "
-        "so this test could not observe a sign error"
-    )
-
-    kernel = BucketVectorCFR(compiled, game, cfr_plus=True, dtype=np.float64)
-    initial = np.ones(compiled.tree.num_buckets(Street.PREFLOP), dtype=np.float64)
-    kernel.iterate(initial)
-
-    width = compiled.tree.num_buckets(Street.RIVER)
-    rows = _showdown_terminals(compiled, Street.RIVER)
-    profile = kernel.terminal_value[0, rows, :width].mean(axis=0)
-    assert np.all(np.diff(profile) > 0), (
-        f"showdown value must rise with bucket strength, got {profile}"
-    )
 
 
 def test_hand_space_kernel_showdown_value_rises_with_hand_strength(compiled):

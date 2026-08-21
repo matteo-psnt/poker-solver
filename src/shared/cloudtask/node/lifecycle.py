@@ -20,15 +20,21 @@ import json
 import os
 import shutil
 import signal
-from typing import TYPE_CHECKING
+import sys
+import time
+from typing import TYPE_CHECKING, Any
 
 from src.shared import cache
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
-from src.shared.cloudtask.node import archive, progress
+from src.shared.cloudtask.node import archive, legmirror, progress
 from src.shared.cloudtask.node.handlers import HANDLERS, publish_own_run
 from src.shared.cloudtask.node.paths import NodePaths
-from src.shared.cloudtask.node.plan import BadEnvironmentError, parse_environment
+from src.shared.cloudtask.node.plan import (
+    BadEnvironmentError,
+    parse_environment,
+    run_id_for,
+)
 from src.shared.cloudtask.node.process import EXIT_TIMEOUT, Killed, TaskLogger, run_guarded
 
 if TYPE_CHECKING:
@@ -99,6 +105,12 @@ def _install_signal_handlers() -> None:
     signal.signal(signal.SIGINT, handler)
 
 
+# Distinct from every signal and from `EXIT_TIMEOUT`, so a task that died
+# unable to record itself is tellable apart from one that merely failed --
+# through Batch's observation, which is the only account such a task leaves.
+NO_RECORD_EXIT_CODE = 44
+
+
 def _cause(code: int, outcome: str | None) -> str:
     if outcome:
         return outcome
@@ -152,44 +164,101 @@ def _units_unit() -> str:
 
 def _record(
     paths: NodePaths, event: str, *, code: int | None = None, cause: str | None = None
-) -> None:
-    """Never fatal, and never allowed to be the reason a task fails.
+) -> int:
+    """The task's account, in the database, which is the only place it lives now.
 
-    The whole point is that a task dying anywhere -- including during dependency
-    install -- still leaves an account on the share.
+    THE STARTED RECORD IS FATAL AND THE TERMINAL ONE IS NOT, and the asymmetry
+    is the whole design. Starting CLAIMS an attempt number, and every later
+    record of this task -- its progress samples, its exit code -- belongs to
+    that number. Inventing one because the write failed means overwriting a
+    PREVIOUS attempt's account, which is the account of the failure that caused
+    this retry. So the claim raises, and the task dies having recorded why.
+
+    That is not a new failure mode: since the record moved off the share, a task
+    that cannot reach the database fails at its first training event regardless.
+    This names the reason minutes earlier, before a node spends an hour on work
+    nothing will be able to describe.
+
+    The terminal record keeps the old contract -- a task that survived its work
+    must not die reporting it -- so it is best-effort and returns the attempt it
+    used. Returns the attempt this record belongs to; 0 when there is none.
     """
+    dsn = os.environ.get("POKER_SOLVER_RECORD_DSN", "")
+    task_id = os.environ.get("AZ_BATCH_TASK_ID", "local")
+    if event == task_log.EVENT_STARTED:
+        return _record_start(paths, task_id, dsn)
+    attempt = 0
     with contextlib.suppress(Exception):
-        task_log.write_node_record(
-            paths.share,
-            task_id=os.environ.get("AZ_BATCH_TASK_ID", "local"),
-            job_id=os.environ.get("AZ_BATCH_JOB_ID", ""),
-            node_id=os.environ.get("AZ_BATCH_NODE_ID", ""),
-            run_id=os.environ.get("RUN_ID", ""),
-            op=os.environ.get("RUN_OP") or TaskName.TRAIN,
-            config=os.environ.get("RUN_CONFIG", ""),
-            target_iteration=os.environ.get("RUN_TO", ""),
-            # `RUN_TO` is a TRAIN target and an evaluate task leaves it 0, so
-            # without these two an evaluation records nothing about what it
-            # actually scored -- which is how 38 evaluate tasks came to be
-            # indistinguishable in the record.
-            eval_at=os.environ.get("RUN_EVAL_AT", ""),
-            eval_flags=_eval_flags(),
-            # Straight from the environment rather than through the plan: this
-            # record is written BEFORE the plan is parsed, and its whole purpose
-            # is to survive a task that dies before anything else runs. A task
-            # that fails during dependency install still has to say what code it
-            # was going to run.
-            code_snapshot=os.environ.get("CODE_SNAPSHOT", ""),
-            git_commit=os.environ.get("RUN_GIT_COMMIT", ""),
-            git_dirty=os.environ.get("RUN_GIT_DIRTY", ""),
-            git_branch=os.environ.get("RUN_GIT_BRANCH", ""),
-            workers=_workers(),
-            units=progress.units_done(paths) if event == task_log.EVENT_FINISHED else 0.0,
-            units_unit=_units_unit(),
-            event=event,
-            cause=cause,
-            exit_code=code,
+        attempt = legmirror.latest_attempt(task_id, dsn=dsn) if dsn else 0
+    with contextlib.suppress(Exception):
+        legmirror.record(
+            task_id,
+            attempt,
+            "exit",
+            _node_fields(paths, task_id, event, attempt, code=code, cause=cause),
+            dsn=dsn,
         )
+    return attempt
+
+
+def _record_start(paths: NodePaths, task_id: str, dsn: str) -> int:
+    """Claim the attempt, or die saying so. See `_record`."""
+    if not dsn:
+        raise RuntimeError(
+            "No POKER_SOLVER_RECORD_DSN: this task would run with no account of "
+            "itself anywhere. The share no longer holds one."
+        )
+    return legmirror.claim_attempt(
+        task_id, _node_fields(paths, task_id, task_log.EVENT_STARTED, 0), dsn=dsn
+    )
+
+
+def _node_fields(
+    paths: NodePaths,
+    task_id: str,
+    event: str,
+    attempt: int,
+    *,
+    code: int | None = None,
+    cause: str | None = None,
+) -> dict[str, Any]:
+    """The record's body, straight from the environment."""
+    op = os.environ.get("RUN_OP") or TaskName.TRAIN
+    return task_log.node_record(
+        task_id=task_id,
+        attempt=attempt,
+        job_id=os.environ.get("AZ_BATCH_JOB_ID", ""),
+        node_id=os.environ.get("AZ_BATCH_NODE_ID", ""),
+        # DERIVED, not the raw variable. A fresh training task is given no
+        # RUN_ID -- the trainer names the run after the task -- so writing the
+        # variable recorded no run at all and nothing could attribute the task
+        # to it. `run_id_for` is that rule, stated once.
+        run_id=run_id_for(op, os.environ.get("RUN_ID", ""), task_id),
+        op=op,
+        config=os.environ.get("RUN_CONFIG", ""),
+        target_iteration=os.environ.get("RUN_TO", ""),
+        # `RUN_TO` is a TRAIN target and an evaluate task leaves it 0, so
+        # without these two an evaluation records nothing about what it
+        # actually scored -- which is how 38 evaluate tasks came to be
+        # indistinguishable in the record.
+        eval_at=os.environ.get("RUN_EVAL_AT", ""),
+        eval_flags=_eval_flags(),
+        # Straight from the environment rather than through the plan: this
+        # record is written BEFORE the plan is parsed, and its whole purpose
+        # is to survive a task that dies before anything else runs. A task
+        # that fails during dependency install still has to say what code it
+        # was going to run.
+        code_snapshot=os.environ.get("CODE_SNAPSHOT", ""),
+        git_commit=os.environ.get("RUN_GIT_COMMIT", ""),
+        git_dirty=os.environ.get("RUN_GIT_DIRTY", ""),
+        git_branch=os.environ.get("RUN_GIT_BRANCH", ""),
+        workers=_workers(),
+        units=progress.units_done(paths) if event == task_log.EVENT_FINISHED else 0.0,
+        units_unit=_units_unit(),
+        event=event,
+        cause=cause,
+        exit_code=code,
+    )
 
 
 def main() -> int:
@@ -197,7 +266,23 @@ def main() -> int:
     # BEFORE the logger. Opening the task log touches /mnt/work, which can fail,
     # and the started record is the one guarantee this module exists for: a task
     # that leaves nothing is indistinguishable from one that never ran.
-    _record(paths, task_log.EVENT_STARTED)
+    #
+    # Which is exactly why the claim's failure is CAUGHT here rather than left
+    # to propagate. It has to be fatal -- see `_record` -- but a bare traceback
+    # at this point produces the very thing the line above is about: no log, no
+    # row, nothing on the share. Batch's own observation is then the only
+    # account, so this makes it a readable one: a dedicated exit code, and the
+    # reason on stderr where the node captures it.
+    try:
+        _record(paths, task_log.EVENT_STARTED)
+    except Exception as exc:  # noqa: BLE001 -- the message IS the deliverable here
+        print(f"FATAL: cannot record this task: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(
+            "The database is the only record; a task that cannot claim its "
+            "attempt would overwrite a previous one's account.",
+            file=sys.stderr,
+        )
+        return NO_RECORD_EXIT_CODE
     task = os.environ.get("AZ_BATCH_TASK_ID", "local")
     log = TaskLogger(paths.work / f"task-{task}.log", paths.share)
     _install_signal_handlers()
@@ -212,7 +297,16 @@ def main() -> int:
             log(f"FATAL dependency sync failed rc={sync}")
             code = sync
         else:
+            started = time.monotonic()
             code, outcome = HANDLERS[plan.op](plan, paths, log)
+            # The ONE boundary this log had no line for, and it hides minutes.
+            # A quick_test whose training reports 22.6s of work publishes five
+            # minutes later, every time and long before any of the record work
+            # -- so the gap is the handler returning, not the publish. Which
+            # PART of the handler is the next question, and it cannot be asked
+            # while the log jumps straight from the child's last line to
+            # `publishing`.
+            log(f"handler returned rc={code} after {time.monotonic() - started:.1f}s")
     except Killed as killed:
         code = 128 + killed.signum
         log(f"signalled ({killed.signum}); publishing what this task has")

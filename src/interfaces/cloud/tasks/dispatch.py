@@ -16,14 +16,14 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
+from src.interfaces.cloud.store import blob
 from src.interfaces.cloud.tasks import batch, spec
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo
 from src.shared.cloudtask import kinds
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from src.interfaces.cloud.tasks.spec import TaskSpec
 
@@ -62,6 +62,13 @@ class Dispatched(BaseModel):
     code_snapshot: str
     job_id: str
     tasks: list[str] = []
+    records_to_database: bool = False
+    """That these tasks carry a DSN, which `_refuse_without_a_record` has already
+    guaranteed. Kept in the payload rather than dropped as redundant: it is
+    sealed from the DISPATCHING SHELL'S environment for the task's whole life,
+    and it is the one fact a caller cannot recover afterwards from the task id.
+    A task without it records NOWHERE -- there is no file half to fall back
+    on."""
 
     def extend[T: Dispatched](self, model: type[T], **fields: Any) -> T:
         """These three facts, plus what the command adds, as the command's payload.
@@ -96,13 +103,15 @@ def stage_and_queue(
 
     # VALIDATED BEFORE ANYTHING IS UPLOADED. Staging first would mean a
     # rejected submission -- `--to 0`, a `--set` missing its `=` -- still
-    # leaving a full tarball on the share, permanently, for a task that never
-    # ran. The specs are built against a placeholder id purely to check them;
+    # uploading a full tarball for a task that never ran. The specs are built
+    # against a placeholder id purely to check them;
     # the real snapshot id is substituted below.
     for task in make_tasks("unvalidated"):
         task.validate()
 
-    snapshot = share.publish_code_snapshot(share.share_client(config), config.share_name, root, now)
+    snapshot = blob.publish_code_snapshot(
+        config.storage_account, config.share_key, config.code_container, root, now
+    )
     specs = [_stamped(task) for task in make_tasks(snapshot)]
     if not specs:
         raise CommandError("Nothing to submit.")
@@ -116,6 +125,9 @@ def stage_and_queue(
     # on 30 draws from a 32k space avoiding a collision (~1.4%) -- and a
     # collision raises mid-loop, after some rungs are already queued and with
     # no record of which.
+    _refuse_without_a_record(specs)
+    specs = _with_code_access(config, specs, snapshot)
+    specs = _with_checkpoint_access(config, specs)
     for index, task in enumerate(specs):
         nonce = index * NONCE_CEILING + secrets.randbelow(NONCE_CEILING)
         identifier = spec.task_id(task.label, now, nonce)
@@ -125,8 +137,75 @@ def stage_and_queue(
         queued.append(Queued(task_id=identifier, job_id=job_id, label=task.label))
 
     return Dispatched(
-        code_snapshot=snapshot, job_id=job_id, tasks=[item.task_id for item in queued]
+        code_snapshot=snapshot,
+        job_id=job_id,
+        tasks=[item.task_id for item in queued],
+        # From the SPECS, not from this process's environment: what matters is
+        # what was sealed into the tasks, and a caller may have set it another
+        # way. Any one of them answers -- they are stamped together.
+        records_to_database=bool(specs and specs[0].record_dsn),
     )
+
+
+def _with_code_access(
+    config: CloudConfig, specs: Sequence[TaskSpec], snapshot: str
+) -> list[TaskSpec]:
+    """Seal a read-only URL for the sealed tree into each task.
+
+    In the ENVIRONMENT, never the command line: Batch prints command lines in
+    every task listing, and this URL is a credential. Minted once per dispatch
+    -- every task here runs the same snapshot.
+    """
+    url = blob.code_snapshot_sas(
+        config.storage_account, config.share_key, config.code_container, snapshot
+    )
+    return [replace(task, code_url=url) for task in specs]
+
+
+def _with_checkpoint_access(config: CloudConfig, specs: Sequence[TaskSpec]) -> list[TaskSpec]:
+    """Seal a container SAS into each task, scoped to what its KIND may do.
+
+    A training task publishes rungs and needs write. Everything else -- an
+    evaluate, a score, a duel -- only FETCHES one, and handing those a writable
+    credential would put the power to overwrite a checkpoint in every task that
+    merely reads one. The blast radius of a leaked or mis-sealed task is the
+    difference between a lost score and a lost run.
+
+    Minted per dispatch and never stored, so there is nothing to rotate.
+    """
+    minted: dict[bool, str] = {}
+    sealed = []
+    for task in specs:
+        write = task.op in blob.WRITES_BLOBS
+        if write not in minted:
+            minted[write] = blob.container_sas(
+                config.storage_account, config.share_key, write=write
+            )
+        sealed.append(replace(task, checkpoint_sas=minted[write]))
+    return sealed
+
+
+def _refuse_without_a_record(specs: Sequence[TaskSpec]) -> None:
+    """A task that cannot record itself must not be queued.
+
+    `record_dsn` is read from the DISPATCHING SHELL and sealed into the task for
+    its whole life, and it used to be optional: an empty one meant files only,
+    which was the pre-migration behaviour and the rollback. Progress is no
+    longer published to the share, so an empty one now means a task whose
+    progress exists NOWHERE -- and the failure is silent, hours later, on a
+    screen showing a bar that never moved.
+
+    Refused here rather than warned about, because the warning was already
+    there. `submit` printed `record: SHARE ONLY` from the day two runs finished
+    while the database still called them running, and tasks kept being queued
+    without it -- 65 leg documents from one afternoon reached the share and
+    nothing else.
+    """
+    if specs and not specs[0].record_dsn:
+        raise CommandError(
+            "No record DSN to seal into these tasks: the store state could not be read "
+            "and POKER_SOLVER_RECORD_DSN is unset. Apply infra/store, or export the DSN."
+        )
 
 
 def _pool_binding(config: CloudConfig, pool: str) -> tuple[str, str]:
@@ -148,7 +227,14 @@ def _pool_binding(config: CloudConfig, pool: str) -> tuple[str, str]:
                 "(it adds `train-huge`), then re-run; `--pool train` works now."
             )
         return config.pool_huge_id, "-huge"
-    raise CommandError(f"Unknown pool {pool!r}; expected 'train', 'big' or 'huge'.")
+    if pool == "mem":
+        if not config.pool_mem_id:
+            raise CommandError(
+                "The memory-optimised pool is not in the Terraform state. Apply infra/ "
+                "(it adds `train-mem`), then re-run; `--pool huge` works now."
+            )
+        return config.pool_mem_id, "-mem"
+    raise CommandError(f"Unknown pool {pool!r}; expected 'train', 'big', 'huge' or 'mem'.")
 
 
 def _stamped(task: TaskSpec) -> TaskSpec:
@@ -179,6 +265,10 @@ def render_queued(payload: Dispatched) -> None:
     """Shared human rendering for a dispatch result."""
     print(f"  code snapshot: {payload.code_snapshot}")
     print(f"  job:           {payload.job_id}")
+    # No `else`: `_refuse_without_a_record` raises before anything is queued,
+    # so a dispatch that got this far carries a DSN.
+    if payload.records_to_database:
+        print("  record:        database")
     for task in payload.tasks:
         print(f"  queued:        {task}")
     count = len(payload.tasks)

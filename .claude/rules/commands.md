@@ -3,7 +3,6 @@ paths:
   - "src/interfaces/commands/**"
   - "src/interfaces/cli/**"
   - "src/interfaces/errors.py"
-  - "src/interfaces/telemetry.py"
   - "tests/interfaces/commands/**"
 ---
 
@@ -21,12 +20,10 @@ either.
   imports NO handler.** Eagerly importing every module cost 1.2s on every
   invocation, `--help` included. Do not add an import that loads handlers.
 - **Grouping is STRUCTURAL: a ref lives inside one `CommandGroup`, and
-  `COMMANDS` is derived by flattening them.** So a command is in exactly one
-  group by construction — no label to typo, no default to fall into. `--help`
-  renders the groups from `headless._listing()` as the parser's epilog, and
-  `add_parser` is given no `help=`, which is what suppresses argparse's own
-  flat block. Do not re-add it: that block, plus the choice list `metavar`
-  replaces, is how `--help` came to print every name twice in one long token.
+  `COMMANDS` is derived by flattening them**, so a command is in exactly one
+  group by construction. `--help` renders the groups from `headless._listing()`
+  as the epilog; `add_parser` gets no `help=` and the choice list is hidden by
+  `metavar`, which is what stops argparse printing every name twice.
 - **`Command.invoke(**kwargs)` builds arguments from the command's own parser**,
   so a second surface cannot drift from it, and returns the payload unrendered.
 - **Refusals are values.** Anything the caller could have got right raises
@@ -39,14 +36,6 @@ either.
   are caught THERE and nowhere else; a guard test fails if anything under
   `interfaces/` names either again. The SDK imports lazily inside `attempt`,
   because `azure.core.exceptions` costs 76ms against a 0.18s `--help`.
-- **`Command.execute` is the observed seam, not `invoke`** — the command line
-  parses argv and calls the handler, so anything wrapped around `invoke` sees
-  the console and misses the CLI.
-- **Telemetry writes are best-effort and must stay that way.** Laptop-local
-  under `$POKER_SOLVER_CACHE`, never the share: the share has no atomic append,
-  a document per invocation would outgrow `legs/` in hours, and every write
-  there would add a round trip to the thing being measured.
-  `POKER_SOLVER_TELEMETRY=0` turns it off, which is what the test suite does.
 - **Both doors serialise through `shared.jsonio.dumps`** — `--json` and the
   console's `PayloadResponse` — so a numpy scalar or `Path` cannot print fine on
   one surface and 500 the other. The console keeps `allow_nan=False`, because

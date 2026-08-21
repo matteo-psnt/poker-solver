@@ -9,7 +9,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, send } from "./client";
 import type {
-  Activity,
   BlueprintLoad,
   BlueprintRun,
   Box,
@@ -24,7 +23,6 @@ import type {
   LogLines,
   NowView,
   PushedCode,
-  PushedData,
   Runs,
   RunsView,
   RunView,
@@ -157,18 +155,6 @@ export const useConfigs = () =>
   });
 
 /**
- * The local activity log. A file read, so it is cheap — but it is also the only
- * query whose answer THIS PAGE changes, since asking is itself an invocation.
- * Polled slowly for that reason as much as for cost.
- */
-export const useActivity = (days = 7) =>
-  useQuery<Activity>({
-    queryKey: ["activity", days],
-    queryFn: () => get(`/api/activity?days=${days}`),
-    refetchInterval: SLOW,
-  });
-
-/**
  * The dispatching writes.
  *
  * Each invalidates what its work will show up in — `jobs` and `tasks` for a
@@ -202,11 +188,6 @@ export const usePrecompute = () => useDispatch<Dispatched>("/api/precompute");
 export const usePushCode = () =>
   useMutation<PushedCode, Error, Record<string, unknown>>({
     mutationFn: (body) => send("/api/push-code", body),
-  });
-
-export const usePushData = () =>
-  useMutation<PushedData, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/push-data", body),
   });
 
 /**

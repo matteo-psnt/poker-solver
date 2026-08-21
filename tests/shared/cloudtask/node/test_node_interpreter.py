@@ -85,7 +85,20 @@ GUARDED_SOURCES = _closure(ENTRY_POINT)
 
 NODE_PYTHON = "3.13"
 
-THIRD_PARTY = ("numpy", "pydantic", "zarr", "yaml", "xxhash", "tqdm", "rich", "azure")
+THIRD_PARTY = (
+    "numpy",
+    "pydantic",
+    "zarr",
+    "yaml",
+    "xxhash",
+    "tqdm",
+    "rich",
+    "azure",
+    # Installed BESIDE the node's interpreter by the pool's start task, unlike
+    # the rest of these -- so importing it is legal, but only from inside a
+    # function that catches the failure. See `legmirror`.
+    "psycopg",
+)
 
 
 def _code(source: pathlib.Path) -> str:
@@ -123,12 +136,43 @@ def test_the_guarded_set_is_discovered_and_not_empty():
     } <= found, f"the node closure lost members; found {sorted(found)}"
 
 
+def _module_level_imports(source: pathlib.Path) -> set[str]:
+    """Top-level package names imported when this module is LOADED.
+
+    Module scope only, which is the rule the node actually needs: an import that
+    runs at load time and is missing kills the task at bootstrap, before it can
+    write the record that would explain it. One inside a function runs later, on
+    a path that can catch it.
+
+    Parsed rather than scanned for substrings. The scan this replaces looked for
+    `import numpy` and would have missed `from numpy import array` entirely.
+    """
+    names: set[str] = set()
+    for node in ast.parse(source.read_text()).body:
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module.split(".")[0])
+    return names
+
+
 @pytest.mark.parametrize("source", GUARDED_SOURCES, ids=lambda p: p.name)
-def test_no_third_party_import(source):
+def test_no_third_party_import_at_module_level(source):
     """A task dying during dependency install must still leave a record."""
+    offending = _module_level_imports(source) & set(THIRD_PARTY)
+    assert not offending, f"{source.name} imports {sorted(offending)} at module level"
+
+
+def test_a_deferred_third_party_import_is_caught_where_it_happens():
+    """`psycopg` is the one the start task installs, so the node may use it --
+    but only where a node that somehow lacks it mirrors nothing instead of dying
+    at bootstrap. The guard above permits the import; this is what makes
+    permitting it safe."""
+    source = REPO_ROOT / "src" / "shared" / "cloudtask" / "node" / "legmirror.py"
     text = source.read_text()
-    for name in THIRD_PARTY:
-        assert f"import {name}" not in text, f"{source.name} must not import {name}"
+    assert "psycopg" not in _module_level_imports(source)
+    assert "import psycopg" in text, "the module this protects no longer imports it"
+    assert "except Exception" in text, "the deferred import must be caught by its caller"
 
 
 def test_the_interpreter_is_installed_by_the_pool_not_the_image():
@@ -143,6 +187,49 @@ def test_the_interpreter_is_installed_by_the_pool_not_the_image():
     """
     main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
     assert f"uv python install {NODE_PYTHON}" in main_tf
+
+
+def test_the_pool_installs_the_wrappers_one_dependency_where_it_will_be_found():
+    """The wrapper mirrors a task's records into the database itself, and it
+    runs before `uv sync` -- so the driver arrives with the INTERPRETER, not the
+    project. Two halves that must agree: Terraform installs it, `spec.py` puts
+    that directory on the wrapper's path, and neither can see the other.
+
+    `--target` and not `--system`: uv REFUSES to install into the interpreter it
+    manages ("externally managed ... should not be modified"), which failed the
+    start task and left a node START_TASK_FAILED.
+    """
+    from src.interfaces.cloud.tasks.spec import NODE_DEPS_DIR, TASK_COMMAND
+
+    main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
+    install = next(line for line in main_tf.splitlines() if "psycopg[binary]" in line)
+    assert f"--target {NODE_DEPS_DIR}" in install, "installed somewhere the wrapper does not look"
+    assert "--system" not in install, "uv refuses to modify the interpreter it manages"
+    assert f"PYTHONPATH={NODE_DEPS_DIR}" in TASK_COMMAND
+
+
+def test_a_node_that_cannot_import_the_driver_does_not_come_up():
+    """The INVERTED version of a guard this file used to hold.
+
+    It required `|| echo` on the install, because a start task that fails
+    bricks the node and a missing driver then cost only a mirrored copy of a
+    record the share already held. The share holds nothing now: a node that
+    cannot reach the database accepts training work and fails every task at its
+    first event. Bricking it is the cheaper failure, and it is the one Batch
+    reports and autoscale replaces.
+
+    The IMPORT is what is asserted, not the install's exit code: an install that
+    "succeeded" into a directory the wrapper cannot import from is the failure
+    this exists to catch, and it is the one an exit code cannot see.
+    """
+    from src.interfaces.cloud.tasks.spec import NODE_DEPS_DIR
+
+    main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
+    install = main_tf[main_tf.index('--quiet "psycopg[binary]"') :][:300]
+    assert "|| echo" not in install, "a swallowed install leaves a node that fails every task"
+    assert f'PYTHONPATH={NODE_DEPS_DIR} /usr/local/bin/python3.13 -c "import psycopg"' in install, (
+        "the install must be verified by importing, under the wrapper's own interpreter and path"
+    )
 
 
 def test_the_entry_point_adds_the_repo_to_the_path_before_importing():
@@ -185,13 +272,19 @@ def test_the_whole_package_imports_on_the_node_interpreter():
 
 @pytest.mark.timeout(300)
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to provide the node interpreter")
-def test_a_task_record_can_be_written_on_the_node_interpreter(tmp_path):
-    """The one thing that must work even when everything else has failed."""
+def test_a_task_record_can_be_built_on_the_node_interpreter():
+    """The one thing that must work even when everything else has failed.
+
+    Building it, not writing it: there is no file any more. What still has to
+    hold on the bare interpreter is that this module IMPORTS -- it is loaded
+    before `uv sync`, so a third-party import reaching it kills the task at
+    bootstrap, before it can record the thing that would explain it.
+    """
     script = (
         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-        "from src.shared.cloudtask.task_log import write_node_record;"
-        f"write_node_record({str(tmp_path)!r}, task_id='t', event='started');"
-        "print('ok')"
+        "from src.shared.cloudtask.task_log import node_record;"
+        "r = node_record(task_id='t', attempt=1, event='started');"
+        "print(r['task_id'], r['attempt'], r['event'])"
     )
     result = subprocess.run(
         ["uv", "run", "--python", NODE_PYTHON, "--no-project", "python", "-c", script],
@@ -203,4 +296,4 @@ def test_a_task_record_can_be_written_on_the_node_interpreter(tmp_path):
     if "no interpreter found" in result.stderr.lower():
         pytest.skip(f"python {NODE_PYTHON} unavailable on this machine")
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "legs" / "t.1.start.json").exists()
+    assert "t 1 started" in result.stdout

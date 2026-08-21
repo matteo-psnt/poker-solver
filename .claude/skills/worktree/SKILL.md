@@ -9,62 +9,77 @@ Parallel experiment lines. This is the source of truth for the procedure —
 `fresh-worktree-setup-gotchas` in memory points here and carries nothing else.
 **Correct this file when a step goes void; do not re-record it in memory.**
 
-## Create — base ref first, or you silently lose work
+## Create
 
-`worktree.baseRef` defaults to `origin/main`, and local `main` runs far ahead of
-it. `EnterWorktree({name})` branches from the stale ref and says nothing. It has
-bitten at least seven sessions: 11, 25, 29, 68, ~100 and 129 commits dropped —
-one worktree had no `console/` in it at all.
+`.claude/settings.json` sets `worktree.baseRef: "head"`, so `EnterWorktree`
+branches from local `HEAD` — local `main` runs far ahead of `origin/main`, and
+the default base once dropped up to 129 commits without a word. Either works:
 
-Always branch from local `HEAD` explicitly, then enter by path:
+    EnterWorktree({name: "<name>"})          # branch worktree-<name>, from HEAD
+    git worktree add -b wt-<name> .claude/worktrees/<name> HEAD   # by hand
 
-    git worktree add -b wt-<name> .claude/worktrees/<name> HEAD
-    # then EnterWorktree({path: ".claude/worktrees/<name>"})
+Whichever you used, `git log --oneline main -1` inside the worktree must show
+main's tip. If it does not, `git reset --hard main` — before editing anything.
 
-Already used `EnterWorktree({name})`? Run `git log --oneline main -3` first
-thing. A clean, just-created worktree recovers with `git reset --hard main` —
-but only before you have edited anything.
+## Then the links, or the tools quietly do the wrong thing
 
-## Then three links, or the tools quietly do the wrong thing
-
-`.claude/` is gitignored, and so is half of each Terraform state, so a fresh
-worktree lacks all of it. From inside the worktree, with `P` = primary checkout:
+`.claude/skills/*` is gitignored except this skill, and half of
+each Terraform state is too, so a fresh worktree lacks them. From inside the
+worktree, with `P` = primary checkout:
 
     uv sync --group dev
 
-    # 1. project skills — the worktree already HAS
-    #    `.claude/skills/worktree/SKILL.md`, which is TRACKED, and lacks the
-    #    rest, which are not. Link the missing ones individually: replacing the
-    #    directory with a single symlink deletes the tracked file and stages
-    #    that deletion, which then rides the next commit.
-    #    Never symlink `.claude` itself: it contains worktrees/ and would recurse.
+    # 1. the untracked skills, ONE LINK EACH. `.claude/skills` already exists
+    #    (worktree/ is tracked), so linking the directory itself
+    #    nests a `skills/skills` link and loads nothing — every worktree made
+    #    before 09-03 was missing these.
     for s in coding-standards testing tooling verify; do
-        ln -sfn "$P/.claude/skills/$s" ".claude/skills/$s"
+      ln -sfn "$P/.claude/skills/$s" ".claude/skills/$s"
     done
 
-    # 2. ALL THREE Terraform states. Initialising only infra/ leaves the
-    #    identical error, because config.py reads infra/store too — and
-    #    infra/serve is needed by anything touching the blueprint box
-    #    (`just serve-deploy`, `serve-ssh`), which read its `public_ip` output.
-    ln -sfn "$P/infra/terraform.tfstate"       infra/terraform.tfstate
-    ln -sfn "$P/infra/store/terraform.tfstate" infra/store/terraform.tfstate
-    ln -sfn "$P/infra/serve/terraform.tfstate" infra/serve/terraform.tfstate
-    (cd infra       && terraform init -input=false)
-    (cd infra/store && terraform init -input=false)
-    (cd infra/serve && terraform init -input=false)
+    # 2. ALL THREE Terraform roots the CLI reads. State is remote (a blob per
+    #    root), so this only fetches providers and the backend pointer and
+    #    NOTHING is symlinked — the old `terraform.tfstate` links are obsolete.
+    #    Initialising only infra/ leaves the identical error, because config.py
+    #    reads infra/store too, and infra/serve is needed by anything touching
+    #    the blueprint box (`just serve-deploy`, `serve-ssh`), which read its
+    #    `public_ip` output.
+    terraform -chdir=infra       init -input=false
+    terraform -chdir=infra/store init -input=false
+    terraform -chdir=infra/serve init -input=false
 
 Cloud commands (`pool-status`, `submit`, `score`) work from a worktree once
 those are in place. Symlinking `.terraform` ITSELF does not work — init must
-populate a real directory; symlinking the state FILE is fine. `INFRA_DIR` is a
-relative path, which is why this is per-worktree rather than once globally.
+populate a real directory. `INFRA_DIR` is a relative path, which is why this
+is per-worktree rather than once globally.
 
 Only if you need `npm run gen:types`: `ln -sfn "$P/console/node_modules"
 console/node_modules`. `.gitignore` has `console/node_modules/` with a trailing
 slash, so it matches a directory and **not** this symlink — it shows up
 untracked. Delete the link once types are regenerated.
 
-The `data/combo_abstraction` symlink step is **void**: `data/` is deleted on
-purpose and caches resolve to `~/.cache/poker-solver`, shared across worktrees.
+## Running commands once you are isolated
+
+`EnterWorktree` isolates the session, and Bash then **refuses any command it
+cannot statically prove stays inside the worktree** — "too complex to verify".
+That refusal fired 111 times across past sessions, and it costs a whole turn
+each. What trips it, all of it ordinary shell:
+
+- `&&` / `;` chains, `for` loops, and `A=x B=y cmd` prefixes
+- heredocs — `python3 - <<'PY' … PY` and `git commit -F - <<'MSG'`
+- anything writing a path the checker cannot resolve to this worktree
+
+So in an isolated session:
+
+- **One plain command per Bash call.** Split the chain; do not try to smuggle
+  it past with a `cd`. Bash's cwd does not persist between calls anyway, so a
+  relative path resolves against the PRIMARY checkout, not this one.
+- **Edit files with Edit/Write, not `python3 - <<PY`.** The bash-first habit
+  is what generates most of these refusals. Pass absolute worktree paths.
+- **Commit messages go in a file**, `git commit -F <path>`, not a heredoc.
+
+`CLAUDE.md` is a symlink to `AGENTS.md` in every checkout, and Edit refuses to
+write through a symlink. Edit `AGENTS.md`.
 
 ## Establish the baseline before editing
 
@@ -89,7 +104,7 @@ not filename.
 tree, which then shows the whole changeset as uncommitted deletions.
 
     # ExitWorktree({action: "keep"}), then from the primary checkout:
-    git merge --ff-only wt-<name>
+    git merge --ff-only wt-<name>        # or worktree-<name>
 
 Never `git add -A` — a hook blocks it, because parallel sessions share the
 primary checkout and it has swept their work into a commit three times.
@@ -102,5 +117,6 @@ A worktree created with `git worktree add` is not session-owned, so
     # ExitWorktree({action: "keep"}), then:
     git worktree remove .claude/worktrees/<name>
     git branch -d wt-<name>          # -d, so git refuses if anything is unmerged
+    # (an EnterWorktree one: ExitWorktree({action: "remove"}) does both)
 
 Confirm "fully merged" with `git merge-base --is-ancestor`, not `git cherry`.

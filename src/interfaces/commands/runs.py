@@ -12,13 +12,16 @@ same rule the rest of the command layer follows: one implementation per question
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from src.interfaces.commands._base import Command, records_root
+from src.adapters.postgres import connect, queries
+from src.interfaces.commands._base import Command
 from src.pipeline import services
 from src.pipeline.services.runs import RunSummary
+from src.shared.gitinfo import commits_ahead_of
 
 if TYPE_CHECKING:
     import argparse
@@ -47,13 +50,75 @@ class RunsPayload(BaseModel):
 
 def run(args: argparse.Namespace) -> RunsPayload:
     """Summarise every published run, newest first."""
-    with records_root(args) as root:
-        summaries = services.describe_runs(root)
+    summaries = _from_database(connect.engine_from_environment())
     if args.loadable_only:
         summaries = [summary for summary in summaries if summary.loadable]
     if args.limit > 0:
         summaries = summaries[: args.limit]
     return RunsPayload(runs=summaries)
+
+
+def _distances(commits: set[str | None]) -> dict[str | None, int | None]:
+    """How far HEAD is ahead of each commit, resolved concurrently.
+
+    `commits_ahead_of` spawns a git process per commit at ~24 ms, and 303 runs
+    share only 72 distinct commits -- so the first win is asking once per
+    COMMIT rather than once per run, and the second is not waiting for each
+    answer before asking the next. Serial, those 72 cost 1.8 s and were the
+    largest single cost in this listing, larger than the query.
+
+    NOT a position lookup into one `git rev-list HEAD`, which is the obvious
+    batch and is wrong: the count is a set difference, and with merge commits a
+    commit's index in that list is not the number of commits reachable from
+    HEAD but not from it. Same computation, concurrently.
+
+    Per CALL rather than a module cache, because HEAD moves under a long-lived
+    server and this is a fact about the checkout now.
+    """
+    known = {commit for commit in commits if commit}
+    if not known:
+        return dict.fromkeys(commits)
+    with ThreadPoolExecutor(max_workers=min(16, len(known))) as pool:
+        answers = list(pool.map(commits_ahead_of, known))
+    resolved: dict[str | None, int | None] = dict(zip(known, answers, strict=True))
+    resolved[None] = None
+    return resolved
+
+
+def _from_database(engine: Any) -> list[services.RunSummary]:
+    """Rows into the model the surfaces already render.
+
+    Built HERE rather than in the adapter: `RunSummary` lives in `pipeline`,
+    and `an_adapter_does_not_do_the_work` forbids the adapter from importing
+    it. The composition root is the only layer that may hold both.
+
+    `commits_ago` stays a read-time computation against the local checkout,
+    exactly as the share path computes it -- it is a fact about THIS working
+    copy, not about the run, so storing it would be storing someone else's
+    answer.
+    """
+    rows = queries.describe_runs(engine)
+    ahead = _distances({row.git_commit for row in rows})
+    summaries = []
+    for row in rows:
+        loadable = bool(row.has_checkpoint)
+        summaries.append(
+            services.RunSummary(
+                name=row.run_id,
+                commits_ago=ahead.get(row.git_commit),
+                git_dirty=row.git_dirty,
+                has_checkpoint=loadable,
+                loadable=loadable,
+                blocker=None if loadable else "no checkpoint",
+                iterations=row.iterations,
+                num_infosets=row.num_infosets,
+                config_name=row.config_name,
+                status=row.status,
+                experiment_id=row.experiment_id,
+                arm=row.arm,
+            )
+        )
+    return summaries
 
 
 def render(payload: RunsPayload) -> None:

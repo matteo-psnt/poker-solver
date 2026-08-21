@@ -2,7 +2,7 @@
 
 ``jobs`` reads Batch directly, so it shows only what Batch still retains -- and a
 task's record ages out while the run it belonged to lives on. This reads the
-durable copy on the share instead, then asks Batch about the tasks the share
+durable copy in the record instead, then asks Batch about the tasks the record
 cannot explain.
 
 Neither side can answer alone. The node wrapper writes its own account on entry and
@@ -17,16 +17,15 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import threading
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
+from src.adapters.postgres import connect, observations, queries
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share, workspace
+from src.interfaces.cloud.store import share
 from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
 from src.shared import task_history
@@ -35,25 +34,16 @@ from src.shared.task_history import TaskRow
 
 if TYPE_CHECKING:
     import argparse
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable
 
 # Round trips, not bytes: see `workspace._PARALLEL_DOWNLOADS`, measured there.
 _PARALLEL_SHARE_IO = 64
-
-# The shared-cache key for legs/. Its own, not the record's: they are different
-# subtrees of the share, pulled by different readers.
-_LEGS_KEY = "legs"
 
 # Which version of each record a materialised tree holds: one `etag<TAB>name`
 # line per file. BESIDE `legs/`, not inside it, where `read_documents` would
 # read it as a leg -- and not JSON, because it is not an artifact: a tree's
 # private note to its successor, gone with the tree.
 _ETAGS_NAME = "legs.etags"
-
-# Held across deciding what is new AND publishing it -- see `run`. Module-level
-# because the tree it protects is too: readers sharing one legs directory are
-# exactly the callers that must not both write to it.
-_RECONCILE_LOCK = threading.Lock()
 
 
 class TasksPayload(BaseModel):
@@ -96,12 +86,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--skip-reconcile",
         action="store_true",
-        help="Read the share without asking Batch about unresolved tasks.",
+        help="Read the record without asking Batch about unresolved tasks.",
     )
     parser.add_argument(
         "--tasks-dir",
         default=None,
-        help="Read a local copy instead of the share (see `fetch`). Implies --skip-reconcile.",
+        help="Read a local legs/ directory instead of the record. Implies --skip-reconcile.",
     )
     parser.add_argument(
         "--limit",
@@ -124,30 +114,102 @@ def run(args: argparse.Namespace) -> TasksPayload:
     if args.tasks_dir:
         return _result(task_history.read_tasks(Path(args.tasks_dir)), None, args.limit)
 
-    config = CloudConfig.load()
-    service = share.share_client(config)
-    with _task_records(service, config.share_name) as local:
-        reconciled = None
-        # Only the tasks with no terminal record are worth asking about; the module
-        # decides which those are, so the criterion lives in one place rather than
-        # being re-derived from a rendered table.
-        open_tasks = task_history.unresolved_tasks(local)
-        if not args.skip_reconcile and open_tasks:
-            observed = _ask_batch(config, open_tasks)
-            # Asking Batch is the slow half and overlaps freely; deciding what is
-            # NEW and publishing it does not. `/api/tasks` and `/api/cost` are
-            # separate cache keys answering the same page, so they run at once
-            # and are handed ONE legs tree -- and two of them writing
-            # `<task>.observed.json` to a share with no atomic rename breaks the
-            # one-writer-per-file rule that makes writing there safe at all.
-            # Serialised, the second sees the first's record and has nothing to
-            # say, which is also why this is not a bottleneck.
-            with _RECONCILE_LOCK:
-                explained = task_history.reconcile(local, observed)
-                _upload_observed(service, config.share_name, local, explained)
-            reconciled = len(explained)
+    return _from_database(connect.engine_from_environment(), args)
 
-        return _result(task_history.read_tasks(local), reconciled, args.limit)
+
+def _from_database(engine: Any, args: argparse.Namespace) -> TasksPayload:
+    """The same join, over rows instead of files.
+
+    Materialising `legs/` to answer this costs 88.5s cold -- every CLI call and
+    the console's first screen -- for 13,900 documents whose history is
+    immutable. The join is `task_history.join_documents` either way; what
+    changes is where the documents came from.
+
+    Reconciliation still asks BATCH, which is the half no store can make
+    cheaper. What the database makes cheap is knowing WHICH tasks to ask about
+    and which answers are new, neither of which needs the tree any more.
+    """
+    rows = task_history.join_documents(task_log.documents_from_rows(queries.leg_rows(engine)))
+    open_tasks = _still_open(rows)
+    if args.skip_reconcile or not open_tasks:
+        return _result(rows, None, args.limit)
+
+    config = CloudConfig.load()
+    fresh = _new_observations(
+        _ask_batch(config, open_tasks), open_tasks, queries.observed_legs(engine)
+    )
+    if fresh:
+        # The share FIRST and the database second, deliberately: the share is
+        # the source of truth, and a record that reached only the database is
+        # one `--verify` reports as a divergence in the direction that means a
+        # bug.
+        _publish_observed(share.share_client(config), config.share_name, fresh)
+        observations.record_observations(engine, fresh)
+    return _result(rows, len(fresh), args.limit)
+
+
+def _still_open(rows: list[TaskRow]) -> list[TaskRow]:
+    """The rows Batch could still explain: non-terminal AND the latest attempt: Batch describes only a task's current
+    attempt, so an earlier one is unresolved by construction and asking about it
+    returns the answer for a different attempt. 1,326 non-terminal rows, of
+    which 1,290 were superseded.
+    """
+    latest: dict[str, int] = {}
+    for row in rows:
+        latest[row.task_id] = max(latest.get(row.task_id, 0), row.attempt)
+    return [
+        row
+        for row in rows
+        if row.cause not in task_history.TERMINAL_CAUSES and row.attempt == latest[row.task_id]
+    ]
+
+
+def _new_observations(
+    seen: list[dict[str, Any]],
+    open_tasks: list[TaskRow],
+    stored: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Batch's answers that say something the record does not already say.
+
+    `says_the_same` rather than a byte comparison, and the reason is measured:
+    `observed_at` is stamped on every read, so two observations of one finished
+    task differ in a field that means nothing. Re-publishing those cost 14.1s
+    per poll restating what the share already said.
+    """
+    open_ids = {row.task_id for row in open_tasks}
+    fresh: dict[str, dict[str, Any]] = {}
+    for task in seen:
+        task_id = task.get("task")
+        if not task_id or task_id not in open_ids:
+            continue
+        document = task_history.observed_record(
+            task_id=task_id,
+            job_id=task.get("job", ""),
+            state=task.get("state") or "",
+            result=task.get("result"),
+            exit_code=task.get("exit_code"),
+            failure=task.get("failure"),
+            start_time=task.get("start_time"),
+            end_time=task.get("end_time"),
+            node_id=task.get("node") or "",
+        )
+        if not task_history.says_the_same(stored.get(task_id), document):
+            fresh[task_id] = document
+    return fresh
+
+
+def _publish_observed(service: Any, share_name: str, fresh: dict[str, dict[str, Any]]) -> None:
+    """Write the observer records to the share.
+
+    Through `write_observed_document` rather than a `json.dumps` here: the
+    record is STAMPED like every other one, and an unstamped document would be
+    rejected by the reader's schema check long after whoever wrote it had gone.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        local = Path(tmp)
+        for document in fresh.values():
+            task_history.write_observed_document(local, document)
+        _upload_observed(service, share_name, local, list(fresh))
 
 
 def _ask_batch(config: CloudConfig, open_tasks: list[TaskRow]) -> list[dict[str, Any]]:
@@ -162,12 +224,10 @@ def _ask_batch(config: CloudConfig, open_tasks: list[TaskRow]) -> list[dict[str,
     old enumeration. That is not dead code: it covers records written before
     the field existed, and losing the explanation would be worse than the cost.
 
-    Returns DICTS, and that is the one boundary in this file. `reconcile` reads
-    these with ``.get()`` and lives in :mod:`src.shared.task_history`, which is
-    layer-neutral and cannot import a shape from `interfaces`. Dumping here is
-    what keeps that true -- and the vocabulary translation this function used to
-    do (`_translate`, shortening Batch's enum strings so `observed_cause` could
-    match them) is gone: `batch._task_record` classifies once, at the source.
+    Returns DICTS, and that is the one boundary in this file: `observed_record`
+    reads these with ``.get()`` and lives in :mod:`src.shared.task_history`,
+    which is layer-neutral and cannot import a shape from `interfaces`.
+    `batch._task_record` classifies the state once, at the source.
     """
     client = batch.client(config)
     pairs = {(row.job_id, row.task_id) for row in open_tasks if row.job_id}
@@ -178,32 +238,6 @@ def _ask_batch(config: CloudConfig, open_tasks: list[TaskRow]) -> list[dict[str,
     with ThreadPoolExecutor(max_workers=min(16, len(pairs) or 1)) as pool:
         fetched = pool.map(lambda pair: batch.task_record(client, *pair), sorted(pairs))
     return [task.model_dump() for task in fetched if task]
-
-
-@contextmanager
-def _task_records(service: Any, share_name: str) -> Iterator[Path]:
-    """The legs/ directory, materialised locally for the duration.
-
-    Shared with other readers when a :func:`workspace.shared_record_cache` is in
-    force. `cost` is `tasks` plus arithmetic -- it invokes this very command --
-    so a console showing both used to pull all 365 records twice, 22s each. The
-    reconciled observations land in the shared tree too, which is what makes the
-    second reader's write-back free rather than merely cheap.
-    """
-    cache = workspace.active_cache()
-    if cache is None:
-        with tempfile.TemporaryDirectory() as tmp:
-            local = Path(tmp)
-            download_tasks(service, share_name, local)
-            yield local
-        return
-
-    def _refresh(root: Path, previous: Path | None) -> None:
-        """The count `download_tasks` returns is not part of the cache protocol."""
-        download_tasks(service, share_name, root, previous)
-
-    with cache.acquire(_LEGS_KEY, _refresh) as local:
-        yield local
 
 
 def download_tasks(service: Any, share_name: str, local: Path, previous: Path | None = None) -> int:
@@ -277,7 +311,7 @@ def _upload_observed(service: Any, share_name: str, local: Path, explained: list
     The node owns the other half and must never be overwritten from here -- one
     writer per file is what makes this safe on a share with no atomic rename.
 
-    Concurrently, and only for what `reconcile` found NEW. A write is ~2.4s of
+    Concurrently, and only for what `_new_observations` found NEW. A write is ~2.4s of
     round trip; six of them, serially, on every read, was 14.1s spent restating
     what the share already said.
     """

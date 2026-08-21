@@ -37,15 +37,19 @@ import numpy as np
 from src.engine.solver.infoset.model import InfoSet
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
     from src.engine.solver.betting_tree import BettingTree
 
 logger = logging.getLogger(__name__)
 
 
-# float32 halves the footprint of the two hot arrays at a measured relative error
-# of 5.95e-8, comfortably inside f32 epsilon (see the m0002 downcast measurement).
+# float32 halves the footprint of the two hot arrays. The 5.95e-8 that justified
+# it is a DOWNCAST error and does not bound the one that matters: these arrays are
+# accumulated IN PLACE under a weight that grows as t^gamma, so an increment
+# eventually falls under the running sum's ULP and the `+=` is a no-op. MEASURED
+# at T=30M with lognormal reach: 35-44% of adds vanish, for 4-6% error on the
+# average strategy. It grows with T -- reprice before a run much past that.
 REGRET_DTYPE = np.float32
 STRATEGY_DTYPE = np.float32
 UTILITY_DTYPE = np.float64
@@ -70,6 +74,7 @@ class StaticArrayStorage:
         *,
         session_id: str | None = None,
         attach: bool = False,
+        extra: Mapping[str, int] | None = None,
     ):
         """Allocate (or attach to) arrays sized to ``tree``.
 
@@ -81,16 +86,25 @@ class StaticArrayStorage:
             worker-process path. The worker rebuilds the tree locally from config
             rather than receiving it, so no index information crosses a process
             boundary at any point. Requires ``session_id``.
+        extra:
+            Further float32 arrays, ``name -> length``, allocated beside the
+            five and shared the same way. They are NOT checkpointed: this is for
+            a trainer's own scaffolding (CFR-BR's opponent table), never for
+            anything the answer is read out of. Every process must pass the same
+            spec, since it is what names the segments.
         """
         if attach and session_id is None:
             raise ValueError("attach=True requires a session_id to attach to")
 
         self.tree = tree
         self.session_id = session_id
+        self.extra = dict(extra or {})
         self._shm: list[shared_memory.SharedMemory] = []
         self._owns_shm = False
 
         if session_id is None:
+            for name, length in self.extra.items():
+                setattr(self, name, np.zeros(length, dtype=REGRET_DTYPE))
             self.regrets = np.zeros(tree.num_slots, dtype=REGRET_DTYPE)
             self.strategy_sum = np.zeros(tree.num_slots, dtype=STRATEGY_DTYPE)
             self.reach_counts = np.zeros(tree.num_rows, dtype=REACH_DTYPE)
@@ -105,6 +119,7 @@ class StaticArrayStorage:
 
     def _spec(self) -> dict[str, tuple[int, np.dtype]]:
         return {
+            **{name: (length, np.dtype(REGRET_DTYPE)) for name, length in self.extra.items()},
             "regrets": (self.tree.num_slots, np.dtype(REGRET_DTYPE)),
             "strategy_sum": (self.tree.num_slots, np.dtype(STRATEGY_DTYPE)),
             "reach_counts": (self.tree.num_rows, np.dtype(REACH_DTYPE)),
@@ -229,6 +244,12 @@ class StaticArrayStorage:
             if create:
                 array.fill(0)
             setattr(self, name, array)
+
+    def extra_array(self, name: str) -> np.ndarray:
+        """One of the ``extra`` arrays by name, which are set dynamically."""
+        if name not in self.extra:
+            raise KeyError(f"{name!r} is not one of this storage's extra arrays: {self.extra}")
+        return getattr(self, name)
 
     def close(self) -> None:
         """Release this process's mappings; the creator also unlinks them."""

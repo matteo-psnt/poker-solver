@@ -9,12 +9,31 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from src.shared import task_history
 from src.shared.cloudtask import task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import plan as node_plan
 from src.shared.cloudtask.node import progress
 from tests.shared.cloudtask.node.conftest import eventually
+
+
+@pytest.fixture(autouse=True)
+def recorded(monkeypatch):
+    """Every progress sample the node records, captured.
+
+    These used to be read back out of `legs/<task>.progress.json`. There is no
+    such file now -- the sample goes straight to the database -- so the row is
+    what a test can look at, and it carries the same document either way.
+    """
+    rows: list[dict] = []
+    monkeypatch.setattr(
+        progress.legmirror,
+        "record",
+        lambda _t, _a, _l, document, **_k: rows.append(document),
+    )
+    return rows
 
 
 class TestLadderWatcher:
@@ -72,53 +91,77 @@ class TestProgressHeartbeat:
     def _plan(op: str = TaskName.TRAIN, to: int = 1000) -> node_plan.TaskPlan:
         return node_plan.TaskPlan(op=op, config="quick_test", to=to)
 
-    def test_a_training_task_publishes_how_far_it_has_got(self, paths, monkeypatch):
+    def test_a_training_task_publishes_how_far_it_has_got(self, paths, monkeypatch, recorded):
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        progress.publish(paths, self._plan(), {"iteration": 250})
+        progress.publish(self._plan(), {"iteration": 250})
 
-        (record,) = list((paths.share / "legs").glob("*.progress.json"))
-        published = json.loads(record.read_text())["progress"]
+        (record,) = recorded
+        published = record["progress"]
         assert (published["done"], published["total"], published["unit"]) == (
             250.0,
             1000.0,
             "iterations",
         )
 
-    def test_a_kind_with_nothing_to_say_writes_nothing(self, paths, monkeypatch):
+    def test_a_kind_with_nothing_to_say_writes_nothing(self, paths, monkeypatch, recorded):
         """No bar beats a bar frozen at zero, which reads as a stuck task."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        progress.publish(paths, self._plan(op=TaskName.PRECOMPUTE), {"iteration": 1})
-        assert not list((paths.share / "legs").glob("*.progress.json"))
+        progress.publish(self._plan(op=TaskName.PRECOMPUTE), {"iteration": 1})
+        assert recorded == []
 
-    def test_it_is_refreshed_in_place_rather_than_accumulated(self, paths, monkeypatch):
-        """One file per tick per task would put the share's file COUNT -- the
-        thing that makes every read slow -- up by thousands."""
+    def test_every_tick_records_and_none_of_them_writes_a_file(self, paths, monkeypatch, recorded):
+        """It used to overwrite ONE file per task, because one per tick would put
+        the share's file COUNT -- the thing that makes every read slow -- up by
+        thousands. It now writes none at all: each sample is a row."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         for iteration in (100, 200, 300):
-            progress.publish(paths, self._plan(), {"iteration": iteration})
+            progress.publish(self._plan(), {"iteration": iteration})
+        assert [r["progress"]["done"] for r in recorded] == [100.0, 200.0, 300.0]
+        assert list((paths.share / "legs").glob("*.progress.json")) == []
 
-        (record,) = list((paths.share / "legs").glob("*.progress.json"))
-        assert json.loads(record.read_text())["progress"]["done"] == 300.0
-
-    def test_an_unwritable_share_never_kills_the_task(self, paths, monkeypatch):
+    def test_a_sample_that_cannot_be_taken_never_kills_the_task(self, paths, monkeypatch):
         """A task must not die because the thing DESCRIBING it could not be
-        written. The reader treats a missing sample exactly as it did before
+        recorded. The reader treats a missing sample exactly as it did before
         this existed."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        monkeypatch.setattr(progress.task_log, "write_progress_record", lambda *a, **k: 1 / 0)
-        progress.publish(paths, self._plan(), {"iteration": 1})
+        monkeypatch.setattr(progress.task_log, "progress_record", lambda *a, **k: 1 / 0)
+        progress.publish(self._plan(), {"iteration": 1})
 
     def test_a_finished_task_stops_showing_a_bar(self, paths, monkeypatch):
         """A completed task at 62% is a sample that stopped arriving, not a
-        task stuck at 62%."""
-        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        progress.publish(paths, self._plan(), {"iteration": 620})
-        task_log.write_node_record(paths.share, task_id="t-1", event=task_log.EVENT_STARTED)
-        task_log.write_node_record(
-            paths.share, task_id="t-1", event=task_log.EVENT_FINISHED, cause="completed"
-        )
+        task stuck at 62%.
 
-        (row,) = task_history.read_tasks(paths.share)
+        Joined from ROWS, which is how `tasks` reads it: the node writes no
+        files, so `read_tasks` over a share directory is the legacy path and
+        joining there would test one production no longer takes.
+        """
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        sample: list[dict] = []
+        monkeypatch.setattr(
+            progress.legmirror,
+            "record",
+            lambda _t, _a, _l, doc, **_kw: sample.append(dict(doc)),
+        )
+        progress.publish(self._plan(), {"iteration": 620})
+
+        rows = [
+            ("t-1", task_log.TASK_SCOPED, "progress", sample[0]),
+            (
+                "t-1",
+                1,
+                "start",
+                task_log.node_record(task_id="t-1", attempt=1, event=task_log.EVENT_STARTED),
+            ),
+            (
+                "t-1",
+                1,
+                "exit",
+                task_log.node_record(
+                    task_id="t-1", attempt=1, event=task_log.EVENT_FINISHED, cause="completed"
+                ),
+            ),
+        ]
+        (row,) = task_history.join_documents(task_log.documents_from_rows(rows))
         assert row.cause == "completed"
         assert row.progress is None
 
@@ -137,23 +180,25 @@ class TestTheRateWindow:
         return node_plan.TaskPlan(op=op, config="quick_test", to=to)
 
     @staticmethod
-    def _published(paths):
-        (record,) = list((paths.share / "legs").glob("*.progress.json"))
-        return json.loads(record.read_text())["progress"]
+    def _published(recorded):
+        (record,) = recorded[-1:]
+        return record["progress"]
 
-    def test_the_window_opens_where_the_count_starts_moving(self, paths, monkeypatch):
+    def test_the_window_opens_where_the_count_starts_moving(self, paths, monkeypatch, recorded):
         """A resumed task inherits 800 of the run's 1,000 and has done none of
         it. Its base is 850 -- where it was seen moving -- and never 0, which
         would credit it with the whole run at the rate of its own first hour."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         for iteration in (800, 800, 850, 900):
-            progress.publish(paths, self._plan(), {"iteration": iteration})
+            progress.publish(self._plan(), {"iteration": iteration})
 
-        published = self._published(paths)
+        published = self._published(recorded)
         assert (published["done"], published["base"]) == (900.0, 850.0)
         assert published["window_seconds"] > 0
 
-    def test_a_count_that_arrives_in_jumps_is_not_a_rate_over_one_tick(self, paths, monkeypatch):
+    def test_a_count_that_arrives_in_jumps_is_not_a_rate_over_one_tick(
+        self, paths, monkeypatch, recorded
+    ):
         """`train-vector` reports only when a CHECKPOINT lands, so a million
         iterations appear between two samples fifteen seconds apart. Anchoring
         at the last stationary sample reads that as ~66,000 it/s against a real
@@ -163,31 +208,33 @@ class TestTheRateWindow:
         So the window opens ON the jump, and the FIRST one is not a rate at
         all: two are needed to measure the interval between them."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
-        plan = self._plan(op=TaskName.TRAIN_VECTOR, to=3_000_000)
+        plan = self._plan(op=TaskName.TRAIN_PCS, to=3_000_000)
         for iteration in (0, 0, 1_000_000):
-            progress.publish(paths, plan, {"iteration": iteration})
+            progress.publish(plan, {"iteration": iteration})
 
-        published = self._published(paths)
+        published = self._published(recorded)
         assert (published["done"], published["base"]) == (1_000_000.0, 1_000_000.0)
         assert published["window_seconds"] == 0.0
 
-        progress.publish(paths, plan, {"iteration": 2_000_000})
-        assert self._published(paths)["base"] == 1_000_000.0
+        progress.publish(plan, {"iteration": 2_000_000})
+        assert self._published(recorded)["base"] == 1_000_000.0
 
-    def test_a_kind_that_changes_what_it_counts_starts_over(self, paths, monkeypatch):
+    def test_a_kind_that_changes_what_it_counts_starts_over(self, paths, monkeypatch, recorded):
         """An evaluation reports rungs until its first board branch lands. One
         count minus another in a different unit is not a small error."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
         plan = self._plan(op=TaskName.EVALUATE)
-        progress.publish(paths, plan, {"scored": 0})
-        progress.publish(paths, plan, {"done": 20, "total": 32})
+        progress.publish(plan, {"scored": 0})
+        progress.publish(plan, {"done": 20, "total": 32})
 
-        published = self._published(paths)
+        published = self._published(recorded)
         assert (published["unit"], published["base"]) == ("board branches", 20.0)
 
 
 class TestTheWatcherReportsPromptly:
-    def test_a_task_shorter_than_the_interval_still_reports(self, paths, log, monkeypatch):
+    def test_a_task_shorter_than_the_interval_still_reports(
+        self, paths, log, monkeypatch, recorded
+    ):
         """The first probe ran 43s against a 120s interval and published nothing,
         so the whole heartbeat went unexercised -- and any short task would have
         shown no bar at all."""
@@ -201,8 +248,8 @@ class TestTheWatcherReportsPromptly:
         watcher.start()
         watcher.stop()
 
-        (record,) = list((paths.share / "legs").glob("*.progress.json"))
-        assert json.loads(record.read_text())["progress"]["done"] == 400.0
+        (record,) = recorded[-1:]
+        assert record["progress"]["done"] == 400.0
 
 
 class TestProgressReadsThisTasksRun:
@@ -252,3 +299,54 @@ class TestProgressReadsThisTasksRun:
         self._manifest(paths, "run-a", 150_000_000)
 
         assert progress.units_done(paths) == 10_000_000
+
+
+class TestEachRecordWritesItsOwnRow:
+    """There WAS a mirror on the slow tick: it re-read the task's files and
+    upserted what it found. Nothing has files now, so every record writes its
+    row where it is made -- which is also what removed the last reason for the
+    fine tick to touch the share.
+
+    The shape it replaced put a subprocess on the 15s progress tick and three
+    and a half minutes on the end of a task whose training took twenty seconds.
+    """
+
+    @staticmethod
+    def _plan() -> node_plan.TaskPlan:
+        return node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000)
+
+    def test_the_progress_tick_writes_its_row_directly(self, paths, monkeypatch):
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        rows: list[tuple] = []
+        monkeypatch.setattr(
+            progress.legmirror,
+            "record",
+            lambda task, attempt, leg, _doc, **_kw: rows.append((task, attempt, leg)),
+        )
+        progress.publish(self._plan(), {"iteration": 250})
+        assert rows == [("t-1", task_log.TASK_SCOPED, "progress")]
+
+    def test_the_sample_is_task_scoped_not_per_attempt(self, paths, monkeypatch):
+        """One live sample per TASK, replaced in place. Keyed per attempt it
+        would accumulate a row per retry and the bar would read the wrong one."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        rows: list[tuple] = []
+        monkeypatch.setattr(
+            progress.legmirror,
+            "record",
+            lambda task, attempt, leg, _doc, **_kw: rows.append((task, attempt, leg)),
+        )
+        progress.publish(self._plan(), {"iteration": 250})
+        progress.publish(self._plan(), {"iteration": 500})
+        assert {row[1] for row in rows} == {task_log.TASK_SCOPED}
+
+    def test_a_failing_row_cannot_cost_the_task(self, paths, monkeypatch):
+        """`publish` suppresses everything: a task must not die because the
+        thing describing it could not be written."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+
+        def _explode(*_a, **_k):
+            raise RuntimeError("database is gone")
+
+        monkeypatch.setattr(progress.legmirror, "record", _explode)
+        progress.publish(self._plan(), {"iteration": 250})

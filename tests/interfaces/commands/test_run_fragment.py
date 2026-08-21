@@ -173,7 +173,13 @@ class TestDispatchResolvesTheFragmentToo:
         monkeypatch.setattr(dispatch, "stage_and_queue", fake)
         payload = score.run(
             argparse.Namespace(
-                run="15261", method="exact_br", at="", timeout=0, flags=[], json=False
+                run="15261",
+                method="exact_br",
+                at="",
+                timeout=0,
+                pool="train",
+                flags=[],
+                json=False,
             )
         )
 

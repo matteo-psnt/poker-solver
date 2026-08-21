@@ -20,6 +20,8 @@ import threading
 import time
 from typing import IO, TYPE_CHECKING
 
+from src.shared.cloudtask.node import profile
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -119,6 +121,7 @@ def run_guarded(
     timeout: int,
     log: TaskLogger,
     stdout_to: Path | None = None,
+    profile_dir: Path | None = None,
 ) -> int:
     """Run a subprocess under a wall-clock ceiling, teeing its output.
 
@@ -129,6 +132,11 @@ def run_guarded(
 
     ``stdout_to`` captures stdout to a file instead of teeing it, for the one
     command whose stdout is a JSON payload rather than a log.
+
+    ``profile_dir`` arms the sampling profiler: this is where the child's pid
+    lives, and an operator asks for a profile by dropping a file there. Off
+    unless a caller passes one, and see :mod:`.profile` for why nothing it does
+    can fail the task.
     """
     sink = stdout_to.open("wb") if stdout_to else None
     try:
@@ -164,21 +172,42 @@ def run_guarded(
         daemon=True,
     )
     pump.start()
+    profiler = None
+    if profile_dir is not None:
+        with contextlib.suppress(Exception):
+            _, profiler = profile.watcher(
+                process.pid, profile_dir, os.environ.get("AZ_BATCH_TASK_ID", "local"), log
+            )
     timed_out = False
+    started = time.monotonic()
     try:
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             log(f"TIMEOUT after {timeout}s -- guard fired; published rungs are on the share")
-            _terminate(process)
+            terminate(process)
     except Killed:
         # The wrapper itself was signalled. Take the child down with it, then
         # let the exception carry the cause to the exit record.
-        _terminate(process)
+        terminate(process)
         raise
     finally:
+        if profiler is not None:
+            profiler.set()
+        # The two halves of a task's tail, which had no line between them: the
+        # child exiting, and this pipe reaching EOF. A quick_test reporting 20s
+        # of training has its handler return 375s later, every time and long
+        # before any of the record work, and the split says which half owns it.
+        # `uv run` spawns python which spawns workers, and a grandchild that
+        # still holds stdout keeps the pump reading after the child is gone.
+        exited = time.monotonic() - started
         pump.join(timeout=GRACE_SECONDS)
+        log(
+            f"child exited after {exited:.1f}s; output pump joined after "
+            f"{time.monotonic() - started:.1f}s"
+            + (" (STILL ATTACHED -- a grandchild holds stdout)" if pump.is_alive() else "")
+        )
         if sink:
             sink.close()
 
@@ -207,9 +236,16 @@ def _pump(stream: IO[bytes] | None, log: TaskLogger) -> None:
         return
 
 
-def _terminate(process: subprocess.Popen[bytes]) -> None:
-    """TERM the whole group so the trainer's handlers can flush, KILL if it
-    will not go -- the case that motivated the guard ignored TERM."""
+def terminate(process: subprocess.Popen[bytes]) -> None:
+    """TERM the whole GROUP so the trainer's handlers can flush, KILL if it
+    will not go -- the case that motivated the guard ignored TERM.
+
+    Public because it is the only correct way to end a subprocess on a node and
+    there are two callers. `terminate()` alone reaches `uv` and leaves the
+    python it spawned running, holding the pipes -- which is a hang, not a slow
+    exit: `subprocess.run(capture_output=True, timeout=...)` then blocks
+    forever draining a pipe the grandchild still owns.
+    """
     _signal_group(process, signal.SIGTERM)
     try:
         process.wait(timeout=GRACE_SECONDS)

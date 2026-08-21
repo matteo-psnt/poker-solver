@@ -102,12 +102,12 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Build a card abstraction on a node and publish it to the share.",
             ),
             CommandRef(
-                "submit-vector", "Queue CFR kernel measurements on the pool, one task per arm."
-            ),
-            CommandRef(
                 "jobs", "Every queued/running task on the pool (--all includes finished jobs)."
             ),
             CommandRef("logs", "Read a task's log from the share (default) or live from its node."),
+            CommandRef(
+                "profile", "Sample a running task's stacks with py-spy and download the result."
+            ),
             CommandRef("tasks", "Per-task outcomes from the share, reconciled against Batch."),
             CommandRef(
                 "cancel", "Terminate a running task; its partial progress is published first."
@@ -123,16 +123,16 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "push-code", "Publish an immutable snapshot of the working tree; echoes its id."
             ),
             CommandRef(
-                "push-data",
-                "Publish card abstractions to the share (copied, never recomputed on a node).",
-            ),
-            CommandRef(
-                "submit-coupling",
-                "Queue board-free abstraction-cost measurements on the pool, one per abstraction.",
-            ),
-            CommandRef(
                 "compact-legs",
                 "Bundle sealed task records into one file, so reading legs/ is one round trip.",
+            ),
+            CommandRef(
+                "prune-checkpoints",
+                "Drop retained checkpoint rungs a settled run no longer needs (dry run by default).",
+            ),
+            CommandRef(
+                "reconcile-runs",
+                "Close runs whose task died without recording a terminal status (dry run by default).",
             ),
         ),
     ),
@@ -144,49 +144,55 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Train over the statically-enumerated tree (fixed memory, no key maps).",
             ),
             CommandRef(
-                "train-vector",
-                "Train the board-free vector kernel, stored as an ordinary static checkpoint.",
-            ),
-            CommandRef(
                 "train-pcs",
                 "Train by public chance sampling: one board per iteration, every hand at once.",
             ),
             CommandRef(
-                "vector-sweep",
-                "Exploitability vs iteration for one vector-CFR kernel on one abstraction.",
-            ),
-            CommandRef(
-                "abstraction-coupling",
-                "What board-free's board averaging costs, and what conditioning would buy back.",
-            ),
-            CommandRef(
-                "precompute", "Precompute a combo abstraction into data/combo_abstraction/."
+                "precompute",
+                "Precompute a combo abstraction (a node builds it; `submit-precompute` is the door).",
             ),
             CommandRef(
                 "evaluate", "Evaluate a run's exploitability (Local Best Response by default)."
+            ),
+            CommandRef(
+                "benchmark",
+                "Play hands against GTO Wizard AI and score them in AIVAT bb/100.",
             ),
         ),
     ),
     CommandGroup(
         "read the record",
         (
+            CommandRef(
+                "benchmark-board",
+                "The public GTO Wizard leaderboard, ranked by AIVAT bb/100 (no API key needed).",
+            ),
             CommandRef("ledger", "List recorded evaluations from the eval ledger."),
             CommandRef(
                 "curve",
                 "Within-run exploitability vs iteration, from the retained checkpoint ladder.",
+            ),
+            CommandRef(
+                "arms",
+                "Compare an experiment's arms, grouped by the instrument each was measured with.",
             ),
             CommandRef("cost", "Billed spend from Azure, and node time derived from the task log."),
             CommandRef("progress", "Per-checkpoint coverage, visits and throughput for a run."),
             CommandRef("runs", "Every published run, newest first."),
             CommandRef("configs", "List the config stems `submit` and `submit-precompute` accept."),
             CommandRef(
-                "activity", "What the commands have been costing: calls, p50/p95, refusals, errors."
-            ),
-            CommandRef(
                 "runinfo",
                 "Everything recorded about a run: provenance, curve, scores, tasks, gaps.",
             ),
             CommandRef("chart", "A run's preflop strategy as a 13x13 grid."),
+            CommandRef(
+                "record-admit",
+                "Admit this machine's current public IP to the record server's firewall.",
+            ),
+            CommandRef(
+                "record-migrate",
+                "Apply pending schema migrations to the record database (--check to only compare).",
+            ),
         ),
     ),
 )

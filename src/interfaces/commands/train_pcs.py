@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import Command, parse_overrides
 from src.pipeline import services
 
@@ -82,22 +83,30 @@ class PcsTrainingPayload(services.PcsTrainingOutput):
 
 def run(args: argparse.Namespace) -> PcsTrainingPayload:
     """Argparse transport around :func:`services.train_pcs`."""
-    out = services.train_pcs(
-        args.config,
-        iterations=args.iterations,
-        num_workers=args.workers,
-        seed=args.seed,
-        config_overrides=parse_overrides(args.overrides),
-        experiment=services.ExperimentTag(
-            experiment_id=args.experiment,
-            arm=args.arm,
-            parent_run_id=args.parent,
-        ),
-        checkpoint_every=args.checkpoint_every,
-        retain_every=args.retain_every,
-        run_id=args.run,
-        progress_file=Path(args.progress_file) if args.progress_file else None,
-    )
+    # The composition root, and the only layer that may name an adapter:
+    # `the_work_does_not_know_its_adapters` forbids the service from doing this
+    # itself.
+    with connect.record_sink() as sink:
+        out = services.train_pcs(
+            args.config,
+            sink=sink,
+            # The READ side, for a resume: without it the tracker folds the
+            # run's events out of a file that is on its way out.
+            record_source=connect.record_source_from_environment(),
+            iterations=args.iterations,
+            num_workers=args.workers,
+            seed=args.seed,
+            config_overrides=parse_overrides(args.overrides),
+            experiment=services.ExperimentTag(
+                experiment_id=args.experiment,
+                arm=args.arm,
+                parent_run_id=args.parent,
+            ),
+            checkpoint_every=args.checkpoint_every,
+            retain_every=args.retain_every,
+            run_id=args.run,
+            progress_file=Path(args.progress_file) if args.progress_file else None,
+        )
     return PcsTrainingPayload(**out.model_dump())
 
 

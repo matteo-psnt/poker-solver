@@ -167,7 +167,6 @@ class TestTheDispatchingWrites:
             "/api/score",
             "/api/precompute",
             "/api/push-code",
-            "/api/push-data",
             "/api/compact-legs",
             "/api/promote",
         ):
@@ -177,26 +176,24 @@ class TestTheDispatchingWrites:
 
 class TestTheReadsAddedForCoverage:
     def test_a_flag_named_like_answers_own_parameter_still_reaches_the_command(self, invoked):
-        """`activity --command tasks` is the case, and it is not a one-off.
+        """A command is free to have a flag called `--command`, or `--cache`.
 
         `answer(cache, command, /, **kwargs)` — the slash is what keeps a
         command's own flags from binding to this function's parameters. Without
         it the failure is a type error several frames from anything the reader
         was thinking about, and the same trap waits for a future `--cache`.
 
-        Driven through `answer` directly rather than through `/api/activity`,
-        which no longer passes `command=` at all: `invoke` fills every default
-        from the command's own parser, so restating one was pure duplication.
-        The trap this pins is `answer`'s signature, not any endpoint's habits.
+        Driven through `answer` directly: the trap this pins is `answer`'s
+        signature, not any endpoint's habits.
         """
         stub = Command(
-            name="activity",
+            name="probe",
             add_arguments=_takes_command,
             run=lambda args: _Nothing(),
             render=lambda payload: None,
         )
         web_app.answer(web_app.TtlCache(0.0), stub, command="tasks", cache="also-a-flag")
-        assert invoked[0] == ("activity", {"command": "tasks", "cache": "also-a-flag"})
+        assert invoked[0] == ("probe", {"command": "tasks", "cache": "also-a-flag"})
 
 
 class TestFailuresBecomeStatusCodes:

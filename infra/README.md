@@ -63,7 +63,7 @@ Needs `terraform`, `az` and `just` locally, plus `az login` for the credential.
 az login
 just store-create   # the durable share — once, ever
 just create         # Batch account, pool, guardrails
-just cli push-data  # card abstractions to the share (~773 MB, one time)
+uv run poker-solver submit-precompute --config production  # card abstractions, built on a node (one time)
 ```
 
 ## Daily use
@@ -88,7 +88,7 @@ poker-solver logs --task <task> --source node --job <job>   # live, node-side
 poker-solver cancel --job <job> --task <task>
 poker-solver score --run <id> --at 10000000,20000000 -- --br-flops 8
 
-poker-solver ledger               # every evaluation, derived from the share
+poker-solver ledger               # every evaluation, from the record
 poker-solver runs                 # every published run, newest first
 
 poker-solver curve --run <id>
@@ -100,13 +100,12 @@ Two things worth knowing at the seams:
 - **`score` passthrough needs a `--` separator.** `-- --br-flops 8`, not
   `--br-flops 8`: argparse rejects a bare unknown option as an argument of
   `score` itself rather than handing it to the passthrough.
-- **Readers pull metadata only, and there is no local copy.** `ledger`, `curve`,
-  `runinfo` and friends materialise `*.json`/`*.jsonl` from the share into a temp
-  tree and discard it — never `*.zarr`, never the `keys-*` tables of the deleted
-  dynamic backend. There is no `--source` and no `--runs-dir`: nothing on a
-  laptop is a source of truth about a run, so a local copy could only be a stale
-  second answer. (`fetch` and `ledger --rebuild` were how this used to work.
-  Both are gone: every read is a rebuild.)
+- **Readers answer from the record, and there is no local copy.** `ledger`,
+  `curve`, `runinfo` and friends read Postgres; the DSN comes from the store's
+  Terraform state at startup, cached under the cache root for an hour. Nothing
+  on a laptop is a source of truth about a run, so a local copy could only be
+  a stale second answer. The server is in Canada Central, with its readers,
+  not with the boxes: `docs/record-move.md`.
 
 `to` is an **absolute** iteration target. That is what makes Batch's automatic
 retry safe: a retried task re-reads a newer checkpoint and converges on the same
@@ -114,8 +113,9 @@ endpoint instead of compounding an increment.
 
 ## How a task survives being killed
 
-`infra/run_task.py` publishes to the share **every time a retained checkpoint rung
-appears**, and again on any exit — success, failure, or cancellation.
+`infra/run_task.py` publishes a rung to the `checkpoints` container **every time
+a retained checkpoint rung appears**, and the run's record on any exit —
+success, failure, or cancellation.
 
 The node's disk is ephemeral. Publishing only at the end would mean an OOM or a
 `maxWallClockTime` kill destroys a multi-hour task entirely, which is the same
@@ -132,7 +132,7 @@ record how an attempt died: a container killed by the OOM killer, by
 `maxWallClockTime`, or by losing its node is gone before it can write anything.
 Batch sees those deaths — but retains them for far less time than the run lives.
 
-So the record is written from both sides, into `<share>/legs/`:
+So the record is written from both sides, into the record's `legs` table:
 
 - **The node's own account.** `run_task.py` writes `<task>.<attempt>.start.json`
   at entry and `<task>.<attempt>.exit.json` from its `finally`. This covers every
@@ -165,7 +165,7 @@ them. `tests/shared/cloudtask/test_imports.py` is the fail-closed half — nothi
 outside `records`/`jsonio`/`cache` may be reached, so a new module in
 `src/shared/` is denied by default rather than by a list somebody has to update.
 
-`poker-solver tasks --skip-reconcile` reads the share without querying Batch,
+`poker-solver tasks --skip-reconcile` reads the record without querying Batch,
 and `poker-solver logs --task <task>` prints a published log. There is no
 severity flag —
 the format is greppable on purpose, so `| grep -E ' (WARN|ERROR|CRIT) '`
@@ -173,9 +173,10 @@ narrows it to the failures.
 
 ## What must never go on the share
 
-**Active run directories.** A checkpoint is ~2,000 small files and the read path
-mmaps them; SMB turns every page fault into a network round-trip and offers no
-atomic replace. Runs live on the node's `/mnt/work` data disk and are *published*
+**Active run directories.** The read path mmaps a checkpoint; SMB turns every
+page fault into a network round-trip and offers no atomic replace. Runs live on
+the node's `/mnt/work` data disk; each retained rung is *published* as one
+object in the `checkpoints` container, and the manifest, markers and logs go
 to the share. The card abstraction is likewise copied share→local at node start.
 
 There is a second reason: a run directory has exactly one writer for its whole
@@ -231,9 +232,25 @@ work. Read them that way — most of them do not stop anything by themselves.
    `$CPUPercent` is a 0-1 fraction; if it is not, the threshold never fires and
    the backstop is silently absent.
 
+**Bounded by NONE of the above — and it is the only thing here that is not:**
+
+6. **The record database** (`infra/store/postgres.tf`, `B_Standard_B2s`,
+   ~$30-35/month). Every control above bounds either a rate of spend or the
+   duration of work that finishes; a database is neither. It does not scale to
+   zero, `just panic` cannot reach it, and `just destroy` cannot either — it
+   lives in the store state on purpose, for the same reason the share does.
+
+   Stopping it is not a durable answer: **a stopped Flexible Server restarts
+   itself after seven days.** The only way to stop paying for it is to destroy
+   it from `infra/store`, which is deliberately awkward.
+
+   It is a small, flat, predictable cost rather than a runaway risk — the point
+   of listing it is that this section otherwise reads as a complete account of
+   what is bounded, and it would be the one thing quietly outside that.
+
 **Alerts only — these stop nothing:**
 
-6. **Budget alerts** at 50/75/90/100% actual plus 100% forecast. Forecast is the
+7. **Budget alerts** at 50/75/90/100% actual plus 100% forecast. Forecast is the
    one that warns you while there is still time to act. At ~$19/day the default
    $250 budget is about two weeks of a total runaway.
 
@@ -359,11 +376,17 @@ that is not a copy.
 
 ## State
 
-Terraform state is local (`infra/terraform.tfstate`, `infra/store/terraform.tfstate`,
-`infra/serve/terraform.tfstate`) and gitignored — it can
-contain resource detail you would not want committed. Solo use makes a remote
-backend unnecessary; if this ever becomes shared, move state to an Azure Storage
-backend before a second person runs `apply`.
+Terraform state is REMOTE: one blob per root in the store account's private
+`tfstate` container (`compute.tfstate`, `store.tfstate`, `serve.tfstate`),
+declared in each root's `backend.tf` and authenticated with AAD, never the
+account key. Several sessions apply against this repo at once; a local file per
+checkout was a corruption waiting to happen, and the blob lease is the lock.
+
+Whoever runs Terraform needs **Storage Blob Data Contributor** on the account;
+`infra/store/main.tf` grants it to the applying identity. A fresh checkout needs
+only `terraform -chdir=<root> init` per root -- there is no state file to copy or
+link. The old local `terraform.tfstate` files are gitignored leftovers of the
+migration and read by nothing.
 
 `infra/.terraform.lock.hcl` *is* committed, like `uv.lock`: it pins the `azurerm`
 provider version so a fresh `terraform init` elsewhere resolves the same one.

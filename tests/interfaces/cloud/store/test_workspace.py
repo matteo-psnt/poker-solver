@@ -36,6 +36,8 @@ class _FakeShare:
     def __init__(self, files: dict[str, str]):
         self.files = files
         self.written: dict[str, str] = {}
+        self.etags: dict[str, str] = {}
+        self.downloads: list[str] = []
 
 
 @pytest.fixture
@@ -60,10 +62,10 @@ def fake(monkeypatch):
             parts = p[len(prefix) :].split("/")
             if skip_dir is not None and any(skip_dir(part) for part in parts[:-1]):
                 continue
-            found.append(p)
+            found.append((p, service.etags.get(p, "v1")))
         return found
 
-    def list_entries(service, share_name, path):
+    def list_entries(service, share_name, path, *, etags=False):
         names = set()
         prefix = f"{path}/"
         for p in service.files:
@@ -73,6 +75,7 @@ def fake(monkeypatch):
         return [share.ShareEntry(name=n, is_directory=d, size=0) for n, d in sorted(names)]
 
     def download_file(service, share_name, path, destination):
+        service.downloads.append(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(service.files[path])
 
@@ -215,6 +218,71 @@ class TestSharedTrees:
         assert len(set(seen)) == 1
         trees.close()
 
+    def test_a_reader_during_a_rebuild_is_served_stale_rather_than_blocked(self):
+        """The measured defect this exists for.
+
+        Discovery alone is ~5.4s against the share, so a reader that WAITS for
+        an in-flight rebuild pays a multi-second sweep for freshness it did not
+        ask for. The builder already holds the expired tree, so handing it out
+        costs one refcount and no round trips.
+        """
+        started, release = threading.Event(), threading.Event()
+
+        def slow_build(root, _previous):
+            (root / "marker").write_text("x")
+            started.set()
+            release.wait(timeout=2)
+
+        trees = workspace.SharedTrees(ttl=0.0, stale_grace=60.0)
+        with trees.acquire("record", _mark) as first:
+            pass
+
+        builder = threading.Thread(target=lambda: _read(trees, slow_build))
+        builder.start()
+        assert started.wait(timeout=2), "the rebuild never began"
+
+        # The rebuild is in flight and will not finish until `release`. A reader
+        # arriving now must come back with the OLD tree, not hang on the new one.
+        with trees.acquire("record", _never_called) as during:
+            assert during == first, "served a different tree than the expired one"
+        release.set()
+        builder.join(timeout=2)
+        trees.close()
+
+    def test_a_stale_tree_past_the_grace_blocks_instead_of_answering(self):
+        """A build that keeps failing must be REPORTED, not answered from an
+        ever-older tree. Same bound as the payload cache one layer up."""
+        started, release = threading.Event(), threading.Event()
+
+        def slow_build(root, _previous):
+            (root / "marker").write_text("x")
+            started.set()
+            release.wait(timeout=2)
+
+        # ttl and grace both zero: the previous tree is already past its welcome.
+        trees = workspace.SharedTrees(ttl=0.0, stale_grace=0.0)
+        with trees.acquire("record", _mark):
+            pass
+
+        builder = threading.Thread(target=lambda: _read(trees, slow_build))
+        builder.start()
+        assert started.wait(timeout=2)
+
+        waited = threading.Event()
+
+        def late_reader():
+            with trees.acquire("record", _mark):
+                waited.set()
+
+        thread = threading.Thread(target=late_reader)
+        thread.start()
+        assert not waited.wait(timeout=0.3), "answered from a tree past its grace"
+        release.set()
+        thread.join(timeout=2)
+        builder.join(timeout=2)
+        assert waited.is_set()
+        trees.close()
+
     def test_expiry_does_not_delete_a_tree_still_being_read(self):
         """The hazard refcounting exists for: expiry alone pulls the directory
         out from under a reader mid-answer."""
@@ -308,3 +376,68 @@ class TestSharedTrees:
         with workspace.shared_record_cache(ttl=60.0) as cache:
             assert workspace.active_cache() is cache
         assert workspace.active_cache() is None
+
+
+class TestIncrementalRefresh:
+    """A published record never changes once written, so a refresh should fetch
+    only what moved. The console rebuilds this tree every 45s; before this it
+    re-downloaded all 4,251 immutable documents each time -- 6.4s of a 24.4s
+    rebuild, and `_checkout` blocks every other request while it runs."""
+
+    def test_a_refresh_against_an_unchanged_share_downloads_nothing(self, fake, tmp_path):
+        first = tmp_path / "first"
+        workspace.pull_metadata(fake, "s", first)
+        assert fake.downloads, "the first pull must actually fetch"
+
+        fake.downloads.clear()
+        second = tmp_path / "second"
+        fetched = workspace.pull_metadata(fake, "s", second, previous=first)
+
+        assert fetched == 0
+        assert fake.downloads == []
+        # And the tree is COMPLETE, not merely cheap.
+        assert (second / "run-a" / "evals" / "slug1.json").is_file()
+        assert (second / "run-b" / "run.jsonl").is_file()
+
+    def test_only_the_changed_document_is_refetched(self, fake, tmp_path):
+        first = tmp_path / "first"
+        workspace.pull_metadata(fake, "s", first)
+
+        fake.etags["archive/run-a/evals/slug1.json"] = "v2"
+        fake.downloads.clear()
+        second = tmp_path / "second"
+        fetched = workspace.pull_metadata(fake, "s", second, previous=first)
+
+        assert fetched == 1
+        assert fake.downloads == ["archive/run-a/evals/slug1.json"]
+
+    def test_a_new_document_is_picked_up(self, fake, tmp_path):
+        first = tmp_path / "first"
+        workspace.pull_metadata(fake, "s", first)
+
+        fake.files["archive/run-b/evals/slug9.json"] = json.dumps({"run_id": "run-b"})
+        second = tmp_path / "second"
+        workspace.pull_metadata(fake, "s", second, previous=first)
+
+        assert (second / "run-b" / "evals" / "slug9.json").is_file()
+
+    def test_a_previous_tree_with_no_manifest_is_ignored_not_trusted(self, fake, tmp_path):
+        """A tree from before this existed has no etags. Reusing its files on
+        name alone would serve whatever it happened to hold."""
+        stale = tmp_path / "stale"
+        (stale / "run-a" / "evals").mkdir(parents=True)
+        (stale / "run-a" / "evals" / "slug1.json").write_text("STALE")
+
+        fresh = tmp_path / "fresh"
+        workspace.pull_metadata(fake, "s", fresh, previous=stale)
+
+        assert (fresh / "run-a" / "evals" / "slug1.json").read_text() != "STALE"
+
+
+def _read(trees, build):
+    with trees.acquire("record", build):
+        pass
+
+
+def _never_called(root, _previous):
+    raise AssertionError("a reader served from the stale tree must not build")

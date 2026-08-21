@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command
+from src.interfaces.errors import CommandError
 from src.shared import gitinfo
 from src.shared.cloudtask import kinds
 from src.shared.cloudtask.kinds import TaskName
@@ -50,10 +51,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--pool",
-        choices=("train", "big", "huge"),
+        choices=("train", "big", "huge", "mem"),
         default="train",
-        help="Which pool runs it: train (D16), big (the train-big D32 pool) or "
-        "huge (the train-huge D64 pool, 32 physical cores).",
+        help="Which pool runs it: train (D16), big (D32), huge (D64) or mem (E64, "
+        "512 GB -- the only one that fits a 200 bb PCS run's workers). SCALAR is "
+        "settled and BIGGER WINS: ~60k it/s at D16/15w, ~115k at D32/31w, ~152k at "
+        "D64/63w, a ratio that RISES with run length, at 0.88 efficiency per billed "
+        "vCPU -- so under 'wall-clock is the scarce thing' take the big box for a "
+        "long run. PCS is NOT settled: its RAM clamp leaves every D box at ~25-28%% "
+        "of its cores, which predicts a wash per dollar, while task-level history "
+        "says train is severalfold cheaper. Those disagree and the history is "
+        "confounded by task length, so until a same-wave A/B settles it prefer "
+        "train for PCS and spread N arms over N nodes rather than stacking one.",
     )
     parser.add_argument(
         "--workers",
@@ -68,18 +77,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="Checkpoint interval in iterations. Default is the KERNEL's: the "
-        "unit is its iteration, and 5M rungs would leave a board-free or pcs "
-        "run as one chunk.",
+        "unit is its iteration, and 5M rungs would leave a pcs run as one chunk.",
     )
     parser.add_argument(
         "--kernel",
-        choices=("scalar", "board-free", "pcs"),
-        default="scalar",
-        help="scalar = external-sampling MCCFR over the real game (train-static). "
-        "board-free = the vector kernel, which updates every row every iteration "
-        "but solves a bucket-transition approximation of the chance layer. "
-        "pcs = the hand-space vector kernel on one freshly sampled board per "
-        "iteration (train-pcs): exact cards, the real chance layer, every hand at once.",
+        choices=("pcs", "scalar"),
+        default=None,
+        help="pcs (default) = the hand-space vector kernel on one freshly sampled "
+        "board per iteration (train-pcs): exact cards, the real chance layer, every "
+        "hand at once, and the trainer every blueprint since 08-25 has come from. "
+        "scalar = external-sampling MCCFR over the real game (train-static); it "
+        "lost to pcs on the same budget and survives as the cheap smoke test for "
+        "infra changes and as the lineage of the frozen baselines.",
     )
     parser.add_argument(
         "--retain-every",
@@ -87,28 +96,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=0,
         dest="retain_every",
         help="[pcs] Keep one rung per this many iterations for `score --at`. 0 keeps every rung.",
-    )
-    parser.add_argument(
-        "--universe-boards",
-        type=int,
-        default=2000,
-        dest="universe_boards",
-        help="[board-free] Real boards the bucket-transition matrices are estimated "
-        "from. They define the chance layer, so they define the game.",
-    )
-    parser.add_argument(
-        "--universe-seed",
-        type=int,
-        default=7,
-        dest="universe_seed",
-        help="[board-free] Draws the universe; part of the game's identity.",
-    )
-    parser.add_argument(
-        "--dtype",
-        default="",
-        choices=("", "float32", "float64"),
-        help="[board-free] Kernel precision. Default float32, measured to cost "
-        "nothing in strategy quality.",
     )
     parser.add_argument(
         "--warm-start-from",
@@ -168,9 +155,27 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 _OPS = {
     "scalar": TaskName.TRAIN,
-    "board-free": TaskName.TRAIN_VECTOR,
     "pcs": TaskName.TRAIN_PCS,
 }
+
+# A pcs iteration is ONE BOARD, ~1/s on a quick_test node, and every pcs arm to
+# date has asked for at most a few thousand. A `--to` above this with the kernel
+# left to default is a scalar-sized number typed against the wrong trainer: a
+# 200k quick_test probe would have run for two days.
+PCS_DEFAULT_TO_CEILING = 20_000
+
+
+def _kernel(args: argparse.Namespace) -> str:
+    """The kernel, defaulting to pcs -- unless the target says otherwise."""
+    if args.kernel is not None:
+        return args.kernel
+    if args.to > PCS_DEFAULT_TO_CEILING:
+        raise CommandError(
+            f"--to {args.to:,} with the default kernel (pcs) is {args.to:,} BOARDS, at "
+            "roughly one per second. If this is a scalar smoke test, pass "
+            "`--kernel scalar`; if you mean that many boards, pass `--kernel pcs`."
+        )
+    return "pcs"
 
 
 def _arm(args: argparse.Namespace) -> str:
@@ -215,12 +220,13 @@ def run(args: argparse.Namespace) -> SubmitPayload:
     # Only a CONTINUE carries a run id, and only then can it be a fragment the
     # node cannot match. A fresh run's id does not exist yet.
     run_id = resolve_published_run(args.run) if args.run else args.run
+    kernel = _kernel(args)
     payload = dispatch.stage_and_queue(
         pool=args.pool,
         make_tasks=lambda snapshot: [
             spec.TaskSpec(
                 code_snapshot=snapshot,
-                op=_OPS[args.kernel],
+                op=_OPS[kernel],
                 config=args.config,
                 to=args.to,
                 run_id=run_id,
@@ -232,13 +238,10 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 checkpoint_every=(
                     args.checkpoint_every
                     if args.checkpoint_every is not None
-                    else kinds.kind(_OPS[args.kernel]).default_checkpoint_every
+                    else kinds.kind(_OPS[kernel]).default_checkpoint_every
                 ),
                 retain_every=args.retain_every,
                 timeout=args.timeout,
-                universe_boards=args.universe_boards if args.kernel == "board-free" else 0,
-                universe_seed=args.universe_seed if args.kernel == "board-free" else 0,
-                dtype=args.dtype,
                 warm_start_from=args.warm_start_from,
                 warm_start_weight=args.warm_start_weight,
                 warm_start_at=args.warm_start_at,

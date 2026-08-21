@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from src.adapters.postgres import connect, queries
 from src.interfaces.commands._base import (
     Command,
-    ledger_for,
-    records_root,
-    resolve_run_dir,
+    eval_index_rows,
+    resolve_run_id,
 )
 from src.pipeline import services
 from src.pipeline.services.experiments import CurvePoint
@@ -38,12 +38,15 @@ class CurvePayload(services.CurveOutput):
 
 def run(args: argparse.Namespace) -> CurvePayload:
     """Argparse transport around :func:`services.exploitability_curve`."""
-    with records_root(args) as root:
-        out = services.exploitability_curve(
-            resolve_run_dir(args.run, str(root)),
-            ledger_path=ledger_for(root),
-            tier_index=args.tier,
-        )
+    engine = connect.engine_from_environment()
+    run_id = resolve_run_id(args.run, engine)
+    out = services.curve_from(
+        run_id,
+        # The ladder the RECORD names: `sink.claim` writes a row per rung.
+        retained=queries.rung_ladder(engine, run_id),
+        records=eval_index_rows(engine, run_id),
+        tier_index=args.tier,
+    )
     return CurvePayload(**out.model_dump())
 
 

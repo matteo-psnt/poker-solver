@@ -1,4 +1,4 @@
-"""The durable share: published runs, code snapshots, abstractions, task logs.
+"""The durable share: published runs, abstractions, task logs.
 
 The share is the experiment record. It lives in its own Terraform state and its
 own resource group precisely so tearing down compute cannot reach it, and every
@@ -21,8 +21,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import tarfile
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -34,46 +32,12 @@ from src.shared import records
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from datetime import datetime
 
     from src.interfaces.cloud.config import CloudConfig
 
 ARCHIVE_DIR = "archive"
-CODE_DIR = "code"
 LOGS_DIR = "logs"
 ABSTRACTION_DIR = "combo_abstraction"
-
-SNAPSHOT_EXCLUDES = frozenset(
-    {
-        ".git",
-        "data",
-        ".venv",
-        "__pycache__",
-        "node_modules",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".mypy_cache",
-        ".terraform",
-        ".claude",
-        ".uv-cache",
-        ".import_linter_cache",
-        ".idea",
-        ".vscode",
-        ".DS_Store",
-        # Credential files. A snapshot seals the WORKING TREE, not the index, so
-        # an untracked secrets file in the root would ride up to the share and
-        # sit in `code/` readable by every node. `chipzen.toml` is here because
-        # it is the Chipzen SDK's own config, which carries a bot token verbatim.
-        "chipzen.toml",
-        ".chipzen",
-    }
-)
-
-# Whole families of credential file, matched by prefix rather than by name --
-# `.env`, `.env.local`, `.env.production`. An exact-name set cannot express this,
-# and the variant that gets forgotten is the one that leaks. A comment, not a
-# string: a string here is not a docstring and would bind to SNAPSHOT_EXCLUDES.
-SNAPSHOT_EXCLUDE_PREFIXES = (".env",)
 
 
 @dataclass(frozen=True)
@@ -180,14 +144,40 @@ def delete_file(service: ShareServiceClient, share: str, path: str) -> bool:
     return True
 
 
+def delete_directory(service: ShareServiceClient, share: str, path: str) -> bool:
+    """Remove one EMPTY directory. ``False`` if it was absent or still occupied.
+
+    Azure Files does not remove a directory when its files go, so deleting a
+    snapshot's contents leaves the directory behind -- and an empty directory is
+    not free: the parent listing still enumerates it, which is the cost a
+    metadata walk pays per run.
+
+    Emptiness is CHECKED rather than the service's refusal caught: the SDK's
+    general error type is classified once in `errors.attempt` and a guard fails
+    if anything under `interfaces/` names it again -- including, as it turns
+    out, a docstring explaining that it does not. The listing costs one round
+    trip against a delete that would have cost one anyway.
+
+    This never decides that a subtree should go -- only tidies up after that
+    decision was carried out one file at a time.
+    """
+    if list_entries(service, share, path):
+        return False
+    try:
+        directory(service, share, path).delete_directory()
+    except ResourceNotFoundError:
+        return False
+    return True
+
+
 def walk_files(
     service: ShareServiceClient,
     share: str,
     path: str,
     *,
     skip_dir: Callable[[str], bool] | None = None,
-) -> Iterator[str]:
-    """Yield every file path beneath ``path``, depth first.
+) -> Iterator[tuple[str, str | None]]:
+    """Yield ``(path, etag)`` for every file beneath ``path``, depth first.
 
     Used by the metadata sync, which needs to see the whole published tree in
     order to pick the small JSON out of it.
@@ -196,15 +186,19 @@ def walk_files(
     snapshots hold thousands of chunk files each, and listing them is a round
     trip per directory -- filtering them out AFTER the walk still paid for the
     walk, which is where the time went: 167s to pull 146 small JSON files.
+
+    The etag rides along because it costs nothing here and is the whole basis of
+    an incremental refresh: a published record never changes once written, so an
+    unchanged etag means the caller already has the bytes.
     """
-    for entry in list_entries(service, share, path):
+    for entry in list_entries(service, share, path, etags=True):
         child = f"{path}/{entry.name}"
         if entry.is_directory:
             if skip_dir is not None and skip_dir(entry.name):
                 continue
             yield from walk_files(service, share, child, skip_dir=skip_dir)
         else:
-            yield child
+            yield child, entry.etag
 
 
 def task_log_names(service: ShareServiceClient, share: str) -> list[str]:
@@ -328,56 +322,3 @@ def upload_file(service: ShareServiceClient, share: str, path: str, source: Path
         ensure_directory(service, share, parent)
     with source.open("rb") as handle:
         service.get_share_client(share).get_file_client(path).upload_file(handle)
-
-
-def snapshot_name(now: datetime) -> str:
-    """The id of one immutable code snapshot."""
-    return f"code-{now:%Y%m%d_%H%M%S}"
-
-
-def _snapshot_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-    """Drop excluded directories, and strip ownership from what remains.
-
-    Ownership is cleared because the node extracts as an unprivileged task
-    user: a tarball carrying the laptop's uid/gid is one more thing for tar to
-    fail to restore. macOS xattrs and resource forks never enter the archive in
-    the first place -- ``tarfile`` does not write them, which is what the shell
-    version needed ``COPYFILE_DISABLE=1 --no-xattrs`` to achieve.
-    """
-    parts = Path(info.name).parts
-    if any(part in SNAPSHOT_EXCLUDES for part in parts):
-        return None
-    if any(part.startswith(SNAPSHOT_EXCLUDE_PREFIXES) for part in parts):
-        return None
-    info.uid = info.gid = 0
-    info.uname = info.gname = ""
-    return info
-
-
-def build_code_snapshot(root: Path, destination: Path) -> None:
-    """Seal the working tree into one gzipped tarball.
-
-    ONE TARBALL, not a directory tree: Azure Files would otherwise need every
-    nested path pre-created and would cost a round trip per file. A sealed
-    archive is also atomic in the way that matters -- a half-uploaded tarball
-    is simply absent, rather than a partially-populated tree a node might run.
-    """
-    with tarfile.open(destination, "w:gz") as archive:
-        for entry in sorted(root.iterdir()):
-            archive.add(entry, arcname=entry.name, filter=_snapshot_filter)
-
-
-def publish_code_snapshot(
-    service: ShareServiceClient, share: str, root: Path, now: datetime
-) -> str:
-    """Build and upload an immutable snapshot of the tree; return its id.
-
-    Pinned per submission on purpose: a push while a job is running must not
-    change what that job is executing.
-    """
-    name = snapshot_name(now)
-    with tempfile.TemporaryDirectory() as workspace:
-        tarball = Path(workspace) / f"{name}.tar.gz"
-        build_code_snapshot(root, tarball)
-        upload_file(service, share, f"{CODE_DIR}/{name}.tar.gz", tarball)
-    return name

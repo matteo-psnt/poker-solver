@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+import queue
 import random
 import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from functools import partial
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
@@ -37,11 +39,10 @@ from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.pipeline.abstraction.resolver import ComboAbstractionResolver
-from src.shared import run_events
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from src.engine.solver.protocols import BucketingStrategy
@@ -263,18 +264,65 @@ class _ProgressReporter:
             logger.warning("Could not publish training progress; training continues.")
 
 
-def _append_checkpoint_event(checkpoint_dir: Path, **fields: Any) -> None:
-    """Record the mid-flight row, but never at the cost of the task.
+def _unrecorded_checkpoint(checkpoint_dir: Path, **fields: Any) -> None:
+    """Log the mid-flight row for a caller with no tracker, and record nothing.
 
-    `records.append_log` propagates on purpose, so its callers can choose. Here
-    the choice is clear: this runs immediately AFTER `save_checkpoint` succeeded,
-    so a full disk or an IO error on `run.jsonl` would throw away a good rung and
-    mark the run failed over telemetry.
+    This used to append the row to `run.jsonl`, which is now WORSE than doing
+    nothing: nothing else writes that file any more, so a direct-drive caller
+    would create one holding checkpoints and no `created` event -- and
+    `has_run_record` answers True on a file that exists, so the next resume
+    would find a run whose fold raises `run log has no 'created' event` instead
+    of one it can simply start.
+
+    A run with a tracker passes `on_checkpoint` and never reaches here.
     """
-    try:
-        run_events.append(checkpoint_dir, run_events.CHECKPOINT, **fields)
-    except Exception:  # telemetry must not fail a checkpoint already written
-        logger.warning("Could not record the checkpoint event; training continues.", exc_info=True)
+    logger.info(
+        "[static] checkpoint at %s not recorded: no tracker driving this run (%s)",
+        fields.get("iteration"),
+        checkpoint_dir.name,
+    )
+
+
+REAP_POLL_SECONDS = 30.0
+
+
+class _Results(Protocol):
+    """The read side of the result queue -- narrow, so a `queue.Queue` can stand in."""
+
+    def get(self, block: bool = ..., timeout: float | None = ...) -> dict[str, Any]: ...
+
+
+def _collect(result_queue: _Results, processes: Sequence[Any]) -> list[dict[str, Any]]:
+    """One result per worker, or the reason there will never be one.
+
+    A worker killed outright -- the OOM killer's pick when the clamp
+    oversubscribes the node -- never puts a result, and a bare `get()` then
+    blocks until the task's external timeout, discarding a finished chunk that
+    was already complete in shared memory. Measured: one killed worker cost a
+    D64 probe all 40 minutes and every rung it had run.
+    """
+    results: list[dict[str, Any]] = []
+    while len(results) < len(processes):
+        try:
+            results.append(result_queue.get(timeout=REAP_POLL_SECONDS))
+        except queue.Empty:
+            # Only a NONZERO exit is proof of a missing result: a worker that
+            # finished has already put one, and may exit before we read it.
+            dead = [p for p in processes if p.exitcode not in (None, 0)]
+            if dead:
+                codes = ", ".join(f"pid {p.pid} exit {p.exitcode}" for p in dead)
+                # The survivors are not daemons, so an un-terminated one holds
+                # the task for the rest of its chunk under multiprocessing's
+                # atexit join -- still mapping the shared segments a killed leg
+                # is known to poison the next one with.
+                for process in processes:
+                    process.terminate()
+                raise RuntimeError(
+                    f"{len(dead)} of {len(processes)} static workers died without a result "
+                    f"({codes}); a negative code is a signal, and -9 is the OOM killer -- "
+                    "the node cannot hold this worker count, so lower `--workers`."
+                ) from None
+    return results
 
 
 def train_static_parallel(
@@ -295,6 +343,8 @@ def train_static_parallel(
     worker: Callable[..., None] = _worker_entry,
     worker_args: tuple[Any, ...] = (),
     before_checkpoint: Callable[[StaticArrayStorage], None] | None = None,
+    on_checkpoint: Callable[..., None] | None = None,
+    extra_arrays: Mapping[str, int] | None = None,
 ) -> StaticTrainingResult:
     """Train on static storage across ``num_workers`` processes.
 
@@ -315,7 +365,7 @@ def train_static_parallel(
     million iterations by default.
     """
     _, abstraction, tree = _build_local(config, abstraction)
-    storage = StaticArrayStorage(tree, session_id=session_id)
+    storage = StaticArrayStorage(tree, session_id=session_id, extra=extra_arrays)
     # Named before the try so the `finally` can stop it on the paths that return
     # before it exists -- an already-satisfied target is one of them.
     reporter = _ProgressReporter(None, (), 0, num_iterations)
@@ -401,7 +451,7 @@ def train_static_parallel(
             for process in processes:
                 process.start()
 
-            results = [result_queue.get() for _ in processes]
+            results = _collect(result_queue, processes)
             for process in processes:
                 process.join()
 
@@ -448,8 +498,11 @@ def train_static_parallel(
                 # After save_checkpoint, so a row never describes state the
                 # arrays did not reach.
                 task_elapsed = time.time() - started
-                _append_checkpoint_event(
-                    checkpoint_dir,
+                # The tracker's when a run has one -- the sink is the only
+                # place a checkpoint lands. A caller with no tracker gets a
+                # log line, because there is nowhere else to put it.
+                record_checkpoint = on_checkpoint or partial(_unrecorded_checkpoint, checkpoint_dir)
+                record_checkpoint(
                     ts=datetime.now(UTC).isoformat(),
                     iteration=done,
                     # Scoped to the LEG: a resumed task restarts its clock while

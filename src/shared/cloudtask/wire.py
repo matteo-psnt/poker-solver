@@ -145,6 +145,37 @@ class Key:
 """Every key on the wire. The order is the order they are emitted."""
 KEYS: tuple[Key, ...] = (
     Key("CODE_SNAPSHOT", "code_snapshot", "code_snapshot"),
+    # The record database, as a DSN carrying a password.
+    #
+    # It reaches the node in the task environment and NOWHERE ELSE: it is not a
+    # field of the durable record, because `task_log.write_node_record` takes an
+    # explicit allowlist of what it writes rather than dumping the plan. That
+    # distinction is the whole reason this is tolerable -- a credential in a
+    # Batch task definition is revocable by rotating it, one in `legs/` on the
+    # share is permanent.
+    #
+    # EMPTY DISABLES IT, and that is the rollout: a task dispatched without this
+    # set behaves exactly as it did before, writing files and nothing else.
+    Key("POKER_SOLVER_RECORD_DSN", "record_dsn", "record_dsn"),
+    # The checkpoint container, as a SAS URL carrying its own authorisation.
+    #
+    # A SAS rather than the account key for the same reason the DSN is tolerable
+    # above -- it is revocable and it is SCOPED. The key opens every container
+    # and the share; this opens one container, for a bounded window, and it is
+    # minted per dispatch rather than stored anywhere.
+    #
+    # It also means the node needs no SDK: `blobstore` speaks REST through
+    # `urllib`, and a SAS URL already carries endpoint, scope and signature.
+    # That matters because `archive` is imported before `uv sync`, where a
+    # third-party import would kill the task at bootstrap.
+    #
+    # EMPTY DISABLES IT: the task publishes to the share exactly as before.
+    Key("POKER_SOLVER_CHECKPOINT_SAS", "checkpoint_sas", "checkpoint_sas"),
+    # The sealed tree, as a read-only SAS URL for that one blob. Consumed by the
+    # task COMMAND LINE (`curl | tar`) before any of this code exists on the
+    # node; carried here so it is declared beside the other two credentials
+    # and never appears in a Batch listing.
+    Key("POKER_SOLVER_CODE_URL", "code_url", "code_url"),
     Key("RUN_OP", "op", "op"),
     Key("RUN_CONFIG", "config", "config"),
     Key("RUN_TO", "to", "to", str, _int),
@@ -199,9 +230,6 @@ KEYS: tuple[Key, ...] = (
     # hash worth recording.
     Key("RUN_GIT_DIRTY", "git_dirty", "git_dirty"),
     Key("RUN_GIT_BRANCH", "git_branch", "git_branch"),
-    Key("RUN_UNIVERSE_BOARDS", "universe_boards", "universe_boards", _number, _int),
-    Key("RUN_UNIVERSE_SEED", "universe_seed", "universe_seed", _number, _int),
-    Key("RUN_DTYPE", "dtype", "dtype"),
     Key("RUN_WARM_START_FROM", "warm_start_from", "warm_start_from"),
     Key("RUN_WARM_START_WEIGHT", "warm_start_weight", "warm_start_weight", _number, _int),
     Key("RUN_WARM_START_AT", "warm_start_at", "warm_start_at", _number, _int),

@@ -39,11 +39,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from src.interfaces import telemetry
+from src.interfaces.cloud.config import export_record_dsn
 from src.interfaces.cloud.store import workspace
 from src.interfaces.commands import (
     Command,
-    activity,
+    arms,
     autoscale_check,
     cancel,
     compact_legs,
@@ -54,17 +54,15 @@ from src.interfaces.commands import (
     ledger,
     logs,
     pool_status,
+    profile,
     progress,
     push_code,
-    push_data,
     runinfo,
     runs,
     score,
     serve_box,
     submit,
-    submit_coupling,
     submit_precompute,
-    submit_vector,
     tasks,
 )
 from src.interfaces.errors import attempt
@@ -92,6 +90,14 @@ VIEW_STALE_GRACE_SECONDS = 120.0
 # Held longer than `CACHE_TTL_SECONDS` because it is a different thing being
 # cached: the payloads are what a panel shows, the tree is what they derive from.
 RECORD_TREE_TTL_SECONDS = 45.0
+
+# How long past that TTL an expired tree still answers, while its replacement is
+# being built. Discovery alone is ~5.4s against the share (measured 08-31: 1.3s
+# to list 300 runs, 4.0s to walk them), and the etag fix did nothing about it --
+# it removed re-DOWNLOADING, not re-walking. So without this every reader that
+# arrives during a rebuild blocks on a sweep it did not need. Generous because
+# the record is runs that take hours: a minute-old answer is not a wrong one.
+RECORD_TREE_STALE_GRACE_SECONDS = 90.0
 
 
 # Anchored to the repo, not to the working directory: `serve` is run from
@@ -162,9 +168,6 @@ class SubmitBody(BaseModel):
     # only cold ones -- a gap that reads as a missing feature rather than a
     # missing field. `test_endpoint_arguments` now pins every body to its flags.
     kernel: str | None = None
-    universe_boards: int | None = None
-    universe_seed: int | None = None
-    dtype: str | None = None
     warm_start_from: str | None = None
     warm_start_weight: int | None = None
     warm_start_at: int | None = None
@@ -178,39 +181,12 @@ class ScoreBody(BaseModel):
     method: str | None = None
     at: str | None = None
     timeout: str | None = None
+    pool: str | None = None
     # `score`'s REMAINDER passthrough, already split. The `--` separator is a
     # command-line artefact -- argparse's way of being told the rest is not its
     # business -- so it has no meaning here and `_passthrough` tolerates its
     # absence.
     flags: list[str] | None = None
-
-
-class SubmitVectorBody(BaseModel):
-    # `abstractions` is required and repeatable: one arm per abstraction per
-    # kernel, and the command has no default for it because which abstractions
-    # to compare IS the experiment.
-    abstractions: list[str]
-    kernels: list[str] | None = None
-    derive_boards: list[int] | None = None
-    train_boards: int | None = None
-    score_boards: int | None = None
-    checkpoints: str | None = None
-    config: str | None = None
-    stack: int | None = None
-    score_seeds: list[int] | None = None
-    board_relative: bool | None = None
-    timeout: str | None = None
-
-
-class SubmitCouplingBody(BaseModel):
-    # Repeatable and required for the same reason as the sweep's: WHICH
-    # abstractions to price against each other is the measurement.
-    abstractions: list[str]
-    boards: int | None = None
-    classes: str | None = None
-    seed: int | None = None
-    board_relative: bool | None = None
-    timeout: str | None = None
 
 
 class PrecomputeBody(BaseModel):
@@ -222,11 +198,6 @@ class PrecomputeBody(BaseModel):
 
 class PushCodeBody(BaseModel):
     root: str | None = None
-
-
-class PushDataBody(BaseModel):
-    source: str | None = None
-    name: str | None = None
 
 
 class CompactBody(BaseModel):
@@ -246,18 +217,13 @@ def _served(
 ) -> JSONResponse:
     """One memoised answer, with its failures mapped onto status codes.
 
-    The surface goes on around the memo, not inside it: a request served from the
-    cache did not run the command, and recording it as if it had would report a
-    `tasks` that takes 5 seconds as one that mostly takes microseconds.
-
     Failures are deliberately NOT cached: a repeated 503 costs a repeated cloud
     read, and the alternative keeps serving "Azure is down" for the whole TTL
     after `az login` has fixed it.
     """
-    with telemetry.surface("console"):
-        payload, failure = attempt(
-            lambda: cache.get(key, produce, serve_stale_for=serve_stale_for, force=force)
-        )
+    payload, failure = attempt(
+        lambda: cache.get(key, produce, serve_stale_for=serve_stale_for, force=force)
+    )
     if failure is not None:
         return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
     return PayloadResponse(payload)
@@ -268,7 +234,7 @@ def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
 
     ``cache`` and ``command`` are POSITIONAL-ONLY and the ``/`` is load-bearing:
     everything after it is a command's own flags, and a command is free to have one
-    called `command` -- `activity --command tasks` does. Without the slash that
+    called `command`. Without the slash that
     argument binds here instead, several frames from anything the reader was
     thinking about.
 
@@ -289,7 +255,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     record as it is NOW. A run published thirty seconds ago must not be
     invisible to the next reader.
     """
-    with workspace.shared_record_cache(RECORD_TREE_TTL_SECONDS):
+    with workspace.shared_record_cache(RECORD_TREE_TTL_SECONDS, RECORD_TREE_STALE_GRACE_SECONDS):
         yield
 
 
@@ -300,6 +266,7 @@ def create_app() -> FastAPI:
     one: the cache is built here and closed over, so nothing survives between
     two applications in the same process.
     """
+    export_record_dsn()
     app = FastAPI(title="poker-solver console", docs_url="/api/docs", lifespan=_lifespan)
     cache = TtlCache(CACHE_TTL_SECONDS)
 
@@ -331,6 +298,15 @@ def create_app() -> FastAPI:
     def _curve(run_id: str) -> JSONResponse:
         return answer(cache, curve.COMMAND, run=run_id)
 
+    @app.get(
+        "/api/experiments/{experiment_id}/arms", response_model=contract.Arms, responses=ERRORS
+    )
+    def _arms(experiment_id: str, control: str = "") -> JSONResponse:
+        # `control` is a query STRING with an empty default, not `str | None`:
+        # omitting it must mean the command's own default, which is the
+        # omit-means-default rule every other endpoint here follows.
+        return answer(cache, arms.COMMAND, experiment=experiment_id, control=control or None)
+
     @app.get("/api/cost", response_model=contract.Cost, responses=ERRORS)
     def _cost(hours: float = 0.0) -> JSONResponse:
         return answer(cache, cost.COMMAND, hours=hours)
@@ -343,6 +319,19 @@ def create_app() -> FastAPI:
     def _log(task_id: str, lines: int = 200) -> JSONResponse:
         return answer(cache, logs.COMMAND, task=task_id, lines=lines)
 
+    # Two endpoints, because asking and reading are minutes apart. The node
+    # polls, records for the duration asked and then uploads, so the POST
+    # returns the moment the request is written (`no_wait`) and the listing is
+    # what the console polls -- an endpoint that blocked for the recording would
+    # hold a connection open for the length of a profile.
+    @app.get("/api/profiles", response_model=contract.Profile, responses=ERRORS)
+    def _profiles() -> JSONResponse:
+        return answer(cache, profile.COMMAND, list=True)
+
+    @app.post("/api/tasks/{task_id}/profile", response_model=contract.Profile, responses=ERRORS)
+    def _profile(task_id: str, seconds: int = 30) -> JSONResponse:
+        return answer(TtlCache(0.0), profile.COMMAND, task=task_id, seconds=seconds, no_wait=True)
+
     # A local directory read, and the only endpoint here that touches neither
     # Azure nor the share. It is what makes the dispatch form offerable at all:
     # `submit --config` names a stem, and a surface that cannot enumerate them
@@ -350,13 +339,6 @@ def create_app() -> FastAPI:
     @app.get("/api/configs", response_model=contract.Configs, responses=ERRORS)
     def _configs() -> JSONResponse:
         return answer(cache, configs.COMMAND)
-
-    # Local, so it costs nothing and is memoised only to keep a shared tab from
-    # re-reading the log every poll. It is also the one endpoint whose answer
-    # this server's own requests keep changing.
-    @app.get("/api/activity", response_model=contract.Activity, responses=ERRORS)
-    def _activity(days: float = 7.0, limit: int = 20) -> JSONResponse:
-        return answer(cache, activity.COMMAND, days=days, limit=limit)
 
     @app.get("/api/autoscale", response_model=contract.Autoscale, responses=ERRORS)
     def _autoscale() -> JSONResponse:
@@ -394,28 +376,13 @@ def create_app() -> FastAPI:
     def _precompute(body: PrecomputeBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_precompute.COMMAND, **given(body))
 
-    @app.post("/api/submit-vector", response_model=contract.SubmitVectorPayload, responses=ERRORS)
-    def _submit_vector(body: SubmitVectorBody) -> JSONResponse:
-        return answer(TtlCache(0.0), submit_vector.COMMAND, **given(body))
-
-    @app.post(
-        "/api/submit-coupling", response_model=contract.SubmitCouplingPayload, responses=ERRORS
-    )
-    def _submit_coupling(body: SubmitCouplingBody) -> JSONResponse:
-        return answer(TtlCache(0.0), submit_coupling.COMMAND, **given(body))
-
-    # `push-code` and `push-data` read a tree on the machine RUNNING THIS
-    # SERVER, which is the one fact about them a browser hides. `--root` and
-    # `--source` default to this checkout, so a console served from a different
-    # worktree publishes that worktree -- and the payload names what it sealed,
-    # which is what the page shows back.
+    # `push-code` reads a tree on the machine RUNNING THIS SERVER, which is the
+    # one fact about it a browser hides. `--root` defaults to this checkout, so
+    # a console served from a different worktree publishes that worktree -- and
+    # the payload names what it sealed, which is what the page shows back.
     @app.post("/api/push-code", response_model=contract.PushedCode, responses=ERRORS)
     def _push_code(body: PushCodeBody) -> JSONResponse:
         return answer(TtlCache(0.0), push_code.COMMAND, **given(body))
-
-    @app.post("/api/push-data", response_model=contract.PushedData, responses=ERRORS)
-    def _push_data(body: PushDataBody) -> JSONResponse:
-        return answer(TtlCache(0.0), push_data.COMMAND, **given(body))
 
     @app.post("/api/compact-legs", response_model=contract.Compacted, responses=ERRORS)
     def _compact_legs(body: CompactBody) -> JSONResponse:

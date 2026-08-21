@@ -39,6 +39,8 @@ from typing import TYPE_CHECKING, Any
 from src.shared import records
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
     from src.shared.cloudtask import kinds
 
 RECORDS_DIRNAME = "legs"
@@ -124,16 +126,101 @@ def read_documents(directory: Path) -> dict[str, dict[str, Any]]:
     return found
 
 
+# `progress` and `observed` are written per TASK, not per attempt, so their
+# filenames carry no attempt number. They are not attempt-scoped facts: the join
+# attaches them to the LATEST attempt. Carried under this sentinel so the
+# record's primary key still holds and the difference stays visible, rather than
+# being flattened onto attempt 0 where it would collide with a real first one.
+TASK_SCOPED = -1
+
+# When a leg happened, from whichever field its writer used. Not one field,
+# because the writers are different programs: the node stamps `ts`, while the
+# READER'S observation stamps `observed_at` -- when IT looked, not when
+# something happened. Batch's own times come last so a record with neither is
+# not dropped for want of a clock.
+_INSTANT_FIELDS = ("ts", "observed_at", "end_time", "start_time")
+
+
+def leg_row(task_id: str, attempt: int, leg: str, document: Mapping[str, Any]) -> dict[str, Any]:
+    """One leg document as the flat row BOTH stores hold.
+
+    Here, in the stdlib-only half, because there are three writers and one of
+    them is the node -- which runs on an interpreter that has no pydantic and no
+    ORM. A row built two ways is two answers about the same record, which is
+    which nothing can reconcile away now that the importer is gone.
+    """
+    return {
+        "task_id": task_id,
+        "attempt": attempt,
+        "leg": leg,
+        "run_id": document.get("run_id") or None,
+        "at": next((document[f] for f in _INSTANT_FIELDS if document.get(f)), None),
+        "body": dict(document),
+    }
+
+
+def rows_from_documents(
+    documents: dict[str, dict[str, Any]],
+) -> list[tuple[str, int, str, dict[str, Any]]]:
+    """Filename-keyed documents as `(task_id, attempt, leg, body)`.
+
+    TWO NAME SHAPES, and requiring the first silently dropped 4,591 of 13,440
+    documents -- a third of the record, including every one of the 1,823
+    `observed` legs, which are the only account of a death the node did not
+    survive:
+
+        <task>.<attempt>.start.json      per ATTEMPT -- a retry reuses the id
+        <task>.<attempt>.exit.json
+        <task>.progress.json             per TASK
+        <task>.observed.json             per TASK, written by the READER
+    """
+    rows: list[tuple[str, int, str, dict[str, Any]]] = []
+    seen: set[tuple[str, int, str]] = set()
+    for name, document in documents.items():
+        stem = name.removesuffix(".json")
+        parts = stem.rsplit(".", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            task_id, attempt, leg = parts[0], int(parts[1]), parts[2]
+        elif len(parts) >= 2:
+            task_id, attempt, leg = stem.rsplit(".", 1)[0], TASK_SCOPED, parts[-1]
+        else:
+            continue
+        key = (task_id, attempt, leg)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append((task_id, attempt, leg, document))
+    return rows
+
+
+def documents_from_rows(
+    rows: Iterable[tuple[str, int, str, dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """`(task_id, attempt, leg, body)` rows as the filename-keyed dict a reader
+    joins over -- the inverse of :func:`rows_from_documents`, and beside it so
+    the two cannot drift.
+
+    The names are REBUILT rather than stored, from the same suffixes the node
+    writes with, so both stores present the join with the same keys and the
+    filename ordering that decides ties still decides them the same way.
+    """
+    named: dict[str, dict[str, Any]] = {}
+    for task_id, attempt, leg, body in rows:
+        stem = task_id if attempt == TASK_SCOPED else f"{task_id}.{attempt}"
+        named[f"{stem}.{leg}.json"] = body
+    return named
+
+
 def _load(path: Path) -> dict[str, Any] | None:
     """Skipped, never fatal: a half-written file is the expected residue of a
     task killed mid-write, and must not take down the listing that explains it."""
     return records.read_snapshot(path)
 
 
-def write_node_record(
-    share: str | os.PathLike[str],
+def node_record(
     *,
     task_id: str,
+    attempt: int,
     event: str,
     run_id: str = "",
     job_id: str = "",
@@ -152,11 +239,15 @@ def write_node_record(
     git_branch: str = "",
     exit_code: int | None = None,
     cause: str | None = None,
-) -> Path:
-    """Record what the node knows about this task. One file per event, per attempt.
+) -> dict[str, Any]:
+    """What the node knows about this task, as the row `legs` holds. WRITES NOTHING.
 
-    Never overwrites -- see the module docstring for why the attempt number and
-    the start/exit split are both load-bearing.
+    `attempt` is CLAIMED, not counted. It used to be derived here by listing
+    `.start.json` files on the share; nothing writes those, and the claim that
+    replaced it is a single INSERT refereed by the primary key -- see
+    `legmirror.claim_attempt` for why that is the safe shape. A started record
+    passes 0 and lets the claim fill it; a terminal one passes the attempt the
+    claim returned.
 
     ``eval_at`` and ``eval_flags`` exist because ``target_iteration`` is
     ``RUN_TO``, which an evaluate task does not use -- so every one of the 38
@@ -173,14 +264,7 @@ def write_node_record(
     parallel worktrees that share a hash and differ only in what is uncommitted;
     the branch narrows that and the snapshot closes it.
     """
-    directory = tasks_dir(share)
-    directory.mkdir(parents=True, exist_ok=True)
-    attempt = (
-        _next_attempt(directory, task_id)
-        if event == EVENT_STARTED
-        else _latest_attempt(directory, task_id)
-    )
-    record = {
+    return {
         "source": "node",
         "task_id": task_id,
         "attempt": attempt,
@@ -212,80 +296,28 @@ def write_node_record(
         "exit_code": exit_code,
         "cause": cause,
     }
-    suffix = START_SUFFIX if event == EVENT_STARTED else EXIT_SUFFIX
-    path = directory / f"{task_id}.{attempt}{suffix}"
-    records.write_snapshot(path, record, records.REGISTRY[f"legs/*{suffix}"])
-    return path
 
 
-def write_progress_record(
-    share: str | os.PathLike[str],
-    *,
-    task_id: str,
-    progress: kinds.Progress,
-) -> Path:
-    """How far along a RUNNING task is. Overwritten, unlike start and exit.
+def progress_record(*, task_id: str, progress: kinds.Progress) -> dict[str, Any]:
+    """How far along a RUNNING task is, as a record. WRITES NOTHING.
 
-    Current state, not history: only the latest matters, and keeping every
-    sample would put one file per tick per task on a share where file COUNT is
-    what makes every read slow.
+    Read from the database, replaced every fifteen seconds; a sample superseded
+    that fast is the one whose loss costs least, and writing it into a share
+    directory of 14,000 files was the most expensive thing a running task did.
 
-    Torn writes are expected and tolerated rather than prevented -- SMB has no
-    atomic rename, and this is refreshed every couple of minutes anyway, so a
-    reader that cannot parse one sample simply shows the task with no bar.
-    Never worth failing a task over: see the caller, which swallows everything.
+    `attempt` is `TASK_SCOPED`, which is what the row's key already says: one
+    live sample per TASK, replaced in place, not one per attempt. It used to be
+    derived by listing the start records beside it -- memoised, because uncached
+    that re-globbed the whole share directory every fifteen seconds for a number
+    that never changes. Nothing writes those records now, and a body claiming an
+    attempt this row is not keyed by would be a second, disagreeing answer.
+
+    Torn writes used to be the hazard here -- SMB has no atomic rename -- and
+    are now someone else's: the row is one statement.
     """
-    directory = tasks_dir(share)
-    directory.mkdir(parents=True, exist_ok=True)
-    record = {
+    return {
         "task_id": task_id,
-        "attempt": _this_attempt(directory, task_id),
+        "attempt": TASK_SCOPED,
         "progress": progress.as_record(),
         "ts": utcnow(),
     }
-    path = directory / f"{task_id}{PROGRESS_SUFFIX}"
-    records.write_snapshot(path, record, records.REGISTRY[f"legs/*{PROGRESS_SUFFIX}"])
-    return path
-
-
-# The attempt number cannot change inside one process -- a Batch retry is a NEW
-# process -- and deriving it walks every document in `legs/`. Uncached, the
-# 15-second progress write re-globbed and re-parsed the whole share directory
-# (thousands of files, each a round trip) for a number that was already known.
-_ATTEMPT_MEMO: dict[tuple[str, str], int] = {}
-
-
-def _this_attempt(directory: Path, task_id: str) -> int:
-    """:func:`_latest_attempt`, resolved once per process."""
-    key = (str(directory), task_id)
-    if key not in _ATTEMPT_MEMO:
-        _ATTEMPT_MEMO[key] = _latest_attempt(directory, task_id)
-    return _ATTEMPT_MEMO[key]
-
-
-def _next_attempt(directory: Path, task_id: str) -> int:
-    """1 for a first run, 2 for Batch's first retry, and so on.
-
-    Counted across bundles as well as loose files, and that is load-bearing
-    rather than tidy: this number NAMES the file the next attempt writes. If
-    compaction swept an earlier attempt's ``.start.json`` into a bundle and this
-    counted only what is loose, a retry would compute an attempt number that has
-    already been used and overwrite the record of the failure that caused it --
-    silently, and on the durable copy.
-    """
-    prefix = f"{task_id}."
-    starts = [
-        name
-        for name in read_documents(directory)
-        if name.startswith(prefix) and name.endswith(START_SUFFIX)
-    ]
-    return len(starts) + 1
-
-
-def _latest_attempt(directory: Path, task_id: str) -> int:
-    """The attempt the terminal record belongs to.
-
-    Derived from disk rather than passed through the shell: the exit trap may
-    have lost anything the entry point computed.
-    """
-    return max(_next_attempt(directory, task_id) - 1, 1)

@@ -12,10 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from src.shared import cache, task_history
+from src.shared import cache
 from src.shared.cloudtask import task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import lifecycle
+from src.shared.cloudtask.node import plan as plan_module
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.process import Killed, TaskLogger
 from tests.shared.cloudtask.node.conftest import python
@@ -49,9 +50,12 @@ class TestMain:
     """The wiring `run_task.sh`'s traps used to carry."""
 
     @pytest.fixture(autouse=True)
-    def _node(self, paths, monkeypatch):
+    def _node(self, paths, monkeypatch, recorded):
         monkeypatch.setattr(NodePaths, "from_environment", classmethod(lambda cls: paths))
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "task-1")
+        # A DSN, because there has to be one: `_record` refuses to start a task
+        # that cannot claim an attempt, and that refusal is the design.
+        monkeypatch.setenv("POKER_SOLVER_RECORD_DSN", "postgresql://u:p@h:5432/db")
         for key, value in {
             "RUN_OP": "train",
             "RUN_CONFIG": "quick_test",
@@ -61,7 +65,7 @@ class TestMain:
         }.items():
             monkeypatch.setenv(key, value)
 
-    def test_a_signalled_task_records_cancelled_not_completed(self, paths, monkeypatch):
+    def test_a_signalled_task_records_cancelled_not_completed(self, paths, monkeypatch, recorded):
         """THE defect this port fixes. Bash's EXIT trap reads `$?` as zero when
         killed while blocked on a child -- measured: SIGTERM ran the trap with
         `$? = 0` and exited 143, so a cancelled task was recorded as clean and
@@ -70,28 +74,30 @@ class TestMain:
         monkeypatch.setitem(lifecycle.HANDLERS, TaskName.TRAIN, _signalled)
 
         assert lifecycle.main() == 143
-        (row,) = task_history.read_tasks(paths.share)
+        (row,) = recorded.join()
         assert row.cause == task_log.CAUSE_CANCELLED
         assert row.exit_code == 143
 
-    def test_a_task_that_dies_before_the_sync_still_leaves_a_record(self, paths, monkeypatch):
+    def test_a_task_that_dies_before_the_sync_still_leaves_a_record(
+        self, paths, monkeypatch, recorded
+    ):
         """The whole reason the started record is written first: a task dying
         during dependency install must not be indistinguishable from one that
         never ran."""
         monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 1)
 
         assert lifecycle.main() == 1
-        (row,) = task_history.read_tasks(paths.share)
+        (row,) = recorded.join()
         assert row.cause == task_log.CAUSE_FAILED
 
-    def test_a_bad_environment_is_a_message_not_a_traceback(self, paths, monkeypatch):
+    def test_a_bad_environment_is_a_message_not_a_traceback(self, paths, monkeypatch, recorded):
         monkeypatch.setenv("RUN_TO", "0")
         assert lifecycle.main() == 1
-        (row,) = task_history.read_tasks(paths.share)
+        (row,) = recorded.join()
         assert row.cause == task_log.CAUSE_FAILED
         assert "ABSOLUTE" in (paths.share / "logs" / "task-1.log").read_text()
 
-    def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch):
+    def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch, recorded):
         """An operator-cancelled task still leaves its progress on the share."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")  # the task's own run is run-a
         run_dir = paths.runs / "run-a"
@@ -103,7 +109,7 @@ class TestMain:
         lifecycle.main()
         assert (paths.archive / "run-a" / ".run.json").exists()
 
-    def test_only_the_tasks_own_run_is_published(self, paths, monkeypatch):
+    def test_only_the_tasks_own_run_is_published(self, paths, monkeypatch, recorded):
         """A node is reused: runs/ also holds what earlier tasks fetched. Pushing
         those back took ~30 minutes per training task."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")
@@ -144,7 +150,7 @@ def _signalled(plan, paths, log):
 
 
 class TestStage:
-    def test_the_data_symlink_points_at_the_node_disk(self, paths, monkeypatch):
+    def test_the_data_symlink_points_at_the_node_disk(self, paths, monkeypatch, recorded):
         """`precompute` writes to <base>/data/, and <base> is the throwaway code
         tree; the symlink is what lands it on the data disk instead."""
         paths.code.mkdir(parents=True)
@@ -156,7 +162,7 @@ class TestStage:
             logger.close()
         assert (paths.code / "data").resolve() == paths.data.resolve()
 
-    def test_a_stale_symlink_is_replaced(self, paths, monkeypatch):
+    def test_a_stale_symlink_is_replaced(self, paths, monkeypatch, recorded):
         """A Batch retry reuses the extracted tree."""
         paths.code.mkdir(parents=True)
         (paths.code / "data").symlink_to(paths.work / "somewhere-else")
@@ -182,7 +188,9 @@ class TestTheCacheSurvivesBetweenTasks:
         finally:
             logger.close()
 
-    def test_the_cache_points_at_the_data_disk_not_the_task_home(self, paths, monkeypatch):
+    def test_the_cache_points_at_the_data_disk_not_the_task_home(
+        self, paths, monkeypatch, recorded
+    ):
         """A Batch task's HOME is its own working directory, wiped with the
         task, so the ~/.cache default would rebuild the river's 2.6M-board
         cache on every single task."""
@@ -190,7 +198,7 @@ class TestTheCacheSurvivesBetweenTasks:
         self._stage(paths, monkeypatch)
         assert os.environ[cache.ENV_OVERRIDE] == str(paths.work / "cache")
 
-    def test_the_child_process_inherits_it(self, paths, monkeypatch):
+    def test_the_child_process_inherits_it(self, paths, monkeypatch, recorded):
         """`run_guarded` passes no `env=`, so the training subprocess -- and its
         16 workers -- see what the wrapper set. Checked against the REAL
         run_guarded, not the stub the other cases use."""
@@ -208,7 +216,7 @@ class TestTheCacheSurvivesBetweenTasks:
         finally:
             logger.close()
 
-    def test_it_is_writable_by_a_later_task(self, paths, monkeypatch):
+    def test_it_is_writable_by_a_later_task(self, paths, monkeypatch, recorded):
         """`submit_task` sets no `user_identity`, so tasks run as Batch's
         default auto-user. A directory left with the first task's ownership and
         umask is one the SECOND task cannot write into -- which would silently
@@ -218,7 +226,9 @@ class TestTheCacheSurvivesBetweenTasks:
         mode = (paths.work / "cache").stat().st_mode & 0o777
         assert mode == 0o777, f"cache dir is {oct(mode)}, not shareable across task users"
 
-    def test_a_cache_that_cannot_be_prepared_does_not_kill_the_task(self, paths, monkeypatch):
+    def test_a_cache_that_cannot_be_prepared_does_not_kill_the_task(
+        self, paths, monkeypatch, recorded
+    ):
         monkeypatch.delenv(cache.ENV_OVERRIDE, raising=False)
 
         real = Path.chmod
@@ -230,3 +240,42 @@ class TestTheCacheSurvivesBetweenTasks:
 
         monkeypatch.setattr(Path, "chmod", refuse)
         self._stage(paths, monkeypatch)  # must still return 0
+
+
+class TestALegRecordsTheRunItBelongsTo:
+    """MEASURED: 1,256 leg rows across 329 tasks recorded no run at all.
+
+    A fresh training task is given no `RUN_ID` -- the trainer names the run
+    after the TASK, so a Batch retry continues it rather than starting a second
+    one from zero. `_record` wrote the raw variable, so the task -> run link was
+    never written down: `reconcile-runs` reported "no task record" for 24
+    finished runs, refused to close them, and `prune-checkpoints` protected
+    every one of their ladders as "still running". Unprunable disk, from an
+    empty string.
+    """
+
+    def test_a_fresh_training_task_derives_its_run(self):
+        assert plan_module.run_id_for(TaskName.TRAIN, "", "train-abc") == "run-train-abc"
+
+    def test_the_pcs_kernel_mints_a_run_too(self):
+        """Same executor, same naming -- an op-by-op list that missed it would
+        lose exactly the arms this project runs most."""
+        assert plan_module.run_id_for(TaskName.TRAIN_PCS, "", "pcs-abc") == "run-pcs-abc"
+
+    def test_an_explicit_run_always_wins(self):
+        """A continuation names its run, and deriving over the top would point
+        a retry's records at a run that does not exist."""
+        assert plan_module.run_id_for(TaskName.TRAIN, "run-real", "train-abc") == "run-real"
+
+    def test_an_op_that_mints_nothing_stays_empty(self):
+        """A precompute owns no run. `run-buckets-...` would be a link to
+        something that never existed -- worse than the gap it fills."""
+        assert plan_module.run_id_for(TaskName.PRECOMPUTE, "", "buckets-abc") == ""
+
+    def test_the_plan_and_the_record_cannot_disagree(self, monkeypatch):
+        """`train_run_id` is what the TRAINER writes to and `_record` is what
+        the leg says it wrote to. Two derivations would be two answers about
+        one task, which is the defect this replaced."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "train-xyz")
+        built = plan_module.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000)
+        assert built.train_run_id == plan_module.run_id_for(TaskName.TRAIN, "", "train-xyz")

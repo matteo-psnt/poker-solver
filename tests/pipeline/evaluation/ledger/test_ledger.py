@@ -160,14 +160,17 @@ class TestWriteAndAppend:
 
 
 class TestRecordEvaluation:
-    def test_writes_one_document_and_no_index(self, tmp_path):
+    def test_builds_the_document_and_writes_no_file(self, tmp_path):
+        """It used to write `evals/<slug>.json` and that was the durable record.
+        The sink is the record now, so a file here would be a second copy that
+        nothing reads and that `rebuild_ledger` would re-enter as a row."""
         run_dir = tmp_path / "run-x"
         run_dir.mkdir()
         results = _results(base_seed=7)
         knobs = ledger.build_lbr_knobs(_lbr_config(), results)
         payload = {"op": "evaluate", "infosets": 10, "results": results}
 
-        result_path, record = ledger.record_evaluation(
+        eval_id, record = ledger.record_evaluation(
             run_dir=run_dir,
             payload=payload,
             provenance=_fake_provenance("run-x"),
@@ -176,18 +179,30 @@ class TestRecordEvaluation:
             knobs=knobs,
         )
 
-        assert result_path.exists()
-        assert result_path.parent == run_dir / "evals"
-        # The document is the ONLY thing written. Recording used to also append
-        # to a module-default `data/eval_ledger.jsonl`, so every cloud eval wrote
-        # a stored index the architecture says is derived on read.
-        assert list(tmp_path.rglob("*.jsonl")) == []
+        assert list(tmp_path.rglob("*.json")) == [], "the document must not be written"
+        assert list(tmp_path.rglob("*.jsonl")) == [], "and neither must an index"
         assert record["run_id"] == "run-x"
-        # Stored run-relative, not CWD-relative: the pointer must mean the same
-        # thing on a machine that mounts its runs directory somewhere else.
-        assert record["result_path"] == f"run-x/evals/{result_path.name}"
-        # The document round-trips to its full payload, including per-hand samples.
-        assert ledger.load_payload(record, tmp_path)["results"]["base_seed"] == 7
+        # `eval_id` IS the slug, and it is what `sink.scored` stores the document
+        # under -- previously spelled `result_path.stem`, which is the same string.
+        assert record["result_path"] == f"run-x/evals/{eval_id}.json"
+        assert record["results"]["base_seed"] == 7
+
+    def test_the_document_still_carries_its_schema_stamp(self, tmp_path):
+        """`write_snapshot` stamped on the way out and returned nothing, so the
+        UNSTAMPED dict was what callers got -- and the sink stored that, leaving
+        37 evals whose database row had no `schema_version` while the file it
+        mirrored did. With no file, this is the only stamp there is."""
+        run_dir = tmp_path / "run-x"
+        run_dir.mkdir()
+        _eval_id, record = ledger.record_evaluation(
+            run_dir=run_dir,
+            payload={"op": "evaluate", "infosets": 10, "results": _results(base_seed=7)},
+            provenance=_fake_provenance("run-x"),
+            method="lbr",
+            estimator="lbr",
+            knobs=ledger.build_lbr_knobs(_lbr_config(), _results(base_seed=7)),
+        )
+        assert record.get("schema_version")
 
 
 class TestTierMismatches:

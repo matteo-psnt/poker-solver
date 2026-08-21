@@ -25,6 +25,8 @@ reading the middle.
 from __future__ import annotations
 
 import itertools
+import json
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -32,9 +34,9 @@ from src.shared import records
 
 if TYPE_CHECKING:
     import os
+    from collections.abc import Mapping
 
 RUN_LOG_FILENAME = "run.jsonl"
-ARTIFACT = records.REGISTRY[RUN_LOG_FILENAME]
 
 # The vocabulary. Adding to a run's record means adding to this list -- not a
 # file, a writer and a reader.
@@ -48,13 +50,59 @@ STATUS = "status"
 EVENT_KEY = "event"
 
 
+# A fixed namespace, so the id an event gets does not depend on when or where it
+# was computed.
+_EVENT_NAMESPACE = uuid.UUID("6f9b1c2a-4a2e-4c1b-9a7f-2c1d3e4f5a6b")
+
+
+def event_identity(run_id: str, event: str, body: Mapping[str, Any]) -> uuid.UUID:
+    """The id one event has WHEREVER it is written.
+
+    Both writers must agree or the record double-counts. They did not: the sink
+    assigned `uuid4()` and the importer a positional `uuid5`, so every event
+    written live and then re-imported landed TWICE -- same run, same timestamp,
+    two rows. Measured on a task that ran and was then backfilled: 6 events on
+    the share, 11 in the database.
+
+    CONTENT-ADDRESSED, and the position the importer used to include is gone.
+    Position is unknowable to a live writer, which is the whole problem. The
+    trade is that two events identical in run, kind, timestamp AND body collapse
+    to one -- and events that agree to the microsecond on every field they carry
+    are the same event by any definition a reader can act on.
+
+    `schema_version` is excluded: the file carries it and the sink does not, and
+    an id that depended on it would disagree across the two for that reason
+    alone.
+    """
+    material = json.dumps(
+        {
+            "run": run_id,
+            "event": event,
+            **{k: v for k, v in body.items() if k not in ("schema_version", "event")},
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return uuid.uuid5(_EVENT_NAMESPACE, material)
+
+
+def rung_uri(run_id: str, iteration: int) -> str:
+    """Where a rung lives, as the record names it.
+
+    LOGICAL today. Snapshots are zarr directories on the share, so this is the
+    name a rung is claimed under rather than an object that has been committed
+    -- which is what it becomes when they move to blob storage, and why the
+    claim is worth recording under the eventual name now.
+
+    Here because two writers produce it -- the trainer as it checkpoints and
+    the importer as it read -- and a name spelled two ways is two rungs
+    where the record should hold one.
+    """
+    return f"rungs/{run_id}/{iteration}"
+
+
 def log_path(run_dir: str | os.PathLike[str]) -> Path:
     return Path(run_dir) / RUN_LOG_FILENAME
-
-
-def append(run_dir: str | os.PathLike[str], event: str, **fields: Any) -> None:
-    """Append one event. Raises on IO failure -- callers choose their policy."""
-    records.append_log(log_path(run_dir), {EVENT_KEY: event, **fields}, ARTIFACT)
 
 
 def read(run_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:

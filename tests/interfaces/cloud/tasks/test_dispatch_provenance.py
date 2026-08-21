@@ -1,6 +1,6 @@
 """Every submission carries the submitting machine's git provenance.
 
-A Batch node has no `.git` -- `share.SNAPSHOT_EXCLUDES` drops it from the code
+A Batch node has no `.git` -- `blob.SNAPSHOT_EXCLUDES` drops it from the code
 tarball -- so `gitinfo`'s `git rev-parse` has nothing to answer from there. The
 consequence went unnoticed for as long as training has been in the cloud:
 `train_git_commit` and `eval_git_commit` were NULL on every cloud row. Measured
@@ -24,6 +24,15 @@ from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.errors import CommandError
 from src.shared import gitinfo
 from src.shared.cloudtask.kinds import TaskName
+
+
+@pytest.fixture(autouse=True)
+def _dispatching_shell_has_a_dsn(monkeypatch):
+    """`TaskSpec.record_dsn` defaults from the OPERATOR'S environment, and a
+    dispatch now refuses without one -- a task that cannot record itself has
+    nowhere to put its progress. Every test here dispatches, so every one of
+    them stands in for a shell that has run `just record-env`."""
+    monkeypatch.setenv("POKER_SOLVER_RECORD_DSN", "postgresql://u:p@h:5432/db")
 
 
 @pytest.fixture(autouse=True)
@@ -230,10 +239,16 @@ class TestQueueLoop:
 
     @staticmethod
     def _stub(monkeypatch, calls):
-        config = SimpleNamespace(share_name="share", pool_id="pool")
+        config = SimpleNamespace(
+            storage_account="acct", share_key="k", code_container="code", pool_id="pool"
+        )
         monkeypatch.setattr(dispatch.CloudConfig, "load", staticmethod(lambda: config))
-        monkeypatch.setattr(dispatch.share, "share_client", lambda _c: object())
-        monkeypatch.setattr(dispatch.share, "publish_code_snapshot", lambda *a: "snap-1")
+        monkeypatch.setattr(dispatch.blob, "publish_code_snapshot", lambda *a: "snap-1")
+        # The SASes are minted against the real SDK, which wants an account and
+        # a key. Faked at the MINTING seams rather than by inventing
+        # credentials, so these tests stay about queueing.
+        monkeypatch.setattr(dispatch, "_with_code_access", lambda _c, specs, _s: list(specs))
+        monkeypatch.setattr(dispatch, "_with_checkpoint_access", lambda _config, specs: list(specs))
         monkeypatch.setattr(dispatch.batch, "client", lambda _c: object())
         monkeypatch.setattr(dispatch.batch, "ensure_job", lambda *a: "poker-20260805")
 
@@ -283,11 +298,17 @@ class TestPoolBinding:
     @staticmethod
     def _stub(monkeypatch, calls, big="", huge=""):
         config = SimpleNamespace(
-            share_name="share", pool_id="pool", pool_big_id=big, pool_huge_id=huge
+            storage_account="acct",
+            share_key="k",
+            code_container="code",
+            pool_id="pool",
+            pool_big_id=big,
+            pool_huge_id=huge,
         )
         monkeypatch.setattr(dispatch.CloudConfig, "load", staticmethod(lambda: config))
-        monkeypatch.setattr(dispatch.share, "share_client", lambda _c: object())
-        monkeypatch.setattr(dispatch.share, "publish_code_snapshot", lambda *a: "snap-1")
+        monkeypatch.setattr(dispatch.blob, "publish_code_snapshot", lambda *a: "snap-1")
+        monkeypatch.setattr(dispatch, "_with_code_access", lambda _c, specs, _s: list(specs))
+        monkeypatch.setattr(dispatch, "_with_checkpoint_access", lambda _config, specs: list(specs))
         monkeypatch.setattr(dispatch.batch, "client", lambda _c: object())
         monkeypatch.setattr(
             dispatch.batch,
@@ -326,3 +347,59 @@ class TestPoolBinding:
         with pytest.raises(CommandError, match="train-huge"):
             dispatch.stage_and_queue(lambda snap: [_task()], pool="huge")
         assert calls == []
+
+
+class TestADispatchSaysWhichRecordItSealed:
+    """`record_dsn` is read from the OPERATOR'S environment at dispatch and
+    sealed into the task for its whole life. A submit from a shell without it
+    produced a task that wrote files only -- and said nothing, so two runs
+    finished at 10:40 while the database still called them running at 0
+    iterations, through a reader that had already been flipped to read it.
+
+    It is refused outright now (below), so the payload's job is narrower: carry
+    the one fact about a queued task that the task id cannot recover.
+    """
+
+    def test_a_sealed_dsn_is_reported(self):
+        payload = dispatch.Dispatched(code_snapshot="s", job_id="j", records_to_database=True)
+        assert payload.records_to_database is True
+
+    def test_the_default_is_no_record(self):
+        """The default must be the UNSAFE value, so a payload built without the
+        fact reads as missing rather than as reassuring."""
+        assert dispatch.Dispatched(code_snapshot="s", job_id="j").records_to_database is False
+
+    def test_it_does_not_shout(self, capsys):
+        dispatch.render_queued(
+            dispatch.Dispatched(code_snapshot="s", job_id="j", records_to_database=True)
+        )
+        printed = capsys.readouterr().out
+        assert "record:        database" in printed
+
+
+class TestATaskThatCannotRecordItselfIsNotQueued:
+    """`record_dsn` used to be optional -- empty meant files only, which was the
+    pre-migration behaviour and the rollback. Progress is no longer published to
+    the share, so empty now means a task whose progress exists NOWHERE, and the
+    failure is silent: hours later, a screen showing a bar that never moved.
+    """
+
+    def test_no_dsn_refuses(self):
+        with pytest.raises(CommandError, match="store state could not be read"):
+            dispatch._refuse_without_a_record([spec.TaskSpec(code_snapshot="s", record_dsn="")])
+
+    def test_it_names_the_fix(self):
+        """The warning was already there -- `submit` has printed `record: SHARE
+        ONLY` since two runs finished while the database called them running --
+        and tasks kept being queued without it."""
+        with pytest.raises(CommandError, match="export the DSN"):
+            dispatch._refuse_without_a_record([spec.TaskSpec(code_snapshot="s", record_dsn="")])
+
+    def test_a_dsn_passes(self):
+        dispatch._refuse_without_a_record(
+            [spec.TaskSpec(code_snapshot="s", record_dsn="postgresql://u:p@h/db")]
+        )
+
+    def test_no_specs_is_not_an_error(self):
+        """Nothing to queue is nothing to lose."""
+        dispatch._refuse_without_a_record([])

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
     Command,
     resolve_run_dir,
@@ -242,7 +243,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="[exact_br] Reweight the average as if training had used this dcfr_gamma, band by "
         "retained ladder band. Costs one rung FETCH and one read per band, per process: pass "
         "--workers 1, and check the run's retention first (a 5M-retention 300M run is 60 "
-        "rungs, tens of GB onto the node). A separate tier.",
+        "rungs, tens of GB onto the node). --workers 1 then SERIALISES the walk, so pick the "
+        "board budget for one worker: measured 09-02, 4/16/16 ran out the 6h task ceiling "
+        "twice (rc=124) where 4/2/2 finishes in minutes, and the ladder fetch was 12s of it. "
+        "A separate tier.",
     )
     parser.add_argument(
         "--mix-run",
@@ -286,6 +290,10 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
     run_dir = resolve_run_dir(args.run, args.runs_dir)
     return services.evaluate_and_record(
         run_dir,
+        # The composition root, same as the trainers': `pipeline` holds a port
+        # and this decides what implements it.
+        sink=connect.eval_sink_from_environment(),
+        record_source=connect.record_source_from_environment(),
         method=args.method,
         lbr=LBRConfig(
             num_hands=args.hands,
@@ -312,6 +320,16 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             policy_threshold=args.policy_threshold,
             purify=args.purify,
             decompose=args.decompose,
+            # `--opponent deployed` already means "the fielded system" for
+            # lbr; exact_br now honours it instead of silently scoring the
+            # stored rows under a flag that says otherwise.
+            deployed=args.opponent == "deployed",
+            resolver_iterations=args.resolver_iterations,
+            resolver_prior_weight=(
+                args.resolver_prior_weight
+                if args.resolver_prior_weight is not None
+                else PublicBRConfig.resolver_prior_weight
+            ),
             policy_iterate=args.policy_iterate,
             avg_window_from=args.avg_window_from,
             avg_gamma=args.avg_gamma,

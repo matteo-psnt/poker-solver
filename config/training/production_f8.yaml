@@ -1,6 +1,7 @@
-# Production action model with the production_f8 card abstraction (800/2400/600). The action model is
-# copied VERBATIM from production.yaml so `action_config_hash` matches and an
-# exact_br score on this run's tree is a matched tier against production.
+# Production with the F800/T2400/R600 card abstraction: 8x the flop and turn
+# resolution, river held. The `action_model` block is copied out of
+# production.yaml rather than inherited, so `action_config_hash` matches by
+# construction and an exact_br score here is a matched tier against production.
 
 solver:
   iteration_weighting: dcfr
@@ -8,6 +9,8 @@ solver:
 action_model:
   preflop_templates:
     sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
+    bb_vs_limp: ["check", 2.0, 3.0]
+    sb_vs_limp_raise: ["fold", "call", "2.3x_last", "jam"]
     bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
     sb_vs_3bet: ["fold", "call", "2.3x_last", "jam"]
   postflop_templates:
@@ -27,7 +30,7 @@ training:
 
 storage:
   initial_capacity: 4000000
-  checkpoint_retain_every: 1000000
+  checkpoint_retain_every: 10000000
 
 system:
   config_name: "production_f8"

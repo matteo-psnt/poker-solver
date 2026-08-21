@@ -24,15 +24,40 @@ removed, renamed, or changed type.
 
 from __future__ import annotations
 
+import ast
+
 import pytest
 from pydantic import BaseModel, ValidationError
 
 from src.interfaces.web import contract
+from src.shared import repo
 from tests.interfaces.commands.test_command_renderers import PAYLOADS
-from tests.interfaces.web.test_command_coverage import _commands_the_console_invokes
 
-# Only the commands the console READS; `test_command_coverage.py` holds the list
-# of what is excluded and why, and this would be the wrong place to re-declare it.
+APP = repo.SRC / "interfaces" / "web" / "app.py"
+
+
+def _commands_the_console_invokes() -> set[str]:
+    """Which command each `answer(...)` call in `app.py` names.
+
+    Read from the AST rather than from a list kept here: a hand-maintained list
+    of endpoints is another thing that can be right about a file it does not
+    read. The second argument is always ``<module>.COMMAND``, and the module
+    name is the command's own with hyphens as underscores.
+    """
+    tree = ast.parse(APP.read_text())
+    named: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id != "answer" or len(node.args) < 2:
+            continue
+        command = node.args[1]
+        if isinstance(command, ast.Attribute) and isinstance(command.value, ast.Name):
+            named.add(command.value.id.replace("_", "-"))
+    return named
+
+
+# Only the commands the console READS.
 MODELS: dict[str, type[BaseModel]] = {
     "pool-status": contract.Pool,
     "jobs": contract.Jobs,
@@ -40,11 +65,12 @@ MODELS: dict[str, type[BaseModel]] = {
     "runs": contract.Runs,
     "runinfo": contract.RunInfo,
     "progress": contract.Progress,
+    "arms": contract.Arms,
     "curve": contract.Curve,
     "ledger": contract.Ledger,
     "logs": contract.LogLines,
+    "profile": contract.Profile,
     "cost": contract.Cost,
-    "activity": contract.Activity,
     "configs": contract.Configs,
     "autoscale-check": contract.Autoscale,
     # Each dispatch declares its OWN payload now. They shared `Dispatched` while
@@ -53,10 +79,7 @@ MODELS: dict[str, type[BaseModel]] = {
     "submit": contract.SubmitPayload,
     "score": contract.ScorePayload,
     "submit-precompute": contract.PrecomputeDispatchPayload,
-    "submit-coupling": contract.SubmitCouplingPayload,
-    "submit-vector": contract.SubmitVectorPayload,
     "push-code": contract.PushedCode,
-    "push-data": contract.PushedData,
     "compact-legs": contract.Compacted,
     "cancel": contract.Cancelled,
     "serve-box": contract.Box,
@@ -89,8 +112,8 @@ class TestTheModelsDescribeRealPayloads:
         fixture, because ITS list was hand-maintained too -- so `cancel` was
         never checked, and its schema disagreed with the command for as long as
         both existed. A coverage list that can silently omit an entry is not
-        coverage, so this one is DERIVED, from the same AST read
-        `test_command_coverage` already does rather than from a second list here.
+        coverage, so this one is DERIVED from an AST read of `app.py` rather
+        than from a second list here.
         """
         served = _commands_the_console_invokes()
         assert served, "found no `answer(...)` calls — the parser is broken, not the code"

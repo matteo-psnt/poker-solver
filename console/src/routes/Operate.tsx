@@ -1,6 +1,5 @@
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { Tabs } from "@/components/Tabs";
-import { Activity } from "./Activity";
 import { Cost } from "./Cost";
 import { Dispatch } from "./Dispatch";
 import { Share } from "./Share";
@@ -32,11 +31,6 @@ export function Operate() {
           { id: "dispatch", label: "Dispatch", hint: "queue training, scoring or precompute" },
           { id: "share", label: "Share", hint: "publish code and abstractions; compact legs" },
           { id: "cost", label: "Cost", hint: "node hours against what Azure actually billed" },
-          {
-            id: "activity",
-            label: "Activity",
-            hint: "what this tool has been doing, and how slowly",
-          },
         ]}
         active={tab}
         onPick={(next) => navigate({ search: (old) => ({ ...old, tab: next }) })}
@@ -44,7 +38,6 @@ export function Operate() {
       {tab === "dispatch" && <Dispatch />}
       {tab === "share" && <Share />}
       {tab === "cost" && <Cost />}
-      {tab === "activity" && <Activity />}
     </div>
   );
 }

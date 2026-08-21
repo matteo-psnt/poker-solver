@@ -27,12 +27,10 @@ from src.interfaces.commands import (
     evaluate,
     load_all,
 )
-from src.interfaces.commands.abstraction_coupling import (
-    AbstractionCouplingPayload,
-    ConstantGap,
-)
-from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
+from src.interfaces.commands.arms import ArmsPayload
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
+from src.interfaces.commands.benchmark import BenchmarkPayload
+from src.interfaces.commands.benchmark_board import BoardPayload, BoardRow
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
 from src.interfaces.commands.chart import ChartPayload
@@ -46,9 +44,13 @@ from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
 from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
+from src.interfaces.commands.profile import ProfilePayload
 from src.interfaces.commands.progress import ProgressPayload, ProgressRow
+from src.interfaces.commands.prune_checkpoints import PrunePlan
 from src.interfaces.commands.push_code import PushedCodePayload
-from src.interfaces.commands.push_data import PushedDataPayload
+from src.interfaces.commands.reconcile_runs import Closure, ReconcilePlan
+from src.interfaces.commands.record_admit import AdmittedPayload
+from src.interfaces.commands.record_migrate import MigratedPayload
 from src.interfaces.commands.runinfo import RunInfoPayload
 from src.interfaces.commands.runs import RunsPayload, RunSummary
 from src.interfaces.commands.score import ScorePayload
@@ -56,16 +58,12 @@ from src.interfaces.commands.serve import ServePayload
 from src.interfaces.commands.serve_box import BoxPayload
 from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
-from src.interfaces.commands.submit_coupling import SubmitCouplingPayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
-from src.interfaces.commands.submit_vector import SubmitVectorPayload, VectorArm
 from src.interfaces.commands.tasks import TasksPayload
 from src.interfaces.commands.train_pcs import PcsTrainingPayload
 from src.interfaces.commands.train_static import StaticTrainingPayload
-from src.interfaces.commands.train_vector import VectorBlueprintPayload
-from src.interfaces.commands.vector_sweep import SweepPoint, VectorSweepPayload
 from src.pipeline.services import EvaluationPayload
-from src.pipeline.services.experiments import CurveOutput, CurvePoint
+from src.pipeline.services.experiments import ArmPoint, ArmsOutput, ArmTier, CurveOutput, CurvePoint
 from src.shared.task_history import TaskProgress, TaskRow
 from src.shared.task_states import Phase
 
@@ -98,104 +96,21 @@ PAYLOADS: dict[str, Any] = {
         iterations_per_second=0.89,
         status="completed",
     ),
-    "abstraction-coupling": AbstractionCouplingPayload(
-        abstraction="buckets-F100T300R600-rexact-a1542e88",
-        buckets={"preflop": 169, "flop": 100, "turn": 300, "river": 600},
-        boards=2000,
-        seed=7,
-        accumulate_seconds=41.2,
-        measure_seconds=18.7,
-        gaps=[
-            ConstantGap(
-                name="transition:FLOP->TURN",
-                kind="coupling",
-                relative=0.8137,
-                recovered={1: 0.0, 8: 0.412, 64: 0.771},
-            ),
-            ConstantGap(
-                name="compatible:RIVER",
-                kind="dispersion",
-                relative=0.0219,
-                recovered={1: 0.0, 8: 0.104, 64: 0.298},
-            ),
+    "reconcile-runs": ReconcilePlan(
+        runs_considered=301,
+        open_runs=28,
+        closures=[
+            Closure(
+                run="run-train-production-to300M-ctrlL-s101-224225-13802",
+                status="failed",
+                task_id="train-production-to300M-ctrlL-s101-224225-13802",
+                cause="killed",
+                cause_source="batch",
+                ended_at="2026-08-24T22:42:25Z",
+            )
         ],
-    ),
-    "vector-sweep": VectorSweepPayload(
-        abstraction="buckets-F100T300R600-rexact-a1542e88",
-        buckets={"flop": 100, "turn": 300, "river": 600},
-        kernel="board-free",
-        derive_boards=6000,
-        train_boards=8,
-        score_boards=32,
-        in_sample=False,
-        stack=20,
-        nodes=2140,
-        infoset_rows=1_132_552,
-        derive_seconds=457.0,
-        uniform_baseline=4.1869,
-        uniform_baseline_unconstrained=4.4021,
-        done=2,
-        total=9,
-        points=[
-            SweepPoint(
-                iterations=400,
-                train_seconds=53.1,
-                exploitability=0.5392,
-                unconstrained=0.8811,
-            ),
-            SweepPoint(
-                iterations=1600,
-                train_seconds=210.1,
-                exploitability=0.693,
-                unconstrained=0.9902,
-            ),
-        ],
-        best_exploitability=0.5392,
-        best_at_iterations=400,
-    ),
-    "submit-coupling": SubmitCouplingPayload(
-        abstractions=[
-            "buckets-F10T20R30-r200-ae5a7e66",
-            "buckets-F100T300R600-rexact-a1542e88",
-        ],
-        boards=2000,
-        code_snapshot="code-20260805_000000",
-        job_id="poker-20260805",
-        tasks=["coupling-buckets-F10T20R30-000000-1"],
-    ),
-    "submit-vector": SubmitVectorPayload(
-        arms=[
-            VectorArm(
-                abstraction="buckets-F10T20R30-r200-ae5a7e66",
-                kernel="board-free",
-                derive_boards=6000,
-                score_seed=999,
-            ),
-            VectorArm(
-                abstraction="buckets-F10T20R30-r200-ae5a7e66",
-                kernel="hand-space",
-                derive_boards=0,
-            ),
-        ],
-        code_snapshot="code-20260805_000000",
-        job_id="poker-20260805",
-        tasks=["vector-board-free-buckets-F10T20R30-000000-1"],
-    ),
-    "train-vector": VectorBlueprintPayload(
-        run_id="vec-a",
-        runs_dir="data/runs",
-        config_name="production",
-        iterations=400,
-        num_rows=32_240_608,
-        touched_rows=32_240_608,
-        coverage=1.0,
-        runtime_seconds=1800.0,
-        seconds_per_iteration=4.5,
-        abstract_exploitability=1.16,
-        universe_boards=2000,
-        universe_seed=7,
-        dtype="float32",
-        status="completed",
+        unsettled=["run-pcs-production-to4k-turn-river-072201-7245"],
+        no_evidence=["run-production-025433-1095"],
     ),
     "precompute": PrecomputePayload(
         abstraction_config="production",
@@ -225,8 +140,38 @@ PAYLOADS: dict[str, Any] = {
         retained_iterations=[1000, 4000, 8000],
         unplaceable_records=1,
     ),
+    "arms": ArmsPayload(
+        result=ArmsOutput(
+            experiment_id="pcs-weighting",
+            tiers=[
+                ArmTier(
+                    tier="exact_br num_flops=4 num_turns=16 num_rivers=16 seed=7",
+                    control="linplus",
+                    arms=["dcfr", "linplus"],
+                    unmatched_iterations=[4000],
+                    points=[
+                        ArmPoint(
+                            arm="linplus",
+                            iteration=2000,
+                            exploitability_mbb=900.0,
+                            std_error_mbb=0.0,
+                            run_id="run-linplus",
+                        ),
+                        ArmPoint(
+                            arm="dcfr",
+                            iteration=2000,
+                            exploitability_mbb=780.0,
+                            std_error_mbb=0.0,
+                            run_id="run-dcfr",
+                            vs_control_mbb=-120.0,
+                        ),
+                    ],
+                )
+            ],
+            unplaceable_records=1,
+        ),
+    ),
     "ledger": LedgerPayload(
-        ledger="data/eval_ledger.jsonl",
         matched=1,
         rows=[
             LedgerRow(
@@ -261,6 +206,10 @@ PAYLOADS: dict[str, Any] = {
         # The digest's own word, which `training_tasks` renames for the reader.
         attempts=4,
         training_tasks=4,
+        trainer_knobs={
+            "solver": {"cfr_plus": False, "iteration_weighting": "dcfr", "dcfr_gamma": 2.0},
+            "pcs": {"cfr_br": "river", "runouts_per_flop": 1},
+        },
         total_progress_rows=2,
         progress=[
             {
@@ -297,6 +246,8 @@ PAYLOADS: dict[str, Any] = {
         tasks=[TaskRow(task_id="prod-101010-1", attempt=1, cause="killed", cause_source="batch")],
         gaps=["unscored ladder rungs: 5,000,000, 20,000,000"],
     ),
+    "record-admit": AdmittedPayload(server="poker-solver-record", address="203.0.113.7"),
+    "record-migrate": MigratedPayload(before="", after="9eb7f485ecad", applied=True),
     "serve-box": BoxPayload(
         action="status",
         vm="blueprint-server",
@@ -474,6 +425,9 @@ PAYLOADS: dict[str, Any] = {
             ),
         ],
     ),
+    # The listing, not the ask: `--list` is the shape the console polls, and the
+    # one where an empty answer still has to render.
+    "profile": ProfilePayload(available=["run-a-task.0.1.speedscope.json"]),
     "progress": ProgressPayload(
         run_id="run-a",
         total_rows=2,
@@ -574,50 +528,48 @@ PAYLOADS: dict[str, Any] = {
             ),
         ],
     ),
-    "activity": ActivityPayload(
-        log="/home/me/.cache/poker-solver/telemetry/invocations.jsonl",
-        exists=True,
-        enabled=True,
-        days=7.0,
-        failures_only=False,
-        rows=412,
-        total_rows=5031,
-        first_at="2026-08-04T09:00:00+00:00",
-        commands=[
-            CommandActivity(
-                command="tasks",
-                calls=180,
-                p50_seconds=2.05,
-                p95_seconds=9.4,
-                max_seconds=23.1,
-                total_seconds=512.7,
-                refusals=0,
-                errors=2,
+    # The probe, matching its published figure. `within_expectation=False` is
+    # not a payload that reaches a renderer: `run` refuses instead, so the
+    # renderer stays pure formatting.
+    "benchmark": BenchmarkPayload(
+        agent="check-call",
+        game="HUNL 200BB",
+        hands_played=2000,
+        hands_failed=1,
+        aivat_bb_per_100=-183.4,
+        aivat_std_bb_per_100=4.7,
+        raw_bb_per_100=-241.0,
+        off_tree_per_hand=1.5,
+        truncated_hands=2,
+        expected="check-call",
+        within_expectation=True,
+        z_score=0.1,
+    ),
+    "benchmark-board": BoardPayload(
+        game="HUNL 200BB",
+        version=2,
+        rows=[
+            BoardRow(
+                bot_name="Bitcrumbs",
+                organization="Individual",
+                version=2,
+                hands=44717,
+                aivat_bb_per_100=-3.11,
+                aivat_std_bb_per_100=0.99,
+                raw_bb_per_100=-9.15,
             ),
-            CommandActivity(
-                command="pool-status",
-                calls=210,
-                p50_seconds=0.4,
-                p95_seconds=1.1,
-                max_seconds=1.4,
-                total_seconds=92.3,
-                refusals=0,
-                errors=0,
+            # An entry with no organisation renders as a bare name, not as
+            # "name ()".
+            BoardRow(
+                bot_name="testbot",
+                organization="",
+                version=2,
+                hands=100659,
+                aivat_bb_per_100=-19.43,
+                aivat_std_bb_per_100=0.74,
+                raw_bb_per_100=-24.45,
             ),
         ],
-        failures=[
-            Failure(
-                at="2026-08-10T22:14:03+00:00",
-                command="runinfo",
-                surface="console",
-                outcome="refusal",
-                error_type="CommandError",
-                error="'run-x' is not published.",
-                asked={"run": "run-x"},
-            )
-        ],
-        total_failures=41,
-        by_surface={"cli": 96, "console": 316},
     ),
     "configs": ConfigsPayload(
         root="/repo/config",
@@ -667,7 +619,6 @@ PAYLOADS: dict[str, Any] = {
         job_id="poker-20260802",
         tasks=["production-000000-1"],
     ),
-    "push-data": PushedDataPayload(uploaded={"buckets-F50T100R200": 9}),
     # The applied-and-deleted shape, because it is the one with something to
     # report: a dry run renders a subset of these keys.
     "compact-legs": CompactedPayload(
@@ -681,6 +632,30 @@ PAYLOADS: dict[str, Any] = {
         verified=True,
         deleted=321,
         backup="/home/me/legs-backup",
+    ),
+    # The APPLIED shape, for the same reason `compact-legs` uses it: a dry run
+    # renders a subset. `protected` and `scored_kept` are populated because both
+    # are lines a reader has to see before trusting a delete.
+    "prune-checkpoints": PrunePlan(
+        applied=True,
+        runs_considered=272,
+        runs_affected=1,
+        rungs_dropped=55,
+        files_deleted=8_360,
+        freed_gib=77.0,
+        protected=["run-pcs-production-to1-2k-river-023543-3910: still running"],
+        plan=[
+            {
+                "run": "run-train-production-to100M-production_f4-081936-25408",
+                "held": 64,
+                "drop": [5_000_000],
+                "dropping": 55,
+                "keeping": [400_000_000],
+                "scored_kept": [400_000_000],
+                "gib_each": 1.4,
+                "gib_freed": 77.0,
+            }
+        ],
     ),
 }
 
@@ -784,7 +759,10 @@ class TestTheServersStillFormatTheirPayload:
         """
         import uvicorn
 
+        from src.adapters.postgres import connect
+
         monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+        monkeypatch.setattr(connect, "record_source_from_environment", lambda: None)
         with pytest.raises(Exception, match=r"run-production|No such file|not found|Errno"):
             BY_NAME["blueprint-serve"].render(PAYLOADS["blueprint-serve"])
 
