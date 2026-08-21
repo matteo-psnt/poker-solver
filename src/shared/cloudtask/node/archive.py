@@ -565,6 +565,69 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: 
     return current
 
 
+ABSTRACTIONS_CONTAINER = "abstractions"
+ABSTRACTION_SUFFIX = ".tar.zst"
+
+
+def abstraction_object(name: str) -> str:
+    """The object one abstraction lives at. `name` is its directory name."""
+    return f"{name}{ABSTRACTION_SUFFIX}"
+
+
+def pack_abstraction(source: Path, destination: Path) -> int:
+    """Tar+zstd one abstraction directory into a single object.
+
+    ONE OBJECT, for the reason a rung is one object: an abstraction is ~10
+    files and a half-uploaded tree is something a node might try to load, where
+    a half-uploaded blob is simply absent.
+    """
+    import subprocess  # noqa: PLC0415 -- stdlib, and only when publishing
+
+    # `tar --zstd` rather than a Python codec: the node closure is stdlib-only
+    # and `zstandard` is not importable before `uv sync`.
+    subprocess.run(
+        ["tar", "--zstd", "-cf", str(destination), "-C", str(source.parent), source.name],
+        check=True,
+    )
+    return destination.stat().st_size
+
+
+def unpack_abstraction(archive_file: Path, destination: Path) -> None:
+    """Extract one packed abstraction into `destination`."""
+    import subprocess  # noqa: PLC0415 -- stdlib, and only when fetching
+
+    destination.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["tar", "--zstd", "-xf", str(archive_file), "-C", str(destination)], check=True)
+
+
+def fetch_abstractions(sas: str, destination: Path, log: Log = _quiet) -> int:
+    """Bring every abstraction the container holds onto this node.
+
+    MERGES, like the share copy it replaces: a node cannot know which
+    abstraction a task will resolve against until the trainer reads its config,
+    and there are ten of them. An abstraction already on the node is not
+    re-fetched, so the steady-state cost is one HEAD each rather than 2.83 GiB.
+    """
+    fetched = 0
+    for name in blobstore.list_container(sas):
+        if not name.endswith(ABSTRACTION_SUFFIX):
+            continue
+        directory = destination / name.removesuffix(ABSTRACTION_SUFFIX)
+        if directory.is_dir():
+            continue
+        packed = destination / name
+        if not blobstore.get_object(sas, name, destination):
+            log(f"  WARN {name} vanished from the container")
+            continue
+        try:
+            unpack_abstraction(packed, destination)
+            fetched += 1
+            log(f"  fetched abstraction {directory.name}")
+        finally:
+            packed.unlink(missing_ok=True)
+    return fetched
+
+
 def manifest_entries(source: Path) -> list[tuple[int, str]]:
     """Every (iteration, snapshot name) the manifest CLAIMS, ascending.
 

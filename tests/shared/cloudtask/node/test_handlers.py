@@ -292,14 +292,36 @@ class TestAbstractionRefresh:
 
         assert (paths.data / "combo_abstraction" / "buckets-F400T1200R600-rexact-e5c873dc").is_dir()
 
-    def test_a_share_without_abstractions_is_a_warning_not_a_failure(self, paths, log, monkeypatch):
+    def test_neither_store_holding_one_is_not_a_failure(self, paths, log, monkeypatch):
         """The node may already hold what this task needs, and the resolver says
         so precisely if it does not -- refusing here would only move the error."""
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a")
 
         assert handlers._train(task, paths, log)[0] == 0
-        assert "no" in log.path.read_text()
+
+    def test_the_container_is_read_before_the_share(self, paths, log, monkeypatch):
+        """Same order, and the same reason, as a rung's fetch: the share is the
+        store being left, so it is the fallback and never the first answer."""
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        seen: list[str] = []
+        monkeypatch.setattr(
+            handlers.archive,
+            "fetch_abstractions",
+            lambda sas, destination, _log: seen.append(sas) or 0,
+        )
+        task = node_plan.TaskPlan(
+            op=TaskName.TRAIN,
+            config="quick_test",
+            to=1000,
+            run_id="run-a",
+            checkpoint_sas="https://a.blob.core.windows.net/checkpoints?sig=x",
+        )
+
+        handlers._train(task, paths, log)
+
+        assert seen, "the container was never consulted"
+        assert seen[0].partition("?")[0].endswith("/abstractions")
 
     def test_an_abstraction_already_on_the_node_is_not_recopied(self, paths, log, monkeypatch):
         """`update=True` is the whole reason the steady-state cost is a directory
