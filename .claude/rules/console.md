@@ -15,11 +15,10 @@ The console reimplements nothing.
   answer. `views.py` may import the command registry and **nothing else**, which
   `test_no_second_read_path.py` checks. The line in practice: the run list ships
   `task_id -> run_id`, and the CLIENT decides which Batch states mean "running".
-- **Coverage is complete and enforced, at two grains.** `test_command_coverage.py`
-  fails until a command has an endpoint or a declared reason — `NO_PAYLOAD` (`serve`,
-  `blueprint-serve` never return one) or `NODE_ONLY` (node compute, each listed
-  with the dispatching command that IS the console's door). `status` is covered
-  by the three panels it composes — do not add `/api/status`.
+- **`status` is covered by the three panels it composes** — do not add
+  `/api/status`. Node compute (`train-static`, `evaluate`, `precompute`) gets
+  no endpoint: the dispatching command (`submit`, `score`, `submit-precompute`)
+  is the console's door.
 - **Never hand-write a schema in the console.**
   `src/interfaces/web/contract.py` → `console/src/api/openapi.json` (via
   `response_model`; a test fails if it is stale) → `types.gen.ts` (regenerated

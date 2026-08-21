@@ -69,7 +69,6 @@ export type Cost = S["CostPayload"];
 export type Billed = S["BilledPayload"];
 
 /** This tool's own behaviour, and the local reads. */
-export type Activity = S["ActivityPayload"];
 export type Configs = S["ConfigsPayload"];
 export type Autoscale = S["AutoscalePayload"];
 

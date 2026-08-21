@@ -186,9 +186,6 @@ GROUPS: tuple[CommandGroup, ...] = (
             CommandRef("runs", "Every published run, newest first."),
             CommandRef("configs", "List the config stems `submit` and `submit-precompute` accept."),
             CommandRef(
-                "activity", "What the commands have been costing: calls, p50/p95, refusals, errors."
-            ),
-            CommandRef(
                 "runinfo",
                 "Everything recorded about a run: provenance, curve, scores, tasks, gaps.",
             ),

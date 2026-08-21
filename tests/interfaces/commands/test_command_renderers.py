@@ -27,7 +27,6 @@ from src.interfaces.commands import (
     evaluate,
     load_all,
 )
-from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
 from src.interfaces.commands.arms import ArmsPayload
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
 from src.interfaces.commands.benchmark import BenchmarkPayload
@@ -499,51 +498,6 @@ PAYLOADS: dict[str, Any] = {
                 vm_size="standard_d32als_v6",
             ),
         ],
-    ),
-    "activity": ActivityPayload(
-        log="/home/me/.cache/poker-solver/telemetry/invocations.jsonl",
-        exists=True,
-        enabled=True,
-        days=7.0,
-        failures_only=False,
-        rows=412,
-        total_rows=5031,
-        first_at="2026-08-04T09:00:00+00:00",
-        commands=[
-            CommandActivity(
-                command="tasks",
-                calls=180,
-                p50_seconds=2.05,
-                p95_seconds=9.4,
-                max_seconds=23.1,
-                total_seconds=512.7,
-                refusals=0,
-                errors=2,
-            ),
-            CommandActivity(
-                command="pool-status",
-                calls=210,
-                p50_seconds=0.4,
-                p95_seconds=1.1,
-                max_seconds=1.4,
-                total_seconds=92.3,
-                refusals=0,
-                errors=0,
-            ),
-        ],
-        failures=[
-            Failure(
-                at="2026-08-10T22:14:03+00:00",
-                command="runinfo",
-                surface="console",
-                outcome="refusal",
-                error_type="CommandError",
-                error="'run-x' is not published.",
-                asked={"run": "run-x"},
-            )
-        ],
-        total_failures=41,
-        by_surface={"cli": 96, "console": 316},
     ),
     # The probe, matching its published figure. `within_expectation=False` is
     # not a payload that reaches a renderer: `run` refuses instead, so the

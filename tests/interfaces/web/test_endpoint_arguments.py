@@ -18,16 +18,11 @@ another thing that can be right about a file it does not read.
 from __future__ import annotations
 
 import ast
-import json
 from typing import Any
 
 import pytest
 
-from src.interfaces import telemetry
-from src.interfaces.commands import _compose, activity, configs, load
-from src.interfaces.commands._compose import Part
-from src.interfaces.web import app
-from src.interfaces.web.cache import TtlCache
+from src.interfaces.commands import load
 from src.shared import repo
 
 APP = repo.SRC / "interfaces" / "web" / "app.py"
@@ -205,38 +200,3 @@ def test_every_command_named_by_an_endpoint_still_exists():
             load(name)
         except KeyError:
             pytest.fail(f"{APP} has an endpoint for `{name}`, which is not a command")
-
-
-def test_a_composed_view_files_its_parts_under_the_console(tmp_path, monkeypatch):
-    """A view's parts cross a thread boundary before they are recorded.
-
-    `_served` opens the surface, `_compose._bound` copies the calling thread's
-    context per submit, and the part runs on a pool thread -- so the attribution
-    survives only because the copy is taken on the caller. It did not once, and
-    every panel's cost was filed under the default. Nothing asserted it until the
-    `with` moved off the four endpoints and into `_served`.
-    """
-    monkeypatch.setenv("POKER_SOLVER_TELEMETRY", "1")
-    monkeypatch.setenv("POKER_SOLVER_CACHE", str(tmp_path))
-
-    def probe() -> dict[str, Any]:
-        # Two LOCAL commands, so this fans out for real and touches no cloud.
-        return _compose.compose(
-            "view-probe",
-            [
-                Part("configs", configs.COMMAND),
-                Part("activity", activity.COMMAND, {"days": 1.0, "limit": 1}),
-            ],
-        )
-
-    assert app._served(TtlCache(0.0), ("probe", ()), probe).status_code == 200
-
-    rows = [
-        json.loads(line)
-        for path in telemetry.logs()
-        for line in path.read_text().splitlines()
-        if line.strip()
-    ]
-    assert rows, "the fan-out recorded nothing, so this asserts nothing"
-    misfiled = sorted({row["command"] for row in rows if row["surface"] != "console"})
-    assert not misfiled, f"{misfiled} were filed under another surface than the console"

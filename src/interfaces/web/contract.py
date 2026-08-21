@@ -43,8 +43,6 @@ from src.interfaces.cloud.cost.billing import ServiceCharge, StandingCharge
 from src.interfaces.cloud.cost.node_time import ConcurrencyPoint
 from src.interfaces.cloud.tasks.batch import BatchTask, Job, ResizeError
 from src.interfaces.cloud.tasks.dispatch import Dispatched
-from src.interfaces.commands.activity import ActivityPayload as Activity
-from src.interfaces.commands.activity import CommandActivity, Failure
 from src.interfaces.commands.arms import ArmsPayload as Arms
 from src.interfaces.commands.autoscale_check import AutoscalePayload as Autoscale
 from src.interfaces.commands.cancel import CancelledPayload as Cancelled
@@ -76,7 +74,6 @@ from src.shared.task_history import TaskProgress, TaskRow
 # generated TypeScript uses. What is still DECLARED below is a command not yet
 # typed, and that list is meant to shrink to nothing.
 __all__ = [
-    "Activity",
     "Arms",
     "Autoscale",
     "BatchTask",
@@ -87,7 +84,6 @@ __all__ = [
     "Bucket",
     "Cancelled",
     "Combos",
-    "CommandActivity",
     "Compacted",
     "ConcurrencyPoint",
     "ConfigKind",
@@ -97,7 +93,6 @@ __all__ = [
     "CurvePoint",
     "Dispatched",
     "Edge",
-    "Failure",
     "Hand",
     "HandEvent",
     "Job",

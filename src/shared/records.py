@@ -151,19 +151,6 @@ REGISTRY: dict[str, Artifact] = {
         where="<abstraction_dir>/metadata.json",
         growth="one per abstraction; rewritten in place",
     ),
-    "telemetry/invocations.jsonl": Artifact(
-        name="telemetry/invocations.jsonl",
-        kind="log",
-        scope="local",
-        version=1,
-        what="one row per command that ran: how long, from which surface, how it ended",
-        where="$POKER_SOLVER_CACHE/telemetry/invocations.jsonl (never the share)",
-        growth="one row per invocation, so a console tab adds ~1,200/hour -- rotated at "
-        "8 MB keeping one generation. The ONLY entry here that is disposable by "
-        "design: it is a cache in the `shared.cache` sense, not a record. On the "
-        "share it would be an append with no atomic rename, a per-document scheme "
-        "outgrowing legs/ in hours, and a round trip added to every command",
-    ),
     "legs/*.start.json": Artifact(
         name="legs/*.start.json",
         kind="snapshot",

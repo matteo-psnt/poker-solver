@@ -123,9 +123,8 @@ def gather(*, limit: int = 10, with_tasks: bool = True) -> StatusPayload:
 
     The entry point for any surface that is not this command. The fan-out lives
     in :mod:`_compose` rather than here: this screen had the only copy of it
-    until the console needed the same three properties -- independent failure,
-    concurrency, and a context copy per submit -- and a second copy is how the
-    telemetry-surface bug fixed in `d67411f` would have come back.
+    until the console needed the same two properties -- independent failure and
+    concurrency -- and one copy is what keeps them agreeing.
 
     ``panels`` rather than `compose`'s ``parts``, because that is the word this
     command's renderer and its `--json` consumers already use, and renaming a
