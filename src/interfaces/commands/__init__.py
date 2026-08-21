@@ -110,10 +110,6 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "cancel", "Terminate a running task; its partial progress is published first."
             ),
             CommandRef(
-                "submit-migrate",
-                "Run the share -> container checkpoint migration on a pool node.",
-            ),
-            CommandRef(
                 "pool-status", "Pool node counts, and the real cause behind any allocation failure."
             ),
             CommandRef(
@@ -140,10 +136,6 @@ GROUPS: tuple[CommandGroup, ...] = (
     CommandGroup(
         "run it here (this is what a node invokes)",
         (
-            CommandRef(
-                "migrate-checkpoints",
-                "Check that the container holds every rung the manifests claim.",
-            ),
             CommandRef(
                 "train-static",
                 "Train over the statically-enumerated tree (fixed memory, no key maps).",

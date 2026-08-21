@@ -384,26 +384,6 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
 # ``TaskName`` because what arrives from the environment is the wire string.
 
 
-def _migrate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-    """Move published rungs from the mounted share into the container.
-
-    The bytes are on the share and a node has it mounted inside the region.
-    Nothing is fetched to `runs/` and nothing is published back: the sweep
-    reads the archive in place and writes objects.
-
-    `--share` is passed explicitly rather than left to the node's default so
-    the same command is runnable against a local copy when debugging it.
-    """
-    log(f"migrate-checkpoints: share={paths.share} (timeout {plan.timeout_seconds}s)")
-    code = run_guarded(
-        _cli([*plan.commands[0], "--share", str(paths.share)]),
-        cwd=paths.code,
-        timeout=plan.timeout_seconds,
-        log=log,
-    )
-    return code, None
-
-
 def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
     """The end-of-task publish: a TRAINING task's own run, and nothing else.
 
@@ -431,5 +411,4 @@ HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN_PCS: _train,
     TaskName.EVALUATE: _evaluate,
     TaskName.PRECOMPUTE: _precompute,
-    TaskName.MIGRATE_CHECKPOINTS: _migrate,
 }

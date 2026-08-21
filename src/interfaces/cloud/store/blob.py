@@ -30,12 +30,12 @@ CONTAINER = "checkpoints"
 # business holding a credential that can overwrite what it read. Kept beside the
 # minting rather than at the call site so there is one list of who may write.
 #
-# MIGRATE_CHECKPOINTS is here because moving the history IS writing rungs -- it
-# was omitted, handed a read-only SAS, and every upload came back 403
-# `AuthorizationPermissionMismatch`. The scoping worked exactly as designed;
-# the list was wrong. A task that writes checkpoints must be named here, and
-# `test_every_kind_is_classified` now fails if a new one is not.
-WRITES_CHECKPOINTS = frozenset({TaskName.TRAIN, TaskName.TRAIN_PCS, TaskName.MIGRATE_CHECKPOINTS})
+# A task that writes checkpoints must be named here, and
+# `test_every_kind_is_classified` fails if a new one is not. The migration was
+# once omitted, handed a read-only SAS, and every upload came back 403
+# `AuthorizationPermissionMismatch` -- the scoping worked as designed and the
+# list was wrong.
+WRITES_CHECKPOINTS = frozenset({TaskName.TRAIN, TaskName.TRAIN_PCS})
 
 # Longer than any job, not any task. A ladder score fans out 30 rungs behind one
 # dispatch and the last of them can start hours after the first; a SAS that
