@@ -15,7 +15,6 @@ from src.interfaces.commands import evaluate as evaluate_cmd
 from src.interfaces.commands import ledger as ledger_cmd
 from src.interfaces.commands import train_static as train_static_cmd
 from src.interfaces.errors import CommandError
-from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import (
     LBR_ESTIMATOR_LABEL,
     StaticTrainingOutput,
@@ -141,9 +140,11 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
 
 
 def _rows(monkeypatch, *documents):
+    """The page the server would cut: every document, oldest first."""
     monkeypatch.setattr(ledger_cmd.connect, "engine_from_environment", lambda: object())
-    rows = [eval_ledger.ledger_row(d) for d in documents]
-    monkeypatch.setattr(ledger_cmd, "eval_index_rows", lambda _e: rows)
+    monkeypatch.setattr(
+        ledger_cmd.queries, "ledger_page", lambda _e, **_f: (len(documents), list(documents))
+    )
 
 
 def _document(run_id, *, mbb=100.0, timestamp=None):

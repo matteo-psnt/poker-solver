@@ -6,11 +6,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.adapters.postgres import connect
-from src.interfaces.commands._base import (
-    Command,
-    eval_index_rows,
-)
+from src.adapters.postgres import connect, queries
+from src.interfaces.commands._base import Command
 from src.pipeline.evaluation import ledger as eval_ledger
 
 if TYPE_CHECKING:
@@ -61,41 +58,28 @@ class LedgerPayload(BaseModel):
 
 
 def run(args: argparse.Namespace) -> LedgerPayload:
-    """List recent eval rows, derived from the published documents.
+    """List recent eval rows, cut to the page in SQL.
 
-    ``--rebuild`` and ``--migrate`` are gone with the local runs directory they
-    acted on. Rebuilding is not a mode any more: the index has no stored form,
-    so every read of it IS a rebuild. Migration rewrites records in place and
-    the materialised tree is a throwaway copy -- it could only ever have
-    reported a success that changed nothing.
+    `--since` is the one filter that stays in Python: it compares the instants
+    `record_instant` derives from each document's own timestamp, where naive
+    legacy values mean local time -- a rule the column's UTC conversion does
+    not apply. With it set, the whole filtered set comes over and pages here.
     """
-    return _list(args, eval_index_rows(connect.engine_from_environment()))
-
-
-def _list(args: argparse.Namespace, records: list[dict[str, Any]]) -> LedgerPayload:
-    """The filtering. `evals.payload` is the whole document, so a row already
-    carries `results` and there is nothing to go and get."""
-    if args.run:
-        records = [r for r in records if r.get("run_id") == args.run]
-    if args.experiment:
-        records = [r for r in records if r.get("experiment_id") == args.experiment]
-    if args.method:
-        records = [r for r in records if r.get("method") == args.method]
+    matched, documents = queries.ledger_page(
+        connect.engine_from_environment(),
+        run_id=args.run,
+        method=args.method,
+        experiment_id=args.experiment,
+        limit=0 if args.since else args.limit,
+    )
+    records = [eval_ledger.ledger_row(document) for document in documents]
     if args.since:
-        # Instants, not strings: the ledger holds naive-local legacy rows beside
-        # UTC-aware new ones, so a lexicographic cutoff skews by the writer's
-        # offset — the exact defect `record_instant` exists to remove.
         cutoff = eval_ledger.record_instant({"timestamp": args.since})
         records = [r for r in records if eval_ledger.record_instant(r) >= cutoff]
-    # `records[-0:]` is the whole list, so a 0 limit already meant "all" by
-    # accident. Made deliberate: `--limit 0` is how to see the whole history.
-    matched = len(records)
-    if args.limit > 0:
-        records = records[-args.limit :]
-    return LedgerPayload(
-        matched=matched,
-        rows=[LedgerRow.model_validate(row) for row in records],
-    )
+        matched = len(records)
+        if args.limit > 0:
+            records = records[-args.limit :]
+    return LedgerPayload(matched=matched, rows=[LedgerRow.model_validate(r) for r in records])
 
 
 def _fmt_commit(commit: str | None, dirty: bool | None) -> str:
