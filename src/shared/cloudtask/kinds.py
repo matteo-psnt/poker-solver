@@ -49,7 +49,6 @@ class TaskName(StrEnum):
     TRAIN_PCS = "train-pcs"
     EVALUATE = "evaluate"
     PRECOMPUTE = "precompute"
-    NET_PROBE = "net-probe"
     MIGRATE_CHECKPOINTS = "migrate-checkpoints"
 
 
@@ -99,9 +98,6 @@ class Submission(TaskFields, Protocol):
     def eval_at(self) -> str: ...
     @property
     def eval_flags(self) -> Sequence[str]: ...
-
-    # Read by TrainVectorTask.validate: the sampled boards are the chance layer,
-    # so a submission that omits them names no game and must be refused here.
 
 
 class NodePlan(TaskFields, Protocol):
@@ -747,36 +743,6 @@ def _flag(flags: object, name: str) -> str:
     return ""
 
 
-class NetProbeTask(TaskKind):
-    """Report what a node can reach outbound -- ports, IMDS, an AAD token.
-
-    ``retries = 0``, against the grain of every other kind here. A probe's
-    failure IS its result: retrying an unreachable port three times reports the
-    third attempt and hides that it was ever intermittent, which is the one
-    thing a connectivity answer must not do.
-    """
-
-    name = TaskName.NET_PROBE
-    unit = "checks"
-    retries = 0
-
-    def validate(self, task: TaskFields) -> None:
-        """Nothing is required: the probe's whole input is optional flags."""
-
-    def commands(self, plan: NodePlan) -> list[list[str]]:
-        return [["net-probe", *plan.eval_flags]]
-
-    def label(self, task: Submission) -> str:  # noqa: ARG002 -- one probe, no distinguishing field
-        return "net-probe"
-
-    def describe(self, record: Mapping[str, Any]) -> str:  # noqa: ARG002
-        return "network reachability probe"
-
-    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
-        """Always ``None``: a handful of connects finish before a bar could draw."""
-        return None
-
-
 class MigrateCheckpointsTask(TaskKind):
     """Move published rungs from the mounted share into the checkpoint container.
 
@@ -919,7 +885,6 @@ KINDS: dict[str, TaskKind] = {
         TrainPcsTask(),
         EvaluateTask(),
         PrecomputeTask(),
-        NetProbeTask(),
         MigrateCheckpointsTask(),
     )
 }

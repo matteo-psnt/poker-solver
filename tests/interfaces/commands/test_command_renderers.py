@@ -42,14 +42,12 @@ from src.interfaces.commands.jobs import JobsPayload
 from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
 from src.interfaces.commands.migrate_checkpoints import MigratedPayload
-from src.interfaces.commands.net_probe import Check, ProbePayload
 from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
 from src.interfaces.commands.profile import ProfilePayload
 from src.interfaces.commands.progress import ProgressPayload, ProgressRow
 from src.interfaces.commands.prune_checkpoints import PrunePlan
 from src.interfaces.commands.push_code import PushedCodePayload
-from src.interfaces.commands.push_data import PushedDataPayload
 from src.interfaces.commands.reconcile_runs import Closure, ReconcilePlan
 from src.interfaces.commands.record_admit import AdmittedPayload
 from src.interfaces.commands.record_migrate import MigratedPayload as SchemaMigratedPayload
@@ -61,7 +59,6 @@ from src.interfaces.commands.serve_box import BoxPayload
 from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
 from src.interfaces.commands.submit_migrate import SubmitMigratePayload
-from src.interfaces.commands.submit_net_probe import SubmitNetProbePayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.tasks import TasksPayload
 from src.interfaces.commands.train_pcs import PcsTrainingPayload
@@ -129,23 +126,6 @@ PAYLOADS: dict[str, Any] = {
         tasks=["migrate-checkpoints-230001-9545"],
         records_to_database=True,
         flags=["--limit", "50"],
-    ),
-    "net-probe": ProbePayload(
-        hostname="a1b2c3d4e5",
-        region="eastus",
-        vm_size="Standard_D16als_v6",
-        egress_ip="20.51.0.7",
-        checks=[
-            Check(name="imds-instance", outcome="open", detail="Standard_D16als_v6", ms=4.2),
-            Check(name="tcp[portquiz.net:5432]", outcome="open", detail="tcp", ms=61.0),
-            Check(name="aad-token", outcome="error", detail="HTTP 400: no identity", ms=12.5),
-        ],
-    ),
-    "submit-net-probe": SubmitNetProbePayload(
-        flags=["--port", "5432"],
-        code_snapshot="code-20260805_000000",
-        job_id="poker-20260805",
-        tasks=["net-probe-000000-1"],
     ),
     "precompute": PrecomputePayload(
         abstraction_config="production",
@@ -656,7 +636,6 @@ PAYLOADS: dict[str, Any] = {
         job_id="poker-20260802",
         tasks=["production-000000-1"],
     ),
-    "push-data": PushedDataPayload(uploaded={"buckets-F50T100R200": 9}),
     # The applied-and-deleted shape, because it is the one with something to
     # report: a dry run renders a subset of these keys.
     "compact-legs": CompactedPayload(

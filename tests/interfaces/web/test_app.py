@@ -167,7 +167,6 @@ class TestTheDispatchingWrites:
             "/api/score",
             "/api/precompute",
             "/api/push-code",
-            "/api/push-data",
             "/api/compact-legs",
             "/api/promote",
         ):

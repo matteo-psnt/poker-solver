@@ -127,22 +127,3 @@ describe("compacting the task record", () => {
     });
   });
 });
-
-describe("publishing", () => {
-  it("says the share was already current rather than showing nothing", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ op: "push-data", uploaded: {} }), { status: 200 }),
-      ),
-    );
-    mount(<Share />);
-    const push = panel(/Push data —/);
-
-    fireEvent.click(push.getByRole("button", { name: /Push data/ }));
-    // An empty result is the ordinary outcome of pushing twice. Rendering it as
-    // blank makes a successful no-op look like a button that did not fire.
-    await waitFor(() => expect(push.getByText(/already current/)).toBeTruthy());
-  });
-});

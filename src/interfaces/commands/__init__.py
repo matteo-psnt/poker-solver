@@ -114,10 +114,6 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Run the share -> container checkpoint migration on a pool node.",
             ),
             CommandRef(
-                "submit-net-probe",
-                "Run a reachability probe on a pool node: outbound ports, IMDS, and an AAD token.",
-            ),
-            CommandRef(
                 "pool-status", "Pool node counts, and the real cause behind any allocation failure."
             ),
             CommandRef(
@@ -126,10 +122,6 @@ GROUPS: tuple[CommandGroup, ...] = (
             ),
             CommandRef(
                 "push-code", "Publish an immutable snapshot of the working tree; echoes its id."
-            ),
-            CommandRef(
-                "push-data",
-                "Publish card abstractions to the share (copied, never recomputed on a node).",
             ),
             CommandRef(
                 "compact-legs",
@@ -161,7 +153,8 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Train by public chance sampling: one board per iteration, every hand at once.",
             ),
             CommandRef(
-                "precompute", "Precompute a combo abstraction into data/combo_abstraction/."
+                "precompute",
+                "Precompute a combo abstraction (a node builds it; `submit-precompute` is the door).",
             ),
             CommandRef(
                 "evaluate", "Evaluate a run's exploitability (Local Best Response by default)."
@@ -169,10 +162,6 @@ GROUPS: tuple[CommandGroup, ...] = (
             CommandRef(
                 "benchmark",
                 "Play hands against GTO Wizard AI and score them in AIVAT bb/100.",
-            ),
-            CommandRef(
-                "net-probe",
-                "Report what a node can reach outbound: ports, IMDS, and an AAD token for Postgres.",
             ),
         ),
     ),

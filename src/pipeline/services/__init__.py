@@ -13,14 +13,14 @@ group by concern only:
 ``static_training``
     Start a run over the static tree, or continue one to an absolute target.
 ``bucketing``
-    Produce a card abstraction, or measure one at several bucket counts.
+    Produce a card abstraction.
 ``scoring``
-    Score a run; one entrypoint per estimator, plus the record orchestrator.
+    Score a run and record the result.
 ``experiments``
     Read the experiment record — curves, baselines, arm-vs-control attribution.
 """
 
-from src.pipeline.services.bucketing import precompute_abstraction, sweep_bucket_counts
+from src.pipeline.services.bucketing import precompute_abstraction
 from src.pipeline.services.equity_prior import (
     DEFAULT_TEMPERATURE as DEFAULT_EQUITY_TEMPERATURE,
 )
@@ -35,7 +35,6 @@ from src.pipeline.services.experiments import (
 from src.pipeline.services.pcs_training import PcsTrainingOutput, train_pcs
 from src.pipeline.services.runs import (
     RunSummary,
-    checkpoint_iteration_of,
     describe_runs,
     list_runs,
     load_run_metadata,
@@ -47,10 +46,6 @@ from src.pipeline.services.scoring import (
     EvaluationOutput,
     EvaluationPayload,
     evaluate_and_record,
-    evaluate_blueprint_match,
-    evaluate_run_exact_br,
-    evaluate_run_lbr,
-    evaluate_run_resolver_gate,
     record_blueprint_match,
 )
 from src.pipeline.services.static_training import StaticTrainingOutput, train_static
@@ -73,21 +68,15 @@ __all__ = [
     "RunDigest",
     "RunSummary",
     "StaticTrainingOutput",
-    "checkpoint_iteration_of",
     "curve_from",
     "describe_runs",
     "evaluate_and_record",
-    "evaluate_blueprint_match",
-    "evaluate_run_exact_br",
-    "evaluate_run_lbr",
-    "evaluate_run_resolver_gate",
     "exploitability_curve",
     "list_runs",
     "load_run_metadata",
     "precompute_abstraction",
     "record_blueprint_match",
     "run_digest",
-    "sweep_bucket_counts",
     "train_pcs",
     "train_static",
 ]

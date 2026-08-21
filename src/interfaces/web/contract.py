@@ -61,7 +61,6 @@ from src.interfaces.commands.pool_status import PoolPayload as Pool
 from src.interfaces.commands.profile import ProfilePayload as Profile
 from src.interfaces.commands.progress import ProgressPayload as Progress
 from src.interfaces.commands.push_code import PushedCodePayload as PushedCode
-from src.interfaces.commands.push_data import PushedDataPayload as PushedData
 from src.interfaces.commands.runinfo import RunInfoPayload as RunInfo
 from src.interfaces.commands.runs import RunsPayload as Runs
 from src.interfaces.commands.runs import RunSummary
@@ -112,7 +111,6 @@ __all__ = [
     "Profile",
     "Progress",
     "PushedCode",
-    "PushedData",
     "ResizeError",
     "RunInfo",
     "RunSummary",

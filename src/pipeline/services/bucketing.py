@@ -1,7 +1,6 @@
-"""Producing and measuring card abstractions."""
+"""Producing card abstractions."""
 
 import logging
-from collections.abc import Sequence
 from pathlib import Path
 
 from src.core.game.state import Street
@@ -13,54 +12,6 @@ from src.shared import records
 PROGRESS_ARTIFACT = "precompute-progress.json"
 
 logger = logging.getLogger(__name__)
-
-
-def sweep_bucket_counts(
-    abstraction_config: str,
-    street: Street,
-    bucket_counts: Sequence[int],
-    *,
-    num_workers: int | None = None,
-    board_limit: int | None = None,
-) -> list[dict]:
-    """Quality metrics for one street bucketed at several bucket counts.
-
-    Answers "how much resolution does bucket count k actually buy?" without
-    paying for k separate precomputes: the equity pass — which is essentially
-    all of the cost — runs once, and each bucket count is then a cheap k-means
-    over the same matrices. ``PostflopPrecomputer`` was already factored for
-    this; ``compute_street_matrices`` and ``bucket_street``'s ``num_buckets``
-    override exist precisely so a sweep can reuse one pass.
-
-    Nothing is written to disk. This measures an abstraction rather than
-    producing one, and a sweep that also emitted artifacts would invite loading
-    a bucketing that no run's ``card_abstraction_hash`` accounts for.
-
-    Returns one quality dict per entry of ``bucket_counts``, each carrying the
-    ``num_buckets`` it was measured at.
-    """
-    config = PrecomputeConfig.from_yaml(abstraction_config)
-    if num_workers is not None:
-        config = config.model_copy(update={"num_workers": num_workers})
-
-    precomputer = PostflopPrecomputer(config)
-    board_ids, equity, weights, histograms = precomputer.compute_street_matrices(
-        street, board_limit=board_limit
-    )
-
-    results: list[dict] = []
-    for count in bucket_counts:
-        quality = precomputer.bucket_street(
-            street, board_ids, equity, weights, histograms, num_buckets=count
-        )
-        results.append({"requested_buckets": int(count), **quality})
-        logger.info(
-            f"{street.name} @ {count} buckets: "
-            f"occupied {quality['occupied_buckets']}/{quality['num_buckets']}, "
-            f"variance explained {quality['variance_explained']:.6f}, "
-            f"within-bucket std {quality['within_bucket_std']:.6f}"
-        )
-    return results
 
 
 def precompute_abstraction(

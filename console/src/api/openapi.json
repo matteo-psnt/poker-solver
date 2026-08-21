@@ -2927,34 +2927,6 @@
         "title": "PushCodeBody",
         "type": "object"
       },
-      "PushDataBody": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
-          }
-        },
-        "title": "PushDataBody",
-        "type": "object"
-      },
       "PushedCodePayload": {
         "description": "The snapshot that was sealed. Its id is what a task executes.",
         "properties": {
@@ -2973,27 +2945,6 @@
           "code_snapshot"
         ],
         "title": "PushedCodePayload",
-        "type": "object"
-      },
-      "PushedDataPayload": {
-        "description": "Abstraction name to files uploaded. Empty means everything was current.",
-        "properties": {
-          "op": {
-            "const": "push-data",
-            "default": "push-data",
-            "title": "Op",
-            "type": "string"
-          },
-          "uploaded": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "default": {},
-            "title": "Uploaded",
-            "type": "object"
-          }
-        },
-        "title": "PushedDataPayload",
         "type": "object"
       },
       "ResizeError": {
@@ -5377,54 +5328,6 @@
           }
         },
         "summary": " Push Code"
-      }
-    },
-    "/api/push-data": {
-      "post": {
-        "operationId": "_push_data_api_push_data_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PushDataBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PushedDataPayload"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Understood, and the answer is no."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            },
-            "description": "Azure did not answer."
-          }
-        },
-        "summary": " Push Data"
       }
     },
     "/api/runs": {

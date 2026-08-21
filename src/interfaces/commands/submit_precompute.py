@@ -5,9 +5,6 @@ local one is no longer the only door. The invariant that made precompute look
 local-only is *computed once, never recomputed* -- not *computed on a laptop*.
 A node that builds an abstraction and publishes it once satisfies it exactly as
 well, and does it on 16 cores instead of a laptop's.
-
-``push-data`` is what remains of the old workflow: a seeding path for getting an
-existing local copy onto a fresh share, not something to run routinely.
 """
 
 from __future__ import annotations

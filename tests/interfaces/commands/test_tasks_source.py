@@ -22,7 +22,7 @@ def _row(task_id: str, attempt: int, cause: str) -> task_history.TaskRow:
 
 
 class TestOnlyAskBatchWhatBatchCanAnswer:
-    """The share's `unresolved_tasks` rule, applied to rows already in hand.
+    """Which rows Batch could still explain, decided over rows already in hand.
     Batch describes only a task's CURRENT attempt, so an earlier one is
     unresolved by construction: 1,326 non-terminal rows, 1,290 superseded."""
 
