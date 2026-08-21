@@ -28,7 +28,10 @@ and not SQLAlchemy Core (`ty` checks `Eval.scor_mbb`; it cannot check
   console startup (`export_record_dsn`) and sealed into every task. Nothing
   answers from the share any more: no record is `NoRecordError`, which both
   surfaces render as a refusal. `POKER_SOLVER_RECORD_DSN` in the shell is an
-  OVERRIDE for pointing at a restored server, not a prerequisite.
+  OVERRIDE for pointing at a restored server, not a prerequisite. The outputs
+  are cached under the cache root for an hour (`terraform output` is 3 s
+  against the remote state); the `just` apply recipes delete the copy, a
+  direct `terraform apply` does not -- `just _forget-coordinates` after one.
 - **A read that times out is the firewall, not the server.** The laptop's IP
   rotates; `poker-solver record-admit` rewrites the rule in place and Terraform
   ignores the address. Writers refuse when the schema is behind the code:
