@@ -88,7 +88,7 @@ poker-solver logs --task <task> --source node --job <job>   # live, node-side
 poker-solver cancel --job <job> --task <task>
 poker-solver score --run <id> --at 10000000,20000000 -- --br-flops 8
 
-poker-solver ledger               # every evaluation, derived from the share
+poker-solver ledger               # every evaluation, from the record
 poker-solver runs                 # every published run, newest first
 
 poker-solver curve --run <id>
@@ -100,13 +100,10 @@ Two things worth knowing at the seams:
 - **`score` passthrough needs a `--` separator.** `-- --br-flops 8`, not
   `--br-flops 8`: argparse rejects a bare unknown option as an argument of
   `score` itself rather than handing it to the passthrough.
-- **Readers pull metadata only, and there is no local copy.** `ledger`, `curve`,
-  `runinfo` and friends materialise `*.json`/`*.jsonl` from the share into a temp
-  tree and discard it — never `*.zarr`, never the `keys-*` tables of the deleted
-  dynamic backend. There is no `--source` and no `--runs-dir`: nothing on a
-  laptop is a source of truth about a run, so a local copy could only be a stale
-  second answer. (`fetch` and `ledger --rebuild` were how this used to work.
-  Both are gone: every read is a rebuild.)
+- **Readers answer from the record, and there is no local copy.** `ledger`,
+  `curve`, `runinfo` and friends read Postgres; the DSN comes from the store's
+  Terraform state at startup. Nothing on a laptop is a source of truth about a
+  run, so a local copy could only be a stale second answer.
 
 `to` is an **absolute** iteration target. That is what makes Batch's automatic
 retry safe: a retried task re-reads a newer checkpoint and converges on the same
@@ -114,8 +111,9 @@ endpoint instead of compounding an increment.
 
 ## How a task survives being killed
 
-`infra/run_task.py` publishes to the share **every time a retained checkpoint rung
-appears**, and again on any exit — success, failure, or cancellation.
+`infra/run_task.py` publishes a rung to the `checkpoints` container **every time
+a retained checkpoint rung appears**, and the run's record on any exit —
+success, failure, or cancellation.
 
 The node's disk is ephemeral. Publishing only at the end would mean an OOM or a
 `maxWallClockTime` kill destroys a multi-hour task entirely, which is the same
@@ -132,7 +130,7 @@ record how an attempt died: a container killed by the OOM killer, by
 `maxWallClockTime`, or by losing its node is gone before it can write anything.
 Batch sees those deaths — but retains them for far less time than the run lives.
 
-So the record is written from both sides, into `<share>/legs/`:
+So the record is written from both sides, into the record's `legs` table:
 
 - **The node's own account.** `run_task.py` writes `<task>.<attempt>.start.json`
   at entry and `<task>.<attempt>.exit.json` from its `finally`. This covers every
@@ -165,7 +163,7 @@ them. `tests/shared/cloudtask/test_imports.py` is the fail-closed half — nothi
 outside `records`/`jsonio`/`cache` may be reached, so a new module in
 `src/shared/` is denied by default rather than by a list somebody has to update.
 
-`poker-solver tasks --skip-reconcile` reads the share without querying Batch,
+`poker-solver tasks --skip-reconcile` reads the record without querying Batch,
 and `poker-solver logs --task <task>` prints a published log. There is no
 severity flag —
 the format is greppable on purpose, so `| grep -E ' (WARN|ERROR|CRIT) '`
@@ -173,9 +171,10 @@ narrows it to the failures.
 
 ## What must never go on the share
 
-**Active run directories.** A checkpoint is ~2,000 small files and the read path
-mmaps them; SMB turns every page fault into a network round-trip and offers no
-atomic replace. Runs live on the node's `/mnt/work` data disk and are *published*
+**Active run directories.** The read path mmaps a checkpoint; SMB turns every
+page fault into a network round-trip and offers no atomic replace. Runs live on
+the node's `/mnt/work` data disk; each retained rung is *published* as one
+object in the `checkpoints` container, and the manifest, markers and logs go
 to the share. The card abstraction is likewise copied share→local at node start.
 
 There is a second reason: a run directory has exactly one writer for its whole

@@ -32,9 +32,10 @@ matching file: `commands.md`, `console.md`, `cloud.md`,
 what a cloud job, a shell and an agent drive; the web console is the one a human
 reads. New capability goes in a command; the console gains it by calling one.
 
-**There is no `data/` directory, and nothing recreates one.** Runs live on the
-share and nowhere else. Regenerable caches go under `$POKER_SOLVER_CACHE`, else
-`$XDG_CACHE_HOME`, else `~/.cache/poker-solver`.
+**There is no `data/` directory, and nothing recreates one.** A run's rungs
+live in the `checkpoints` blob container and its record in Postgres; the share
+holds manifests, markers and task logs. Regenerable caches go under
+`$POKER_SOLVER_CACHE`, else `$XDG_CACHE_HOME`, else `~/.cache/poker-solver`.
 
 Config YAML under `config/` is the source of truth for training setups. Tests
 in `tests/` mirror `src/`.
@@ -43,8 +44,8 @@ in `tests/` mirror `src/`.
 
 **Every change starts in a worktree.** Several sessions run against this repo
 at once and `main` is the only shared thing. Follow the `worktree` skill:
-branch from local `HEAD`, link skills and both tfstates, run the fast gate
-before editing so a later failure is yours. Edit the primary checkout only
+branch from local `HEAD`, link skills, init both Terraform roots, run the fast
+gate before editing so a later failure is yours. Edit the primary checkout only
 when told to.
 
 The loop is **try → prove → clean → merge**. A session's job is to close it.

@@ -46,7 +46,7 @@ Sections and fields, with defaults:
 | Section | Field | Default | Notes |
 |---|---|---|---|
 | `training` | `num_iterations` | 100000 | |
-| | `runs_dir` | `data/runs` | node-relative; runs live on the share |
+| | `runs_dir` | `data/runs` | node-relative, under `/mnt/work`; rungs are published to the `checkpoints` container |
 | `storage` | `initial_capacity` | 2000000 | recorded in run metadata only |
 | | `checkpoint_retain_every` | 0 | spare a rung per N iterations from pruning (0 = keep only the last) |
 | `system` | `seed` | null | |
@@ -132,7 +132,7 @@ Workflow:
 The abstraction identity hash (`get_config_hash`) covers `buckets`,
 `flop_runouts`, and `equity_histogram_bins` only — changing any of these
 produces a new artifact directory
-(`data/combo_abstraction/buckets-F..T..R..-r..-<hash>/`) and requires
+(`<share>/combo_abstraction/buckets-F..T..R..-r..-<hash>/`) and requires
 re-running precompute. `kmeans_*`, `num_workers`, and `seed` do not change
 the identity.
 

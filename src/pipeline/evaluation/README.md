@@ -131,13 +131,10 @@ All transports route through one orchestrator, `evaluate_and_record()` in
 `src/pipeline/services/scoring/`. It runs the requested method, pins the
 run's recorded `card_abstraction_hash` (refusing unhashed runs) so an eval
 always uses the abstraction the run trained with, records git provenance, and
-writes the complete row to `<run_dir>/evals/<slug>.json`.
+writes the complete row to the record's `evals` table.
 
-**There is no stored index.** `ledger` DERIVES one from the published documents
-on every read, which is what makes concurrent evaluation from several boxes
-safe. `eval-*.json` and `record-*.json` are legacy shapes and are skipped
-deliberately — reading both entered one evaluation twice. A sparse `ledger`
-therefore means un-migrated legacy files on the share, not a broken rebuild.
+**The row is the evaluation.** `ledger` reads the rows; several boxes can
+score at once because each writes its own and nothing indexes them.
 
 ## Running one
 

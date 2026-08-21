@@ -11,7 +11,7 @@ paths:
 # Azure dispatch, the node wrapper, and the share
 
 `src/interfaces/cloud/` is split by what the code TALKS TO: `tasks/` (Batch),
-`store/` (the SMB share), `cost/` (Cost Management), with `config.py` and
+`store/` (the share and the blob containers), `cost/` (Cost Management), with `config.py` and
 `serve_box.py` above them. It lives under `interfaces` so nothing in
 `pipeline`/`engine`/`core` can reach Azure.
 
@@ -44,7 +44,7 @@ paths:
   arrives explains itself only in the node log (`logs --task <id> | grep
   profile`). numba JIT frames are bare addresses; numpy's resolve.
 - **Never point `runs_dir` at the share.** Active runs live on the node's
-  `/mnt/work` data disk and are *published* to the share. The wrapper sets
+  `/mnt/work` data disk and are *published* from there. The wrapper sets
   `POKER_SOLVER_CACHE=/mnt/work/cache` so the river's 2.6M boards are not
   re-canonicalised (~1 min) on every task.
 - **Rungs live in the `checkpoints` CONTAINER; the share holds the record.**
