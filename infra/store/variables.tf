@@ -112,6 +112,12 @@ variable "code_container_name" {
   default     = "code"
 }
 
+variable "abstractions_container_name" {
+  description = "Blob container holding one object per precomputed card abstraction."
+  type        = string
+  default     = "abstractions"
+}
+
 variable "record_live" {
   description = <<-EOT
     Which server the readers and every dispatch are pointed at: `sweden` or

@@ -23,12 +23,17 @@ class TestOnlyATrainerMayWrite:
     """
 
     def test_training_writes(self):
-        assert TaskName.TRAIN in blob.WRITES_CHECKPOINTS
-        assert TaskName.TRAIN_PCS in blob.WRITES_CHECKPOINTS
+        assert TaskName.TRAIN in blob.WRITES_BLOBS
+        assert TaskName.TRAIN_PCS in blob.WRITES_BLOBS
 
-    @pytest.mark.parametrize("op", [TaskName.EVALUATE, TaskName.PRECOMPUTE])
+    def test_precompute_writes(self):
+        """It PUBLISHES the card abstraction it builds. Omitted, it would get a
+        read-only SAS and the upload would 403 after hours of precompute."""
+        assert TaskName.PRECOMPUTE in blob.WRITES_BLOBS
+
+    @pytest.mark.parametrize("op", [TaskName.EVALUATE])
     def test_everything_else_only_reads(self, op):
-        assert op not in blob.WRITES_CHECKPOINTS
+        assert op not in blob.WRITES_BLOBS
 
     def test_every_kind_is_classified(self):
         """A kind that is neither named a writer nor deliberately a reader is a
@@ -36,9 +41,18 @@ class TestOnlyATrainerMayWrite:
         is safe for a fetch and a 403 for anything that publishes."""
         from src.shared.cloudtask import kinds
 
-        readers = {TaskName.EVALUATE, TaskName.PRECOMPUTE}
-        unclassified = set(kinds.KINDS) - {str(op) for op in blob.WRITES_CHECKPOINTS | readers}
+        readers = {TaskName.EVALUATE}
+        unclassified = set(kinds.KINDS) - {str(op) for op in blob.WRITES_BLOBS | readers}
         assert not unclassified, f"no checkpoint-access decision for: {sorted(unclassified)}"
+
+    def test_the_abstractions_uri_reuses_one_credential(self):
+        """The token is an ACCOUNT SAS and only the path names the container,
+        so a task carries one credential rather than one per store."""
+        checkpoints = blob.container_sas(ACCOUNT, KEY, write=True)
+        abstractions = blob.abstractions_uri(checkpoints)
+
+        assert abstractions.split("?")[0].endswith(f"/{blob.ABSTRACTIONS}")
+        assert abstractions.split("?")[1] == checkpoints.split("?")[1], "same token"
 
     def test_a_reader_sas_carries_no_write_permission(self):
         token = blob.container_sas(ACCOUNT, KEY, write=False)
@@ -92,16 +106,27 @@ class TestTheUrlItBuilds:
         assert url.startswith(f"https://acct.blob.core.windows.net/{blob.CONTAINER}?")
 
     def test_it_is_what_blobstore_expects(self):
-        """The two halves are written apart and must agree: `rung_uri` splices
-        the blob name in BEFORE the query."""
+        """The two halves are written apart and must agree: `object_uri`
+        splices the blob name in BEFORE the query."""
         from src.shared.cloudtask.node import blobstore
 
-        url = blobstore.rung_uri(
-            blob.container_sas(ACCOUNT, KEY, write=True), "run-a", "s.ckpt.zst"
-        )
+        url = blobstore.object_uri(blob.container_sas(ACCOUNT, KEY, write=True), "run-a/s.ckpt.zst")
         head, _, query = url.partition("?")
         assert head.endswith("/checkpoints/run-a/s.ckpt.zst")
         assert "sig=" in query
+
+    def test_an_abstraction_addresses_its_own_container(self):
+        """Same token, different path -- which is the whole reason one
+        credential can serve both stores."""
+        from src.shared.cloudtask.node import blobstore
+
+        url = blobstore.object_uri(
+            blob.abstractions_uri(blob.container_sas(ACCOUNT, KEY, write=True)),
+            "buckets-F100T300R600-rexact-a1542e88.tar.zst",
+        )
+        assert url.partition("?")[0].endswith(
+            "/abstractions/buckets-F100T300R600-rexact-a1542e88.tar.zst"
+        )
 
 
 class TestTheCodeSnapshotUrl:

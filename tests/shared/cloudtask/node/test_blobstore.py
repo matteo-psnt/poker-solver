@@ -44,7 +44,7 @@ class TestTheObjectItAddresses:
         """The one place this is easy to get wrong. Appended after the query,
         every request would address the container with a junk parameter and
         authorise against a signature covering a different path."""
-        url = blobstore.rung_uri(SAS, "run-a", "static-100.ckpt.zst")
+        url = blobstore.object_uri(SAS, "run-a/static-100.ckpt.zst")
         assert url == (
             "https://acct.blob.core.windows.net/checkpoints/"
             "run-a/static-100.ckpt.zst?sv=2021&sig=abc%3D"
@@ -54,20 +54,20 @@ class TestTheObjectItAddresses:
         """One naming convention, not a stored name and a derived one that can
         drift: the object is called what the snapshot is called."""
         assert (
-            blobstore.rung_uri(SAS, "r", "static-5.ckpt.zst")
+            blobstore.object_uri(SAS, "r/static-5.ckpt.zst")
             .partition("?")[0]
             .endswith("/r/static-5.ckpt.zst")
         )
 
     def test_a_sas_without_a_query_still_addresses(self):
-        assert blobstore.rung_uri(
-            "https://acct.blob.core.windows.net/checkpoints", "r", "s.ckpt.zst"
+        assert blobstore.object_uri(
+            "https://acct.blob.core.windows.net/checkpoints", "r/s.ckpt.zst"
         ).endswith("/r/s.ckpt.zst")
 
     def test_the_name_is_escaped(self):
         """A run id is generated, but the record has held one with a bare
         number and one with characters nobody planned for."""
-        assert "%20" in blobstore.rung_uri(SAS, "run a", "s.ckpt.zst")
+        assert "%20" in blobstore.object_uri(SAS, "run a/s.ckpt.zst")
 
 
 class TestARungIsOneObject:
@@ -85,11 +85,11 @@ class TestARungIsOneObject:
             return _Response(sent["body"])
 
         monkeypatch.setattr(blobstore.urllib.request, "urlopen", _urlopen)
-        size = blobstore.put_rung(SAS, "run-a", "static-100.ckpt.zst", rung)
+        size = blobstore.put_object(SAS, "run-a/static-100.ckpt.zst", rung)
         assert size == rung.stat().st_size
 
         back = tmp_path / "fetched"
-        assert blobstore.get_rung(SAS, "run-a", "static-100.ckpt.zst", back) is True
+        assert blobstore.get_object(SAS, "run-a/static-100.ckpt.zst", back) is True
         assert (back / "static-100.ckpt.zst").read_bytes() == rung.read_bytes()
 
     def test_the_upload_declares_its_length(self, tmp_path, monkeypatch):
@@ -105,7 +105,7 @@ class TestARungIsOneObject:
             return _Response(b"")
 
         monkeypatch.setattr(blobstore.urllib.request, "urlopen", _urlopen)
-        blobstore.put_rung(SAS, "run-a", "static-1.ckpt.zst", rung)
+        blobstore.put_object(SAS, "run-a/static-1.ckpt.zst", rung)
         assert seen["content-length"] == "5000"
         assert seen["x-ms-blob-type"] == "BlockBlob"
 
@@ -120,8 +120,8 @@ class TestAbsenceIsNotAnError:
             "urlopen",
             lambda *_a, **_k: (_ for _ in ()).throw(self._http_error(404)),
         )
-        assert blobstore.exists(SAS, "run-a", "s.ckpt.zst") is False
-        assert blobstore.get_rung(SAS, "run-a", "s.ckpt.zst", tmp_path) is False
+        assert blobstore.exists(SAS, "run-a/s.ckpt.zst") is False
+        assert blobstore.get_object(SAS, "run-a/s.ckpt.zst", tmp_path) is False
 
     def test_any_other_failure_raises(self, monkeypatch, tmp_path):
         """A 403 is an expired SAS and a 500 is the service. Reading either as
@@ -134,9 +134,9 @@ class TestAbsenceIsNotAnError:
                 lambda *_a, code=code, **_k: (_ for _ in ()).throw(self._http_error(code)),
             )
             with pytest.raises(urllib.error.HTTPError):
-                blobstore.exists(SAS, "run-a", "s.ckpt.zst")
+                blobstore.exists(SAS, "run-a/s.ckpt.zst")
             with pytest.raises(urllib.error.HTTPError):
-                blobstore.get_rung(SAS, "run-a", "s.ckpt.zst", tmp_path)
+                blobstore.get_object(SAS, "run-a/s.ckpt.zst", tmp_path)
 
 
 def test_it_asks_for_an_api_version_that_allows_a_big_single_put():

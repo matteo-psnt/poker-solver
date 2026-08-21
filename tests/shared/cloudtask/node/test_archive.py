@@ -567,7 +567,9 @@ class TestTheContainerIsActuallyReached:
     def test_the_object_name_is_what_is_asked_for(self, tmp_path, monkeypatch):
         asked: list[str] = []
         monkeypatch.setattr(
-            archive.blobstore, "exists", lambda _s, _r, name: (asked.append(name), True)[1]
+            archive.blobstore,
+            "exists",
+            lambda _s, name: (asked.append(name.split("/", 1)[1]), True)[1],
         )
         archive.require_complete(self._share(tmp_path), "static-1000.zarr", "sas")
         assert asked == ["static-1000.ckpt.zst"]
@@ -581,11 +583,12 @@ class TestTheContainerIsActuallyReached:
     def test_the_fetch_pulls_the_object_and_lands_it_under_that_name(self, tmp_path, monkeypatch):
         share, node = self._share(tmp_path), tmp_path / "runs" / "run-a"
 
-        def _get(_s, _r, name, destination):
+        def _get(_s, name, destination):
+            name = name.split("/", 1)[1]
             (destination / name).write_text("the object")
             return True
 
-        monkeypatch.setattr(archive.blobstore, "get_rung", _get)
+        monkeypatch.setattr(archive.blobstore, "get_object", _get)
         archive.fetch_snapshot(share, node, "static-1000.zarr", "sas")
 
         assert (node / "static-1000.ckpt.zst").read_text() == "the object"
@@ -600,8 +603,11 @@ class TestTheContainerIsActuallyReached:
 
         monkeypatch.setattr(
             archive.blobstore,
-            "get_rung",
-            lambda _s, _r, name, destination: ((destination / name).write_text("fresh"), True)[1],
+            "get_object",
+            lambda _s, name, destination: (
+                (destination / name.split("/", 1)[1]).write_text("fresh"),
+                True,
+            )[1],
         )
         archive.fetch_snapshot(share, node, "static-1000.zarr", "sas")
 

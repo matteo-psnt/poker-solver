@@ -32,7 +32,9 @@ class TestWhatItUploads:
         sent = []
         monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: False)
         monkeypatch.setattr(
-            archive.blobstore, "put_rung", lambda _s, run, snap, _p: sent.append((run, snap)) or 1
+            archive.blobstore,
+            "put_object",
+            lambda _s, name, _p: sent.append(tuple(name.split("/", 1))) or 1,
         )
         run_dir = _run(tmp_path, "static-100.ckpt.zst", "static-200.ckpt.zst")
         assert archive.publish_rungs_to_blob(run_dir, "run-a", SAS) == 2
@@ -41,10 +43,12 @@ class TestWhatItUploads:
     def test_a_rung_already_there_is_skipped(self, tmp_path, monkeypatch):
         """Existence is a HEAD on the object. One rung is one atomically
         committed blob, so there is no half-written state to guard."""
-        monkeypatch.setattr(archive.blobstore, "exists", lambda _s, _r, snap: "100" in snap)
+        monkeypatch.setattr(archive.blobstore, "exists", lambda _s, name: "100" in name)
         sent = []
         monkeypatch.setattr(
-            archive.blobstore, "put_rung", lambda _s, run, snap, _p: sent.append(snap) or 1
+            archive.blobstore,
+            "put_object",
+            lambda _s, name, _p: sent.append(name.split("/", 1)[1]) or 1,
         )
         run_dir = _run(tmp_path, "static-100.ckpt.zst", "static-200.ckpt.zst")
         assert archive.publish_rungs_to_blob(run_dir, "run-a", SAS) == 1
@@ -57,7 +61,9 @@ class TestWhatItUploads:
         monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: False)
         sent = []
         monkeypatch.setattr(
-            archive.blobstore, "put_rung", lambda _s, _r, snap, _p: sent.append(snap) or 1
+            archive.blobstore,
+            "put_object",
+            lambda _s, name, _p: sent.append(name.split("/", 1)[1]) or 1,
         )
         run_dir = _run(tmp_path, "static-100.ckpt.zst", marked=("static-100.ckpt.zst",))
         assert archive.publish_rungs_to_blob(run_dir, "run-a", SAS) == 1
@@ -67,7 +73,9 @@ class TestWhatItUploads:
         monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: False)
         sent = []
         monkeypatch.setattr(
-            archive.blobstore, "put_rung", lambda _s, _r, snap, _p: sent.append(snap) or 1
+            archive.blobstore,
+            "put_object",
+            lambda _s, name, _p: sent.append(name.split("/", 1)[1]) or 1,
         )
         run_dir = _run(tmp_path, "static-100.ckpt.zst")
         (run_dir / "evals").mkdir()
@@ -103,12 +111,12 @@ class TestWhatItDoesWhenItCannot:
     def test_one_bad_rung_does_not_stop_the_others(self, tmp_path, monkeypatch):
         monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: False)
 
-        def _put(_s, _r, snap, _p):
-            if "100" in snap:
+        def _put(_s, name, _p):
+            if "100" in name:
                 raise RuntimeError("transient")
             return 1
 
-        monkeypatch.setattr(archive.blobstore, "put_rung", _put)
+        monkeypatch.setattr(archive.blobstore, "put_object", _put)
         run_dir = _run(tmp_path, "static-100.ckpt.zst", "static-200.ckpt.zst")
         assert archive.publish_rungs_to_blob(run_dir, "run-a", SAS) == 1
 
@@ -192,6 +200,6 @@ class TestALegacyRungIsNeverStranded:
         """It cannot convert one, so it must not claim to have moved one."""
         monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: False)
         monkeypatch.setattr(
-            archive.blobstore, "put_rung", lambda *_a: pytest.fail("uploaded a directory")
+            archive.blobstore, "put_object", lambda *_a: pytest.fail("uploaded a directory")
         )
         assert archive.publish_rungs_to_blob(self._legacy(tmp_path), "run-a", SAS) == 0
