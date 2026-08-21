@@ -162,7 +162,11 @@ def run(args: argparse.Namespace) -> MigratedPayload:
         dropped_mode=bool(args.drop_share),
         applied=bool(args.drop_share and args.apply),
     )
-    wanted = set(args.runs or [])
+    # SPLIT ON WHITESPACE. A shell that fails to word-split `--runs $ids` hands
+    # over ONE space-joined value; no run id contains a space, so the intent is
+    # unambiguous. Taking it literally filtered on a run that cannot exist:
+    # 29 tasks queued, considered 0 runs, deleted nothing and exited 0.
+    wanted = {name for value in (args.runs or []) for name in value.split()}
     # TIMED AND PRINTED AT EVERY STAGE, because the first version of this
     # printed only after a successful upload and told me nothing when it spent
     # thirty minutes reaching zero. Reading a share directory is latency-bound
@@ -223,6 +227,25 @@ def run(args: argparse.Namespace) -> MigratedPayload:
     return payload
 
 
+def _rmtree_parallel(directory: Path) -> None:
+    """Delete a snapshot directory, unlinking its files in PARALLEL.
+
+    A rung is ~5,500 files and SMB is latency-bound, so `shutil.rmtree` walks
+    them one round trip at a time: measured 169 deletes/second on a node, which
+    is 443 rungs in a four-hour task. The copy path beside this has used a
+    thread pool for exactly this reason since 08-24.
+    """
+    import shutil  # noqa: PLC0415 -- node-only
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415 -- node-only
+
+    files = [path for path in directory.rglob("*") if path.is_file()]
+    if files:
+        with ThreadPoolExecutor(max_workers=archive.copy_workers()) as pool:
+            list(pool.map(lambda path: path.unlink(missing_ok=True), files))
+    # The directories are empty now, so this is a walk of the tree and no data.
+    shutil.rmtree(directory, ignore_errors=True)
+
+
 def _drop_one(
     args: argparse.Namespace,
     payload: MigratedPayload,
@@ -237,7 +260,6 @@ def _drop_one(
     `verify_published_rungs` builds from them before it asks the container.
     Deleting it would make a rung the container holds unscoreable.
     """
-    import shutil  # noqa: PLC0415 -- node-only
 
     from src.shared import records  # noqa: PLC0415 -- node-only
     from src.shared.cloudtask.node import blobstore  # noqa: PLC0415 -- node-only
@@ -255,7 +277,7 @@ def _drop_one(
     if not args.apply:
         payload.rungs_dropped += 1
         return
-    shutil.rmtree(run_dir / snapshot)
+    _rmtree_parallel(run_dir / snapshot)
     payload.rungs_dropped += 1
     print(f"  {snapshot}: dropped", flush=True)
 
