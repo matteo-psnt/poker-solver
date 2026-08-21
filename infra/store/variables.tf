@@ -45,10 +45,30 @@ variable "share_quota_gb" {
   default     = 4096
 }
 
-variable "postgres_server_name" {
-  description = "Globally unique across Azure; change it if creation fails with a name-taken error."
+variable "postgres_location" {
+  description = <<-EOT
+    The record server's region, and deliberately NOT `location`. The share must
+    sit with the boxes -- SMB pays WAN latency per file -- but the database
+    must sit with its READERS, and every reader is the laptop: the CLI and the
+    console. The nodes write a few rows a rung, each through a fresh
+    connection, and cannot tell 5 ms from 120.
+
+    Measured from the laptop to Sweden Central: 116-175 ms per round trip, and
+    a cold command spent seven or more of them before its first query. Canada
+    Central is Toronto, the same city the laptop usually is.
+  EOT
   type        = string
-  default     = "poker-solver-record"
+  default     = "canadacentral"
+}
+
+variable "postgres_server_name" {
+  description = <<-EOT
+    Globally unique across Azure; change it if creation fails with a name-taken
+    error. `-ca` because the Sweden server still holds `poker-solver-record`
+    until it is deleted (postgres.tf, the retired `record`).
+  EOT
+  type        = string
+  default     = "poker-solver-record-ca"
 }
 
 variable "postgres_admin_user" {

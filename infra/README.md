@@ -102,8 +102,10 @@ Two things worth knowing at the seams:
   `score` itself rather than handing it to the passthrough.
 - **Readers answer from the record, and there is no local copy.** `ledger`,
   `curve`, `runinfo` and friends read Postgres; the DSN comes from the store's
-  Terraform state at startup. Nothing on a laptop is a source of truth about a
-  run, so a local copy could only be a stale second answer.
+  Terraform state at startup, cached under the cache root for an hour. Nothing
+  on a laptop is a source of truth about a run, so a local copy could only be
+  a stale second answer. The server is in Canada Central, with its readers,
+  not with the boxes: `docs/record-move.md`.
 
 `to` is an **absolute** iteration target. That is what makes Batch's automatic
 retry safe: a retried task re-reads a newer checkpoint and converges on the same

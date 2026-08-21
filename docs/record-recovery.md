@@ -35,7 +35,7 @@ and one failed silently enough to look like a network problem.
 ```sh
 az postgres flexible-server restore \
   --name <restored> --resource-group poker-solver-store-rg \
-  --source-server poker-solver-record \
+  --source-server poker-solver-record-ca \
   --restore-time 2026-09-02T23:51:48Z          # UTC, >= a few minutes ago
 ```
 
@@ -43,7 +43,7 @@ Then point the DSN at it by host substitution — admin credentials are preserve
 
 ```sh
 export POKER_SOLVER_RECORD_DSN=$(terraform -chdir=infra/store output -raw postgres_dsn \
-  | sed 's/poker-solver-record\./<restored>./')
+  | sed 's/poker-solver-record-ca\./<restored>./')
 ```
 
 ## The window
