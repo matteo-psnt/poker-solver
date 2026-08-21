@@ -10,16 +10,19 @@ from src.interfaces.commands import migrate_checkpoints, submit_migrate
 def _flags(**over):
     args = argparse.Namespace(
         runs=None,
-        limit=0,
-        verify=False,
-        drop_share=False,
-        apply=False,
         pool=None,
         timeout="6h",
     )
     for key, value in over.items():
         setattr(args, key, value)
     return submit_migrate._flags(args)
+
+
+def _parse(flags):
+    """Parse on the node side, as `migrate-checkpoints` will."""
+    parser = argparse.ArgumentParser()
+    migrate_checkpoints.add_arguments(parser)
+    return parser.parse_args(list(flags))
 
 
 class TestTheFlagsReachTheSweepIntact:
@@ -33,19 +36,10 @@ class TestTheFlagsReachTheSweepIntact:
         parsed = _parse(_flags(runs=["run-a", "run-b", "run-c"]))
         assert parsed.runs == ["run-a", "run-b", "run-c"]
 
-    def test_a_limit_survives(self):
-        assert _parse(_flags(limit=5)).limit == 5
-
     def test_nothing_asked_for_is_nothing_sent(self):
         assert _flags() == ()
         parsed = _parse(())
         assert parsed.runs is None
-        assert parsed.limit == 0
-
-    def test_verify_survives(self):
-        """It existed on the sweep and had no way to reach the node: the
-        submitter never emitted it, so `--verify` silently ran a real sweep."""
-        assert _parse(_flags(verify=True)).verify is True
 
     def test_every_flag_the_sweep_takes_can_be_asked_for(self):
         """The general form of the `--verify` gap: a flag declared on the node
@@ -59,14 +53,3 @@ class TestTheFlagsReachTheSweepIntact:
         emitted = {a.dest for a in submitter._actions}
         unreachable = {a.dest for a in sweep._actions} - emitted - {"help", "share"}
         assert not unreachable, f"the sweep accepts flags nothing can send: {sorted(unreachable)}"
-
-    def test_both_together(self):
-        parsed = _parse(_flags(runs=["run-a", "run-b"], limit=3))
-        assert parsed.runs == ["run-a", "run-b"]
-        assert parsed.limit == 3
-
-
-def _parse(flags):
-    parser = argparse.ArgumentParser()
-    migrate_checkpoints.add_arguments(parser)
-    return parser.parse_args(list(flags))

@@ -14,7 +14,7 @@ failure is ever visible.
 Layout on disk::
 
     <dir>/STATIC_CHECKPOINT.json     manifest: current + retained ladder
-    <dir>/static-<iteration>.zarr    the five arrays
+    <dir>/static-<iteration>.ckpt.zst    the five arrays, one object
 
 The manifest is published with an atomic ``Path.replace`` after the arrays are
 fully written, so a snapshot is either current or absent, never half-current.
@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -217,18 +216,16 @@ def _extend_ladder(
 def _prune(checkpoint_dir: Path, manifest: dict) -> None:
     """Delete snapshots that are neither current nor retained.
 
-    BOTH SHAPES, because a run that started before the format changed has zarr
-    DIRECTORIES beside its newer single-file rungs -- and a prune that saw only
-    one of them would leave the other accumulating forever, silently, which is
-    the ladder growth this exists to stop.
+    THROUGH `object_name` ON BOTH SIDES. The manifest of a run that started
+    before the format changed names `static-N.zarr` while the file beside it is
+    `static-N.ckpt.zst`, so comparing the two literally kept nothing: the rung
+    a resume had just fetched matched no entry and was deleted as surplus.
     """
-    keep = {manifest["zarr"]} | {entry["zarr"] for entry in manifest["retained"]}
-    for path in checkpoint_dir.glob("static-*"):
-        if path.name in keep or not (path.name.endswith((".zarr", snapshot_format.SUFFIX))):
-            continue
-        if path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
-        else:
+    keep = {records.object_name(manifest["zarr"])} | {
+        records.object_name(entry["zarr"]) for entry in manifest["retained"]
+    }
+    for path in checkpoint_dir.glob(f"static-*{snapshot_format.SUFFIX}"):
+        if path.name not in keep:
             path.unlink(missing_ok=True)
 
 
@@ -308,25 +305,13 @@ def _open_snapshot(
 ) -> dict[str, np.ndarray]:
     """One rung's arrays, refusing any the manifest disagrees with.
 
-    Reads EITHER format. A `.ckpt.zst` is one object; a `.zarr` is the
-    directory every rung published before the format changed, and that half
-    goes when the last of them has been converted -- it is migration
-    scaffolding, not a second supported format.
-
-    THE MANIFEST'S OWN SPELLING FIRST, then the object it converts to. A
-    manifest written before the migration names the directory while a fetch
-    from the container brings down the object, and only the fallback makes that
-    rung loadable. Preferring the object would read a `.ckpt.zst` in favour of
-    the `.zarr` the manifest actually names; `fetch_snapshot` is what keeps a
-    stale copy of the other spelling from sitting there to be picked up.
+    THE NAME IS MAPPED, NOT TRUSTED. A manifest written before the format
+    changed still spells `static-N.zarr` and is never repointed -- rewriting
+    them would have mutated the durable share -- so `records.object_name` is
+    what turns the claim into the file that exists.
     """
-    path = Path(checkpoint_dir) / entry["zarr"]
-    if not path.exists():
-        path = Path(checkpoint_dir) / records.object_name(entry["zarr"])
-    if path.name.endswith(snapshot_format.SUFFIX):
-        arrays, attrs = snapshot_format.read_snapshot(path, names)
-    else:
-        arrays, attrs = _read_legacy_zarr(path, names)
+    path = Path(checkpoint_dir) / records.object_name(entry["zarr"])
+    arrays, attrs = snapshot_format.read_snapshot(path, names)
     stored = attrs.get("fingerprint")
     if stored != expected:
         raise FingerprintMismatchError(
@@ -334,21 +319,6 @@ def _open_snapshot(
             "The manifest and the arrays disagree; the snapshot is corrupt."
         )
     return arrays
-
-
-def _read_legacy_zarr(
-    path: Path, names: Iterable[str] | None = None
-) -> tuple[dict[str, np.ndarray], dict[str, object]]:
-    """A pre-`.ckpt.zst` rung. DELETE WITH THE LAST ZARR SNAPSHOT.
-
-    Imported here rather than at module scope so that dropping the dependency
-    is one edit in one place once the migration has converted everything.
-    """
-    import zarr  # noqa: PLC0415 -- legacy read path only; see the docstring
-
-    root = zarr.open(zarr.DirectoryStore(path), mode="r")
-    wanted = list(root.array_keys()) if names is None else [n for n in names if n in root]
-    return {name: root[name][:] for name in wanted}, dict(root.attrs)
 
 
 def read_strategy_sum(storage: StaticArrayStorage, checkpoint_dir: Path, iteration: int):

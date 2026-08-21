@@ -21,10 +21,6 @@ dependencies = [
     "scikit-learn==1.7.2",
     "numba>=0.63.1,<0.64",
     "xxhash>=3.6.0",
-    # LEGACY READ PATH ONLY. `save_checkpoint` writes one zstd object; this
-    # reads the rungs published before it did, and goes when the migration
-    # has converted the last one. `numcodecs` went with the write path.
-    "zarr<3",
     "eval7>=0.1.10",
     "pydantic>=2.0",
     "azure-batch>=15.1.0",
