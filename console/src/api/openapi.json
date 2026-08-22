@@ -3378,6 +3378,17 @@
             "title": "Abstractions",
             "type": "array"
           },
+          "board_relative": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Relative"
+          },
           "boards": {
             "anyOf": [
               {
@@ -3520,6 +3531,17 @@
             },
             "title": "Abstractions",
             "type": "array"
+          },
+          "board_relative": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Relative"
           },
           "checkpoints": {
             "anyOf": [
