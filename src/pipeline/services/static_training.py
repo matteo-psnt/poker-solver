@@ -197,25 +197,28 @@ def train_static(
     # confidence where it has one. Kept as a base rather than a second seeding
     # pass so the two never race to write the same iteration-0 checkpoint.
     equity_base = None
+    equity_policy = None
+    equity_tree = None
     if equity_prior_weight and not resuming:
-        equity_base = equity_prior.tree_regrets(
-            config, weight=equity_prior_weight, temperature=equity_prior_temperature
+        # Built once and threaded through: every implicit build reloads the card
+        # abstraction, and three of them cost ~50 minutes before iteration 1.
+        equity_tree = equity_prior.build_tree(config)
+        equity_policy = equity_prior.tree_policy(
+            config, temperature=equity_prior_temperature, tree=equity_tree
         )
-    if equity_base is not None and warm_start_from is None and not resuming:
+        equity_base = equity_policy * float(equity_prior_weight)
+    if equity_policy is not None and warm_start_from is None and not resuming:
         # The prior only PLAYS through strategy_sum; regrets alone just steer
         # training. Scaling the same distribution keeps the two channels
         # describing one guess rather than two.
-        fallback = None
-        if equity_prior_fallback > 0.0:
-            fallback = equity_prior_fallback * equity_prior.tree_policy(
-                config, temperature=equity_prior_temperature
-            )
+        fallback = equity_policy * equity_prior_fallback if equity_prior_fallback > 0.0 else None
         equity_prior.write_checkpoint(
             config,
             run_dir=run_dir,
-            regrets=equity_base,
+            regrets=equity_policy * float(equity_prior_weight),
             abstraction_hash=tracker.metadata.card_abstraction_hash,
             fallback=fallback,
+            tree=equity_tree,
         )
         (run_dir / warm_start.SEEDED_MARKER).write_text(
             f"equity-prior weight={equity_prior_weight} "
