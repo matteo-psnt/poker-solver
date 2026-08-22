@@ -25,83 +25,67 @@ on Azure Batch; the laptop is for tests and dispatch.
 and `.importlinter` is the documentation** — nine contracts, four of which state
 a rule the directory alone does not. Read it before moving anything.
 
-Detail that only matters inside one subtree lives in `.claude/rules/`, scoped by
-path so it loads when you open a matching file: `commands.md`, `console.md`,
-`cloud.md`, `solver-and-evaluation.md`.
+Subtree detail lives in `.claude/rules/`, path-scoped so it loads with a
+matching file: `commands.md`, `console.md`, `cloud.md`,
+`solver-and-evaluation.md`.
 
-**There are TWO surfaces, split by who is asking.** `poker-solver` is the
-scriptable one — what a cloud job, a shell, and an AI agent drive. The web
-console is the one a human reads. The console reimplements nothing: **it may
-COMPOSE command payloads, and it may not COMPUTE one.** New capability goes in a
-command; the console gains it by calling one.
+**TWO surfaces, split by who is asking.** `poker-solver` is the scriptable one —
+what a cloud job, a shell and an agent drive; the web console is the one a human
+reads. New capability goes in a command; the console gains it by calling one.
 
 **There is no `data/` directory, and nothing recreates one.** Runs live on the
-share and nowhere else. Regenerable caches live under `$POKER_SOLVER_CACHE`,
-else `$XDG_CACHE_HOME`, else `~/.cache/poker-solver`;
-`tests/shared/test_cache.py` fails if any module names a `data/cache` path
-again. Anything under `data/` is a cache by definition: never a source of truth,
+share and nowhere else. Regenerable caches go under `$POKER_SOLVER_CACHE`, else
+`$XDG_CACHE_HOME`, else `~/.cache/poker-solver` — never a source of truth,
 never worth backing up.
 
-Config YAML lives under `config/` and is the source of truth for training
-setups; name new files for their purpose. Tests in `tests/` mirror `src/`.
+Config YAML under `config/` is the source of truth for training setups; name new
+files for their purpose. Tests in `tests/` mirror `src/`.
 
 ## Cost & where work runs
 
-Compute budget is effectively unbounded — **money is not a constraint here.** If
-a bigger box, more nodes, a longer task, more seeds, or more evaluation deals
-would make a result arrive sooner or land with tighter error bars, propose that;
-don't quietly pick the cheap option. Never trade statistical power or wall-clock
-for dollars, and don't cite a cost estimate as a reason against something.
+**Money is not a constraint.** If a bigger box, more nodes, a longer task, more
+seeds or more evaluation deals would land a result sooner or with tighter error
+bars, propose that. Never trade statistical power or wall-clock for dollars, and
+never cite cost as a reason against something.
 
 **Real work runs in the cloud, not on the laptop.** Local is for tests, the
-pre-commit gate, and seconds-long probes — no training, precompute, or
-evaluation, not even a shrunken "sanity" version. For a fast signal, run a short
-one-node job on the pool.
+pre-commit gate and seconds-long probes — no training, precompute or evaluation,
+not even a shrunken "sanity" version. For a fast signal, run a short one-node job
+on the pool.
 
 That makes the cloud path the critical path: when it is awkward, **fix the infra
-instead of routing around it locally.** Work on `src/interfaces/cloud/` and
-`infra/` is in scope by default.
+instead of routing around it locally** — `src/interfaces/cloud/` and `infra/` are
+in scope by default.
 
 **Wall-clock is the scarce thing.** Probe short before committing long, and give
 an ETA plus a go-ahead check before anything multi-hour.
 
 ## Code style
 
-Python 3.13+ (ruff `target-version = "py313"`). `src/shared/cloudtask/` is
-**stdlib only** — the node imports it BEFORE `uv sync`, so nothing third-party
-exists yet — but it is on the same 3.13 as everything else: the pool's start task
-installs the interpreter (`uv python install 3.13`, `infra/main.tf`) rather than
-using the image's `python3`. There is no old-language floor to code around; two
-tests enforce the stdlib rule.
+Python 3.13+ (ruff `target-version = "py313"`) everywhere, node included — the
+pool installs the interpreter, so there is no old-language floor to code around.
+`src/shared/cloudtask/` and its closure are **stdlib only**: the node imports
+them before `uv sync`. Ruff enforces formatting and import sorting — don't
+hand-police style. What is *not* enforced by tooling:
 
-Ruff enforces formatting and import sorting — don't hand-police style. What is
-*not* enforced by tooling:
-
-- Imports at the top of the file; avoid importing inside functions unless
-  absolutely necessary.
-- **Do not assume backward compatibility is required.** Unless explicitly
-  requested, prefer clean breaks over compatibility shims, aliases, or legacy
-  import paths.
+- Imports at the top of the file; avoid importing inside a function.
+- **Do not assume backward compatibility is required.** Prefer clean breaks over
+  compatibility shims, aliases and legacy import paths.
 - **A docstring says why the code has this shape, not what used to be there.**
-  Deleted alternatives, the bug that prompted a fix, and what a module replaces
-  belong in the commit message — not at the top of a file every reader pays for.
-  Prose rots silently and nothing fails: `kinds.py` asserted for weeks that two
-  task kinds no longer existed while four of their commands stayed registered.
+  Deleted alternatives, the bug behind a fix and what a module replaces belong in
+  the commit message. Prose rots silently and nothing fails.
 - **Write the shortest docstring that leaves the reader able to act.** It earns
-  its lines by carrying what the code cannot — an invariant a caller can
-  violate, a unit, a sign convention, an array shape, a measurement that decides
-  a knob — and never by restating a signature `ty` already checks, so
-  `Args:`/`Returns:` blocks are noise. Don't restate a `.claude/rules/` bullet
-  either; those load with the file, so a copy is a second thing to keep true.
-  **Three lines is the budget, and longer than the code below it is the smell.**
-  A one-line annotation *after* a field is the house style for a non-obvious
-  attribute; a multi-paragraph block with an underlined heading, sitting between
-  declarations, is not — that is a string statement, discarded at import, read
-  by nothing, and ruff has no rule that will tell you.
-- **A guard test pins a MEASURED failure, not a filing convention.** Read cost,
-  the node's stdlib floor, contract staleness and the golden numbers each earn
-  their place because they broke something expensive. A registry with no
-  violations in it is documentation wearing a tripwire; write the documentation.
+  its lines by carrying what the code cannot — an invariant a caller can violate,
+  a unit, a sign convention, an array shape, a measurement that decides a knob.
+  Never restate a signature `ty` already checks (`Args:`/`Returns:` blocks are
+  noise) or a `.claude/rules/` bullet that loads anyway. **Three lines is the
+  budget, and longer than the code below it is the smell.**
+- **A string that is not the first statement of a scope is not a docstring** — it
+  is discarded at import, read by nothing, and no ruff rule will tell you. The
+  house style for a non-obvious attribute is a one-line comment after the field.
+- **A guard test pins a MEASURED failure, not a filing convention.** A registry
+  with no violations in it is documentation wearing a tripwire; write the
+  documentation instead.
 - This is a research-grade project: call out anything that does not meet that
   bar — bugs, correctness risks, or inelegant code that can be optimized.
 
