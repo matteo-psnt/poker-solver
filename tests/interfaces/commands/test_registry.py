@@ -21,7 +21,7 @@ from typing import cast
 import pytest
 
 from src.interfaces.cli import headless
-from src.interfaces.commands import BY_NAME, COMMANDS, load_all
+from src.interfaces.commands import BY_NAME, COMMANDS, GROUPS, load_all
 
 # On every subcommand whether or not its own flags were built: `--json` and
 # `--log-level` come from the shared parent parser, and argparse adds `-h`.
@@ -60,6 +60,50 @@ class TestTheRefsMatchTheirModules:
 
     def test_names_are_unique(self):
         assert len(BY_NAME) == len(COMMANDS)
+
+
+class TestHelpIsGrouped:
+    """`--help` is the first thing a reader meets, and it had stopped saying
+    anything: 32 names in one 900-character token, twice, while `CLAUDE.md` and
+    the registry both described four groups. The groups were a comment.
+    """
+
+    def test_every_group_heading_reaches_the_listing(self):
+        listing = headless._listing()
+        for group in GROUPS:
+            assert group.title in listing
+
+    def test_every_command_is_listed_exactly_once(self):
+        """`COMMANDS` is derived from `GROUPS`, so a command cannot be in two
+        groups or none -- this pins that the LISTING inherits that property."""
+        listing = headless._listing()
+        # A name row is exactly four spaces then the name. Matching on a prefix
+        # instead would count `serve-box` as a second `serve`, and a wrapped
+        # help line -- indented past the name column -- as a command of its own.
+        named = [
+            line.split()[0]
+            for line in listing.splitlines()
+            if line.startswith("    ") and not line[4:5].isspace()
+        ]
+        assert sorted(named) == sorted(ref.name for ref in COMMANDS)
+
+    def test_usage_does_not_name_every_command(self):
+        """What `metavar` buys. Without it argparse puts all 32 into `usage:`."""
+        usage = headless.build_parser([]).format_usage()
+        assert "<command>" in usage
+        assert "pool-status" not in usage
+
+    def test_an_unknown_command_is_still_told_what_the_commands_are(self):
+        """The other half: suppressing the flat block must not suppress THIS.
+
+        `_named_command` returns None for an unrecognised token and leans on
+        argparse producing its own listing; a `metavar` that swallowed it would
+        leave a bare "invalid choice" with nowhere to go.
+        """
+        parser = headless.build_parser(["bogus"])
+        with pytest.raises(argparse.ArgumentError) as caught:
+            parser._subparsers._group_actions[0](parser, argparse.Namespace(), "bogus")
+        assert "pool-status" in str(caught.value)
 
 
 class TestTheLazyParserIsTheEagerParser:
