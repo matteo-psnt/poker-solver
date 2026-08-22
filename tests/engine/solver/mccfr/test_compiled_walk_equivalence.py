@@ -33,7 +33,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import FULL_DECK, Street
 from src.engine.solver.betting_tree import build_betting_tree
-from src.engine.solver.mccfr.compiled_walk import CompiledContext, run_iteration
+from src.engine.solver.mccfr.compiled_walk import CompiledContext, run_iteration, run_iterations
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.pipeline.abstraction.postflop.bucketer import (
@@ -124,3 +124,52 @@ def test_the_compiled_kernel_is_bit_identical_to_the_tree_walk():
     # And the comparison must not have passed on two empty tables.
     assert int(got["visited"].sum()) > 0
     assert np.count_nonzero(got["strategy_sum"]) > 0
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(900)
+def test_one_crossing_per_range_is_the_same_stream_as_one_per_iteration():
+    """``run_iterations`` hands the generators over once for the whole range.
+
+    What that must not change: the draws, their order, or where both streams
+    are left -- a range that advanced the kernel's copy but restored Python's
+    from the wrong place would diverge on the NEXT call, not this one, so the
+    check draws once more from each stream after the range.
+    """
+    config = make_test_config(seed=42, starting_stack=60, iteration_weighting="dcfr")
+    bucketer = artifact()
+    action_model = ActionModel(config)
+    tree = build_betting_tree(
+        GameRules(config.game.small_blind, config.game.big_blind),
+        action_model,
+        bucketer,
+        starting_stack=config.game.starting_stack,
+    )
+    context = CompiledContext(tree, bucketer, FULL_DECK)
+
+    def arm(ranges):
+        storage = StaticArrayStorage(tree)
+        solver = StaticTreeSolver(action_model, bucketer, storage, config, tree=tree)
+        random.seed(1234)
+        np.random.seed(1234)
+        values = []
+        for block in ranges:
+            values.extend(float(v) for v in run_iterations(solver, context, block))
+        arrays = {name: getattr(storage, name).copy() for name in ARRAYS}
+        return arrays, values, (random.random(), np.random.random()), solver.applied_updates
+
+    n = 250
+    singles = arm([range(i, i + 1) for i in range(n)])
+    batched = arm([range(100), range(100, n)])
+    for name in ARRAYS:
+        assert np.array_equal(batched[0][name], singles[0][name]), name
+    assert batched[1:] == singles[1:]
+    assert int(singles[0]["visited"].sum()) > 0
+
+    # A worker's range is interleaved, so the kernel's loop must honour the step.
+    order = [range(s, n, 3) for s in range(3)]
+    strided_singles = arm([range(i, i + 1) for block in order for i in block])
+    strided = arm(order)
+    for name in ARRAYS:
+        assert np.array_equal(strided[0][name], strided_singles[0][name]), name
+    assert strided[1:] == strided_singles[1:]

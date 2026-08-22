@@ -20,18 +20,16 @@ that would otherwise be free choices —
     where the kernel stopped.
 
 ``Deck`` is passed in rather than rebuilt because ``FULL_DECK``'s ORDER decides
-which card ``randrange(52)`` names.
+which card a dealt position names.
 """
 
 from __future__ import annotations
-
-import random
 
 import numpy as np
 from numba import jit
 
 from src.core.game.numba_eval import hand_rank
-from src.core.game.state import FULL_DECK, Street
+from src.core.game.state import Street
 from src.engine.solver.infoset.index import preflop_hand_index
 from src.engine.solver.numba_lookup import board_id, hand_id, suit_labels
 from src.engine.solver.numba_ops import (
@@ -48,10 +46,6 @@ from src.engine.solver.numba_random import (
     restore_python_state,
 )
 from src.engine.solver.vector.walk_arrays import WalkArrays
-
-# `randrange(52)` names a POSITION in this deck, so the order is part of the
-# stream, not an implementation detail.
-_DECK_POSITION = {card: index for index, card in enumerate(FULL_DECK)}
 
 _DEAL_BITS = 6
 _DECK_SIZE = 52
@@ -638,48 +632,153 @@ class CompiledContext:
         )
 
 
-def run_iteration(solver, context, iteration: int) -> float:
-    """One ``train_iteration``, with the traversal inside the kernel.
+@jit(nopython=True, cache=True)
+def walk_many(
+    first,
+    stop,
+    step,
+    utilities,
+    regrets,
+    strategy_sum,
+    reach_counts,
+    cumulative_utility,
+    visited,
+    edge_offset,
+    edge_child,
+    edge_deal,
+    edge_terminal,
+    num_actions,
+    row_offset,
+    slot_offset,
+    buckets_per_node,
+    actor_is_button,
+    is_preflop,
+    street_of_node,
+    terminal_is_fold,
+    terminal_cards_to_deal,
+    terminal_fold,
+    terminal_win,
+    terminal_lose,
+    terminal_tie,
+    deck_rank,
+    deck_suit,
+    deck_mask,
+    preflop_index,
+    street_board_ids,
+    street_matrix,
+    street_offsets,
+    hand_to_col,
+    sentinels,
+    cfr_plus,
+    weighting,
+    alpha,
+    beta,
+    gamma,
+    deal_state,
+    deal_index,
+    sample_state,
+    sample_index,
+):
+    """Every iteration of ``range(first, stop, step)``, in one crossing.
 
-    Hole cards are still dealt in Python, by ``random.sample(FULL_DECK, 4)``,
-    because that is where ``chance.deal_initial_state`` draws them and the
-    stream has to match card for card. The kernel then takes both generators,
-    advances them, and hands the state back so Python continues where it
-    stopped — see ``numba_random``.
+    The hole cards are dealt here too: ``random.sample(FULL_DECK, 4)`` at n=52
+    takes the set branch -- ``randbelow(52)`` per card, redrawn on a repeat --
+    which is exactly ``_draw`` against an empty seen-mask. ``utilities[i]`` is
+    the i-th iteration's signed utility; returns (deal_index, sample_index,
+    applied).
     """
-    cards = random.sample(FULL_DECK, 4)
-    hole_index = np.array([_DECK_POSITION[card] for card in cards], dtype=np.int64)
+    applied = 0
+    hole_index = np.empty(4, dtype=np.int64)
+    root_board = np.zeros(5, dtype=np.int64)
+    for done, iteration in enumerate(range(first, stop, step)):
+        known, deal_index = _draw(deck_mask, 0, 4, hole_index, 0, deal_state, deal_index)
+        traverser = iteration % 2
+        button = (iteration // 2) % 2
+        if weighting == 2:
+            strategy_weight = compute_dcfr_strategy_weight(iteration, gamma)
+        elif weighting == 1:
+            strategy_weight = 1.0 * iteration
+        else:
+            strategy_weight = 1.0
+        seat = 0 if traverser == button else 1
+        utility, deal_index, sample_index, applied = walk(
+            0,
+            root_board,
+            0,
+            known,
+            traverser,
+            button,
+            seat,
+            iteration,
+            hole_index,
+            regrets,
+            strategy_sum,
+            reach_counts,
+            cumulative_utility,
+            visited,
+            edge_offset,
+            edge_child,
+            edge_deal,
+            edge_terminal,
+            num_actions,
+            row_offset,
+            slot_offset,
+            buckets_per_node,
+            actor_is_button,
+            is_preflop,
+            street_of_node,
+            terminal_is_fold,
+            terminal_cards_to_deal,
+            terminal_fold,
+            terminal_win,
+            terminal_lose,
+            terminal_tie,
+            deck_rank,
+            deck_suit,
+            deck_mask,
+            preflop_index,
+            street_board_ids,
+            street_matrix,
+            street_offsets,
+            hand_to_col,
+            sentinels,
+            cfr_plus,
+            weighting,
+            alpha,
+            beta,
+            strategy_weight,
+            deal_state,
+            deal_index,
+            sample_state,
+            sample_index,
+            applied,
+        )
+        utilities[done] = -utility if traverser == 1 else utility
+    return deal_index, sample_index, applied
 
-    traverser = iteration % 2
-    button = (iteration // 2) % 2
-    known = 0
-    for card in cards:
-        known |= card.mask
 
+def run_iterations(solver, context, iterations: range) -> np.ndarray:
+    """``train_iteration`` for each index of ``iterations``, crossing into the kernel once.
+
+    The crossing is the expensive part, not the walk: handing both MT19937
+    states to the kernel and back is ~280 us a call (measured), against a
+    ~300 us walk at production scale. So the generators are read once, advanced
+    through the whole range, and written back once -- the stream is the same
+    one iteration-by-iteration calls would have produced. Returns each
+    iteration's signed utility, in order.
+    """
     solver_config = solver.config.solver
-    weighting = WEIGHTING_CODES[solver_config.iteration_weighting]
-    if solver_config.iteration_weighting == "dcfr":
-        strategy_weight = 1.0 * compute_dcfr_strategy_weight(iteration, solver_config.dcfr_gamma)
-    elif solver_config.iteration_weighting == "linear":
-        strategy_weight = 1.0 * iteration
-    else:
-        strategy_weight = 1.0
-
     deal_state, deal_index = python_state()
     sample_state, sample_index = numpy_state()
+    utilities = np.empty(len(iterations), dtype=np.float64)
 
     arrays = context.arrays
     storage = solver.storage
-    utility, deal_index, sample_index, applied = walk(
-        0,
-        np.zeros(5, dtype=np.int64),
-        0,
-        known,
-        traverser,
-        button,
-        0 if traverser == button else 1,
-        iteration,
-        hole_index,
+    deal_index, sample_index, applied = walk_many(
+        iterations.start,
+        iterations.stop,
+        iterations.step,
+        utilities,
         storage.regrets,
         storage.strategy_sum,
         storage.reach_counts,
@@ -712,18 +811,22 @@ def run_iteration(solver, context, iteration: int) -> float:
         context.hand_to_col,
         context.sentinels,
         solver_config.cfr_plus,
-        weighting,
+        WEIGHTING_CODES[solver_config.iteration_weighting],
         solver_config.dcfr_alpha,
         solver_config.dcfr_beta,
-        strategy_weight,
+        solver_config.dcfr_gamma,
         deal_state,
         deal_index,
         sample_state,
         sample_index,
-        0,
     )
 
     restore_python_state(deal_state, deal_index)
     restore_numpy_state(sample_state, sample_index)
     solver.applied_updates += applied
-    return -utility if traverser == 1 else utility
+    return utilities
+
+
+def run_iteration(solver, context, iteration: int) -> float:
+    """One ``train_iteration``; ``run_iterations`` is the one to call in a loop."""
+    return float(run_iterations(solver, context, range(iteration, iteration + 1))[0])
