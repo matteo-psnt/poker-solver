@@ -119,6 +119,33 @@ def pull_metadata(
     return len(wanted)
 
 
+def resolve_published_run(run: str) -> str:
+    """The full published run id for ``run``, which may be a fragment.
+
+    Readers resolve a fragment locally (``resolve_run_dir``); DISPATCH has to
+    resolve too, because the id is sent to a node and the node has no fragment
+    matcher. Unresolved, `score --run 15261` cost a snapshot upload, a node
+    allocation and three retries before failing "no such run on the share".
+    Resolved against the share's own listing, so both sides answer from one
+    source -- the rule already stated in :func:`pull_metadata`.
+    """
+    config = CloudConfig.load()
+    service = share.share_client(config)
+    published = [
+        entry.name
+        for entry in share.list_entries(service, config.share_name, share.ARCHIVE_DIR)
+        if entry.is_directory
+    ]
+    matches = run_names.matching(run, published)
+    if len(matches) > 1:
+        raise CommandError(run_names.ambiguous_message(run, matches))
+    if not matches:
+        raise CommandError(
+            f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
+        )
+    return matches[0]
+
+
 @dataclass
 class _Tree:
     """One materialised subtree, and who is still reading it."""

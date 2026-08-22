@@ -73,8 +73,10 @@ def evaluate_and_record(
     exact_br: PublicBRConfig | None = None,
     resolver_iterations: int = 64,
     resolver_gate_deals: int = 1000,
+    resolver_gate_workers: int = 1,
     leaf_continuation_fraction: float | None = None,
     resolver_max_iterations: int | None = None,
+    resolver_allin_runouts: int = 1,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     progress_file: Path | None = None,
@@ -123,6 +125,8 @@ def evaluate_and_record(
             num_deals=resolver_gate_deals,
             leaf_continuation_fraction=leaf_continuation_fraction,
             max_iterations=resolver_max_iterations,
+            workers=resolver_gate_workers,
+            allin_runouts=resolver_allin_runouts,
         )
         estimator = RESOLVER_GATE_ESTIMATOR_LABEL
         knobs = eval_ledger.build_resolver_match_knobs(out.results)

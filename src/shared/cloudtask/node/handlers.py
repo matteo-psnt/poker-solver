@@ -272,8 +272,16 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
 # ``TaskName`` because what arrives from the environment is the wire string.
 
 
-def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-    """Measure one kernel on one abstraction, publishing the curve as it grows.
+# Where each measurement kind's result lands on the share. Separate folders
+# because they answer different questions and a reader globs one of them.
+MEASUREMENT_OUTPUT: dict[str, str] = {
+    TaskName.VECTOR_SWEEP: "vector-sweeps",
+    TaskName.ABSTRACTION_COUPLING: "abstraction-coupling",
+}
+
+
+def _measurement(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
+    """Run one abstraction measurement, publishing its result as it grows.
 
     The result is published on EVERY exit, not only success. A sweep that runs
     past its timeout is killed mid-checkpoint, and without this it would lose
@@ -286,7 +294,7 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
     """
     plan = _reporting(plan, paths)
     result = Path(plan.progress_path)
-    destination = paths.share / "vector-sweeps"
+    destination = paths.share / MEASUREMENT_OUTPUT[plan.op]
     # The task id is the node's, not the plan's -- the plan describes the WORK
     # and several retries of it would share one. Read the same way every other
     # node module reads it.
@@ -329,13 +337,13 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
         log("  publish one with `poker-solver push-data`, or build one with submit-precompute")
         return 1, None
 
-    log(f"vector-sweep: {plan.arm or 'sweep'} on {plan.config} (timeout {plan.timeout_seconds}s)")
+    log(f"{plan.op}: {plan.arm or 'measure'} on {plan.config} (timeout {plan.timeout_seconds}s)")
     progress.note_baseline(paths, plan)
     watcher = progress.ProgressWatcher(paths, log, plan=plan, publish_log=log.publish)
     watcher.start()
     stop = threading.Event()
     publisher = threading.Thread(
-        target=publish_as_it_lands, args=(stop,), name="vector-sweep-publish", daemon=True
+        target=publish_as_it_lands, args=(stop,), name=f"{plan.op}-publish", daemon=True
     )
     publisher.start()
     try:
@@ -352,9 +360,9 @@ def _vector_sweep(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[in
         publish_partial()
 
     if code != 0:
-        log(f"vector-sweep failed rc={code} (partial curve published if any was reached)")
+        log(f"{plan.op} failed rc={code} (partial result published if any was reached)")
         return code, None
-    log(f"published vector-sweeps/{published}")
+    log(f"published {MEASUREMENT_OUTPUT[plan.op]}/{published}")
     return 0, None
 
 
@@ -365,5 +373,7 @@ HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN_VECTOR: _train,
     TaskName.EVALUATE: _evaluate,
     TaskName.PRECOMPUTE: _precompute,
-    TaskName.VECTOR_SWEEP: _vector_sweep,
+    TaskName.VECTOR_SWEEP: _measurement,
+    # Same executor: an abstraction off the share, one command, one JSON result.
+    TaskName.ABSTRACTION_COUPLING: _measurement,
 }

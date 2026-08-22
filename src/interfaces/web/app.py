@@ -62,6 +62,7 @@ from src.interfaces.commands import (
     score,
     serve_box,
     submit,
+    submit_coupling,
     submit_precompute,
     submit_vector,
     tasks,
@@ -72,7 +73,7 @@ from src.interfaces.web.cache import TtlCache
 from src.shared import jsonio, repo
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
     from pathlib import Path
 
 # Long enough that several open tabs (or a remount) share one cloud sweep,
@@ -147,6 +148,17 @@ class SubmitBody(BaseModel):
     workers: int | None = None
     checkpoint_every: int | None = None
     timeout: str | None = None
+    # `--kernel` and the two groups it gates. Absent here for as long as they
+    # existed on the command, so the console could queue only scalar runs and
+    # only cold ones -- a gap that reads as a missing feature rather than a
+    # missing field. `test_endpoint_arguments` now pins every body to its flags.
+    kernel: str | None = None
+    universe_boards: int | None = None
+    universe_seed: int | None = None
+    dtype: str | None = None
+    warm_start_from: str | None = None
+    warm_start_weight: int | None = None
+    warm_start_at: int | None = None
 
 
 class ScoreBody(BaseModel):
@@ -176,6 +188,16 @@ class SubmitVectorBody(BaseModel):
     timeout: str | None = None
 
 
+class SubmitCouplingBody(BaseModel):
+    # Repeatable and required for the same reason as the sweep's: WHICH
+    # abstractions to price against each other is the measurement.
+    abstractions: list[str]
+    boards: int | None = None
+    classes: str | None = None
+    seed: int | None = None
+    timeout: str | None = None
+
+
 class PrecomputeBody(BaseModel):
     config: str
     workers: int | None = None
@@ -199,8 +221,26 @@ class CompactBody(BaseModel):
     label: str | None = None
 
 
+def _served(cache: TtlCache, key: tuple[Any, ...], produce: Callable[[], Any]) -> JSONResponse:
+    """One memoised answer, with its failures mapped onto status codes.
+
+    The surface goes on around the memo, not inside it: a request served from the
+    cache did not run the command, and recording it as if it had would report a
+    `tasks` that takes 5 seconds as one that mostly takes microseconds.
+
+    Failures are deliberately NOT cached: a repeated 503 costs a repeated cloud
+    read, and the alternative keeps serving "Azure is down" for the whole TTL
+    after `az login` has fixed it.
+    """
+    with telemetry.surface("console"):
+        payload, failure = attempt(lambda: cache.get(key, produce))
+    if failure is not None:
+        return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
+    return PayloadResponse(payload)
+
+
 def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
-    """Run one command, memoised, and map its failures onto status codes.
+    """Run one command, memoised per (command, arguments).
 
     ``cache`` and ``command`` are POSITIONAL-ONLY and the ``/`` is load-bearing:
     everything after it is a command's own flags, and a command is free to have one
@@ -210,20 +250,9 @@ def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
 
     The cache is passed in rather than reached for, so two apps in one process (a
     test and its subject) cannot serve each other's answers.
-
-    Failures are deliberately NOT cached: a repeated 503 costs a repeated cloud
-    read, and the alternative keeps serving "Azure is down" for the whole TTL after
-    `az login` has fixed it.
     """
     key = (command.name, tuple(sorted(kwargs.items())))
-    # Around the memo, not inside it: a request served from the cache did not
-    # run the command, and recording it as if it had would report a `tasks` that
-    # takes 5 seconds as one that mostly takes microseconds.
-    with telemetry.surface("console"):
-        payload, failure = attempt(lambda: cache.get(key, lambda: command.invoke(**kwargs)))
-    if failure is not None:
-        return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
-    return PayloadResponse(payload)
+    return _served(cache, key, lambda: command.invoke(**kwargs))
 
 
 @asynccontextmanager
@@ -345,6 +374,12 @@ def create_app() -> FastAPI:
     def _submit_vector(body: SubmitVectorBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_vector.COMMAND, **given(body))
 
+    @app.post(
+        "/api/submit-coupling", response_model=contract.SubmitCouplingPayload, responses=ERRORS
+    )
+    def _submit_coupling(body: SubmitCouplingBody) -> JSONResponse:
+        return answer(TtlCache(0.0), submit_coupling.COMMAND, **given(body))
+
     # `push-code` and `push-data` read a tree on the machine RUNNING THIS
     # SERVER, which is the one fact about them a browser hides. `--root` and
     # `--source` default to this checkout, so a console served from a different
@@ -367,67 +402,44 @@ def create_app() -> FastAPI:
     # the property that stops a second control surface existing. Not cached:
     # asking whether the box is up must not be answered from 15 seconds ago while
     # someone watches it boot.
+    #
+    # WHICH box is the command's own answer, and these three used to ask it to
+    # repeat itself: `--resource-group`, `--vm` and `--subscription` were passed
+    # back at their parser defaults, so the VM's name lived here as well as in
+    # `serve_box.py`. `action` stays spelled out -- these differ in exactly one
+    # argument, and leaving it implicit on the one whose value is the default
+    # makes the set read as though it were doing something else.
     @app.get("/api/box", response_model=contract.Box, responses=ERRORS)
     def _box() -> JSONResponse:
-        # `action` is spelled out on all three even though `status` is the
-        # command's own default: these three endpoints differ in exactly one
-        # argument, and leaving it implicit on one of them makes the set read as
-        # though it were doing something different.
-        return answer(
-            TtlCache(0.0),
-            serve_box.COMMAND,
-            action="status",
-            resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
-            vm=serve_box.DEFAULT_VM,
-            subscription=serve_box.DEFAULT_SUBSCRIPTION,
-        )
+        return answer(TtlCache(0.0), serve_box.COMMAND, action="status")
 
     @app.post("/api/box/start", response_model=contract.Box, responses=ERRORS)
     def _box_start() -> JSONResponse:
-        return answer(
-            TtlCache(0.0),
-            serve_box.COMMAND,
-            action="start",
-            resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
-            vm=serve_box.DEFAULT_VM,
-            subscription=serve_box.DEFAULT_SUBSCRIPTION,
-        )
+        return answer(TtlCache(0.0), serve_box.COMMAND, action="start")
 
     @app.post("/api/box/stop", response_model=contract.Box, responses=ERRORS)
     def _box_stop() -> JSONResponse:
-        return answer(
-            TtlCache(0.0),
-            serve_box.COMMAND,
-            action="stop",
-            resource_group=serve_box.DEFAULT_RESOURCE_GROUP,
-            vm=serve_box.DEFAULT_VM,
-            subscription=serve_box.DEFAULT_SUBSCRIPTION,
-        )
+        return answer(TtlCache(0.0), serve_box.COMMAND, action="stop")
 
-    # Several commands fanned out concurrently and joined -- through `answer`
-    # like everything else, so they are memoised, classified and recorded once.
-    # `view.__name__` stands in for a command name in the cache key.
+    # Several commands fanned out concurrently and joined -- served through the
+    # same memo and the same failure ladder as a single command, so a screen is
+    # classified and recorded exactly like the panels it is made of.
+    # `build.__name__` stands in for a command name in the cache key.
 
     def view(build: Any, *key: str) -> JSONResponse:
-        payload, failure = attempt(lambda: cache.get((build.__name__, key), lambda: build(*key)))
-        if failure is not None:
-            return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
-        return PayloadResponse(payload)
+        return _served(cache, (build.__name__, key), lambda: build(*key))
 
     @app.get("/api/view/now", response_model=contract.NowView, responses=ERRORS)
     def _view_now() -> JSONResponse:
-        with telemetry.surface("console"):
-            return view(views.now)
+        return view(views.now)
 
     @app.get("/api/view/runs", response_model=contract.RunsView, responses=ERRORS)
     def _view_runs() -> JSONResponse:
-        with telemetry.surface("console"):
-            return view(views.runs)
+        return view(views.runs)
 
     @app.get("/api/view/run/{run_id}", response_model=contract.RunView, responses=ERRORS)
     def _view_run(run_id: str) -> JSONResponse:
-        with telemetry.surface("console"):
-            return view(views.run, run_id)
+        return view(views.run, run_id)
 
     # Not `answer(...)`: these are not commands and there is nothing to memoise
     # here. The blueprint server owns one loaded run and answers in

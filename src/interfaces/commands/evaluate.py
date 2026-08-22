@@ -71,10 +71,26 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "budget. REQUIRED for a valid A/B: time-budgeted arms differ by how fast the "
         "box was, not only by the knob under test.",
     )
+    parser.add_argument(
+        "--resolver-allin-runouts",
+        type=int,
+        default=1,
+        help="[resolver_match] Average an all-in board over this many completions "
+        "instead of the single dealt one. SAME expectation, less variance -- and "
+        "exact (enumerated, zero variance) when few enough cards remain. 1 = the "
+        "shipped single-board behaviour.",
+    )
     # LBR options (--method lbr).
     parser.add_argument("--hands", type=int, default=1000, help="[lbr] Number of hands.")
     parser.add_argument("--runouts", type=int, default=12, help="[lbr] Equity runouts per node.")
-    parser.add_argument("--workers", type=int, default=1, help="[lbr] Parallel workers over hands.")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="[lbr, resolver_match] Parallel workers. resolver_match splits DEALS, "
+        "which are a pure function of (seed, deal) and so give identical numbers "
+        "at any worker count.",
+    )
     parser.add_argument(
         "--include-off-tree",
         action="store_true",
@@ -183,8 +199,10 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         ),
         resolver_iterations=args.resolver_iterations,
         resolver_gate_deals=args.deals,
+        resolver_gate_workers=args.workers,
         leaf_continuation_fraction=args.leaf_continuation,
         resolver_max_iterations=args.resolver_max_iterations,
+        resolver_allin_runouts=args.resolver_allin_runouts,
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,

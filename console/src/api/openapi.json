@@ -3212,6 +3212,17 @@
             ],
             "title": "Config"
           },
+          "dtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dtype"
+          },
           "experiment": {
             "anyOf": [
               {
@@ -3222,6 +3233,17 @@
               }
             ],
             "title": "Experiment"
+          },
+          "kernel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kernel"
           },
           "parent": {
             "anyOf": [
@@ -3274,6 +3296,61 @@
             "title": "To",
             "type": "integer"
           },
+          "universe_boards": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe Boards"
+          },
+          "universe_seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe Seed"
+          },
+          "warm_start_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warm Start At"
+          },
+          "warm_start_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warm Start From"
+          },
+          "warm_start_weight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warm Start Weight"
+          },
           "workers": {
             "anyOf": [
               {
@@ -3290,6 +3367,111 @@
           "to"
         ],
         "title": "SubmitBody",
+        "type": "object"
+      },
+      "SubmitCouplingBody": {
+        "properties": {
+          "abstractions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Abstractions",
+            "type": "array"
+          },
+          "boards": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boards"
+          },
+          "classes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classes"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          }
+        },
+        "required": [
+          "abstractions"
+        ],
+        "title": "SubmitCouplingBody",
+        "type": "object"
+      },
+      "SubmitCouplingPayload": {
+        "description": "A dispatch, plus which abstractions it priced.",
+        "properties": {
+          "abstractions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Abstractions",
+            "type": "array"
+          },
+          "boards": {
+            "default": 0,
+            "title": "Boards",
+            "type": "integer"
+          },
+          "code_snapshot": {
+            "title": "Code Snapshot",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "op": {
+            "const": "submit-coupling",
+            "default": "submit-coupling",
+            "title": "Op",
+            "type": "string"
+          },
+          "tasks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code_snapshot",
+          "job_id"
+        ],
+        "title": "SubmitCouplingPayload",
         "type": "object"
       },
       "SubmitPayload": {
@@ -5175,6 +5357,54 @@
           }
         },
         "summary": " Submit"
+      }
+    },
+    "/api/submit-coupling": {
+      "post": {
+        "operationId": "_submit_coupling_api_submit_coupling_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitCouplingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitCouplingPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " Submit Coupling"
       }
     },
     "/api/submit-vector": {

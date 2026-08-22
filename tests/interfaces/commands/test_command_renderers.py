@@ -27,6 +27,10 @@ from src.interfaces.commands import (
     evaluate,
     load_all,
 )
+from src.interfaces.commands.abstraction_coupling import (
+    AbstractionCouplingPayload,
+    ConstantGap,
+)
 from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
 from src.interfaces.commands.autoscale_check import AutoscalePayload
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
@@ -50,6 +54,7 @@ from src.interfaces.commands.serve import ServePayload
 from src.interfaces.commands.serve_box import BoxPayload
 from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
+from src.interfaces.commands.submit_coupling import SubmitCouplingPayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.submit_vector import SubmitVectorPayload, VectorArm
 from src.interfaces.commands.tasks import TasksPayload
@@ -75,6 +80,28 @@ PAYLOADS: dict[str, Any] = {
         iterations_per_second=666.7,
         dropped_updates=0,
         status="completed",
+    ),
+    "abstraction-coupling": AbstractionCouplingPayload(
+        abstraction="buckets-F100T300R600-rexact-a1542e88",
+        buckets={"preflop": 169, "flop": 100, "turn": 300, "river": 600},
+        boards=2000,
+        seed=7,
+        accumulate_seconds=41.2,
+        measure_seconds=18.7,
+        gaps=[
+            ConstantGap(
+                name="transition:FLOP->TURN",
+                kind="coupling",
+                relative=0.8137,
+                recovered={1: 0.0, 8: 0.412, 64: 0.771},
+            ),
+            ConstantGap(
+                name="compatible:RIVER",
+                kind="dispersion",
+                relative=0.0219,
+                recovered={1: 0.0, 8: 0.104, 64: 0.298},
+            ),
+        ],
     ),
     "vector-sweep": VectorSweepPayload(
         abstraction="buckets-F100T300R600-rexact-a1542e88",
@@ -108,6 +135,16 @@ PAYLOADS: dict[str, Any] = {
         ],
         best_exploitability=0.5392,
         best_at_iterations=400,
+    ),
+    "submit-coupling": SubmitCouplingPayload(
+        abstractions=[
+            "buckets-F10T20R30-r200-ae5a7e66",
+            "buckets-F100T300R600-rexact-a1542e88",
+        ],
+        boards=2000,
+        code_snapshot="code-20260805_000000",
+        job_id="poker-20260805",
+        tasks=["coupling-buckets-F10T20R30-000000-1"],
     ),
     "submit-vector": SubmitVectorPayload(
         arms=[

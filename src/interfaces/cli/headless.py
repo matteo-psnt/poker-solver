@@ -51,7 +51,7 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     Every subcommand is always LISTED -- ``--help`` is complete and the "invalid
     choice" message names them all. Only the one ``argv`` asks for has its flags
     built, because building them means importing that command's module, and
-    importing all 27 cost 1.2s on every invocation to run one.
+    importing them all cost 1.2s on every invocation to run one.
 
     ``argv=None`` builds all of them. That is what a test or an introspection
     tool wants, and it is also the definition the lazy path has to stay

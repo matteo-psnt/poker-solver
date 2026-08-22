@@ -50,6 +50,7 @@ class TaskName(StrEnum):
     EVALUATE = "evaluate"
     PRECOMPUTE = "precompute"
     VECTOR_SWEEP = "vector-sweep"
+    ABSTRACTION_COUPLING = "abstraction-coupling"
 
 
 class BadTaskError(ValueError):
@@ -709,6 +710,48 @@ def _flag(flags: object, name: str) -> str:
     return ""
 
 
+class AbstractionCouplingTask(TaskKind):
+    """Price what the board-free game's board averaging costs, on one abstraction.
+
+    Rides the same fields as :class:`VectorSweepTask` -- ``config`` is the
+    abstraction directory and ``eval_flags`` the rest of the command line -- and
+    for the same reason: the wire is already the pass-through, and this kind
+    needs no field the sweep did not.
+
+    Unlike the sweep it produces ONE answer rather than a curve, so there is no
+    partial progress to sample and no rung to resume from. That is also why it
+    keeps retries: a failure here re-runs a measurement of minutes, not a
+    training arm of hours.
+    """
+
+    name = TaskName.ABSTRACTION_COUPLING
+    unit = "constants"
+    progress_file = "abstraction-coupling-progress.json"
+
+    def validate(self, task: TaskFields) -> None:
+        if not task.config:
+            raise BadTaskError("an abstraction-coupling task needs an abstraction directory")
+
+    def commands(self, plan: NodePlan) -> list[list[str]]:
+        argv = ["abstraction-coupling", "--abstraction", plan.config, *plan.eval_flags]
+        work = plan.progress_path
+        return [[*argv, "--progress-file", work] if work else argv]
+
+    def label(self, task: Submission) -> str:
+        return f"coupling-{task.config}"
+
+    def describe(self, record: Mapping[str, Any]) -> str:
+        return f"abstraction-coupling on {record.get('config') or ''}".strip()
+
+    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
+        """Always ``None``: the measurement is one pass with no rung inside it.
+
+        A bar would have to interpolate against a guess, and the honest rendering
+        of "no partial answer exists" is no bar at all.
+        """
+        return None
+
+
 class VectorSweepTask(TaskKind):
     """Score one CFR kernel against iteration count on one abstraction.
 
@@ -837,6 +880,7 @@ KINDS: dict[str, TaskKind] = {
         EvaluateTask(),
         PrecomputeTask(),
         VectorSweepTask(),
+        AbstractionCouplingTask(),
     )
 }
 

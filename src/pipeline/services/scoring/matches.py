@@ -1,5 +1,6 @@
 """Head-to-head gates: run against run, and blueprint against deployed resolver."""
 
+import functools
 import logging
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from src.pipeline.evaluation.estimators.resolver_match import play_resolver_matc
 from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
 from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
+    load_blueprint,
 )
 from src.pipeline.training.run_tracker import RunMetadata
 
@@ -65,6 +67,8 @@ def evaluate_run_resolver_gate(
     seed: int = 1,
     leaf_continuation_fraction: float | None = None,
     max_iterations: int | None = None,
+    workers: int = 1,
+    allin_runouts: int = 1,
 ) -> EvaluationOutput:
     """Head-to-head resolver gate on a run: blueprint+resolver vs bare blueprint.
 
@@ -84,11 +88,19 @@ def evaluate_run_resolver_gate(
         max_iterations=max_iterations,
     )
     solver, storage = build_static_evaluation_solver(config, checkpoint_dir=run_dir)
+    # The factory carries the OVERRIDDEN config, not the run's. A worker built
+    # from the stored config would resolve under different knobs than the
+    # coordinator and the arms would silently stop being an A/B -- the same trap
+    # `prepare_blueprint` documents for a mismatched abstraction hash.
+    factory = functools.partial(load_blueprint, config, run_dir) if workers > 1 else None
     result = play_resolver_match(
         solver,
         num_deals=num_deals,
         time_budget_ms=time_budget_ms,
         seed=seed,
+        workers=workers,
+        allin_runouts=allin_runouts,
+        blueprint_factory=factory,
     )
     results = {
         "resolver_mbb_per_hand": result.resolver_mbb_per_hand,
@@ -100,6 +112,7 @@ def evaluate_run_resolver_gate(
         "resolver_decisions": result.resolver_decisions,
         "resolver_fallbacks": result.resolver_fallbacks,
         "time_budget_ms": time_budget_ms,
+        "workers": workers,
         "seed": seed,
         "pair_samples_mbb": result.pair_samples_mbb,
         # The arm's identity, recorded WITH the number. Two resolver-gate rows
@@ -107,6 +120,7 @@ def evaluate_run_resolver_gate(
         # twice is to subtract one from the other.
         "leaf_continuation_fraction": config.resolver.leaf_continuation_fraction,
         "resolver_max_iterations": config.resolver.max_iterations,
+        "allin_runouts": allin_runouts,
     }
     return EvaluationOutput(
         infosets=storage.num_infosets(),

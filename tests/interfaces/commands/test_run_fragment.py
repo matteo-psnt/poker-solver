@@ -8,6 +8,7 @@ Typing the whole thing was the most tedious part of every reader command.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -97,3 +98,84 @@ class TestEmptyIsNotARun:
         interpolating an unset variable."""
         monkeypatch.chdir(tmp_path)
         assert resolve_run_dir(".", str(tmp_path / "runs")) == Path()
+
+
+class TestDispatchResolvesTheFragmentToo:
+    """MEASURED failure: `score --run 15261` reached the node as `15261`.
+
+    Readers resolve a fragment locally; dispatch did not, so the id travelled
+    raw to a node that has no fragment matcher. It cost a snapshot upload, a
+    node allocation and three retries before `FATAL no such run on the share:
+    15261`. Resolving must happen before the payload is built.
+    """
+
+    PUBLISHED = (
+        "run-train-production-to30M-eq1000-230841-15261",
+        "run-train-production-to30M-w3000-114628-25986",
+        "run-production-025433-1095",
+    )
+
+    @staticmethod
+    def _share(monkeypatch, names):
+        from src.interfaces.cloud.config import CloudConfig
+        from src.interfaces.cloud.store import share, workspace
+
+        monkeypatch.setattr(
+            CloudConfig,
+            "load",
+            classmethod(
+                lambda cls: SimpleNamespace(storage_account="a", share_name="s", share_key="k")
+            ),
+        )
+        monkeypatch.setattr(share, "share_client", lambda config: object())
+        monkeypatch.setattr(
+            share,
+            "list_entries",
+            lambda service, share_name, path: [
+                SimpleNamespace(name=name, is_directory=True) for name in names
+            ],
+        )
+        return workspace
+
+    def test_a_fragment_becomes_the_full_id_before_dispatch(self, monkeypatch):
+        workspace = self._share(monkeypatch, self.PUBLISHED)
+        assert workspace.resolve_published_run("15261") == self.PUBLISHED[0]
+
+    def test_an_exact_id_is_returned_unchanged(self, monkeypatch):
+        workspace = self._share(monkeypatch, self.PUBLISHED)
+        assert workspace.resolve_published_run(self.PUBLISHED[1]) == self.PUBLISHED[1]
+
+    def test_an_ambiguous_fragment_is_refused_here_not_on_a_node(self, monkeypatch):
+        """The whole point: fail in the terminal, not after a pool spin-up."""
+        workspace = self._share(monkeypatch, self.PUBLISHED)
+        with pytest.raises(CommandError, match="matches 2 runs"):
+            workspace.resolve_published_run("to30M")
+
+    def test_an_unpublished_run_names_what_is_published(self, monkeypatch):
+        workspace = self._share(monkeypatch, self.PUBLISHED)
+        with pytest.raises(CommandError, match="is not published"):
+            workspace.resolve_published_run("no-such-run")
+
+    def test_score_puts_the_full_id_in_the_task_it_queues(self, monkeypatch):
+        """The pin for the actual failure: what `score` SENDS, not what it can resolve."""
+        import argparse
+
+        from src.interfaces.cloud.tasks import dispatch
+        from src.interfaces.commands import score
+
+        self._share(monkeypatch, self.PUBLISHED)
+        queued: list = []
+
+        def fake(make_tasks, **_):
+            queued.extend(make_tasks("snap-1"))
+            return dispatch.Dispatched(op="score", code_snapshot="snap-1", job_id="j", tasks=["t"])
+
+        monkeypatch.setattr(dispatch, "stage_and_queue", fake)
+        payload = score.run(
+            argparse.Namespace(
+                run="15261", method="exact_br", at="", timeout=0, flags=[], json=False
+            )
+        )
+
+        assert payload.run_id == self.PUBLISHED[0]
+        assert [task.run_id for task in queued] == [self.PUBLISHED[0]]

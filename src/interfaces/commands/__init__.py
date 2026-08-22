@@ -104,6 +104,14 @@ COMMANDS: tuple[CommandRef, ...] = (
     CommandRef(
         "vector-sweep", "Exploitability vs iteration for one vector-CFR kernel on one abstraction."
     ),
+    CommandRef(
+        "abstraction-coupling",
+        "What board-free's board averaging costs, and what conditioning would buy back.",
+    ),
+    CommandRef(
+        "submit-coupling",
+        "Queue board-free abstraction-cost measurements on the pool, one per abstraction.",
+    ),
     CommandRef("precompute", "Precompute a combo abstraction into data/combo_abstraction/."),
     CommandRef("evaluate", "Evaluate a run's exploitability (Local Best Response by default)."),
     CommandRef("ledger", "List recorded evaluations from the eval ledger."),
