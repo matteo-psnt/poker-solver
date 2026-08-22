@@ -161,7 +161,6 @@ class TestEnvironment:
             "RUN_WARM_START_SHAPE",
             "RUN_EQUITY_PRIOR",
             "RUN_EQUITY_PRIOR_TEMPERATURE",
-            "RUN_EQUITY_PRIOR_FALLBACK",
             "RUN_CHECKPOINT_EVERY",
             "RUN_GIT_COMMIT",
             "RUN_GIT_DIRTY",
@@ -272,14 +271,10 @@ class TestPrecomputeTask:
         assert env["RUN_FORCE_PUBLISH"] == "1"
 
 
-class TestTheEquityPriorFlagsCannotBeOrphaned:
+class TestTheEquityPriorTemperatureCannotBeOrphaned:
     """A shaping flag without a weight is dropped by the argv builder, which
     would train a plain control under the variant's arm name -- the failure that
     has twice turned a whole sweep into four identical controls."""
-
-    def test_a_fallback_without_a_weight_is_refused(self):
-        with pytest.raises(spec.BadTaskError, match="no prior to shape"):
-            spec.TaskSpec(code_snapshot="s", config="p", to=1, equity_prior_fallback=1.0).validate()
 
     def test_a_temperature_without_a_weight_is_refused(self):
         with pytest.raises(spec.BadTaskError, match="no prior to shape"):
@@ -287,12 +282,11 @@ class TestTheEquityPriorFlagsCannotBeOrphaned:
                 code_snapshot="s", config="p", to=1, equity_prior_temperature=0.4
             ).validate()
 
-    def test_they_are_accepted_alongside_a_weight(self):
+    def test_it_is_accepted_alongside_a_weight(self):
         spec.TaskSpec(
             code_snapshot="s",
             config="p",
             to=1,
             equity_prior_weight=1000,
             equity_prior_temperature=0.4,
-            equity_prior_fallback=1.0,
         ).validate()

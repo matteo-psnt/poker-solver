@@ -79,7 +79,6 @@ def train_static(
     warm_start_shape: str = "flat",
     equity_prior_weight: int = 0,
     equity_prior_temperature: float = equity_prior.DEFAULT_TEMPERATURE,
-    equity_prior_fallback: float = 0.0,
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
 
@@ -208,21 +207,15 @@ def train_static(
         )
         equity_base = equity_policy * float(equity_prior_weight)
     if equity_policy is not None and warm_start_from is None and not resuming:
-        # The prior only PLAYS through strategy_sum; regrets alone just steer
-        # training. Scaling the same distribution keeps the two channels
-        # describing one guess rather than two.
-        fallback = equity_policy * equity_prior_fallback if equity_prior_fallback > 0.0 else None
         equity_prior.write_checkpoint(
             config,
             run_dir=run_dir,
             regrets=equity_policy * float(equity_prior_weight),
             abstraction_hash=tracker.metadata.card_abstraction_hash,
-            fallback=fallback,
             tree=equity_tree,
         )
         (run_dir / warm_start.SEEDED_MARKER).write_text(
-            f"equity-prior weight={equity_prior_weight} "
-            f"temperature={equity_prior_temperature} fallback={equity_prior_fallback}\n"
+            f"equity-prior weight={equity_prior_weight} temperature={equity_prior_temperature}\n"
         )
         seeded = True
     if (

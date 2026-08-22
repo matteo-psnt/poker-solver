@@ -146,7 +146,6 @@ class TaskSpec:
     warm_start_shape: str = ""
     equity_prior_weight: int = 0
     equity_prior_temperature: float = 0.0
-    equity_prior_fallback: float = 0.0
     force_publish: bool = False
     # Stamped by `dispatch.stage_and_queue`, never by a caller: the node has no
     # `.git` (the snapshot excludes it), so the submitting machine is the only
@@ -192,13 +191,11 @@ class TaskSpec:
         # the argv builder skips them without it. Silently dropping them would
         # train a plain control under the variant's arm label -- the failure
         # that has twice cost a whole sweep, so it raises at submit instead.
-        if not self.equity_prior_weight and (
-            self.equity_prior_temperature or self.equity_prior_fallback
-        ):
+        if self.equity_prior_temperature and not self.equity_prior_weight:
             raise BadTaskError(
-                "--equity-prior-temperature/--equity-prior-fallback shape the equity "
-                "prior, and without --equity-prior there is no prior to shape. This "
-                "would train a control under a variant's arm name."
+                "--equity-prior-temperature shapes the equity prior, and without "
+                "--equity-prior there is no prior to shape. This would train a "
+                "control under a variant's arm name."
             )
 
 
