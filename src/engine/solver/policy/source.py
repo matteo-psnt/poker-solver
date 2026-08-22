@@ -13,6 +13,7 @@ problem that module was written to end would come back.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from src.engine.solver.infoset.index import (
@@ -21,6 +22,8 @@ from src.engine.solver.infoset.index import (
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
+
+    import numpy as np
 
     from src.core.actions.action_model import ActionModel
     from src.core.game.actions import Action
@@ -59,11 +62,33 @@ class ScorableBlueprint(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True)
+class StoredRows:
+    """Every bucket's stored row at one public state, as one slice of the table.
+
+    ``strategy_sum`` is ``(num_buckets, len(actions))`` and ``visited`` is
+    ``(num_buckets,)``; both are views, never copies. Row i is bucket i.
+    """
+
+    actions: tuple[Action, ...]
+    strategy_sum: np.ndarray
+    visited: np.ndarray
+
+
 class PolicySource(Protocol):
     """Resolves a stored infoset from a public state and a card bucket."""
 
     def num_buckets(self, street: Street) -> int:
         """Buckets on ``street`` — the range a consumer may enumerate."""
+        ...
+
+    def rows_at(self, state: GameState) -> StoredRows:
+        """The acting player's stored rows at ``state`` for EVERY bucket at once.
+
+        What a consumer that enumerates buckets should read: ``infoset_at``
+        per bucket costs a view and a Python call each, and an exact-BR score
+        fills hundreds of buckets per betting context.
+        """
         ...
 
     def infoset_at(self, state: GameState, bucket: int) -> InfoSet | None:
@@ -136,6 +161,19 @@ class TreePolicySource:
     def identity(self, state: GameState, player: int) -> Hashable:
         return (self._tree.node_id(state), self.bucket_for(state, player))
 
+    def rows_at(self, state: GameState) -> StoredRows:
+        node_id = self._tree.node_id(state)
+        tree = self._tree
+        count = int(tree.buckets_per_node[node_id])
+        width = int(tree.num_actions[node_id])
+        start = int(tree.slot_offset[node_id])
+        first_row = int(tree.row_offset[node_id])
+        return StoredRows(
+            tree.legal_actions(node_id),
+            self._storage.strategy_sum[start : start + count * width].reshape(count, width),
+            self._storage.visited[first_row : first_row + count],
+        )
+
     def infoset_at(self, state: GameState, bucket: int) -> InfoSet | None:
         node_id = self._tree.node_id(state)
         if not 0 <= bucket < self._tree.buckets_per_node[node_id]:
@@ -155,5 +193,6 @@ class TreePolicySource:
 __all__ = (
     "PolicySource",
     "ScorableBlueprint",
+    "StoredRows",
     "TreePolicySource",
 )

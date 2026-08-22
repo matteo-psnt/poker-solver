@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
     from src.core.game.rules import GameRules
     from src.core.game.state import GameState
     from src.engine.solver.infoset.model import InfoSet
+    from src.engine.solver.policy.source import StoredRows
 
 
 def filter_stored_actions(
@@ -77,3 +80,46 @@ def blueprint_action_distribution(
     for action, probability in zip(valid_actions, strategy, strict=True):
         distribution[action] = distribution.get(action, 0.0) + float(probability)
     return distribution
+
+
+def blueprint_policy_table(
+    rows: StoredRows,
+    state: GameState,
+    rules: GameRules,
+    candidates: Iterable[Action],
+) -> tuple[np.ndarray, np.ndarray]:
+    """``blueprint_action_distribution`` for every bucket at ``state`` in one pass.
+
+    Returns ``(table, missing)``: ``table[b, j]`` is bucket ``b``'s average
+    probability of ``candidates[j]`` and ``missing[b]`` marks the buckets with
+    no usable answer, whose rows hold the uniform-over-candidates fallback.
+    The predicate above is applied once -- it reads the state and the stored
+    list, never the bucket -- and the normalisation is ``average_strategy``'s:
+    a visited row summing to zero is uniform over the SURVIVING stored actions,
+    not over the candidates. Exactly the per-bucket answer, row for row
+    (``test_lookup``).
+    """
+    candidates = tuple(candidates)
+    candidate_set = set(candidates)
+    survivors = [
+        (index, action)
+        for index, action in enumerate(rows.actions)
+        if action in candidate_set and rules.is_action_valid(state, action)
+    ]
+    count = rows.strategy_sum.shape[0]
+    table = np.full((count, len(candidates)), 1.0 / len(candidates))
+    if not survivors:
+        return table, np.ones(count, dtype=bool)
+
+    present = rows.visited.astype(bool)
+    sums = rows.strategy_sum[:, [index for index, _ in survivors]].astype(np.float64)
+    totals = sums.sum(axis=1)
+    normalised = np.full(sums.shape, 1.0 / len(survivors))
+    positive = totals > 0
+    normalised[positive] = sums[positive] / totals[positive, None]
+
+    table[present] = 0.0
+    position = {action: column for column, action in enumerate(candidates)}
+    for column, (_, action) in enumerate(survivors):
+        table[present, position[action]] += normalised[present, column]
+    return table, ~present
