@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numba import jit
 
 from src.core.game.evaluator import get_evaluator
 from src.core.game.state import FULL_DECK, Card, GameState
@@ -148,51 +149,193 @@ class RunoutEvaluator:
         ``alive[h]`` = total non-blocking reach mass. Lose mass is
         ``alive - win - tie``. Entries for combos not alive on this board are 0.
         """
-        w_sorted = reach[self.sorted_combo]
-        group_sums = np.add.reduceat(w_sorted, self.group_starts)
-        # Mass in groups strictly after g: group-level suffix sums with sentinel 0.
-        suffix = np.zeros(self.num_groups + 1, dtype=np.float64)
-        suffix[:-1] = np.cumsum(group_sums[::-1])[::-1]
-        total = float(suffix[0])
-
-        # Global suffix sums over the flat per-card position list; a per-card
-        # segment's local suffix is the global suffix minus its value at the
-        # segment end (segments are contiguous), so no per-card loop is needed.
-        card_vals = w_sorted[self.card_pos_flat]
-        global_suffix = np.zeros(len(card_vals) + 1, dtype=np.float64)
-        global_suffix[:-1] = np.cumsum(card_vals[::-1])[::-1]
-
-        end_a = global_suffix[self._seg_end[:, 0]]
-        end_b = global_suffix[self._seg_end[:, 1]]
-        pw_a = global_suffix[self._ptr_worse[:, 0]] - end_a
-        pw_b = global_suffix[self._ptr_worse[:, 1]] - end_b
-        pg_a = global_suffix[self._ptr_group[:, 0]] - end_a
-        pg_b = global_suffix[self._ptr_group[:, 1]] - end_b
-
-        g = self._group
-        worse_total = suffix[g + 1]
-        group_total = group_sums[g]
-        self_mass = w_sorted
-
         win = np.zeros(NUM_COMBOS, dtype=np.float64)
         tie = np.zeros(NUM_COMBOS, dtype=np.float64)
         alive = np.zeros(NUM_COMBOS, dtype=np.float64)
+        _masses(
+            np.ascontiguousarray(reach, dtype=np.float64),
+            self.sorted_combo,
+            self.group_starts,
+            self.card_pos_flat,
+            self._seg_end,
+            self._ptr_worse,
+            self._ptr_group,
+            self._group,
+            self._a_idx,
+            self._b_idx,
+            win,
+            tie,
+            alive,
+        )
+        return win, tie, alive
 
-        combos = self.sorted_combo
+
+@jit(nopython=True, cache=True)
+def _pairwise_leaf(a, start, n):
+    """numpy's ``pairwise_sum`` below its block size: a plain loop under 8
+    elements, eight accumulators up to 128."""
+    if n < 8:
+        res = 0.0
+        for i in range(n):
+            res += a[start + i]
+        return res
+    r0 = a[start]
+    r1 = a[start + 1]
+    r2 = a[start + 2]
+    r3 = a[start + 3]
+    r4 = a[start + 4]
+    r5 = a[start + 5]
+    r6 = a[start + 6]
+    r7 = a[start + 7]
+    i = 8
+    limit = n - (n % 8)
+    while i < limit:
+        r0 += a[start + i]
+        r1 += a[start + i + 1]
+        r2 += a[start + i + 2]
+        r3 += a[start + i + 3]
+        r4 += a[start + i + 4]
+        r5 += a[start + i + 5]
+        r6 += a[start + i + 6]
+        r7 += a[start + i + 7]
+        i += 8
+    res = ((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7))
+    while i < n:
+        res += a[start + i]
+        i += 1
+    return res
+
+
+@jit(nopython=True, cache=True)
+def _pairwise_sum(a, start, n):
+    """numpy's ``pairwise_sum`` over ``a[start:start + n]``, bit for bit.
+
+    ``np.sum`` and the per-segment reduce behind ``np.add.reduceat`` both use
+    it, and reproducing their association is what keeps these kernels'
+    output byte-identical to the vectorised numpy they replaced (checked
+    empirically). Above 128 elements numpy recurses on a split at the
+    largest multiple of 8 below the half; that tree is walked here with an
+    explicit stack because a CACHED kernel that calls itself does not reload
+    safely -- the second process to import it segfaulted.
+    """
+    if n <= 128:
+        return _pairwise_leaf(a, start, n)
+    starts = np.empty(64, dtype=np.int64)
+    sizes = np.empty(64, dtype=np.int64)
+    lefts = np.empty(64, dtype=np.float64)
+    has_left = np.zeros(64, dtype=np.int64)
+    starts[0] = start
+    sizes[0] = n
+    depth = 1
+    while True:
+        top = depth - 1
+        if sizes[top] > 128:
+            half = sizes[top] // 2
+            half -= half % 8
+            starts[depth] = starts[top]
+            sizes[depth] = half
+            has_left[depth] = 0
+            depth += 1
+            continue
+        value = _pairwise_leaf(a, starts[top], sizes[top])
+        depth -= 1
+        while True:
+            if depth == 0:
+                return value
+            parent = depth - 1
+            if has_left[parent] == 0:
+                lefts[parent] = value
+                has_left[parent] = 1
+                half = sizes[parent] // 2
+                half -= half % 8
+                starts[depth] = starts[parent] + half
+                sizes[depth] = sizes[parent] - half
+                has_left[depth] = 0
+                depth += 1
+                break
+            value = lefts[parent] + value
+            depth -= 1
+
+
+@jit(nopython=True, cache=True)
+def _masses(
+    reach,
+    sorted_combo,
+    group_starts,
+    card_pos_flat,
+    seg_end,
+    ptr_worse,
+    ptr_group,
+    group,
+    a_idx,
+    b_idx,
+    win,
+    tie,
+    alive,
+):
+    """``RunoutEvaluator.masses`` as loops: ~20 numpy calls on 1,326-vectors
+    were almost all dispatch. Every sum keeps numpy's order (``_pairwise_sum``,
+    sequential cumsum and bincount), so the values are the same bytes."""
+    n = sorted_combo.shape[0]
+    num_groups = group_starts.shape[0]
+
+    w_sorted = np.empty(n, dtype=np.float64)
+    for pos in range(n):
+        w_sorted[pos] = reach[sorted_combo[pos]]
+
+    # np.add.reduceat: the segment's first element plus the pairwise sum of the rest.
+    group_sums = np.empty(num_groups, dtype=np.float64)
+    for g in range(num_groups):
+        lo = group_starts[g]
+        hi = group_starts[g + 1] if g + 1 < num_groups else n
+        group_sums[g] = w_sorted[lo] + _pairwise_sum(w_sorted, lo + 1, hi - lo - 1)
+
+    # Mass in groups strictly after g: a sequential suffix sum, sentinel 0.
+    suffix = np.zeros(num_groups + 1, dtype=np.float64)
+    acc = 0.0
+    for g in range(num_groups - 1, -1, -1):
+        acc = acc + group_sums[g] if g < num_groups - 1 else group_sums[g]
+        suffix[g] = acc
+    total = suffix[0]
+
+    m = card_pos_flat.shape[0]
+    global_suffix = np.zeros(m + 1, dtype=np.float64)
+    acc = 0.0
+    for k in range(m - 1, -1, -1):
+        value = w_sorted[card_pos_flat[k]]
+        acc = acc + value if k < m - 1 else value
+        global_suffix[k] = acc
+
+    # np.bincount(a) + np.bincount(b): two sequential scatters, then one add.
+    per_card_a = np.zeros(52, dtype=np.float64)
+    per_card_b = np.zeros(52, dtype=np.float64)
+    for pos in range(n):
+        per_card_a[a_idx[pos]] += w_sorted[pos]
+    for pos in range(n):
+        per_card_b[b_idx[pos]] += w_sorted[pos]
+    per_card = np.empty(52, dtype=np.float64)
+    for k in range(52):
+        per_card[k] = per_card_a[k] + per_card_b[k]
+
+    for pos in range(n):
+        combo = sorted_combo[pos]
+        end_a = global_suffix[seg_end[pos, 0]]
+        end_b = global_suffix[seg_end[pos, 1]]
+        pw_a = global_suffix[ptr_worse[pos, 0]] - end_a
+        pw_b = global_suffix[ptr_worse[pos, 1]] - end_b
+        pg_a = global_suffix[ptr_group[pos, 0]] - end_a
+        pg_b = global_suffix[ptr_group[pos, 1]] - end_b
+        g = group[pos]
+        self_mass = w_sorted[pos]
         # Card-a/b mass within the worse set (no both-cards combo can be there).
-        win[combos] = worse_total - pw_a - pw_b
+        w = suffix[g + 1] - pw_a - pw_b
         # Blocked in-group mass = a + b - w[h] (`h` is the only both-cards combo
         # and is double-counted); excluding the blocked set already excludes h.
-        tie[combos] = group_total - (pg_a - pw_a) - (pg_b - pw_b) + self_mass
-        per_card = np.bincount(self._a_idx, weights=self_mass, minlength=52) + np.bincount(
-            self._b_idx, weights=self_mass, minlength=52
-        )
-        alive[combos] = total - per_card[self._a_idx] - per_card[self._b_idx] + self_mass
-
-        np.maximum(win, 0.0, out=win)
-        np.maximum(tie, 0.0, out=tie)
-        np.maximum(alive, 0.0, out=alive)
-        return win, tie, alive
+        t = group_sums[g] - (pg_a - pw_a) - (pg_b - pw_b) + self_mass
+        a = total - per_card[a_idx[pos]] - per_card[b_idx[pos]] + self_mass
+        win[combo] = w if w >= 0.0 else 0.0
+        tie[combo] = t if t >= 0.0 else 0.0
+        alive[combo] = a if a >= 0.0 else 0.0
 
 
 @dataclass
@@ -474,10 +617,28 @@ def _leaf_values(
 
 def nonblocking_mass(reach: np.ndarray) -> np.ndarray:
     """Per-combo total reach mass of combos not sharing a card (inclusion-exclusion)."""
-    per_card = np.bincount(_CARD_A, weights=reach, minlength=52) + np.bincount(
-        _CARD_B, weights=reach, minlength=52
-    )
-    return float(reach.sum()) - per_card[_CARD_A] - per_card[_CARD_B] + reach
+    return _nonblocking_mass(np.ascontiguousarray(reach, dtype=np.float64), _CARD_A, _CARD_B)
+
+
+@jit(nopython=True, cache=True)
+def _nonblocking_mass(reach, card_a, card_b):
+    n = reach.shape[0]
+    per_card_a = np.zeros(52, dtype=np.float64)
+    per_card_b = np.zeros(52, dtype=np.float64)
+    for i in range(n):
+        per_card_a[card_a[i]] += reach[i]
+    for i in range(n):
+        per_card_b[card_b[i]] += reach[i]
+    total = _pairwise_sum(reach, 0, n)
+    out = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        out[i] = (
+            total
+            - (per_card_a[card_a[i]] + per_card_b[card_a[i]])
+            - (per_card_a[card_b[i]] + per_card_b[card_b[i]])
+            + reach[i]
+        )
+    return out
 
 
 def _complete_pending_call(state: GameState) -> GameState:
